@@ -52,7 +52,7 @@ fun FileListScreen(
         TopAppBar(
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Z传", fontWeight = FontWeight.Bold)
+                    Text("Z传", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
                     IconButton(
                         onClick = onNavigateToSettings,
                         modifier = Modifier.size(40.dp)
@@ -191,11 +191,14 @@ fun FileListScreen(
                                         }
                                     },
                                     enabled = remainingGroupFiles.isNotEmpty(),
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(28.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp)
                                 ) {
                                     Text(
                                         if (remainingGroupFiles.isEmpty()) "已添加" else "传输",
-                                        style = MaterialTheme.typography.labelMedium
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = DarkOnBackground
                                     )
                                 }
                             }

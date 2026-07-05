@@ -32,30 +32,18 @@ fun TransferScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f, fill = false)) {
-                        Text("传输队列", fontWeight = FontWeight.Bold)
-                        if (transferState.tasks.isNotEmpty()) {
-                            val completed = transferState.tasks.count { it.status == TransferStatus.COMPLETED }
-                            val failed = transferState.tasks.count { it.status == TransferStatus.FAILED }
-                            Text(
-                                text = buildString {
-                                    append("$completed/${transferState.tasks.size}")
-                                    if (failed > 0) append(" · $failed 失败")
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = DarkOnSurfaceVariant
-                            )
-                        }
-                    }
-                    // 速度显示在标题右侧
-                    if (transferState.isTransferring && transferState.currentSpeed > 0) {
-                        Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.padding(start = 16.dp)) {
+                    Text("传输队列", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
+                    if (transferState.tasks.isNotEmpty()) {
+                        val completed = transferState.tasks.count { it.status == TransferStatus.COMPLETED }
+                        val failed = transferState.tasks.count { it.status == TransferStatus.FAILED }
                         Text(
-                            text = formatSpeed(transferState.currentSpeed),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = AccentBlue,
-                            fontWeight = FontWeight.Bold
+                            text = buildString {
+                                append("$completed/${transferState.tasks.size}")
+                                if (failed > 0) append(" · $failed 失败")
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = DarkOnSurfaceVariant
                         )
                     }
                 }
@@ -65,7 +53,17 @@ fun TransferScreen(
                     Icon(Icons.Default.ArrowBack, contentDescription = "返回")
                 }
             },
-            actions = {},
+            actions = {
+                if (transferState.isTransferring && transferState.currentSpeed > 0) {
+                    Text(
+                        text = formatSpeed(transferState.currentSpeed),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = AccentBlue,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(end = 16.dp)
+                    )
+                }
+            },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground)
         )
 

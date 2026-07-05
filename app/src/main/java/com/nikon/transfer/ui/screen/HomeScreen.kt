@@ -58,7 +58,7 @@ fun HomeScreen(
 
             Text(
                 text = "Z传",
-                style = MaterialTheme.typography.headlineLarge,
+                style = MaterialTheme.typography.headlineSmall,
                 color = DarkOnBackground
             )
 
