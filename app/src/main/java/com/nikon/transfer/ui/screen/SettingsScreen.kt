@@ -22,7 +22,8 @@ import com.nikon.transfer.viewmodel.TransferViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    viewModel: TransferViewModel
+    viewModel: TransferViewModel,
+    onNavigateBack: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
@@ -46,6 +47,15 @@ fun SettingsScreen(
         TopAppBar(
             title = {
                 Text("设置", fontWeight = FontWeight.Bold)
+            },
+            navigationIcon = {
+                IconButton(onClick = onNavigateBack) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "返回",
+                        tint = DarkOnBackground
+                    )
+                }
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground)
         )
@@ -162,7 +172,7 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Nikon Z30 文件传输工具 v1.0",
+                    text = "Z传 v1.0",
                     style = MaterialTheme.typography.bodyMedium,
                     color = DarkOnSurfaceVariant
                 )

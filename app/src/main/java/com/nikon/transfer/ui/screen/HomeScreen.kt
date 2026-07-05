@@ -15,54 +15,60 @@ import androidx.compose.ui.unit.dp
 import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.viewmodel.CameraViewModel
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(viewModel: CameraViewModel) {
+fun HomeScreen(
+    viewModel: CameraViewModel,
+    onNavigateToSettings: () -> Unit
+) {
     val state by viewModel.state.collectAsState()
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        modifier = Modifier.fillMaxSize()
     ) {
-        Icon(
-            imageVector = Icons.Default.CameraAlt,
-            contentDescription = null,
-            modifier = Modifier.size(80.dp),
-            tint = AccentBlue
+        TopAppBar(
+            title = {},
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground),
+            actions = {
+                IconButton(onClick = onNavigateToSettings) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "设置",
+                        tint = DarkOnBackground
+                    )
+                }
+            }
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Nikon Z30",
-            style = MaterialTheme.typography.headlineLarge,
-            color = DarkOnBackground
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = "文件传输工具",
-            style = MaterialTheme.typography.bodyLarge,
-            color = DarkOnSurfaceVariant
-        )
-
-        Spacer(modifier = Modifier.height(48.dp))
-
-        // WiFi 状态
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (state.isConnectedToCamera) StatusConnected.copy(alpha = 0.15f)
-                else if (state.isWifiConnected) AccentBlue.copy(alpha = 0.1f)
-                else DarkSurfaceVariant
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
+            Icon(
+                imageVector = Icons.Default.CameraAlt,
+                contentDescription = null,
+                modifier = Modifier.size(80.dp),
+                tint = AccentBlue
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Z传",
+                style = MaterialTheme.typography.headlineLarge,
+                color = DarkOnBackground
+            )
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            // WiFi 状态
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier
+                    .width(220.dp)
+                    .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Icon(
@@ -87,7 +93,7 @@ fun HomeScreen(viewModel: CameraViewModel) {
                         state.isConnectedToCamera -> "已连接: ${state.cameraName}"
                         state.isWifiConnected && state.isConnecting -> "正在连接相机..."
                         state.isWifiConnected -> "WiFi 已连接"
-                        else -> "未连接到相机 WiFi"
+                        else -> "请连接相机WiFi"
                     },
                     style = MaterialTheme.typography.titleMedium,
                     color = when {
@@ -106,38 +112,38 @@ fun HomeScreen(viewModel: CameraViewModel) {
                     )
                 }
             }
-        }
 
-        // 错误信息
-        if (state.error != null) {
-            Spacer(modifier = Modifier.height(16.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = StatusError.copy(alpha = 0.15f))
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            // 错误信息
+            if (state.error != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = StatusError.copy(alpha = 0.15f))
                 ) {
-                    Icon(Icons.Default.Error, contentDescription = null, tint = StatusError)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = state.error ?: "",
-                        color = StatusError,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Error, contentDescription = null, tint = StatusError)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = state.error ?: "",
+                            color = StatusError,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
             }
-        }
 
-        if (state.isConnectedToCamera) {
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = "正在加载文件...",
-                style = MaterialTheme.typography.bodyMedium,
-                color = StatusConnected
-            )
+            if (state.isConnectedToCamera) {
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = "正在加载文件...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = StatusConnected
+                )
+            }
         }
     }
 }

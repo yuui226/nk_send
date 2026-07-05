@@ -11,13 +11,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nikon.transfer.protocol.NikonCamera
 import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.viewmodel.CameraViewModel
+import com.nikon.transfer.viewmodel.TransferStatus
 import com.nikon.transfer.viewmodel.TransferViewModel
 
 data class FileGroup(
@@ -37,7 +41,8 @@ fun groupFilesByDate(files: List<NikonCamera.FileInfo>): List<FileGroup> {
 fun FileListScreen(
     cameraViewModel: CameraViewModel,
     transferViewModel: TransferViewModel,
-    onNavigateToTransfer: () -> Unit
+    onNavigateToTransfer: () -> Unit,
+    onNavigateToSettings: () -> Unit
 ) {
     val state by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
@@ -46,13 +51,16 @@ fun FileListScreen(
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
             title = {
-                Column {
-                    Text("文件列表", fontWeight = FontWeight.Bold)
-                    if (state.files.isNotEmpty()) {
-                        Text(
-                            text = "${state.files.size} 个文件",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = DarkOnSurfaceVariant
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Z传", fontWeight = FontWeight.Bold)
+                    IconButton(
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "设置",
+                            tint = DarkOnSurfaceVariant
                         )
                     }
                 }
@@ -60,31 +68,53 @@ fun FileListScreen(
             colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground),
             actions = {
                 if (transferState.tasks.isNotEmpty()) {
+                    val total = transferState.tasks.size
                     val remaining = transferState.tasks.count {
                         it.status == com.nikon.transfer.viewmodel.TransferStatus.WAITING ||
                         it.status == com.nikon.transfer.viewmodel.TransferStatus.TRANSFERING
                     }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    val done = total - remaining
+                    val progressFraction = if (total > 0) done.toFloat() / total else 0f
+
+                    Surface(
+                        onClick = onNavigateToTransfer,
+                        shape = RoundedCornerShape(20.dp),
+                        color = AccentBlue.copy(alpha = 0.12f),
                         modifier = Modifier
-                            .clickable { onNavigateToTransfer() }
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .height(36.dp)
+                            .padding(end = 8.dp)
                     ) {
-                        // 传输速度
-                        if (transferState.isTransferring && transferState.currentSpeed > 0) {
-                            Text(
-                                text = "${formatFileListSpeed(transferState.currentSpeed)}  ",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = AccentBlue
+                        Box(contentAlignment = Alignment.Center) {
+                            // 进度填充背景
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .drawBehind {
+                                        drawRect(
+                                            color = AccentBlue.copy(alpha = 0.35f),
+                                            size = Size(size.width * progressFraction, size.height)
+                                        )
+                                    }
                             )
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (transferState.isTransferring && transferState.currentSpeed > 0) {
+                                    Text(
+                                        text = "${formatFileListSpeed(transferState.currentSpeed)} · ",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = AccentBlue
+                                    )
+                                }
+                                Text(
+                                    text = "$done/$total",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = AccentBlue,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
-                        Text(
-                            text = "$remaining/${transferState.tasks.size}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = AccentBlue
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(Icons.Default.CloudDownload, contentDescription = "传输队列", tint = AccentBlue)
                     }
                 }
             }
@@ -112,6 +142,9 @@ fun FileListScreen(
 
         if (state.files.isNotEmpty()) {
             val groups = groupFilesByDate(state.files)
+            val queuedByHandle = remember(transferState.tasks) {
+                transferState.tasks.associateBy { it.file.handle }
+            }
 
             LazyColumn(
                 modifier = Modifier.weight(1f),
@@ -140,41 +173,47 @@ fun FileListScreen(
                                     text = formatDateHeader(group.date),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = DarkOnBackground,
-                                    modifier = Modifier.weight(1f)
+                                    color = DarkOnBackground
                                 )
+                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "${group.files.size}张",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = DarkOnSurfaceVariant
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.weight(1f))
+                                val remainingGroupFiles = group.files.filter { it.handle !in queuedByHandle }
                                 FilledTonalButton(
                                     onClick = {
-                                        if (camera != null) {
-                                            transferViewModel.addToQueue(group.files, camera)
+                                        if (camera != null && remainingGroupFiles.isNotEmpty()) {
+                                            transferViewModel.addToQueue(remainingGroupFiles, camera)
                                             onNavigateToTransfer()
                                         }
                                     },
+                                    enabled = remainingGroupFiles.isNotEmpty(),
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
-                                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("传输", style = MaterialTheme.typography.labelMedium)
+                                    Text(
+                                        if (remainingGroupFiles.isEmpty()) "已添加" else "传输",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
                                 }
                             }
 
                             Spacer(modifier = Modifier.height(12.dp))
 
                             group.files.forEach { file ->
+                                val task = queuedByHandle[file.handle]
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable {
-                                            if (camera != null) {
-                                                transferViewModel.addToQueue(listOf(file), camera)
-                                            }
-                                        }
+                                        .then(
+                                            if (task == null) Modifier.clickable {
+                                                if (camera != null) {
+                                                    transferViewModel.addToQueue(listOf(file), camera)
+                                                }
+                                            } else Modifier
+                                        )
                                         .padding(vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -205,7 +244,7 @@ fun FileListScreen(
                                     Text(
                                         text = file.fileName,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = DarkOnBackground,
+                                        color = if (task != null) DarkOnSurfaceVariant else DarkOnBackground,
                                         modifier = Modifier.weight(1f)
                                     )
 
@@ -214,6 +253,11 @@ fun FileListScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = DarkOnSurfaceVariant
                                     )
+
+                                    if (task != null) {
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        TransferStatusIndicator(status = task.status)
+                                    }
                                 }
 
                                 Divider(
@@ -268,5 +312,40 @@ private fun formatFileListSpeed(bytesPerSec: Long): String {
         bytesPerSec < 1024 -> "$bytesPerSec B/s"
         bytesPerSec < 1024 * 1024 -> String.format("%.1f KB/s", bytesPerSec / 1024.0)
         else -> String.format("%.1f MB/s", bytesPerSec / (1024.0 * 1024.0))
+    }
+}
+
+@Composable
+private fun TransferStatusIndicator(status: TransferStatus) {
+    when (status) {
+        TransferStatus.COMPLETED -> Icon(
+            imageVector = Icons.Default.CheckCircle,
+            contentDescription = "已传输",
+            tint = StatusConnected,
+            modifier = Modifier.size(18.dp)
+        )
+        TransferStatus.TRANSFERING -> CircularProgressIndicator(
+            modifier = Modifier.size(16.dp),
+            color = AccentBlue,
+            strokeWidth = 2.dp
+        )
+        TransferStatus.WAITING -> Icon(
+            imageVector = Icons.Default.HourglassEmpty,
+            contentDescription = "排队中",
+            tint = AccentBlue,
+            modifier = Modifier.size(18.dp)
+        )
+        TransferStatus.FAILED -> Icon(
+            imageVector = Icons.Default.Error,
+            contentDescription = "传输失败",
+            tint = StatusError,
+            modifier = Modifier.size(18.dp)
+        )
+        TransferStatus.CANCELLED -> Icon(
+            imageVector = Icons.Default.Cancel,
+            contentDescription = "已取消",
+            tint = DarkOnSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }

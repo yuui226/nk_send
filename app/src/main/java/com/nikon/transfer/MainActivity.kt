@@ -17,7 +17,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.nikon.transfer.ui.screen.*
 import com.nikon.transfer.ui.theme.DarkBackground
-import com.nikon.transfer.ui.theme.DarkSurface
 import com.nikon.transfer.ui.theme.NikonTransferTheme
 import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferViewModel
@@ -63,33 +62,8 @@ fun MainScreen() {
         }
     }
 
-    val bottomBarScreens = listOf(Screen.Home, Screen.Files, Screen.Settings)
-    val showBottomBar = currentRoute in bottomBarScreens.map { it.route }
-
     Scaffold(
-        containerColor = DarkBackground,
-        bottomBar = {
-            if (showBottomBar) {
-                NavigationBar(containerColor = DarkSurface) {
-                    bottomBarScreens.forEach { screen ->
-                        NavigationBarItem(
-                            icon = { Icon(screen.icon, contentDescription = screen.title) },
-                            label = { Text(screen.title) },
-                            selected = currentRoute == screen.route,
-                            onClick = {
-                                if (currentRoute != screen.route) {
-                                    navController.navigate(screen.route) {
-                                        popUpTo(Screen.Home.route) { saveState = true }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-        }
+        containerColor = DarkBackground
     ) { paddingValues ->
         NavHost(
             navController = navController,
@@ -97,7 +71,12 @@ fun MainScreen() {
             modifier = Modifier.padding(paddingValues)
         ) {
             composable(Screen.Home.route) {
-                HomeScreen(viewModel = cameraViewModel)
+                HomeScreen(
+                    viewModel = cameraViewModel,
+                    onNavigateToSettings = {
+                        navController.navigate(Screen.Settings.route)
+                    }
+                )
             }
             composable(Screen.Files.route) {
                 FileListScreen(
@@ -105,11 +84,17 @@ fun MainScreen() {
                     transferViewModel = transferViewModel,
                     onNavigateToTransfer = {
                         navController.navigate(Screen.Transfer.route)
+                    },
+                    onNavigateToSettings = {
+                        navController.navigate(Screen.Settings.route)
                     }
                 )
             }
             composable(Screen.Settings.route) {
-                SettingsScreen(viewModel = transferViewModel)
+                SettingsScreen(
+                    viewModel = transferViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
             composable(Screen.Transfer.route) {
                 TransferScreen(
