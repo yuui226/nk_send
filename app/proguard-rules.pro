@@ -1,0 +1,2 @@
+-keep class com.nikon.transfer.protocol.** { *; }
+-keepclassmembers class com.nikon.transfer.protocol.** { *; }
