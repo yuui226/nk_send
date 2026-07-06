@@ -1,9 +1,15 @@
 package com.nikon.transfer.ui.screen
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -11,11 +17,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nikon.transfer.protocol.NikonCamera
@@ -24,6 +34,7 @@ import com.nikon.transfer.ui.util.formatFileSize
 import com.nikon.transfer.ui.util.formatSpeed
 import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferStatus
+import com.nikon.transfer.viewmodel.TransferTask
 import com.nikon.transfer.viewmodel.TransferViewModel
 
 data class FileGroup(
@@ -148,159 +159,332 @@ fun FileListScreen(
                 transferState.tasks.associateBy { it.file.handle }
             }
 
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(groups) { group ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(containerColor = DarkSurface)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.CalendarToday,
-                                    contentDescription = null,
-                                    tint = AccentBlue,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = formatDateHeader(group.date),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = DarkOnBackground
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "${group.files.size}张",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = DarkOnSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.weight(1f))
-                                val remainingGroupFiles = group.files.filter { it.handle !in queuedByHandle }
-                                FilledTonalButton(
-                                    onClick = {
-                                        if (transferState.transferDirUri == null) {
-                                            // 未设置传输目录，先引导到设置页
-                                            onNavigateToSettings()
-                                        } else if (camera != null && remainingGroupFiles.isNotEmpty()) {
-                                            transferViewModel.addToQueue(remainingGroupFiles, camera)
-                                            onNavigateToTransfer()
-                                        }
-                                    },
-                                    enabled = remainingGroupFiles.isNotEmpty(),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(28.dp),
-                                    contentPadding = PaddingValues(horizontal = 16.dp)
-                                ) {
-                                    Text(
-                                        if (remainingGroupFiles.isEmpty()) "已添加" else "传输",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = DarkOnBackground
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            group.files.forEach { file ->
-                                val task = queuedByHandle[file.handle]
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .then(
-                                            if (task == null) Modifier.clickable {
-                                                if (transferState.transferDirUri == null) {
-                                                    // 未设置传输目录，先引导到设置页
-                                                    onNavigateToSettings()
-                                                } else if (camera != null) {
-                                                    transferViewModel.addToQueue(listOf(file), camera)
-                                                }
-                                            } else Modifier
-                                        )
-                                        .padding(vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = when (file.extension) {
-                                            ".jpg" -> AccentBlue.copy(alpha = 0.2f)
-                                            ".nef" -> AccentPurple.copy(alpha = 0.2f)
-                                            ".mov" -> AccentOrange.copy(alpha = 0.2f)
-                                            else -> DarkSurfaceVariant
-                                        }
-                                    ) {
-                                        Text(
-                                            text = file.extension.uppercase().removePrefix("."),
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = when (file.extension) {
-                                                ".jpg" -> AccentBlue
-                                                ".nef" -> AccentPurple
-                                                ".mov" -> AccentOrange
-                                                else -> DarkOnSurfaceVariant
-                                            }
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.width(8.dp))
-
-                                    Text(
-                                        text = file.fileName,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (task != null) DarkOnSurfaceVariant else DarkOnBackground,
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    Text(
-                                        text = formatFileSize(file.size),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = DarkOnSurfaceVariant
-                                    )
-
-                                    if (task != null) {
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        TransferStatusIndicator(status = task.status)
-                                    }
-                                }
-
-                                Divider(
-                                    modifier = Modifier.padding(start = 28.dp),
-                                    color = DarkSurfaceVariant.copy(alpha = 0.5f)
-                                )
-                            }
-                        }
-                    }
+            // 两种展示形态共享的交互：分组批量传输 / 单文件点击（分组逻辑不变，仅展示不同）。
+            val onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit = onTransferGroup@{ remaining ->
+                if (transferState.transferDirUri == null) {
+                    onNavigateToSettings(); return@onTransferGroup
                 }
+                if (camera != null && remaining.isNotEmpty()) {
+                    transferViewModel.addToQueue(remaining, camera)
+                    onNavigateToTransfer()
+                }
+            }
+            val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
+                if (transferState.transferDirUri == null) {
+                    onNavigateToSettings(); return@onTapFile
+                }
+                if (camera != null) transferViewModel.addToQueue(listOf(file), camera)
+            }
 
-                if (state.isLoadingFiles) {
-                    item {
+            if (transferState.thumbnailMode) {
+                ThumbnailGrid(
+                    groups = groups,
+                    queuedByHandle = queuedByHandle,
+                    columns = transferState.thumbnailColumns,
+                    isLoading = state.isLoadingFiles,
+                    cameraViewModel = cameraViewModel,
+                    onTransferGroup = onTransferGroup,
+                    onTapFile = onTapFile,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                FileList(
+                    groups = groups,
+                    queuedByHandle = queuedByHandle,
+                    isLoading = state.isLoadingFiles,
+                    onTransferGroup = onTransferGroup,
+                    onTapFile = onTapFile,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GroupHeader(
+    group: FileGroup,
+    queuedByHandle: Map<Int, TransferTask>,
+    onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Default.CalendarToday,
+            contentDescription = null,
+            tint = AccentBlue,
+            modifier = Modifier.size(20.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = formatDateHeader(group.date),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = DarkOnBackground
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = "${group.files.size}张",
+            style = MaterialTheme.typography.bodySmall,
+            color = DarkOnSurfaceVariant
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        val remainingGroupFiles = group.files.filter { it.handle !in queuedByHandle }
+        FilledTonalButton(
+            onClick = { onTransferGroup(remainingGroupFiles) },
+            enabled = remainingGroupFiles.isNotEmpty(),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.height(28.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp)
+        ) {
+            Text(
+                if (remainingGroupFiles.isEmpty()) "已添加" else "传输",
+                style = MaterialTheme.typography.bodySmall,
+                color = DarkOnBackground
+            )
+        }
+    }
+}
+
+@Composable
+private fun FileList(
+    groups: List<FileGroup>,
+    queuedByHandle: Map<Int, TransferTask>,
+    isLoading: Boolean,
+    onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit,
+    onTapFile: (NikonCamera.FileInfo) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(groups) { group ->
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    GroupHeader(group, queuedByHandle, onTransferGroup)
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    group.files.forEach { file ->
+                        val task = queuedByHandle[file.handle]
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.Center,
+                                .then(
+                                    if (task == null) Modifier.clickable { onTapFile(file) } else Modifier
+                                )
+                                .padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = AccentBlue,
-                                strokeWidth = 2.dp
-                            )
+                            FileTypeBadge(file.extension)
+
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("正在加载更多文件...", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceVariant)
+
+                            Text(
+                                text = file.fileName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (task != null) DarkOnSurfaceVariant else DarkOnBackground,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Text(
+                                text = formatFileSize(file.size),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = DarkOnSurfaceVariant
+                            )
+
+                            if (task != null) {
+                                Spacer(modifier = Modifier.width(10.dp))
+                                TransferStatusIndicator(status = task.status)
+                            }
                         }
+
+                        Divider(
+                            modifier = Modifier.padding(start = 28.dp),
+                            color = DarkSurfaceVariant.copy(alpha = 0.5f)
+                        )
                     }
                 }
             }
         }
+
+        if (isLoading) {
+            item { LoadingMoreRow() }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailGrid(
+    groups: List<FileGroup>,
+    queuedByHandle: Map<Int, TransferTask>,
+    columns: Int,
+    isLoading: Boolean,
+    cameraViewModel: CameraViewModel,
+    onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit,
+    onTapFile: (NikonCamera.FileInfo) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(columns.coerceIn(1, 4)),
+        modifier = modifier,
+        contentPadding = PaddingValues(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        groups.forEach { group ->
+            // 分组头整行跨列，保持与列表模式一致的分组语义
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    GroupHeader(group, queuedByHandle, onTransferGroup)
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+            }
+            items(group.files, key = { it.handle }) { file ->
+                ThumbnailCell(
+                    file = file,
+                    task = queuedByHandle[file.handle],
+                    cameraViewModel = cameraViewModel,
+                    onTapFile = onTapFile
+                )
+            }
+        }
+
+        if (isLoading) {
+            item(span = { GridItemSpan(maxLineSpan) }) { LoadingMoreRow() }
+        }
+    }
+}
+
+@Composable
+private fun ThumbnailCell(
+    file: NikonCamera.FileInfo,
+    task: TransferTask?,
+    cameraViewModel: CameraViewModel,
+    onTapFile: (NikonCamera.FileInfo) -> Unit
+) {
+    // 仅在单元进入可见区时按 handle 懒加载，命中缓存瞬时返回；滚出可见区协程随之取消。
+    val thumbnail by produceState<ImageBitmap?>(initialValue = null, key1 = file.handle) {
+        value = cameraViewModel.loadThumbnail(file.handle)
+    }
+
+    Box(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(8.dp))
+            .background(DarkSurface)
+            .then(if (task == null) Modifier.clickable { onTapFile(file) } else Modifier)
+    ) {
+        val image = thumbnail
+        if (image != null) {
+            Image(
+                bitmap = image,
+                contentDescription = file.fileName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // 占位：类型角标底色
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = when (file.extension) {
+                        ".mov", ".mp4" -> Icons.Default.Movie
+                        else -> Icons.Default.Image
+                    },
+                    contentDescription = null,
+                    tint = DarkOnSurfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        }
+
+        // 左上角类型角标
+        Surface(
+            shape = RoundedCornerShape(bottomEnd = 6.dp),
+            color = when (file.extension) {
+                ".jpg" -> AccentBlue.copy(alpha = 0.85f)
+                ".nef" -> AccentPurple.copy(alpha = 0.85f)
+                ".mov" -> AccentOrange.copy(alpha = 0.85f)
+                else -> DarkSurfaceVariant.copy(alpha = 0.85f)
+            },
+            modifier = Modifier.align(Alignment.TopStart)
+        ) {
+            Text(
+                text = file.extension.uppercase().removePrefix("."),
+                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = DarkBackground
+            )
+        }
+
+        // 已入队：遮罩 + 状态角标
+        if (task != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(DarkBackground.copy(alpha = 0.35f))
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(4.dp)
+            ) {
+                TransferStatusIndicator(status = task.status)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FileTypeBadge(extension: String) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = when (extension) {
+            ".jpg" -> AccentBlue.copy(alpha = 0.2f)
+            ".nef" -> AccentPurple.copy(alpha = 0.2f)
+            ".mov" -> AccentOrange.copy(alpha = 0.2f)
+            else -> DarkSurfaceVariant
+        }
+    ) {
+        Text(
+            text = extension.uppercase().removePrefix("."),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = when (extension) {
+                ".jpg" -> AccentBlue
+                ".nef" -> AccentPurple
+                ".mov" -> AccentOrange
+                else -> DarkOnSurfaceVariant
+            }
+        )
+    }
+}
+
+@Composable
+private fun LoadingMoreRow() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(20.dp),
+            color = AccentBlue,
+            strokeWidth = 2.dp
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("正在加载更多文件...", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceVariant)
     }
 }
 

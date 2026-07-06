@@ -145,6 +145,79 @@ fun SettingsScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // 缩略图设置
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.GridView,
+                        contentDescription = null,
+                        tint = AccentBlue,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "缩略图模式",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = DarkOnBackground,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = state.thumbnailMode,
+                        onCheckedChange = { viewModel.setThumbnailMode(it) }
+                    )
+                }
+
+                Text(
+                    text = "以网格缩略图展示照片（分组方式不变，仅展示形态不同）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DarkOnSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                // 列数选择（仅缩略图模式下可用）
+                if (state.thumbnailMode) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "每行列数",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = DarkOnBackground
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        (1..4).forEach { col ->
+                            val selected = state.thumbnailColumns == col
+                            Surface(
+                                onClick = { viewModel.setThumbnailColumns(col) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (selected) AccentBlue else DarkSurfaceVariant,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "$col",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (selected) DarkBackground else DarkOnSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // 关于信息
         Card(
             modifier = Modifier

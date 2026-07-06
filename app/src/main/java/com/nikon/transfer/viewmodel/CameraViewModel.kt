@@ -6,7 +6,11 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
+import android.util.LruCache
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nikon.transfer.protocol.NikonCamera
@@ -22,6 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class CameraState(
     val isWifiConnected: Boolean = false,
@@ -40,6 +45,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
     private var watcherJob: Job? = null
+
+    // 缩略图内存缓存：按位图字节数限容（约 1/8 可用内存），超限自动淘汰。
+    private val thumbnailCache = object : LruCache<Int, ImageBitmap>(
+        (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt().coerceAtLeast(4 * 1024)
+    ) {
+        override fun sizeOf(key: Int, value: ImageBitmap): Int = value.width * value.height * 4 / 1024
+    }
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -216,6 +228,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun loadFiles() {
         val cam = camera ?: return
+        thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
         _state.update { it.copy(isLoadingFiles = true, files = emptyList()) }
 
         viewModelScope.launch {
@@ -252,6 +265,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun getCamera(): NikonCamera? = camera
+
+    /**
+     * 加载指定文件的缩略图（用于缩略图网格）。命中内存缓存直接返回；否则经 PTP GetThumb 取字节、
+     * 在后台线程解码并入缓存。与下载共用 ioMutex，串行安全；相机未连接或无缩略图返回 null。
+     */
+    suspend fun loadThumbnail(handle: Int): ImageBitmap? {
+        thumbnailCache.get(handle)?.let { return it }
+        val cam = camera ?: return null
+        return try {
+            val bytes = cam.getThumbnail(handle) ?: return null
+            val image = withContext(Dispatchers.Default) {
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            } ?: return null
+            thumbnailCache.put(handle, image)
+            image
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     fun clearError() {
         _state.update { it.copy(error = null) }

@@ -34,7 +34,9 @@ data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
     val isTransferring: Boolean = false,
     val currentSpeed: Long = 0,
-    val transferDirUri: String? = null
+    val transferDirUri: String? = null,
+    val thumbnailMode: Boolean = false,
+    val thumbnailColumns: Int = 3
 )
 
 class TransferViewModel(application: Application) : AndroidViewModel(application) {
@@ -50,7 +52,24 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     init {
-        _state.update { it.copy(transferDirUri = prefs.getString("transfer_dir", null)) }
+        _state.update {
+            it.copy(
+                transferDirUri = prefs.getString("transfer_dir", null),
+                thumbnailMode = prefs.getBoolean("thumbnail_mode", false),
+                thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4)
+            )
+        }
+    }
+
+    fun setThumbnailMode(enabled: Boolean) {
+        prefs.edit().putBoolean("thumbnail_mode", enabled).apply()
+        _state.update { it.copy(thumbnailMode = enabled) }
+    }
+
+    fun setThumbnailColumns(columns: Int) {
+        val c = columns.coerceIn(1, 4)
+        prefs.edit().putInt("thumbnail_columns", c).apply()
+        _state.update { it.copy(thumbnailColumns = c) }
     }
 
     fun setTransferDirUri(uri: Uri) {

@@ -179,6 +179,19 @@ class NikonCamera {
         val extension: String get() = fileName.substringAfterLast('.', "")
     }
 
+    /** 通过 PTP GetThumb 获取缩略图 JPEG 字节；无缩略图或出错返回 null。与其它命令共用 ioMutex。 */
+    suspend fun getThumbnail(handle: Int): ByteArray? = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                sendCmd(PtpConstants.GET_THUMB, handle)
+                val (respCode, data) = recvRespWithPayload()
+                if (respCode == PtpConstants.RESPONSE_OK) data else null
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
     suspend fun getObjectInfo(handle: Int): FileInfo? = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             try {
