@@ -25,6 +25,9 @@ class NikonCamera {
     private val evtReader = PacketReader()
     private var evtThread: Thread? = null
     private val ioMutex = Mutex()
+    // 会话是否已 OpenSession 成功；用于决定 close() 是否需要发送 CloseSession，
+    // 避免在握手中途失败时空等 CloseSession 响应（最长可达 soTimeout）。
+    @Volatile private var sessionOpen = false
 
     private companion object {
         const val TAG = "NikonTransfer"
@@ -88,6 +91,7 @@ class NikonCamera {
             if (resp.first != PtpConstants.RESPONSE_OK) {
                 return@withContext Result.failure(Exception("OpenSession 失败: ${PtpConstants.translateResponse(resp.first)}"))
             }
+            sessionOpen = true
 
             startEvtThread()
 
@@ -353,15 +357,19 @@ class NikonCamera {
      */
     suspend fun close() = withContext(NonCancellable + Dispatchers.IO) {
         ioMutex.withLock {
-            try {
-                sendCmd(PtpConstants.CLOSE_SESSION)
-                recvResp()
-            } catch (_: Exception) {}
+            // 仅在会话确实打开时才发送 CloseSession，否则握手中途失败时会空等响应。
+            if (sessionOpen) {
+                try {
+                    sendCmd(PtpConstants.CLOSE_SESSION)
+                    recvResp()
+                } catch (_: Exception) {}
+            }
             closeQuietly()
         }
     }
 
     private fun closeQuietly() {
+        sessionOpen = false
         try { cmdInput?.close() } catch (_: Exception) {}
         try { cmdSocket?.close() } catch (_: Exception) {}
         try { evtInput?.close() } catch (_: Exception) {}
@@ -424,20 +432,20 @@ class NikonCamera {
     }
 
     private fun recvRespWithPayload(): Pair<Int, ByteArray?> {
-        var responseData: ByteArray? = null
+        // 用 ByteArrayOutputStream 累积多包数据，避免 responseData + data 的 O(n²) 复制。
+        var buffer: java.io.ByteArrayOutputStream? = null
         while (true) {
             val packet = cmdReader.readPacket(cmdInput!!)
             when (packet.type) {
                 PtpConstants.CMD_RESPONSE -> {
                     val respCode = packet.payload?.getUShortLE(0) ?: 0
-                    return respCode to responseData
-                }
-                PtpConstants.START_DATA_PACKET -> {
+                    return respCode to buffer?.toByteArray()
                 }
                 PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
-                    if (packet.payload != null && packet.payload.size > 4) {
-                        val data = packet.payload.copyOfRange(4, packet.payload.size)
-                        responseData = if (responseData == null) data else responseData + data
+                    val p = packet.payload
+                    if (p != null && p.size > 4) {
+                        val out = buffer ?: java.io.ByteArrayOutputStream().also { buffer = it }
+                        out.write(p, 4, p.size - 4)
                     }
                 }
                 PtpConstants.PING -> sendPong()

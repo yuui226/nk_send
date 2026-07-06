@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -72,7 +73,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun onWifiChanged() {
         viewModelScope.launch {
             val connected = isNikonWifi()
-            _state.value = _state.value.copy(isWifiConnected = connected)
+            _state.update { it.copy(isWifiConnected = connected) }
 
             if (connected && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
                 connectToCameraWithRetry()
@@ -80,6 +81,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun isNikonWifi(): Boolean {
         try {
             val dhcp = wifiManager.dhcpInfo ?: return false
@@ -93,7 +95,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private suspend fun connectToCameraWithRetry(maxRetries: Int = 3) {
         if (_state.value.isConnecting || _state.value.isConnectedToCamera) return
-        _state.value = _state.value.copy(isConnecting = true, error = null)
+        _state.update { it.copy(isConnecting = true, error = null) }
 
         repeat(maxRetries) { attempt ->
             val cam = NikonCamera()
@@ -101,12 +103,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             result.fold(
                 onSuccess = { camName ->
                     camera = cam
-                    _state.value = _state.value.copy(
-                        isConnectedToCamera = true,
-                        cameraName = camName,
-                        isConnecting = false,
-                        error = null
-                    )
+                    _state.update {
+                        it.copy(
+                            isConnectedToCamera = true,
+                            cameraName = camName,
+                            isConnecting = false,
+                            error = null
+                        )
+                    }
                     startKeepalive()
                     loadFiles()
                     return
@@ -116,10 +120,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (attempt < maxRetries - 1) {
                         delay(2000L)
                     } else {
-                        _state.value = _state.value.copy(
-                            isConnecting = false,
-                            error = "连接失败 (${maxRetries}次重试): ${e.message}"
-                        )
+                        _state.update {
+                            it.copy(
+                                isConnecting = false,
+                                error = "连接失败 (${maxRetries}次重试): ${e.message}"
+                            )
+                        }
                     }
                 }
             )
@@ -144,12 +150,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val cam = camera ?: break
                 if (!cam.keepalive()) {
                     camera = null
-                    _state.value = _state.value.copy(
-                        isConnectedToCamera = false,
-                        cameraName = null,
-                        files = emptyList(),
-                        error = "与相机的连接已断开"
-                    )
+                    _state.update {
+                        it.copy(
+                            isConnectedToCamera = false,
+                            cameraName = null,
+                            files = emptyList(),
+                            error = "与相机的连接已断开"
+                        )
+                    }
                     cam.close()
                     break
                 }
@@ -167,19 +175,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun loadFiles() {
         val cam = camera ?: return
-        _state.value = _state.value.copy(isLoadingFiles = true, files = emptyList())
+        _state.update { it.copy(isLoadingFiles = true, files = emptyList()) }
 
         viewModelScope.launch {
             try {
                 val storageIds = cam.getStorageIds()
                 if (storageIds.isEmpty()) {
-                    _state.value = _state.value.copy(isLoadingFiles = false)
+                    _state.update { it.copy(isLoadingFiles = false) }
                     return@launch
                 }
 
                 val handles = cam.getObjectHandles(storageIds.first())
                 if (handles.isEmpty()) {
-                    _state.value = _state.value.copy(isLoadingFiles = false)
+                    _state.update { it.copy(isLoadingFiles = false) }
                     return@launch
                 }
 
@@ -190,18 +198,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                 cam.streamFileInfo(sortedHandles, batchSize = 20) { batch, loaded, total ->
                     allFiles.addAll(batch)
-                    _state.value = _state.value.copy(
-                        files = allFiles.toList(),
-                        isLoadingFiles = loaded < total
-                    )
+                    val snapshot = allFiles.toList()
+                    // onBatch 回调运行在 IO 线程，用 update 原子读改写避免与主线程写入竞争。
+                    _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
                 }
 
-                _state.value = _state.value.copy(isLoadingFiles = false)
+                _state.update { it.copy(isLoadingFiles = false) }
             } catch (e: Exception) {
-                _state.value = _state.value.copy(
-                    isLoadingFiles = false,
-                    error = e.message ?: "加载文件失败"
-                )
+                _state.update { it.copy(isLoadingFiles = false, error = e.message ?: "加载文件失败") }
             }
         }
     }
@@ -209,7 +213,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun getCamera(): NikonCamera? = camera
 
     fun clearError() {
-        _state.value = _state.value.copy(error = null)
+        _state.update { it.copy(error = null) }
     }
 
     override fun onCleared() {

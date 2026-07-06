@@ -14,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class TransferStatus {
@@ -49,9 +50,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     init {
-        _state.value = _state.value.copy(
-            transferDirUri = prefs.getString("transfer_dir", null)
-        )
+        _state.update { it.copy(transferDirUri = prefs.getString("transfer_dir", null)) }
     }
 
     fun setTransferDirUri(uri: Uri) {
@@ -61,7 +60,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         )
         prefs.edit().putString("transfer_dir", uri.toString()).apply()
-        _state.value = _state.value.copy(transferDirUri = uri.toString())
+        _state.update { it.copy(transferDirUri = uri.toString()) }
     }
 
     fun addToQueue(files: List<NikonCamera.FileInfo>, camera: NikonCamera) {
@@ -71,12 +70,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             val errorTasks = files.map {
                 TransferTask(file = it, status = TransferStatus.FAILED, error = "未设置传输目录")
             }
-            _state.value = _state.value.copy(tasks = _state.value.tasks + errorTasks)
+            _state.update { it.copy(tasks = it.tasks + errorTasks) }
             return
         }
 
         val newTasks = files.map { TransferTask(file = it) }
-        _state.value = _state.value.copy(tasks = _state.value.tasks + newTasks)
+        _state.update { it.copy(tasks = it.tasks + newTasks) }
 
         if (!_state.value.isTransferring) {
             processQueue(dirUri, camera)
@@ -87,7 +86,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if (transferJob?.isActive == true) return
 
         transferJob = viewModelScope.launch {
-            _state.value = _state.value.copy(isTransferring = true)
+            _state.update { it.copy(isTransferring = true) }
             // 前台服务 + 唤醒锁，保证锁屏/切后台时传输不被系统杀死。
             TransferService.start(getApplication())
 
@@ -105,8 +104,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     updateTask(handle) { it.copy(status = TransferStatus.TRANSFERING) }
                     log { "DL_BEGIN: ${task.file.fileName} handle=$handle size=${task.file.size}" }
 
+                    // 追踪已创建的文档，失败/取消时删除半成品，避免残留与重试时产生重名副本。
+                    var fileDocUri: Uri? = null
                     try {
-                        val fileDocUri = DocumentsContract.createDocument(
+                        fileDocUri = DocumentsContract.createDocument(
                             contentResolver,
                             docUri,
                             getMimeType(task.file.fileName),
@@ -132,7 +133,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         )
                                     } else t
                                 }
-                                _state.value = _state.value.copy(currentSpeed = speed)
+                                _state.update { it.copy(currentSpeed = speed) }
                             }
                         }
 
@@ -149,14 +150,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                             },
                             onFailure = { e ->
+                                deleteQuietly(fileDocUri)
                                 updateTask(handle) {
                                     it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
                                 }
                             }
                         )
                     } catch (e: CancellationException) {
-                        throw e   // 取消须向上传播，交由 cancelTransfer 统一置为 CANCELLED
+                        deleteQuietly(fileDocUri)   // 清理取消时的半成品文件
+                        throw e                     // 取消须向上传播，交由 cancelTransfer 统一置为 CANCELLED
                     } catch (e: Exception) {
+                        deleteQuietly(fileDocUri)
                         if (BuildConfig.DEBUG) {
                             android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
                         }
@@ -166,17 +170,25 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             } finally {
-                _state.value = _state.value.copy(isTransferring = false, currentSpeed = 0)
+                _state.update { it.copy(isTransferring = false, currentSpeed = 0) }
                 TransferService.stop(getApplication())
             }
         }
     }
 
-    /** 按 handle 就地更新任务；handle 不存在时保持列表不变。 */
+    /** 删除下载失败/取消留下的半成品文件，忽略删除失败。 */
+    private fun deleteQuietly(uri: Uri?) {
+        if (uri == null) return
+        try {
+            DocumentsContract.deleteDocument(contentResolver, uri)
+        } catch (_: Exception) {}
+    }
+
+    /** 按 handle 就地更新任务；handle 不存在时保持列表不变。用 update 保证跨线程原子读改写。 */
     private fun updateTask(handle: Int, transform: (TransferTask) -> TransferTask) {
-        _state.value = _state.value.copy(
-            tasks = _state.value.tasks.map { if (it.file.handle == handle) transform(it) else it }
-        )
+        _state.update { state ->
+            state.copy(tasks = state.tasks.map { if (it.file.handle == handle) transform(it) else it })
+        }
     }
 
     private inline fun log(message: () -> String) {
@@ -196,29 +208,32 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun cancelTransfer() {
         transferJob?.cancel()
         transferJob = null
-        _state.value = _state.value.copy(
-            isTransferring = false,
-            currentSpeed = 0,
-            tasks = _state.value.tasks.map {
-                if (it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING) {
-                    it.copy(status = TransferStatus.CANCELLED, speed = 0)
-                } else it
-            }
-        )
+        _state.update { state ->
+            state.copy(
+                isTransferring = false,
+                currentSpeed = 0,
+                tasks = state.tasks.map {
+                    if (it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING) {
+                        it.copy(status = TransferStatus.CANCELLED, speed = 0)
+                    } else it
+                }
+            )
+        }
     }
 
     fun retryFailed(camera: NikonCamera) {
-        val tasks = _state.value.tasks
-        val hasFailed = tasks.any { it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED }
+        val hasFailed = _state.value.tasks.any { it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED }
         if (!hasFailed) return
 
-        _state.value = _state.value.copy(
-            tasks = tasks.map {
-                if (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED) {
-                    it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0)
-                } else it
-            }
-        )
+        _state.update { state ->
+            state.copy(
+                tasks = state.tasks.map {
+                    if (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED) {
+                        it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0)
+                    } else it
+                }
+            )
+        }
 
         val dirUri = _state.value.transferDirUri ?: return
         processQueue(dirUri, camera)
@@ -237,11 +252,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun clearCompleted() {
-        _state.value = _state.value.copy(
-            tasks = _state.value.tasks.filter {
-                it.status != TransferStatus.COMPLETED && it.status != TransferStatus.CANCELLED && it.status != TransferStatus.FAILED
-            }
-        )
+        _state.update { state ->
+            state.copy(
+                tasks = state.tasks.filter {
+                    it.status != TransferStatus.COMPLETED && it.status != TransferStatus.CANCELLED && it.status != TransferStatus.FAILED
+                }
+            )
+        }
     }
 
     override fun onCleared() {

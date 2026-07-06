@@ -28,8 +28,14 @@ class TransferService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
-        acquireWakeLock()
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification())
+            acquireWakeLock()
+        } catch (e: Exception) {
+            // 某些系统状态下 startForeground 可能被拒绝；此时放弃保活但不崩溃，
+            // 传输仍会在前台继续进行。
+            stopSelf()
+        }
         // 被系统杀死后不自动重建：任务队列在进程内存中，重建无意义。
         return START_NOT_STICKY
     }
@@ -95,15 +101,22 @@ class TransferService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, TransferService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                // Android 12+ 后台启动前台服务会抛 ForegroundServiceStartNotAllowedException，
+                // 吞掉以免崩溃；传输在前台时不会触发，后台场景下服务已在运行。
             }
         }
 
         fun stop(context: Context) {
-            context.stopService(Intent(context, TransferService::class.java))
+            try {
+                context.stopService(Intent(context, TransferService::class.java))
+            } catch (_: Exception) {}
         }
     }
 }
