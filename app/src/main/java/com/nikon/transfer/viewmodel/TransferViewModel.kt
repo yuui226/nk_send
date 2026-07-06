@@ -191,13 +191,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         }
 
                         result.fold(
-                            onSuccess = { (size, detectedExt) ->
-                                // 下载完整 → 把临时名改成真正文件名（.bin 未知格式时套用探测到的扩展名）。
-                                val finalName = if (task.file.extension == ".bin" && detectedExt != null && detectedExt != ".bin") {
-                                    task.file.fileName.substringBeforeLast('.') + detectedExt
-                                } else {
-                                    task.file.fileName
-                                }
+                            onSuccess = { size ->
+                                // 下载完整 → 把临时名改成真正文件名（相机上报的文件名即为准）。
+                                val finalName = task.file.fileName
                                 val renamedUri = try {
                                     DocumentsContract.renameDocument(contentResolver, fileDocUri, finalName)
                                 } catch (_: Exception) { null }

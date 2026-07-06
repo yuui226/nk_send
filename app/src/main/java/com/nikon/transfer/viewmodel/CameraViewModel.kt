@@ -188,12 +188,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _state.update { it.copy(isConnecting = false) }
     }
 
-    fun connectToCamera() {
-        viewModelScope.launch {
-            connectToCameraWithRetry()
-        }
-    }
-
     /**
      * 周期性心跳：空闲时每 [KEEPALIVE_INTERVAL_MS] 探测一次相机，及时发现掉线并更新状态。
      * keepalive() 走 ioMutex，与下载/命令互斥，不会与进行中的传输产生并发冲突。
@@ -216,14 +210,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
-    }
-
-    fun disconnect() {
-        val cam = camera
-        camera = null
-        keepaliveJob?.cancel()
-        _state.value = CameraState()
-        cam?.let { cleanupScope.launch { it.close() } }
     }
 
     private fun loadFiles() {

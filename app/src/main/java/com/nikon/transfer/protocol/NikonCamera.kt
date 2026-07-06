@@ -176,7 +176,12 @@ class NikonCamera {
         val fileName: String,
         val captureDate: String?
     ) {
-        val extension: String get() = fileName.substringAfterLast('.', "")
+        /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
+        val extension: String
+            get() {
+                val i = fileName.lastIndexOf('.')
+                return if (i < 0) "" else fileName.substring(i).lowercase()
+            }
     }
 
     /** 通过 PTP GetThumb 获取缩略图 JPEG 字节；无缩略图或出错返回 null。与其它命令共用 ioMutex。 */
@@ -256,14 +261,13 @@ class NikonCamera {
         handle: Int,
         output: OutputStream,
         onProgress: ((DownloadProgress) -> Unit)? = null
-    ): Result<Pair<Long, String?>> = ioMutex.withLock {
+    ): Result<Long> = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             try {
                 sendCmd(PtpConstants.GET_OBJECT, handle)
 
                 var totalDownloaded = 0L
                 var expected = 0L
-                var first4: ByteArray? = null
                 val startTime = System.currentTimeMillis()
                 var lastProgressTime = startTime
 
@@ -282,7 +286,7 @@ class NikonCamera {
                             if (respCode != PtpConstants.RESPONSE_OK) {
                                 return@withContext Result.failure(Exception("传输失败: ${PtpConstants.translateResponse(respCode)}"))
                             }
-                            return@withContext Result.success(totalDownloaded to first4?.let { detectExt(it) })
+                            return@withContext Result.success(totalDownloaded)
                         }
                         PtpConstants.START_DATA_PACKET -> {
                             expected = if (len >= 8) buf.getIntLE(4).toLong() and 0xFFFFFFFFL else 0L
@@ -301,10 +305,6 @@ class NikonCamera {
                                 }
                                 totalDownloaded += len - 4
 
-                                if (first4 == null) {
-                                    first4 = buf.copyOfRange(4, minOf(len, 8))
-                                }
-
                                 val now = System.currentTimeMillis()
                                 if (now - lastProgressTime >= 200) {
                                     val elapsed = (now - startTime) / 1000f
@@ -316,7 +316,7 @@ class NikonCamera {
                                 log { "DL_END total=$totalDownloaded, draining CMD_RESPONSE..." }
                                 // 必须消费掉本次传输的 CMD_RESPONSE，否则残留包会污染下次传输
                                 drainCmdResponse()
-                                return@withContext Result.success(totalDownloaded to first4?.let { detectExt(it) })
+                                return@withContext Result.success(totalDownloaded)
                             }
                         }
                         PtpConstants.PING -> {
@@ -333,26 +333,6 @@ class NikonCamera {
                 Result.failure(e)
             }
         }
-    }
-
-    /**
-     * 依据文件头魔数推断扩展名。仅在相机上报的格式码未知（.bin）时作为兜底。
-     * 只依赖前若干字节，因此不检测 ISO-BMFF (MOV/MP4) —— 其 'ftyp' 位于偏移 4，
-     * 且已知视频格式码已在 [PtpConstants.FORMAT_EXT] 中直接映射。
-     */
-    private fun detectExt(data: ByteArray): String {
-        if (data.size < 2) return ".bin"
-        // JPEG: FF D8
-        if (data[0] == 0xFF.toByte() && data[1] == 0xD8.toByte()) return ".jpg"
-        if (data.size >= 4) {
-            // TIFF/NEF 小端: 'I' 'I' 2A 00
-            if (data[0] == 'I'.code.toByte() && data[1] == 'I'.code.toByte() &&
-                data[2] == 0x2A.toByte() && data[3] == 0x00.toByte()) return ".nef"
-            // TIFF/NEF 大端: 'M' 'M' 00 2A
-            if (data[0] == 'M'.code.toByte() && data[1] == 'M'.code.toByte() &&
-                data[2] == 0x00.toByte() && data[3] == 0x2A.toByte()) return ".nef"
-        }
-        return ".bin"
     }
 
     /**
