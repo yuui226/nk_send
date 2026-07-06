@@ -10,12 +10,14 @@ import com.nikon.transfer.BuildConfig
 import com.nikon.transfer.protocol.NikonCamera
 import com.nikon.transfer.service.TransferService
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class TransferStatus {
     WAITING, TRANSFERING, COMPLETED, FAILED, CANCELLED
@@ -50,15 +52,24 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     private companion object {
         const val TAG = "NikonTransfer"
+        // 未完成文件的临时名前缀（带前导点，在相册中隐藏）。真正文件名只在下载完整后才出现。
+        const val PART_PREFIX = ".nkpart_"
     }
 
     init {
+        val dir = prefs.getString("transfer_dir", null)
         _state.update {
             it.copy(
-                transferDirUri = prefs.getString("transfer_dir", null),
+                transferDirUri = dir,
                 thumbnailMode = prefs.getBoolean("thumbnail_mode", false),
                 thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4)
             )
+        }
+        // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
+        if (dir != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try { sweepPartials(Uri.parse(dir)) } catch (_: Exception) {}
+            }
         }
     }
 
@@ -109,8 +120,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     uri,
                     DocumentsContract.getTreeDocumentId(uri)
                 )
-                // 目标目录已有文件（名称 -> 大小），用于"已存在则跳过"。会随本次成功传输的文件更新。
-                val existing = queryExistingFiles(uri)
+                // 先清扫上次遗留的半成品，再查目标目录已有文件（名称 -> 大小）用于"已存在则跳过"。
+                val existing = withContext(Dispatchers.IO) {
+                    sweepPartials(uri)
+                    queryExistingFiles(uri)
+                }
 
                 while (true) {
                     // 以 handle（稳定唯一键）定位任务，避免 clearCompleted 等操作导致下标串位。
@@ -141,11 +155,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 连接断开导致的失败：把任务放回等待队列并暂停整个队列，等重连后自动继续。
                     var pausedForDisconnect = false
                     try {
+                        // 写入临时名 .nkpart_原名（扩展名保留，与 mime 匹配，避免 SAF 追加扩展名）。
+                        // 下载完整后再改名成真正文件名——崩溃/被杀只会留下 .nkpart_ 半成品，绝不出现残缺的真名文件。
                         fileDocUri = DocumentsContract.createDocument(
                             contentResolver,
                             docUri,
                             getMimeType(task.file.fileName),
-                            task.file.fileName
+                            PART_PREFIX + task.file.fileName
                         ) ?: throw Exception("无法创建文件")
 
                         val outputStream = contentResolver.openOutputStream(fileDocUri)
@@ -174,13 +190,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                         result.fold(
                             onSuccess = { (size, detectedExt) ->
-                                if (task.file.extension == ".bin" && detectedExt != null && detectedExt != ".bin") {
-                                    try {
-                                        val newName = task.file.fileName.substringBeforeLast('.') + detectedExt
-                                        DocumentsContract.renameDocument(contentResolver, fileDocUri, newName)
-                                    } catch (_: Exception) {}
+                                // 下载完整 → 把临时名改成真正文件名（.bin 未知格式时套用探测到的扩展名）。
+                                val finalName = if (task.file.extension == ".bin" && detectedExt != null && detectedExt != ".bin") {
+                                    task.file.fileName.substringBeforeLast('.') + detectedExt
+                                } else {
+                                    task.file.fileName
                                 }
-                                existing[task.file.fileName] = task.file.size   // 供后续任务去重
+                                try {
+                                    DocumentsContract.renameDocument(contentResolver, fileDocUri, finalName)
+                                } catch (_: Exception) {}
+                                existing[finalName] = task.file.size   // 供后续任务去重
                                 updateTask(handle) {
                                     it.copy(status = TransferStatus.COMPLETED, progress = 1f, downloaded = size, speed = 0)
                                 }
@@ -255,6 +274,44 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if (_state.value.tasks.any { it.status == TransferStatus.WAITING }) {
             processQueue(dirUri, camera)
         }
+    }
+
+    /**
+     * 清扫目标目录里遗留的半成品（以 [PART_PREFIX] 开头的临时文件）——这些是上次崩溃/被杀留下的
+     * 未完成下载。正常完成的文件已改名为真名，不会被误删。
+     */
+    private fun sweepPartials(treeUri: Uri) {
+        try {
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri,
+                DocumentsContract.getTreeDocumentId(treeUri)
+            )
+            contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID
+                ),
+                null, null, null
+            )?.use { c ->
+                val nameIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val idIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                if (nameIdx >= 0 && idIdx >= 0) {
+                    while (c.moveToNext()) {
+                        val name = c.getString(nameIdx) ?: continue
+                        if (name.startsWith(PART_PREFIX)) {
+                            val docId = c.getString(idIdx) ?: continue
+                            try {
+                                DocumentsContract.deleteDocument(
+                                    contentResolver,
+                                    DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                                )
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     /**
