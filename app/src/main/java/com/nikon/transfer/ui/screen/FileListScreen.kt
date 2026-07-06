@@ -15,10 +15,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -177,11 +179,16 @@ fun FileListScreen(
             }
 
             if (transferState.thumbnailMode) {
+                // 传输队列有未完成任务时，缩略图让路：只用缓存，不发起新的 GetThumb，避免抢占下载通道。
+                val transfersBusy = transferState.tasks.any {
+                    it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
+                }
                 ThumbnailGrid(
                     groups = groups,
                     queuedByHandle = queuedByHandle,
                     columns = transferState.thumbnailColumns,
                     isLoading = state.isLoadingFiles,
+                    transfersBusy = transfersBusy,
                     cameraViewModel = cameraViewModel,
                     onTransferGroup = onTransferGroup,
                     onTapFile = onTapFile,
@@ -328,6 +335,7 @@ private fun ThumbnailGrid(
     queuedByHandle: Map<Int, TransferTask>,
     columns: Int,
     isLoading: Boolean,
+    transfersBusy: Boolean,
     cameraViewModel: CameraViewModel,
     onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
@@ -353,6 +361,7 @@ private fun ThumbnailGrid(
                 ThumbnailCell(
                     file = file,
                     task = queuedByHandle[file.handle],
+                    transfersBusy = transfersBusy,
                     cameraViewModel = cameraViewModel,
                     onTapFile = onTapFile
                 )
@@ -369,12 +378,17 @@ private fun ThumbnailGrid(
 private fun ThumbnailCell(
     file: NikonCamera.FileInfo,
     task: TransferTask?,
+    transfersBusy: Boolean,
     cameraViewModel: CameraViewModel,
     onTapFile: (NikonCamera.FileInfo) -> Unit
 ) {
-    // 仅在单元进入可见区时按 handle 懒加载，命中缓存瞬时返回；滚出可见区协程随之取消。
-    val thumbnail by produceState<ImageBitmap?>(initialValue = null, key1 = file.handle) {
-        value = cameraViewModel.loadThumbnail(file.handle)
+    // 已加载的缩略图按 handle 记住，transfersBusy 变化不会让它闪回占位。
+    var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
+    // 仅在尚未加载时才尝试取；传输进行中只读缓存(allowFetch=false)，队列空闲后本效应重跑自动补载。
+    LaunchedEffect(file.handle, transfersBusy) {
+        if (thumbnail == null) {
+            thumbnail = cameraViewModel.loadThumbnail(file.handle, allowFetch = !transfersBusy)
+        }
     }
 
     Box(

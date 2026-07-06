@@ -269,9 +269,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /**
      * 加载指定文件的缩略图（用于缩略图网格）。命中内存缓存直接返回；否则经 PTP GetThumb 取字节、
      * 在后台线程解码并入缓存。与下载共用 ioMutex，串行安全；相机未连接或无缩略图返回 null。
+     *
+     * @param allowFetch 为 false 时只读缓存、不发起新的 GetThumb —— 用于"传输进行中让路给下载"，
+     *                   已缓存的缩略图仍会显示，未缓存的等队列空闲后再补载。
      */
-    suspend fun loadThumbnail(handle: Int): ImageBitmap? {
+    suspend fun loadThumbnail(handle: Int, allowFetch: Boolean = true): ImageBitmap? {
         thumbnailCache.get(handle)?.let { return it }
+        if (!allowFetch) return null
         val cam = camera ?: return null
         return try {
             val bytes = cam.getThumbnail(handle) ?: return null
