@@ -93,14 +93,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun connectToCameraWithRetry(maxRetries: Int = 3) {
+    /**
+     * 持续尝试连接相机：只要还在相机 Wi-Fi 上就不断重试，直到连上为止，不再在若干次后报错。
+     * 用户流程本就是"必须连上相机 Wi-Fi 才能用"，所以保持探测更符合预期。
+     * 一旦离开相机网段则退出循环，由网络回调在重新连上 Wi-Fi 后再次触发。
+     */
+    private suspend fun connectToCameraWithRetry() {
         if (_state.value.isConnecting || _state.value.isConnectedToCamera) return
         _state.update { it.copy(isConnecting = true, error = null) }
 
-        repeat(maxRetries) { attempt ->
+        while (isNikonWifi() && !_state.value.isConnectedToCamera) {
             val cam = NikonCamera()
-            val result = cam.connect()
-            result.fold(
+            var connected = false
+            cam.connect().fold(
                 onSuccess = { camName ->
                     camera = cam
                     _state.update {
@@ -113,23 +118,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     startKeepalive()
                     loadFiles()
-                    return
+                    connected = true
                 },
-                onFailure = { e ->
+                onFailure = {
                     cam.close()
-                    if (attempt < maxRetries - 1) {
-                        delay(2000L)
-                    } else {
-                        _state.update {
-                            it.copy(
-                                isConnecting = false,
-                                error = "连接失败 (${maxRetries}次重试): ${e.message}"
-                            )
-                        }
-                    }
                 }
             )
+            if (connected) return
+            delay(RETRY_INTERVAL_MS)   // 未连上，稍后再试，不显示错误
         }
+
+        // 已离开相机 Wi-Fi（或已连上）；清除"连接中"状态，等待下次网络变化再触发。
+        _state.update { it.copy(isConnecting = false) }
     }
 
     fun connectToCamera() {
@@ -150,15 +150,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val cam = camera ?: break
                 if (!cam.keepalive()) {
                     camera = null
-                    _state.update {
-                        it.copy(
-                            isConnectedToCamera = false,
-                            cameraName = null,
-                            files = emptyList(),
-                            error = "与相机的连接已断开"
-                        )
-                    }
                     cam.close()
+                    // 掉线不报错，直接进入重连（新协程，避免与当前心跳协程的取消纠缠）。
+                    _state.update {
+                        it.copy(isConnectedToCamera = false, cameraName = null, files = emptyList())
+                    }
+                    viewModelScope.launch { connectToCameraWithRetry() }
                     break
                 }
             }
@@ -230,5 +227,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private companion object {
         const val KEEPALIVE_INTERVAL_MS = 10_000L
+        const val RETRY_INTERVAL_MS = 2_000L
     }
 }

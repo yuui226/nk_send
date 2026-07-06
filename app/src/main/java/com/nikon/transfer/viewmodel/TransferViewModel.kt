@@ -64,15 +64,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun addToQueue(files: List<NikonCamera.FileInfo>, camera: NikonCamera) {
-        val dirUri = _state.value.transferDirUri
-        if (dirUri == null) {
-            // 追加失败任务，不覆盖已有
-            val errorTasks = files.map {
-                TransferTask(file = it, status = TransferStatus.FAILED, error = "未设置传输目录")
-            }
-            _state.update { it.copy(tasks = it.tasks + errorTasks) }
-            return
-        }
+        // 未设置传输目录时禁止入队（UI 层会把用户引导到设置页）。
+        val dirUri = _state.value.transferDirUri ?: return
 
         val newTasks = files.map { TransferTask(file = it) }
         _state.update { it.copy(tasks = it.tasks + newTasks) }
@@ -117,7 +110,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         val outputStream = contentResolver.openOutputStream(fileDocUri)
                             ?: throw Exception("无法打开文件")
 
-                        val result = outputStream.use { out ->
+                        // 用大缓冲包裹 SAF 输出流，把零散的写批量化，减少 ContentProvider 往返。
+                        val result = java.io.BufferedOutputStream(outputStream, 1024 * 1024).use { out ->
                             camera.downloadToFile(handle, out) { progress ->
                                 val speed = if (progress.elapsed > 0) {
                                     (progress.downloaded / progress.elapsed).toLong()

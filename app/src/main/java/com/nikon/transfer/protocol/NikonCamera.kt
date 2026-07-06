@@ -48,6 +48,8 @@ class NikonCamera {
             cmdSocket = Socket().apply {
                 tcpNoDelay = true
                 soTimeout = 60000
+                // 增大接收缓冲，提升 Wi-Fi 上大文件下载的 TCP 吞吐。
+                receiveBufferSize = 1024 * 1024
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), 5000)
             }
             cmdInput = cmdSocket!!.getInputStream()
@@ -272,11 +274,14 @@ class NikonCamera {
                 while (true) {
                     // 协作式取消：在每个包边界检查，使 cancelTransfer() 能及时中断
                     ensureActive()
-                    val packet = cmdReader.readPacket(cmdInput!!)
+                    // 零拷贝读取：直接从共享缓冲区写入，避免每包一次全量分配+复制。
+                    val packet = cmdReader.readPacketRaw(cmdInput!!)
+                    val buf = packet.buffer
+                    val len = packet.payloadLen
 
                     when (packet.type) {
                         PtpConstants.CMD_RESPONSE -> {
-                            val respCode = packet.payload?.getUShortLE(0) ?: 0
+                            val respCode = if (len >= 2) buf.getUShortLE(0) else 0
                             log { "DL_CMD_RESPONSE resp=0x${respCode.toString(16)} downloaded=$totalDownloaded" }
                             if (respCode != PtpConstants.RESPONSE_OK) {
                                 return@withContext Result.failure(Exception("传输失败: ${PtpConstants.translateResponse(respCode)}"))
@@ -284,19 +289,18 @@ class NikonCamera {
                             return@withContext Result.success(totalDownloaded to first4?.let { detectExt(it) })
                         }
                         PtpConstants.START_DATA_PACKET -> {
-                            expected = packet.payload?.getIntLE(4)?.toLong()?.and(0xFFFFFFFFL) ?: 0L
+                            expected = if (len >= 8) buf.getIntLE(4).toLong() and 0xFFFFFFFFL else 0L
                             log { "DL_START expected=$expected" }
                         }
                         PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
                             // DATA 与 END_DATA 同样携带数据段（前 4 字节为 PTP 数据阶段头）。
                             // 先写入本包数据，再判断是否为结束包，避免丢失最后一段数据。
-                            val payload = packet.payload
-                            if (payload != null && payload.size > 4) {
-                                output.write(payload, 4, payload.size - 4)
-                                totalDownloaded += payload.size - 4
+                            if (len > 4) {
+                                output.write(buf, 4, len - 4)
+                                totalDownloaded += len - 4
 
                                 if (first4 == null) {
-                                    first4 = payload.copyOfRange(4, minOf(payload.size, 8))
+                                    first4 = buf.copyOfRange(4, minOf(len, 8))
                                 }
 
                                 val now = System.currentTimeMillis()
