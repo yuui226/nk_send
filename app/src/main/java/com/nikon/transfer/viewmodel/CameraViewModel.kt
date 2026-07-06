@@ -52,7 +52,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         override fun onLost(network: Network) {
-            // 不主动关闭，等心跳超时自然断开
+            onWifiChanged()
         }
 
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
@@ -80,8 +80,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (_state.value.isWifiConnected != onNikonWifi) {
                     _state.update { it.copy(isWifiConnected = onNikonWifi) }
                 }
-                if (onNikonWifi && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
-                    connectToCameraWithRetry()
+                if (onNikonWifi) {
+                    if (!_state.value.isConnectedToCamera && !_state.value.isConnecting) {
+                        connectToCameraWithRetry()
+                    }
+                } else if (_state.value.isConnectedToCamera || camera != null) {
+                    forceDisconnect()   // 兜底：回调漏报时也能在掉线后断开
                 }
                 delay(WATCH_INTERVAL_MS)
             }
@@ -97,13 +101,28 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun onWifiChanged() {
         viewModelScope.launch {
-            val connected = isNikonWifi()
-            _state.update { it.copy(isWifiConnected = connected) }
+            val onNikonWifi = isNikonWifi()
+            _state.update { it.copy(isWifiConnected = onNikonWifi) }
 
-            if (connected && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
-                connectToCameraWithRetry()
+            if (onNikonWifi) {
+                if (!_state.value.isConnectedToCamera && !_state.value.isConnecting) {
+                    connectToCameraWithRetry()
+                }
+            } else if (_state.value.isConnectedToCamera || camera != null) {
+                // Wi-Fi 掉线：立即断开相机，中断进行中的下载（由传输队列侧暂停并等待重连续传）。
+                forceDisconnect()
             }
         }
+    }
+
+    /** Wi-Fi 掉线时主动断开：强制关闭 socket 以立即中断阻塞的下载读取，并置为未连接。 */
+    private fun forceDisconnect() {
+        val cam = camera
+        camera = null
+        keepaliveJob?.cancel()
+        _state.update { it.copy(isConnectedToCamera = false, cameraName = null) }
+        cam?.forceClose()                                    // 立即中断阻塞中的读
+        cam?.let { cleanupScope.launch { it.close() } }      // 完整清理（幂等）
     }
 
     @Suppress("DEPRECATION")

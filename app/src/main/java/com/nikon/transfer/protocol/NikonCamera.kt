@@ -14,6 +14,9 @@ import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
+/** 写入本地文件失败（非相机连接错误），用于区分"掉线"与"磁盘/存储"问题。 */
+class OutputWriteException(cause: Throwable) : Exception("写入文件失败: ${cause.message}", cause)
+
 class NikonCamera {
     private var cmdSocket: Socket? = null
     private var evtSocket: Socket? = null
@@ -296,7 +299,13 @@ class NikonCamera {
                             // DATA 与 END_DATA 同样携带数据段（前 4 字节为 PTP 数据阶段头）。
                             // 先写入本包数据，再判断是否为结束包，避免丢失最后一段数据。
                             if (len > 4) {
-                                output.write(buf, 4, len - 4)
+                                try {
+                                    output.write(buf, 4, len - 4)
+                                } catch (e: java.io.IOException) {
+                                    // 写本地文件失败（如存储空间不足）——非相机连接问题，
+                                    // 包装成非 IOException 以便上层按单文件失败处理，而不是误判为掉线。
+                                    return@withContext Result.failure(OutputWriteException(e))
+                                }
                                 totalDownloaded += len - 4
 
                                 if (first4 == null) {
@@ -370,6 +379,16 @@ class NikonCamera {
             }
             closeQuietly()
         }
+    }
+
+    /**
+     * 强制关闭底层 socket 以立即中断正在阻塞的读操作（不经过 ioMutex，因为持锁方正卡在读上）。
+     * 用于 Wi-Fi 掉线时快速中止进行中的下载；之后仍应调用 [close] 做完整清理（幂等）。
+     */
+    fun forceClose() {
+        sessionOpen = false
+        try { cmdSocket?.close() } catch (_: Exception) {}
+        try { evtSocket?.close() } catch (_: Exception) {}
     }
 
     private fun closeQuietly() {

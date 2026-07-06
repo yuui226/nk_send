@@ -99,6 +99,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                     // 追踪已创建的文档，失败/取消时删除半成品，避免残留与重试时产生重名副本。
                     var fileDocUri: Uri? = null
+                    // 连接断开导致的失败：把任务放回等待队列并暂停整个队列，等重连后自动继续。
+                    var pausedForDisconnect = false
                     try {
                         fileDocUri = DocumentsContract.createDocument(
                             contentResolver,
@@ -145,8 +147,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             },
                             onFailure = { e ->
                                 deleteQuietly(fileDocUri)
-                                updateTask(handle) {
-                                    it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
+                                if (isConnectionError(e)) {
+                                    requeue(handle)
+                                    pausedForDisconnect = true
+                                } else {
+                                    updateTask(handle) {
+                                        it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
+                                    }
                                 }
                             }
                         )
@@ -155,18 +162,58 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         throw e                     // 取消须向上传播，交由 cancelTransfer 统一置为 CANCELLED
                     } catch (e: Exception) {
                         deleteQuietly(fileDocUri)
-                        if (BuildConfig.DEBUG) {
-                            android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
-                        }
-                        updateTask(handle) {
-                            it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
+                        if (isConnectionError(e)) {
+                            // 连接断开：放回队列并暂停，等待重连后自动继续
+                            requeue(handle)
+                            pausedForDisconnect = true
+                        } else {
+                            if (BuildConfig.DEBUG) {
+                                android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
+                            }
+                            updateTask(handle) {
+                                it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
+                            }
                         }
                     }
+
+                    // 连接断开：停止继续处理队列，剩余任务保持 WAITING，等重连后 onCameraConnected 续传。
+                    if (pausedForDisconnect) break
                 }
             } finally {
                 _state.update { it.copy(isTransferring = false, currentSpeed = 0) }
                 TransferService.stop(getApplication())
             }
+        }
+    }
+
+    /** 把任务重置回等待状态（用于连接断开后续传）。 */
+    private fun requeue(handle: Int) {
+        updateTask(handle) {
+            it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, speed = 0, error = null)
+        }
+    }
+
+    /**
+     * 判断失败是否由连接断开引起。网络类异常（EOF/Socket 关闭/超时等）均为 IOException 子类；
+     * 协议层错误（"传输失败: xxx"）是普通 Exception，按单文件失败处理。
+     */
+    private fun isConnectionError(e: Throwable): Boolean = e is java.io.IOException
+
+    /**
+     * 相机（重新）连接后调用：把中断残留的 TRANSFERING 复位为 WAITING，若队列仍有待传任务则自动续传。
+     */
+    fun onCameraConnected(camera: NikonCamera) {
+        if (transferJob?.isActive == true) return
+        _state.update { s ->
+            s.copy(tasks = s.tasks.map {
+                if (it.status == TransferStatus.TRANSFERING) {
+                    it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, speed = 0)
+                } else it
+            })
+        }
+        val dirUri = _state.value.transferDirUri ?: return
+        if (_state.value.tasks.any { it.status == TransferStatus.WAITING }) {
+            processQueue(dirUri, camera)
         }
     }
 

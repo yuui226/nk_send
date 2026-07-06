@@ -81,6 +81,13 @@ fun MainScreen() {
         }
     }
 
+    // 相机（重新）连接后，若队列有因掉线暂停的任务则自动续传
+    LaunchedEffect(cameraState.isConnectedToCamera) {
+        if (cameraState.isConnectedToCamera) {
+            cameraViewModel.getCamera()?.let { transferViewModel.onCameraConnected(it) }
+        }
+    }
+
     Scaffold(
         containerColor = DarkBackground
     ) { paddingValues ->
