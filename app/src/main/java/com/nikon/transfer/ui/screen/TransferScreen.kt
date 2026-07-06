@@ -141,7 +141,7 @@ fun TransferScreen(
                                     }
                                     TransferStatus.COMPLETED -> {
                                         Text(
-                                            text = formatFileSize(task.file.size),
+                                            text = if (task.skipped) "已存在" else formatFileSize(task.file.size),
                                             style = MaterialTheme.typography.labelMedium,
                                             color = StatusConnected
                                         )

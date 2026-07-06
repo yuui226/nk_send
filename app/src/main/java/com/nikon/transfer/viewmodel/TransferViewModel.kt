@@ -27,7 +27,8 @@ data class TransferTask(
     val progress: Float = 0f,
     val speed: Long = 0,
     val downloaded: Long = 0,
-    val error: String? = null
+    val error: String? = null,
+    val skipped: Boolean = false   // 目标目录已存在同名文件而跳过
 )
 
 data class TransferState(
@@ -108,11 +109,30 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     uri,
                     DocumentsContract.getTreeDocumentId(uri)
                 )
+                // 目标目录已有文件（名称 -> 大小），用于"已存在则跳过"。会随本次成功传输的文件更新。
+                val existing = queryExistingFiles(uri)
 
                 while (true) {
                     // 以 handle（稳定唯一键）定位任务，避免 clearCompleted 等操作导致下标串位。
                     val task = _state.value.tasks.firstOrNull { it.status == TransferStatus.WAITING } ?: break
                     val handle = task.file.handle
+
+                    // 目标目录已存在同名文件（大小一致或大小未知）→ 跳过，不重复下载。
+                    val existingSize = existing[task.file.fileName]
+                    if (existingSize != null && (existingSize == task.file.size || existingSize < 0L)) {
+                        log { "DL_SKIP existing: ${task.file.fileName}" }
+                        updateTask(handle) {
+                            it.copy(
+                                status = TransferStatus.COMPLETED,
+                                skipped = true,
+                                progress = 1f,
+                                downloaded = task.file.size,
+                                speed = 0
+                            )
+                        }
+                        continue
+                    }
+
                     updateTask(handle) { it.copy(status = TransferStatus.TRANSFERING) }
                     log { "DL_BEGIN: ${task.file.fileName} handle=$handle size=${task.file.size}" }
 
@@ -160,6 +180,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         DocumentsContract.renameDocument(contentResolver, fileDocUri, newName)
                                     } catch (_: Exception) {}
                                 }
+                                existing[task.file.fileName] = task.file.size   // 供后续任务去重
                                 updateTask(handle) {
                                     it.copy(status = TransferStatus.COMPLETED, progress = 1f, downloaded = size, speed = 0)
                                 }
@@ -234,6 +255,39 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if (_state.value.tasks.any { it.status == TransferStatus.WAITING }) {
             processQueue(dirUri, camera)
         }
+    }
+
+    /**
+     * 一次性查询目标目录已有文件的 显示名->大小（字节；大小未知记为 -1）。
+     * 用于"已存在则跳过"，避免每个文件单独 findFile 的 O(n²) 开销。
+     */
+    private fun queryExistingFiles(treeUri: Uri): MutableMap<String, Long> {
+        val map = HashMap<String, Long>()
+        try {
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri,
+                DocumentsContract.getTreeDocumentId(treeUri)
+            )
+            contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_SIZE
+                ),
+                null, null, null
+            )?.use { c ->
+                val nameIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val sizeIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+                if (nameIdx >= 0) {
+                    while (c.moveToNext()) {
+                        val name = c.getString(nameIdx) ?: continue
+                        val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else -1L
+                        map[name] = size
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return map
     }
 
     /** 删除下载失败/取消留下的半成品文件，忽略删除失败。 */
