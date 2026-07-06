@@ -68,7 +68,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
         if (dir != null) {
             viewModelScope.launch(Dispatchers.IO) {
-                try { sweepPartials(Uri.parse(dir)) } catch (_: Exception) {}
+                try { sweepAndListExisting(Uri.parse(dir)) } catch (_: Exception) {}
             }
         }
     }
@@ -111,8 +111,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
         transferJob = viewModelScope.launch {
             _state.update { it.copy(isTransferring = true) }
-            // 前台服务 + 唤醒锁，保证锁屏/切后台时传输不被系统杀死。
-            TransferService.start(getApplication())
+            var serviceStarted = false
 
             try {
                 val uri = Uri.parse(dirUri)
@@ -120,11 +119,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     uri,
                     DocumentsContract.getTreeDocumentId(uri)
                 )
-                // 先清扫上次遗留的半成品，再查目标目录已有文件（名称 -> 大小）用于"已存在则跳过"。
-                val existing = withContext(Dispatchers.IO) {
-                    sweepPartials(uri)
-                    queryExistingFiles(uri)
-                }
+                // 单次遍历：清扫遗留半成品(.nkpart_) + 建立"已存在(名称->大小)"去重表。
+                val existing = withContext(Dispatchers.IO) { sweepAndListExisting(uri) }
 
                 while (true) {
                     // 以 handle（稳定唯一键）定位任务，避免 clearCompleted 等操作导致下标串位。
@@ -149,6 +145,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                     updateTask(handle) { it.copy(status = TransferStatus.TRANSFERING) }
                     log { "DL_BEGIN: ${task.file.fileName} handle=$handle size=${task.file.size}" }
+
+                    // 首个真正要下载的文件才拉起前台服务（全部命中"已存在"时不必启动，避免通知闪一下）。
+                    if (!serviceStarted) {
+                        TransferService.start(getApplication())
+                        serviceStarted = true
+                    }
 
                     // 追踪已创建的文档，失败/取消时删除半成品，避免残留与重试时产生重名副本。
                     var fileDocUri: Uri? = null
@@ -196,12 +198,21 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 } else {
                                     task.file.fileName
                                 }
-                                try {
+                                val renamedUri = try {
                                     DocumentsContract.renameDocument(contentResolver, fileDocUri, finalName)
-                                } catch (_: Exception) {}
-                                existing[finalName] = task.file.size   // 供后续任务去重
-                                updateTask(handle) {
-                                    it.copy(status = TransferStatus.COMPLETED, progress = 1f, downloaded = size, speed = 0)
+                                } catch (_: Exception) { null }
+                                if (renamedUri != null) {
+                                    existing[finalName] = task.file.size   // 供后续任务去重
+                                    updateTask(handle) {
+                                        it.copy(status = TransferStatus.COMPLETED, progress = 1f, downloaded = size, speed = 0)
+                                    }
+                                } else {
+                                    // 改名失败：删掉临时文件并标记失败让用户重试，
+                                    // 避免完整数据以 .nkpart_ 名残留后被后续 sweep 静默删除。
+                                    deleteQuietly(fileDocUri)
+                                    updateTask(handle) {
+                                        it.copy(status = TransferStatus.FAILED, error = "保存失败", speed = 0)
+                                    }
                                 }
                             },
                             onFailure = { e ->
@@ -277,48 +288,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * 清扫目标目录里遗留的半成品（以 [PART_PREFIX] 开头的临时文件）——这些是上次崩溃/被杀留下的
-     * 未完成下载。正常完成的文件已改名为真名，不会被误删。
+     * 单次遍历目标目录：
+     * 1) 删除遗留的半成品（[PART_PREFIX] 开头的临时文件，上次崩溃/被杀留下）；
+     * 2) 返回其余"完整文件"的 显示名->大小（字节，未知记 -1），用于"已存在则跳过"。
+     * 合并清扫与列举，避免两次全目录扫描；正常完成的文件已改真名，不会被误删。
      */
-    private fun sweepPartials(treeUri: Uri) {
-        try {
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
-                treeUri,
-                DocumentsContract.getTreeDocumentId(treeUri)
-            )
-            contentResolver.query(
-                childrenUri,
-                arrayOf(
-                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                    DocumentsContract.Document.COLUMN_DOCUMENT_ID
-                ),
-                null, null, null
-            )?.use { c ->
-                val nameIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val idIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                if (nameIdx >= 0 && idIdx >= 0) {
-                    while (c.moveToNext()) {
-                        val name = c.getString(nameIdx) ?: continue
-                        if (name.startsWith(PART_PREFIX)) {
-                            val docId = c.getString(idIdx) ?: continue
-                            try {
-                                DocumentsContract.deleteDocument(
-                                    contentResolver,
-                                    DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
-                                )
-                            } catch (_: Exception) {}
-                        }
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-    }
-
-    /**
-     * 一次性查询目标目录已有文件的 显示名->大小（字节；大小未知记为 -1）。
-     * 用于"已存在则跳过"，避免每个文件单独 findFile 的 O(n²) 开销。
-     */
-    private fun queryExistingFiles(treeUri: Uri): MutableMap<String, Long> {
+    private fun sweepAndListExisting(treeUri: Uri): MutableMap<String, Long> {
         val map = HashMap<String, Long>()
         try {
             val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
@@ -329,17 +304,31 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 childrenUri,
                 arrayOf(
                     DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                    DocumentsContract.Document.COLUMN_SIZE
+                    DocumentsContract.Document.COLUMN_SIZE,
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID
                 ),
                 null, null, null
             )?.use { c ->
                 val nameIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                 val sizeIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+                val idIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
                 if (nameIdx >= 0) {
                     while (c.moveToNext()) {
                         val name = c.getString(nameIdx) ?: continue
-                        val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else -1L
-                        map[name] = size
+                        if (name.startsWith(PART_PREFIX)) {
+                            if (idIdx >= 0) {
+                                val docId = c.getString(idIdx) ?: continue
+                                try {
+                                    DocumentsContract.deleteDocument(
+                                        contentResolver,
+                                        DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                                    )
+                                } catch (_: Exception) {}
+                            }
+                        } else {
+                            val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else -1L
+                            map[name] = size
+                        }
                     }
                 }
             }

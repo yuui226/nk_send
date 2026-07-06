@@ -56,14 +56,38 @@ fun TransferScreen(
                 }
             },
             actions = {
-                if (transferState.isTransferring && transferState.currentSpeed > 0) {
-                    Text(
-                        text = formatSpeed(transferState.currentSpeed),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = AccentBlue,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(end = 16.dp)
-                    )
+                if (transferState.isTransferring) {
+                    if (transferState.currentSpeed > 0) {
+                        Text(
+                            text = formatSpeed(transferState.currentSpeed),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AccentBlue,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+                    }
+                    TextButton(onClick = { transferViewModel.cancelTransfer() }) {
+                        Text("取消")
+                    }
+                } else {
+                    val hasRetryable = transferState.tasks.any {
+                        it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
+                    }
+                    val hasFinished = transferState.tasks.any {
+                        it.status == TransferStatus.COMPLETED ||
+                        it.status == TransferStatus.FAILED ||
+                        it.status == TransferStatus.CANCELLED
+                    }
+                    if (hasRetryable && camera != null) {
+                        TextButton(onClick = { transferViewModel.retryFailed(camera) }) {
+                            Text("重试全部")
+                        }
+                    }
+                    if (hasFinished) {
+                        IconButton(onClick = { transferViewModel.clearCompleted() }) {
+                            Icon(Icons.Default.ClearAll, contentDescription = "清除已结束")
+                        }
+                    }
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground)

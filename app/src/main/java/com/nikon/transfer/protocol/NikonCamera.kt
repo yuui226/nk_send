@@ -192,44 +192,24 @@ class NikonCamera {
         }
     }
 
-    suspend fun getObjectInfo(handle: Int): FileInfo? = ioMutex.withLock {
-        withContext(Dispatchers.IO) {
-            try {
-                getObjectInfoInternal(handle)
-            } catch (_: Exception) {
-                null
-            }
-        }
-    }
-
-    suspend fun getAllFileInfo(handles: List<Int>): List<FileInfo> = ioMutex.withLock {
-        withContext(Dispatchers.IO) {
-            handles.mapNotNull { handle ->
-                try {
-                    getObjectInfoInternal(handle)
-                } catch (_: Exception) {
-                    null
-                }
-            }
-        }
-    }
-
     suspend fun streamFileInfo(
         handles: List<Int>,
         batchSize: Int = 20,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit
-    ) = ioMutex.withLock {
-        withContext(Dispatchers.IO) {
-            val total = handles.size
-            var loaded = 0
-            handles.chunked(batchSize).forEach { batch ->
-                val files = batch.mapNotNull { handle ->
+    ) = withContext(Dispatchers.IO) {
+        val total = handles.size
+        var loaded = 0
+        handles.chunked(batchSize).forEach { batch ->
+            // 每批单独持锁，批间释放 ioMutex：缩略图模式下缩略图请求可在批间插入，
+            // 从而随列表一起渐进出图，而不是等整份列表加载完才开始。
+            val files = ioMutex.withLock {
+                batch.mapNotNull { handle ->
                     try { getObjectInfoInternal(handle) } catch (_: Exception) { null }
                 }
-                loaded += files.size
-                if (files.isNotEmpty()) {
-                    onBatch(files, loaded, total)
-                }
+            }
+            loaded += files.size
+            if (files.isNotEmpty()) {
+                onBatch(files, loaded, total)
             }
         }
     }
