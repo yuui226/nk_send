@@ -284,6 +284,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             } ?: return null
             thumbnailCache.put(handle, image)
             image
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e   // 滚动/传输开始导致的取消须传播，不能吞掉
         } catch (_: Exception) {
             null
         }

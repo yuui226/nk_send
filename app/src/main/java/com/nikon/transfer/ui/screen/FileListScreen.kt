@@ -350,14 +350,18 @@ private fun ThumbnailGrid(
     ) {
         groups.forEach { group ->
             // 分组头整行跨列，保持与列表模式一致的分组语义
-            item(span = { GridItemSpan(maxLineSpan) }) {
+            item(
+                span = { GridItemSpan(maxLineSpan) },
+                key = "header_${group.date}",
+                contentType = "header"
+            ) {
                 Column {
                     Spacer(modifier = Modifier.height(4.dp))
                     GroupHeader(group, queuedByHandle, onTransferGroup)
                     Spacer(modifier = Modifier.height(4.dp))
                 }
             }
-            items(group.files, key = { it.handle }) { file ->
+            items(group.files, key = { it.handle }, contentType = { "cell" }) { file ->
                 ThumbnailCell(
                     file = file,
                     task = queuedByHandle[file.handle],
