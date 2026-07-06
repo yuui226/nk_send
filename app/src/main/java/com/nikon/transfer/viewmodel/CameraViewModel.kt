@@ -39,6 +39,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
+    private var watcherJob: Job? = null
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -61,6 +62,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         registerNetworkCallback()
+        startConnectionWatcher()
+    }
+
+    /**
+     * 连接看护：只要未连上相机，就周期性检测手机是否已在相机 Wi-Fi 上，一旦在就立即发起连接。
+     * 作为系统网络回调的兜底——部分机型回调触发晚或不稳定（DHCP 时序），此循环保证"手机一进
+     * 相机 Wi-Fi 就连上"。isNikonWifi() 仅读本地 DHCP 网关，开销极小；只有确实在相机 Wi-Fi 上
+     * 才会发起真正的 socket 连接，不在时不做任何无谓尝试（因此不在相机 Wi-Fi 上不会空耗电量）。
+     */
+    private fun startConnectionWatcher() {
+        watcherJob?.cancel()
+        watcherJob = viewModelScope.launch {
+            while (isActive) {
+                val onNikonWifi = isNikonWifi()
+                // 顺带纠正 Wi-Fi 状态，避免回调漏报导致 UI 显示滞后。
+                if (_state.value.isWifiConnected != onNikonWifi) {
+                    _state.update { it.copy(isWifiConnected = onNikonWifi) }
+                }
+                if (onNikonWifi && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
+                    connectToCameraWithRetry()
+                }
+                delay(WATCH_INTERVAL_MS)
+            }
+        }
     }
 
     private fun registerNetworkCallback() {
@@ -216,6 +241,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         super.onCleared()
         keepaliveJob?.cancel()
+        watcherJob?.cancel()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
         } catch (_: Exception) {}
@@ -228,5 +254,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private companion object {
         const val KEEPALIVE_INTERVAL_MS = 10_000L
         const val RETRY_INTERVAL_MS = 2_000L
+        const val WATCH_INTERVAL_MS = 3_000L
     }
 }
