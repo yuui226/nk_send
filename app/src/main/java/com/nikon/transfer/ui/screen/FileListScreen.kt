@@ -187,7 +187,10 @@ fun FileListScreen(
                                 val remainingGroupFiles = group.files.filter { it.handle !in queuedByHandle }
                                 FilledTonalButton(
                                     onClick = {
-                                        if (camera != null && remainingGroupFiles.isNotEmpty()) {
+                                        if (transferState.transferDirUri == null) {
+                                            // 未设置传输目录，先引导到设置页
+                                            onNavigateToSettings()
+                                        } else if (camera != null && remainingGroupFiles.isNotEmpty()) {
                                             transferViewModel.addToQueue(remainingGroupFiles, camera)
                                             onNavigateToTransfer()
                                         }
@@ -214,7 +217,10 @@ fun FileListScreen(
                                         .fillMaxWidth()
                                         .then(
                                             if (task == null) Modifier.clickable {
-                                                if (camera != null) {
+                                                if (transferState.transferDirUri == null) {
+                                                    // 未设置传输目录，先引导到设置页
+                                                    onNavigateToSettings()
+                                                } else if (camera != null) {
                                                     transferViewModel.addToQueue(listOf(file), camera)
                                                 }
                                             } else Modifier
