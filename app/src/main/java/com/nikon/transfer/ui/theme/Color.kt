@@ -19,8 +19,5 @@ val AccentPurple = Color(0xFFAB47BC)
 
 // 状态色
 val StatusConnected = Color(0xFF4CAF50)
-val StatusDisconnected = Color(0xFFFF9800)
 val StatusError = Color(0xFFF44336)
-val StatusTransferring = Color(0xFF2196F3)
-val StatusComplete = Color(0xFF4CAF50)
 val StatusWaiting = Color(0xFF757575)

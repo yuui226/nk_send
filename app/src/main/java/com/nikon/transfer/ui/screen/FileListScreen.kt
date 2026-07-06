@@ -20,6 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nikon.transfer.protocol.NikonCamera
 import com.nikon.transfer.ui.theme.*
+import com.nikon.transfer.ui.util.formatFileSize
+import com.nikon.transfer.ui.util.formatSpeed
 import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferStatus
 import com.nikon.transfer.viewmodel.TransferViewModel
@@ -70,8 +72,8 @@ fun FileListScreen(
                 if (transferState.tasks.isNotEmpty()) {
                     val total = transferState.tasks.size
                     val remaining = transferState.tasks.count {
-                        it.status == com.nikon.transfer.viewmodel.TransferStatus.WAITING ||
-                        it.status == com.nikon.transfer.viewmodel.TransferStatus.TRANSFERING
+                        it.status == TransferStatus.WAITING ||
+                        it.status == TransferStatus.TRANSFERING
                     }
                     val done = total - remaining
                     val progressFraction = if (total > 0) done.toFloat() / total else 0f
@@ -102,7 +104,7 @@ fun FileListScreen(
                             ) {
                                 if (transferState.isTransferring && transferState.currentSpeed > 0) {
                                     Text(
-                                        text = "${formatFileListSpeed(transferState.currentSpeed)} · ",
+                                        text = "${formatSpeed(transferState.currentSpeed)} · ",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = AccentBlue
                                     )
@@ -141,7 +143,7 @@ fun FileListScreen(
         }
 
         if (state.files.isNotEmpty()) {
-            val groups = groupFilesByDate(state.files)
+            val groups = remember(state.files) { groupFilesByDate(state.files) }
             val queuedByHandle = remember(transferState.tasks) {
                 transferState.tasks.associateBy { it.file.handle }
             }
@@ -299,23 +301,6 @@ fun FileListScreen(
 private fun formatDateHeader(date: String): String {
     if (date.length < 8 || date == "未知日期") return date
     return "${date.substring(0, 4)}-${date.substring(4, 6)}-${date.substring(6, 8)}"
-}
-
-private fun formatFileSize(bytes: Long): String {
-    return when {
-        bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-        bytes < 1024 * 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
-        else -> String.format("%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
-    }
-}
-
-private fun formatFileListSpeed(bytesPerSec: Long): String {
-    return when {
-        bytesPerSec < 1024 -> "$bytesPerSec B/s"
-        bytesPerSec < 1024 * 1024 -> String.format("%.1f KB/s", bytesPerSec / 1024.0)
-        else -> String.format("%.1f MB/s", bytesPerSec / (1024.0 * 1024.0))
-    }
 }
 
 @Composable

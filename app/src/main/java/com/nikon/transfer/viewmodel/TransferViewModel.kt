@@ -3,10 +3,13 @@ package com.nikon.transfer.viewmodel
 import android.app.Application
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.nikon.transfer.BuildConfig
 import com.nikon.transfer.protocol.NikonCamera
-import kotlinx.coroutines.Dispatchers
+import com.nikon.transfer.service.TransferService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +43,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private var transferJob: Job? = null
     private val prefs = application.getSharedPreferences("nikon_transfer", Context.MODE_PRIVATE)
     private val contentResolver = application.contentResolver
-    var cameraViewModel: CameraViewModel? = null
+
+    private companion object {
+        const val TAG = "NikonTransfer"
+    }
 
     init {
         _state.value = _state.value.copy(
@@ -82,101 +88,99 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
         transferJob = viewModelScope.launch {
             _state.value = _state.value.copy(isTransferring = true)
+            // 前台服务 + 唤醒锁，保证锁屏/切后台时传输不被系统杀死。
+            TransferService.start(getApplication())
 
             try {
                 val uri = Uri.parse(dirUri)
-                val docUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(
+                val docUri = DocumentsContract.buildDocumentUriUsingTree(
                     uri,
-                    android.provider.DocumentsContract.getTreeDocumentId(uri)
+                    DocumentsContract.getTreeDocumentId(uri)
                 )
 
                 while (true) {
-                    val currentIndex = _state.value.tasks.indexOfFirst { it.status == TransferStatus.WAITING }
-                    if (currentIndex == -1) break
-
-                    val task = _state.value.tasks[currentIndex]
-                    updateTask(currentIndex, task.copy(status = TransferStatus.TRANSFERING))
-                    android.util.Log.d("NikonTransfer", "DL_BEGIN: ${task.file.fileName} handle=${task.file.handle} size=${task.file.size}")
+                    // 以 handle（稳定唯一键）定位任务，避免 clearCompleted 等操作导致下标串位。
+                    val task = _state.value.tasks.firstOrNull { it.status == TransferStatus.WAITING } ?: break
+                    val handle = task.file.handle
+                    updateTask(handle) { it.copy(status = TransferStatus.TRANSFERING) }
+                    log { "DL_BEGIN: ${task.file.fileName} handle=$handle size=${task.file.size}" }
 
                     try {
-                        val fileDocUri = android.provider.DocumentsContract.createDocument(
+                        val fileDocUri = DocumentsContract.createDocument(
                             contentResolver,
                             docUri,
                             getMimeType(task.file.fileName),
                             task.file.fileName
                         ) ?: throw Exception("无法创建文件")
 
-                        var outputStream: java.io.OutputStream? = null
-                        try {
-                            outputStream = contentResolver.openOutputStream(fileDocUri)
-                                ?: throw Exception("无法打开文件")
+                        val outputStream = contentResolver.openOutputStream(fileDocUri)
+                            ?: throw Exception("无法打开文件")
 
-                        val result = camera.downloadToFile(task.file.handle, outputStream) { progress ->
-                            val speed = if (progress.elapsed > 0) {
-                                (progress.downloaded / progress.elapsed).toLong()
-                            } else 0
-
-                            // 从最新 state 读取 task，避免用旧对象覆盖 downloaded
-                            val latest = _state.value.tasks.getOrNull(currentIndex)
-                            if (latest != null && latest.status == TransferStatus.TRANSFERING) {
-                                updateTask(currentIndex, latest.copy(
-                                    progress = if (progress.total > 0) {
-                                        progress.downloaded.toFloat() / progress.total
-                                    } else 0f,
-                                    downloaded = progress.downloaded,
-                                    speed = speed
-                                ))
-                            }
-                            _state.value = _state.value.copy(currentSpeed = speed)
-                        }
-
-                            result.fold(
-                                onSuccess = { (size, detectedExt) ->
-                                    if (task.file.extension == ".bin" && detectedExt != null && detectedExt != ".bin") {
-                                        try {
-                                            val newName = task.file.fileName.substringBeforeLast('.') + detectedExt
-                                            android.provider.DocumentsContract.renameDocument(contentResolver, fileDocUri, newName)
-                                        } catch (_: Exception) {}
-                                    }
-                                    updateTask(currentIndex, task.copy(
-                                        status = TransferStatus.COMPLETED,
-                                        progress = 1f,
-                                        downloaded = size,
-                                        speed = 0
-                                    ))
-                                },
-                                onFailure = { e ->
-                                    updateTask(currentIndex, task.copy(
-                                        status = TransferStatus.FAILED,
-                                        error = e.message ?: "传输失败",
-                                        speed = 0
-                                    ))
+                        val result = outputStream.use { out ->
+                            camera.downloadToFile(handle, out) { progress ->
+                                val speed = if (progress.elapsed > 0) {
+                                    (progress.downloaded / progress.elapsed).toLong()
+                                } else 0
+                                updateTask(handle) { t ->
+                                    if (t.status == TransferStatus.TRANSFERING) {
+                                        t.copy(
+                                            progress = if (progress.total > 0) {
+                                                progress.downloaded.toFloat() / progress.total
+                                            } else 0f,
+                                            downloaded = progress.downloaded,
+                                            speed = speed
+                                        )
+                                    } else t
                                 }
-                            )
-                        } finally {
-                            outputStream?.close()
+                                _state.value = _state.value.copy(currentSpeed = speed)
+                            }
                         }
+
+                        result.fold(
+                            onSuccess = { (size, detectedExt) ->
+                                if (task.file.extension == ".bin" && detectedExt != null && detectedExt != ".bin") {
+                                    try {
+                                        val newName = task.file.fileName.substringBeforeLast('.') + detectedExt
+                                        DocumentsContract.renameDocument(contentResolver, fileDocUri, newName)
+                                    } catch (_: Exception) {}
+                                }
+                                updateTask(handle) {
+                                    it.copy(status = TransferStatus.COMPLETED, progress = 1f, downloaded = size, speed = 0)
+                                }
+                            },
+                            onFailure = { e ->
+                                updateTask(handle) {
+                                    it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
+                                }
+                            }
+                        )
+                    } catch (e: CancellationException) {
+                        throw e   // 取消须向上传播，交由 cancelTransfer 统一置为 CANCELLED
                     } catch (e: Exception) {
-                        android.util.Log.e("NikonTransfer", "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
-                        updateTask(currentIndex, task.copy(
-                            status = TransferStatus.FAILED,
-                            error = e.message ?: "传输失败",
-                            speed = 0
-                        ))
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
+                        }
+                        updateTask(handle) {
+                            it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
+                        }
                     }
                 }
             } finally {
                 _state.value = _state.value.copy(isTransferring = false, currentSpeed = 0)
+                TransferService.stop(getApplication())
             }
         }
     }
 
-    private fun updateTask(index: Int, task: TransferTask) {
+    /** 按 handle 就地更新任务；handle 不存在时保持列表不变。 */
+    private fun updateTask(handle: Int, transform: (TransferTask) -> TransferTask) {
         _state.value = _state.value.copy(
-            tasks = _state.value.tasks.toMutableList().also {
-                it[index] = task
-            }
+            tasks = _state.value.tasks.map { if (it.file.handle == handle) transform(it) else it }
         )
+    }
+
+    private inline fun log(message: () -> String) {
+        if (BuildConfig.DEBUG) android.util.Log.d(TAG, message())
     }
 
     private fun getMimeType(fileName: String): String {
@@ -220,15 +224,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         processQueue(dirUri, camera)
     }
 
-    fun retrySingleTask(index: Int, camera: NikonCamera) {
-        val task = _state.value.tasks.getOrNull(index) ?: return
+    fun retrySingleTask(handle: Int, camera: NikonCamera) {
+        val task = _state.value.tasks.firstOrNull { it.file.handle == handle } ?: return
         if (task.status != TransferStatus.FAILED && task.status != TransferStatus.CANCELLED) return
 
-        _state.value = _state.value.copy(
-            tasks = _state.value.tasks.toMutableList().also {
-                it[index] = task.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0)
-            }
-        )
+        updateTask(handle) {
+            it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0)
+        }
 
         val dirUri = _state.value.transferDirUri ?: return
         processQueue(dirUri, camera)
@@ -245,5 +247,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         transferJob?.cancel()
+        // 兜底停止前台服务，防止 VM 销毁后通知残留。
+        TransferService.stop(getApplication())
     }
 }

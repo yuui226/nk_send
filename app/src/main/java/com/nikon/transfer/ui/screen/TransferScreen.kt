@@ -2,7 +2,7 @@ package com.nikon.transfer.ui.screen
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nikon.transfer.ui.theme.*
+import com.nikon.transfer.ui.util.formatFileSize
+import com.nikon.transfer.ui.util.formatSpeed
 import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferStatus
 import com.nikon.transfer.viewmodel.TransferViewModel
@@ -81,7 +83,7 @@ fun TransferScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                itemsIndexed(transferState.tasks) { index, task ->
+                items(transferState.tasks, key = { it.file.handle }) { task ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -132,14 +134,14 @@ fun TransferScreen(
                                 when (task.status) {
                                     TransferStatus.TRANSFERING -> {
                                         Text(
-                                            text = "${formatSize(task.downloaded)}/${formatSize(task.file.size)}",
+                                            text = "${formatFileSize(task.downloaded)}/${formatFileSize(task.file.size)}",
                                             style = MaterialTheme.typography.labelMedium,
                                             color = AccentBlue
                                         )
                                     }
                                     TransferStatus.COMPLETED -> {
                                         Text(
-                                            text = formatSize(task.file.size),
+                                            text = formatFileSize(task.file.size),
                                             style = MaterialTheme.typography.labelMedium,
                                             color = StatusConnected
                                         )
@@ -172,7 +174,7 @@ fun TransferScreen(
                                 if (camera != null) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                     OutlinedButton(
-                                        onClick = { transferViewModel.retrySingleTask(index, camera) },
+                                        onClick = { transferViewModel.retrySingleTask(task.file.handle, camera) },
                                         shape = RoundedCornerShape(8.dp)
                                     ) {
                                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -189,19 +191,3 @@ fun TransferScreen(
     }
 }
 
-private fun formatSize(bytes: Long): String {
-    return when {
-        bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
-        bytes < 1024 * 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
-        else -> String.format("%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
-    }
-}
-
-private fun formatSpeed(bytesPerSec: Long): String {
-    return when {
-        bytesPerSec < 1024 -> "$bytesPerSec B/s"
-        bytesPerSec < 1024 * 1024 -> String.format("%.1f KB/s", bytesPerSec / 1024.0)
-        else -> String.format("%.1f MB/s", bytesPerSec / (1024.0 * 1024.0))
-    }
-}

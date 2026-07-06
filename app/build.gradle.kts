@@ -1,17 +1,31 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
+// 发布签名从 keystore.properties 读取（该文件不入库）。缺失时回退到 debug 签名，
+// 保证开发者本地仍可构建 release，同时避免把签名口令硬编码进版本库。
+val keystorePropsFile = rootProject.file("keystore.properties")
+val hasReleaseKeystore = keystorePropsFile.exists()
+val keystoreProps = Properties().apply {
+    if (hasReleaseKeystore) FileInputStream(keystorePropsFile).use { load(it) }
+}
+
 android {
     namespace = "com.nikon.transfer"
     compileSdk = 34
+
     signingConfigs {
-        create("release") {
-            storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
         }
     }
 
@@ -25,9 +39,13 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -43,6 +61,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.5"
@@ -70,12 +89,12 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.2")
 
-    implementation("androidx.datastore:datastore-preferences:1.0.0")
-
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
 
+// 手动安装到设备的便捷任务：./gradlew installToDevice（构建 release 后按需调用，
+// 不再自动挂到 assembleRelease，避免 CI/无设备环境构建失败）。
 tasks.register("installToDevice") {
     doLast {
         val apk = file("build/outputs/apk/release/app-release.apk")
@@ -90,11 +109,5 @@ tasks.register("installToDevice") {
         exec {
             commandLine("adb", "shell", "am", "start", "-n", "com.nikon.transfer/.MainActivity")
         }
-    }
-}
-
-afterEvaluate {
-    tasks.named("assembleRelease") {
-        finalizedBy("installToDevice")
     }
 }

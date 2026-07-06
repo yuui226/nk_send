@@ -11,10 +11,15 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nikon.transfer.protocol.NikonCamera
 import com.nikon.transfer.protocol.PtpConstants
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class CameraState(
@@ -32,6 +37,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val state: StateFlow<CameraState> = _state.asStateFlow()
 
     private var camera: NikonCamera? = null
+    private var keepaliveJob: Job? = null
+    // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     @Suppress("DEPRECATION")
     private val wifiManager = application.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -99,6 +107,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         isConnecting = false,
                         error = null
                     )
+                    startKeepalive()
                     loadFiles()
                     return
                 },
@@ -123,10 +132,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * 周期性心跳：空闲时每 [KEEPALIVE_INTERVAL_MS] 探测一次相机，及时发现掉线并更新状态。
+     * keepalive() 走 ioMutex，与下载/命令互斥，不会与进行中的传输产生并发冲突。
+     */
+    private fun startKeepalive() {
+        keepaliveJob?.cancel()
+        keepaliveJob = viewModelScope.launch {
+            while (isActive) {
+                delay(KEEPALIVE_INTERVAL_MS)
+                val cam = camera ?: break
+                if (!cam.keepalive()) {
+                    camera = null
+                    _state.value = _state.value.copy(
+                        isConnectedToCamera = false,
+                        cameraName = null,
+                        files = emptyList(),
+                        error = "与相机的连接已断开"
+                    )
+                    cam.close()
+                    break
+                }
+            }
+        }
+    }
+
     fun disconnect() {
-        camera?.close()
+        val cam = camera
         camera = null
+        keepaliveJob?.cancel()
         _state.value = CameraState()
+        cam?.let { cleanupScope.launch { it.close() } }
     }
 
     private fun loadFiles() {
@@ -147,14 +183,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     return@launch
                 }
 
+                // handle 降序 ≈ 拍摄时间由新到旧；按批追加即可，最终展示顺序由
+                // FileListScreen.groupFilesByDate 统一按日期分组排序，避免此处每批 O(n log n) 全量重排。
                 val sortedHandles = handles.sortedDescending()
                 val allFiles = mutableListOf<NikonCamera.FileInfo>()
 
                 cam.streamFileInfo(sortedHandles, batchSize = 20) { batch, loaded, total ->
                     allFiles.addAll(batch)
-                    val sorted = allFiles.sortedByDescending { it.captureDate ?: "" }
                     _state.value = _state.value.copy(
-                        files = sorted.toList(),
+                        files = allFiles.toList(),
                         isLoadingFiles = loaded < total
                     )
                 }
@@ -177,9 +214,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         super.onCleared()
+        keepaliveJob?.cancel()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
         } catch (_: Exception) {}
-        camera?.close()
+        val cam = camera
+        camera = null
+        // onCleared 时 viewModelScope 已取消，用独立作用域完成 socket 清理（close 内部为 NonCancellable）。
+        cam?.let { cleanupScope.launch { it.close() } }
+    }
+
+    private companion object {
+        const val KEEPALIVE_INTERVAL_MS = 10_000L
     }
 }

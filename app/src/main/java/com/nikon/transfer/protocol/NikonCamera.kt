@@ -1,6 +1,10 @@
 package com.nikon.transfer.protocol
 
+import com.nikon.transfer.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -21,6 +25,15 @@ class NikonCamera {
     private val evtReader = PacketReader()
     private var evtThread: Thread? = null
     private val ioMutex = Mutex()
+
+    private companion object {
+        const val TAG = "NikonTransfer"
+    }
+
+    /** 仅 debug 构建输出协议日志，避免 release 包泄露 handle/size 并拖慢热路径。 */
+    private inline fun log(message: () -> String) {
+        if (BuildConfig.DEBUG) android.util.Log.d(TAG, message())
+    }
 
     private fun nextTid(): Int {
         tid++
@@ -206,7 +219,7 @@ class NikonCamera {
             return null
         }
 
-        val format = data.getShortLE(4).toInt() and 0xFFFF
+        val format = data.getUShortLE(4)
         val size = data.getIntLE(8).toLong() and 0xFFFFFFFFL
         val ext = PtpConstants.getExt(format)
 
@@ -253,38 +266,33 @@ class NikonCamera {
                 var lastProgressTime = startTime
 
                 while (true) {
+                    // 协作式取消：在每个包边界检查，使 cancelTransfer() 能及时中断
+                    ensureActive()
                     val packet = cmdReader.readPacket(cmdInput!!)
 
                     when (packet.type) {
                         PtpConstants.CMD_RESPONSE -> {
-                            val respCode = packet.payload?.getShortLE(0)?.toInt() ?: 0
-                            android.util.Log.d("NikonTransfer", "DL_CMD_RESPONSE resp=0x${respCode.toString(16)} downloaded=$totalDownloaded")
+                            val respCode = packet.payload?.getUShortLE(0) ?: 0
+                            log { "DL_CMD_RESPONSE resp=0x${respCode.toString(16)} downloaded=$totalDownloaded" }
                             if (respCode != PtpConstants.RESPONSE_OK) {
                                 return@withContext Result.failure(Exception("传输失败: ${PtpConstants.translateResponse(respCode)}"))
                             }
-                            val ext = first4?.let { detectExt(it) }
-                            return@withContext Result.success(totalDownloaded to ext)
+                            return@withContext Result.success(totalDownloaded to first4?.let { detectExt(it) })
                         }
                         PtpConstants.START_DATA_PACKET -> {
-                            expected = packet.payload?.getIntLE(4)?.toLong() ?: 0L
-                            android.util.Log.d("NikonTransfer", "DL_START expected=$expected")
+                            expected = packet.payload?.getIntLE(4)?.toLong()?.and(0xFFFFFFFFL) ?: 0L
+                            log { "DL_START expected=$expected" }
                         }
                         PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
-                            val dataSize = packet.payload?.let { it.size - 4 } ?: 0
-                        if (packet.type == PtpConstants.END_DATA_PACKET) {
-                            android.util.Log.d("NikonTransfer", "DL_END total=$totalDownloaded, draining CMD_RESPONSE...")
-                            // 必须消费掉本次传输的 CMD_RESPONSE，否则残留包会污染下次传输
-                            drainCmdResponse()
-                            val ext = first4?.let { detectExt(it) }
-                            return@withContext Result.success(totalDownloaded to ext)
-                        }
-                            if (packet.payload != null && packet.payload.size > 4) {
-                                val data = packet.payload.copyOfRange(4, packet.payload.size)
-                                output.write(data)
-                                totalDownloaded += data.size
+                            // DATA 与 END_DATA 同样携带数据段（前 4 字节为 PTP 数据阶段头）。
+                            // 先写入本包数据，再判断是否为结束包，避免丢失最后一段数据。
+                            val payload = packet.payload
+                            if (payload != null && payload.size > 4) {
+                                output.write(payload, 4, payload.size - 4)
+                                totalDownloaded += payload.size - 4
 
                                 if (first4 == null) {
-                                    first4 = if (data.size >= 4) data.copyOf(4) else data.copyOf()
+                                    first4 = payload.copyOfRange(4, minOf(payload.size, 8))
                                 }
 
                                 val now = System.currentTimeMillis()
@@ -295,41 +303,65 @@ class NikonCamera {
                                 }
                             }
                             if (packet.type == PtpConstants.END_DATA_PACKET) {
-                                val ext = first4?.let { detectExt(it) }
-                                return@withContext Result.success(totalDownloaded to ext)
+                                log { "DL_END total=$totalDownloaded, draining CMD_RESPONSE..." }
+                                // 必须消费掉本次传输的 CMD_RESPONSE，否则残留包会污染下次传输
+                                drainCmdResponse()
+                                return@withContext Result.success(totalDownloaded to first4?.let { detectExt(it) })
                             }
                         }
                         PtpConstants.PING -> {
-                            android.util.Log.d("NikonTransfer", "DL_PING during download")
+                            log { "DL_PING during download" }
                             sendPong()
                         }
                     }
                 }
                 @Suppress("UNREACHABLE_CODE")
                 Result.failure(Exception("Unexpected end of stream"))
+            } catch (e: CancellationException) {
+                throw e   // 取消须向上传播，不能包装成失败结果
             } catch (e: Exception) {
                 Result.failure(e)
             }
         }
     }
 
+    /**
+     * 依据文件头魔数推断扩展名。仅在相机上报的格式码未知（.bin）时作为兜底。
+     * 只依赖前若干字节，因此不检测 ISO-BMFF (MOV/MP4) —— 其 'ftyp' 位于偏移 4，
+     * 且已知视频格式码已在 [PtpConstants.FORMAT_EXT] 中直接映射。
+     */
     private fun detectExt(data: ByteArray): String {
         if (data.size < 2) return ".bin"
+        // JPEG: FF D8
         if (data[0] == 0xFF.toByte() && data[1] == 0xD8.toByte()) return ".jpg"
         if (data.size >= 4) {
-            val header = String(data, 0, 4, Charsets.US_ASCII)
-            if (header == "ftyp") return ".mov"
-            if (data[0] == 'I'.code.toByte() && data[1] == 'I'.code.toByte() && data[2] == 0x2A.toByte()) return ".nef"
-            if (data[0] == 'M'.code.toByte() && data[1] == 'M'.code.toByte() && data[2] == 0x00.toByte() && data[3] == 0x2A.toByte()) return ".nef"
+            // TIFF/NEF 小端: 'I' 'I' 2A 00
+            if (data[0] == 'I'.code.toByte() && data[1] == 'I'.code.toByte() &&
+                data[2] == 0x2A.toByte() && data[3] == 0x00.toByte()) return ".nef"
+            // TIFF/NEF 大端: 'M' 'M' 00 2A
+            if (data[0] == 'M'.code.toByte() && data[1] == 'M'.code.toByte() &&
+                data[2] == 0x00.toByte() && data[3] == 0x2A.toByte()) return ".nef"
         }
         return ".bin"
     }
 
-    fun close() {
-        try {
-            sendCmd(PtpConstants.CLOSE_SESSION)
-            recvResp()
-        } catch (_: Exception) {}
+    /**
+     * 关闭会话与连接。为 suspend 并纳入 [ioMutex] + IO 线程：
+     * - 避免在主线程发起 socket 写导致 NetworkOnMainThreadException；
+     * - 与进行中的命令/下载互斥，消除并发读写同一 socket 的竞态；
+     * - 用 NonCancellable 保证即使调用方作用域已取消也能完成清理。
+     */
+    suspend fun close() = withContext(NonCancellable + Dispatchers.IO) {
+        ioMutex.withLock {
+            try {
+                sendCmd(PtpConstants.CLOSE_SESSION)
+                recvResp()
+            } catch (_: Exception) {}
+            closeQuietly()
+        }
+    }
+
+    private fun closeQuietly() {
         try { cmdInput?.close() } catch (_: Exception) {}
         try { cmdSocket?.close() } catch (_: Exception) {}
         try { evtInput?.close() } catch (_: Exception) {}
@@ -383,7 +415,7 @@ class NikonCamera {
             val packet = cmdReader.readPacket(cmdInput!!)
             when (packet.type) {
                 PtpConstants.CMD_RESPONSE -> {
-                    val respCode = packet.payload?.getShortLE(0)?.toInt() ?: 0
+                    val respCode = packet.payload?.getUShortLE(0) ?: 0
                     return respCode to packet.payload
                 }
                 PtpConstants.PING -> sendPong()
@@ -397,7 +429,7 @@ class NikonCamera {
             val packet = cmdReader.readPacket(cmdInput!!)
             when (packet.type) {
                 PtpConstants.CMD_RESPONSE -> {
-                    val respCode = packet.payload?.getShortLE(0)?.toInt() ?: 0
+                    val respCode = packet.payload?.getUShortLE(0) ?: 0
                     return respCode to responseData
                 }
                 PtpConstants.START_DATA_PACKET -> {
@@ -422,8 +454,9 @@ class NikonCamera {
         }
     }
 
-    private fun ByteArray.getShortLE(offset: Int): Short {
-        return ((this[offset].toInt() and 0xFF) or ((this[offset + 1].toInt() and 0xFF) shl 8)).toShort()
+    /** 读取小端无符号 16 位，返回 0..65535，避免高位错误码 (0xAxxx) 被符号扩展。 */
+    private fun ByteArray.getUShortLE(offset: Int): Int {
+        return (this[offset].toInt() and 0xFF) or ((this[offset + 1].toInt() and 0xFF) shl 8)
     }
 
     private fun ByteArray.getIntLE(offset: Int): Int {
