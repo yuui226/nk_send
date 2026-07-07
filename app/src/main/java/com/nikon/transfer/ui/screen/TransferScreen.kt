@@ -1,5 +1,8 @@
 package com.nikon.transfer.ui.screen
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -8,10 +11,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nikon.transfer.ui.theme.*
@@ -31,7 +41,7 @@ fun TransferScreen(
     val transferState by transferViewModel.state.collectAsState()
     val camera = cameraViewModel.getCamera()
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
         TopAppBar(
             title = {
                 Column(modifier = Modifier.padding(start = 16.dp)) {
@@ -66,8 +76,16 @@ fun TransferScreen(
                             modifier = Modifier.padding(end = 4.dp)
                         )
                     }
-                    TextButton(onClick = { transferViewModel.cancelTransfer() }) {
-                        Text("取消")
+                    OutlinedIconButton(
+                        onClick = { transferViewModel.cancelTransfer() },
+                        border = BorderStroke(1.dp, StatusError),
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = "取消传输",
+                            tint = StatusError
+                        )
                     }
                 } else {
                     val hasRetryable = transferState.tasks.any {
@@ -107,7 +125,8 @@ fun TransferScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(transferState.tasks, key = { it.file.handle }) { task ->
+                // 倒序显示：最新加入队列的排在最上方（asReversed 是视图，不复制列表）。
+                items(transferState.tasks.asReversed(), key = { it.file.handle }) { task ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -146,6 +165,17 @@ fun TransferScreen(
                                 )
 
                                 Spacer(modifier = Modifier.width(12.dp))
+
+                                // 缩略图模式：状态图标后展示缩略图，行高随之略增。
+                                // allowFetch=!isTransferring：传输中只读缓存，不发 GetThumb 抢带宽。
+                                if (transferState.thumbnailMode) {
+                                    QueueThumbnail(
+                                        handle = task.file.handle,
+                                        allowFetch = !transferState.isTransferring,
+                                        cameraViewModel = cameraViewModel
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                }
 
                                 Text(
                                     text = task.file.fileName,
@@ -211,6 +241,48 @@ fun TransferScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 传输队列行内的小缩略图。命中缓存即显示，未命中且 [allowFetch] 为真时才发 GetThumb；
+ * 传输进行中传入 allowFetch=false 让路给下载，未缓存的等空闲后本效应重跑补载。
+ */
+@Composable
+private fun QueueThumbnail(
+    handle: Int,
+    allowFetch: Boolean,
+    cameraViewModel: CameraViewModel
+) {
+    var thumbnail by remember(handle) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(handle, allowFetch) {
+        if (thumbnail == null) {
+            thumbnail = cameraViewModel.loadThumbnail(handle, allowFetch = allowFetch)
+        }
+    }
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(DarkSurfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        val image = thumbnail
+        if (image != null) {
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Icon(
+                Icons.Default.Image,
+                contentDescription = null,
+                tint = DarkOnSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }

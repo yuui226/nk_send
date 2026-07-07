@@ -42,7 +42,9 @@ fun SettingsScreen(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .systemBarsPadding()
     ) {
         TopAppBar(
             title = {

@@ -35,8 +35,13 @@ fun NikonTransferTheme(content: @Composable () -> Unit) {
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = DarkBackground.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
+            // 状态栏/导航栏透明，内容延伸到系统栏后面（edge-to-edge）
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = false   // 深色主题：浅色图标
+                isAppearanceLightNavigationBars = false
+            }
         }
     }
 

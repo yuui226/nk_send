@@ -33,7 +33,6 @@ data class CameraState(
     val isConnectedToCamera: Boolean = false,
     val cameraName: String? = null,
     val isConnecting: Boolean = false,
-    val error: String? = null,
     val files: List<NikonCamera.FileInfo> = emptyList(),
     val isLoadingFiles: Boolean = false
 )
@@ -92,12 +91,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (_state.value.isWifiConnected != onNikonWifi) {
                     _state.update { it.copy(isWifiConnected = onNikonWifi) }
                 }
-                if (onNikonWifi) {
-                    if (!_state.value.isConnectedToCamera && !_state.value.isConnecting) {
-                        connectToCameraWithRetry()
-                    }
-                } else if (_state.value.isConnectedToCamera || camera != null) {
-                    forceDisconnect()   // 兜底：回调漏报时也能在掉线后断开
+                // 同 onWifiChanged：只负责"在相机 Wi-Fi 上就连上"，绝不主动断开，避免误断打断传输。
+                if (onNikonWifi && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
+                    connectToCameraWithRetry()
                 }
                 delay(WATCH_INTERVAL_MS)
             }
@@ -116,25 +112,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val onNikonWifi = isNikonWifi()
             _state.update { it.copy(isWifiConnected = onNikonWifi) }
 
-            if (onNikonWifi) {
-                if (!_state.value.isConnectedToCamera && !_state.value.isConnecting) {
-                    connectToCameraWithRetry()
-                }
-            } else if (_state.value.isConnectedToCamera || camera != null) {
-                // Wi-Fi 掉线：立即断开相机，中断进行中的下载（由传输队列侧暂停并等待重连续传）。
-                forceDisconnect()
+            // 只在"已在相机 Wi-Fi 但尚未连上相机"时发起连接。
+            // 绝不因 isNikonWifi()==false 主动断开：该判断依赖 dhcpInfo 网关，运行中可能瞬时误报，
+            // 一旦在传输途中误断会不断打断并重传文件，速度暴跌。真正掉线由下载失败/心跳自然发现。
+            if (onNikonWifi && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
+                connectToCameraWithRetry()
             }
         }
-    }
-
-    /** Wi-Fi 掉线时主动断开：强制关闭 socket 以立即中断阻塞的下载读取，并置为未连接。 */
-    private fun forceDisconnect() {
-        val cam = camera
-        camera = null
-        keepaliveJob?.cancel()
-        _state.update { it.copy(isConnectedToCamera = false, cameraName = null) }
-        cam?.forceClose()                                    // 立即中断阻塞中的读
-        cam?.let { cleanupScope.launch { it.close() } }      // 完整清理（幂等）
     }
 
     @Suppress("DEPRECATION")
@@ -156,7 +140,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     private suspend fun connectToCameraWithRetry() {
         if (_state.value.isConnecting || _state.value.isConnectedToCamera) return
-        _state.update { it.copy(isConnecting = true, error = null) }
+        _state.update { it.copy(isConnecting = true) }
 
         while (isNikonWifi() && !_state.value.isConnectedToCamera) {
             val cam = NikonCamera()
@@ -168,8 +152,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         it.copy(
                             isConnectedToCamera = true,
                             cameraName = camName,
-                            isConnecting = false,
-                            error = null
+                            isConnecting = false
                         )
                     }
                     startKeepalive()
@@ -245,12 +228,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                 _state.update { it.copy(isLoadingFiles = false) }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoadingFiles = false, error = e.message ?: "加载文件失败") }
+                _state.update { it.copy(isLoadingFiles = false) }
             }
         }
     }
 
     fun getCamera(): NikonCamera? = camera
+
+    /** 供 UI 在切换展示模式（列表/缩略图）后重新加载文件列表，规避切换时列表偶发清空的问题。 */
+    fun reloadFiles() {
+        if (camera != null && !_state.value.isLoadingFiles) loadFiles()
+    }
 
     /**
      * 加载指定文件的缩略图（用于缩略图网格）。命中内存缓存直接返回；否则经 PTP GetThumb 取字节、
@@ -275,10 +263,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } catch (_: Exception) {
             null
         }
-    }
-
-    fun clearError() {
-        _state.update { it.copy(error = null) }
     }
 
     override fun onCleared() {

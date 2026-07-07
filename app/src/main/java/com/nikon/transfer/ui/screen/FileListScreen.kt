@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -38,6 +39,8 @@ import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferStatus
 import com.nikon.transfer.viewmodel.TransferTask
 import com.nikon.transfer.viewmodel.TransferViewModel
+import com.nikon.transfer.viewmodel.currentFileProgress
+import com.nikon.transfer.viewmodel.remainingCount
 
 data class FileGroup(
     val date: String,
@@ -63,78 +66,18 @@ fun FileListScreen(
     val transferState by transferViewModel.state.collectAsState()
     val camera = cameraViewModel.getCamera()
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Z传", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
-                    IconButton(
-                        onClick = onNavigateToSettings,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "设置",
-                            tint = DarkOnSurfaceVariant
-                        )
-                    }
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground),
-            actions = {
-                if (transferState.tasks.isNotEmpty()) {
-                    val total = transferState.tasks.size
-                    val remaining = transferState.tasks.count {
-                        it.status == TransferStatus.WAITING ||
-                        it.status == TransferStatus.TRANSFERING
-                    }
-                    val done = total - remaining
-                    val progressFraction = if (total > 0) done.toFloat() / total else 0f
+    val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // 列表内容内边距：顶部让出状态栏 + 悬浮控件高度；底部让出导航栏。内容本身 edge-to-edge。
+    val listPadding = PaddingValues(
+        start = 12.dp,
+        end = 12.dp,
+        top = topInset + 60.dp,
+        bottom = bottomInset + 12.dp
+    )
 
-                    Surface(
-                        onClick = onNavigateToTransfer,
-                        shape = RoundedCornerShape(20.dp),
-                        color = AccentBlue.copy(alpha = 0.12f),
-                        modifier = Modifier
-                            .height(36.dp)
-                            .padding(end = 8.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            // 进度填充背景
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .drawBehind {
-                                        drawRect(
-                                            color = AccentBlue.copy(alpha = 0.35f),
-                                            size = Size(size.width * progressFraction, size.height)
-                                        )
-                                    }
-                            )
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (transferState.isTransferring && transferState.currentSpeed > 0) {
-                                    Text(
-                                        text = "${formatSpeed(transferState.currentSpeed)} · ",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = AccentBlue
-                                    )
-                                }
-                                Text(
-                                    text = "$done/$total",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = AccentBlue,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        )
-
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (state.isLoadingFiles && state.files.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -160,6 +103,9 @@ fun FileListScreen(
             val queuedByHandle = remember(transferState.tasks) {
                 transferState.tasks.associateBy { it.file.handle }
             }
+            // 各日期分组的收起状态（key=日期）。收起的组不渲染其条目/缩略图，
+            // 因而缩略图不会加载；展开后条目重新 emit 才恢复加载。跨渐进加载持久保留。
+            val collapsedDates = remember { mutableStateMapOf<String, Boolean>() }
 
             // 两种展示形态共享的交互：分组批量传输 / 单文件点击（分组逻辑不变，仅展示不同）。
             val onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit = onTransferGroup@{ remaining ->
@@ -189,20 +135,116 @@ fun FileListScreen(
                     columns = transferState.thumbnailColumns,
                     isLoading = state.isLoadingFiles,
                     transfersBusy = transfersBusy,
+                    collapsedDates = collapsedDates,
                     cameraViewModel = cameraViewModel,
                     onTransferGroup = onTransferGroup,
                     onTapFile = onTapFile,
-                    modifier = Modifier.weight(1f)
+                    contentPadding = listPadding,
+                    modifier = Modifier.fillMaxSize()
                 )
             } else {
                 FileList(
                     groups = groups,
                     queuedByHandle = queuedByHandle,
                     isLoading = state.isLoadingFiles,
+                    collapsedDates = collapsedDates,
                     onTransferGroup = onTransferGroup,
                     onTapFile = onTapFile,
-                    modifier = Modifier.weight(1f)
+                    contentPadding = listPadding,
+                    modifier = Modifier.fillMaxSize()
                 )
+            }
+        }
+
+        // ---------- 悬浮顶部控件（不占高度，浮在内容上）----------
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 左：Z传 + 设置（悬浮 chip）
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = DarkSurface.copy(alpha = 0.92f),
+                shadowElevation = 3.dp
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 14.dp)
+                ) {
+                    Text(
+                        "Z传",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = DarkOnBackground
+                    )
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "设置", tint = DarkOnSurfaceVariant)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            // 右：传输队列药丸（悬浮）
+            if (transferState.tasks.isNotEmpty()) {
+                QueuePill(transferState = transferState, onClick = onNavigateToTransfer)
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueuePill(
+    transferState: com.nikon.transfer.viewmodel.TransferState,
+    onClick: () -> Unit
+) {
+    val remaining = transferState.remainingCount
+    val allDone = remaining == 0
+    // 进度条 = 当前单文件进度（复用传输页语义）；全部传完时填满。
+    val barFraction = if (allDone) 1f else transferState.currentFileProgress
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(22.dp),
+        color = DarkSurface.copy(alpha = 0.92f),
+        shadowElevation = 3.dp,
+        modifier = Modifier.height(40.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            // 单文件进度填充背景
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .drawBehind {
+                        drawRect(
+                            color = AccentBlue.copy(alpha = 0.35f),
+                            size = Size(size.width * barFraction, size.height)
+                        )
+                    }
+            )
+            Row(
+                modifier = Modifier.padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    // 队列剩余数量；全部传完显示 done。
+                    text = if (allDone) "done" else "$remaining",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (allDone) StatusConnected else AccentBlue,
+                    fontWeight = FontWeight.Bold
+                )
+                // 传输中且有速度时附带实时速度；速度为 0（文件间隙/暂停）不显示，避免闪烁。
+                if (!allDone && transferState.currentSpeed > 0) {
+                    Text(
+                        text = formatSpeed(transferState.currentSpeed),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = DarkOnSurfaceVariant
+                    )
+                }
             }
         }
     }
@@ -212,26 +254,34 @@ fun FileListScreen(
 private fun GroupHeader(
     group: FileGroup,
     queuedByHandle: Map<Int, TransferTask>,
+    collapsed: Boolean,
+    onToggleCollapse: () -> Unit,
     onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            Icons.Default.CalendarToday,
-            contentDescription = null,
-            tint = AccentBlue,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = formatDateHeader(group.date),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = DarkOnBackground
         )
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        // 展开/收起按钮：收起时朝下(可展开)，展开时朝上(可收起)。
+        IconButton(
+            onClick = onToggleCollapse,
+            modifier = Modifier.size(28.dp)
+        ) {
+            Icon(
+                if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                contentDescription = if (collapsed) "展开" else "收起",
+                tint = AccentBlue,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(4.dp))
         Text(
             text = "${group.files.size}张",
             style = MaterialTheme.typography.bodySmall,
@@ -260,27 +310,37 @@ private fun FileList(
     groups: List<FileGroup>,
     queuedByHandle: Map<Int, TransferTask>,
     isLoading: Boolean,
+    collapsedDates: MutableMap<String, Boolean>,
     onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
+    contentPadding: PaddingValues,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         items(groups) { group ->
+            val collapsed = collapsedDates[group.date] == true
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = DarkSurface)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    GroupHeader(group, queuedByHandle, onTransferGroup)
+                    GroupHeader(
+                        group = group,
+                        queuedByHandle = queuedByHandle,
+                        collapsed = collapsed,
+                        onToggleCollapse = { collapsedDates[group.date] = !collapsed },
+                        onTransferGroup = onTransferGroup
+                    )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    if (!collapsed) {
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                    group.files.forEach { file ->
+                        group.files.forEach { file ->
                         val task = queuedByHandle[file.handle]
                         Row(
                             modifier = Modifier
@@ -318,6 +378,7 @@ private fun FileList(
                             modifier = Modifier.padding(start = 28.dp),
                             color = DarkSurfaceVariant.copy(alpha = 0.5f)
                         )
+                        }
                     }
                 }
             }
@@ -336,19 +397,22 @@ private fun ThumbnailGrid(
     columns: Int,
     isLoading: Boolean,
     transfersBusy: Boolean,
+    collapsedDates: MutableMap<String, Boolean>,
     cameraViewModel: CameraViewModel,
     onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
+    contentPadding: PaddingValues,
     modifier: Modifier = Modifier
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(columns.coerceIn(1, 4)),
         modifier = modifier,
-        contentPadding = PaddingValues(12.dp),
+        contentPadding = contentPadding,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         groups.forEach { group ->
+            val collapsed = collapsedDates[group.date] == true
             // 分组头整行跨列，保持与列表模式一致的分组语义
             item(
                 span = { GridItemSpan(maxLineSpan) },
@@ -357,18 +421,28 @@ private fun ThumbnailGrid(
             ) {
                 Column {
                     Spacer(modifier = Modifier.height(4.dp))
-                    GroupHeader(group, queuedByHandle, onTransferGroup)
+                    GroupHeader(
+                        group = group,
+                        queuedByHandle = queuedByHandle,
+                        collapsed = collapsed,
+                        onToggleCollapse = { collapsedDates[group.date] = !collapsed },
+                        onTransferGroup = onTransferGroup
+                    )
                     Spacer(modifier = Modifier.height(4.dp))
                 }
             }
-            items(group.files, key = { it.handle }, contentType = { "cell" }) { file ->
-                ThumbnailCell(
-                    file = file,
-                    task = queuedByHandle[file.handle],
-                    transfersBusy = transfersBusy,
-                    cameraViewModel = cameraViewModel,
-                    onTapFile = onTapFile
-                )
+            // 收起的分组不 emit cell：ThumbnailCell 不 compose → 不触发 GetThumb，
+            // 从而"锁起来"的缩略图不加载；展开后 cell 重新 emit 才恢复加载。
+            if (!collapsed) {
+                items(group.files, key = { it.handle }, contentType = { "cell" }) { file ->
+                    ThumbnailCell(
+                        file = file,
+                        task = queuedByHandle[file.handle],
+                        transfersBusy = transfersBusy,
+                        cameraViewModel = cameraViewModel,
+                        onTapFile = onTapFile
+                    )
+                }
             }
         }
 

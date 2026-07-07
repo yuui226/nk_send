@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.*
@@ -32,6 +33,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()   // 内容延伸到系统栏后面，各屏自行处理 inset
         requestNotificationPermissionIfNeeded()
         setContent {
             NikonTransferTheme {
@@ -69,6 +71,17 @@ fun MainScreen() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val cameraState by cameraViewModel.state.collectAsState()
+    val transferState by transferViewModel.state.collectAsState()
+
+    // 切换展示模式（列表 <-> 缩略图）后重新加载文件列表，规避切换时列表偶发清空。
+    // 在 MainScreen 层用 remember 记住上次模式，可跨导航存活、且首帧不触发。
+    var lastThumbnailMode by remember { mutableStateOf(transferState.thumbnailMode) }
+    LaunchedEffect(transferState.thumbnailMode) {
+        if (transferState.thumbnailMode != lastThumbnailMode) {
+            lastThumbnailMode = transferState.thumbnailMode
+            cameraViewModel.reloadFiles()
+        }
+    }
 
     // 相机连接成功后自动跳转到文件列表
     LaunchedEffect(cameraState.isConnectedToCamera) {
@@ -89,7 +102,9 @@ fun MainScreen() {
     }
 
     Scaffold(
-        containerColor = DarkBackground
+        containerColor = DarkBackground,
+        // 不消费系统栏 inset，交由各屏自行处理（文件列表 edge-to-edge，其余用 systemBarsPadding）
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { paddingValues ->
         NavHost(
             navController = navController,

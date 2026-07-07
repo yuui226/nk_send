@@ -42,6 +42,14 @@ data class TransferState(
     val thumbnailColumns: Int = 3
 )
 
+/** 队列剩余待处理数量（正在传 + 等待传）。供顶栏药丸等复用。 */
+val TransferState.remainingCount: Int
+    get() = tasks.count { it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING }
+
+/** 当前正在传输文件的进度（0..1）；没有正在传的返回 0。供顶栏药丸复用传输页的单文件进度语义。 */
+val TransferState.currentFileProgress: Float
+    get() = tasks.firstOrNull { it.status == TransferStatus.TRANSFERING }?.progress ?: 0f
+
 class TransferViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(TransferState())
     val state: StateFlow<TransferState> = _state.asStateFlow()
@@ -61,7 +69,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update {
             it.copy(
                 transferDirUri = dir,
-                thumbnailMode = prefs.getBoolean("thumbnail_mode", false),
+                thumbnailMode = prefs.getBoolean("thumbnail_mode", true),
                 thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4)
             )
         }
@@ -170,23 +178,30 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             ?: throw Exception("无法打开文件")
 
                         // 用大缓冲包裹 SAF 输出流，把零散的写批量化，减少 ContentProvider 往返。
+                        // 缺了它，每个 PTP-IP 数据包都要跨 Binder 写一次 SAF，吞吐直接腰斩（2M/s→<1M/s）。
                         val result = java.io.BufferedOutputStream(outputStream, 1024 * 1024).use { out ->
                             camera.downloadToFile(handle, out) { progress ->
                                 val speed = if (progress.elapsed > 0) {
                                     (progress.downloaded / progress.elapsed).toLong()
                                 } else 0
-                                updateTask(handle) { t ->
-                                    if (t.status == TransferStatus.TRANSFERING) {
-                                        t.copy(
-                                            progress = if (progress.total > 0) {
-                                                progress.downloaded.toFloat() / progress.total
-                                            } else 0f,
-                                            downloaded = progress.downloaded,
-                                            speed = speed
-                                        )
-                                    } else t
+                                // 单次原子更新：同时写当前速度与该任务进度，避免每个进度 tick
+                                // 触发两次 StateFlow 发射 / 两次全量列表拷贝（5Hz 下累积可观）。
+                                _state.update { state ->
+                                    state.copy(
+                                        currentSpeed = speed,
+                                        tasks = state.tasks.map { t ->
+                                            if (t.file.handle == handle && t.status == TransferStatus.TRANSFERING) {
+                                                t.copy(
+                                                    progress = if (progress.total > 0) {
+                                                        progress.downloaded.toFloat() / progress.total
+                                                    } else 0f,
+                                                    downloaded = progress.downloaded,
+                                                    speed = speed
+                                                )
+                                            } else t
+                                        }
+                                    )
                                 }
-                                _state.update { it.copy(currentSpeed = speed) }
                             }
                         }
 

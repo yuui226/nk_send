@@ -24,7 +24,9 @@ fun HomeScreen(
     val state by viewModel.state.collectAsState()
 
     Column(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .systemBarsPadding()
     ) {
         TopAppBar(
             title = {},
@@ -110,29 +112,6 @@ fun HomeScreen(
                         color = AccentBlue,
                         strokeWidth = 2.dp
                     )
-                }
-            }
-
-            // 错误信息
-            if (state.error != null) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = StatusError.copy(alpha = 0.15f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Error, contentDescription = null, tint = StatusError)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = state.error ?: "",
-                            color = StatusError,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
                 }
             }
 

@@ -51,8 +51,9 @@ class NikonCamera {
             cmdSocket = Socket().apply {
                 tcpNoDelay = true
                 soTimeout = 60000
-                // 增大接收缓冲，提升 Wi-Fi 上大文件下载的 TCP 吞吐。
-                receiveBufferSize = 1024 * 1024
+                // 不手动设置 receiveBufferSize：本地 Wi-Fi 带宽延迟积极小，自动调优的窗口已足够
+                // (家里实测自动调优即可跑满 ~2MB/s)。手动设 SO_RCVBUF 会关闭内核接收窗口自动调优，
+                // 是没必要的干预，故交给系统。
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), 5000)
             }
             cmdInput = cmdSocket!!.getInputStream()

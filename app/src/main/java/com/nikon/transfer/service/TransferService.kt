@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.net.wifi.WifiManager
 import androidx.core.app.NotificationCompat
 import com.nikon.transfer.MainActivity
 import com.nikon.transfer.R
@@ -23,6 +24,7 @@ import com.nikon.transfer.R
 class TransferService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -31,6 +33,7 @@ class TransferService : Service() {
         try {
             startForeground(NOTIFICATION_ID, buildNotification())
             acquireWakeLock()
+            acquireWifiLock()
         } catch (e: Exception) {
             // 某些系统状态下 startForeground 可能被拒绝；此时放弃保活但不崩溃，
             // 传输仍会在前台继续进行。
@@ -42,6 +45,7 @@ class TransferService : Service() {
 
     override fun onDestroy() {
         releaseWakeLock()
+        releaseWifiLock()
         super.onDestroy()
     }
 
@@ -60,6 +64,35 @@ class TransferService : Service() {
         } catch (_: Exception) {
         } finally {
             wakeLock = null
+        }
+    }
+
+    /**
+     * 传输期间持有高性能 WifiLock，阻止 Wi-Fi 进入省电模式（省电模式下 Wi-Fi 吞吐会明显下降，
+     * 大文件下载速度腰斩）。API 29+ 用低时延模式，更适合本地实时传输；以下用高性能模式。
+     * PARTIAL_WAKE_LOCK 只保 CPU 不管 Wi-Fi 无线功耗，二者互补。
+     */
+    private fun acquireWifiLock() {
+        if (wifiLock?.isHeld == true) return
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION")
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        wifiLock = wm.createWifiLock(mode, WIFILOCK_TAG).apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseWifiLock() {
+        try {
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        } catch (_: Exception) {
+        } finally {
+            wifiLock = null
         }
     }
 
@@ -97,6 +130,7 @@ class TransferService : Service() {
         private const val CHANNEL_ID = "transfer_channel"
         private const val NOTIFICATION_ID = 1001
         private const val WAKELOCK_TAG = "NikonTransfer:transfer"
+        private const val WIFILOCK_TAG = "NikonTransfer:wifi"
         private const val MAX_WAKELOCK_MS = 60L * 60L * 1000L // 兜底超时，防止异常时唤醒锁泄露
 
         fun start(context: Context) {
