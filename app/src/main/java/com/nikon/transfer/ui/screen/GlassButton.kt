@@ -26,12 +26,14 @@ import com.nikon.transfer.ui.theme.DarkSurface
 fun GlassButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     shape: Shape = RoundedCornerShape(20.dp),
     contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
     content: @Composable RowScope.() -> Unit
 ) {
     Surface(
         onClick = onClick,
+        enabled = enabled,
         shape = shape,
         color = DarkSurface.copy(alpha = 0.45f),
         shadowElevation = 4.dp,

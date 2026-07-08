@@ -14,6 +14,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import com.nikon.transfer.ui.theme.Motion
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -96,10 +99,10 @@ fun MainScreen() {
             startDestination = Screen.Home.route,
             modifier = Modifier.padding(paddingValues),
             // 活泼转场：进入的页面缩放+淡入，退出的页面淡出；返回时反向。
-            enterTransition = { scaleIn(initialScale = 0.90f, animationSpec = tween(420)) + fadeIn(tween(420)) },
-            exitTransition = { fadeOut(tween(280)) },
-            popEnterTransition = { fadeIn(tween(280)) },
-            popExitTransition = { scaleOut(targetScale = 0.90f, animationSpec = tween(280)) + fadeOut(tween(280)) }
+            enterTransition = { scaleIn(initialScale = 0.90f, animationSpec = tween(Motion.NAV_ENTER_MS)) + fadeIn(tween(Motion.NAV_ENTER_MS)) },
+            exitTransition = { fadeOut(tween(Motion.NAV_EXIT_MS)) },
+            popEnterTransition = { fadeIn(tween(Motion.NAV_EXIT_MS)) },
+            popExitTransition = { scaleOut(targetScale = 0.90f, animationSpec = tween(Motion.NAV_EXIT_MS)) + fadeOut(tween(Motion.NAV_EXIT_MS)) }
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(
@@ -107,7 +110,20 @@ fun MainScreen() {
                     transferViewModel = transferViewModel
                 )
             }
-            composable(Screen.Files.route) {
+            composable(
+                Screen.Files.route,
+                // 空间隐喻：队列页位于本页右侧。去队列页时本页作为底层向左 1/3 视差退场
+                // 并轻微压暗（营造被上层卡片盖住的纵深），返回时反向浮现回来。
+                // enter/popEnter 不设，与连接页之间仍走 NavHost 默认的缩放淡入转场。
+                exitTransition = {
+                    slideOutHorizontally(Motion.pageSlide) { -it / 3 } +
+                            fadeOut(tween(Motion.PAGE_FADE_MS), targetAlpha = 0.5f)
+                },
+                popEnterTransition = {
+                    slideInHorizontally(Motion.pageSlide) { -it / 3 } +
+                            fadeIn(tween(Motion.PAGE_FADE_MS), initialAlpha = 0.5f)
+                }
+            ) {
                 FileListScreen(
                     cameraViewModel = cameraViewModel,
                     transferViewModel = transferViewModel,
@@ -116,7 +132,13 @@ fun MainScreen() {
                     }
                 )
             }
-            composable(Screen.Transfer.route) {
+            composable(
+                Screen.Transfer.route,
+                // 队列页作为上层卡片：前进时整页从右滑入盖住"Z传"页，
+                // 返回（含系统返回键）时向右滑出、露出底层视差归位的"Z传"页。
+                enterTransition = { slideInHorizontally(Motion.pageSlide) { it } },
+                popExitTransition = { slideOutHorizontally(Motion.pageSlide) { it } }
+            ) {
                 TransferScreen(
                     transferViewModel = transferViewModel,
                     cameraViewModel = cameraViewModel,

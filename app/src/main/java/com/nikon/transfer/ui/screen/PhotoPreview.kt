@@ -2,11 +2,10 @@ package com.nikon.transfer.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -59,12 +58,12 @@ fun PhotoPreviewOverlay(
 
     LaunchedEffect(overlayBounds, closing) {
         if (!closing && overlayBounds != null && progress.value < 1f) {
-            progress.animateTo(1f, tween(320, easing = FastOutSlowInEasing))
+            progress.animateTo(1f, Motion.overlayExpand)
         }
     }
     LaunchedEffect(closing) {
         if (closing) {
-            progress.animateTo(0f, tween(240, easing = FastOutSlowInEasing))
+            progress.animateTo(0f, Motion.overlayCollapse)
             onDismiss()
         }
     }
@@ -75,6 +74,9 @@ fun PhotoPreviewOverlay(
         modifier = Modifier
             .fillMaxSize()
             .onGloballyPositioned { overlayBounds = it.boundsInRoot() }
+            // 消费未被翻页器处理的拖动（如竖向滑动），防止滚动穿透到底下的照片网格；
+            // 横向翻页由更深层的 Pager 先消费，不受影响。
+            .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
     ) {
         // 黑色背景：随进度淡入。
         Box(
@@ -84,15 +86,19 @@ fun PhotoPreviewOverlay(
                 .background(Color.Black.copy(alpha = 0.94f))
         )
 
-        // 图片翻页器：整体从被长按格子的位置缩放展开。
+        // 图片翻页器：整体从被长按格子的位置缩放展开。相邻页预载一页，快速翻页不用等图。
         HorizontalPager(
             state = pagerState,
+            beyondBoundsPageCount = 1,
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
                     val ob = overlayBounds
                     val ar = anchorRect
-                    if (ob != null && ar != null && ob.width > 0f && ob.height > 0f) {
+                    // 已翻页离开初始张时，关闭不再缩回原格子（位置早对不上，会"飞回"错误
+                    // 的格子造成视觉断裂），改为原地线性淡出。
+                    val shrinkToAnchor = pagerState.currentPage == initialIndex
+                    if (shrinkToAnchor && ob != null && ar != null && ob.width > 0f && ob.height > 0f) {
                         transformOrigin = TransformOrigin(
                             (ar.center.x - ob.left) / ob.width,
                             (ar.center.y - ob.top) / ob.height
@@ -101,8 +107,12 @@ fun PhotoPreviewOverlay(
                         val s = startScale + (1f - startScale) * progress.value
                         scaleX = s
                         scaleY = s
+                        alpha = (progress.value * 1.6f).coerceAtMost(1f)
+                    } else {
+                        scaleX = 1f
+                        scaleY = 1f
+                        alpha = progress.value
                     }
-                    alpha = (progress.value * 1.6f).coerceAtMost(1f)
                 }
         ) { page ->
             PreviewPage(

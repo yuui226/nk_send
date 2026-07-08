@@ -2,14 +2,13 @@ package com.nikon.transfer.ui.screen
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.StartOffset
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,11 +24,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -56,7 +57,8 @@ fun HomeScreen(
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
     var showSettings by remember { mutableStateOf(false) }
-    var zAnchor by remember { mutableStateOf<Offset?>(null) }
+    // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
+    var zAnchor by remember { mutableStateOf<Rect?>(null) }
 
     val connected = state.isConnectedToCamera
     val onCameraWifi = state.isWifiConnected
@@ -139,15 +141,14 @@ fun HomeScreen(
             GlassButton(
                 onClick = { showSettings = true },
                 shape = RoundedCornerShape(22.dp),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 9.dp),
-                modifier = Modifier.onGloballyPositioned { zAnchor = it.boundsInRoot().center }
+                // 与文件列表页的双 Z 标按钮完全同规格（顶栏统一 36dp 高，见彼处注释）。
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .height(36.dp)
+                    .onGloballyPositioned { zAnchor = it.boundsInRoot() }
             ) {
-                Text(
-                    "Z传",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = DarkOnBackground
-                )
+                // 双 Z 标（原"Z传"文本，换成自绘的尼康 Z 系列标志更简洁）。
+                ZMark(modifier = Modifier.height(20.dp))
             }
         }
 
@@ -155,87 +156,89 @@ fun HomeScreen(
         if (showSettings) {
             SettingsOverlay(
                 viewModel = transferViewModel,
-                anchorCenter = zAnchor,
+                anchorBounds = zAnchor,
                 onDismiss = { showSettings = false }
             )
         }
     }
 }
 
+// 脉冲一轮的周期（秒）与成功时的相位加速倍数。
+private const val PULSE_PERIOD_S = 2.2f
+private const val BURST_SPEED = 4f
+
 /**
  * 状态 Hero：中心圆盘 + 图标。
- * [pulsing]：连接中——外围雷达式持续脉冲。
- * [success]：连接成功——播放一次性"快速发散"环 + 图标弹跳一下，颜色平滑渐变到绿色。
+ * 脉冲环由"单调累加的连续相位"驱动（跨状态不重建，永不断档）：各环进度取
+ * frac(phase + i/3)，透明度用"出生淡入 × 扩散淡出"包络——两端都为 0，循环无缝。
+ * [pulsing] 切换时环整体平滑淡入/淡出，绝不硬切。
+ * [success]：相位加速 [BURST_SPEED] 倍——正在扩散的环猛地向外冲出（爆发散开）并淡出，
+ * 颜色随 animColor 一路转绿；中心图标 Crossfade 渐变换形 + 轻微弹跳。
  */
 @Composable
 private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, success: Boolean) {
     val animColor by animateColorAsState(targetValue = color, animationSpec = tween(500), label = "heroColor")
-    val burst = remember { Animatable(0f) }
-    LaunchedEffect(success) {
-        if (success) {
-            burst.snapTo(0f)
-            burst.animateTo(1f, tween(750, easing = FastOutSlowInEasing))
+
+    // 连续相位：每帧按当前速度累加，成功时速度平滑升到 BURST_SPEED。
+    var phase by remember { mutableStateOf(0f) }
+    val speed by animateFloatAsState(
+        targetValue = if (success) BURST_SPEED else 1f,
+        animationSpec = tween(250),
+        label = "pulseSpeed"
+    )
+    val currentSpeed by rememberUpdatedState(speed)
+    LaunchedEffect(Unit) {
+        var last = 0L
+        while (true) {
+            withFrameNanos { now ->
+                if (last != 0L) {
+                    phase += (now - last) / 1_000_000_000f / PULSE_PERIOD_S * currentSpeed
+                }
+                last = now
+            }
         }
     }
+    // 环整体透明度：脉冲中为 1；成功爆发时边冲边淡出，离开相机 Wi-Fi 时平滑收场。
+    val ringsAlpha by animateFloatAsState(
+        targetValue = if (pulsing) 1f else 0f,
+        animationSpec = tween(if (success) 550 else 400),
+        label = "ringsAlpha"
+    )
 
     Box(modifier = Modifier.size(200.dp), contentAlignment = Alignment.Center) {
-        if (pulsing) {
-            val transition = rememberInfiniteTransition(label = "pulse")
+        if (ringsAlpha > 0.01f) {
             repeat(3) { i ->
-                val p by transition.animateFloat(
-                    initialValue = 0f,
-                    targetValue = 1f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(2200, easing = LinearEasing),
-                        initialStartOffset = StartOffset(i * 2200 / 3)
-                    ),
-                    label = "ring$i"
-                )
                 Box(
                     modifier = Modifier
                         .size(180.dp)
                         .graphicsLayer {
-                            val s = 0.35f + p * 0.65f
+                            // 相位在 graphicsLayer 块内读取：逐帧只更新图层，不触发重组。
+                            val p = (phase + i / 3f).mod(1f)
+                            val s = 0.35f + p * 0.75f
                             scaleX = s
                             scaleY = s
-                            alpha = (1f - p) * 0.45f
+                            alpha = (p * 5f).coerceAtMost(1f) * (1f - p) * 0.5f * ringsAlpha
                         }
-                        .border(2.dp, color, CircleShape)
+                        .border(2.dp, animColor, CircleShape)
                 )
             }
         }
 
-        if (success) {
-            val b = burst.value
-            repeat(3) { i ->
-                val d = ((b - i * 0.12f) / (1f - i * 0.12f)).coerceIn(0f, 1f)
-                if (d > 0f) {
-                    Box(
-                        modifier = Modifier
-                            .size(200.dp)
-                            .graphicsLayer {
-                                val s = 0.25f + d * 1.05f
-                                scaleX = s
-                                scaleY = s
-                                alpha = (1f - d) * 0.6f
-                            }
-                            .border(2.5.dp, StatusConnected, CircleShape)
-                    )
-                }
+        // 成功瞬间图标轻微弹跳（快起 + 弹性回落）。
+        val iconPop = remember { Animatable(1f) }
+        LaunchedEffect(success) {
+            if (success) {
+                iconPop.animateTo(1.12f, tween(180, easing = FastOutSlowInEasing))
+                iconPop.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
             }
         }
 
-        val iconScale = if (success) {
-            val b = burst.value
-            if (b < 0.3f) 0.7f + (b / 0.3f) * 0.45f
-            else 1.15f - ((b - 0.3f) / 0.7f) * 0.15f
-        } else 1f
         Box(
             modifier = Modifier
                 .size(96.dp)
                 .graphicsLayer {
-                    scaleX = iconScale
-                    scaleY = iconScale
+                    scaleX = iconPop.value
+                    scaleY = iconPop.value
                 }
                 .clip(CircleShape)
                 // 毛玻璃：状态色淡底 + 自上而下白色高光 + 浅色描边。
@@ -254,7 +257,10 @@ private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, succes
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, contentDescription = null, tint = animColor, modifier = Modifier.size(44.dp))
+            // 图标渐变换形（Wifi→√ 等一律交叉淡化），配合 tint 颜色过渡，不再硬切。
+            Crossfade(targetState = icon, animationSpec = tween(450), label = "heroIcon") { ic ->
+                Icon(ic, contentDescription = null, tint = animColor, modifier = Modifier.size(44.dp))
+            }
         }
     }
 }

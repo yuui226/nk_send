@@ -42,7 +42,9 @@ data class TransferState(
     val isTransferring: Boolean = false,
     val currentSpeed: Long = 0,
     val transferDirUri: String? = null,
-    val thumbnailColumns: Int = 3
+    val thumbnailColumns: Int = 3,
+    // 触感反馈开关：默认关闭，用户开启后持久化，下次启动保持。
+    val hapticsEnabled: Boolean = false
 )
 
 /** 队列剩余待处理数量（正在传 + 等待传）。供顶栏药丸等复用。 */
@@ -74,7 +76,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update {
             it.copy(
                 transferDirUri = dir,
-                thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4)
+                thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4),
+                hapticsEnabled = prefs.getBoolean("haptics_enabled", false)
             )
         }
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
@@ -89,6 +92,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val c = columns.coerceIn(1, 4)
         prefs.edit().putInt("thumbnail_columns", c).apply()
         _state.update { it.copy(thumbnailColumns = c) }
+    }
+
+    fun setHapticsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("haptics_enabled", enabled).apply()
+        _state.update { it.copy(hapticsEnabled = enabled) }
     }
 
     fun setTransferDirUri(uri: Uri) {

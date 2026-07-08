@@ -12,12 +12,11 @@ val DarkOnSurfaceVariant = Color(0xFFB0B0B0)
 
 // 强调色
 val AccentBlue = Color(0xFF4FC3F7)
-val AccentGreen = Color(0xFF66BB6A)
 val AccentOrange = Color(0xFFFFB74D)
-val AccentRed = Color(0xFFEF5350)
 val AccentPurple = Color(0xFFAB47BC)
 
-// 状态色
+// 状态色。全 App 唯一的"成功绿"与"错误红"——不再另设肉眼难辨的
+// AccentGreen/AccentRed 变体，主题色与状态图标同源，语义色全局一致。
 val StatusConnected = Color(0xFF4CAF50)
 val StatusError = Color(0xFFF44336)
 val StatusWaiting = Color(0xFF757575)

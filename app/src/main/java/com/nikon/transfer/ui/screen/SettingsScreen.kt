@@ -5,10 +5,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -20,8 +19,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -30,19 +29,22 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.nikon.transfer.BuildConfig
 import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.viewmodel.TransferViewModel
 
 /**
- * 轻量设置面板（全屏覆盖层，非系统 Dialog）：
- * 面板以触发按钮（[anchorCenter]，在同一 Compose 根坐标系）为缩放原点，缩放+淡入"从按钮变形展开"，
+ * 轻量设置面板（全屏覆盖层，非系统 Dialog），下拉弹窗观感：
+ * 面板顶边贴在触发按钮（[anchorBounds]，在同一 Compose 根坐标系）下缘、左缘与按钮对齐，
+ * 以按钮中心为缩放原点"从按钮变形展开"（原点在面板左上角附近，展开方向自然朝右下），
  * 关闭时反向收回到按钮再消失。放在与按钮同一 composition 内，避免跨窗口坐标不一致。
  */
 @Composable
 fun SettingsOverlay(
     viewModel: TransferViewModel,
-    anchorCenter: Offset?,
+    anchorBounds: Rect?,
     onDismiss: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
@@ -72,13 +74,13 @@ fun SettingsOverlay(
     // 面板测量完成即入场展开。
     LaunchedEffect(panelBounds, closing) {
         if (!closing && panelBounds != null && progress.value < 1f) {
-            progress.animateTo(1f, tween(360, easing = FastOutSlowInEasing))
+            progress.animateTo(1f, Motion.overlayExpand)
         }
     }
     // 关闭：反向收回后再真正移除。
     LaunchedEffect(closing) {
         if (closing) {
-            progress.animateTo(0f, tween(280, easing = FastOutSlowInEasing))
+            progress.animateTo(0f, Motion.overlayCollapse)
             onDismiss()
         }
     }
@@ -87,29 +89,36 @@ fun SettingsOverlay(
     BackHandler(enabled = !closing) { startClose() }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // 遮罩：随进度淡入；点击外部关闭。
+        // 遮罩：随进度淡入；点击外部关闭。拖动一并消费，防止滚动穿透到底下的列表。
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = progress.value }
                 .background(Color.Black.copy(alpha = 0.4f))
                 .pointerInput(Unit) { detectTapGestures { startClose() } }
+                .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
         )
 
-        // 面板：以按钮位置为原点缩放展开。
+        // 面板：贴在按钮下缘的下拉位置，以按钮中心为原点缩放展开。
+        // 顶边 = 按钮底边 + 8dp（padding 参与测量，剩余高度自动约束，内容超出由内部滚动兜底）。
+        val density = LocalDensity.current
+        val panelTop = if (anchorBounds != null) {
+            with(density) { anchorBounds.bottom.toDp() } + 8.dp
+        } else 76.dp   // 兜底：按钮尚未测量时按顶栏下方近似定位
         Surface(
             modifier = Modifier
-                .align(Alignment.Center)
-                .padding(24.dp)
+                .align(Alignment.TopStart)
+                .padding(start = 12.dp, end = 12.dp, top = panelTop)
+                .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
                 .fillMaxWidth()
                 .onGloballyPositioned { panelBounds = it.boundsInRoot() }
                 .graphicsLayer {
                     val b = panelBounds
-                    if (b != null && b.width > 0f && b.height > 0f && anchorCenter != null) {
+                    if (b != null && b.width > 0f && b.height > 0f && anchorBounds != null) {
                         // 按钮中心相对于面板自身的比例位置（可超出 0..1，即原点落在面板外）。
                         transformOrigin = TransformOrigin(
-                            (anchorCenter.x - b.left) / b.width,
-                            (anchorCenter.y - b.top) / b.height
+                            (anchorBounds.center.x - b.left) / b.width,
+                            (anchorBounds.center.y - b.top) / b.height
                         )
                     }
                     val p = progress.value
@@ -167,6 +176,8 @@ fun SettingsOverlay(
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = DarkSurfaceVariant,
+                    // 未设目录时橙色描边强调：因点图未设目录被弹到这里的新用户能立刻明白来意。
+                    border = if (dirText == null) BorderStroke(1.dp, AccentOrange.copy(alpha = 0.8f)) else null,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -176,7 +187,7 @@ fun SettingsOverlay(
                         Icon(
                             Icons.Default.LocationOn,
                             contentDescription = null,
-                            tint = if (dirText != null) StatusConnected else DarkOnSurfaceVariant,
+                            tint = if (dirText != null) StatusConnected else AccentOrange,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(8.dp))
@@ -184,6 +195,8 @@ fun SettingsOverlay(
                             text = dirText ?: "未设置",
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (dirText != null) DarkOnBackground else DarkOnSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -230,9 +243,28 @@ fun SettingsOverlay(
 
                 Spacer(Modifier.height(20.dp))
 
+                // ---------- 触感反馈 ----------
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        SectionLabel("触感反馈")
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "轻点入队、长按预览、传输完成时轻震",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = DarkOnSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = state.hapticsEnabled,
+                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                    )
+                }
+
+                Spacer(Modifier.height(20.dp))
+
                 // ---------- 关于（精简页脚）----------
                 Text(
-                    text = "Z传 v1.0 · 通过 PTP/IP 直连相机传输",
+                    text = "Z传 v${BuildConfig.VERSION_NAME} · 通过 PTP/IP 直连相机传输",
                     style = MaterialTheme.typography.bodySmall,
                     color = DarkOnSurfaceVariant.copy(alpha = 0.7f)
                 )

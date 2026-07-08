@@ -8,6 +8,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
@@ -41,6 +43,7 @@ import com.nikon.transfer.protocol.PtpConstants
 import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.ui.util.formatFileSize
 import com.nikon.transfer.ui.util.formatSpeed
+import com.nikon.transfer.ui.util.rememberHaptics
 import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferStatus
 import com.nikon.transfer.viewmodel.TransferViewModel
@@ -56,6 +59,8 @@ fun TransferScreen(
     val cameraState by cameraViewModel.state.collectAsState()
     // 停止二次确认的展开状态（提到这层，便于全屏遮罩接管"点击外部关闭"）。
     var showStopConfirm by remember { mutableStateOf(false) }
+    // 触感反馈（与"Z传"页同一开关）；本页胶囊负责传输全部完成时的成功震动。
+    val haptics = rememberHaptics(transferState.hapticsEnabled)
 
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -68,7 +73,8 @@ fun TransferScreen(
         bottom = bottomInset + (if (transferState.isTransferring) 96.dp else 12.dp)
     )
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // 根需不透明底色：与"Z传"页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
+    Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (transferState.tasks.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -166,7 +172,9 @@ fun TransferScreen(
                                     progress = task.progress,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(4.dp),
+                                        .height(4.dp)
+                                        // 圆角进度条，与卡片圆角语言一致
+                                        .clip(RoundedCornerShape(2.dp)),
                                     color = AccentBlue,
                                     trackColor = DarkSurfaceVariant,
                                 )
@@ -189,6 +197,20 @@ fun TransferScreen(
             }
         }
 
+        // ---------- 顶部渐变 scrim：与"Z传"页同款，保证状态栏与悬浮控件在内容上可读 ----------
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(topInset + 56.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0f to DarkBackground.copy(alpha = 0.85f),
+                        0.45f to DarkBackground.copy(alpha = 0.5f),
+                        1f to Color.Transparent
+                    )
+                )
+        )
+
         // ---------- 悬浮顶部控件（毛玻璃，浮在内容上，与 "Z传" 页同款）----------
         Row(
             modifier = Modifier
@@ -197,14 +219,20 @@ fun TransferScreen(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 左：返回（毛玻璃按钮，仅返回图标）
-            GlassButton(onClick = onNavigateBack) {
+            // 左：返回（毛玻璃按钮，仅返回图标）。顶栏按钮统一 36dp 高。
+            GlassButton(onClick = onNavigateBack, modifier = Modifier.height(36.dp)) {
                 Icon(
                     Icons.Default.ArrowBack,
                     contentDescription = "返回",
                     tint = DarkOnBackground,
                     modifier = Modifier.size(22.dp)
                 )
+            }
+
+            // 返回键右侧："Z传"页同款 Wi-Fi 信号按钮——传输中最关心信号强弱，这里同样一眼可查。
+            cameraState.wifiRssi?.let { rssi ->
+                Spacer(modifier = Modifier.width(8.dp))
+                SignalPill(rssi = rssi)
             }
 
             // 右：胶囊始终常驻（传输中显速度/数量，完成后 done→图标，不再切换成按钮以免高度跳动）；
@@ -221,7 +249,7 @@ fun TransferScreen(
                     ) {
                         GlassButton(
                             onClick = { transferViewModel.retryFailed(cameraViewModel::getCamera) },
-                            modifier = Modifier.height(40.dp)
+                            modifier = Modifier.height(36.dp)
                         ) {
                             Text(
                                 "重试全部",
@@ -231,7 +259,7 @@ fun TransferScreen(
                             )
                         }
                     }
-                    QueuePill(transferState = transferState, onClick = {})
+                    QueuePill(transferState = transferState, haptics = haptics, onClick = {})
                 }
             }
         }
@@ -249,6 +277,8 @@ fun TransferScreen(
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = 0.3f))
                         .pointerInput(Unit) { detectTapGestures { showStopConfirm = false } }
+                        // 连拖动一起消费：否则手指在遮罩上滑动会穿透，底下列表照样滚。
+                        .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
                 )
             }
             StopControl(
