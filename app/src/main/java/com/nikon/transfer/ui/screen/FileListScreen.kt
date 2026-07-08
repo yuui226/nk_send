@@ -92,7 +92,6 @@ fun FileListScreen(
 ) {
     val state by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
-    val camera = cameraViewModel.getCamera()
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
     // "Z传" 按钮在根坐标系中的中心，作为设置面板"从按钮变形展开"的动画原点。
@@ -185,21 +184,24 @@ fun FileListScreen(
             // 因而缩略图不会加载；展开后条目重新 emit 才恢复加载。跨渐进加载持久保留。
             val collapsedDates = remember { mutableStateMapOf<String, Boolean>() }
 
-            // 分组批量传输 / 单文件点击。
+            // 分组批量传输 / 单文件点击。gating 用响应式的 isConnectedToCamera；
+            // 队列内部经 provider 现取当前相机实例，中途重连后续传任务自动用新连接。
             val onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit = onTransferGroup@{ remaining ->
                 if (transferState.transferDirUri == null) {
                     showSettings = true; return@onTransferGroup
                 }
-                if (camera != null && remaining.isNotEmpty()) {
+                if (state.isConnectedToCamera && remaining.isNotEmpty()) {
                     // 只加入队列、原地继续浏览，不跳转到队列页（想看进度可点右上角胶囊进入）。
-                    transferViewModel.addToQueue(remaining, camera)
+                    transferViewModel.addToQueue(remaining, cameraViewModel::getCamera)
                 }
             }
             val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
                 if (transferState.transferDirUri == null) {
                     showSettings = true; return@onTapFile
                 }
-                if (camera != null) transferViewModel.addToQueue(listOf(file), camera)
+                if (state.isConnectedToCamera) {
+                    transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
+                }
             }
 
             // transfersBusy 时缩略图让路：只用缓存，不发起新的 GetThumb，避免抢占下载通道。

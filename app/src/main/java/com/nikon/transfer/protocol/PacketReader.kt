@@ -5,6 +5,11 @@ import java.io.InputStream
 class PacketReader {
     companion object {
         const val HEADER_SIZE = 8
+        // 包长上限：远大于任何真实 PTP/IP 包，仅用于拦截损坏/伪造的长度字段。
+        // 不校验的话 length=0x7FFFFFFF 会直接按 2GB 分配缓冲抛 OutOfMemoryError
+        //（Error 不会被上层 catch(Exception) 捕获，App 直接崩溃）；length<8 则会
+        // 让后续读取错位，之后全是脏数据。越界按 IOException 处理，走断线重连。
+        const val MAX_PACKET_SIZE = 256 * 1024 * 1024
     }
 
     private var buffer = ByteArray(1024 * 1024) // 1MB initial
@@ -25,8 +30,7 @@ class PacketReader {
     }
 
     fun readPacket(input: InputStream): Packet {
-        readFully(input, headerBuf, HEADER_SIZE)
-        val length = headerBuf.getIntLE(0)
+        val length = readValidatedLength(input)
         val type = headerBuf.getIntLE(4)
         val payloadLen = length - HEADER_SIZE
 
@@ -46,17 +50,25 @@ class PacketReader {
      * 仅用于下载热路径，避免每包一次全量分配+复制带来的 GC 压力。
      */
     fun readPacketRaw(input: InputStream): RawPacket {
-        readFully(input, headerBuf, HEADER_SIZE)
-        val length = headerBuf.getIntLE(0)
+        val length = readValidatedLength(input)
         raw.type = headerBuf.getIntLE(4)
-        val payloadLen = length - HEADER_SIZE
-        raw.payloadLen = if (payloadLen > 0) payloadLen else 0
+        raw.payloadLen = length - HEADER_SIZE
         if (raw.payloadLen > 0) {
             ensureCapacity(raw.payloadLen)
             readFully(input, buffer, raw.payloadLen)
         }
         raw.buffer = buffer
         return raw
+    }
+
+    /** 读包头并校验长度字段合理性；返回校验过的包长（含头），类型字段留在 [headerBuf] 中。 */
+    private fun readValidatedLength(input: InputStream): Int {
+        readFully(input, headerBuf, HEADER_SIZE)
+        val length = headerBuf.getIntLE(0)
+        if (length < HEADER_SIZE || length > MAX_PACKET_SIZE) {
+            throw java.io.IOException("非法包长度 $length: 连接数据已损坏")
+        }
+        return length
     }
 
     private fun ensureCapacity(n: Int) {

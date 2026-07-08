@@ -1,6 +1,5 @@
 package com.nikon.transfer.ui.screen
 
-import android.content.Intent
 import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -30,7 +29,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nikon.transfer.ui.theme.*
@@ -48,18 +46,12 @@ fun SettingsOverlay(
     onDismiss: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
-    val context = LocalContext.current
 
     val directoryPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
-        uri?.let {
-            context.contentResolver.takePersistableUriPermission(
-                it,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-            viewModel.setTransferDirUri(it)
-        }
+        // 持久化授权在 setTransferDirUri 内统一处理，这里不重复申请。
+        uri?.let { viewModel.setTransferDirUri(it) }
     }
 
     val dirText: String? = state.transferDirUri?.let { dir ->

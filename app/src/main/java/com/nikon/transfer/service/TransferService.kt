@@ -97,7 +97,7 @@ class TransferService : Service() {
     }
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        // minSdk 26 = O，通知渠道 API 恒可用，无需版本判断。
         val manager = getSystemService(NotificationManager::class.java)
         if (manager.getNotificationChannel(CHANNEL_ID) == null) {
             val channel = NotificationChannel(
@@ -136,11 +136,8 @@ class TransferService : Service() {
         fun start(context: Context) {
             val intent = Intent(context, TransferService::class.java)
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
+                // minSdk 26 = O，直接走前台服务启动路径。
+                context.startForegroundService(intent)
             } catch (e: Exception) {
                 // Android 12+ 后台启动前台服务会抛 ForegroundServiceStartNotAllowedException，
                 // 吞掉以免崩溃；传输在前台时不会触发，后台场景下服务已在运行。

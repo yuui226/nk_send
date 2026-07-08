@@ -51,7 +51,8 @@ fun TransferScreen(
     onNavigateBack: () -> Unit
 ) {
     val transferState by transferViewModel.state.collectAsState()
-    val camera = cameraViewModel.getCamera()
+    // 响应式连接状态：断开/重连即时反映到重试按钮的可用性（getCamera() 不是快照状态，不能作 gating）。
+    val cameraState by cameraViewModel.state.collectAsState()
     // 停止二次确认的展开状态（提到这层，便于全屏遮罩接管"点击外部关闭"）。
     var showStopConfirm by remember { mutableStateOf(false) }
 
@@ -164,10 +165,10 @@ fun TransferScreen(
                                 )
                             }
 
-                            if (task.status == TransferStatus.FAILED && camera != null) {
+                            if (task.status == TransferStatus.FAILED && cameraState.isConnectedToCamera) {
                                 Spacer(modifier = Modifier.height(10.dp))
                                 OutlinedButton(
-                                    onClick = { transferViewModel.retrySingleTask(task.file.handle, camera) },
+                                    onClick = { transferViewModel.retrySingleTask(task.file.handle, cameraViewModel::getCamera) },
                                     shape = RoundedCornerShape(8.dp)
                                 ) {
                                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -206,13 +207,13 @@ fun TransferScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (!transferState.isTransferring && camera != null &&
+                    if (!transferState.isTransferring && cameraState.isConnectedToCamera &&
                         transferState.tasks.any {
                             it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
                         }
                     ) {
                         GlassButton(
-                            onClick = { transferViewModel.retryFailed(camera) },
+                            onClick = { transferViewModel.retryFailed(cameraViewModel::getCamera) },
                             modifier = Modifier.height(40.dp)
                         ) {
                             Text(

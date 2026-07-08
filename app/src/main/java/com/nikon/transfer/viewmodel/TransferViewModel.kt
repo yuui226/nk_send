@@ -63,6 +63,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         const val TAG = "NikonTransfer"
         // 未完成文件的临时名前缀（带前导点，在相册中隐藏）。真正文件名只在下载完整后才出现。
         const val PART_PREFIX = ".nkpart_"
+        // 重名副本后缀（"DSC_0001 (1).NEF" 中的 " (1)"），用于剥离/生成。
+        val COPY_SUFFIX_REGEX = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
     }
 
     init {
@@ -97,19 +99,27 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(transferDirUri = uri.toString()) }
     }
 
-    fun addToQueue(files: List<NikonCamera.FileInfo>, camera: NikonCamera) {
+    fun addToQueue(files: List<NikonCamera.FileInfo>, cameraProvider: () -> NikonCamera?) {
         // 未设置传输目录时禁止入队（UI 层会把用户引导到设置页）。
         val dirUri = _state.value.transferDirUri ?: return
 
-        val newTasks = files.map { TransferTask(file = it) }
+        // 按 handle 去重：已在队列（任意状态）的不重复入队。这是防御底线——
+        // 一旦出现重复 handle，任务列表/缩略图网格的 LazyColumn key 冲突会直接崩溃。
+        val queued = _state.value.tasks.mapTo(HashSet()) { it.file.handle }
+        val newTasks = files.asSequence()
+            .filter { it.handle !in queued }
+            .distinctBy { it.handle }
+            .map { TransferTask(file = it) }
+            .toList()
+        if (newTasks.isEmpty()) return
         _state.update { it.copy(tasks = it.tasks + newTasks) }
 
         if (!_state.value.isTransferring) {
-            processQueue(dirUri, camera)
+            processQueue(dirUri, cameraProvider)
         }
     }
 
-    private fun processQueue(dirUri: String, camera: NikonCamera) {
+    private fun processQueue(dirUri: String, cameraProvider: () -> NikonCamera?) {
         if (transferJob?.isActive == true) return
 
         transferJob = viewModelScope.launch {
@@ -124,15 +134,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 )
                 // 单次遍历：清扫遗留半成品(.nkpart_) + 建立"已存在(名称->大小)"去重表。
                 val existing = withContext(Dispatchers.IO) { sweepAndListExisting(uri) }
+                // 归一化名 -> 大小集合：把重名冲突时落盘的 "DSC_0001 (1).NEF" 副本也归到
+                // "DSC_0001.NEF" 名下参与"已存在则跳过"，跨会话不再重复下载这些副本。
+                val existingSizes = HashMap<String, MutableSet<Long>>()
+                existing.forEach { (name, size) ->
+                    existingSizes.getOrPut(baseName(name)) { HashSet() }.add(size)
+                }
 
                 while (true) {
                     // 以 handle（稳定唯一键）定位任务，避免增删任务导致下标串位。
                     val task = _state.value.tasks.firstOrNull { it.status == TransferStatus.WAITING } ?: break
                     val handle = task.file.handle
 
-                    // 目标目录已存在同名文件（大小一致或大小未知）→ 跳过，不重复下载。
+                    // 目标目录已存在同名文件（大小一致或大小未知），或已有同大小的重名副本 → 跳过，不重复下载。
                     val existingSize = existing[task.file.fileName]
-                    if (existingSize != null && (existingSize == task.file.size || existingSize < 0L)) {
+                    if ((existingSize != null && (existingSize == task.file.size || existingSize < 0L)) ||
+                        existingSizes[task.file.fileName]?.contains(task.file.size) == true
+                    ) {
                         log { "DL_SKIP existing: ${task.file.fileName}" }
                         updateTask(handle) {
                             it.copy(
@@ -142,6 +160,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 downloaded = task.file.size,
                                 speed = 0
                             )
+                        }
+                        continue
+                    }
+
+                    // 每个任务开始时现取相机实例：中途掉线重连后，后续任务用的是新连接，
+                    // 而不是队列启动时捕获的旧实例（旧实例 socket 已死，只会全部快速失败）。
+                    val camera = cameraProvider()
+                    if (camera == null) {
+                        updateTask(handle) {
+                            it.copy(status = TransferStatus.FAILED, error = "相机未连接", speed = 0)
                         }
                         continue
                     }
@@ -160,14 +188,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     try {
                         // 写入临时名 .nkpart_原名（扩展名保留，与 mime 匹配，避免 SAF 追加扩展名）。
                         // 下载完整后再改名成真正文件名——崩溃/被杀只会留下 .nkpart_ 半成品，绝不出现残缺的真名文件。
-                        fileDocUri = DocumentsContract.createDocument(
+                        val createdUri = DocumentsContract.createDocument(
                             contentResolver,
                             docUri,
                             getMimeType(task.file.fileName),
                             PART_PREFIX + task.file.fileName
                         ) ?: throw Exception("无法创建文件")
+                        fileDocUri = createdUri
 
-                        val outputStream = contentResolver.openOutputStream(fileDocUri)
+                        val outputStream = contentResolver.openOutputStream(createdUri)
                             ?: throw Exception("无法打开文件")
 
                         // 用大缓冲包裹 SAF 输出流，把零散的写批量化，减少 ContentProvider 往返。
@@ -202,11 +231,26 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             onSuccess = { stats ->
                                 // 下载完整 → 把临时名改成真正文件名（相机上报的文件名即为准）。
                                 val finalName = task.file.fileName
-                                val renamedUri = try {
-                                    DocumentsContract.renameDocument(contentResolver, fileDocUri, finalName)
-                                } catch (_: Exception) { null }
+                                var savedName = finalName
+                                var renamedUri = renameQuietly(createdUri, finalName)
+                                if (renamedUri == null) {
+                                    // 目标名已被占用（历史残缺文件 / 相机跨文件夹 DSC 编号回卷重名）。
+                                    // 绝不覆盖已有文件，也绝不让任务陷入"每次重下、每次改名失败"的
+                                    // 死循环：落为 "名字 (n).扩展名" 副本。
+                                    for (n in 1..99) {
+                                        val candidate = suffixedName(finalName, n)
+                                        if (existing.containsKey(candidate)) continue
+                                        renamedUri = renameQuietly(createdUri, candidate)
+                                        if (renamedUri != null) {
+                                            savedName = candidate
+                                            break
+                                        }
+                                    }
+                                }
                                 if (renamedUri != null) {
-                                    existing[finalName] = task.file.size   // 供后续任务去重
+                                    // 供后续任务与跨会话去重（副本按归一化名归档）。
+                                    existing[savedName] = task.file.size
+                                    existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(task.file.size)
                                     updateTask(handle) {
                                         it.copy(
                                             status = TransferStatus.COMPLETED, progress = 1f,
@@ -215,9 +259,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         )
                                     }
                                 } else {
-                                    // 改名失败：删掉临时文件并标记失败让用户重试，
-                                    // 避免完整数据以 .nkpart_ 名残留后被后续 sweep 静默删除。
-                                    deleteQuietly(fileDocUri)
+                                    // 改名彻底失败（非重名问题，如目录权限失效）：删掉临时文件并标记失败
+                                    // 让用户重试，避免完整数据以 .nkpart_ 名残留后被后续 sweep 静默删除。
+                                    deleteQuietly(createdUri)
                                     updateTask(handle) {
                                         it.copy(status = TransferStatus.FAILED, error = "保存失败", speed = 0)
                                     }
@@ -309,6 +353,22 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         } catch (_: Exception) {}
     }
 
+    /** 改名；失败（如目标名已存在、部分 provider 返回 null）返回 null。 */
+    private fun renameQuietly(uri: Uri, newName: String): Uri? = try {
+        DocumentsContract.renameDocument(contentResolver, uri, newName)
+    } catch (_: Exception) {
+        null
+    }
+
+    /** 剥掉重名副本后缀："DSC_0001 (2).NEF" -> "DSC_0001.NEF"，用于与相机文件名归一化匹配。 */
+    private fun baseName(name: String): String = name.replace(COPY_SUFFIX_REGEX, "")
+
+    /** 生成重名副本名："DSC_0001.NEF" + 2 -> "DSC_0001 (2).NEF"；无扩展名则直接追加。 */
+    private fun suffixedName(name: String, n: Int): String {
+        val dot = name.lastIndexOf('.')
+        return if (dot <= 0) "$name ($n)" else "${name.substring(0, dot)} ($n)${name.substring(dot)}"
+    }
+
     /** 按 handle 就地更新任务；handle 不存在时保持列表不变。用 update 保证跨线程原子读改写。 */
     private fun updateTask(handle: Int, transform: (TransferTask) -> TransferTask) {
         _state.update { state ->
@@ -346,7 +406,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun retryFailed(camera: NikonCamera) {
+    fun retryFailed(cameraProvider: () -> NikonCamera?) {
         val hasFailed = _state.value.tasks.any { it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED }
         if (!hasFailed) return
 
@@ -361,10 +421,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
 
         val dirUri = _state.value.transferDirUri ?: return
-        processQueue(dirUri, camera)
+        processQueue(dirUri, cameraProvider)
     }
 
-    fun retrySingleTask(handle: Int, camera: NikonCamera) {
+    fun retrySingleTask(handle: Int, cameraProvider: () -> NikonCamera?) {
         val task = _state.value.tasks.firstOrNull { it.file.handle == handle } ?: return
         if (task.status != TransferStatus.FAILED && task.status != TransferStatus.CANCELLED) return
 
@@ -373,7 +433,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
 
         val dirUri = _state.value.transferDirUri ?: return
-        processQueue(dirUri, camera)
+        processQueue(dirUri, cameraProvider)
     }
 
     override fun onCleared() {

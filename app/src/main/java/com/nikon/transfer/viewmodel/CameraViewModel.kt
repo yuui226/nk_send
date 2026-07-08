@@ -16,9 +16,11 @@ import androidx.lifecycle.viewModelScope
 import com.nikon.transfer.protocol.NikonCamera
 import com.nikon.transfer.protocol.PtpConstants
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +55,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         override fun sizeOf(key: Int, value: ImageBitmap): Int = value.width * value.height * 4 / 1024
     }
+    // "确认无缩略图/解码失败"的负缓存：滚动回来不再对同一文件重发无谓的 GetThumb。
+    // IO 瞬时失败（掉线等）不入内。仅主线程访问（loadThumbnail 及其 async 均跑在主调度器）。
+    private val noThumbHandles = HashSet<Int>()
+    // 进行中的缩略图请求：格子与长按预览并发请求同一张时共享同一次取图+解码；
+    // 最后一个等待者取消时连带取消底层请求，保留"滚出屏幕即剪枝"的行为。仅主线程访问。
+    private class InflightThumb(val deferred: Deferred<ImageBitmap?>) { var waiters = 0 }
+    private val inflightThumbs = HashMap<Int, InflightThumb>()
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -88,8 +97,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         watcherJob?.cancel()
         watcherJob = viewModelScope.launch {
             while (isActive) {
-                val onNikonWifi = isNikonWifi()
-                val rssi = if (onNikonWifi) readRssi() else null
+                // dhcpInfo/connectionInfo 是 Binder IPC，放 IO 线程，不在主线程每 1.5s 抖一下。
+                val (onNikonWifi, rssi) = withContext(Dispatchers.IO) {
+                    val on = isNikonWifi()
+                    on to (if (on) readRssi() else null)
+                }
                 // 顺带纠正 Wi-Fi 状态与信号强度，避免回调漏报导致 UI 显示滞后。
                 if (_state.value.isWifiConnected != onNikonWifi || _state.value.wifiRssi != rssi) {
                     _state.update { it.copy(isWifiConnected = onNikonWifi, wifiRssi = rssi) }
@@ -112,7 +124,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun onWifiChanged() {
         viewModelScope.launch {
-            val onNikonWifi = isNikonWifi()
+            val onNikonWifi = checkNikonWifi()
             _state.update { it.copy(isWifiConnected = onNikonWifi) }
 
             // 只在"已在相机 Wi-Fi 但尚未连上相机"时发起连接。
@@ -124,7 +136,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /** 读取当前 Wi-Fi 连接的信号强度（dBm）。取不到返回 null。 */
+    /** [isNikonWifi] 的挂起版本：Binder 调用移到 IO 线程执行。 */
+    private suspend fun checkNikonWifi(): Boolean = withContext(Dispatchers.IO) { isNikonWifi() }
+
+    /** 读取当前 Wi-Fi 连接的信号强度（dBm）。取不到返回 null。仅在 IO 线程调用。 */
     @Suppress("DEPRECATION")
     private fun readRssi(): Int? {
         return try {
@@ -157,7 +172,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (_state.value.isConnecting || _state.value.isConnectedToCamera) return
         _state.update { it.copy(isConnecting = true) }
 
-        while (isNikonWifi() && !_state.value.isConnectedToCamera) {
+        while (checkNikonWifi() && !_state.value.isConnectedToCamera) {
             val cam = NikonCamera()
             var connected = false
             cam.connect().fold(
@@ -213,6 +228,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun loadFiles() {
         val cam = camera ?: return
         thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
+        noThumbHandles.clear()      // handle 跨会话可能复用，负缓存一并作废
         _state.update { it.copy(isLoadingFiles = true, files = emptyList()) }
 
         viewModelScope.launch {
@@ -251,27 +267,57 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun getCamera(): NikonCamera? = camera
 
     /**
-     * 加载指定文件的缩略图（用于缩略图网格）。命中内存缓存直接返回；否则经 PTP GetThumb 取字节、
-     * 在后台线程解码并入缓存。与下载共用 ioMutex，串行安全；相机未连接或无缩略图返回 null。
+     * 加载指定文件的缩略图（用于缩略图网格）。命中内存缓存直接返回；确认无缩略图的负缓存直接
+     * 返回 null；否则经 PTP GetThumb 取字节、在后台线程解码并入缓存。同 handle 的并发请求
+     * 共享同一次取图。与下载共用 ioMutex，串行安全；相机未连接返回 null。
      *
      * @param allowFetch 为 false 时只读缓存、不发起新的 GetThumb —— 用于"传输进行中让路给下载"，
      *                   已缓存的缩略图仍会显示，未缓存的等队列空闲后再补载。
      */
     suspend fun loadThumbnail(handle: Int, allowFetch: Boolean = true): ImageBitmap? {
         thumbnailCache.get(handle)?.let { return it }
+        if (handle in noThumbHandles) return null
         if (!allowFetch) return null
-        val cam = camera ?: return null
+        // 复用进行中的请求（跳过已被取消但尚未从表中清理的条目）。
+        val entry = inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled } ?: run {
+            val cam = camera ?: return null
+            InflightThumb(viewModelScope.async { fetchAndDecodeThumb(cam, handle) })
+                .also { inflightThumbs[handle] = it }
+        }
+        entry.waiters++
+        try {
+            return entry.deferred.await()   // 调用方被取消时在此抛出并传播，不能吞掉
+        } finally {
+            entry.waiters--
+            if (entry.waiters == 0) {
+                // 最后一个等待者离开：请求仍未完成说明所有调用方都已取消（滚出屏幕），
+                // 连带取消底层请求，别让排队的 GetThumb 挤占后续可见格子的加载。
+                if (!entry.deferred.isCompleted) entry.deferred.cancel()
+                if (inflightThumbs[handle] === entry) inflightThumbs.remove(handle)
+            }
+        }
+    }
+
+    private suspend fun fetchAndDecodeThumb(cam: NikonCamera, handle: Int): ImageBitmap? {
         return try {
-            val bytes = cam.getThumbnail(handle) ?: return null
+            val bytes = cam.getThumbnail(handle)
+            if (bytes == null || bytes.isEmpty()) {
+                noThumbHandles.add(handle)   // 相机明确表示无缩略图：负缓存，不再重试
+                return null
+            }
             val image = withContext(Dispatchers.Default) {
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-            } ?: return null
+            }
+            if (image == null) {
+                noThumbHandles.add(handle)   // 字节取到但解码失败：同样视为无缩略图
+                return null
+            }
             thumbnailCache.put(handle, image)
             image
         } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e   // 滚动/传输开始导致的取消须传播，不能吞掉
+            throw e
         } catch (_: Exception) {
-            null
+            null   // IO 瞬时失败（掉线等）：不负缓存，重连后仍可加载
         }
     }
 

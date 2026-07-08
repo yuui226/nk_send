@@ -34,6 +34,9 @@ class NikonCamera {
 
     private companion object {
         const val TAG = "NikonTransfer"
+        // 取消下载时允许就地排空的剩余数据上限：不超过它就把剩余数据读干净保住连接；
+        // 超过则排空代价高于重连（取消大视频要排空数分钟），直接断开由心跳/看护自动重连。
+        const val DRAIN_ON_CANCEL_LIMIT = 16L * 1024 * 1024
     }
 
     /** 仅 debug 构建输出协议日志，避免 release 包泄露 handle/size 并拖慢热路径。 */
@@ -96,8 +99,10 @@ class NikonCamera {
 
             sendCmd(PtpConstants.OPEN_SESSION, sessionId)
             val resp = recvResp()
-            if (resp.first != PtpConstants.RESPONSE_OK) {
-                return@withContext Result.failure(Exception("OpenSession 失败: ${PtpConstants.translateResponse(resp.first)}"))
+            // 0x201E Session Already Open：App 异常退出后相机侧旧会话可能未清，
+            // 视为会话已就绪继续使用，否则会陷入"反复重连直到相机自己超时"的循环。
+            if (resp != PtpConstants.RESPONSE_OK && resp != PtpConstants.SESSION_ALREADY_OPEN) {
+                return@withContext Result.failure(Exception("OpenSession 失败: ${PtpConstants.translateResponse(resp)}"))
             }
             sessionOpen = true
 
@@ -111,16 +116,25 @@ class NikonCamera {
     }
 
     private fun startEvtThread() {
+        val socket = evtSocket ?: return
+        val input = evtInput ?: return
         evtThread = Thread {
             try {
-                while (evtSocket?.isConnected == true) {
-                    try {
-                        evtReader.readPacket(evtInput!!)
-                    } catch (_: Exception) {
-                        break
+                // 事件通道长时间无事件是常态：握手后取消读超时，阻塞等待即可。
+                //（之前沿用 60s 超时会让本线程在空闲后静默退出，之后事件通道无人读、
+                // PING 无人应答，长时间挂机可能被相机判定失联。）
+                socket.soTimeout = 0
+                val output = socket.getOutputStream()
+                while (true) {
+                    val packet = evtReader.readPacket(input)
+                    // 部分机型在事件通道发 PING 保活，必须在本通道应答。
+                    if (packet.type == PtpConstants.PING) {
+                        sendPong(output)
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // socket 关闭/连接断开：线程自然结束。掉线由命令通道的心跳发现并触发重连。
+            }
         }.apply {
             isDaemon = true
             name = "PTP-EvtThread"
@@ -148,8 +162,7 @@ class NikonCamera {
         withContext(Dispatchers.IO) {
             try {
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
-                val resp = recvResp()
-                resp.first == PtpConstants.RESPONSE_OK
+                recvResp() == PtpConstants.RESPONSE_OK
             } catch (_: Exception) {
                 false
             }
@@ -177,6 +190,7 @@ class NikonCamera {
         val format: Int,
         val size: Long,
         val fileName: String,
+        /** PTP DateTime 完整串（YYYYMMDDThhmmss…，至少 8 位日期）；分组取前 8 位，组内按完整串排序。 */
         val captureDate: String?
     ) {
         /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
@@ -187,16 +201,16 @@ class NikonCamera {
             }
     }
 
-    /** 通过 PTP GetThumb 获取缩略图 JPEG 字节；无缩略图或出错返回 null。与其它命令共用 ioMutex。 */
+    /**
+     * 通过 PTP GetThumb 获取缩略图 JPEG 字节。相机明确表示无缩略图返回 null；
+     * IO 失败则抛出——调用方以此区分"确实没有"（可负缓存、不再重试）与"瞬时失败"
+     *（掉线等，重连后仍可加载）。与其它命令共用 ioMutex。
+     */
     suspend fun getThumbnail(handle: Int): ByteArray? = ioMutex.withLock {
         withContext(Dispatchers.IO) {
-            try {
-                sendCmd(PtpConstants.GET_THUMB, handle)
-                val (respCode, data) = recvRespWithPayload()
-                if (respCode == PtpConstants.RESPONSE_OK) data else null
-            } catch (_: Exception) {
-                null
-            }
+            sendCmd(PtpConstants.GET_THUMB, handle)
+            val (respCode, data) = recvRespWithPayload()
+            if (respCode == PtpConstants.RESPONSE_OK) data else null
         }
     }
 
@@ -230,6 +244,7 @@ class NikonCamera {
         }
 
         val format = data.getUShortLE(4)
+        // PTP ObjectInfo 的大小字段是 32 位无符号；>4GB 的对象（长视频）相机报 0xFFFFFFFF（未知）。
         val size = data.getIntLE(8).toLong() and 0xFFFFFFFFL
         val ext = PtpConstants.getExt(format)
 
@@ -246,7 +261,9 @@ class NikonCamera {
                 val dateLen = data[dateOffset].toInt() and 0xFF
                 if (dateLen > 0 && data.size >= dateOffset + 1 + dateLen * 2) {
                     val dateStr = String(data, dateOffset + 1, dateLen * 2, Charsets.UTF_16LE).trimEnd('\u0000')
-                    if (dateStr.length >= 8) dateStr.substring(0, 8) else null
+                    // 保留完整的 PTP DateTime（YYYYMMDDThhmmss…），前 8 位为日期。
+                    // UI 按前 8 位分组、按完整串在组内排时间序——只存日期的话组内排序就是无效操作。
+                    dateStr.takeIf { it.length >= 8 }
                 } else null
             } catch (_: Exception) { null }
         } else null
@@ -260,7 +277,7 @@ class NikonCamera {
         val elapsed: Float
     )
 
-    /** 单文件下载完成后的下载速度（MB/s，纯网络读取吞吐）。 */
+    /** 单文件下载完成后的下载速度（MB/s，1024 进制，与 UI formatSpeed 同口径；纯网络读取吞吐）。 */
     data class DownloadStats(
         val bytes: Long,
         val mbps: Float
@@ -272,19 +289,28 @@ class NikonCamera {
         onProgress: ((DownloadProgress) -> Unit)? = null
     ): Result<DownloadStats> = ioMutex.withLock {
         withContext(Dispatchers.IO) {
+            // 声明在 try 外：取消路径（catch CancellationException）需要按 expected/totalDownloaded
+            // 计算剩余数据量，决定就地排空还是断开重连。
+            var totalDownloaded = 0L
+            var expected = 0L
             try {
                 sendCmd(PtpConstants.GET_OBJECT, handle)
 
-                var totalDownloaded = 0L
-                var expected = 0L
                 val startTime = System.currentTimeMillis()
                 var lastProgressTime = startTime
                 // 下载速度：累计纯网络读耗时算吞吐（写盘极快、可忽略，故只测读）。
                 var readNanos = 0L
                 fun buildStats(): DownloadStats {
-                    val mbps = if (readNanos > 0) totalDownloaded / (readNanos / 1e9f) / 1e6f else 0f
+                    // 1024 进制 MB/s，与 UI 的 formatFileSize/formatSpeed 同口径，避免同屏两种单位差 ~5%。
+                    val mbps = if (readNanos > 0) totalDownloaded / (readNanos / 1e9f) / (1024f * 1024f) else 0f
                     return DownloadStats(totalDownloaded, mbps)
                 }
+                // 完整性校验：相机若异常提前结束数据阶段，绝不能把截断的文件当完整文件返回
+                //（.nkpart_ 改真名的防线就在这一步之后）。0xFFFFFFFF 表示 >4GB/大小未知，无法校验只能放行。
+                fun verifyComplete(): Result<DownloadStats>? =
+                    if (expected in 1 until 0xFFFFFFFFL && totalDownloaded != expected) {
+                        Result.failure(Exception("数据不完整: 收到 $totalDownloaded / 预期 $expected 字节"))
+                    } else null
 
                 while (true) {
                     // 协作式取消：在每个包边界检查，使 cancelTransfer() 能及时中断
@@ -303,7 +329,7 @@ class NikonCamera {
                             if (respCode != PtpConstants.RESPONSE_OK) {
                                 return@withContext Result.failure(Exception("传输失败: ${PtpConstants.translateResponse(respCode)}"))
                             }
-                            return@withContext Result.success(buildStats())
+                            return@withContext verifyComplete() ?: Result.success(buildStats())
                         }
                         PtpConstants.START_DATA_PACKET -> {
                             expected = if (len >= 8) buf.getIntLE(4).toLong() and 0xFFFFFFFFL else 0L
@@ -333,22 +359,30 @@ class NikonCamera {
                                 log { "DL_END total=$totalDownloaded, draining CMD_RESPONSE..." }
                                 // 必须消费掉本次传输的 CMD_RESPONSE，否则残留包会污染下次传输
                                 drainCmdResponse()
-                                return@withContext Result.success(buildStats())
+                                return@withContext verifyComplete() ?: Result.success(buildStats())
                             }
                         }
                         PtpConstants.PING -> {
                             log { "DL_PING during download" }
-                            sendPong()
+                            sendPong(cmdOutput)
                         }
                     }
                 }
                 @Suppress("UNREACHABLE_CODE")
                 Result.failure(Exception("Unexpected end of stream"))
             } catch (e: CancellationException) {
-                // 取消时相机仍在发送本文件剩余数据（TCP 背压堆着）。必须把剩余数据 + CMD_RESPONSE
-                // 读干净，否则残留会污染 socket，令下一条命令（缩略图 / 下一次传输）读到陈旧数据、
-                // 协议错位（表现为取消后缩略图不再加载、重试失败）。NonCancellable 保证排空不被打断。
-                try { withContext(NonCancellable) { drainCmdResponse() } } catch (_: Exception) {}
+                // 取消时相机仍在发送本文件剩余数据（TCP 背压堆着）。残留数据会污染 socket，
+                // 令下一条命令读到陈旧数据、协议错位（表现为取消后缩略图不再加载、重试失败）。
+                // 剩余不多：把剩余数据 + CMD_RESPONSE 读干净，保住连接（NonCancellable 保证不被打断）；
+                // 剩余太多（如取消大视频）：排空代价高于重连，直接断开，由心跳/看护自动重连。
+                // 尚未读到 START（expected==0）时剩余量未知，可能是整个文件——保守按"很大"处理走断开，
+                // 排空的最坏代价无界（数分钟），断开重连的代价有界（约 2s）。
+                val remaining = if (expected > 0) expected - totalDownloaded else Long.MAX_VALUE
+                try {
+                    withContext(NonCancellable) {
+                        if (remaining <= DRAIN_ON_CANCEL_LIMIT) drainCmdResponse() else closeQuietly()
+                    }
+                } catch (_: Exception) {}
                 throw e   // 取消须向上传播，不能包装成失败结果
             } catch (e: Exception) {
                 Result.failure(e)
@@ -416,24 +450,24 @@ class NikonCamera {
         cmdOutput?.flush()
     }
 
-    private fun sendPong() {
+    /** 应答 PING。命令通道传 [cmdOutput]，事件通道传其自身输出流（各自独立，无并发冲突）。 */
+    private fun sendPong(output: OutputStream?) {
         val pong = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).apply {
             putInt(8)
             putInt(PtpConstants.PONG)
         }.array()
-        cmdOutput?.write(pong)
-        cmdOutput?.flush()
+        output?.write(pong)
+        output?.flush()
     }
 
-    private fun recvResp(): Pair<Int, ByteArray?> {
+    /** 等待并返回响应码。中途丢弃的数据包（如 keepalive 的 GetStorageIds 数据段）用 raw 读，不逐包分配。 */
+    private fun recvResp(): Int {
         while (true) {
-            val packet = cmdReader.readPacket(cmdInput!!)
+            val packet = cmdReader.readPacketRaw(cmdInput!!)
             when (packet.type) {
-                PtpConstants.CMD_RESPONSE -> {
-                    val respCode = packet.payload?.getUShortLE(0) ?: 0
-                    return respCode to packet.payload
-                }
-                PtpConstants.PING -> sendPong()
+                PtpConstants.CMD_RESPONSE ->
+                    return if (packet.payloadLen >= 2) packet.buffer.getUShortLE(0) else 0
+                PtpConstants.PING -> sendPong(cmdOutput)
             }
         }
     }
@@ -455,7 +489,7 @@ class NikonCamera {
                         out.write(p, 4, p.size - 4)
                     }
                 }
-                PtpConstants.PING -> sendPong()
+                PtpConstants.PING -> sendPong(cmdOutput)
             }
         }
     }
@@ -466,7 +500,7 @@ class NikonCamera {
         while (true) {
             val packet = cmdReader.readPacketRaw(cmdInput!!)
             if (packet.type == PtpConstants.CMD_RESPONSE) return
-            if (packet.type == PtpConstants.PING) sendPong()
+            if (packet.type == PtpConstants.PING) sendPong(cmdOutput)
         }
     }
 

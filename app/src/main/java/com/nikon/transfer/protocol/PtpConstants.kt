@@ -27,6 +27,7 @@ object PtpConstants {
 
     // 响应码
     const val RESPONSE_OK = 0x2001
+    const val SESSION_ALREADY_OPEN = 0x201E
 
     // 相机地址
     const val CAMERA_IP = "192.168.1.1"
@@ -75,6 +76,7 @@ object PtpConstants {
         0x200D to "规范不兼容",
         0x200F to "设备忙",
         0x2010 to "父对象不存在",
+        0x201E to "会话已打开",
         0xA801 to "设备固件错误",
         0xA802 to "存储不可用"
     )
