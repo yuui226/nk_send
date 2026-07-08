@@ -9,13 +9,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -26,6 +28,7 @@ import com.nikon.transfer.ui.theme.DarkBackground
 import com.nikon.transfer.ui.theme.NikonTransferTheme
 import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferViewModel
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -54,14 +57,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
-    object Home : Screen("home", "首页", Icons.Default.Home)
-    object Files : Screen("files", "文件", Icons.Default.Folder)
-    object Settings : Screen("settings", "设置", Icons.Default.Settings)
-    object Transfer : Screen("transfer", "传输", Icons.Default.CloudDownload)
+sealed class Screen(val route: String) {
+    object Home : Screen("home")
+    object Files : Screen("files")
+    object Transfer : Screen("transfer")
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
     val navController = rememberNavController()
@@ -71,33 +72,17 @@ fun MainScreen() {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val cameraState by cameraViewModel.state.collectAsState()
-    val transferState by transferViewModel.state.collectAsState()
 
-    // 切换展示模式（列表 <-> 缩略图）后重新加载文件列表，规避切换时列表偶发清空。
-    // 在 MainScreen 层用 remember 记住上次模式，可跨导航存活、且首帧不触发。
-    var lastThumbnailMode by remember { mutableStateOf(transferState.thumbnailMode) }
-    LaunchedEffect(transferState.thumbnailMode) {
-        if (transferState.thumbnailMode != lastThumbnailMode) {
-            lastThumbnailMode = transferState.thumbnailMode
-            cameraViewModel.reloadFiles()
-        }
-    }
-
-    // 相机连接成功后自动跳转到文件列表
+    // 相机连接成功后：在首页时先留时间给连接页播放"成功脉冲收尾"动画，再跳转到文件列表
+    // （跳转本身带活泼的缩放淡入转场）。
     LaunchedEffect(cameraState.isConnectedToCamera) {
         if (cameraState.isConnectedToCamera && currentRoute == Screen.Home.route) {
+            delay(850)
             navController.navigate(Screen.Files.route) {
                 popUpTo(Screen.Home.route) { saveState = true }
                 launchSingleTop = true
                 restoreState = true
             }
-        }
-    }
-
-    // 相机（重新）连接后，若队列有因掉线暂停的任务则自动续传
-    LaunchedEffect(cameraState.isConnectedToCamera) {
-        if (cameraState.isConnectedToCamera) {
-            cameraViewModel.getCamera()?.let { transferViewModel.onCameraConnected(it) }
         }
     }
 
@@ -109,14 +94,17 @@ fun MainScreen() {
         NavHost(
             navController = navController,
             startDestination = Screen.Home.route,
-            modifier = Modifier.padding(paddingValues)
+            modifier = Modifier.padding(paddingValues),
+            // 活泼转场：进入的页面缩放+淡入，退出的页面淡出；返回时反向。
+            enterTransition = { scaleIn(initialScale = 0.90f, animationSpec = tween(420)) + fadeIn(tween(420)) },
+            exitTransition = { fadeOut(tween(280)) },
+            popEnterTransition = { fadeIn(tween(280)) },
+            popExitTransition = { scaleOut(targetScale = 0.90f, animationSpec = tween(280)) + fadeOut(tween(280)) }
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(
                     viewModel = cameraViewModel,
-                    onNavigateToSettings = {
-                        navController.navigate(Screen.Settings.route)
-                    }
+                    transferViewModel = transferViewModel
                 )
             }
             composable(Screen.Files.route) {
@@ -125,16 +113,7 @@ fun MainScreen() {
                     transferViewModel = transferViewModel,
                     onNavigateToTransfer = {
                         navController.navigate(Screen.Transfer.route)
-                    },
-                    onNavigateToSettings = {
-                        navController.navigate(Screen.Settings.route)
                     }
-                )
-            }
-            composable(Screen.Settings.route) {
-                SettingsScreen(
-                    viewModel = transferViewModel,
-                    onNavigateBack = { navController.popBackStack() }
                 )
             }
             composable(Screen.Transfer.route) {

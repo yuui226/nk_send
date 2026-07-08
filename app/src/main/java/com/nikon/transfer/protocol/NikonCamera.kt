@@ -51,12 +51,14 @@ class NikonCamera {
             cmdSocket = Socket().apply {
                 tcpNoDelay = true
                 soTimeout = 60000
-                // 不手动设置 receiveBufferSize：本地 Wi-Fi 带宽延迟积极小，自动调优的窗口已足够
-                // (家里实测自动调优即可跑满 ~2MB/s)。手动设 SO_RCVBUF 会关闭内核接收窗口自动调优，
-                // 是没必要的干预，故交给系统。
+                // 显式加大接收缓冲，撑起 TCP 接收窗口（4MB 远大于本地 Wi-Fi 所需，不会成为瓶颈；
+                // 在延迟稍高时也能避免小窗口拖慢吞吐）。必须在 connect 前设置才对窗口缩放生效。
+                receiveBufferSize = 4 * 1024 * 1024
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), 5000)
             }
-            cmdInput = cmdSocket!!.getInputStream()
+            // 用 BufferedInputStream 批量化 socket 读：每包 8 字节头 + 小数据段本会产生大量 read 系统调用，
+            // 缓冲后合并为大块读，减少系统调用开销（大数据段仍会直读进目标缓冲，无额外拷贝）。
+            cmdInput = java.io.BufferedInputStream(cmdSocket!!.getInputStream(), 64 * 1024)
             cmdOutput = cmdSocket!!.getOutputStream()
 
             cmdOutput!!.write(makeInitReq())
@@ -258,11 +260,17 @@ class NikonCamera {
         val elapsed: Float
     )
 
+    /** 单文件下载完成后的下载速度（MB/s，纯网络读取吞吐）。 */
+    data class DownloadStats(
+        val bytes: Long,
+        val mbps: Float
+    )
+
     suspend fun downloadToFile(
         handle: Int,
         output: OutputStream,
         onProgress: ((DownloadProgress) -> Unit)? = null
-    ): Result<Long> = ioMutex.withLock {
+    ): Result<DownloadStats> = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             try {
                 sendCmd(PtpConstants.GET_OBJECT, handle)
@@ -271,12 +279,20 @@ class NikonCamera {
                 var expected = 0L
                 val startTime = System.currentTimeMillis()
                 var lastProgressTime = startTime
+                // 下载速度：累计纯网络读耗时算吞吐（写盘极快、可忽略，故只测读）。
+                var readNanos = 0L
+                fun buildStats(): DownloadStats {
+                    val mbps = if (readNanos > 0) totalDownloaded / (readNanos / 1e9f) / 1e6f else 0f
+                    return DownloadStats(totalDownloaded, mbps)
+                }
 
                 while (true) {
                     // 协作式取消：在每个包边界检查，使 cancelTransfer() 能及时中断
                     ensureActive()
                     // 零拷贝读取：直接从共享缓冲区写入，避免每包一次全量分配+复制。
+                    val rt0 = System.nanoTime()
                     val packet = cmdReader.readPacketRaw(cmdInput!!)
+                    readNanos += System.nanoTime() - rt0
                     val buf = packet.buffer
                     val len = packet.payloadLen
 
@@ -287,7 +303,7 @@ class NikonCamera {
                             if (respCode != PtpConstants.RESPONSE_OK) {
                                 return@withContext Result.failure(Exception("传输失败: ${PtpConstants.translateResponse(respCode)}"))
                             }
-                            return@withContext Result.success(totalDownloaded)
+                            return@withContext Result.success(buildStats())
                         }
                         PtpConstants.START_DATA_PACKET -> {
                             expected = if (len >= 8) buf.getIntLE(4).toLong() and 0xFFFFFFFFL else 0L
@@ -317,7 +333,7 @@ class NikonCamera {
                                 log { "DL_END total=$totalDownloaded, draining CMD_RESPONSE..." }
                                 // 必须消费掉本次传输的 CMD_RESPONSE，否则残留包会污染下次传输
                                 drainCmdResponse()
-                                return@withContext Result.success(totalDownloaded)
+                                return@withContext Result.success(buildStats())
                             }
                         }
                         PtpConstants.PING -> {
@@ -329,6 +345,10 @@ class NikonCamera {
                 @Suppress("UNREACHABLE_CODE")
                 Result.failure(Exception("Unexpected end of stream"))
             } catch (e: CancellationException) {
+                // 取消时相机仍在发送本文件剩余数据（TCP 背压堆着）。必须把剩余数据 + CMD_RESPONSE
+                // 读干净，否则残留会污染 socket，令下一条命令（缩略图 / 下一次传输）读到陈旧数据、
+                // 协议错位（表现为取消后缩略图不再加载、重试失败）。NonCancellable 保证排空不被打断。
+                try { withContext(NonCancellable) { drainCmdResponse() } } catch (_: Exception) {}
                 throw e   // 取消须向上传播，不能包装成失败结果
             } catch (e: Exception) {
                 Result.failure(e)
@@ -353,16 +373,6 @@ class NikonCamera {
             }
             closeQuietly()
         }
-    }
-
-    /**
-     * 强制关闭底层 socket 以立即中断正在阻塞的读操作（不经过 ioMutex，因为持锁方正卡在读上）。
-     * 用于 Wi-Fi 掉线时快速中止进行中的下载；之后仍应调用 [close] 做完整清理（幂等）。
-     */
-    fun forceClose() {
-        sessionOpen = false
-        try { cmdSocket?.close() } catch (_: Exception) {}
-        try { evtSocket?.close() } catch (_: Exception) {}
     }
 
     private fun closeQuietly() {
@@ -451,9 +461,10 @@ class NikonCamera {
     }
 
     private fun drainCmdResponse() {
-        // 读取并丢弃本次传输的 CMD_RESPONSE
+        // 读取并丢弃直到本次传输的 CMD_RESPONSE。成功路径此时只剩 CMD_RESPONSE；
+        // 取消路径会连带把剩余的数据包一并读掉——用 raw 读避免逐包分配。
         while (true) {
-            val packet = cmdReader.readPacket(cmdInput!!)
+            val packet = cmdReader.readPacketRaw(cmdInput!!)
             if (packet.type == PtpConstants.CMD_RESPONSE) return
             if (packet.type == PtpConstants.PING) sendPong()
         }

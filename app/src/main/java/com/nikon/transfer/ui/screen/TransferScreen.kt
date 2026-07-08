@@ -1,11 +1,18 @@
 package com.nikon.transfer.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -20,9 +27,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.ui.util.formatFileSize
@@ -31,7 +44,6 @@ import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferStatus
 import com.nikon.transfer.viewmodel.TransferViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransferScreen(
     transferViewModel: TransferViewModel,
@@ -40,77 +52,22 @@ fun TransferScreen(
 ) {
     val transferState by transferViewModel.state.collectAsState()
     val camera = cameraViewModel.getCamera()
+    // 停止二次确认的展开状态（提到这层，便于全屏遮罩接管"点击外部关闭"）。
+    var showStopConfirm by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxSize().systemBarsPadding()) {
-        TopAppBar(
-            title = {
-                Column(modifier = Modifier.padding(start = 16.dp)) {
-                    Text("传输队列", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
-                    if (transferState.tasks.isNotEmpty()) {
-                        val completed = transferState.tasks.count { it.status == TransferStatus.COMPLETED }
-                        val failed = transferState.tasks.count { it.status == TransferStatus.FAILED }
-                        Text(
-                            text = buildString {
-                                append("$completed/${transferState.tasks.size}")
-                                if (failed > 0) append(" · $failed 失败")
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = DarkOnSurfaceVariant
-                        )
-                    }
-                }
-            },
-            navigationIcon = {
-                IconButton(onClick = onNavigateBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "返回")
-                }
-            },
-            actions = {
-                if (transferState.isTransferring) {
-                    if (transferState.currentSpeed > 0) {
-                        Text(
-                            text = formatSpeed(transferState.currentSpeed),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = AccentBlue,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(end = 4.dp)
-                        )
-                    }
-                    OutlinedIconButton(
-                        onClick = { transferViewModel.cancelTransfer() },
-                        border = BorderStroke(1.dp, StatusError),
-                        modifier = Modifier.padding(end = 4.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Stop,
-                            contentDescription = "取消传输",
-                            tint = StatusError
-                        )
-                    }
-                } else {
-                    val hasRetryable = transferState.tasks.any {
-                        it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
-                    }
-                    val hasFinished = transferState.tasks.any {
-                        it.status == TransferStatus.COMPLETED ||
-                        it.status == TransferStatus.FAILED ||
-                        it.status == TransferStatus.CANCELLED
-                    }
-                    if (hasRetryable && camera != null) {
-                        TextButton(onClick = { transferViewModel.retryFailed(camera) }) {
-                            Text("重试全部")
-                        }
-                    }
-                    if (hasFinished) {
-                        IconButton(onClick = { transferViewModel.clearCompleted() }) {
-                            Icon(Icons.Default.ClearAll, contentDescription = "清除已结束")
-                        }
-                    }
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = DarkBackground)
-        )
+    val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // 内容 edge-to-edge（与 "Z传" 页一致，无顶部黑条）：顶部让出状态栏 + 悬浮控件；
+    // 底部让出导航栏 +（传输中）右下角悬浮停止按钮的高度。
+    val listPadding = PaddingValues(
+        start = 12.dp,
+        end = 12.dp,
+        top = topInset + 58.dp,
+        bottom = bottomInset + (if (transferState.isTransferring) 96.dp else 12.dp)
+    )
 
+    Box(modifier = Modifier.fillMaxSize()) {
+        // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (transferState.tasks.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -121,8 +78,8 @@ fun TransferScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(16.dp),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = listPadding,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // 倒序显示：最新加入队列的排在最上方（asReversed 是视图，不复制列表）。
@@ -140,72 +97,63 @@ fun TransferScreen(
                             }
                         )
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = when (task.status) {
-                                        TransferStatus.WAITING -> Icons.Default.Schedule
-                                        TransferStatus.TRANSFERING -> Icons.Default.Downloading
-                                        TransferStatus.COMPLETED -> Icons.Default.CheckCircle
-                                        TransferStatus.FAILED -> Icons.Default.Error
-                                        TransferStatus.CANCELLED -> Icons.Default.Cancel
-                                    },
-                                    contentDescription = null,
-                                    tint = when (task.status) {
-                                        TransferStatus.WAITING -> StatusWaiting
-                                        TransferStatus.TRANSFERING -> AccentBlue
-                                        TransferStatus.COMPLETED -> StatusConnected
-                                        TransferStatus.FAILED -> StatusError
-                                        TransferStatus.CANCELLED -> DarkOnSurfaceVariant
-                                    },
-                                    modifier = Modifier.size(20.dp)
+                                // 前导缩略图。allowFetch=!isTransferring：传输中只读缓存，不发 GetThumb 抢带宽。
+                                QueueThumbnail(
+                                    handle = task.file.handle,
+                                    allowFetch = !transferState.isTransferring,
+                                    cameraViewModel = cameraViewModel
                                 )
 
                                 Spacer(modifier = Modifier.width(12.dp))
 
-                                // 缩略图模式：状态图标后展示缩略图，行高随之略增。
-                                // allowFetch=!isTransferring：传输中只读缓存，不发 GetThumb 抢带宽。
-                                if (transferState.thumbnailMode) {
-                                    QueueThumbnail(
-                                        handle = task.file.handle,
-                                        allowFetch = !transferState.isTransferring,
-                                        cameraViewModel = cameraViewModel
+                                // 中部两行：文件名 + 状态副信息，撑满前导高度，充分利用竖向空间。
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = task.file.fileName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (task.status == TransferStatus.CANCELLED) DarkOnSurfaceVariant else DarkOnBackground,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    val (subText, subColor) = when (task.status) {
+                                        TransferStatus.WAITING -> "等待传输" to DarkOnSurfaceVariant
+                                        TransferStatus.TRANSFERING -> {
+                                            val base = "${formatFileSize(task.downloaded)} / ${formatFileSize(task.file.size)}"
+                                            (if (task.speed > 0) "$base · ${formatSpeed(task.speed)}" else base) to AccentBlue
+                                        }
+                                        TransferStatus.COMPLETED ->
+                                            (when {
+                                                task.skipped -> "已存在，跳过"
+                                                // 单文件下载速度：一眼看出当前网络快慢。
+                                                task.downloadMBps > 0f -> "${formatFileSize(task.file.size)} · %.1f MB/s".format(task.downloadMBps)
+                                                else -> "已完成 · ${formatFileSize(task.file.size)}"
+                                            }) to StatusConnected
+                                        TransferStatus.FAILED -> (task.error ?: "传输失败") to StatusError
+                                        TransferStatus.CANCELLED -> "已取消" to DarkOnSurfaceVariant
+                                    }
+                                    Text(
+                                        text = subText,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = subColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
 
-                                Text(
-                                    text = task.file.fileName,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = DarkOnBackground,
-                                    modifier = Modifier.weight(1f)
-                                )
-
-                                // 右侧：传输中显示已下载/总大小，完成显示大小，失败显示错误
-                                when (task.status) {
-                                    TransferStatus.TRANSFERING -> {
-                                        Text(
-                                            text = "${formatFileSize(task.downloaded)}/${formatFileSize(task.file.size)}",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = AccentBlue
-                                        )
-                                    }
-                                    TransferStatus.COMPLETED -> {
-                                        Text(
-                                            text = if (task.skipped) "已存在" else formatFileSize(task.file.size),
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = StatusConnected
-                                        )
-                                    }
-                                    else -> {}
-                                }
+                                // 尾部：状态图标（前导已被缩略图占用）。
+                                Spacer(modifier = Modifier.width(10.dp))
+                                TaskStatusIcon(task.status, size = 22.dp)
                             }
 
                             if (task.status == TransferStatus.TRANSFERING) {
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(10.dp))
                                 LinearProgressIndicator(
                                     progress = task.progress,
                                     modifier = Modifier
@@ -216,29 +164,189 @@ fun TransferScreen(
                                 )
                             }
 
-                            if (task.status == TransferStatus.FAILED) {
-                                if (task.error != null) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = task.error,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = StatusError
-                                    )
-                                }
-                                if (camera != null) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    OutlinedButton(
-                                        onClick = { transferViewModel.retrySingleTask(task.file.handle, camera) },
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("重新传输", style = MaterialTheme.typography.labelMedium)
-                                    }
+                            if (task.status == TransferStatus.FAILED && camera != null) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = { transferViewModel.retrySingleTask(task.file.handle, camera) },
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("重新传输", style = MaterialTheme.typography.labelMedium)
                                 }
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // ---------- 悬浮顶部控件（毛玻璃，浮在内容上，与 "Z传" 页同款）----------
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 左：返回（毛玻璃按钮，仅返回图标）
+            GlassButton(onClick = onNavigateBack) {
+                Icon(
+                    Icons.Default.ArrowBack,
+                    contentDescription = "返回",
+                    tint = DarkOnBackground,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            // 右：胶囊始终常驻（传输中显速度/数量，完成后 done→图标，不再切换成按钮以免高度跳动）；
+            // 有失败/取消且已停止时，在胶囊左侧显示等高的"重试全部"（出现/消失不影响胶囊右边缘）。
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (!transferState.isTransferring && camera != null &&
+                        transferState.tasks.any {
+                            it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
+                        }
+                    ) {
+                        GlassButton(
+                            onClick = { transferViewModel.retryFailed(camera) },
+                            modifier = Modifier.height(40.dp)
+                        ) {
+                            Text(
+                                "重试全部",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = DarkOnBackground
+                            )
+                        }
+                    }
+                    QueuePill(transferState = transferState, onClick = {})
+                }
+            }
+        }
+
+        // ---------- 右下角悬浮停止控件（毛玻璃）+ 二次确认 ----------
+        if (transferState.isTransferring) {
+            // 全屏遮罩：确认卡展开时接管"点击外部任意处关闭"，淡入淡出，位于卡片之下、内容之上。
+            AnimatedVisibility(
+                visible = showStopConfirm,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.3f))
+                        .pointerInput(Unit) { detectTapGestures { showStopConfirm = false } }
+                )
+            }
+            StopControl(
+                expanded = showStopConfirm,
+                onToggle = { showStopConfirm = !showStopConfirm },
+                onConfirmStop = {
+                    showStopConfirm = false
+                    transferViewModel.cancelTransfer()
+                },
+                onDismiss = { showStopConfirm = false },
+                modifier = Modifier.align(Alignment.BottomEnd)
+            )
+        }
+    }
+}
+
+/**
+ * 右下角悬浮的停止控件：一个红色停止 FAB，点击后在其左上方弹出二次确认卡片
+ * （缩放动画以 FAB 所在的右下角为原点，向左上放大），确认后才真正执行停止。
+ */
+@Composable
+private fun StopControl(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onConfirmStop: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(end = 20.dp, bottom = 24.dp)
+    ) {
+        Column(horizontalAlignment = Alignment.End) {
+            AnimatedVisibility(
+                visible = expanded,
+                // 以右下角为原点缩放弹出，视觉上从停止按钮位置向左上方展开。
+                enter = scaleIn(transformOrigin = TransformOrigin(1f, 1f)) + fadeIn(),
+                exit = scaleOut(transformOrigin = TransformOrigin(1f, 1f)) + fadeOut()
+            ) {
+                ConfirmStopCard(onConfirm = onConfirmStop, onDismiss = onDismiss)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 停止按钮：毛玻璃圆形，内置红色停止图标。
+            GlassButton(
+                onClick = onToggle,
+                shape = CircleShape,
+                contentPadding = PaddingValues(16.dp),
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Icon(
+                    Icons.Default.Stop,
+                    contentDescription = "停止传输",
+                    tint = StatusError,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfirmStopCard(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = DarkSurface,
+        shadowElevation = 8.dp,
+        border = BorderStroke(1.dp, StatusError.copy(alpha = 0.4f)),
+        // 消费卡片区域的点击，避免穿透到背后的全屏遮罩而被误关闭。
+        modifier = Modifier
+            .widthIn(max = 260.dp)
+            .pointerInput(Unit) { detectTapGestures { } }
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "停止全部传输？",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = DarkOnBackground
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "正在传输的文件会中断，已完成的会保留。",
+                style = MaterialTheme.typography.bodySmall,
+                color = DarkOnSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.align(Alignment.End),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text("取消", color = DarkOnSurfaceVariant)
+                }
+                Button(
+                    onClick = onConfirm,
+                    colors = ButtonDefaults.buttonColors(containerColor = StatusError),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("停止")
                 }
             }
         }
@@ -263,8 +371,8 @@ private fun QueueThumbnail(
     }
     Box(
         modifier = Modifier
-            .size(44.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .size(52.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(DarkSurfaceVariant),
         contentAlignment = Alignment.Center
     ) {
@@ -274,16 +382,42 @@ private fun QueueThumbnail(
                 bitmap = image,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
+                // 相机缩略图常带上下黑边（3:2 画面塞进 4:3）；轻微放大裁掉黑边（与列表页一致）。
+                modifier = Modifier
+                    .fillMaxSize()
+                    .scale(1.12f)
             )
         } else {
             Icon(
                 Icons.Default.Image,
                 contentDescription = null,
                 tint = DarkOnSurfaceVariant,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(22.dp)
             )
         }
     }
+}
+
+/** 队列任务状态图标（等待/传输/完成/失败/取消）。前导或尾部复用。 */
+@Composable
+private fun TaskStatusIcon(status: TransferStatus, size: Dp = 20.dp) {
+    Icon(
+        imageVector = when (status) {
+            TransferStatus.WAITING -> Icons.Default.Schedule
+            TransferStatus.TRANSFERING -> Icons.Default.Downloading
+            TransferStatus.COMPLETED -> Icons.Default.CheckCircle
+            TransferStatus.FAILED -> Icons.Default.Error
+            TransferStatus.CANCELLED -> Icons.Default.Cancel
+        },
+        contentDescription = null,
+        tint = when (status) {
+            TransferStatus.WAITING -> StatusWaiting
+            TransferStatus.TRANSFERING -> AccentBlue
+            TransferStatus.COMPLETED -> StatusConnected
+            TransferStatus.FAILED -> StatusError
+            TransferStatus.CANCELLED -> DarkOnSurfaceVariant
+        },
+        modifier = Modifier.size(size)
+    )
 }
 

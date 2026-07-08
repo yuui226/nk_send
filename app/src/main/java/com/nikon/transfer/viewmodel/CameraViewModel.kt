@@ -34,7 +34,9 @@ data class CameraState(
     val cameraName: String? = null,
     val isConnecting: Boolean = false,
     val files: List<NikonCamera.FileInfo> = emptyList(),
-    val isLoadingFiles: Boolean = false
+    val isLoadingFiles: Boolean = false,
+    // 当前相机 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；未在相机 Wi-Fi 上时为 null。
+    val wifiRssi: Int? = null
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -87,9 +89,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         watcherJob = viewModelScope.launch {
             while (isActive) {
                 val onNikonWifi = isNikonWifi()
-                // 顺带纠正 Wi-Fi 状态，避免回调漏报导致 UI 显示滞后。
-                if (_state.value.isWifiConnected != onNikonWifi) {
-                    _state.update { it.copy(isWifiConnected = onNikonWifi) }
+                val rssi = if (onNikonWifi) readRssi() else null
+                // 顺带纠正 Wi-Fi 状态与信号强度，避免回调漏报导致 UI 显示滞后。
+                if (_state.value.isWifiConnected != onNikonWifi || _state.value.wifiRssi != rssi) {
+                    _state.update { it.copy(isWifiConnected = onNikonWifi, wifiRssi = rssi) }
                 }
                 // 同 onWifiChanged：只负责"在相机 Wi-Fi 上就连上"，绝不主动断开，避免误断打断传输。
                 if (onNikonWifi && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
@@ -118,6 +121,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (onNikonWifi && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
                 connectToCameraWithRetry()
             }
+        }
+    }
+
+    /** 读取当前 Wi-Fi 连接的信号强度（dBm）。取不到返回 null。 */
+    @Suppress("DEPRECATION")
+    private fun readRssi(): Int? {
+        return try {
+            val rssi = wifiManager.connectionInfo?.rssi ?: return null
+            // 未关联/无效时部分机型返回 -127 之类的哨兵值，过滤掉。
+            if (rssi == -127 || rssi >= 0) null else rssi
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -235,11 +250,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun getCamera(): NikonCamera? = camera
 
-    /** 供 UI 在切换展示模式（列表/缩略图）后重新加载文件列表，规避切换时列表偶发清空的问题。 */
-    fun reloadFiles() {
-        if (camera != null && !_state.value.isLoadingFiles) loadFiles()
-    }
-
     /**
      * 加载指定文件的缩略图（用于缩略图网格）。命中内存缓存直接返回；否则经 PTP GetThumb 取字节、
      * 在后台线程解码并入缓存。与下载共用 ioMutex，串行安全；相机未连接或无缩略图返回 null。
@@ -281,6 +291,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private companion object {
         const val KEEPALIVE_INTERVAL_MS = 10_000L
         const val RETRY_INTERVAL_MS = 2_000L
-        const val WATCH_INTERVAL_MS = 3_000L
+        const val WATCH_INTERVAL_MS = 1_500L
     }
 }

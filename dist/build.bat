@@ -16,8 +16,16 @@ if errorlevel 1 (
 )
 
 set "SRC=app\build\outputs\apk\release\app-release.apk"
-rem Copy the artifact into the script's own folder (dist\).
-set "DST=%~dp0nk_send.apk"
+
+rem Build-completion time stamp HHMM, e.g. 0929 = finished at 09:29.
+rem %TIME% may be " 9:29:.." (leading space for single-digit hour); pad it to 0.
+set "HH=%TIME:~0,2%"
+set "MM=%TIME:~3,2%"
+set "HH=%HH: =0%"
+set "STAMP=%HH%%MM%"
+
+rem Copy the artifact into the script's own folder (dist\), named with the stamp.
+set "DST=%~dp0nk_send_%STAMP%.apk"
 
 if not exist "%SRC%" (
     echo.

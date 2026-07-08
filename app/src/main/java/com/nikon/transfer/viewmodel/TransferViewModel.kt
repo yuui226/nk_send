@@ -30,7 +30,9 @@ data class TransferTask(
     val speed: Long = 0,
     val downloaded: Long = 0,
     val error: String? = null,
-    val skipped: Boolean = false   // 目标目录已存在同名文件而跳过
+    val skipped: Boolean = false,  // 目标目录已存在同名文件而跳过
+    // 单文件下载速度（MB/s），完成后填入，显示在卡片上。
+    val downloadMBps: Float = 0f
 )
 
 data class TransferState(
@@ -38,7 +40,6 @@ data class TransferState(
     val isTransferring: Boolean = false,
     val currentSpeed: Long = 0,
     val transferDirUri: String? = null,
-    val thumbnailMode: Boolean = false,
     val thumbnailColumns: Int = 3
 )
 
@@ -69,7 +70,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update {
             it.copy(
                 transferDirUri = dir,
-                thumbnailMode = prefs.getBoolean("thumbnail_mode", true),
                 thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4)
             )
         }
@@ -79,11 +79,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 try { sweepAndListExisting(Uri.parse(dir)) } catch (_: Exception) {}
             }
         }
-    }
-
-    fun setThumbnailMode(enabled: Boolean) {
-        prefs.edit().putBoolean("thumbnail_mode", enabled).apply()
-        _state.update { it.copy(thumbnailMode = enabled) }
     }
 
     fun setThumbnailColumns(columns: Int) {
@@ -131,7 +126,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 val existing = withContext(Dispatchers.IO) { sweepAndListExisting(uri) }
 
                 while (true) {
-                    // 以 handle（稳定唯一键）定位任务，避免 clearCompleted 等操作导致下标串位。
+                    // 以 handle（稳定唯一键）定位任务，避免增删任务导致下标串位。
                     val task = _state.value.tasks.firstOrNull { it.status == TransferStatus.WAITING } ?: break
                     val handle = task.file.handle
 
@@ -162,8 +157,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                     // 追踪已创建的文档，失败/取消时删除半成品，避免残留与重试时产生重名副本。
                     var fileDocUri: Uri? = null
-                    // 连接断开导致的失败：把任务放回等待队列并暂停整个队列，等重连后自动继续。
-                    var pausedForDisconnect = false
                     try {
                         // 写入临时名 .nkpart_原名（扩展名保留，与 mime 匹配，避免 SAF 追加扩展名）。
                         // 下载完整后再改名成真正文件名——崩溃/被杀只会留下 .nkpart_ 半成品，绝不出现残缺的真名文件。
@@ -206,7 +199,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         }
 
                         result.fold(
-                            onSuccess = { size ->
+                            onSuccess = { stats ->
                                 // 下载完整 → 把临时名改成真正文件名（相机上报的文件名即为准）。
                                 val finalName = task.file.fileName
                                 val renamedUri = try {
@@ -215,7 +208,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 if (renamedUri != null) {
                                     existing[finalName] = task.file.size   // 供后续任务去重
                                     updateTask(handle) {
-                                        it.copy(status = TransferStatus.COMPLETED, progress = 1f, downloaded = size, speed = 0)
+                                        it.copy(
+                                            status = TransferStatus.COMPLETED, progress = 1f,
+                                            downloaded = stats.bytes, speed = 0,
+                                            downloadMBps = stats.mbps
+                                        )
                                     }
                                 } else {
                                     // 改名失败：删掉临时文件并标记失败让用户重试，
@@ -227,14 +224,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                             },
                             onFailure = { e ->
+                                // 掉线也当普通失败处理（相机断开后会省电关 Wi-Fi，无法即时续传）；
+                                // 重连后由用户点"重试全部"重新下载。
                                 deleteQuietly(fileDocUri)
-                                if (isConnectionError(e)) {
-                                    requeue(handle)
-                                    pausedForDisconnect = true
-                                } else {
-                                    updateTask(handle) {
-                                        it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
-                                    }
+                                updateTask(handle) {
+                                    it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
                                 }
                             }
                         )
@@ -243,58 +237,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         throw e                     // 取消须向上传播，交由 cancelTransfer 统一置为 CANCELLED
                     } catch (e: Exception) {
                         deleteQuietly(fileDocUri)
-                        if (isConnectionError(e)) {
-                            // 连接断开：放回队列并暂停，等待重连后自动继续
-                            requeue(handle)
-                            pausedForDisconnect = true
-                        } else {
-                            if (BuildConfig.DEBUG) {
-                                android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
-                            }
-                            updateTask(handle) {
-                                it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
-                            }
+                        if (BuildConfig.DEBUG) {
+                            android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
+                        }
+                        updateTask(handle) {
+                            it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
                         }
                     }
-
-                    // 连接断开：停止继续处理队列，剩余任务保持 WAITING，等重连后 onCameraConnected 续传。
-                    if (pausedForDisconnect) break
                 }
             } finally {
                 _state.update { it.copy(isTransferring = false, currentSpeed = 0) }
                 TransferService.stop(getApplication())
             }
-        }
-    }
-
-    /** 把任务重置回等待状态（用于连接断开后续传）。 */
-    private fun requeue(handle: Int) {
-        updateTask(handle) {
-            it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, speed = 0, error = null)
-        }
-    }
-
-    /**
-     * 判断失败是否由连接断开引起。网络类异常（EOF/Socket 关闭/超时等）均为 IOException 子类；
-     * 协议层错误（"传输失败: xxx"）是普通 Exception，按单文件失败处理。
-     */
-    private fun isConnectionError(e: Throwable): Boolean = e is java.io.IOException
-
-    /**
-     * 相机（重新）连接后调用：把中断残留的 TRANSFERING 复位为 WAITING，若队列仍有待传任务则自动续传。
-     */
-    fun onCameraConnected(camera: NikonCamera) {
-        if (transferJob?.isActive == true) return
-        _state.update { s ->
-            s.copy(tasks = s.tasks.map {
-                if (it.status == TransferStatus.TRANSFERING) {
-                    it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, speed = 0)
-                } else it
-            })
-        }
-        val dirUri = _state.value.transferDirUri ?: return
-        if (_state.value.tasks.any { it.status == TransferStatus.WAITING }) {
-            processQueue(dirUri, camera)
         }
     }
 
@@ -420,16 +374,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
         val dirUri = _state.value.transferDirUri ?: return
         processQueue(dirUri, camera)
-    }
-
-    fun clearCompleted() {
-        _state.update { state ->
-            state.copy(
-                tasks = state.tasks.filter {
-                    it.status != TransferStatus.COMPLETED && it.status != TransferStatus.CANCELLED && it.status != TransferStatus.FAILED
-                }
-            )
-        }
     }
 
     override fun onCleared() {
