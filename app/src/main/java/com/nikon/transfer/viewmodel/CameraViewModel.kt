@@ -33,7 +33,6 @@ import kotlinx.coroutines.withContext
 data class CameraState(
     val isWifiConnected: Boolean = false,
     val isConnectedToCamera: Boolean = false,
-    val cameraName: String? = null,
     val isConnecting: Boolean = false,
     val files: List<NikonCamera.FileInfo> = emptyList(),
     val isLoadingFiles: Boolean = false,
@@ -176,12 +175,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val cam = NikonCamera()
             var connected = false
             cam.connect().fold(
-                onSuccess = { camName ->
+                onSuccess = {
                     camera = cam
                     _state.update {
                         it.copy(
                             isConnectedToCamera = true,
-                            cameraName = camName,
                             isConnecting = false
                         )
                     }
@@ -216,7 +214,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     cam.close()
                     // 掉线不报错，直接进入重连（新协程，避免与当前心跳协程的取消纠缠）。
                     _state.update {
-                        it.copy(isConnectedToCamera = false, cameraName = null, files = emptyList())
+                        it.copy(isConnectedToCamera = false, files = emptyList())
                     }
                     viewModelScope.launch { connectToCameraWithRetry() }
                     break
@@ -258,7 +256,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 _state.update { it.copy(isLoadingFiles = false) }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
+                // 扫描中断（掉线/读超时）：保留已加载的部分，掉线由心跳发现并触发重连。
                 _state.update { it.copy(isLoadingFiles = false) }
             }
         }

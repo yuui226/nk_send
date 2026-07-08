@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.nikon.transfer.protocol.PtpConstants
 import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.ui.util.formatFileSize
 import com.nikon.transfer.ui.util.formatSpeed
@@ -126,15 +127,21 @@ fun TransferScreen(
                                     val (subText, subColor) = when (task.status) {
                                         TransferStatus.WAITING -> "等待传输" to DarkOnSurfaceVariant
                                         TransferStatus.TRANSFERING -> {
-                                            val base = "${formatFileSize(task.downloaded)} / ${formatFileSize(task.file.size)}"
+                                            // >4GB 对象的 file.size 只是 SIZE_UNKNOWN 哨兵，别显示假总量。
+                                            val base = if (task.file.size == PtpConstants.SIZE_UNKNOWN) {
+                                                formatFileSize(task.downloaded)
+                                            } else {
+                                                "${formatFileSize(task.downloaded)} / ${formatFileSize(task.file.size)}"
+                                            }
                                             (if (task.speed > 0) "$base · ${formatSpeed(task.speed)}" else base) to AccentBlue
                                         }
                                         TransferStatus.COMPLETED ->
                                             (when {
                                                 task.skipped -> "已存在，跳过"
-                                                // 单文件下载速度：一眼看出当前网络快慢。
-                                                task.downloadMBps > 0f -> "${formatFileSize(task.file.size)} · %.1f MB/s".format(task.downloadMBps)
-                                                else -> "已完成 · ${formatFileSize(task.file.size)}"
+                                                // 单文件下载速度：一眼看出当前网络快慢。大小取真实落盘字节数
+                                                //（>4GB 对象的 file.size 只是哨兵值）。
+                                                task.downloadMBps > 0f -> "${formatFileSize(task.downloaded)} · %.1f MB/s".format(task.downloadMBps)
+                                                else -> "已完成 · ${formatFileSize(task.downloaded)}"
                                             }) to StatusConnected
                                         TransferStatus.FAILED -> (task.error ?: "传输失败") to StatusError
                                         TransferStatus.CANCELLED -> "已取消" to DarkOnSurfaceVariant

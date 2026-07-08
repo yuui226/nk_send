@@ -9,7 +9,7 @@ object PtpConstants {
     const val INIT_FAIL = 5
     const val CMD_REQUEST = 6
     const val CMD_RESPONSE = 7
-    const val EVENT = 8
+    // 8 = Event 包（事件通道上收到后直接忽略，无需常量）
     const val START_DATA_PACKET = 9
     const val DATA_PACKET = 10
     const val END_DATA_PACKET = 12
@@ -28,6 +28,9 @@ object PtpConstants {
     // 响应码
     const val RESPONSE_OK = 0x2001
     const val SESSION_ALREADY_OPEN = 0x201E
+
+    // ObjectInfo 的 32 位大小字段报不出 >4GB 对象的真实大小，此时为全 FF 哨兵（无符号）。
+    const val SIZE_UNKNOWN = 0xFFFFFFFFL
 
     // 相机地址
     const val CAMERA_IP = "192.168.1.1"

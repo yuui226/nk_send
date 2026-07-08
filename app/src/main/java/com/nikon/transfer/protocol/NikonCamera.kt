@@ -49,7 +49,7 @@ class NikonCamera {
         return tid
     }
 
-    suspend fun connect(ip: String = PtpConstants.CAMERA_IP): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun connect(ip: String = PtpConstants.CAMERA_IP): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             cmdSocket = Socket().apply {
                 tcpNoDelay = true
@@ -69,14 +69,15 @@ class NikonCamera {
 
             val ack = cmdReader.readPacket(cmdInput!!)
             if (ack.type != PtpConstants.INIT_CMD_ACK) {
-                return@withContext Result.failure(Exception("握手失败: 非 ACK 响应"))
+                // INIT_FAIL = 相机主动拒绝（如未配对/连接数已满），与协议错乱区分开提示。
+                return@withContext Result.failure(
+                    if (ack.type == PtpConstants.INIT_FAIL) Exception("相机拒绝连接")
+                    else Exception("握手失败: 非 ACK 响应")
+                )
             }
 
             val payload = ack.payload ?: return@withContext Result.failure(Exception("握手失败: 空响应"))
             val sessionId = payload.getIntLE(0)
-            val camName = if (payload.size > 20) {
-                String(payload, 20, payload.size - 20, Charsets.UTF_16LE).trimEnd('\u0000')
-            } else "Nikon"
 
             evtSocket = Socket().apply {
                 soTimeout = 60000
@@ -108,7 +109,7 @@ class NikonCamera {
 
             startEvtThread()
 
-            Result.success(camName)
+            Result.success(Unit)
         } catch (e: Exception) {
             close()
             Result.failure(e)
@@ -187,7 +188,6 @@ class NikonCamera {
 
     data class FileInfo(
         val handle: Int,
-        val format: Int,
         val size: Long,
         val fileName: String,
         /** PTP DateTime 完整串（YYYYMMDDThhmmss…，至少 8 位日期）；分组取前 8 位，组内按完整串排序。 */
@@ -224,10 +224,11 @@ class NikonCamera {
         handles.chunked(batchSize).forEach { batch ->
             // 每批单独持锁，批间释放 ioMutex：缩略图模式下缩略图请求可在批间插入，
             // 从而随列表一起渐进出图，而不是等整份列表加载完才开始。
+            // IO 异常（掉线/读超时）直接向上抛给调用方终止扫描：逐个 handle 硬试会让
+            // 每个都等满 60s 读超时、扫描假死数十分钟；单文件 PTP 级失败在
+            // getObjectInfoInternal 内已按 null 跳过，不会走到这里。
             val files = ioMutex.withLock {
-                batch.mapNotNull { handle ->
-                    try { getObjectInfoInternal(handle) } catch (_: Exception) { null }
-                }
+                batch.mapNotNull { handle -> getObjectInfoInternal(handle) }
             }
             loaded += files.size
             if (files.isNotEmpty()) {
@@ -268,7 +269,7 @@ class NikonCamera {
             } catch (_: Exception) { null }
         } else null
 
-        return FileInfo(handle, format, size, fileName, captureDate)
+        return FileInfo(handle, size, fileName, captureDate)
     }
 
     data class DownloadProgress(
@@ -306,9 +307,10 @@ class NikonCamera {
                     return DownloadStats(totalDownloaded, mbps)
                 }
                 // 完整性校验：相机若异常提前结束数据阶段，绝不能把截断的文件当完整文件返回
-                //（.nkpart_ 改真名的防线就在这一步之后）。0xFFFFFFFF 表示 >4GB/大小未知，无法校验只能放行。
+                //（.nkpart_ 改真名的防线就在这一步之后）。0xFFFFFFFF（32 位哨兵）与全 FF（64 位哨兵）
+                // 表示大小未知，无法校验只能放行。
                 fun verifyComplete(): Result<DownloadStats>? =
-                    if (expected in 1 until 0xFFFFFFFFL && totalDownloaded != expected) {
+                    if (expected > 0 && expected != PtpConstants.SIZE_UNKNOWN && expected != -1L && totalDownloaded != expected) {
                         Result.failure(Exception("数据不完整: 收到 $totalDownloaded / 预期 $expected 字节"))
                     } else null
 
@@ -332,7 +334,13 @@ class NikonCamera {
                             return@withContext verifyComplete() ?: Result.success(buildStats())
                         }
                         PtpConstants.START_DATA_PACKET -> {
-                            expected = if (len >= 8) buf.getIntLE(4).toLong() and 0xFFFFFFFFL else 0L
+                            // PTP/IP Start-Data 载荷 = TID(4) + 总长度(8，64 位小端)。只读低 32 位
+                            // 会把 >4GB 视频的预期大小截断，完整下载后被误判"数据不完整"。
+                            expected = when {
+                                len >= 12 -> buf.getLongLE(4)
+                                len >= 8 -> buf.getIntLE(4).toLong() and 0xFFFFFFFFL
+                                else -> 0L
+                            }
                             log { "DL_START expected=$expected" }
                         }
                         PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
@@ -368,6 +376,8 @@ class NikonCamera {
                         }
                     }
                 }
+                // 不可达（循环内必经 return@withContext），但 try 作为表达式时
+                // 编译器要求块末尾给出 Result 类型的值。
                 @Suppress("UNREACHABLE_CODE")
                 Result.failure(Exception("Unexpected end of stream"))
             } catch (e: CancellationException) {
@@ -514,5 +524,9 @@ class NikonCamera {
                 ((this[offset + 1].toInt() and 0xFF) shl 8) or
                 ((this[offset + 2].toInt() and 0xFF) shl 16) or
                 ((this[offset + 3].toInt() and 0xFF) shl 24)
+    }
+
+    private fun ByteArray.getLongLE(offset: Int): Long {
+        return (getIntLE(offset).toLong() and 0xFFFFFFFFL) or (getIntLE(offset + 4).toLong() shl 32)
     }
 }

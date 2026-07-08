@@ -8,10 +8,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nikon.transfer.BuildConfig
 import com.nikon.transfer.protocol.NikonCamera
+import com.nikon.transfer.protocol.PtpConstants
 import com.nikon.transfer.service.TransferService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -123,6 +125,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if (transferJob?.isActive == true) return
 
         transferJob = viewModelScope.launch {
+            val self = coroutineContext[Job]
             _state.update { it.copy(isTransferring = true) }
             var serviceStarted = false
 
@@ -146,9 +149,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     val task = _state.value.tasks.firstOrNull { it.status == TransferStatus.WAITING } ?: break
                     val handle = task.file.handle
 
-                    // 目标目录已存在同名文件（大小一致或大小未知），或已有同大小的重名副本 → 跳过，不重复下载。
+                    // 目标目录已存在同名文件（大小一致或任一侧大小未知），或已有同大小的重名副本 → 跳过，不重复下载。
+                    // 相机对 >4GB 对象报不出真实大小（SIZE_UNKNOWN 哨兵），与磁盘大小必然不等，
+                    // 此时按文件名匹配跳过，避免每次重传数 GB 后又落成 " (1)" 副本。
                     val existingSize = existing[task.file.fileName]
-                    if ((existingSize != null && (existingSize == task.file.size || existingSize < 0L)) ||
+                    if ((existingSize != null && (existingSize == task.file.size || existingSize < 0L ||
+                            task.file.size == PtpConstants.SIZE_UNKNOWN)) ||
                         existingSizes[task.file.fileName]?.contains(task.file.size) == true
                     ) {
                         log { "DL_SKIP existing: ${task.file.fileName}" }
@@ -186,46 +192,52 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 追踪已创建的文档，失败/取消时删除半成品，避免残留与重试时产生重名副本。
                     var fileDocUri: Uri? = null
                     try {
-                        // 写入临时名 .nkpart_原名（扩展名保留，与 mime 匹配，避免 SAF 追加扩展名）。
-                        // 下载完整后再改名成真正文件名——崩溃/被杀只会留下 .nkpart_ 半成品，绝不出现残缺的真名文件。
-                        val createdUri = DocumentsContract.createDocument(
-                            contentResolver,
-                            docUri,
-                            getMimeType(task.file.fileName),
-                            PART_PREFIX + task.file.fileName
-                        ) ?: throw Exception("无法创建文件")
-                        fileDocUri = createdUri
+                        // SAF 的建文件/开流/关闭冲刷都是跨进程 Binder + 磁盘 IO，放 IO 线程，
+                        // 不在主线程随每个文件抖一下（状态更新经 StateFlow.update，线程安全）。
+                        val result = withContext(Dispatchers.IO) {
+                            // 写入临时名 .nkpart_原名（扩展名保留，与 mime 匹配，避免 SAF 追加扩展名）。
+                            // 下载完整后再改名成真正文件名——崩溃/被杀只会留下 .nkpart_ 半成品，绝不出现残缺的真名文件。
+                            val createdUri = DocumentsContract.createDocument(
+                                contentResolver,
+                                docUri,
+                                getMimeType(task.file.fileName),
+                                PART_PREFIX + task.file.fileName
+                            ) ?: throw Exception("无法创建文件")
+                            fileDocUri = createdUri
 
-                        val outputStream = contentResolver.openOutputStream(createdUri)
-                            ?: throw Exception("无法打开文件")
+                            val outputStream = contentResolver.openOutputStream(createdUri)
+                                ?: throw Exception("无法打开文件")
 
-                        // 用大缓冲包裹 SAF 输出流，把零散的写批量化，减少 ContentProvider 往返。
-                        // 缺了它，每个 PTP-IP 数据包都要跨 Binder 写一次 SAF，吞吐直接腰斩（2M/s→<1M/s）。
-                        val result = java.io.BufferedOutputStream(outputStream, 1024 * 1024).use { out ->
-                            camera.downloadToFile(handle, out) { progress ->
-                                val speed = if (progress.elapsed > 0) {
-                                    (progress.downloaded / progress.elapsed).toLong()
-                                } else 0
-                                // 单次原子更新：同时写当前速度与该任务进度，避免每个进度 tick
-                                // 触发两次 StateFlow 发射 / 两次全量列表拷贝（5Hz 下累积可观）。
-                                _state.update { state ->
-                                    state.copy(
-                                        currentSpeed = speed,
-                                        tasks = state.tasks.map { t ->
-                                            if (t.file.handle == handle && t.status == TransferStatus.TRANSFERING) {
-                                                t.copy(
-                                                    progress = if (progress.total > 0) {
-                                                        progress.downloaded.toFloat() / progress.total
-                                                    } else 0f,
-                                                    downloaded = progress.downloaded,
-                                                    speed = speed
-                                                )
-                                            } else t
-                                        }
-                                    )
+                            // 用大缓冲包裹 SAF 输出流，把零散的写批量化，减少 ContentProvider 往返。
+                            // 缺了它，每个 PTP-IP 数据包都要跨 Binder 写一次 SAF，吞吐直接腰斩（2M/s→<1M/s）。
+                            java.io.BufferedOutputStream(outputStream, 1024 * 1024).use { out ->
+                                camera.downloadToFile(handle, out) { progress ->
+                                    val speed = if (progress.elapsed > 0) {
+                                        (progress.downloaded / progress.elapsed).toLong()
+                                    } else 0
+                                    // 单次原子更新：同时写当前速度与该任务进度，避免每个进度 tick
+                                    // 触发两次 StateFlow 发射 / 两次全量列表拷贝（5Hz 下累积可观）。
+                                    _state.update { state ->
+                                        state.copy(
+                                            currentSpeed = speed,
+                                            tasks = state.tasks.map { t ->
+                                                if (t.file.handle == handle && t.status == TransferStatus.TRANSFERING) {
+                                                    t.copy(
+                                                        progress = if (progress.total > 0) {
+                                                            progress.downloaded.toFloat() / progress.total
+                                                        } else 0f,
+                                                        downloaded = progress.downloaded,
+                                                        speed = speed
+                                                    )
+                                                } else t
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
+                        // withContext 正常返回则临时文件必已创建（否则内部已抛异常）。
+                        val createdUri = checkNotNull(fileDocUri)
 
                         result.fold(
                             onSuccess = { stats ->
@@ -248,9 +260,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     }
                                 }
                                 if (renamedUri != null) {
-                                    // 供后续任务与跨会话去重（副本按归一化名归档）。
-                                    existing[savedName] = task.file.size
-                                    existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(task.file.size)
+                                    // 供后续任务与跨会话去重（副本按归一化名归档）。记真实落盘字节数
+                                    // 而非 ObjectInfo 大小——>4GB 对象后者只是哨兵值，与磁盘对不上。
+                                    existing[savedName] = stats.bytes
+                                    existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(stats.bytes)
                                     updateTask(handle) {
                                         it.copy(
                                             status = TransferStatus.COMPLETED, progress = 1f,
@@ -290,8 +303,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             } finally {
-                _state.update { it.copy(isTransferring = false, currentSpeed = 0) }
-                TransferService.stop(getApplication())
+                // 取消下载的排空可达数秒，用户在此窗口内点"重试"会先启动新队列、后执行本收尾。
+                // 仅当本协程仍是当前传输 job 时才收尾，避免误停新队列的前台服务/误清传输状态；
+                // 被 cancelTransfer 顶掉（transferJob 已置 null）时，收尾由 cancelTransfer 负责。
+                if (transferJob === self) {
+                    _state.update { it.copy(isTransferring = false, currentSpeed = 0) }
+                    TransferService.stop(getApplication())
+                }
             }
         }
     }
@@ -345,19 +363,26 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         return map
     }
 
-    /** 删除下载失败/取消留下的半成品文件，忽略删除失败。 */
-    private fun deleteQuietly(uri: Uri?) {
+    /**
+     * 删除下载失败/取消留下的半成品文件，忽略删除失败。走 IO 线程（Binder + 磁盘）；
+     * NonCancellable 保证取消路径（协程已被 cancel）也能完成清理。
+     */
+    private suspend fun deleteQuietly(uri: Uri?) {
         if (uri == null) return
-        try {
-            DocumentsContract.deleteDocument(contentResolver, uri)
-        } catch (_: Exception) {}
+        withContext(NonCancellable + Dispatchers.IO) {
+            try {
+                DocumentsContract.deleteDocument(contentResolver, uri)
+            } catch (_: Exception) {}
+        }
     }
 
-    /** 改名；失败（如目标名已存在、部分 provider 返回 null）返回 null。 */
-    private fun renameQuietly(uri: Uri, newName: String): Uri? = try {
-        DocumentsContract.renameDocument(contentResolver, uri, newName)
-    } catch (_: Exception) {
-        null
+    /** 改名；失败（如目标名已存在、部分 provider 返回 null）返回 null。走 IO 线程。 */
+    private suspend fun renameQuietly(uri: Uri, newName: String): Uri? = withContext(Dispatchers.IO) {
+        try {
+            DocumentsContract.renameDocument(contentResolver, uri, newName)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /** 剥掉重名副本后缀："DSC_0001 (2).NEF" -> "DSC_0001.NEF"，用于与相机文件名归一化匹配。 */
@@ -393,6 +418,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun cancelTransfer() {
         transferJob?.cancel()
         transferJob = null
+        // 旧 job 的 finally 因 transferJob 已置 null 会跳过收尾，前台服务在此停止。
+        TransferService.stop(getApplication())
         _state.update { state ->
             state.copy(
                 isTransferring = false,
