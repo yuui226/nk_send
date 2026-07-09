@@ -34,9 +34,11 @@ class NikonCamera {
 
     private companion object {
         const val TAG = "NikonTransfer"
-        // 取消下载时允许就地排空的剩余数据上限：不超过它就把剩余数据读干净保住连接；
-        // 超过则排空代价高于重连（取消大视频要排空数分钟），直接断开由心跳/看护自动重连。
-        const val DRAIN_ON_CANCEL_LIMIT = 16L * 1024 * 1024
+        // 取消下载的排空安全阀：已向相机发送 Cancel 包后，在途数据只剩 ≈TCP 窗口的数 MB，
+        // 排空应秒级完成；若累计排空超过该预算仍没等到响应包，说明机型不支持 Cancel、
+        // 还在发整个文件——此时才断开由心跳/看护自动重连（断开会让相机侧会话挂起甚至
+        // 关 Wi-Fi，重连可达数十秒，"停止后重试卡很久"，所以只作为兜底而非首选）。
+        const val CANCEL_DRAIN_BUDGET = 32L * 1024 * 1024
     }
 
     /** 仅 debug 构建输出协议日志，避免 release 包泄露 handle/size 并拖慢热路径。 */
@@ -381,18 +383,23 @@ class NikonCamera {
                 @Suppress("UNREACHABLE_CODE")
                 Result.failure(Exception("Unexpected end of stream"))
             } catch (e: CancellationException) {
-                // 取消时相机仍在发送本文件剩余数据（TCP 背压堆着）。残留数据会污染 socket，
-                // 令下一条命令读到陈旧数据、协议错位（表现为取消后缩略图不再加载、重试失败）。
-                // 剩余不多：把剩余数据 + CMD_RESPONSE 读干净，保住连接（NonCancellable 保证不被打断）；
-                // 剩余太多（如取消大视频）：排空代价高于重连，直接断开，由心跳/看护自动重连。
-                // 尚未读到 START（expected==0）时剩余量未知，可能是整个文件——保守按"很大"处理走断开，
-                // 排空的最坏代价无界（数分钟），断开重连的代价有界（约 2s）。
-                val remaining = if (expected > 0) expected - totalDownloaded else Long.MAX_VALUE
+                // 取消时相机仍在发送本文件剩余数据（TCP 背压堆着），残留数据会污染 socket、
+                // 令下一条命令协议错位。处理：先发 PTP/IP Cancel 请求相机中止本事务的数据
+                // 阶段，再把在途数据排空到 CMD_RESPONSE（相机停发后在途只剩 ≈TCP 窗口的
+                // 数 MB，秒级完成）——连接保住，"停止后立刻重试"无需等重连。
+                // 安全阀：不支持 Cancel 的机型会继续发完整个文件，排空超预算即断开兜底。
                 try {
                     withContext(NonCancellable) {
-                        if (remaining <= DRAIN_ON_CANCEL_LIMIT) drainCmdResponse() else closeQuietly()
+                        sendCancel()
+                        if (!drainCmdResponse(CANCEL_DRAIN_BUDGET)) {
+                            log { "DL_CANCEL drain budget exceeded, closing" }
+                            closeQuietly()
+                        }
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                    // 排空途中连接出错：直接断开，由心跳/看护自动重连。
+                    closeQuietly()
+                }
                 throw e   // 取消须向上传播，不能包装成失败结果
             } catch (e: Exception) {
                 Result.failure(e)
@@ -506,12 +513,40 @@ class NikonCamera {
 
     private fun drainCmdResponse() {
         // 读取并丢弃直到本次传输的 CMD_RESPONSE。成功路径此时只剩 CMD_RESPONSE；
-        // 取消路径会连带把剩余的数据包一并读掉——用 raw 读避免逐包分配。
+        // 用 raw 读避免逐包分配。
         while (true) {
             val packet = cmdReader.readPacketRaw(cmdInput!!)
             if (packet.type == PtpConstants.CMD_RESPONSE) return
             if (packet.type == PtpConstants.PING) sendPong(cmdOutput)
         }
+    }
+
+    /**
+     * 带预算的排空（取消路径专用）：读取并丢弃直到 CMD_RESPONSE，返回 true；
+     * 累计排空超过 [maxBytes] 仍没等到响应（机型不理会 Cancel、还在发整个文件）返回 false。
+     */
+    private fun drainCmdResponse(maxBytes: Long): Boolean {
+        var drained = 0L
+        while (drained <= maxBytes) {
+            val packet = cmdReader.readPacketRaw(cmdInput!!)
+            when (packet.type) {
+                PtpConstants.CMD_RESPONSE -> return true
+                PtpConstants.PING -> sendPong(cmdOutput)
+                else -> drained += packet.payloadLen
+            }
+        }
+        return false
+    }
+
+    /** PTP/IP Cancel 包：请求相机中止当前事务（[tid] 为最后发出的事务号）的数据阶段。 */
+    private fun sendCancel() {
+        val pkt = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(12)
+            putInt(PtpConstants.CANCEL)
+            putInt(tid)
+        }.array()
+        cmdOutput?.write(pkt)
+        cmdOutput?.flush()
     }
 
     /** 读取小端无符号 16 位，返回 0..65535，避免高位错误码 (0xAxxx) 被符号扩展。 */

@@ -75,56 +75,86 @@ fun HomeScreen(
     val pulsing = onCameraWifi && !connected
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // ---------- 中央 Hero ----------
+        // ---------- 中央 Hero：上下弹性区按 1:2 定位——Hero 中心落在屏幕约 35~38% 高度
+        // 的视觉重心（光学中心），顶部不空旷、下方给引导文案充裕空间。权重是常数，
+        // 状态切换 Hero 依然一动不动；引导在下方区域用 Crossfade 渐变出现/消失 ----------
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
                 .padding(horizontal = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 连接中脉冲；连接成功时播放一次性"快速发散 + 图标渐变绿"的收尾动画。
+            Spacer(modifier = Modifier.weight(1f))
+
+            // 连接中脉冲；连接成功时播放"脉冲爆发散开 + 图标渐变绿"的收尾动画。
             StatusHero(color = heroColor, icon = heroIcon, pulsing = pulsing, success = connected)
 
-            // 已连接后不再显示状态文字——交给成功收尾动画，随后由外层延迟跳转到照片列表。
-            if (!connected) {
-                Spacer(modifier = Modifier.height(28.dp))
-
-                Text(
-                    text = if (onCameraWifi) "正在连接相机…" else "请连接相机 Wi-Fi",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = heroColor
-                )
-
-                // 未连相机 Wi-Fi 时：一键去系统 Wi-Fi 设置 + 两步引导。
-                if (!onCameraWifi) {
-                    Spacer(modifier = Modifier.height(24.dp))
-                    GlassButton(
-                        onClick = {
-                            try {
-                                context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-                            } catch (_: Exception) {}
+            Box(modifier = Modifier.weight(2f).fillMaxWidth()) {
+                Crossfade(
+                    targetState = when {
+                        connected -> HomeHint.NONE
+                        onCameraWifi -> HomeHint.CONNECTING
+                        else -> HomeHint.OFF_WIFI
+                    },
+                    animationSpec = tween(300),
+                    label = "homeHint",
+                    modifier = Modifier.fillMaxSize()
+                ) { hint ->
+                    when (hint) {
+                        // 已连接：交给成功收尾动画，随后由外层延迟跳转到照片列表。
+                        HomeHint.NONE -> Box(modifier = Modifier.fillMaxSize())
+                        HomeHint.CONNECTING -> Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "正在连接相机…",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentBlue
+                            )
                         }
-                    ) {
-                        Icon(Icons.Default.Wifi, contentDescription = null, tint = AccentBlue, modifier = Modifier.size(20.dp))
-                        Text(
-                            "打开 Wi-Fi 设置",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Medium,
-                            color = DarkOnBackground
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        horizontalAlignment = Alignment.Start
-                    ) {
-                        StepRow(1, "相机开启「与智能设备建立 Wi-Fi 连接」")
-                        StepRow(2, "手机 Wi-Fi 连接到相机的热点")
+                        HomeHint.OFF_WIFI -> Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "请连接相机 Wi-Fi",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = AccentOrange
+                            )
+                            Spacer(modifier = Modifier.height(24.dp))
+                            // 一键去系统 Wi-Fi 设置 + 两步引导。
+                            GlassButton(
+                                onClick = {
+                                    try {
+                                        context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                                    } catch (_: Exception) {}
+                                }
+                            ) {
+                                Icon(Icons.Default.Wifi, contentDescription = null, tint = AccentBlue, modifier = Modifier.size(20.dp))
+                                Text(
+                                    "打开 Wi-Fi 设置",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    color = DarkOnBackground
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalAlignment = Alignment.Start
+                            ) {
+                                StepRow(1, "相机开启「与智能设备建立 Wi-Fi 连接」")
+                                StepRow(2, "手机 Wi-Fi 连接到相机的热点")
+                            }
+                        }
                     }
                 }
             }
@@ -166,6 +196,9 @@ fun HomeScreen(
 // 脉冲一轮的周期（秒）与成功时的相位加速倍数。
 private const val PULSE_PERIOD_S = 2.2f
 private const val BURST_SPEED = 4f
+
+/** 连接页下半区的引导内容形态（Hero 恒定居中，引导只在下半区渐变切换）。 */
+private enum class HomeHint { NONE, CONNECTING, OFF_WIFI }
 
 /**
  * 状态 Hero：中心圆盘 + 图标。
@@ -214,12 +247,14 @@ private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, succes
                         .graphicsLayer {
                             // 相位在 graphicsLayer 块内读取：逐帧只更新图层，不触发重组。
                             val p = (phase + i / 3f).mod(1f)
-                            val s = 0.35f + p * 0.75f
+                            // 出生尺寸 0.55×180=99dp——刚好在 96dp 中心圆盘外缘冒头。
+                            // 再小的话，环最亮的前 20% 行程全藏在圆盘后面，脉冲显得又弱又淡。
+                            val s = 0.55f + p * 0.55f
                             scaleX = s
                             scaleY = s
-                            alpha = (p * 5f).coerceAtMost(1f) * (1f - p) * 0.5f * ringsAlpha
+                            alpha = (p * 5f).coerceAtMost(1f) * (1f - p) * 0.7f * ringsAlpha
                         }
-                        .border(2.dp, animColor, CircleShape)
+                        .border(3.5.dp, animColor, CircleShape)
                 )
             }
         }

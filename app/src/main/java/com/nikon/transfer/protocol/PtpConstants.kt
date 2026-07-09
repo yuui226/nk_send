@@ -12,6 +12,7 @@ object PtpConstants {
     // 8 = Event 包（事件通道上收到后直接忽略，无需常量）
     const val START_DATA_PACKET = 9
     const val DATA_PACKET = 10
+    const val CANCEL = 11          // Cancel 包：请求对端中止指定事务的数据阶段
     const val END_DATA_PACKET = 12
     const val PING = 13
     const val PONG = 14

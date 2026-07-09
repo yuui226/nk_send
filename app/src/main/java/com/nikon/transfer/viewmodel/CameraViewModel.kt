@@ -213,8 +213,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     camera = null
                     cam.close()
                     // 掉线不报错，直接进入重连（新协程，避免与当前心跳协程的取消纠缠）。
+                    // 不清空文件列表：网格保留（缩略图走缓存），断开状态由顶栏信号按钮
+                    // 承担（红色断连图标），点击缩略图有抖动+提示反馈；重连后 loadFiles
+                    // 整表刷新，不存在陈旧 handle 被使用的问题（点击已被连接检查挡住）。
                     _state.update {
-                        it.copy(isConnectedToCamera = false, files = emptyList())
+                        it.copy(isConnectedToCamera = false)
                     }
                     viewModelScope.launch { connectToCameraWithRetry() }
                     break

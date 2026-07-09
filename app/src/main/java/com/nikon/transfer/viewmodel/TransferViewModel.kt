@@ -298,8 +298,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             }
                         )
                     } catch (e: CancellationException) {
-                        deleteQuietly(fileDocUri)   // 清理取消时的半成品文件
-                        throw e                     // 取消须向上传播，交由 cancelTransfer 统一置为 CANCELLED
+                        // 取消路径【不】就地删除半成品：本清理要等协议层排空完才执行，若用户
+                        // 已点"重试"，新队列可能先建出同名 .nkpart_——SAF 文档 URI 按路径寻址，
+                        // 这里的延迟删除会把新队列刚建的文件删掉，新下载写进已解链的 FD，
+                        // 改名时 FileNotFound → 偶发"保存失败"。半成品交给每次队列启动/App
+                        // 启动的 sweep 统一清扫（.nkpart_ 前缀带前导点，相册中本就不可见）。
+                        throw e   // 取消须向上传播，交由 cancelTransfer 统一置为 CANCELLED
                     } catch (e: Exception) {
                         deleteQuietly(fileDocUri)
                         if (BuildConfig.DEBUG) {
@@ -445,12 +449,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val hasFailed = _state.value.tasks.any { it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED }
         if (!hasFailed) return
 
+        // 重试 = 重新入队：重试项移到列表尾部（队列页倒序显示，即出现在页面最上方，
+        // 与新加入的任务一个待遇），用户不用翻页就能看到它们的进展。
         _state.update { state ->
+            val (retry, others) = state.tasks.partition {
+                it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
+            }
             state.copy(
-                tasks = state.tasks.map {
-                    if (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED) {
-                        it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0)
-                    } else it
+                tasks = others + retry.map {
+                    it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0)
                 }
             )
         }
@@ -463,8 +470,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val task = _state.value.tasks.firstOrNull { it.file.handle == handle } ?: return
         if (task.status != TransferStatus.FAILED && task.status != TransferStatus.CANCELLED) return
 
-        updateTask(handle) {
-            it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0)
+        // 同 retryFailed：重试项重新入队（移到列表尾部 = 队列页最上方）。
+        _state.update { state ->
+            val rest = state.tasks.filter { it.file.handle != handle }
+            state.copy(
+                tasks = rest + task.copy(
+                    status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0
+                )
+            )
         }
 
         val dirUri = _state.value.transferDirUri ?: return

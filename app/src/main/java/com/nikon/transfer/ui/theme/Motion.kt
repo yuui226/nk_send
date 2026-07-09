@@ -41,12 +41,14 @@ object Motion {
     const val PAGE_FADE_MS = 320
 
     /**
-     * 列表/网格条目的位移动画（分组收起/展开时后续内容弹到新位置）：
-     * 轻微欠阻尼，有一点弹性但不会荡过头。
+     * 列表条目的位移动画（分组收起时下方内容"弹上来"、传输页卡片高度变化让位）。
+     * 注意：禁止用于会把条目推出屏幕的变化（如分组展开）——Lazy 布局会把移出条目
+     * 的动画目标钳在视口边缘，退场减速必然发生在边缘、条目会悬停一下才消失；
+     * 照片网格在展开前会先摘掉动画 modifier（见 ThumbnailGrid 的 animatePlacement）。
      */
     val itemPlacement: FiniteAnimationSpec<IntOffset> = spring(
-        dampingRatio = 0.8f,
-        stiffness = 380f,
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = 500f,
         visibilityThreshold = IntOffset.VisibilityThreshold
     )
 }

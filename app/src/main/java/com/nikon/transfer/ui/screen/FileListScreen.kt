@@ -8,6 +8,7 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.snap
@@ -32,7 +33,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -45,11 +46,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
@@ -59,8 +62,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -79,8 +84,10 @@ import com.nikon.transfer.viewmodel.TransferTask
 import com.nikon.transfer.viewmodel.TransferViewModel
 import com.nikon.transfer.viewmodel.currentFileProgress
 import com.nikon.transfer.viewmodel.remainingCount
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 data class FileGroup(
     val date: String,
@@ -95,6 +102,23 @@ private enum class PillMode { ICON, DONE, COUNTING }
 // 内存缓存为堆的 1/8（典型可容 200~400 张），超出由 LRU 淘汰最远端，视口附近始终新鲜。
 private const val PREFETCH_AHEAD = 200
 private const val PREFETCH_BEHIND = 12
+
+/** 正在播放收合动画的分组：[date] + 保留参与动画的前 [keep] 个格子（收起瞬间可见的那部分）。 */
+private data class CollapsingGroup(val date: String, val keep: Int)
+
+/**
+ * 手风琴收合：按 [progress]（1→0）缩减条目报告给布局的高度（内容顶部对齐、超出裁掉），
+ * 绘制时同步淡出。高度变化是逐帧真实布局，下方内容随之连续上移——不经过条目位移
+ * 动画器，不存在"移出屏幕的条目在边缘悬停"的框架问题。
+ */
+private fun Modifier.collapseHeight(progress: () -> Float): Modifier =
+    clipToBounds().layout { measurable, constraints ->
+        val placeable = measurable.measure(constraints)
+        val p = progress().coerceIn(0f, 1f)
+        layout(placeable.width, (placeable.height * p).roundToInt()) {
+            placeable.placeRelativeWithLayer(0, 0) { alpha = p }
+        }
+    }
 
 /** 从 Compose 的 Context 逐层向上找到宿主 Activity（用于返回键退出应用）。 */
 private fun Context.findActivity(): Activity? {
@@ -126,25 +150,35 @@ fun FileListScreen(
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
 
+    // 底部玻璃提示条（通用）：退出确认、"相机未连接"等复用，替代系统 Toast。
+    // hintText 在淡出期间保留，避免退场动画里文字先消失；nonce 保证连续触发重启计时。
+    var hintText by remember { mutableStateOf("") }
+    var hintVisible by remember { mutableStateOf(false) }
+    var hintNonce by remember { mutableStateOf(0) }
+    val showHint: (String) -> Unit = { text ->
+        hintText = text
+        hintVisible = true
+        hintNonce++
+    }
+    LaunchedEffect(hintNonce) {
+        if (hintVisible) {
+            delay(1800)
+            hintVisible = false
+        }
+    }
+    // 断开时点击缩略图/整组按钮：信号按钮放大缩回强调一下，配合提示条指向"病因"。
+    var signalPulse by remember { mutableStateOf(0) }
+
     // 文件列表是连接成功后的主页面：返回不回到连接页，而是"再按一次退出应用"。
-    // 提示用自绘玻璃条（见下方 exitHint），与深色玻璃语言一致，替代系统 Toast。
     val context = LocalContext.current
     var lastBackTime by remember { mutableStateOf(0L) }
-    var exitHintVisible by remember { mutableStateOf(false) }
     BackHandler {
         val now = System.currentTimeMillis()
         if (now - lastBackTime < 2000L) {
             context.findActivity()?.finish()
         } else {
             lastBackTime = now
-            exitHintVisible = true
-        }
-    }
-    // 自动隐藏；期间再按返回会更新 lastBackTime 重启计时。
-    LaunchedEffect(lastBackTime) {
-        if (exitHintVisible) {
-            delay(1800)
-            exitHintVisible = false
+            showHint("再按一次退出")
         }
     }
 
@@ -187,7 +221,7 @@ fun FileListScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = AccentBlue)
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("正在获取文件列表...", color = DarkOnSurfaceVariant)
+                    Text("正在获取文件列表…", color = DarkOnSurfaceVariant)
                 }
             }
         }
@@ -199,13 +233,14 @@ fun FileListScreen(
                     modifier = Modifier.padding(horizontal = 32.dp)
                 ) {
                     if (!state.isConnectedToCamera) {
-                        // 空列表更可能是连接断开（而非相机真的没照片）——如实提示并说明会自动重连。
+                        // 兜底：断开且列表从未加载成功（掉线不再清列表，正常断开时网格保留、
+                        // 由顶栏信号按钮指示状态，不会走到这里）。
                         Icon(Icons.Default.WifiOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = AccentOrange)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("与相机的连接已断开", color = DarkOnBackground, style = MaterialTheme.typography.titleMedium)
+                        Text("连接已断开", color = DarkOnBackground, style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "请连接到相机 Wi-Fi",
+                            "请连接相机 Wi-Fi",
                             color = DarkOnSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center
@@ -250,7 +285,11 @@ fun FileListScreen(
                 if (transferState.transferDirUri == null) {
                     showSettings = true; return@onTransferGroup
                 }
-                if (state.isConnectedToCamera && remaining.isNotEmpty()) {
+                if (!state.isConnectedToCamera) {
+                    // 未连接：信号按钮放大强调 + 提示，而不是静默无响应。
+                    signalPulse++
+                    showHint("相机未连接")
+                } else if (remaining.isNotEmpty()) {
                     haptics.tick()   // 整组入队只震一次
                     // 只加入队列、原地继续浏览，不跳转到队列页（想看进度可点右上角胶囊进入）。
                     transferViewModel.addToQueue(remaining, cameraViewModel::getCamera)
@@ -260,8 +299,11 @@ fun FileListScreen(
                 if (transferState.transferDirUri == null) {
                     showSettings = true; return@onTapFile
                 }
-                if (state.isConnectedToCamera) {
-                    haptics.tick()   // 只在真正入队时震（引导去设置/未连接时不震）
+                if (!state.isConnectedToCamera) {
+                    signalPulse++
+                    showHint("相机未连接")
+                } else {
+                    haptics.tick()   // 只在真正入队时震（引导去设置时不震）
                     transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
                 }
             }
@@ -321,12 +363,14 @@ fun FileListScreen(
                 ZMark(modifier = Modifier.height(20.dp))
             }
 
-            // "Z传" 边上的 Wi-Fi 信号按钮：默认只显示信号条，点击展开显示具体 dBm 数值。
-            // 传输慢时一眼判断是不是信号弱（信号是 CameraViewModel 每 1.5s 顺带读取，无额外轮询开销）。
-            state.wifiRssi?.let { rssi ->
-                Spacer(modifier = Modifier.width(8.dp))
-                SignalPill(rssi = rssi)
-            }
+            // 双 Z 标边上的信号按钮（常驻）：在线显示信号条（点击展开 dBm），断开显示
+            // 红色断连图标；断开时点缩略图会放大强调它并弹提示（signalPulse 驱动）。
+            Spacer(modifier = Modifier.width(8.dp))
+            SignalPill(
+                rssi = state.wifiRssi,
+                connected = state.isConnectedToCamera,
+                pulseTrigger = signalPulse
+            )
 
             // 右：传输胶囊（悬浮）。用"占满剩余宽度 + 靠右对齐"的 Box 承载，
             // 保证胶囊宽度变化时右边缘固定、只向左伸缩，不会向右溢出屏幕。
@@ -340,9 +384,9 @@ fun FileListScreen(
             }
         }
 
-        // 底部"再按一次退出"玻璃提示条（替代系统 Toast，与深色玻璃语言一致）。
+        // 底部通用玻璃提示条（退出确认 / 相机未连接等）。
         AnimatedVisibility(
-            visible = exitHintVisible,
+            visible = hintVisible,
             enter = fadeIn() + slideInVertically { it / 2 },
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier
@@ -357,7 +401,7 @@ fun FileListScreen(
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
             ) {
                 Text(
-                    "再按一次退出",
+                    hintText,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.labelLarge,
                     color = DarkOnBackground
@@ -423,13 +467,19 @@ fun QueuePill(
     LaunchedEffect(hasActive) {
         if (hasActive) sawTransfer = true
     }
+    // 取消导致的"归零"不是完成：不闪 done、不震成功震（否则取消后出现庆祝反馈，误导）。
+    // sawTransfer 在每次归零时都复位，取消那轮的记录不能污染下一轮的完成判定。
+    val hasCancelled = transferState.tasks.any { it.status == TransferStatus.CANCELLED }
     LaunchedEffect(allDone) {
         if (allDone && !prevAllDone) {
-            if (sawTransfer) haptics.success()
+            val celebrate = !hasCancelled && sawTransfer
             sawTransfer = false
-            showDoneLabel = true
-            delay(1800)
-            showDoneLabel = false
+            if (!hasCancelled) {
+                if (celebrate) haptics.success()
+                showDoneLabel = true
+                delay(1800)
+                showDoneLabel = false
+            }
         }
         prevAllDone = allDone
     }
@@ -558,12 +608,25 @@ fun QueuePill(
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
-                                    Text(
-                                        text = "$remaining",
-                                        style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-                                        color = DarkOnBackground,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    // 数字滚动：减少（传输推进）时旧数上滑、新数自下滑入；增加（新入队）反向。
+                                    // 尺寸仍 snap 交给外层宽度弹簧；clip 让滑动的数字在行内裁切，像里程表。
+                                    AnimatedContent(
+                                        targetState = remaining,
+                                        transitionSpec = {
+                                            val dir = if (targetState < initialState) 1 else -1
+                                            (slideInVertically { it / 2 * dir } + fadeIn(tween(160)))
+                                                .togetherWith(slideOutVertically { -it / 2 * dir } + fadeOut(tween(120)))
+                                                .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() }))
+                                        },
+                                        label = "count"
+                                    ) { n ->
+                                        Text(
+                                            text = "$n",
+                                            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                                            color = DarkOnBackground,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                         }
                     }
@@ -574,20 +637,23 @@ fun QueuePill(
 }
 
 /**
- * Wi-Fi 信号毛玻璃按钮：默认只显示 4 格信号条（图标样式），点击展开一并显示具体 dBm
- * 数值，再点收起。数值实时刷新（数据源每 1.5s 更新一次）。
- * "Z传"页（"Z传"按钮右侧）与队列页（返回按钮右侧）顶栏共用。
+ * Wi-Fi 信号毛玻璃按钮：相机已连接时显示 4 格信号条（点击展开具体 dBm）；
+ * 连接断开（含不在相机 Wi-Fi）时显示红色断连图标——断开状态一眼可见。
+ * [pulseTrigger] 递增时按钮轻微放大再弹性缩回（断开时点缩略图的"病因指向"反馈）。
+ * "Z传"页与队列页顶栏共用。
  */
 @Composable
-fun SignalPill(rssi: Int) {
+fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
     var expanded by remember { mutableStateOf(false) }
+    val online = connected && rssi != null
+    val r = rssi ?: -999
     // dBm 越接近 0 越强。判定从严：满格只给极好信号，稍差立刻掉格。
     //  -30↑ 满格 / -45↑ 三格 / -55↑ 两格 / -65↑ 一格 / 更弱 0 格。
     val level = when {
-        rssi >= -30 -> 4
-        rssi >= -45 -> 3
-        rssi >= -55 -> 2
-        rssi >= -65 -> 1
+        r >= -30 -> 4
+        r >= -45 -> 3
+        r >= -55 -> 2
+        r >= -65 -> 1
         else -> 0
     }
     val color = when {
@@ -596,12 +662,26 @@ fun SignalPill(rssi: Int) {
         else -> StatusError
     }
 
+    // 强调动画：trigger 递增时轻微放大、再弹性缩回（比左右抖动柔和）。
+    val pulse = remember { Animatable(1f) }
+    LaunchedEffect(pulseTrigger) {
+        if (pulseTrigger > 0) {
+            pulse.animateTo(1.15f, tween(120, easing = FastOutSlowInEasing))
+            pulse.animateTo(1f, Motion.bouncy())
+        }
+    }
+
     GlassButton(
         onClick = { expanded = !expanded },
         shape = RoundedCornerShape(22.dp),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
         // 顶栏按钮统一 36dp 高；信号条内容 15dp，在按钮内垂直居中。
-        modifier = Modifier.height(36.dp)
+        modifier = Modifier
+            .height(36.dp)
+            .graphicsLayer {
+                scaleX = pulse.value
+                scaleY = pulse.value
+            }
     ) {
         // dBm 文本用 AnimatedVisibility 逐帧驱动宽度+透明度，按钮宽度随内容自然过渡。
         // 不能用 animateContentSize + if(expanded)：那是"内容瞬间增删、容器尺寸补动画"，
@@ -613,25 +693,39 @@ fun SignalPill(rssi: Int) {
             modifier = Modifier.height(15.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 信号条：4 格递增高度，按等级点亮，颜色随强弱变化。
-            Row(
-                modifier = Modifier.fillMaxHeight(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.spacedBy(2.5.dp)
-            ) {
-                repeat(4) { i ->
-                    val on = i < level.coerceAtLeast(1)   // 至少亮一格，表示"在连接中"
-                    Box(
+            // 在线：4 格信号条；断开：红色断连图标。两态交叉淡化切换。
+            Crossfade(targetState = online, animationSpec = tween(220), label = "signalMode") { on ->
+                if (on) {
+                    Row(
+                        modifier = Modifier.fillMaxHeight(),
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(2.5.dp)
+                    ) {
+                        repeat(4) { i ->
+                            val lit = i < level.coerceAtLeast(1)   // 至少亮一格，表示"在连接中"
+                            Box(
+                                modifier = Modifier
+                                    .width(4.dp)
+                                    .height((6 + i * 3).dp)
+                                    .clip(RoundedCornerShape(1.5.dp))
+                                    .background(if (lit) color else DarkOnSurfaceVariant.copy(alpha = 0.28f))
+                            )
+                        }
+                    }
+                } else {
+                    Icon(
+                        Icons.Default.WifiOff,
+                        contentDescription = "相机未连接",
+                        tint = StatusError,
+                        // 图标比 15dp 内容行略大，溢出居中进 padding（与 dBm 文本同法）。
                         modifier = Modifier
-                            .width(4.dp)
-                            .height((6 + i * 3).dp)
-                            .clip(RoundedCornerShape(1.5.dp))
-                            .background(if (on) color else DarkOnSurfaceVariant.copy(alpha = 0.28f))
+                            .wrapContentHeight(unbounded = true)
+                            .size(18.dp)
                     )
                 }
             }
             AnimatedVisibility(
-                visible = expanded,
+                visible = expanded && online,
                 // 展开带一点弹性（与胶囊同款手感），从左侧展开、文字先露出开头。
                 enter = expandHorizontally(
                     animationSpec = Motion.bouncy(),
@@ -644,7 +738,7 @@ fun SignalPill(rssi: Int) {
                 ) + fadeOut(tween(160))
             ) {
                 Text(
-                    text = "$rssi dBm",
+                    text = "$r dBm",
                     style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                     fontWeight = FontWeight.Medium,
                     color = color,
@@ -726,7 +820,6 @@ private fun GroupHeader(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ThumbnailGrid(
     groups: List<FileGroup>,
@@ -743,6 +836,25 @@ private fun ThumbnailGrid(
     modifier: Modifier = Modifier
 ) {
     val gridState = rememberLazyGridState()
+
+    // 展开/收起动画（手风琴方案；不用条目位移动画——它对"被推出屏幕的条目"有框架级
+    // 边缘悬停，对"从屏外移入"的条目又根本不生效，大分组收起时什么动画都看不到）：
+    // - 收起：真实的高度收合。收起瞬间只保留该组当前可见的前 keep 个格子参与动画
+    //  （其余在屏外，立即移除、无感知）；这些格子按 collapseProgress 收合高度并淡出，
+    //   下方内容随布局逐帧连续上移——是布局本身在变化，不经过位移动画器，无任何钳制。
+    //   行间距烘焙在格子内部（底部 6dp），随高度一起收合，动画结束零跳变。
+    // - 展开：瞬时重排 + 被展开组格子的级联入场（淡入+放大）。不做反向增高动画：
+    //   格子从 0 高度长起时视口会一次性容纳数百行，组合成本爆炸。
+    var collapsing by remember { mutableStateOf<CollapsingGroup?>(null) }
+    val collapseProgress = remember { Animatable(1f) }
+    val toggleScope = rememberCoroutineScope()
+    var recentlyExpanded by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(recentlyExpanded) {
+        if (recentlyExpanded != null) {
+            delay(600)   // 入场窗口：展开瞬间组成的格子播入场，之后滚动进入的不播
+            recentlyExpanded = null
+        }
+    }
 
     // 预取可见区外的缩略图：向下 PREFETCH_AHEAD、向上 PREFETCH_BEHIND 张提前拉进缓存，
     // 格子滚进视野时直接命中，用户基本看不到黑格子。窗口按"可见的首/尾 cell key"去重，
@@ -784,34 +896,70 @@ private fun ThumbnailGrid(
         columns = GridCells.Fixed(columns.coerceIn(1, 4)),
         modifier = modifier,
         contentPadding = contentPadding,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        // 竖向行距烘焙在每个格子底部（6dp），随收合动画一起缩放；这里只留横向间距。
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         groups.forEach { group ->
             val collapsed = collapsedDates[group.date] == true
+            val collapsingThis = collapsing?.date == group.date
             // 分组头整行跨列，保持与列表模式一致的分组语义
             item(
                 span = { GridItemSpan(maxLineSpan) },
                 key = "header_${group.date}",
                 contentType = "header"
             ) {
-                // 分组收起/展开时，本头（及其后所有内容）弹性滑到新位置而不是闪现。
-                Column(modifier = Modifier.animateItemPlacement(Motion.itemPlacement)) {
+                Column {
                     Spacer(modifier = Modifier.height(4.dp))
                     GroupHeader(
                         group = group,
                         queuedByHandle = queuedByHandle,
-                        collapsed = collapsed,
-                        onToggleCollapse = { collapsedDates[group.date] = !collapsed },
+                        // 收合动画进行中箭头即刻转向，不等动画结束。
+                        collapsed = collapsed || collapsingThis,
+                        onToggleCollapse = {
+                            if (collapsing == null) {   // 收合动画期间忽略再次点击
+                                if (collapsed) {
+                                    // 展开：瞬时重排 + 该组格子级联入场。
+                                    recentlyExpanded = group.date
+                                    collapsedDates[group.date] = false
+                                } else {
+                                    recentlyExpanded = null
+                                    toggleScope.launch {
+                                        // 只保留当前可见的格子（+一行缓冲）参与收合动画。
+                                        val visibleKeys = gridState.layoutInfo.visibleItemsInfo
+                                            .mapNotNull { it.key as? Int }
+                                            .toHashSet()
+                                        val lastVisible = group.files.indexOfLast { it.handle in visibleKeys }
+                                        if (lastVisible < 0) {
+                                            collapsedDates[group.date] = true
+                                        } else {
+                                            collapsing = CollapsingGroup(group.date, lastVisible + 1 + columns)
+                                            collapseProgress.snapTo(1f)
+                                            collapseProgress.animateTo(0f, tween(300, easing = FastOutSlowInEasing))
+                                            collapsedDates[group.date] = true
+                                            collapsing = null
+                                        }
+                                    }
+                                }
+                            }
+                        },
                         onTransferGroup = onTransferGroup
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    // 头到首行的间距（行距已烘焙进格子底部，这里补足到与原 spacedBy 一致）。
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             }
             // 收起的分组不 emit cell：ThumbnailCell 不 compose → 不触发 GetThumb，
             // 从而"锁起来"的缩略图不加载；展开后 cell 重新 emit 才恢复加载。
-            if (!collapsed) {
-                items(group.files, key = { it.handle }, contentType = { "cell" }) { file ->
+            // 收合动画期间保留可见的前 keep 个格子，随 collapseProgress 收合。
+            if (!collapsed || collapsingThis) {
+                val files = if (collapsingThis) {
+                    group.files.take(collapsing?.keep ?: 0)
+                } else group.files
+                itemsIndexed(
+                    files,
+                    key = { _, f -> f.handle },
+                    contentType = { _, _ -> "cell" }
+                ) { index, file ->
                     ThumbnailCell(
                         file = file,
                         task = queuedByHandle[file.handle],
@@ -819,7 +967,12 @@ private fun ThumbnailGrid(
                         cameraViewModel = cameraViewModel,
                         onTapFile = onTapFile,
                         onPreview = onPreview,
-                        modifier = Modifier.animateItemPlacement(Motion.itemPlacement)
+                        reveal = group.date == recentlyExpanded,
+                        // 级联错峰：组内前 18 格按 15ms 递增，其余同批（基本都在屏外）。
+                        revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
+                        modifier = if (collapsingThis) {
+                            Modifier.collapseHeight { collapseProgress.value }
+                        } else Modifier
                     )
                 }
             }
@@ -840,8 +993,19 @@ private fun ThumbnailCell(
     cameraViewModel: CameraViewModel,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
+    reveal: Boolean = false,
+    revealDelayMs: Long = 0L,
     modifier: Modifier = Modifier
 ) {
+    // 展开入场：本组刚被展开时淡入+轻微放大、按 revealDelayMs 级联错峰；
+    // 平时（滚动进入）revealProgress 初始即 1，直接全显、零开销。
+    val revealProgress = remember { Animatable(if (reveal) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (revealProgress.value < 1f) {
+            delay(revealDelayMs)
+            revealProgress.animateTo(1f, tween(220))
+        }
+    }
     // 已加载的缩略图按 handle 记住，transfersBusy 变化不会让它闪回占位。
     var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
     // 仅在尚未加载时才尝试取；传输进行中只读缓存(allowFetch=false)，队列空闲后本效应重跑自动补载。
@@ -855,7 +1019,16 @@ private fun ThumbnailCell(
 
     Box(
         modifier = modifier
+            // 行距烘焙在格子底部：收合动画缩放整个条目（含间距），结束零跳变。
+            .padding(bottom = 6.dp)
             .aspectRatio(1f)
+            .graphicsLayer {
+                val p = revealProgress.value
+                alpha = p
+                val s = 0.94f + 0.06f * p
+                scaleX = s
+                scaleY = s
+            }
             .clip(RoundedCornerShape(8.dp))
             .background(DarkSurface)
             .onGloballyPositioned { cellBounds = it.boundsInRoot() }
@@ -944,7 +1117,7 @@ private fun LoadingMoreRow() {
             strokeWidth = 2.dp
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text("正在加载更多文件...", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceVariant)
+        Text("正在加载更多…", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceVariant)
     }
 }
 

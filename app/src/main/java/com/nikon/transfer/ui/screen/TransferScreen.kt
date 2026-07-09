@@ -1,11 +1,16 @@
 package com.nikon.transfer.ui.screen
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -33,6 +38,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +54,7 @@ import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferStatus
 import com.nikon.transfer.viewmodel.TransferViewModel
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TransferScreen(
     transferViewModel: TransferViewModel,
@@ -57,20 +64,26 @@ fun TransferScreen(
     val transferState by transferViewModel.state.collectAsState()
     // 响应式连接状态：断开/重连即时反映到重试按钮的可用性（getCamera() 不是快照状态，不能作 gating）。
     val cameraState by cameraViewModel.state.collectAsState()
-    // 停止二次确认的展开状态（提到这层，便于全屏遮罩接管"点击外部关闭"）。
+    // 停止/重试二次确认的展开状态（提到这层，便于全屏遮罩接管"点击外部关闭"）。
     var showStopConfirm by remember { mutableStateOf(false) }
+    var showRetryConfirm by remember { mutableStateOf(false) }
     // 触感反馈（与"Z传"页同一开关）；本页胶囊负责传输全部完成时的成功震动。
     val haptics = rememberHaptics(transferState.hapticsEnabled)
+
+    // 存在可重试任务（失败/取消）且未在传输：右下角显示"重试全部"FAB（与停止同位同规格）。
+    val hasRetryable = !transferState.isTransferring && transferState.tasks.any {
+        it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
+    }
 
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     // 内容 edge-to-edge（与 "Z传" 页一致，无顶部黑条）：顶部让出状态栏 + 悬浮控件；
-    // 底部让出导航栏 +（传输中）右下角悬浮停止按钮的高度。
+    // 底部让出导航栏 + 右下角悬浮按钮（停止/重试）的高度。
     val listPadding = PaddingValues(
         start = 12.dp,
         end = 12.dp,
         top = topInset + 58.dp,
-        bottom = bottomInset + (if (transferState.isTransferring) 96.dp else 12.dp)
+        bottom = bottomInset + (if (transferState.isTransferring || hasRetryable) 96.dp else 12.dp)
     )
 
     // 根需不透明底色：与"Z传"页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
@@ -93,7 +106,10 @@ fun TransferScreen(
                 // 倒序显示：最新加入队列的排在最上方（asReversed 是视图，不复制列表）。
                 items(transferState.tasks.asReversed(), key = { it.file.handle }) { task ->
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
+                        // 上方卡片因状态变化长高/缩矮时，本卡平滑让位而不是硬跳。
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .animateItemPlacement(Motion.itemPlacement),
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = when (task.status) {
@@ -105,7 +121,13 @@ fun TransferScreen(
                             }
                         )
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
+                        // 进度条/重试按钮随状态出现消失时，卡片高度平滑过渡，
+                        // 卡内图标与文字不再瞬移。
+                        Column(
+                            modifier = Modifier
+                                .animateContentSize(tween(250, easing = FastOutSlowInEasing))
+                                .padding(12.dp)
+                        ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
@@ -131,7 +153,7 @@ fun TransferScreen(
                                     )
                                     Spacer(modifier = Modifier.height(3.dp))
                                     val (subText, subColor) = when (task.status) {
-                                        TransferStatus.WAITING -> "等待传输" to DarkOnSurfaceVariant
+                                        TransferStatus.WAITING -> "等待" to DarkOnSurfaceVariant
                                         TransferStatus.TRANSFERING -> {
                                             // >4GB 对象的 file.size 只是 SIZE_UNKNOWN 哨兵，别显示假总量。
                                             val base = if (task.file.size == PtpConstants.SIZE_UNKNOWN) {
@@ -143,11 +165,11 @@ fun TransferScreen(
                                         }
                                         TransferStatus.COMPLETED ->
                                             (when {
-                                                task.skipped -> "已存在，跳过"
+                                                task.skipped -> "跳过"
                                                 // 单文件下载速度：一眼看出当前网络快慢。大小取真实落盘字节数
                                                 //（>4GB 对象的 file.size 只是哨兵值）。
                                                 task.downloadMBps > 0f -> "${formatFileSize(task.downloaded)} · %.1f MB/s".format(task.downloadMBps)
-                                                else -> "已完成 · ${formatFileSize(task.downloaded)}"
+                                                else -> formatFileSize(task.downloaded)
                                             }) to StatusConnected
                                         TransferStatus.FAILED -> (task.error ?: "传输失败") to StatusError
                                         TransferStatus.CANCELLED -> "已取消" to DarkOnSurfaceVariant
@@ -161,9 +183,11 @@ fun TransferScreen(
                                     )
                                 }
 
-                                // 尾部：状态图标（前导已被缩略图占用）。
+                                // 尾部：状态图标（前导已被缩略图占用），换状态时交叉淡化不硬切。
                                 Spacer(modifier = Modifier.width(10.dp))
-                                TaskStatusIcon(task.status, size = 22.dp)
+                                Crossfade(targetState = task.status, animationSpec = tween(220), label = "taskIcon") { st ->
+                                    TaskStatusIcon(st, size = 22.dp)
+                                }
                             }
 
                             if (task.status == TransferStatus.TRANSFERING) {
@@ -180,15 +204,28 @@ fun TransferScreen(
                                 )
                             }
 
-                            if (task.status == TransferStatus.FAILED && cameraState.isConnectedToCamera) {
+                            if (task.status == TransferStatus.FAILED) {
                                 Spacer(modifier = Modifier.height(10.dp))
-                                OutlinedButton(
+                                // 单个重试（毛玻璃小胶囊，与日期胶囊同规格）；断开时置灰而非消失。
+                                val connected = cameraState.isConnectedToCamera
+                                GlassButton(
                                     onClick = { transferViewModel.retrySingleTask(task.file.handle, cameraViewModel::getCamera) },
-                                    shape = RoundedCornerShape(8.dp)
+                                    enabled = connected,
+                                    shape = RoundedCornerShape(14.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = Modifier.height(28.dp)
                                 ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("重新传输", style = MaterialTheme.typography.labelMedium)
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        tint = if (connected) AccentBlue else DarkOnSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        "重试",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (connected) DarkOnBackground else DarkOnSurfaceVariant
+                                    )
                                 }
                             }
                         }
@@ -229,66 +266,79 @@ fun TransferScreen(
                 )
             }
 
-            // 返回键右侧："Z传"页同款 Wi-Fi 信号按钮——传输中最关心信号强弱，这里同样一眼可查。
-            cameraState.wifiRssi?.let { rssi ->
-                Spacer(modifier = Modifier.width(8.dp))
-                SignalPill(rssi = rssi)
-            }
+            // 返回键右侧："Z传"页同款信号按钮（常驻）——传输中最关心信号强弱，断开也一眼可见。
+            Spacer(modifier = Modifier.width(8.dp))
+            SignalPill(
+                rssi = cameraState.wifiRssi,
+                connected = cameraState.isConnectedToCamera
+            )
 
-            // 右：胶囊始终常驻（传输中显速度/数量，完成后 done→图标，不再切换成按钮以免高度跳动）；
-            // 有失败/取消且已停止时，在胶囊左侧显示等高的"重试全部"（出现/消失不影响胶囊右边缘）。
+            // 右：胶囊始终常驻（传输中显速度/数量，完成后 done→图标）。
+            // "重试全部"移到右下角 FAB（与停止按钮同位同规格），不再占顶栏。
             Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (!transferState.isTransferring && cameraState.isConnectedToCamera &&
-                        transferState.tasks.any {
-                            it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
-                        }
-                    ) {
-                        GlassButton(
-                            onClick = { transferViewModel.retryFailed(cameraViewModel::getCamera) },
-                            modifier = Modifier.height(36.dp)
-                        ) {
-                            Text(
-                                "重试全部",
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Medium,
-                                color = DarkOnBackground
-                            )
-                        }
-                    }
-                    QueuePill(transferState = transferState, haptics = haptics, onClick = {})
-                }
+                QueuePill(transferState = transferState, haptics = haptics, onClick = {})
             }
         }
 
-        // ---------- 右下角悬浮停止控件（毛玻璃）+ 二次确认 ----------
+        // ---------- 右下角悬浮控件（毛玻璃）+ 二次确认：传输中=停止，停止后有可重试=重试全部 ----------
+        val confirmOpen = (transferState.isTransferring && showStopConfirm) ||
+                (hasRetryable && showRetryConfirm)
+        // 全屏遮罩：确认卡展开时接管"点击外部任意处关闭"，淡入淡出，位于卡片之下、内容之上。
+        AnimatedVisibility(
+            visible = confirmOpen,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.3f))
+                    .pointerInput(Unit) {
+                        detectTapGestures {
+                            showStopConfirm = false
+                            showRetryConfirm = false
+                        }
+                    }
+                    // 连拖动一起消费：否则手指在遮罩上滑动会穿透，底下列表照样滚。
+                    .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
+            )
+        }
         if (transferState.isTransferring) {
-            // 全屏遮罩：确认卡展开时接管"点击外部任意处关闭"，淡入淡出，位于卡片之下、内容之上。
-            AnimatedVisibility(
-                visible = showStopConfirm,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.3f))
-                        .pointerInput(Unit) { detectTapGestures { showStopConfirm = false } }
-                        // 连拖动一起消费：否则手指在遮罩上滑动会穿透，底下列表照样滚。
-                        .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
-                )
-            }
-            StopControl(
+            ConfirmFab(
                 expanded = showStopConfirm,
+                icon = Icons.Default.Stop,
+                iconTint = StatusError,
+                contentDescription = "停止传输",
+                title = "停止全部传输？",
+                confirmText = "停止",
+                confirmColor = StatusError,
                 onToggle = { showStopConfirm = !showStopConfirm },
-                onConfirmStop = {
+                onConfirm = {
                     showStopConfirm = false
                     transferViewModel.cancelTransfer()
                 },
                 onDismiss = { showStopConfirm = false },
+                modifier = Modifier.align(Alignment.BottomEnd)
+            )
+        } else if (hasRetryable) {
+            // 断开时置灰禁用而非消失（取消走断开兜底时相机会短暂离线，
+            // 配合顶栏红色断连图标，用户能看懂"等重连"；重连后自动恢复可点）。
+            val connected = cameraState.isConnectedToCamera
+            ConfirmFab(
+                expanded = showRetryConfirm,
+                icon = Icons.Default.Refresh,
+                iconTint = if (connected) AccentBlue else DarkOnSurfaceVariant,
+                contentDescription = "重试失败任务",
+                title = "重试失败任务？",
+                confirmText = "重试",
+                confirmColor = AccentBlue,
+                enabled = connected,
+                onToggle = { showRetryConfirm = !showRetryConfirm },
+                onConfirm = {
+                    showRetryConfirm = false
+                    transferViewModel.retryFailed(cameraViewModel::getCamera)
+                },
+                onDismiss = { showRetryConfirm = false },
                 modifier = Modifier.align(Alignment.BottomEnd)
             )
         }
@@ -296,15 +346,23 @@ fun TransferScreen(
 }
 
 /**
- * 右下角悬浮的停止控件：一个红色停止 FAB，点击后在其左上方弹出二次确认卡片
- * （缩放动画以 FAB 所在的右下角为原点，向左上放大），确认后才真正执行停止。
+ * 右下角悬浮的"图标 FAB + 二次确认"控件（停止/重试全部共用）：毛玻璃圆形按钮，
+ * 点击后在其左上方弹出确认卡片（缩放动画以 FAB 所在的右下角为原点，向左上放大），
+ * 确认后才真正执行。
  */
 @Composable
-private fun StopControl(
+private fun ConfirmFab(
     expanded: Boolean,
+    icon: ImageVector,
+    iconTint: Color,
+    contentDescription: String,
+    title: String,
+    confirmText: String,
+    confirmColor: Color,
     onToggle: () -> Unit,
-    onConfirmStop: () -> Unit,
+    onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -315,26 +373,32 @@ private fun StopControl(
         Column(horizontalAlignment = Alignment.End) {
             AnimatedVisibility(
                 visible = expanded,
-                // 以右下角为原点缩放弹出，视觉上从停止按钮位置向左上方展开。
+                // 以右下角为原点缩放弹出，视觉上从 FAB 位置向左上方展开。
                 enter = scaleIn(transformOrigin = TransformOrigin(1f, 1f)) + fadeIn(),
                 exit = scaleOut(transformOrigin = TransformOrigin(1f, 1f)) + fadeOut()
             ) {
-                ConfirmStopCard(onConfirm = onConfirmStop, onDismiss = onDismiss)
+                ConfirmCard(
+                    title = title,
+                    confirmText = confirmText,
+                    confirmColor = confirmColor,
+                    onConfirm = onConfirm,
+                    onDismiss = onDismiss
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 停止按钮：毛玻璃圆形，内置红色停止图标。
             GlassButton(
                 onClick = onToggle,
+                enabled = enabled,
                 shape = CircleShape,
                 contentPadding = PaddingValues(16.dp),
                 modifier = Modifier.align(Alignment.End)
             ) {
                 Icon(
-                    Icons.Default.Stop,
-                    contentDescription = "停止传输",
-                    tint = StatusError,
+                    icon,
+                    contentDescription = contentDescription,
+                    tint = iconTint,
                     modifier = Modifier.size(26.dp)
                 )
             }
@@ -343,7 +407,10 @@ private fun StopControl(
 }
 
 @Composable
-private fun ConfirmStopCard(
+private fun ConfirmCard(
+    title: String,
+    confirmText: String,
+    confirmColor: Color,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -351,7 +418,7 @@ private fun ConfirmStopCard(
         shape = RoundedCornerShape(16.dp),
         color = DarkSurface,
         shadowElevation = 8.dp,
-        border = BorderStroke(1.dp, StatusError.copy(alpha = 0.4f)),
+        border = BorderStroke(1.dp, confirmColor.copy(alpha = 0.4f)),
         // 消费卡片区域的点击，避免穿透到背后的全屏遮罩而被误关闭。
         modifier = Modifier
             .widthIn(max = 260.dp)
@@ -359,16 +426,10 @@ private fun ConfirmStopCard(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "停止全部传输？",
+                text = title,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
                 color = DarkOnBackground
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "正在传输的文件会中断，已完成的会保留。",
-                style = MaterialTheme.typography.bodySmall,
-                color = DarkOnSurfaceVariant
             )
             Spacer(modifier = Modifier.height(12.dp))
             Row(
@@ -381,10 +442,10 @@ private fun ConfirmStopCard(
                 }
                 Button(
                     onClick = onConfirm,
-                    colors = ButtonDefaults.buttonColors(containerColor = StatusError),
+                    colors = ButtonDefaults.buttonColors(containerColor = confirmColor),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("停止")
+                    Text(confirmText)
                 }
             }
         }

@@ -1,28 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 尼康 Z 系列风格双 Z 标（与应用内 ZMark 同一几何：斜体剪切 0.30、错位 0.44、缝 0.06）。
+     居中缩放到自适应图标 66dp 安全区内；右 Z 先以背景色描边+填充压出分隔缝，再叠白色填充。 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 背景圆形 -->
+    <!-- 左 Z -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M39.56,35 L63.12,35 L61.64,39.94 L35.34,68.06 L53.2,68.06 L51.72,73 L28.16,73 L29.64,68.06 L55.94,39.94 L38.08,39.94 Z" />
+    <!-- 右 Z 的分隔缝（背景色外扩一圈） -->
     <path
         android:fillColor="#1E1E1E"
-        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0" />
-    <!-- 相机图标 -->
+        android:strokeColor="#1E1E1E"
+        android:strokeWidth="4.6"
+        android:strokeLineJoin="round"
+        android:pathData="M56.28,35 L79.84,35 L78.36,39.94 L52.06,68.06 L69.92,68.06 L68.44,73 L44.88,73 L46.36,68.06 L72.66,39.94 L54.8,39.94 Z" />
+    <!-- 右 Z -->
     <path
-        android:fillColor="#4FC3F7"
-        android:pathData="M38,42h32c2.2,0 4,1.8 4,4v16c0,2.2 -1.8,4 -4,4h-32c-2.2,0 -4,-1.8 -4,-4v-16c0,-2.2 1.8,-4 4,-4z" />
-    <!-- 镜头 -->
-    <path
-        android:fillColor="#1E1E1E"
-        android:pathData="M54,54m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0" />
-    <path
-        android:fillColor="#4FC3F7"
-        android:pathData="M54,54m-6,0a6,6 0,1 1,12 0a6,6 0,1 1,-12 0" />
-    <!-- 闪光灯 -->
-    <path
-        android:fillColor="#4FC3F7"
-        android:pathData="M44,38l4,-4h12l4,4"
-        android:strokeWidth="2"
-        android:strokeColor="#4FC3F7" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M56.28,35 L79.84,35 L78.36,39.94 L52.06,68.06 L69.92,68.06 L68.44,73 L44.88,73 L46.36,68.06 L72.66,39.94 L54.8,39.94 Z" />
 </vector>

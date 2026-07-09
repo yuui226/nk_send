@@ -4,7 +4,12 @@ import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -28,12 +33,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nikon.transfer.BuildConfig
 import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.viewmodel.TransferViewModel
+import kotlinx.coroutines.delay
+
+private const val CONTACT_EMAIL = "yuui226@163.com"
 
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），下拉弹窗观感：
@@ -70,6 +81,17 @@ fun SettingsOverlay(
     var panelBounds by remember { mutableStateOf<Rect?>(null) }
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
+
+    // "反馈"按钮复制邮箱后的底部提示；nonce 保证连续点击重启计时。
+    val clipboard = LocalClipboardManager.current
+    var emailCopied by remember { mutableStateOf(false) }
+    var emailCopiedNonce by remember { mutableStateOf(0) }
+    LaunchedEffect(emailCopiedNonce) {
+        if (emailCopied) {
+            delay(1800)
+            emailCopied = false
+        }
+    }
 
     // 面板测量完成即入场展开。
     LaunchedEffect(panelBounds, closing) {
@@ -247,12 +269,6 @@ fun SettingsOverlay(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         SectionLabel("触感反馈")
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            "轻点入队、长按预览、传输完成时轻震",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = DarkOnSurfaceVariant
-                        )
                     }
                     Switch(
                         checked = state.hapticsEnabled,
@@ -262,14 +278,60 @@ fun SettingsOverlay(
 
                 Spacer(Modifier.height(20.dp))
 
-                // ---------- 关于（精简页脚）----------
-                Text(
-                    text = "Z传 v${BuildConfig.VERSION_NAME} · 通过 PTP/IP 直连相机传输",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = DarkOnSurfaceVariant.copy(alpha = 0.7f)
-                )
+                // ---------- 页脚：左侧版本号，右侧毛玻璃"反馈"按钮（点击复制邮箱，
+                // 面板底部弹玻璃提示显示具体邮箱 + 已复制）----------
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Z传 v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = DarkOnSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                    Spacer(Modifier.weight(1f))
+                    GlassButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(CONTACT_EMAIL))
+                            emailCopied = true
+                            emailCopiedNonce++
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text(
+                            "反馈",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = DarkOnBackground
+                        )
+                    }
+                }
             }
           }
+        }
+
+        // 底部玻璃提示：显示已复制的具体邮箱（与列表页提示条同款视觉），在遮罩与面板之上。
+        AnimatedVisibility(
+            visible = emailCopied,
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 28.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = DarkSurface.copy(alpha = 0.9f),
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+            ) {
+                Text(
+                    text = "$CONTACT_EMAIL\n已复制邮箱",
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = DarkOnBackground,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                )
+            }
         }
     }
 }
