@@ -34,11 +34,17 @@ class NikonCamera {
 
     private companion object {
         const val TAG = "NikonTransfer"
+        // 命令/事件通道的常规读超时。
+        const val SO_TIMEOUT_MS = 60_000
         // 取消下载的排空安全阀：已向相机发送 Cancel 包后，在途数据只剩 ≈TCP 窗口的数 MB，
         // 排空应秒级完成；若累计排空超过该预算仍没等到响应包，说明机型不支持 Cancel、
         // 还在发整个文件——此时才断开由心跳/看护自动重连（断开会让相机侧会话挂起甚至
         // 关 Wi-Fi，重连可达数十秒，"停止后重试卡很久"，所以只作为兜底而非首选）。
         const val CANCEL_DRAIN_BUDGET = 32L * 1024 * 1024
+        // 排空期间的读超时：部分机型收到 Cancel 停发数据后并不回 CMD_RESPONSE，按常规
+        // 60s 超时会抱着 ioMutex 白等一分钟——重试的首个下载全程被挡住，表现为
+        // "停止后重试卡半天没速度"。静默 3s 即认定连接不可用，断开走自动重连。
+        const val CANCEL_DRAIN_TIMEOUT_MS = 3_000
     }
 
     /** 仅 debug 构建输出协议日志，避免 release 包泄露 handle/size 并拖慢热路径。 */
@@ -55,7 +61,7 @@ class NikonCamera {
         try {
             cmdSocket = Socket().apply {
                 tcpNoDelay = true
-                soTimeout = 60000
+                soTimeout = SO_TIMEOUT_MS
                 // 显式加大接收缓冲，撑起 TCP 接收窗口（4MB 远大于本地 Wi-Fi 所需，不会成为瓶颈；
                 // 在延迟稍高时也能避免小窗口拖慢吞吐）。必须在 connect 前设置才对窗口缩放生效。
                 receiveBufferSize = 4 * 1024 * 1024
@@ -82,7 +88,7 @@ class NikonCamera {
             val sessionId = payload.getIntLE(0)
 
             evtSocket = Socket().apply {
-                soTimeout = 60000
+                soTimeout = SO_TIMEOUT_MS
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), 5000)
             }
             evtInput = evtSocket!!.getInputStream()
@@ -204,15 +210,21 @@ class NikonCamera {
     }
 
     /**
-     * 通过 PTP GetThumb 获取缩略图 JPEG 字节。相机明确表示无缩略图返回 null；
-     * IO 失败则抛出——调用方以此区分"确实没有"（可负缓存、不再重试）与"瞬时失败"
-     *（掉线等，重连后仍可加载）。与其它命令共用 ioMutex。
+     * 通过 PTP GetThumb 获取缩略图 JPEG 字节。相机【确认】无缩略图（No_Thumbnail_Present /
+     * Invalid_Object_Handle）返回 null——调用方可安全负缓存、不再重试；
+     * 其它非 OK 响应（如设备忙）与 IO 失败一律抛出——那是瞬时状态，负缓存会把
+     * 恰好赶上相机忙碌时段的整批缩略图永久打成"无图"。与其它命令共用 ioMutex。
      */
     suspend fun getThumbnail(handle: Int): ByteArray? = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             sendCmd(PtpConstants.GET_THUMB, handle)
             val (respCode, data) = recvRespWithPayload()
-            if (respCode == PtpConstants.RESPONSE_OK) data else null
+            when (respCode) {
+                PtpConstants.RESPONSE_OK -> data
+                PtpConstants.NO_THUMBNAIL_PRESENT,
+                PtpConstants.INVALID_OBJECT_HANDLE -> null
+                else -> throw Exception("GetThumb: ${PtpConstants.translateResponse(respCode)}")
+            }
         }
     }
 
@@ -317,7 +329,7 @@ class NikonCamera {
                     } else null
 
                 while (true) {
-                    // 协作式取消：在每个包边界检查，使 cancelTransfer() 能及时中断
+                    // 协作式取消：在每个包边界检查，使协程取消（仅 App 退出时发生）能及时中断
                     ensureActive()
                     // 零拷贝读取：直接从共享缓冲区写入，避免每包一次全量分配+复制。
                     val rt0 = System.nanoTime()
@@ -391,13 +403,18 @@ class NikonCamera {
                 try {
                     withContext(NonCancellable) {
                         sendCancel()
-                        if (!drainCmdResponse(CANCEL_DRAIN_BUDGET)) {
+                        // 排空期间收紧读超时：相机停发数据又不回响应包时 3s 即放弃，
+                        // 不再按常规 60s 干等（那正是"停止后重试卡半天"的来源）。
+                        cmdSocket?.soTimeout = CANCEL_DRAIN_TIMEOUT_MS
+                        if (drainCmdResponse(CANCEL_DRAIN_BUDGET)) {
+                            cmdSocket?.soTimeout = SO_TIMEOUT_MS   // 连接保住，恢复常规超时
+                        } else {
                             log { "DL_CANCEL drain budget exceeded, closing" }
                             closeQuietly()
                         }
                     }
                 } catch (_: Exception) {
-                    // 排空途中连接出错：直接断开，由心跳/看护自动重连。
+                    // 排空静默超时/连接出错：直接断开，由心跳/看护自动重连。
                     closeQuietly()
                 }
                 throw e   // 取消须向上传播，不能包装成失败结果

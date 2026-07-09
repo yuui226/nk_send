@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import com.nikon.transfer.ui.theme.DarkOnBackground
+import com.nikon.transfer.ui.theme.AppTheme
 
 // 归一化几何参数（均为高度的倍数），改这里即可整体调形。
 private const val BAR = 0.13f      // 横杠厚度
@@ -31,7 +31,7 @@ private const val ASPECT = ZW + SHEAR + DX   // 整个标志的宽高比
 @Composable
 fun ZMark(
     modifier: Modifier = Modifier,
-    color: Color = DarkOnBackground
+    color: Color = AppTheme.colors.onBackground
 ) {
     Canvas(
         modifier = modifier

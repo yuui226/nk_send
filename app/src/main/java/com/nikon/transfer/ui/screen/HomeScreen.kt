@@ -60,12 +60,13 @@ fun HomeScreen(
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
 
+    val colors = AppTheme.colors
     val connected = state.isConnectedToCamera
     val onCameraWifi = state.isWifiConnected
     val heroColor = when {
-        connected -> StatusConnected
-        onCameraWifi -> AccentBlue
-        else -> AccentOrange
+        connected -> colors.statusConnected
+        onCameraWifi -> colors.accentBlue
+        else -> colors.accentOrange
     }
     val heroIcon = when {
         connected -> Icons.Default.CheckCircle
@@ -114,7 +115,7 @@ fun HomeScreen(
                                 text = "正在连接相机…",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentBlue
+                                color = colors.accentBlue
                             )
                         }
                         HomeHint.OFF_WIFI -> Column(
@@ -127,7 +128,7 @@ fun HomeScreen(
                                 text = "请连接相机 Wi-Fi",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = AccentOrange
+                                color = colors.accentOrange
                             )
                             Spacer(modifier = Modifier.height(24.dp))
                             // 一键去系统 Wi-Fi 设置 + 两步引导。
@@ -138,12 +139,12 @@ fun HomeScreen(
                                     } catch (_: Exception) {}
                                 }
                             ) {
-                                Icon(Icons.Default.Wifi, contentDescription = null, tint = AccentBlue, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Default.Wifi, contentDescription = null, tint = colors.accentBlue, modifier = Modifier.size(20.dp))
                                 Text(
                                     "打开 Wi-Fi 设置",
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Medium,
-                                    color = DarkOnBackground
+                                    color = colors.onBackground
                                 )
                             }
                             Spacer(modifier = Modifier.height(24.dp))
@@ -210,6 +211,7 @@ private enum class HomeHint { NONE, CONNECTING, OFF_WIFI }
  */
 @Composable
 private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, success: Boolean) {
+    val colors = AppTheme.colors
     val animColor by animateColorAsState(targetValue = color, animationSpec = tween(500), label = "heroColor")
 
     // 连续相位：每帧按当前速度累加，成功时速度平滑升到 BURST_SPEED。
@@ -276,17 +278,19 @@ private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, succes
                     scaleY = iconPop.value
                 }
                 .clip(CircleShape)
-                // 毛玻璃：状态色淡底 + 自上而下白色高光 + 浅色描边。
-                .background(animColor.copy(alpha = 0.15f))
+                // 毛玻璃：高光打底、状态色淡罩在上——浅色主题的高光较浓（白 60%），
+                // 若把状态色垫在高光下面会被洗成一片白，圆盘失去状态感；
+                // 深色主题两层透明度都很低，先后顺序视觉上无差别。
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.16f), Color.White.copy(alpha = 0.04f))
+                        listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
                     )
                 )
+                .background(animColor.copy(alpha = 0.15f))
                 .border(
                     width = 1.dp,
                     brush = Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.4f), Color.White.copy(alpha = 0.1f))
+                        listOf(colors.glassBorderTop, colors.glassBorderBottom)
                     ),
                     shape = CircleShape
                 ),
@@ -303,26 +307,27 @@ private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, succes
 /** 引导步骤行：序号圆点 + 说明文字。 */
 @Composable
 private fun StepRow(index: Int, text: String) {
+    val colors = AppTheme.colors
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
                 .size(22.dp)
                 .clip(CircleShape)
-                .background(DarkSurfaceVariant),
+                .background(colors.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 "$index",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                color = AccentBlue
+                color = colors.accentBlue
             )
         }
         Spacer(modifier = Modifier.width(10.dp))
         Text(
             text,
             style = MaterialTheme.typography.bodyMedium,
-            color = DarkOnSurfaceVariant
+            color = colors.onSurfaceVariant
         )
     }
 }

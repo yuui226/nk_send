@@ -40,6 +40,8 @@ import com.nikon.transfer.viewmodel.CameraViewModel
  * 全屏照片预览层：显示缓存缩略图的**未裁切**（Fit）完整画面，可左右翻页浏览整份列表。
  * 整体从被长按格子 [anchorRect] 的位置缩放展开，关闭时反向缩回（从哪来回哪去）。
  * 不下载原图（缩略图低清但瞬开、不抢传输通道）。
+ * 本层在深浅两种主题下都保持黑底沉浸式（照片查看器惯例，黑底最衬照片），
+ * 因此内部直接用深色常量而非主题 token——这是有意的，不参与深浅切换。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -47,7 +49,6 @@ fun PhotoPreviewOverlay(
     files: List<NikonCamera.FileInfo>,
     initialIndex: Int,
     anchorRect: Rect?,
-    transfersBusy: Boolean,
     cameraViewModel: CameraViewModel,
     onDismiss: () -> Unit
 ) {
@@ -117,7 +118,6 @@ fun PhotoPreviewOverlay(
         ) { page ->
             PreviewPage(
                 file = files[page],
-                transfersBusy = transfersBusy,
                 cameraViewModel = cameraViewModel,
                 onTap = startClose
             )
@@ -144,18 +144,17 @@ fun PhotoPreviewOverlay(
 @Composable
 private fun PreviewPage(
     file: NikonCamera.FileInfo,
-    transfersBusy: Boolean,
     cameraViewModel: CameraViewModel,
     onTap: () -> Unit
 ) {
     var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
-    // 允许取仍为 null → 该文件确实没有缩略图（如部分视频）。
+    // 取过仍为 null → 该文件确实没有缩略图（如部分视频）。
+    // 用户正盯着的预览始终允许取图；传输中请求排到文件间隙执行，等待期间显示加载圈。
     var noThumb by remember(file.handle) { mutableStateOf(false) }
-    LaunchedEffect(file.handle, transfersBusy) {
+    LaunchedEffect(file.handle) {
         if (thumbnail == null && !noThumb) {
-            val t = cameraViewModel.loadThumbnail(file.handle, allowFetch = !transfersBusy)
-            if (t != null) thumbnail = t
-            else if (!transfersBusy) noThumb = true
+            val t = cameraViewModel.loadThumbnail(file.handle)
+            if (t != null) thumbnail = t else noThumb = true
         }
     }
 

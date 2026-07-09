@@ -6,6 +6,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
 import android.util.LruCache
@@ -273,13 +274,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 返回 null；否则经 PTP GetThumb 取字节、在后台线程解码并入缓存。同 handle 的并发请求
      * 共享同一次取图。与下载共用 ioMutex，串行安全；相机未连接返回 null。
      *
-     * @param allowFetch 为 false 时只读缓存、不发起新的 GetThumb —— 用于"传输进行中让路给下载"，
-     *                   已缓存的缩略图仍会显示，未缓存的等队列空闲后再补载。
+     * 传输进行中也允许请求：ioMutex 在单个文件下载期间被持有，缩略图请求只会排队到
+     * 当前文件传完的间隙执行，不会拖慢传输中的文件本身。"传输期间少取图"由 UI 层
+     * 收窄预取窗口实现（见 FileListScreen 的 PREFETCH_AHEAD_BUSY），已缓存即静默。
      */
-    suspend fun loadThumbnail(handle: Int, allowFetch: Boolean = true): ImageBitmap? {
+    suspend fun loadThumbnail(handle: Int): ImageBitmap? {
         thumbnailCache.get(handle)?.let { return it }
         if (handle in noThumbHandles) return null
-        if (!allowFetch) return null
         // 复用进行中的请求（跳过已被取消但尚未从表中清理的条目）。
         val entry = inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled } ?: run {
             val cam = camera ?: return null
@@ -300,26 +301,93 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * 裁掉缩略图里烘焙的黑边：相机把 3:2（照片）/16:9（视频）画面塞进 4:3 缩略图，
+     * 上下（竖构图时罕见地左右）带黑条。从四边向内逐行/列扫描，一条线上 ≥97% 采样点
+     * 近黑即算黑边；黑边必须两侧成对且近似对称（letterbox 的特征），否则视为画面自身的
+     * 暗部，不裁。扫描越过 [BAR_MAX_FRACTION] 上限（整图偏暗，如夜景）也不裁。
+     * 检出后每侧多裁 1px，吃掉 JPEG 在黑边交界处的灰色过渡线，边缘干净"刚刚好"。
+     * 仅在解码时执行一次（后台线程），结果入缓存，滚动与传输热路径零开销。
+     */
+    private fun cropLetterbox(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w < 16 || h < 16) return src
+        val buf = IntArray(maxOf(w, h))
+
+        // 横线（y 行）或竖线（x 列）是否几乎全为近黑像素。隔点采样，量级仅几千次整数比较。
+        fun lineIsBlack(index: Int, horizontal: Boolean): Boolean {
+            val n = if (horizontal) w else h
+            if (horizontal) src.getPixels(buf, 0, w, 0, index, w, 1)
+            else src.getPixels(buf, 0, 1, index, 0, 1, h)
+            var dark = 0
+            var total = 0
+            var i = 0
+            while (i < n) {
+                val p = buf[i]
+                if ((p ushr 16 and 0xFF) < BAR_BLACK_MAX &&
+                    (p ushr 8 and 0xFF) < BAR_BLACK_MAX &&
+                    (p and 0xFF) < BAR_BLACK_MAX
+                ) dark++
+                total++
+                i += 2
+            }
+            return dark * 100 >= total * 97
+        }
+
+        // 从两端向内数黑线；不成对/不对称/越过上限均按"无黑边"处理，成对时各 +1px 裁掉过渡线。
+        fun scanPair(size: Int, isBlack: (Int) -> Boolean): Pair<Int, Int> {
+            val limit = (size * BAR_MAX_FRACTION).toInt()
+            var a = 0
+            while (a < limit && isBlack(a)) a++
+            var b = 0
+            while (b < limit && isBlack(size - 1 - b)) b++
+            return if (a == 0 || b == 0 || a >= limit || b >= limit || kotlin.math.abs(a - b) > 3) 0 to 0
+            else a + 1 to b + 1
+        }
+
+        val (top, bottom) = scanPair(h) { y -> lineIsBlack(y, horizontal = true) }
+        val (left, right) = scanPair(w) { x -> lineIsBlack(x, horizontal = false) }
+        if (top == 0 && left == 0) return src
+        return Bitmap.createBitmap(src, left, top, w - left - right, h - top - bottom)
+    }
+
     private suspend fun fetchAndDecodeThumb(cam: NikonCamera, handle: Int): ImageBitmap? {
         return try {
             val bytes = cam.getThumbnail(handle)
             if (bytes == null || bytes.isEmpty()) {
                 noThumbHandles.add(handle)   // 相机明确表示无缩略图：负缓存，不再重试
+                log { "THUMB no-thumb handle=$handle (resp non-OK / empty)" }
                 return null
             }
             val image = withContext(Dispatchers.Default) {
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                // 解码后立即精确裁掉烘焙在缩略图里的黑边（3:2/16:9 塞 4:3 的上下黑条），
+                // 裁好的位图进缓存——列表格子/队列小图/预览全都拿到无黑边的图，
+                // UI 层不再需要"放大遮边"的近似 hack。
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    ?.let { cropLetterbox(it) }
+                    ?.asImageBitmap()
             }
             if (image == null) {
                 noThumbHandles.add(handle)   // 字节取到但解码失败：同样视为无缩略图
+                log { "THUMB decode failed handle=$handle bytes=${bytes.size}" }
                 return null
             }
             thumbnailCache.put(handle, image)
             image
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
-        } catch (_: Exception) {
-            null   // IO 瞬时失败（掉线等）：不负缓存，重连后仍可加载
+        } catch (e: Exception) {
+            // IO 瞬时失败（掉线等）：不负缓存，重连后仍可加载
+            log { "THUMB fetch failed handle=$handle: ${e.javaClass.simpleName}: ${e.message}" }
+            null
+        }
+    }
+
+    /** 仅 debug 构建输出缩略图链路日志（与协议层同 TAG，logcat 过滤 NikonTransfer 即可）。 */
+    private inline fun log(message: () -> String) {
+        if (com.nikon.transfer.BuildConfig.DEBUG) {
+            android.util.Log.d("NikonTransfer", message())
         }
     }
 
@@ -340,5 +408,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val KEEPALIVE_INTERVAL_MS = 10_000L
         const val RETRY_INTERVAL_MS = 2_000L
         const val WATCH_INTERVAL_MS = 1_500L
+        // 黑边判定：近黑像素的通道上限（JPEG 压缩后黑条并非纯黑，留噪声余量）；
+        // 黑边占边长的上限——3:2 塞 4:3 为 5.6%、16:9 为 12.5%，超过 15% 视为画面本身偏暗。
+        const val BAR_BLACK_MAX = 32
+        const val BAR_MAX_FRACTION = 0.15f
     }
 }

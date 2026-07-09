@@ -55,7 +55,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -85,6 +84,8 @@ import com.nikon.transfer.viewmodel.TransferViewModel
 import com.nikon.transfer.viewmodel.currentFileProgress
 import com.nikon.transfer.viewmodel.remainingCount
 import kotlin.math.roundToInt
+import com.nikon.transfer.BuildConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -97,11 +98,13 @@ data class FileGroup(
 /** 队列胶囊的三种内容形态：入口图标 / 完成短标 / 计数（速度+剩余数）。 */
 private enum class PillMode { ICON, DONE, COUNTING }
 
-// 缩略图预取窗口：可见区之后/之前各多拉多少张进缓存。向下开到 200（约十二屏，3 列时），
-// 空闲时后台持续填充；串行排队 + 窗口变化即取消，不会挤占可见格子和传输。
-// 内存缓存为堆的 1/8（典型可容 200~400 张），超出由 LRU 淘汰最远端，视口附近始终新鲜。
-private const val PREFETCH_AHEAD = 200
-private const val PREFETCH_BEHIND = 12
+// 缩略图预取：空闲时【全量】填充——以视口为界，先把下方所有缩略图由近及远拉进缓存，
+// 再补上方的，直到整个列表（展开的分组）都有图；窗口移动即从新位置重来（由近及远，
+// 缓存命中直接跳过，重扫近乎零开销），LRU 超容时淘汰最远端、视口附近始终新鲜。
+// 传输进行中收窄为"可见区 + 后面 20 张"的保守窗口——只补齐眼前这一屏多一点，
+// 补完即静默把通道让给传输（缩略图与下载共用一条 PTP 连接，传输中的请求只会排到
+// 文件间隙执行，代价是文件之间多一点间隙，且加载完就没有了）。
+private const val PREFETCH_AHEAD_BUSY = 20
 
 /** 正在播放收合动画的分组：[date] + 保留参与动画的前 [keep] 个格子（收起瞬间可见的那部分）。 */
 private data class CollapsingGroup(val date: String, val keep: Int)
@@ -110,8 +113,9 @@ private data class CollapsingGroup(val date: String, val keep: Int)
  * 手风琴收合：按 [progress]（1→0）缩减条目报告给布局的高度（内容顶部对齐、超出裁掉），
  * 绘制时同步淡出。高度变化是逐帧真实布局，下方内容随之连续上移——不经过条目位移
  * 动画器，不存在"移出屏幕的条目在边缘悬停"的框架问题。
+ * 列表页分组收合与队列页卡片移除共用（包内共享）。
  */
-private fun Modifier.collapseHeight(progress: () -> Float): Modifier =
+internal fun Modifier.collapseHeight(progress: () -> Float): Modifier =
     clipToBounds().layout { measurable, constraints ->
         val placeable = measurable.measure(constraints)
         val p = progress().coerceIn(0f, 1f)
@@ -145,6 +149,7 @@ fun FileListScreen(
 ) {
     val state by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
+    val colors = AppTheme.colors
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
@@ -214,14 +219,14 @@ fun FileListScreen(
     }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
-    Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
+    Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (state.isLoadingFiles && state.files.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = AccentBlue)
+                    CircularProgressIndicator(color = colors.accentBlue)
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("正在获取文件列表…", color = DarkOnSurfaceVariant)
+                    Text("正在获取文件列表…", color = colors.onSurfaceVariant)
                 }
             }
         }
@@ -235,13 +240,13 @@ fun FileListScreen(
                     if (!state.isConnectedToCamera) {
                         // 兜底：断开且列表从未加载成功（掉线不再清列表，正常断开时网格保留、
                         // 由顶栏信号按钮指示状态，不会走到这里）。
-                        Icon(Icons.Default.WifiOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = AccentOrange)
+                        Icon(Icons.Default.WifiOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = colors.accentOrange)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("连接已断开", color = DarkOnBackground, style = MaterialTheme.typography.titleMedium)
+                        Text("连接已断开", color = colors.onBackground, style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             "请连接相机 Wi-Fi",
-                            color = DarkOnSurfaceVariant,
+                            color = colors.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center
                         )
@@ -254,18 +259,18 @@ fun FileListScreen(
                                 } catch (_: Exception) {}
                             }
                         ) {
-                            Icon(Icons.Default.Wifi, contentDescription = null, tint = AccentBlue, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Wifi, contentDescription = null, tint = colors.accentBlue, modifier = Modifier.size(20.dp))
                             Text(
                                 "打开 Wi-Fi 设置",
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Medium,
-                                color = DarkOnBackground
+                                color = colors.onBackground
                             )
                         }
                     } else {
-                        Icon(Icons.Default.FolderOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = DarkOnSurfaceVariant)
+                        Icon(Icons.Default.FolderOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = colors.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("相机中没有照片", color = DarkOnSurfaceVariant)
+                        Text("相机中没有照片", color = colors.onSurfaceVariant)
                     }
                 }
             }
@@ -308,7 +313,8 @@ fun FileListScreen(
                 }
             }
 
-            // transfersBusy 时缩略图让路：只用缓存，不发起新的 GetThumb，避免抢占下载通道。
+            // transfersBusy 时缩略图转保守模式：可见格子照常加载、预取窗口收窄到 +20，
+            // 加载齐即静默——不再出现"点了传输,列表突然不出图"的观感。
             ThumbnailGrid(
                 groups = groups,
                 queuedByHandle = queuedByHandle,
@@ -333,8 +339,8 @@ fun FileListScreen(
                 .height(topInset + 56.dp)
                 .background(
                     Brush.verticalGradient(
-                        0f to DarkBackground.copy(alpha = 0.85f),
-                        0.45f to DarkBackground.copy(alpha = 0.5f),
+                        0f to colors.background.copy(alpha = 0.85f),
+                        0.45f to colors.background.copy(alpha = 0.5f),
                         1f to Color.Transparent
                     )
                 )
@@ -396,15 +402,15 @@ fun FileListScreen(
         ) {
             Surface(
                 shape = RoundedCornerShape(22.dp),
-                color = DarkSurface.copy(alpha = 0.9f),
+                color = colors.glassSurfaceHeavy,
                 shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+                border = BorderStroke(1.dp, colors.glassPanelBorder)
             ) {
                 Text(
                     hintText,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.labelLarge,
-                    color = DarkOnBackground
+                    color = colors.onBackground
                 )
             }
         }
@@ -425,7 +431,6 @@ fun FileListScreen(
                     files = flatFiles,
                     initialIndex = idx,
                     anchorRect = previewAnchor,
-                    transfersBusy = transfersBusy,
                     cameraViewModel = cameraViewModel,
                     onDismiss = { previewIndex = null }
                 )
@@ -440,6 +445,7 @@ fun QueuePill(
     haptics: Haptics,
     onClick: () -> Unit
 ) {
+    val colors = AppTheme.colors
     val remaining = transferState.remainingCount
     val allDone = remaining == 0
     val transferring = transferState.isTransferring
@@ -506,7 +512,7 @@ fun QueuePill(
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(22.dp),
-        color = DarkSurface.copy(alpha = 0.45f),   // 毛玻璃半透明底（与 "Z传" 一致）
+        color = colors.glassSurface,   // 毛玻璃半透明底（与 "Z传" 一致）
         shadowElevation = 4.dp,
         modifier = Modifier
             .height(36.dp)
@@ -521,7 +527,7 @@ fun QueuePill(
                         .matchParentSize()
                         .drawBehind {
                             drawRect(
-                                color = AccentBlue.copy(alpha = 0.35f),
+                                color = colors.accentBlue.copy(alpha = 0.35f),
                                 size = Size(size.width * barFraction, size.height)
                             )
                         }
@@ -533,13 +539,13 @@ fun QueuePill(
                     .matchParentSize()
                     .background(
                         brush = Brush.verticalGradient(
-                            listOf(Color.White.copy(alpha = 0.14f), Color.White.copy(alpha = 0.03f))
+                            listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
                         )
                     )
                     .border(
                         width = 1.dp,
                         brush = Brush.verticalGradient(
-                            listOf(Color.White.copy(alpha = 0.4f), Color.White.copy(alpha = 0.08f))
+                            listOf(colors.glassBorderTop, colors.glassBorderBottom)
                         ),
                         shape = RoundedCornerShape(22.dp)
                     )
@@ -580,7 +586,7 @@ fun QueuePill(
                                 Icon(
                                     imageVector = Icons.Default.Checklist,
                                     contentDescription = "传输",
-                                    tint = StatusConnected,
+                                    tint = colors.statusConnected,
                                     modifier = Modifier
                                         .padding(horizontal = 12.dp)
                                         .size(22.dp)
@@ -589,7 +595,7 @@ fun QueuePill(
                                 Text(
                                     text = "done",
                                     style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-                                    color = StatusConnected,
+                                    color = colors.statusConnected,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 18.dp)
                                 )
@@ -604,7 +610,7 @@ fun QueuePill(
                                         Text(
                                             text = formatSpeed(transferState.currentSpeed),
                                             style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-                                            color = AccentBlue,
+                                            color = colors.accentBlue,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -623,7 +629,7 @@ fun QueuePill(
                                         Text(
                                             text = "$n",
                                             style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-                                            color = DarkOnBackground,
+                                            color = colors.onBackground,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -644,6 +650,7 @@ fun QueuePill(
  */
 @Composable
 fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
+    val colors = AppTheme.colors
     var expanded by remember { mutableStateOf(false) }
     val online = connected && rssi != null
     val r = rssi ?: -999
@@ -657,9 +664,9 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
         else -> 0
     }
     val color = when {
-        level == 4 -> StatusConnected
-        level >= 2 -> AccentOrange
-        else -> StatusError
+        level == 4 -> colors.statusConnected
+        level >= 2 -> colors.accentOrange
+        else -> colors.statusError
     }
 
     // 强调动画：trigger 递增时轻微放大、再弹性缩回（比左右抖动柔和）。
@@ -708,7 +715,7 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
                                     .width(4.dp)
                                     .height((6 + i * 3).dp)
                                     .clip(RoundedCornerShape(1.5.dp))
-                                    .background(if (lit) color else DarkOnSurfaceVariant.copy(alpha = 0.28f))
+                                    .background(if (lit) color else colors.onSurfaceVariant.copy(alpha = 0.28f))
                             )
                         }
                     }
@@ -716,7 +723,7 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
                     Icon(
                         Icons.Default.WifiOff,
                         contentDescription = "相机未连接",
-                        tint = StatusError,
+                        tint = colors.statusError,
                         // 图标比 15dp 内容行略大，溢出居中进 padding（与 dBm 文本同法）。
                         modifier = Modifier
                             .wrapContentHeight(unbounded = true)
@@ -761,6 +768,7 @@ private fun GroupHeader(
     onToggleCollapse: () -> Unit,
     onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit
 ) {
+    val colors = AppTheme.colors
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
@@ -782,12 +790,12 @@ private fun GroupHeader(
                 text = formatDateHeader(group.date),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
-                color = DarkOnBackground
+                color = colors.onBackground
             )
             Icon(
                 Icons.Default.ExpandMore,
                 contentDescription = if (collapsed) "展开" else "收起",
-                tint = AccentBlue,
+                tint = colors.accentBlue,
                 modifier = Modifier
                     .size(18.dp)
                     .rotate(chevron)
@@ -796,7 +804,7 @@ private fun GroupHeader(
             Text(
                 text = "${group.files.size}",
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
-                color = DarkOnSurfaceVariant
+                color = colors.onSurfaceVariant
             )
         }
         Spacer(modifier = Modifier.weight(1f))
@@ -813,7 +821,7 @@ private fun GroupHeader(
             Icon(
                 if (allQueued) Icons.Default.Check else Icons.Default.Add,
                 contentDescription = if (allQueued) "已全部加入队列" else "传输整组",
-                tint = if (allQueued) StatusConnected else AccentBlue,
+                tint = if (allQueued) colors.statusConnected else colors.accentBlue,
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -856,37 +864,84 @@ private fun ThumbnailGrid(
         }
     }
 
-    // 预取可见区外的缩略图：向下 PREFETCH_AHEAD、向上 PREFETCH_BEHIND 张提前拉进缓存，
-    // 格子滚进视野时直接命中，用户基本看不到黑格子。窗口按"可见的首/尾 cell key"去重，
-    // 滚动一行才重发；collectLatest 让窗口变化即取消旧批次（"滚走剪枝"语义与格子一致）。
+    // 缩略图后台填充：
+    // - 空闲：持续填充直到整个列表（展开的分组）全部有图——从启动时的视口位置起、
+    //   到底回绕补前面。【滚动绝不打断也不重启】：用户正看的格子由格子自身的请求即时
+    //   加载（与填充共享 in-flight 去重，天然优先），后台扫后台的，互不干扰。
+    //   只有分组展开状态变化 / 文件列表更新 / 传输开始才重启扫描。
+    // - 传输中：收窄为跟随视口的"可见区 + 后面 PREFETCH_AHEAD_BUSY 张"保守窗口，
+    //   补完静默让路（请求经公平 ioMutex 排到文件间隙执行，不拖慢传输中的文件）。
     LaunchedEffect(groups, transfersBusy) {
-        snapshotFlow {
-            val visible = gridState.layoutInfo.visibleItemsInfo
-            Triple(
-                visible.firstOrNull { it.key is Int }?.key as? Int,
-                visible.lastOrNull { it.key is Int }?.key as? Int,
-                // 展开状态变化也要重算预取窗口
+        // 单轮扫描：逐张拉入缓存。已缓存/负缓存的瞬间跳过；断连即止损；
+        // 单张异常绝不中断整轮（任何逃逸异常都会悄悄杀死本效应，之后再也不预取）。
+        suspend fun sweep(files: List<NikonCamera.FileInfo>, label: String) {
+            if (BuildConfig.DEBUG) {
+                android.util.Log.d("NikonTransfer", "THUMB_SWEEP($label) start n=${files.size}")
+            }
+            var loaded = 0
+            for (file in files) {
+                if (!cameraViewModel.state.value.isConnectedToCamera) {
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.d("NikonTransfer", "THUMB_SWEEP($label) abort: disconnected, loaded=$loaded")
+                    }
+                    return
+                }
+                try {
+                    if (cameraViewModel.loadThumbnail(file.handle) != null) loaded++
+                } catch (e: CancellationException) {
+                    throw e   // 展开变化/传输开始/离开页面的正常取消，须向上传播
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) {
+                        android.util.Log.w("NikonTransfer", "THUMB_SWEEP($label) item failed handle=${file.handle}: $e")
+                    }
+                }
+            }
+            if (BuildConfig.DEBUG) {
+                android.util.Log.d("NikonTransfer", "THUMB_SWEEP($label) done loaded=$loaded/${files.size}")
+            }
+        }
+
+        if (transfersBusy) {
+            // 保守窗口跟随视口：按"可见首/尾 cell key"去重，滚动一行才重发；
+            // collectLatest 让窗口变化即取消旧批次、从新位置重扫。
+            snapshotFlow {
+                val visible = gridState.layoutInfo.visibleItemsInfo
+                Triple(
+                    visible.firstOrNull { it.key is Int }?.key as? Int,
+                    visible.lastOrNull { it.key is Int }?.key as? Int,
+                    groups.filter { collapsedDates[it.date] != true }.map { it.date }
+                )
+            }.collectLatest { (_, lastKey, _) ->
+                if (lastKey == null) return@collectLatest
+                val ordered = groups.filter { collapsedDates[it.date] != true }.flatMap { it.files }
+                val lastIdx = ordered.indexOfFirst { it.handle == lastKey }
+                if (lastIdx < 0) return@collectLatest
+                sweep(
+                    ordered.subList(
+                        (lastIdx + 1).coerceAtMost(ordered.size),
+                        (lastIdx + 1 + PREFETCH_AHEAD_BUSY).coerceAtMost(ordered.size)
+                    ),
+                    label = "busy"
+                )
+            }
+        } else {
+            // 全量填充：只观察分组展开状态，【不】观察滚动位置——滑动不会打断扫描。
+            snapshotFlow {
                 groups.filter { collapsedDates[it.date] != true }.map { it.date }
-            )
-        }.collectLatest { (firstKey, lastKey, _) ->
-            if (lastKey == null) return@collectLatest
-            val ordered = groups.filter { collapsedDates[it.date] != true }.flatMap { it.files }
-            val lastIdx = ordered.indexOfFirst { it.handle == lastKey }
-            if (lastIdx < 0) return@collectLatest
-            val firstIdx = firstKey
-                ?.let { k -> ordered.indexOfFirst { it.handle == k } }
-                ?.takeIf { it >= 0 } ?: lastIdx
-            val ahead = ordered.subList(
-                (lastIdx + 1).coerceAtMost(ordered.size),
-                (lastIdx + 1 + PREFETCH_AHEAD).coerceAtMost(ordered.size)
-            )
-            val behind = ordered.subList(
-                (firstIdx - PREFETCH_BEHIND).coerceAtLeast(0),
-                firstIdx
-            )
-            // 向下优先、由近及远；向上的按"离视口近的先取"倒序。
-            for (file in ahead + behind.reversed()) {
-                cameraViewModel.loadThumbnail(file.handle, allowFetch = !transfersBusy)
+            }.collectLatest {
+                val ordered = groups.filter { collapsedDates[it.date] != true }.flatMap { it.files }
+                if (ordered.isEmpty()) return@collectLatest
+                // 起点取当前视口位置（一次性读取，不订阅）：先填用户正看的附近，
+                // 扫到列表末尾后回绕补上面的，直到全部尝试过一遍。
+                val firstKey = gridState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.key is Int }?.key as? Int
+                val startIdx = firstKey
+                    ?.let { k -> ordered.indexOfFirst { it.handle == k } }
+                    ?.takeIf { it >= 0 } ?: 0
+                sweep(
+                    ordered.subList(startIdx, ordered.size) + ordered.subList(0, startIdx),
+                    label = "idle-full"
+                )
             }
         }
     }
@@ -997,6 +1052,7 @@ private fun ThumbnailCell(
     revealDelayMs: Long = 0L,
     modifier: Modifier = Modifier
 ) {
+    val colors = AppTheme.colors
     // 展开入场：本组刚被展开时淡入+轻微放大、按 revealDelayMs 级联错峰；
     // 平时（滚动进入）revealProgress 初始即 1，直接全显、零开销。
     val revealProgress = remember { Animatable(if (reveal) 0f else 1f) }
@@ -1008,10 +1064,11 @@ private fun ThumbnailCell(
     }
     // 已加载的缩略图按 handle 记住，transfersBusy 变化不会让它闪回占位。
     var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
-    // 仅在尚未加载时才尝试取；传输进行中只读缓存(allowFetch=false)，队列空闲后本效应重跑自动补载。
+    // 可见格子始终允许取图（传输中请求排到文件间隙执行，见 loadThumbnail 注释）。
+    // transfersBusy 仅作为重试键：传输结束时对瞬时失败（如短暂掉线）的格子再补一次。
     LaunchedEffect(file.handle, transfersBusy) {
         if (thumbnail == null) {
-            thumbnail = cameraViewModel.loadThumbnail(file.handle, allowFetch = !transfersBusy)
+            thumbnail = cameraViewModel.loadThumbnail(file.handle)
         }
     }
     // 记录本格子在根坐标系中的位置，供长按预览"从格子位置放大"用。
@@ -1030,7 +1087,7 @@ private fun ThumbnailCell(
                 scaleY = s
             }
             .clip(RoundedCornerShape(8.dp))
-            .background(DarkSurface)
+            .background(colors.thumbPlaceholder)
             .onGloballyPositioned { cellBounds = it.boundsInRoot() }
             // 轻触加入队列（已入队则无操作），长按预览大图（任何状态都可预览）。
             .combinedClickable(
@@ -1043,11 +1100,10 @@ private fun ThumbnailCell(
             Image(
                 bitmap = image,
                 contentDescription = file.fileName,
+                // 黑边已在解码时按实际黑条精确裁除（CameraViewModel.cropLetterbox），
+                // Crop 填满格子即为刚好，无需再放大遮边。
                 contentScale = ContentScale.Crop,
-                // 相机缩略图常带上下黑边（3:2 画面塞进 4:3 缩略图）；轻微放大裁掉黑边。
-                modifier = Modifier
-                    .fillMaxSize()
-                    .scale(1.12f)
+                modifier = Modifier.fillMaxSize()
             )
         } else {
             // 占位：类型角标底色
@@ -1058,7 +1114,7 @@ private fun ThumbnailCell(
                         else -> Icons.Default.Image
                     },
                     contentDescription = null,
-                    tint = DarkOnSurfaceVariant.copy(alpha = 0.4f),
+                    tint = colors.onSurfaceVariant.copy(alpha = 0.4f),
                     modifier = Modifier.size(28.dp)
                 )
             }
@@ -1068,10 +1124,10 @@ private fun ThumbnailCell(
         Surface(
             shape = RoundedCornerShape(bottomEnd = 6.dp),
             color = when (file.extension) {
-                ".jpg" -> AccentBlue.copy(alpha = 0.85f)
-                ".nef" -> AccentPurple.copy(alpha = 0.85f)
-                ".mov" -> AccentOrange.copy(alpha = 0.85f)
-                else -> DarkSurfaceVariant.copy(alpha = 0.85f)
+                ".jpg" -> colors.accentBlue.copy(alpha = 0.85f)
+                ".nef" -> colors.accentPurple.copy(alpha = 0.85f)
+                ".mov" -> colors.accentOrange.copy(alpha = 0.85f)
+                else -> colors.surfaceVariant.copy(alpha = 0.85f)
             },
             modifier = Modifier.align(Alignment.TopStart)
         ) {
@@ -1080,7 +1136,7 @@ private fun ThumbnailCell(
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
                 fontWeight = FontWeight.Medium,
-                color = DarkBackground
+                color = if (file.extension in setOf(".jpg", ".nef", ".mov")) colors.onAccent else colors.onSurfaceVariant
             )
         }
 
@@ -1089,7 +1145,7 @@ private fun ThumbnailCell(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(DarkBackground.copy(alpha = 0.35f))
+                    .background(colors.background.copy(alpha = 0.35f))
             )
             Box(
                 modifier = Modifier
@@ -1104,6 +1160,7 @@ private fun ThumbnailCell(
 
 @Composable
 private fun LoadingMoreRow() {
+    val colors = AppTheme.colors
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1113,11 +1170,11 @@ private fun LoadingMoreRow() {
     ) {
         CircularProgressIndicator(
             modifier = Modifier.size(20.dp),
-            color = AccentBlue,
+            color = colors.accentBlue,
             strokeWidth = 2.dp
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text("正在加载更多…", style = MaterialTheme.typography.bodySmall, color = DarkOnSurfaceVariant)
+        Text("正在加载更多…", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
     }
 }
 
@@ -1129,34 +1186,35 @@ private fun formatDateHeader(date: String): String {
 /** 缩略图角标：已入队文件在缩略图右下角显示的传输状态小图标。 */
 @Composable
 private fun TransferStatusIndicator(status: TransferStatus) {
+    val colors = AppTheme.colors
     when (status) {
         TransferStatus.COMPLETED -> Icon(
             imageVector = Icons.Default.CheckCircle,
             contentDescription = "已传输",
-            tint = StatusConnected,
+            tint = colors.statusConnected,
             modifier = Modifier.size(18.dp)
         )
         TransferStatus.TRANSFERING -> CircularProgressIndicator(
             modifier = Modifier.size(16.dp),
-            color = AccentBlue,
+            color = colors.accentBlue,
             strokeWidth = 2.dp
         )
         TransferStatus.WAITING -> Icon(
             imageVector = Icons.Default.HourglassEmpty,
             contentDescription = "排队中",
-            tint = AccentBlue,
+            tint = colors.accentBlue,
             modifier = Modifier.size(18.dp)
         )
         TransferStatus.FAILED -> Icon(
             imageVector = Icons.Default.Error,
             contentDescription = "传输失败",
-            tint = StatusError,
+            tint = colors.statusError,
             modifier = Modifier.size(18.dp)
         )
         TransferStatus.CANCELLED -> Icon(
             imageVector = Icons.Default.Cancel,
             contentDescription = "已取消",
-            tint = DarkOnSurfaceVariant,
+            tint = colors.onSurfaceVariant,
             modifier = Modifier.size(18.dp)
         )
     }

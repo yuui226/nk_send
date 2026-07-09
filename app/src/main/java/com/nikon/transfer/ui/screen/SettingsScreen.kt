@@ -44,7 +44,7 @@ import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 
-private const val CONTACT_EMAIL = "yuui226@163.com"
+private const val QQ_GROUP = "1054316860"
 
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），下拉弹窗观感：
@@ -59,6 +59,7 @@ fun SettingsOverlay(
     onDismiss: () -> Unit
 ) {
     val state by viewModel.state.collectAsState()
+    val colors = AppTheme.colors
 
     val directoryPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -82,14 +83,14 @@ fun SettingsOverlay(
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
 
-    // "反馈"按钮复制邮箱后的底部提示；nonce 保证连续点击重启计时。
+    // "加群"按钮复制 QQ 群号后的底部提示；nonce 保证连续点击重启计时。
     val clipboard = LocalClipboardManager.current
-    var emailCopied by remember { mutableStateOf(false) }
-    var emailCopiedNonce by remember { mutableStateOf(0) }
-    LaunchedEffect(emailCopiedNonce) {
-        if (emailCopied) {
+    var groupCopied by remember { mutableStateOf(false) }
+    var groupCopiedNonce by remember { mutableStateOf(0) }
+    LaunchedEffect(groupCopiedNonce) {
+        if (groupCopied) {
             delay(1800)
-            emailCopied = false
+            groupCopied = false
         }
     }
 
@@ -116,7 +117,7 @@ fun SettingsOverlay(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = progress.value }
-                .background(Color.Black.copy(alpha = 0.4f))
+                .background(colors.scrim)
                 .pointerInput(Unit) { detectTapGestures { startClose() } }
                 .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
         )
@@ -155,19 +156,19 @@ fun SettingsOverlay(
                 // 消费面板内点击，避免穿透到遮罩误关闭。
                 .pointerInput(Unit) { detectTapGestures { } },
             shape = RoundedCornerShape(20.dp),
-            // 毛玻璃：底色保持较高不透明度（不那么透明，保证可读）+ 浅色描边。
-            color = DarkSurface.copy(alpha = 0.92f),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+            // 毛玻璃：底色保持较高不透明度（不那么透明，保证可读）+ 细描边。
+            color = colors.glassSurfaceHeavy,
+            border = BorderStroke(1.dp, colors.glassPanelBorder),
             tonalElevation = 6.dp
         ) {
           Box {
-            // 自上而下淡出的白色高光叠层，营造毛玻璃质感。
+            // 自上而下淡出的高光叠层，营造毛玻璃质感。
             Box(
                 modifier = Modifier
                     .matchParentSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color.White.copy(alpha = 0.08f), Color.Transparent)
+                            listOf(colors.glassSheen, Color.Transparent)
                         )
                     )
             )
@@ -182,11 +183,11 @@ fun SettingsOverlay(
                         "设置",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = DarkOnBackground
+                        color = colors.onBackground
                     )
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = startClose, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭", tint = DarkOnSurfaceVariant)
+                        Icon(Icons.Default.Close, contentDescription = "关闭", tint = colors.onSurfaceVariant)
                     }
                 }
 
@@ -197,9 +198,9 @@ fun SettingsOverlay(
                 Spacer(Modifier.height(8.dp))
                 Surface(
                     shape = RoundedCornerShape(10.dp),
-                    color = DarkSurfaceVariant,
+                    color = colors.surfaceVariant,
                     // 未设目录时橙色描边强调：因点图未设目录被弹到这里的新用户能立刻明白来意。
-                    border = if (dirText == null) BorderStroke(1.dp, AccentOrange.copy(alpha = 0.8f)) else null,
+                    border = if (dirText == null) BorderStroke(1.dp, colors.accentOrange.copy(alpha = 0.8f)) else null,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -209,14 +210,14 @@ fun SettingsOverlay(
                         Icon(
                             Icons.Default.LocationOn,
                             contentDescription = null,
-                            tint = if (dirText != null) StatusConnected else AccentOrange,
+                            tint = if (dirText != null) colors.statusConnected else colors.accentOrange,
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
                             text = dirText ?: "未设置",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (dirText != null) DarkOnBackground else DarkOnSurfaceVariant,
+                            color = if (dirText != null) colors.onBackground else colors.onSurfaceVariant,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f)
@@ -227,7 +228,7 @@ fun SettingsOverlay(
                 Button(
                     onClick = { directoryPicker.launch(null) },
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accentBlue),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -246,7 +247,7 @@ fun SettingsOverlay(
                         Surface(
                             onClick = { viewModel.setThumbnailColumns(col) },
                             shape = RoundedCornerShape(8.dp),
-                            color = if (selected) AccentBlue else DarkSurfaceVariant,
+                            color = if (selected) colors.accentBlue else colors.surfaceVariant,
                             modifier = Modifier
                                 .weight(1f)
                                 .height(40.dp)
@@ -256,7 +257,40 @@ fun SettingsOverlay(
                                     text = "$col",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (selected) DarkBackground else DarkOnSurfaceVariant
+                                    color = if (selected) colors.onAccent else colors.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // ---------- 外观（深浅色主题）----------
+                SectionLabel("外观")
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ThemeMode.entries.forEach { mode ->
+                        val selected = state.themeMode == mode
+                        Surface(
+                            onClick = { viewModel.setThemeMode(mode) },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (selected) colors.accentBlue else colors.surfaceVariant,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = when (mode) {
+                                        ThemeMode.SYSTEM -> "跟随系统"
+                                        ThemeMode.DARK -> "深色"
+                                        ThemeMode.LIGHT -> "浅色"
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    color = if (selected) colors.onAccent else colors.onSurfaceVariant
                                 )
                             }
                         }
@@ -278,29 +312,29 @@ fun SettingsOverlay(
 
                 Spacer(Modifier.height(20.dp))
 
-                // ---------- 页脚：左侧版本号，右侧毛玻璃"反馈"按钮（点击复制邮箱，
-                // 面板底部弹玻璃提示显示具体邮箱 + 已复制）----------
+                // ---------- 页脚：左侧版本号，右侧毛玻璃"加群"按钮（点击复制 QQ 群号，
+                // 面板底部弹玻璃提示显示具体群号 + 已复制）----------
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "Z传 v${BuildConfig.VERSION_NAME}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = DarkOnSurfaceVariant.copy(alpha = 0.7f)
+                        color = colors.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                     Spacer(Modifier.weight(1f))
                     GlassButton(
                         onClick = {
-                            clipboard.setText(AnnotatedString(CONTACT_EMAIL))
-                            emailCopied = true
-                            emailCopiedNonce++
+                            clipboard.setText(AnnotatedString(QQ_GROUP))
+                            groupCopied = true
+                            groupCopiedNonce++
                         },
                         shape = RoundedCornerShape(14.dp),
                         contentPadding = PaddingValues(horizontal = 14.dp),
                         modifier = Modifier.height(28.dp)
                     ) {
                         Text(
-                            "反馈",
+                            "加群",
                             style = MaterialTheme.typography.labelMedium,
-                            color = DarkOnBackground
+                            color = colors.onBackground
                         )
                     }
                 }
@@ -308,9 +342,9 @@ fun SettingsOverlay(
           }
         }
 
-        // 底部玻璃提示：显示已复制的具体邮箱（与列表页提示条同款视觉），在遮罩与面板之上。
+        // 底部玻璃提示：显示已复制的具体群号（与列表页提示条同款视觉），在遮罩与面板之上。
         AnimatedVisibility(
-            visible = emailCopied,
+            visible = groupCopied,
             enter = fadeIn() + slideInVertically { it / 2 },
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier
@@ -320,15 +354,15 @@ fun SettingsOverlay(
         ) {
             Surface(
                 shape = RoundedCornerShape(18.dp),
-                color = DarkSurface.copy(alpha = 0.9f),
+                color = colors.glassSurfaceHeavy,
                 shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+                border = BorderStroke(1.dp, colors.glassPanelBorder)
             ) {
                 Text(
-                    text = "$CONTACT_EMAIL\n已复制邮箱",
+                    text = "QQ群 $QQ_GROUP\n已复制群号",
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelLarge,
-                    color = DarkOnBackground,
+                    color = colors.onBackground,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
                 )
             }
@@ -342,6 +376,6 @@ private fun SectionLabel(text: String) {
         text,
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold,
-        color = DarkOnBackground
+        color = AppTheme.colors.onBackground
     )
 }

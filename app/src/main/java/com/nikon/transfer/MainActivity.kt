@@ -27,7 +27,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.nikon.transfer.ui.screen.*
-import com.nikon.transfer.ui.theme.DarkBackground
+import com.nikon.transfer.ui.theme.AppTheme
 import com.nikon.transfer.ui.theme.NikonTransferTheme
 import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferViewModel
@@ -42,8 +42,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()   // 内容延伸到系统栏后面，各屏自行处理 inset
         requestNotificationPermissionIfNeeded()
         setContent {
-            NikonTransferTheme {
-                MainScreen()
+            // 主题模式存在 TransferViewModel（与其它设置同处持久化），
+            // 在主题之上先取出来，切换即全局重排配色。
+            val transferViewModel: TransferViewModel = viewModel()
+            val transferState by transferViewModel.state.collectAsState()
+            NikonTransferTheme(themeMode = transferState.themeMode) {
+                MainScreen(transferViewModel)
             }
         }
     }
@@ -67,10 +71,9 @@ sealed class Screen(val route: String) {
 }
 
 @Composable
-fun MainScreen() {
+fun MainScreen(transferViewModel: TransferViewModel) {
     val navController = rememberNavController()
     val cameraViewModel: CameraViewModel = viewModel()
-    val transferViewModel: TransferViewModel = viewModel()
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -90,7 +93,7 @@ fun MainScreen() {
     }
 
     Scaffold(
-        containerColor = DarkBackground,
+        containerColor = AppTheme.colors.background,
         // 不消费系统栏 inset，交由各屏自行处理（文件列表 edge-to-edge，其余用 systemBarsPadding）
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { paddingValues ->

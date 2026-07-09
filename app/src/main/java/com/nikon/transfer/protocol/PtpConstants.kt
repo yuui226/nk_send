@@ -29,6 +29,10 @@ object PtpConstants {
     // 响应码
     const val RESPONSE_OK = 0x2001
     const val SESSION_ALREADY_OPEN = 0x201E
+    // PTP 规范：0x2009 Invalid_Object_Handle / 0x2010 No_Thumbnail_Present。
+    // 用于区分"确认无缩略图"（可负缓存）与"瞬时失败"（如设备忙，绝不能负缓存）。
+    const val INVALID_OBJECT_HANDLE = 0x2009
+    const val NO_THUMBNAIL_PRESENT = 0x2010
 
     // ObjectInfo 的 32 位大小字段报不出 >4GB 对象的真实大小，此时为全 FF 哨兵（无符号）。
     const val SIZE_UNKNOWN = 0xFFFFFFFFL

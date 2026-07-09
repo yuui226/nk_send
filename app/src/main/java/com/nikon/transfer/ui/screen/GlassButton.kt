@@ -13,10 +13,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
-import com.nikon.transfer.ui.theme.DarkSurface
+import com.nikon.transfer.ui.theme.AppTheme
 
 /**
  * 统一的"毛玻璃"悬浮按钮：半透明底 + 自上而下白色高光渐变 + 上亮下暗细描边，
@@ -31,11 +30,12 @@ fun GlassButton(
     contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
     content: @Composable RowScope.() -> Unit
 ) {
+    val colors = AppTheme.colors
     Surface(
         onClick = onClick,
         enabled = enabled,
         shape = shape,
-        color = DarkSurface.copy(alpha = 0.45f),
+        color = colors.glassSurface,
         shadowElevation = 4.dp,
         modifier = modifier
     ) {
@@ -43,13 +43,13 @@ fun GlassButton(
             modifier = Modifier
                 .background(
                     brush = Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.16f), Color.White.copy(alpha = 0.04f))
+                        listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
                     )
                 )
                 .border(
                     width = 1.dp,
                     brush = Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.4f), Color.White.copy(alpha = 0.1f))
+                        listOf(colors.glassBorderTop, colors.glassBorderBottom)
                     ),
                     shape = shape
                 )

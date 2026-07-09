@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 系统深色模式下的启动窗口背景（与 DarkBackground 一致）。 -->
+    <style name="Theme.NikonTransfer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#121212</item>
+    </style>
+</resources>

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- 启动窗口背景跟随系统深浅色（values-night 提供深色变体），避免首帧前闪色。
+         App 内的手动深浅色由 Compose 主题接管，首帧后即生效。 -->
     <style name="Theme.NikonTransfer" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowBackground">#F2F2F7</item>
     </style>
 </resources>

@@ -10,6 +10,7 @@ import com.nikon.transfer.BuildConfig
 import com.nikon.transfer.protocol.NikonCamera
 import com.nikon.transfer.protocol.PtpConstants
 import com.nikon.transfer.service.TransferService
+import com.nikon.transfer.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -44,7 +45,9 @@ data class TransferState(
     val transferDirUri: String? = null,
     val thumbnailColumns: Int = 3,
     // 触感反馈开关：默认关闭，用户开启后持久化，下次启动保持。
-    val hapticsEnabled: Boolean = false
+    val hapticsEnabled: Boolean = false,
+    // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
+    val themeMode: ThemeMode = ThemeMode.SYSTEM
 )
 
 /** 队列剩余待处理数量（正在传 + 等待传）。供顶栏药丸等复用。 */
@@ -77,7 +80,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 transferDirUri = dir,
                 thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4),
-                hapticsEnabled = prefs.getBoolean("haptics_enabled", false)
+                hapticsEnabled = prefs.getBoolean("haptics_enabled", false),
+                themeMode = prefs.getString("theme_mode", null)
+                    ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
+                    ?: ThemeMode.SYSTEM
             )
         }
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
@@ -92,6 +98,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val c = columns.coerceIn(1, 4)
         prefs.edit().putInt("thumbnail_columns", c).apply()
         _state.update { it.copy(thumbnailColumns = c) }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        prefs.edit().putString("theme_mode", mode.name).apply()
+        _state.update { it.copy(themeMode = mode) }
     }
 
     fun setHapticsEnabled(enabled: Boolean) {
@@ -298,12 +309,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             }
                         )
                     } catch (e: CancellationException) {
-                        // 取消路径【不】就地删除半成品：本清理要等协议层排空完才执行，若用户
-                        // 已点"重试"，新队列可能先建出同名 .nkpart_——SAF 文档 URI 按路径寻址，
-                        // 这里的延迟删除会把新队列刚建的文件删掉，新下载写进已解链的 FD，
-                        // 改名时 FileNotFound → 偶发"保存失败"。半成品交给每次队列启动/App
-                        // 启动的 sweep 统一清扫（.nkpart_ 前缀带前导点，相册中本就不可见）。
-                        throw e   // 取消须向上传播，交由 cancelTransfer 统一置为 CANCELLED
+                        // 协程取消只发生在 ViewModel 销毁（App 退出）时——界面上的"停止"
+                        // 不再取消协程（正在传的文件自然传完，见 withdrawPending）。
+                        // 此处【不】就地删除半成品：清理要等协议层收尾后才执行，时序难保证，
+                        // 半成品交给每次队列启动/App 启动的 sweep 统一清扫
+                        //（.nkpart_ 前缀带前导点，相册中本就不可见）。
+                        throw e   // 取消须向上传播
                     } catch (e: Exception) {
                         deleteQuietly(fileDocUri)
                         if (BuildConfig.DEBUG) {
@@ -315,9 +326,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             } finally {
-                // 取消下载的排空可达数秒，用户在此窗口内点"重试"会先启动新队列、后执行本收尾。
-                // 仅当本协程仍是当前传输 job 时才收尾，避免误停新队列的前台服务/误清传输状态；
-                // 被 cancelTransfer 顶掉（transferJob 已置 null）时，收尾由 cancelTransfer 负责。
+                // 仅当本协程仍是当前传输 job 时才收尾，避免误停新队列的前台服务/误清传输
+                // 状态（旧队列收尾期间新队列可能已启动并接管 transferJob）。
                 if (transferJob === self) {
                     _state.update { it.copy(isTransferring = false, currentSpeed = 0) }
                     TransferService.stop(getApplication())
@@ -427,17 +437,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun cancelTransfer() {
-        transferJob?.cancel()
-        transferJob = null
-        // 旧 job 的 finally 因 transferJob 已置 null 会跳过收尾，前台服务在此停止。
-        TransferService.stop(getApplication())
+    /**
+     * 撤下所有等待中的任务（WAITING→CANCELLED），队列协程不会再开始它们；
+     * 正在传输的文件让它自然传完——中途打断需要发 PTP/IP Cancel 包或直接断开连接，
+     * 实测两者都会让相机挂起会话甚至关闭 Wi-Fi，代价远高于传完当前文件。
+     * 队列协程发现没有 WAITING 任务后自然收尾（isTransferring 复位、前台服务停止）。
+     * "清空队列"的第一步：先撤下，UI 播完移除动画后再逐个 [removeTask]。
+     */
+    fun withdrawPending() {
         _state.update { state ->
             state.copy(
-                isTransferring = false,
-                currentSpeed = 0,
                 tasks = state.tasks.map {
-                    if (it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING) {
+                    if (it.status == TransferStatus.WAITING) {
                         it.copy(status = TransferStatus.CANCELLED, speed = 0)
                     } else it
                 }
@@ -445,43 +456,77 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun retryFailed(cameraProvider: () -> NikonCamera?) {
-        val hasFailed = _state.value.tasks.any { it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED }
-        if (!hasFailed) return
-
-        // 重试 = 重新入队：重试项移到列表尾部（队列页倒序显示，即出现在页面最上方，
-        // 与新加入的任务一个待遇），用户不用翻页就能看到它们的进展。
+    /** 撤下单个等待中的任务（仅 WAITING→CANCELLED）：移除动画播放期间队列不得开始传它。 */
+    fun withdrawTask(handle: Int) {
         _state.update { state ->
-            val (retry, others) = state.tasks.partition {
-                it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
-            }
             state.copy(
-                tasks = others + retry.map {
-                    it.copy(status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0)
+                tasks = state.tasks.map {
+                    if (it.file.handle == handle && it.status == TransferStatus.WAITING) {
+                        it.copy(status = TransferStatus.CANCELLED, speed = 0)
+                    } else it
                 }
             )
         }
-
-        val dirUri = _state.value.transferDirUri ?: return
-        processQueue(dirUri, cameraProvider)
     }
 
+    /**
+     * 清空收尾：一次性移除所有已终结的任务（CANCELLED/COMPLETED/FAILED）。
+     * "清空队列"的兜底——LazyColumn 只组合可见卡片，屏幕外的卡没有条目协程替它做
+     * "动画后移除"，由本方法在可见卡片收合动画播完后统一清掉。
+     * 与 [removeTask] 同规则：TRANSFERING/WAITING 一律保留。
+     */
+    fun removeCleared() {
+        _state.update { state ->
+            state.copy(
+                tasks = state.tasks.filter {
+                    it.status == TransferStatus.TRANSFERING || it.status == TransferStatus.WAITING
+                }
+            )
+        }
+    }
+
+    /**
+     * 把任务卡片从队列移除（移除动画结束后调用），返回是否真的移除了。
+     * 拒绝移除 TRANSFERING（正在传输）与 WAITING（动画期间被"重试"重置回等待，
+     * 说明用户想要它了）——两种竞态下调用方把卡片弹回原高即可。
+     * 合法移除路径上任务必为 CANCELLED/COMPLETED/FAILED（等待中的在标记时已 withdraw）。
+     */
+    fun removeTask(handle: Int): Boolean {
+        var removed = false
+        _state.update { state ->
+            val kept = state.tasks.filterNot {
+                it.file.handle == handle &&
+                        it.status != TransferStatus.TRANSFERING &&
+                        it.status != TransferStatus.WAITING
+            }
+            removed = kept.size != state.tasks.size
+            state.copy(tasks = kept)
+        }
+        return removed
+    }
+
+    /**
+     * 重试失败/取消的任务：从队列移除后经 [addToQueue] 重新加入——与用户重新点选这些
+     * 文件完全同一条路径（同样的去重、排队与启动时机），重试没有任何特殊逻辑。
+     */
+    fun retryFailed(cameraProvider: () -> NikonCamera?) {
+        if (_state.value.transferDirUri == null) return
+        val retry = _state.value.tasks.filter {
+            it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
+        }
+        if (retry.isEmpty()) return
+        val handles = retry.mapTo(HashSet()) { it.file.handle }
+        _state.update { s -> s.copy(tasks = s.tasks.filterNot { it.file.handle in handles }) }
+        addToQueue(retry.map { it.file }, cameraProvider)
+    }
+
+    /** 同 [retryFailed]：单个任务移除后按新任务重新入队。 */
     fun retrySingleTask(handle: Int, cameraProvider: () -> NikonCamera?) {
         val task = _state.value.tasks.firstOrNull { it.file.handle == handle } ?: return
         if (task.status != TransferStatus.FAILED && task.status != TransferStatus.CANCELLED) return
-
-        // 同 retryFailed：重试项重新入队（移到列表尾部 = 队列页最上方）。
-        _state.update { state ->
-            val rest = state.tasks.filter { it.file.handle != handle }
-            state.copy(
-                tasks = rest + task.copy(
-                    status = TransferStatus.WAITING, progress = 0f, downloaded = 0, error = null, speed = 0
-                )
-            )
-        }
-
-        val dirUri = _state.value.transferDirUri ?: return
-        processQueue(dirUri, cameraProvider)
+        if (_state.value.transferDirUri == null) return
+        _state.update { s -> s.copy(tasks = s.tasks.filterNot { it.file.handle == handle }) }
+        addToQueue(listOf(task.file), cameraProvider)
     }
 
     override fun onCleared() {
