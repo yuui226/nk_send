@@ -312,6 +312,24 @@ fun SettingsOverlay(
 
                 Spacer(Modifier.height(20.dp))
 
+                // ---------- 屏幕常亮（默认开）：前台不熄屏，防系统冻结进程/Wi-Fi 打盹断连 ----------
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        SectionLabel("屏幕常亮")
+                        Text(
+                            "应用在前台时不熄屏，防止连接中断",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = state.keepScreenOn,
+                        onCheckedChange = { viewModel.setKeepScreenOn(it) }
+                    )
+                }
+
+                Spacer(Modifier.height(20.dp))
+
                 // ---------- 页脚：左侧版本号，右侧毛玻璃"加群"按钮（点击复制 QQ 群号，
                 // 面板底部弹玻璃提示显示具体群号 + 已复制）----------
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -1,5 +1,6 @@
 package com.nikon.transfer.protocol
 
+import android.net.Network
 import com.nikon.transfer.BuildConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,9 @@ class NikonCamera {
         const val TAG = "NikonTransfer"
         // 命令/事件通道的常规读超时。
         const val SO_TIMEOUT_MS = 60_000
+        // TCP 连接超时：本地热点正常握手 <300ms；缩短它让"相机侧 PTP 服务还没就绪"的
+        // 失败尝试更快结束、更快进入下一轮重试。
+        const val CONNECT_TIMEOUT_MS = 3_000
         // 取消下载的排空安全阀：已向相机发送 Cancel 包后，在途数据只剩 ≈TCP 窗口的数 MB，
         // 排空应秒级完成；若累计排空超过该预算仍没等到响应包，说明机型不支持 Cancel、
         // 还在发整个文件——此时才断开由心跳/看护自动重连（断开会让相机侧会话挂起甚至
@@ -57,15 +61,23 @@ class NikonCamera {
         return tid
     }
 
-    suspend fun connect(ip: String = PtpConstants.CAMERA_IP): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun connect(
+        ip: String = PtpConstants.CAMERA_IP,
+        network: Network? = null
+    ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            cmdSocket = Socket().apply {
+            // 经 Wi-Fi Network 的 socketFactory 建 socket：相机热点没有互联网，系统验证失败后
+            // 常把【默认网络】切回蜂窝数据——普通 Socket() 走默认路由，连 192.168.1.1 的包进蜂窝
+            // 黑洞，每次尝试烧满连接超时，直到系统把默认网切回 Wi-Fi 才能成功（用户感知
+            // "连上 Wi-Fi 后还要干等一阵"）。绑定到 Wi-Fi 网络后首次尝试即可达。
+            fun newSocket(): Socket = network?.socketFactory?.createSocket() ?: Socket()
+            cmdSocket = newSocket().apply {
                 tcpNoDelay = true
                 soTimeout = SO_TIMEOUT_MS
                 // 显式加大接收缓冲，撑起 TCP 接收窗口（4MB 远大于本地 Wi-Fi 所需，不会成为瓶颈；
                 // 在延迟稍高时也能避免小窗口拖慢吞吐）。必须在 connect 前设置才对窗口缩放生效。
                 receiveBufferSize = 4 * 1024 * 1024
-                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), 5000)
+                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             }
             // 用 BufferedInputStream 批量化 socket 读：每包 8 字节头 + 小数据段本会产生大量 read 系统调用，
             // 缓冲后合并为大块读，减少系统调用开销（大数据段仍会直读进目标缓冲，无额外拷贝）。
@@ -87,9 +99,9 @@ class NikonCamera {
             val payload = ack.payload ?: return@withContext Result.failure(Exception("握手失败: 空响应"))
             val sessionId = payload.getIntLE(0)
 
-            evtSocket = Socket().apply {
+            evtSocket = newSocket().apply {
                 soTimeout = SO_TIMEOUT_MS
-                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), 5000)
+                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             }
             evtInput = evtSocket!!.getInputStream()
 
@@ -171,7 +183,11 @@ class NikonCamera {
         withContext(Dispatchers.IO) {
             try {
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
-                recvResp() == PtpConstants.RESPONSE_OK
+                // 能收到【任何】响应就证明链路活着；非 OK（如相机忙碌时的 DeviceBusy）
+                // 不代表断线——按响应码判死会把健康连接误杀掉重连，相机侧反而可能
+                // 因此挂会话/关热点。只有 IO 异常（socket 死）才算失联。
+                recvResp()
+                true
             } catch (_: Exception) {
                 false
             }

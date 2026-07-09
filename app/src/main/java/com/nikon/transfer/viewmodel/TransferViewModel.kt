@@ -46,6 +46,9 @@ data class TransferState(
     val thumbnailColumns: Int = 3,
     // 触感反馈开关：默认关闭，用户开启后持久化，下次启动保持。
     val hapticsEnabled: Boolean = false,
+    // 屏幕常亮（默认开启）：应用在前台时不熄屏——熄屏后系统会冻结进程/让 Wi-Fi 打盹，
+    // 相机连接容易断；代价是手机一直亮屏。
+    val keepScreenOn: Boolean = true,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
     val themeMode: ThemeMode = ThemeMode.SYSTEM
 )
@@ -81,6 +84,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 transferDirUri = dir,
                 thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4),
                 hapticsEnabled = prefs.getBoolean("haptics_enabled", false),
+                keepScreenOn = prefs.getBoolean("keep_screen_on", true),
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
                     ?: ThemeMode.SYSTEM
@@ -108,6 +112,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setHapticsEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("haptics_enabled", enabled).apply()
         _state.update { it.copy(hapticsEnabled = enabled) }
+    }
+
+    fun setKeepScreenOn(enabled: Boolean) {
+        prefs.edit().putBoolean("keep_screen_on", enabled).apply()
+        _state.update { it.copy(keepScreenOn = enabled) }
     }
 
     fun setTransferDirUri(uri: Uri) {

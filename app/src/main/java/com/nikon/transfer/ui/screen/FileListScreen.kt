@@ -48,7 +48,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,10 +83,7 @@ import com.nikon.transfer.viewmodel.TransferViewModel
 import com.nikon.transfer.viewmodel.currentFileProgress
 import com.nikon.transfer.viewmodel.remainingCount
 import kotlin.math.roundToInt
-import com.nikon.transfer.BuildConfig
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 data class FileGroup(
@@ -98,13 +94,8 @@ data class FileGroup(
 /** 队列胶囊的三种内容形态：入口图标 / 完成短标 / 计数（速度+剩余数）。 */
 private enum class PillMode { ICON, DONE, COUNTING }
 
-// 缩略图预取：空闲时【全量】填充——以视口为界，先把下方所有缩略图由近及远拉进缓存，
-// 再补上方的，直到整个列表（展开的分组）都有图；窗口移动即从新位置重来（由近及远，
-// 缓存命中直接跳过，重扫近乎零开销），LRU 超容时淘汰最远端、视口附近始终新鲜。
-// 传输进行中收窄为"可见区 + 后面 20 张"的保守窗口——只补齐眼前这一屏多一点，
-// 补完即静默把通道让给传输（缩略图与下载共用一条 PTP 连接，传输中的请求只会排到
-// 文件间隙执行，代价是文件之间多一点间隙，且加载完就没有了）。
-private const val PREFETCH_AHEAD_BUSY = 20
+// 缩略图后台填充没有任何窗口/视口参数：未传输=从新到旧全量填充；传输中=完全停止。
+// 见 ThumbnailGrid 内的填充效应。
 
 /** 正在播放收合动画的分组：[date] + 保留参与动画的前 [keep] 个格子（收起瞬间可见的那部分）。 */
 private data class CollapsingGroup(val date: String, val keep: Int)
@@ -864,87 +855,8 @@ private fun ThumbnailGrid(
         }
     }
 
-    // 缩略图后台填充：
-    // - 空闲：持续填充直到整个列表（展开的分组）全部有图——从启动时的视口位置起、
-    //   到底回绕补前面。【滚动绝不打断也不重启】：用户正看的格子由格子自身的请求即时
-    //   加载（与填充共享 in-flight 去重，天然优先），后台扫后台的，互不干扰。
-    //   只有分组展开状态变化 / 文件列表更新 / 传输开始才重启扫描。
-    // - 传输中：收窄为跟随视口的"可见区 + 后面 PREFETCH_AHEAD_BUSY 张"保守窗口，
-    //   补完静默让路（请求经公平 ioMutex 排到文件间隙执行，不拖慢传输中的文件）。
-    LaunchedEffect(groups, transfersBusy) {
-        // 单轮扫描：逐张拉入缓存。已缓存/负缓存的瞬间跳过；断连即止损；
-        // 单张异常绝不中断整轮（任何逃逸异常都会悄悄杀死本效应，之后再也不预取）。
-        suspend fun sweep(files: List<NikonCamera.FileInfo>, label: String) {
-            if (BuildConfig.DEBUG) {
-                android.util.Log.d("NikonTransfer", "THUMB_SWEEP($label) start n=${files.size}")
-            }
-            var loaded = 0
-            for (file in files) {
-                if (!cameraViewModel.state.value.isConnectedToCamera) {
-                    if (BuildConfig.DEBUG) {
-                        android.util.Log.d("NikonTransfer", "THUMB_SWEEP($label) abort: disconnected, loaded=$loaded")
-                    }
-                    return
-                }
-                try {
-                    if (cameraViewModel.loadThumbnail(file.handle) != null) loaded++
-                } catch (e: CancellationException) {
-                    throw e   // 展开变化/传输开始/离开页面的正常取消，须向上传播
-                } catch (e: Exception) {
-                    if (BuildConfig.DEBUG) {
-                        android.util.Log.w("NikonTransfer", "THUMB_SWEEP($label) item failed handle=${file.handle}: $e")
-                    }
-                }
-            }
-            if (BuildConfig.DEBUG) {
-                android.util.Log.d("NikonTransfer", "THUMB_SWEEP($label) done loaded=$loaded/${files.size}")
-            }
-        }
-
-        if (transfersBusy) {
-            // 保守窗口跟随视口：按"可见首/尾 cell key"去重，滚动一行才重发；
-            // collectLatest 让窗口变化即取消旧批次、从新位置重扫。
-            snapshotFlow {
-                val visible = gridState.layoutInfo.visibleItemsInfo
-                Triple(
-                    visible.firstOrNull { it.key is Int }?.key as? Int,
-                    visible.lastOrNull { it.key is Int }?.key as? Int,
-                    groups.filter { collapsedDates[it.date] != true }.map { it.date }
-                )
-            }.collectLatest { (_, lastKey, _) ->
-                if (lastKey == null) return@collectLatest
-                val ordered = groups.filter { collapsedDates[it.date] != true }.flatMap { it.files }
-                val lastIdx = ordered.indexOfFirst { it.handle == lastKey }
-                if (lastIdx < 0) return@collectLatest
-                sweep(
-                    ordered.subList(
-                        (lastIdx + 1).coerceAtMost(ordered.size),
-                        (lastIdx + 1 + PREFETCH_AHEAD_BUSY).coerceAtMost(ordered.size)
-                    ),
-                    label = "busy"
-                )
-            }
-        } else {
-            // 全量填充：只观察分组展开状态，【不】观察滚动位置——滑动不会打断扫描。
-            snapshotFlow {
-                groups.filter { collapsedDates[it.date] != true }.map { it.date }
-            }.collectLatest {
-                val ordered = groups.filter { collapsedDates[it.date] != true }.flatMap { it.files }
-                if (ordered.isEmpty()) return@collectLatest
-                // 起点取当前视口位置（一次性读取，不订阅）：先填用户正看的附近，
-                // 扫到列表末尾后回绕补上面的，直到全部尝试过一遍。
-                val firstKey = gridState.layoutInfo.visibleItemsInfo
-                    .firstOrNull { it.key is Int }?.key as? Int
-                val startIdx = firstKey
-                    ?.let { k -> ordered.indexOfFirst { it.handle == k } }
-                    ?.takeIf { it >= 0 } ?: 0
-                sweep(
-                    ordered.subList(startIdx, ordered.size) + ordered.subList(0, startIdx),
-                    label = "idle-full"
-                )
-            }
-        }
-    }
+    // 后台缩略图填充已移入 CameraViewModel.startThumbnailFill（与连接同生共死、
+    // 与页面无关——停在队列页也照常推进）；本页只负责可见格子的即时加载。
 
     LazyVerticalGrid(
         state = gridState,
@@ -1068,7 +980,7 @@ private fun ThumbnailCell(
     // transfersBusy 仅作为重试键：传输结束时对瞬时失败（如短暂掉线）的格子再补一次。
     LaunchedEffect(file.handle, transfersBusy) {
         if (thumbnail == null) {
-            thumbnail = cameraViewModel.loadThumbnail(file.handle)
+            thumbnail = cameraViewModel.loadThumbnail(file)
         }
     }
     // 记录本格子在根坐标系中的位置，供长按预览"从格子位置放大"用。

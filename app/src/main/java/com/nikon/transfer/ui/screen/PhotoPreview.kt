@@ -153,7 +153,7 @@ private fun PreviewPage(
     var noThumb by remember(file.handle) { mutableStateOf(false) }
     LaunchedEffect(file.handle) {
         if (thumbnail == null && !noThumb) {
-            val t = cameraViewModel.loadThumbnail(file.handle)
+            val t = cameraViewModel.loadThumbnail(file)
             if (t != null) thumbnail = t else noThumb = true
         }
     }

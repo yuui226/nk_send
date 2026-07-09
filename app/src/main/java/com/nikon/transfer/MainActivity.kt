@@ -1,9 +1,11 @@
 package com.nikon.transfer
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -30,6 +33,7 @@ import com.nikon.transfer.ui.screen.*
 import com.nikon.transfer.ui.theme.AppTheme
 import com.nikon.transfer.ui.theme.NikonTransferTheme
 import com.nikon.transfer.viewmodel.CameraViewModel
+import com.nikon.transfer.viewmodel.TransferStatus
 import com.nikon.transfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 
@@ -78,12 +82,33 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     val cameraState by cameraViewModel.state.collectAsState()
+    val transferState by transferViewModel.state.collectAsState()
 
-    // 相机连接成功后：在首页时先留时间给连接页播放"成功脉冲收尾"动画，再跳转到文件列表
-    // （跳转本身带活泼的缩放淡入转场）。
+    // 把"是否有任务在传输/等待"喂给相机 VM——它是后台缩略图填充的唯一开关。
+    // 桥接放在 MainScreen（所有页面共同的宿主）：填充与页面无关，停在队列页也照常推进。
+    val transfersBusy = transferState.tasks.any {
+        it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
+    }
+    LaunchedEffect(transfersBusy) {
+        cameraViewModel.setTransfersBusy(transfersBusy)
+    }
+
+    // 屏幕常亮（设置项，默认开）：FLAG_KEEP_SCREEN_ON 只在本应用窗口前台可见时生效，
+    // 切到后台/其它应用自动失效，不会全局锁屏幕。
+    val view = LocalView.current
+    DisposableEffect(transferState.keepScreenOn) {
+        val window = (view.context as? Activity)?.window
+        val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        if (transferState.keepScreenOn) window?.addFlags(flag) else window?.clearFlags(flag)
+        onDispose { window?.clearFlags(flag) }
+    }
+
+    // 相机连接成功后：连接页先保持"连接中"脉冲一小会（列表与缩略图此间已在全速加载），
+    // 再播成功爆发收尾，播完直接进照片列表——绿色对号 = 马上进入。
+    // 时长与 HomeScreen 的庆祝延迟严格对齐（同一对常量）。
     LaunchedEffect(cameraState.isConnectedToCamera) {
         if (cameraState.isConnectedToCamera && currentRoute == Screen.Home.route) {
-            delay(850)
+            delay(CONNECT_CELEBRATE_DELAY_MS + CONNECT_SUCCESS_ANIM_MS)
             navController.navigate(Screen.Files.route) {
                 popUpTo(Screen.Home.route) { saveState = true }
                 launchSingleTop = true

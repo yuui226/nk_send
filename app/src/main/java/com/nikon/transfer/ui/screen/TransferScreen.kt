@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.nikon.transfer.protocol.NikonCamera
 import com.nikon.transfer.protocol.PtpConstants
 import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.ui.util.formatFileSize
@@ -183,7 +184,7 @@ fun TransferScreen(
                                 // 前导缩略图：屏幕内的卡片始终允许取图（传输中请求排到
                                 // 文件间隙执行），isTransferring 仅作传输结束后的补载重试键。
                                 QueueThumbnail(
-                                    handle = task.file.handle,
+                                    file = task.file,
                                     retryNudge = transferState.isTransferring,
                                     cameraViewModel = cameraViewModel
                                 )
@@ -596,14 +597,14 @@ private fun ConfirmCard(
  */
 @Composable
 private fun QueueThumbnail(
-    handle: Int,
+    file: NikonCamera.FileInfo,
     retryNudge: Boolean,
     cameraViewModel: CameraViewModel
 ) {
-    var thumbnail by remember(handle) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(handle, retryNudge) {
+    var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(file.handle, retryNudge) {
         if (thumbnail == null) {
-            thumbnail = cameraViewModel.loadThumbnail(handle)
+            thumbnail = cameraViewModel.loadThumbnail(file)
         }
     }
     Box(

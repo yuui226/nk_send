@@ -3,12 +3,14 @@ package com.nikon.transfer.viewmodel
 import android.app.Application
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -26,10 +28,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 data class CameraState(
     val isWifiConnected: Boolean = false,
@@ -64,27 +71,139 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val inflightThumbs = HashMap<Int, InflightThumb>()
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // 缩略图磁盘缓存目录：后台填充落盘于此，内存 LRU 只服务可见区。
+    private val thumbDiskDir = File(application.cacheDir, "thumbs").apply { mkdirs() }
+    // 磁盘缓存文件名索引：首次使用时一次性列目录建立，写入/删除同步维护——后台填充
+    // 逐张探测"是否已落盘"在内存完成，不再每张跨线程 stat（几千张跳过从数百 ms 降到微秒级）。
+    // 仅主线程访问（prefetch/fetch 的续体都在主调度器）。
+    private var diskIndex: HashSet<String>? = null
+
+    private suspend fun diskIndexSet(): HashSet<String> {
+        diskIndex?.let { return it }
+        val names = withContext(Dispatchers.IO) {
+            thumbDiskDir.list()?.toHashSet() ?: HashSet()
+        }
+        // 挂起期间可能已有并发首调建好索引（且其后可能已有写入），保留已建的。
+        return diskIndex ?: names.also { diskIndex = it }
+    }
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     @Suppress("DEPRECATION")
     private val wifiManager = application.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
+    // 会话级 WifiLock：只要连着相机就持有——阻止 Wi-Fi 进省电打盹（打盹的客户端容易被
+    // 相机热点踢掉，也是浏览时"容易断"的主要来源）。与 TransferService 传输期的锁互补：
+    // 那把只覆盖传输窗口，这把覆盖整个会话；持锁期间用户本就在用相机，功耗可接受。
+    private val sessionWifiLock: WifiManager.WifiLock = wifiManager.createWifiLock(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION")
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        },
+        "NikonTransfer:session"
+    ).apply { setReferenceCounted(false) }
+
+    private fun acquireSessionWifiLock() {
+        try {
+            if (!sessionWifiLock.isHeld) sessionWifiLock.acquire()
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseSessionWifiLock() {
+        try {
+            if (sessionWifiLock.isHeld) sessionWifiLock.release()
+        } catch (_: Exception) {}
+    }
+
+    // 当前 Wi-Fi 的 Network 对象：socket 必须绑定到它建连——相机热点没有互联网，
+    // 系统常把默认网络留在蜂窝上，不绑定的话连接请求会进蜂窝路由黑洞干等超时。
+    @Volatile
+    private var wifiNetwork: Network? = null
+
+    // LinkProperties 直接认出的"已在相机网段"：网关随 DHCP 完成即刻由系统推送，
+    // 比轮询 dhcpInfo（自身还滞后于 DHCP）早 1~2 秒。与 dhcpInfo 判定取或使用。
+    @Volatile
+    private var linkSaysCameraWifi = false
+
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
+            wifiNetwork = network
             onWifiChanged()
         }
 
         override fun onLost(network: Network) {
+            if (wifiNetwork == network) {
+                wifiNetwork = null
+                linkSaysCameraWifi = false
+            }
             onWifiChanged()
         }
 
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            wifiNetwork = network
             onWifiChanged()
         }
+
+        override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+            wifiNetwork = network
+            linkSaysCameraWifi = linkProperties.routes.any {
+                it.gateway?.hostAddress == PtpConstants.CAMERA_IP
+            }
+            onWifiChanged()
+        }
+    }
+
+    // "是否有任务在传输"（含等待中）——后台缩略图填充的唯一开关，由 UI 层喂入
+    //（TransferViewModel 与本 VM 相互独立，经 MainScreen 桥接）。
+    private val transfersBusyFlow = MutableStateFlow(false)
+
+    fun setTransfersBusy(busy: Boolean) {
+        transfersBusyFlow.value = busy
     }
 
     init {
         registerNetworkCallback()
         startConnectionWatcher()
+        // 磁盘缓存超容淘汰（后台一次，不阻塞启动）。
+        viewModelScope.launch(Dispatchers.IO) { pruneThumbDisk() }
+        startThumbnailFill()
+    }
+
+    /**
+     * 后台缩略图填充：与连接同生共死，【不依赖任何页面】——用户停在队列页/设置里
+     * 照常推进。只有两种状态：未传输=按拍摄时间从新到旧全量填充（prefetchThumbnail
+     * 只落盘）直到每张都有缓存；传输中=完全停止，通道全部让给传输。
+     * 文件列表渐进加载/传输状态翻转都会重启扫描——已落盘的经内存索引微秒级跳过，
+     * 重启代价可忽略，进度单调推进。
+     */
+    private fun startThumbnailFill() {
+        viewModelScope.launch {
+            combine(
+                state.map { it.files }.distinctUntilChanged(),
+                transfersBusyFlow
+            ) { files, busy -> files to busy }.collectLatest { (files, busy) ->
+                if (busy || files.isEmpty()) return@collectLatest
+                // 展示序≈拍摄时间新→旧；无拍摄时间的排最后。
+                val ordered = files.sortedByDescending { it.captureDate ?: "" }
+                log { "THUMB_SWEEP start n=${ordered.size}" }
+                var loaded = 0
+                for (file in ordered) {
+                    if (!state.value.isConnectedToCamera) {
+                        log { "THUMB_SWEEP abort: disconnected, loaded=$loaded" }
+                        return@collectLatest
+                    }
+                    try {
+                        if (prefetchThumbnail(file)) loaded++
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e   // 列表更新/传输开始的正常取消，须向上传播
+                    } catch (e: Exception) {
+                        // 单张异常绝不中断整轮（逃逸异常会悄悄杀死本协程，之后再也不填充）。
+                        log { "THUMB_SWEEP item failed handle=${file.handle}: $e" }
+                    }
+                }
+                log { "THUMB_SWEEP done loaded=$loaded/${ordered.size}" }
+            }
+        }
     }
 
     /**
@@ -97,9 +216,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         watcherJob?.cancel()
         watcherJob = viewModelScope.launch {
             while (isActive) {
-                // dhcpInfo/connectionInfo 是 Binder IPC，放 IO 线程，不在主线程每 1.5s 抖一下。
+                // dhcpInfo/connectionInfo 是 Binder IPC，放 IO 线程，不在主线程高频抖动。
                 val (onNikonWifi, rssi) = withContext(Dispatchers.IO) {
-                    val on = isNikonWifi()
+                    val on = linkSaysCameraWifi || isNikonWifi()
                     on to (if (on) readRssi() else null)
                 }
                 // 顺带纠正 Wi-Fi 状态与信号强度，避免回调漏报导致 UI 显示滞后。
@@ -119,12 +238,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .build()
-        connectivityManager.registerNetworkCallback(request, networkCallback)
+        // requestNetwork 而非被动 registerNetworkCallback：向系统声明"本应用需要 Wi-Fi"。
+        // 相机热点无互联网，部分厂商系统会把它自动切走/压后；存在活跃请求时系统会保持
+        // 连接，且 LinkProperties 等回调推送更及时。个别 ROM 抛异常则退回纯监听。
+        try {
+            connectivityManager.requestNetwork(request, networkCallback)
+        } catch (_: Exception) {
+            connectivityManager.registerNetworkCallback(request, networkCallback)
+        }
     }
 
     private fun onWifiChanged() {
         viewModelScope.launch {
-            val onNikonWifi = checkNikonWifi()
+            val onNikonWifi = linkSaysCameraWifi || checkNikonWifi()
             _state.update { it.copy(isWifiConnected = onNikonWifi) }
 
             // 只在"已在相机 Wi-Fi 但尚未连上相机"时发起连接。
@@ -172,12 +298,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (_state.value.isConnecting || _state.value.isConnectedToCamera) return
         _state.update { it.copy(isConnecting = true) }
 
-        while (checkNikonWifi() && !_state.value.isConnectedToCamera) {
+        while ((linkSaysCameraWifi || checkNikonWifi()) && !_state.value.isConnectedToCamera) {
             val cam = NikonCamera()
             var connected = false
-            cam.connect().fold(
+            cam.connect(network = wifiNetwork).fold(
                 onSuccess = {
                     camera = cam
+                    acquireSessionWifiLock()   // 会话保活：连着就不让 Wi-Fi 打盹
                     _state.update {
                         it.copy(
                             isConnectedToCamera = true,
@@ -212,6 +339,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val cam = camera ?: break
                 if (!cam.keepalive()) {
                     camera = null
+                    releaseSessionWifiLock()   // 会话结束，允许 Wi-Fi 恢复省电
                     cam.close()
                     // 掉线不报错，直接进入重连（新协程，避免与当前心跳协程的取消纠缠）。
                     // 不清空文件列表：网格保留（缩略图走缓存），断开状态由顶栏信号按钮
@@ -235,13 +363,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             try {
-                val storageIds = cam.getStorageIds()
+                // 双卡机型（Z5 II / Z6 III 等）：枚举【所有】存储卡的对象并合并，单卡机型
+                // 行为不变。PTP StorageID 低 16 位为逻辑存储号，0 表示卡槽无卡，跳过；
+                // handle 全机唯一、与卡无关，下载/缩略图等后续链路零改动。
+                val storageIds = cam.getStorageIds().filter { it and 0xFFFF != 0 }
                 if (storageIds.isEmpty()) {
                     _state.update { it.copy(isLoadingFiles = false) }
                     return@launch
                 }
 
-                val handles = cam.getObjectHandles(storageIds.first())
+                val handles = storageIds.flatMap { cam.getObjectHandles(it) }.distinct()
                 if (handles.isEmpty()) {
                     _state.update { it.copy(isLoadingFiles = false) }
                     return@launch
@@ -249,11 +380,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                 // handle 降序 ≈ 拍摄时间由新到旧；按批追加即可，最终展示顺序由
                 // FileListScreen.groupFilesByDate 统一按日期分组排序，避免此处每批 O(n log n) 全量重排。
+                // 双卡照片按拍摄日期自然混排进同一分组。
                 val sortedHandles = handles.sortedDescending()
                 val allFiles = mutableListOf<NikonCamera.FileInfo>()
+                // 备份模式下同一张照片在两张卡各有一份（handle 不同）：按 名称+大小+拍摄时间
+                // 去重，列表只显示一份；溢出/RAW+JPG 分卡等模式互不相同，不受影响。
+                val seen = HashSet<String>()
 
                 cam.streamFileInfo(sortedHandles, batchSize = 20) { batch, loaded, total ->
-                    allFiles.addAll(batch)
+                    val fresh = batch.filter { seen.add("${it.fileName}|${it.size}|${it.captureDate}") }
+                    allFiles.addAll(fresh)
                     val snapshot = allFiles.toList()
                     // onBatch 回调运行在 IO 线程，用 update 原子读改写避免与主线程写入竞争。
                     _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
@@ -270,23 +406,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun getCamera(): NikonCamera? = camera
 
     /**
-     * 加载指定文件的缩略图（用于缩略图网格）。命中内存缓存直接返回；确认无缩略图的负缓存直接
-     * 返回 null；否则经 PTP GetThumb 取字节、在后台线程解码并入缓存。同 handle 的并发请求
-     * 共享同一次取图。与下载共用 ioMutex，串行安全；相机未连接返回 null。
+     * 加载指定文件的缩略图（用于可见格子/预览/队列小图）。三级查找：
+     * 内存 LRU → 磁盘缓存（毫秒级解码）→ 相机 GetThumb（取到即落盘 + 入内存）。
+     * 确认无缩略图的负缓存直接返回 null。同 handle 的并发请求共享同一次取图。
+     * 磁盘键是"文件名+大小+拍摄时间"的稳定身份，与会话级 handle 无关——断线重连
+     * 后不必重新向相机拉图。相机未连接时磁盘命中仍可显示。
      *
      * 传输进行中也允许请求：ioMutex 在单个文件下载期间被持有，缩略图请求只会排队到
-     * 当前文件传完的间隙执行，不会拖慢传输中的文件本身。"传输期间少取图"由 UI 层
-     * 收窄预取窗口实现（见 FileListScreen 的 PREFETCH_AHEAD_BUSY），已缓存即静默。
+     * 当前文件传完的间隙执行，不会拖慢传输中的文件本身。
      */
-    suspend fun loadThumbnail(handle: Int): ImageBitmap? {
+    suspend fun loadThumbnail(file: NikonCamera.FileInfo): ImageBitmap? {
+        val handle = file.handle
         thumbnailCache.get(handle)?.let { return it }
         if (handle in noThumbHandles) return null
         // 复用进行中的请求（跳过已被取消但尚未从表中清理的条目）。
-        val entry = inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled } ?: run {
-            val cam = camera ?: return null
-            InflightThumb(viewModelScope.async { fetchAndDecodeThumb(cam, handle) })
+        val entry = inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled }
+            ?: InflightThumb(viewModelScope.async { fetchAndDecodeThumb(file) })
                 .also { inflightThumbs[handle] = it }
-        }
         entry.waiters++
         try {
             return entry.deferred.await()   // 调用方被取消时在此抛出并传播，不能吞掉
@@ -299,6 +435,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (inflightThumbs[handle] === entry) inflightThumbs.remove(handle)
             }
         }
+    }
+
+    /**
+     * 后台填充专用：确保缩略图字节已在【磁盘】缓存——不解码、不写内存 LRU。
+     * 返回 true 表示已可用（内存/磁盘/确认无图）。
+     *
+     * 为什么不复用 [loadThumbnail]：内存 LRU 只装得下几百张解码位图，全量扫描若逐张
+     * 解码入内存，扫到后面会把前面（以及视口附近）的全部挤出去——扫描白跑，还破坏
+     * 可见区缓存。落盘不占堆内存，几千张也只有几十 MB；格子滚到时从磁盘毫秒级解码。
+     */
+    suspend fun prefetchThumbnail(file: NikonCamera.FileInfo): Boolean {
+        val handle = file.handle
+        if (handle in noThumbHandles) return true
+        if (thumbnailCache.get(handle) != null) return true
+        val disk = diskFile(file)
+        if (disk.name in diskIndexSet()) return true
+        // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
+        // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
+        // 用户来回翻动导致的"格子请求发出又取消"绝不会让这张图两头落空。
+        if (inflightThumbs[handle]?.deferred?.isCancelled == false) {
+            return loadThumbnail(file) != null
+        }
+        val cam = camera ?: return false
+        val bytes = cam.getThumbnail(handle)   // 瞬时失败会抛出，由扫描循环按单张失败处理
+        if (bytes == null || bytes.isEmpty()) {
+            noThumbHandles.add(handle)
+            return true
+        }
+        withContext(Dispatchers.IO) { writeAtomic(disk, bytes) }
+        diskIndex?.add(disk.name)
+        return true
     }
 
     /**
@@ -352,25 +519,45 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return Bitmap.createBitmap(src, left, top, w - left - right, h - top - bottom)
     }
 
-    private suspend fun fetchAndDecodeThumb(cam: NikonCamera, handle: Int): ImageBitmap? {
+    private suspend fun fetchAndDecodeThumb(file: NikonCamera.FileInfo): ImageBitmap? {
+        val handle = file.handle
         return try {
-            val bytes = cam.getThumbnail(handle)
-            if (bytes == null || bytes.isEmpty()) {
-                noThumbHandles.add(handle)   // 相机明确表示无缩略图：负缓存，不再重试
-                log { "THUMB no-thumb handle=$handle (resp non-OK / empty)" }
-                return null
+            // 1) 磁盘缓存：按稳定身份键命中（跨会话/断连有效）。
+            val disk = diskFile(file)
+            var fromDisk = true
+            var bytes = withContext(Dispatchers.IO) {
+                if (disk.isFile) try { disk.readBytes() } catch (_: Exception) { null } else null
             }
+            // 2) 相机取图，取到即落盘。
+            if (bytes == null || bytes.isEmpty()) {
+                fromDisk = false
+                val cam = camera ?: return null
+                bytes = cam.getThumbnail(handle)
+                if (bytes == null || bytes.isEmpty()) {
+                    noThumbHandles.add(handle)   // 相机明确表示无缩略图：负缓存，不再重试
+                    log { "THUMB no-thumb handle=$handle (resp non-OK / empty)" }
+                    return null
+                }
+                val fresh = bytes
+                withContext(Dispatchers.IO) { writeAtomic(disk, fresh) }
+                diskIndex?.add(disk.name)
+            }
+            val data = bytes
             val image = withContext(Dispatchers.Default) {
                 // 解码后立即精确裁掉烘焙在缩略图里的黑边（3:2/16:9 塞 4:3 的上下黑条），
                 // 裁好的位图进缓存——列表格子/队列小图/预览全都拿到无黑边的图，
                 // UI 层不再需要"放大遮边"的近似 hack。
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                BitmapFactory.decodeByteArray(data, 0, data.size)
                     ?.let { cropLetterbox(it) }
                     ?.asImageBitmap()
             }
             if (image == null) {
-                noThumbHandles.add(handle)   // 字节取到但解码失败：同样视为无缩略图
-                log { "THUMB decode failed handle=$handle bytes=${bytes.size}" }
+                // 解码失败：删掉磁盘上的坏文件。磁盘来源不负缓存（下次直接找相机重取）；
+                // 相机新鲜字节都解不了才视为确认无图。
+                withContext(Dispatchers.IO) { disk.delete() }
+                diskIndex?.remove(disk.name)
+                if (!fromDisk) noThumbHandles.add(handle)
+                log { "THUMB decode failed handle=$handle bytes=${data.size} fromDisk=$fromDisk" }
                 return null
             }
             thumbnailCache.put(handle, image)
@@ -384,6 +571,41 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** 磁盘缓存键：文件名+大小+拍摄时间的稳定身份（与会话级 handle 无关，重连后依旧命中）。 */
+    private fun diskFile(file: NikonCamera.FileInfo): File {
+        val key = "${file.fileName}_${file.size}_${file.captureDate ?: "0"}"
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+        return File(thumbDiskDir, "$key.jpg")
+    }
+
+    /** 先写临时文件再改名，避免进程被杀留下半截 JPEG 被当成有效缓存。仅 IO 线程调用。 */
+    private fun writeAtomic(target: File, bytes: ByteArray) {
+        try {
+            // 系统设置"清除缓存"会把 thumbs 目录整个删掉且【不杀进程】：每次写入前
+            // 重建目录，否则此后所有落盘静默失败、后台填充整个失效（实测踩过）。
+            target.parentFile?.mkdirs()
+            val tmp = File(target.parentFile, target.name + ".tmp")
+            tmp.writeBytes(bytes)
+            if (!tmp.renameTo(target)) tmp.delete()
+        } catch (e: Exception) {
+            log { "THUMB disk write failed ${target.name}: ${e.javaClass.simpleName}: ${e.message}" }
+        }
+    }
+
+    /** 磁盘缓存超容时按最旧访问淘汰到 3/4 容量。启动时后台执行一次，平时零开销。 */
+    private fun pruneThumbDisk() {
+        try {
+            val files = thumbDiskDir.listFiles() ?: return
+            var total = files.sumOf { it.length() }
+            if (total <= THUMB_DISK_MAX_BYTES) return
+            for (f in files.sortedBy { it.lastModified() }) {
+                total -= f.length()
+                f.delete()
+                if (total <= THUMB_DISK_MAX_BYTES * 3 / 4) break
+            }
+        } catch (_: Exception) {}
+    }
+
     /** 仅 debug 构建输出缩略图链路日志（与协议层同 TAG，logcat 过滤 NikonTransfer 即可）。 */
     private inline fun log(message: () -> String) {
         if (com.nikon.transfer.BuildConfig.DEBUG) {
@@ -393,6 +615,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         super.onCleared()
+        releaseSessionWifiLock()
         keepaliveJob?.cancel()
         watcherJob?.cancel()
         try {
@@ -406,11 +629,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private companion object {
         const val KEEPALIVE_INTERVAL_MS = 10_000L
-        const val RETRY_INTERVAL_MS = 2_000L
-        const val WATCH_INTERVAL_MS = 1_500L
+        // 连接失败重试间隔：相机刚开热点时 PTP 服务可能晚于 Wi-Fi 就绪，快节奏重试
+        // 让"差一步"的场景少等一秒。看护轮询同理（开销只是读本地 DHCP，可忽略）。
+        const val RETRY_INTERVAL_MS = 1_000L
+        const val WATCH_INTERVAL_MS = 1_000L
         // 黑边判定：近黑像素的通道上限（JPEG 压缩后黑条并非纯黑，留噪声余量）；
         // 黑边占边长的上限——3:2 塞 4:3 为 5.6%、16:9 为 12.5%，超过 15% 视为画面本身偏暗。
         const val BAR_BLACK_MAX = 32
         const val BAR_MAX_FRACTION = 0.15f
+        // 缩略图磁盘缓存容量上限（原始 JPEG 每张几 KB，64MB 足够上万张）。
+        const val THUMB_DISK_MAX_BYTES = 64L * 1024 * 1024
     }
 }

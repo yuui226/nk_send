@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.nikon.transfer.ui.theme.*
 import com.nikon.transfer.viewmodel.CameraViewModel
 import com.nikon.transfer.viewmodel.TransferViewModel
+import kotlinx.coroutines.delay
 
 /**
  * 连接（引导）页：展示连接状态与引导。左上角 "Z传" 玻璃按钮为设置入口，
@@ -63,17 +64,29 @@ fun HomeScreen(
     val colors = AppTheme.colors
     val connected = state.isConnectedToCamera
     val onCameraWifi = state.isWifiConnected
+    // 成功庆祝刻意延后：连接后先保持"连接中"的脉冲一小会——此时文件列表与缩略图
+    // 已在后台全速加载（连接成功瞬间就启动，与本页停留无关）——再播爆发收尾，
+    // 否则动画一闪而过根本看不清。跳转时机在 MainScreen 与此对齐。
+    var celebrate by remember { mutableStateOf(false) }
+    LaunchedEffect(connected) {
+        if (connected) {
+            delay(CONNECT_CELEBRATE_DELAY_MS)
+            celebrate = true
+        } else {
+            celebrate = false
+        }
+    }
     val heroColor = when {
-        connected -> colors.statusConnected
-        onCameraWifi -> colors.accentBlue
+        celebrate -> colors.statusConnected
+        onCameraWifi || connected -> colors.accentBlue
         else -> colors.accentOrange
     }
     val heroIcon = when {
-        connected -> Icons.Default.CheckCircle
-        onCameraWifi -> Icons.Default.Wifi
+        celebrate -> Icons.Default.CheckCircle
+        onCameraWifi || connected -> Icons.Default.Wifi
         else -> Icons.Default.WifiOff
     }
-    val pulsing = onCameraWifi && !connected
+    val pulsing = (onCameraWifi || connected) && !celebrate
 
     Box(modifier = Modifier.fillMaxSize()) {
         // ---------- 中央 Hero：上下弹性区按 1:2 定位——Hero 中心落在屏幕约 35~38% 高度
@@ -89,13 +102,14 @@ fun HomeScreen(
             Spacer(modifier = Modifier.weight(1f))
 
             // 连接中脉冲；连接成功时播放"脉冲爆发散开 + 图标渐变绿"的收尾动画。
-            StatusHero(color = heroColor, icon = heroIcon, pulsing = pulsing, success = connected)
+            StatusHero(color = heroColor, icon = heroIcon, pulsing = pulsing, success = celebrate)
 
             Box(modifier = Modifier.weight(2f).fillMaxWidth()) {
                 Crossfade(
                     targetState = when {
-                        connected -> HomeHint.NONE
-                        onCameraWifi -> HomeHint.CONNECTING
+                        celebrate -> HomeHint.NONE
+                        // 已连接但还没到庆祝时刻：视觉上仍是"正在连接"的延续，无缝衔接。
+                        onCameraWifi || connected -> HomeHint.CONNECTING
                         else -> HomeHint.OFF_WIFI
                     },
                     animationSpec = tween(300),
@@ -103,7 +117,8 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxSize()
                 ) { hint ->
                     when (hint) {
-                        // 已连接：交给成功收尾动画，随后由外层延迟跳转到照片列表。
+                        // 已连接：全交给成功爆发动画——绿色对号 = 马上进入照片列表
+                        //（MainScreen 在动画播完后直接跳转），无需任何文字。
                         HomeHint.NONE -> Box(modifier = Modifier.fillMaxSize())
                         HomeHint.CONNECTING -> Column(
                             modifier = Modifier
@@ -194,9 +209,17 @@ fun HomeScreen(
     }
 }
 
+// 连接成功后的入场节奏：先保持"连接中"脉冲 [CONNECT_CELEBRATE_DELAY_MS]（此间列表与
+// 缩略图已在后台全速加载），再播约 [CONNECT_SUCCESS_ANIM_MS] 的爆发收尾——播完由
+// MainScreen 跳转到照片列表。两个值相加即连接成功后在本页的总停留。
+const val CONNECT_CELEBRATE_DELAY_MS = 1200L
+const val CONNECT_SUCCESS_ANIM_MS = 850L
+
 // 脉冲一轮的周期（秒）与成功时的相位加速倍数。
 private const val PULSE_PERIOD_S = 2.2f
-private const val BURST_SPEED = 4f
+private const val BURST_SPEED = 5.5f
+// 成功爆发时环的额外扩散范围：最远飞到基准尺寸的约 2.3 倍，明显冲出圆盘。
+private const val BURST_EXTRA_RANGE = 1.2f
 
 /** 连接页下半区的引导内容形态（Hero 恒定居中，引导只在下半区渐变切换）。 */
 private enum class HomeHint { NONE, CONNECTING, OFF_WIFI }
@@ -233,11 +256,18 @@ private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, succes
             }
         }
     }
-    // 环整体透明度：脉冲中为 1；成功爆发时边冲边淡出，离开相机 Wi-Fi 时平滑收场。
+    // 环整体透明度：脉冲中为 1；成功爆发时边冲边淡出（拉长到 700ms 让"飞出"读得完整），
+    // 离开相机 Wi-Fi 时平滑收场。
     val ringsAlpha by animateFloatAsState(
         targetValue = if (pulsing) 1f else 0f,
-        animationSpec = tween(if (success) 550 else 400),
+        animationSpec = tween(if (success) 700 else 400),
         label = "ringsAlpha"
+    )
+    // 爆发进度：成功瞬间 0→1，驱动环的扩散范围外扩（冲出圆盘）与亮度增强。
+    val burst by animateFloatAsState(
+        targetValue = if (success) 1f else 0f,
+        animationSpec = tween(650, easing = FastOutSlowInEasing),
+        label = "burst"
     )
 
     Box(modifier = Modifier.size(200.dp), contentAlignment = Alignment.Center) {
@@ -251,21 +281,24 @@ private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, succes
                             val p = (phase + i / 3f).mod(1f)
                             // 出生尺寸 0.55×180=99dp——刚好在 96dp 中心圆盘外缘冒头。
                             // 再小的话，环最亮的前 20% 行程全藏在圆盘后面，脉冲显得又弱又淡。
-                            val s = 0.55f + p * 0.55f
+                            // 成功爆发：扩散终点随 burst 外扩到 ~2.3 倍，环猛地冲出圆盘很远，
+                            // 亮度同时增强——能量迸发感，而不是普通脉冲的延续。
+                            val s = 0.55f + p * (0.55f + BURST_EXTRA_RANGE * burst)
                             scaleX = s
                             scaleY = s
-                            alpha = (p * 5f).coerceAtMost(1f) * (1f - p) * 0.7f * ringsAlpha
+                            alpha = (p * 5f).coerceAtMost(1f) * (1f - p) *
+                                    (0.7f + 0.3f * burst) * ringsAlpha
                         }
                         .border(3.5.dp, animColor, CircleShape)
                 )
             }
         }
 
-        // 成功瞬间图标轻微弹跳（快起 + 弹性回落）。
+        // 成功瞬间图标有力地弹跳（快起 + 弹性回落），与环的爆发同拍。
         val iconPop = remember { Animatable(1f) }
         LaunchedEffect(success) {
             if (success) {
-                iconPop.animateTo(1.12f, tween(180, easing = FastOutSlowInEasing))
+                iconPop.animateTo(1.22f, tween(160, easing = FastOutSlowInEasing))
                 iconPop.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
             }
         }

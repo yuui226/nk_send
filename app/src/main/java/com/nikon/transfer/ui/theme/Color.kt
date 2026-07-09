@@ -48,12 +48,10 @@ val LightStatusWaiting = Color(0xFF8E8E93)
  */
 @Immutable
 data class AppColors(
-    val isDark: Boolean,
     val background: Color,
     val surface: Color,
     val surfaceVariant: Color,
     val onBackground: Color,
-    val onSurface: Color,
     val onSurfaceVariant: Color,
     val accentBlue: Color,
     val accentOrange: Color,
@@ -86,12 +84,10 @@ data class AppColors(
 )
 
 val DarkAppColors = AppColors(
-    isDark = true,
     background = DarkBackground,
     surface = DarkSurface,
     surfaceVariant = DarkSurfaceVariant,
     onBackground = DarkOnBackground,
-    onSurface = DarkOnSurface,
     onSurfaceVariant = DarkOnSurfaceVariant,
     accentBlue = AccentBlue,
     accentOrange = AccentOrange,
@@ -114,12 +110,10 @@ val DarkAppColors = AppColors(
 )
 
 val LightAppColors = AppColors(
-    isDark = false,
     background = LightBackground,
     surface = LightSurface,
     surfaceVariant = LightSurfaceVariant,
     onBackground = LightOnBackground,
-    onSurface = LightOnSurface,
     onSurfaceVariant = LightOnSurfaceVariant,
     accentBlue = LightAccentBlue,
     accentOrange = LightAccentOrange,
