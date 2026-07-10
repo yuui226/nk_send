@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -35,10 +36,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.R
+import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGetObjectInfo
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
+import com.ztransfer.protocol.labStepProp
 import com.ztransfer.protocol.runLabCapture
 import com.ztransfer.protocol.runLabProbe
 import com.ztransfer.ui.theme.AppTheme
@@ -51,9 +54,35 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** 调参步进小按钮（等宽平分一行，文本居中）。 */
+@Composable
+private fun RowScope.StepChip(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = AppTheme.colors
+    GlassButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.weight(1f),
+        contentPadding = PaddingValues(horizontal = 2.dp, vertical = 8.dp)
+    ) {
+        Spacer(Modifier.weight(1f))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onBackground,
+            maxLines = 1
+        )
+        Spacer(Modifier.weight(1f))
+    }
+}
+
 /**
  * 遥控实验页（临时，验证无线遥控可行性）：位于文件列表页左侧，右滑打开。
- * 三个动作：完整探测（只读+LV试帧，一次拿全能力清单）、连续监看、试拍一张。
+ * 动作：完整探测（只读+LV试帧，一次拿全能力清单）、连续监看、试拍一张、
+ * 快门/光圈/ISO 调参步进（真实改设置，监看中立即可见）。
  * 日志区可复制,方便把真机探测结果带出来分析。
  */
 @Composable
@@ -160,6 +189,16 @@ fun RemoteLabScreen(
             } finally {
                 busy = false
             }
+        }
+    }
+
+    // 调参步进：沿相机返回的枚举表挪一档并写回，真实改变相机设置。
+    fun stepProp(prop: Int, delta: Int) {
+        val cam = cameraViewModel.getCamera() ?: return
+        scope.launch {
+            runCatching { cam.labStepProp(prop, delta) }
+                .onSuccess { logLines.add(it) }
+                .onFailure { logLines.add("!! step failed: ${it.message}") }
         }
     }
 
@@ -275,7 +314,18 @@ fun RemoteLabScreen(
                 )
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
+
+        // ---------- 调参步进（S=快门 f=光圈 ISO；技术符号不进 i18n）----------
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            StepChip("S−", connected && !busy) { stepProp(Lab.PROP_NK_SHUTTER, -1) }
+            StepChip("S+", connected && !busy) { stepProp(Lab.PROP_NK_SHUTTER, 1) }
+            StepChip("f−", connected && !busy) { stepProp(Lab.PROP_F_NUMBER, -1) }
+            StepChip("f+", connected && !busy) { stepProp(Lab.PROP_F_NUMBER, 1) }
+            StepChip("ISO−", connected && !busy) { stepProp(Lab.PROP_ISO, -1) }
+            StepChip("ISO+", connected && !busy) { stepProp(Lab.PROP_ISO, 1) }
+        }
+        Spacer(Modifier.height(8.dp))
 
         // ---------- 日志 ----------
         Box(

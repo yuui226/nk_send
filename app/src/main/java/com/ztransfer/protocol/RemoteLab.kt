@@ -281,6 +281,56 @@ private fun findJpegStart(d: ByteArray): Int {
     return -1
 }
 
+// ============================ 调参步进 ============================
+
+/** DevicePropDesc 的结构化解析结果（调参步进用）。 */
+private data class PropDescData(val dataType: Int, val current: Long, val enumValues: List<Long>)
+
+private fun parsePropDescData(d: ByteArray): PropDescData {
+    val c = Cur(d)
+    c.u16()
+    val dataType = c.u16()
+    c.u8()                               // GetSet
+    c.typed(dataType)                    // default
+    val (cur, _) = c.typed(dataType)
+    val formFlag = c.u8()
+    val values = if (formFlag == 2) {
+        val n = c.u16()
+        (0 until n).map { c.typed(dataType).first }
+    } else emptyList()
+    return PropDescData(dataType, cur, values)
+}
+
+private fun encodeScalar(dataType: Int, v: Long): ByteArray {
+    val size = when (dataType) {
+        0x0001, 0x0002 -> 1
+        0x0003, 0x0004 -> 2
+        0x0005, 0x0006 -> 4
+        else -> 8
+    }
+    return ByteArray(size) { i -> ((v shr (8 * i)) and 0xFF).toByte() }
+}
+
+/**
+ * 调参步进：现取 desc 定位当前值在枚举表中的位置，挪 [delta] 档后写回。
+ * 会真实改变相机设置（仅实验页手动触发）。返回一行结果日志。
+ * 枚举表现取而非缓存：可选值随曝光模式动态变化，缓存会写出相机拒绝的值。
+ */
+suspend fun NikonCamera.labStepProp(prop: Int, delta: Int): String {
+    val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
+    if (rc != Lab.OK || d == null) return "${hex4(prop)} desc resp=${hex4(rc)}"
+    val desc = runCatching { parsePropDescData(d) }.getOrNull()
+        ?: return "${hex4(prop)} desc parse failed"
+    if (desc.enumValues.isEmpty()) return "${hex4(prop)} no enum form"
+    val idx = desc.enumValues.indexOf(desc.current)
+    if (idx < 0) return "${hex4(prop)} current ${desc.current} not in enum"
+    val newIdx = (idx + delta).coerceIn(0, desc.enumValues.size - 1)
+    if (newIdx == idx) return "${hex4(prop)} already at ${if (delta > 0) "last" else "first"} (${fmtVal(prop, desc.current)})"
+    val newVal = desc.enumValues[newIdx]
+    val src = labSetProp(prop, encodeScalar(desc.dataType, newVal))
+    return "${hex4(prop)} ${fmtVal(prop, desc.current)} -> ${fmtVal(prop, newVal)} resp=${hex4(src)}"
+}
+
 // ============================ Live View ============================
 
 /**
