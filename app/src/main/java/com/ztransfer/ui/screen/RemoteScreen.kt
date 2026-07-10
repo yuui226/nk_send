@@ -241,15 +241,25 @@ private fun RemoteContent(
         }
     }
 
-    // 进页/重连：拉型号 + 参数 + 开监看。断线时 LV 循环自行失败退出，重连后这里重启。
+    // 在页期间暂停后台缩略图填充：把 ioMutex 完全让给取帧与参数加载，
+    // 否则每条启动命令都排在 GetThumb 后面，进页要等好几秒。退出自动恢复。
+    DisposableEffect(Unit) {
+        cameraViewModel.setRemoteActive(true)
+        onDispose { cameraViewModel.setRemoteActive(false) }
+    }
+
+    // 进页/重连：画面最优先——立即启动监看会话；参数与型号并行加载，
+    // 在帧间隙穿插完成（读数条随加载逐个点亮）。
     LaunchedEffect(connected) {
         if (!connected) return@LaunchedEffect
-        if (modelName == null) {
-            modelName = runCatching { cameraViewModel.getCamera()?.rcModelName() }.getOrNull()
-        }
-        EXPOSURE_PROPS.forEach { refreshParam(it) }
-        refreshMode()
         startSession(hdLiveView)
+        launch {
+            EXPOSURE_PROPS.forEach { refreshParam(it) }
+            refreshMode()
+            if (modelName == null) {
+                modelName = runCatching { cameraViewModel.getCamera()?.rcModelName() }.getOrNull()
+            }
+        }
     }
 
     // 事件轮询：唯一的 GetEvent 消费者。参数被机身侧改动（0x4006）时刷新对应值域。

@@ -384,15 +384,6 @@ suspend fun NikonCamera.rcModelName(): String? {
  * 返回是否成功；过程写入 [log]。
  */
 suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean {
-    // 预检禁止条件（失败不阻断，仅记录——部分机型不支持该属性）
-    val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_LV_PROHIBIT)
-    if (prc == Lab.OK && pd != null && pd.size >= 4) {
-        val bits = Cur(pd).u32()
-        log("LV prohibit condition = ${hex8(bits)}${if (bits != 0L) "  << non-zero, LV may fail" else ""}")
-    } else {
-        log("LV prohibit condition read: resp=${hex4(prc)}")
-    }
-
     // 0x2019 忙 / 0xA004 InvalidStatus（上一次 EndLiveView 后相机内部状态未落定时常见）
     // 都值得短暂重试。
     var rc = labCommand(Lab.NK_START_LIVE_VIEW).first
@@ -403,14 +394,21 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
         tries++
     }
     log("StartLiveView(0x9201) resp=${hex4(rc)}${if (tries > 0) " after $tries busy-retries" else ""}")
-    if (rc != Lab.OK) return false
+    if (rc != Lab.OK) {
+        // 失败才读禁止条件用于诊断——成功路径省掉这条往返，进页更快。
+        val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_LV_PROHIBIT)
+        if (prc == Lab.OK && pd != null && pd.size >= 4) {
+            log("LV prohibit condition = ${hex8(Cur(pd).u32())}")
+        }
+        return false
+    }
 
     val t0 = System.currentTimeMillis()
     var ready = rc
     while (System.currentTimeMillis() - t0 < 4000) {
         ready = labCommand(Lab.NK_DEVICE_READY).first
         if (ready != Lab.DEVICE_BUSY) break
-        delay(60)
+        delay(20)   // 相机通常 20-80ms 就绪，20ms 步进能少等半拍
     }
     log("DeviceReady(0x90C8) resp=${hex4(ready)} after ${System.currentTimeMillis() - t0}ms")
     return true

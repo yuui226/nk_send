@@ -153,12 +153,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // "是否有任务在传输"（含等待中）——后台缩略图填充的唯一开关，由 UI 层喂入
+    // "是否有任务在传输"（含等待中）——后台缩略图填充的开关之一，由 UI 层喂入
     //（TransferViewModel 与本 VM 相互独立，经 MainScreen 桥接）。
     private val transfersBusyFlow = MutableStateFlow(false)
 
     fun setTransfersBusy(busy: Boolean) {
         transfersBusyFlow.value = busy
+    }
+
+    // 遥控页活跃期间同样完全停止填充：监看取帧是连续流量，填充的 GetThumb 会与
+    // 参数加载/取帧争抢 ioMutex（表现为进页要等半天、帧率骤降）。与"传输中停止"
+    // 同一哲学——前台交互独占通道；退出遥控页自动恢复。
+    private val remoteActiveFlow = MutableStateFlow(false)
+
+    fun setRemoteActive(active: Boolean) {
+        remoteActiveFlow.value = active
     }
 
     init {
@@ -180,9 +189,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             combine(
                 state.map { it.files }.distinctUntilChanged(),
-                transfersBusyFlow
-            ) { files, busy -> files to busy }.collectLatest { (files, busy) ->
-                if (busy || files.isEmpty()) return@collectLatest
+                transfersBusyFlow,
+                remoteActiveFlow
+            ) { files, busy, remote -> Triple(files, busy, remote) }.collectLatest { (files, busy, remote) ->
+                if (busy || remote || files.isEmpty()) return@collectLatest
                 // 展示序≈拍摄时间新→旧；无拍摄时间的排最后。
                 val ordered = files.sortedByDescending { it.captureDate ?: "" }
                 log { "THUMB_SWEEP start n=${ordered.size}" }
