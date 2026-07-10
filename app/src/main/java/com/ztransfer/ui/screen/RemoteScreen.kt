@@ -6,7 +6,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,28 +13,26 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -46,22 +43,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.R
@@ -72,7 +67,6 @@ import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
 import com.ztransfer.protocol.rcAfDrive
 import com.ztransfer.protocol.rcCapture
-import com.ztransfer.protocol.rcChangeAfArea
 import com.ztransfer.protocol.rcFormat
 import com.ztransfer.protocol.rcGetParam
 import com.ztransfer.protocol.rcModelName
@@ -83,13 +77,11 @@ import com.ztransfer.protocol.runLabProbe
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.DarkAppColors
 import com.ztransfer.ui.theme.LocalAppColors
-import com.ztransfer.ui.util.Haptics
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
-import kotlin.math.abs
-import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -103,11 +95,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-// 读数条/拨轮覆盖的四个曝光参数（顺序即读数条顺序）
+// 直控胶囊覆盖的四个曝光参数（顺序即 2×2 网格顺序：快门/光圈/ISO/曝光补偿）
 private val EXPOSURE_PROPS = listOf(
     Lab.PROP_NK_SHUTTER, Lab.PROP_F_NUMBER, Lab.PROP_ISO, Lab.PROP_EXP_COMPENSATION
 )
-private val WHEEL_ITEM_WIDTH = 84.dp
 
 /**
  * 无线遥控页（正式功能）：取景器隐喻，恒黑底不随主题——通过覆盖 [LocalAppColors]
@@ -153,7 +144,10 @@ private fun RemoteContent(
     var modelName by remember { mutableStateOf<String?>(null) }
     var modeText by remember { mutableStateOf<String?>(null) }
     val params = remember { mutableStateMapOf<Int, RcParam>() }
-    var selectedProp by remember { mutableStateOf(Lab.PROP_NK_SHUTTER) }
+    // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
+    val pendingSets = remember { mutableMapOf<Int, Job>() }
+    // 弹出完整值表的参数（点胶囊中间值触发）
+    var listProp by remember { mutableStateOf<Int?>(null) }
 
     // ---------- 开发者面板 ----------
     val logLines = remember { mutableStateListOf<String>() }
@@ -212,6 +206,8 @@ private fun RemoteContent(
                     while (isActive) {
                         val grabbed = try {
                             cam.labGrabFrame()
+                        } catch (e: CancellationException) {
+                            throw e   // 会话被取消（退页/重启），不能当普通错误吞掉
                         } catch (e: Exception) {
                             // 非忙失败（掉出 LV / 连接异常）：退避后回外层整体重启
                             errStreak++
@@ -248,15 +244,16 @@ private fun RemoteContent(
         onDispose { cameraViewModel.setRemoteActive(false) }
     }
 
-    // 进页/重连：画面最优先——立即启动监看会话；参数与型号并行加载，
-    // 在帧间隙穿插完成（读数条随加载逐个点亮）。
+    // 进页/重连：先拉参数（5 条快速往返，胶囊立刻点亮）再启动监看——LV 首帧
+    // 反正要等相机预热（DeviceReady 常见 1s+），参数若排在取帧流后面才真叫慢；
+    // 型号是装饰信息，最后后台拉。
     LaunchedEffect(connected) {
         if (!connected) return@LaunchedEffect
+        EXPOSURE_PROPS.forEach { refreshParam(it) }
+        refreshMode()
         startSession(hdLiveView)
-        launch {
-            EXPOSURE_PROPS.forEach { refreshParam(it) }
-            refreshMode()
-            if (modelName == null) {
+        if (modelName == null) {
+            launch {
                 modelName = runCatching { cameraViewModel.getCamera()?.rcModelName() }.getOrNull()
             }
         }
@@ -272,7 +269,11 @@ private fun RemoteContent(
                 eventFlow.emit(e)
                 if (e.first == Lab.EVT_DEVICE_PROP_CHANGED) {
                     val prop = e.second.toInt()
-                    if (prop in EXPOSURE_PROPS) refreshParam(prop)
+                    // 本地还有未发出的乐观值时不刷新——自己刚设的值触发的事件
+                    // 会把正在连调的显示值拽回去
+                    if (prop in EXPOSURE_PROPS && pendingSets[prop]?.isActive != true) {
+                        refreshParam(prop)
+                    }
                     if (prop == Lab.PROP_EXPOSURE_PROGRAM) {
                         refreshMode()
                         // 曝光模式变化会连带改变各参数的可写性/值域
@@ -284,19 +285,33 @@ private fun RemoteContent(
         }
     }
 
-    // ---------- 动作 ----------
-    fun commitValue(p: RcParam, value: Long) {
-        val cam = cameraViewModel.getCamera() ?: return
-        scope.launch {
+    // ---------- 调参 ----------
+    // 步进采用"乐观更新 + 尾值合并"：本地值立即跟手（长按连调不卡），停手 160ms 后
+    // 只把最终值发给相机——逐档发送会在 ioMutex 上排队，连调十几档要追几秒。
+    fun sendValue(prop: Int, value: Long, immediate: Boolean) {
+        val p = params[prop] ?: return
+        params[prop] = p.copy(current = value)
+        haptics.tick()
+        pendingSets[prop]?.cancel()
+        pendingSets[prop] = scope.launch {
+            if (!immediate) delay(160)
+            val cam = cameraViewModel.getCamera() ?: return@launch
             val rc = runCatching { cam.rcSetValue(p, value) }.getOrDefault(-1)
-            if (rc == Lab.OK) {
-                params[p.prop] = p.copy(current = value)
-                haptics.tick()
-            } else {
-                devLog("!! set 0x%04X resp=0x%04X".format(p.prop, rc and 0xFFFF))
-                refreshParam(p.prop)   // 写失败刷回真实值，拨轮自动弹回
+            if (rc != Lab.OK) {
+                devLog("!! set 0x%04X resp=0x%04X".format(prop, rc and 0xFFFF))
+                refreshParam(prop)   // 写失败刷回真实值
             }
         }
+    }
+
+    fun stepParam(prop: Int, delta: Int) {
+        val p = params[prop] ?: return
+        if (!p.writable || p.values.isEmpty()) return
+        val idx = p.values.indexOf(p.current)
+        if (idx < 0) return
+        val newIdx = (idx + delta).coerceIn(0, p.values.size - 1)
+        if (newIdx == idx) return
+        sendValue(prop, p.values[newIdx], immediate = false)
     }
 
     fun shoot() {
@@ -336,35 +351,28 @@ private fun RemoteContent(
         }
     }
 
-    // 触摸对焦：容器坐标 → ContentScale.Fit 反算 → LV 图像像素坐标
-    var viewSize by remember { mutableStateOf(IntSize.Zero) }
-    var focusPos by remember { mutableStateOf<Offset?>(null) }
-    var focusNonce by remember { mutableStateOf(0) }
-    LaunchedEffect(focusNonce) {
-        if (focusPos != null) { delay(900); focusPos = null }
+    // 模拟半按对焦：点画面任意处 = AfDrive 在【当前对焦点】合焦，与机身半按一致。
+    //（曾试过 ChangeAfArea 移点：响应 0x2001 但焦点落点与预期不符——坐标系语义与
+    // 机身预期对不上，且连发后相机掉出 LV(0xA00B)。半按模式行为可预期。）
+    var afNonce by remember { mutableStateOf(0) }
+    var afVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(afNonce) {
+        if (afNonce > 0) {
+            afVisible = true
+            delay(900)
+            afVisible = false
+        }
     }
     var afBusy by remember { mutableStateOf(false) }
-    fun tapToFocus(pos: Offset) {
+    fun halfPressFocus() {
         if (afBusy) return
-        val bmp = frame ?: return
         val cam = cameraViewModel.getCamera() ?: return
-        val cw = viewSize.width.toFloat()
-        val ch = viewSize.height.toFloat()
-        if (cw <= 0f || ch <= 0f) return
-        val scale = minOf(cw / bmp.width, ch / bmp.height)
-        val bx = ((pos.x - (cw - bmp.width * scale) / 2f) / scale).roundToInt()
-        val by = ((pos.y - (ch - bmp.height * scale) / 2f) / scale).roundToInt()
-        if (bx !in 0 until bmp.width || by !in 0 until bmp.height) return
-        focusPos = pos
-        focusNonce++
+        afNonce++
         haptics.tick()
         scope.launch {
             afBusy = true
             try {
-                val rc = runCatching { cam.rcChangeAfArea(bx, by) }.getOrDefault(-1)
-                devLog("AF area ($bx,$by) resp=0x%04X".format(rc and 0xFFFF))
-                // 移点只是选点，不驱动对焦；补一发 AfDrive 真正合焦
-                //（阻塞至合焦/失败，期间 LV 暂停一下属正常；0xA002=对不上焦）。
+                // 阻塞至合焦/失败，期间 LV 暂停一下属正常；0xA002 = 对不上焦
                 val drive = runCatching { cam.rcAfDrive() }.getOrDefault(-1)
                 devLog("AF drive resp=0x%04X".format(drive and 0xFFFF))
             } finally {
@@ -451,6 +459,19 @@ private fun RemoteContent(
                     ) { onTitleTap() }
                 )
                 Spacer(Modifier.weight(1f))
+                // 曝光模式徽标（只读；带物理拨盘的机身无法远程切换）
+                modeText?.let {
+                    Text(
+                        it,
+                        color = colors.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                }
                 Text(
                     text = if (connected) "●" else "○",
                     color = if (connected) colors.statusConnected else colors.accentOrange,
@@ -473,8 +494,7 @@ private fun RemoteContent(
                     .aspectRatio(3f / 2f)
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color(0xFF0D0D0D))
-                    .onSizeChanged { viewSize = it }
-                    .pointerInput(Unit) { detectTapGestures { tapToFocus(it) } }
+                    .pointerInput(Unit) { detectTapGestures { halfPressFocus() } }
             ) {
                 frame?.let {
                     Image(
@@ -488,19 +508,14 @@ private fun RemoteContent(
                     tint = Color.White.copy(alpha = 0.18f),
                     modifier = Modifier.size(44.dp).align(Alignment.Center)
                 )
-                // 对焦框
-                focusPos?.let { pt ->
-                    val reticleScale = remember(focusNonce) { Animatable(1.5f) }
-                    LaunchedEffect(focusNonce) { reticleScale.animateTo(1f, tween(180)) }
+                // 半按对焦指示：中央对焦框收缩入场（合焦位置由机身当前对焦点决定）
+                if (afVisible) {
+                    val reticleScale = remember(afNonce) { Animatable(1.4f) }
+                    LaunchedEffect(afNonce) { reticleScale.animateTo(1f, tween(180)) }
                     Box(
                         modifier = Modifier
-                            .offset {
-                                IntOffset(
-                                    (pt.x - 28.dp.toPx()).roundToInt(),
-                                    (pt.y - 28.dp.toPx()).roundToInt()
-                                )
-                            }
-                            .size(56.dp)
+                            .align(Alignment.Center)
+                            .size(64.dp)
                             .graphicsLayer {
                                 scaleX = reticleScale.value
                                 scaleY = reticleScale.value
@@ -535,72 +550,24 @@ private fun RemoteContent(
             }
             Spacer(Modifier.height(12.dp))
 
-            // 曝光读数条：点谁调谁；RO 参数压暗；右端模式徽标（只读）
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                EXPOSURE_PROPS.forEach { prop ->
-                    val p = params[prop]
-                    val selected = prop == selectedProp
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                selectedProp = prop
-                                haptics.tick()
-                            }
-                            .padding(horizontal = 4.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            p?.let { rcFormat(prop, it.current) } ?: "—",
-                            color = when {
-                                p == null -> colors.onSurfaceVariant.copy(alpha = 0.4f)
-                                !p.writable -> colors.onSurfaceVariant.copy(alpha = 0.5f)
-                                selected -> Color.White
-                                else -> colors.onSurfaceVariant
-                            },
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 15.sp,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                            maxLines = 1
-                        )
-                        Box(
-                            Modifier
-                                .padding(top = 3.dp)
-                                .size(width = 18.dp, height = 2.dp)
-                                .background(
-                                    if (selected) colors.accentBlue else Color.Transparent,
-                                    RoundedCornerShape(1.dp)
-                                )
-                        )
+            // 2×2 直控胶囊：读数即控件——单击 ±1 档、长按连调、点中间值弹全表直跳；
+            // 只读参数整个胶囊压暗 + 锁。无选中态、无隐藏手势。
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                EXPOSURE_PROPS.chunked(2).forEach { rowProps ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowProps.forEach { prop ->
+                            ParamCapsule(
+                                param = params[prop],
+                                modifier = Modifier.weight(1f),
+                                onStep = { delta -> stepParam(prop, delta) },
+                                onOpenList = {
+                                    if (params[prop]?.values?.isNotEmpty() == true) listProp = prop
+                                }
+                            )
+                        }
                     }
                 }
-                modeText?.let {
-                    Text(
-                        it,
-                        color = colors.onSurfaceVariant,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    )
-                }
             }
-            Spacer(Modifier.height(4.dp))
-
-            // 吸附拨轮
-            ParamWheel(
-                param = params[selectedProp],
-                haptics = haptics,
-                modifier = Modifier.fillMaxWidth(),
-                onCommit = ::commitValue
-            )
 
             Spacer(Modifier.weight(1f))
 
@@ -666,6 +633,57 @@ private fun RemoteContent(
                     .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(12.dp))
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             )
+        }
+
+        // 完整值表（点胶囊中间值弹出）：当前值高亮并自动滚到附近，点选即设、立即发送
+        val listParam = listProp?.let { params[it] }
+        if (listProp != null && listParam != null) {
+            val prop = listProp!!
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(colors.scrim)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { listProp = null },
+                contentAlignment = Alignment.Center
+            ) {
+                val valueListState = rememberLazyListState()
+                LaunchedEffect(prop) {
+                    val idx = listParam.values.indexOf(listParam.current)
+                    if (idx > 3) valueListState.scrollToItem(idx - 3)
+                }
+                LazyColumn(
+                    state = valueListState,
+                    modifier = Modifier
+                        .width(190.dp)
+                        .heightIn(max = 340.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(colors.glassSurfaceHeavy)
+                        .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(16.dp))
+                        .padding(vertical = 6.dp)
+                ) {
+                    items(listParam.values) { v ->
+                        val isCurrent = v == listParam.current
+                        Text(
+                            rcFormat(prop, v),
+                            color = if (isCurrent) colors.accentBlue else colors.onBackground,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 15.sp,
+                            fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    sendValue(prop, v, immediate = true)
+                                    listProp = null
+                                }
+                                .padding(vertical = 10.dp)
+                        )
+                    }
+                }
+            }
         }
 
         // 最近一张放大回显（缩略图放大，非原图；下载走照片列表）
@@ -805,145 +823,94 @@ private fun RemoteContent(
 }
 
 /**
- * 吸附拨轮：档位来自相机枚举，滑动吸附对中即提交；中心值放大高亮，滑过一档 tick。
- * RO 时禁滚、整条压暗、右端锁图标，点击左右轻抖（把"调不了"的答案放在界面上）。
+ * 参数直控胶囊：[− 值 ＋]。单击 ±1 档、长按连调（420ms 后每 140ms 一档）、
+ * 点中间值打开完整值表大跨度直跳；只读参数整体压暗 + 锁图标，步进与弹表不可用。
  */
-@OptIn(ExperimentalFoundationApi::class)   // rememberSnapFlingBehavior
 @Composable
-private fun ParamWheel(
+private fun ParamCapsule(
     param: RcParam?,
-    haptics: Haptics,
     modifier: Modifier = Modifier,
-    onCommit: (RcParam, Long) -> Unit
+    onStep: (Int) -> Unit,
+    onOpenList: () -> Unit
 ) {
     val colors = AppTheme.colors
-    if (param == null || param.values.isEmpty()) {
-        Box(modifier.height(56.dp), contentAlignment = Alignment.Center) {
-            Text("—", color = colors.onSurfaceVariant.copy(alpha = 0.4f))
-        }
-        return
-    }
-    val current by rememberUpdatedState(param)
-    val listState = rememberLazyListState()
-    val fling = rememberSnapFlingBehavior(listState)
     val scope = rememberCoroutineScope()
-    var programmatic by remember { mutableStateOf(false) }
-    val shake = remember { Animatable(0f) }
+    val writable = param != null && param.writable && param.values.isNotEmpty()
 
-    val centeredIndex by remember {
-        derivedStateOf {
-            val li = listState.layoutInfo
-            if (li.visibleItemsInfo.isEmpty()) null
-            else {
-                val center = (li.viewportStartOffset + li.viewportEndOffset) / 2
-                li.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - center) }?.index
-            }
-        }
-    }
-
-    // 参数切换/外部刷新：拨轮直接跳到当前值（不触发提交）
-    LaunchedEffect(param.prop, param.current, param.values) {
-        val idx = param.values.indexOf(param.current)
-        if (idx >= 0) {
-            programmatic = true
-            listState.scrollToItem(idx)
-            programmatic = false
-        }
-    }
-
-    // 滑动停止且对中值 != 当前值 → 提交
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-            if (!scrolling && !programmatic) {
-                val p = current
-                val idx = centeredIndex ?: return@collect
-                if (idx in p.values.indices && idx != p.values.indexOf(p.current)) {
-                    onCommit(p, p.values[idx])
-                }
-            }
-        }
-    }
-
-    // 滑过一档 tick
-    LaunchedEffect(listState) {
-        snapshotFlow { centeredIndex }.collect {
-            if (listState.isScrollInProgress) haptics.tick()
-        }
-    }
-
-    BoxWithConstraints(
-        modifier
-            .height(56.dp)
-            .graphicsLayer { translationX = shake.value }
-            .pointerInput(Unit) {
-                detectTapGestures {
-                    if (!current.writable) {
-                        scope.launch {
-                            shake.animateTo(0f, keyframes {
-                                durationMillis = 320
-                                -8f at 50
-                                8f at 110
-                                -5f at 170
-                                5f at 230
-                                0f at 320
-                            })
+    @Composable
+    fun StepZone(delta: Int, icon: ImageVector) {
+        Box(
+            modifier = Modifier
+                .width(42.dp)
+                .fillMaxHeight()
+                .pointerInput(writable, delta) {
+                    if (!writable) return@pointerInput
+                    detectTapGestures(onPress = {
+                        onStep(delta)
+                        val repeater = scope.launch {
+                            delay(420)
+                            while (isActive) {
+                                onStep(delta)
+                                delay(140)
+                            }
                         }
-                    }
-                }
-            }
-    ) {
-        val sidePadding = (maxWidth - WHEEL_ITEM_WIDTH) / 2
-        LazyRow(
-            state = listState,
-            flingBehavior = fling,
-            userScrollEnabled = param.writable,
-            contentPadding = PaddingValues(horizontal = sidePadding),
-            modifier = Modifier.fillMaxSize()
+                        tryAwaitRelease()
+                        repeater.cancel()
+                    })
+                },
+            contentAlignment = Alignment.Center
         ) {
-            itemsIndexed(param.values) { i, v ->
-                val isCenter = i == centeredIndex
-                Box(
-                    Modifier.width(WHEEL_ITEM_WIDTH).fillMaxHeight(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        rcFormat(param.prop, v),
-                        color = when {
-                            !param.writable -> colors.onSurfaceVariant.copy(alpha = 0.35f)
-                            isCenter -> Color.White
-                            else -> colors.onSurfaceVariant.copy(alpha = 0.8f)
-                        },
-                        fontSize = if (isCenter) 17.sp else 13.sp,
-                        fontWeight = if (isCenter) FontWeight.SemiBold else FontWeight.Normal,
-                        fontFamily = FontFamily.Monospace,
-                        maxLines = 1
-                    )
-                }
-            }
-        }
-        // 中心刻度线（上下各一条）
-        Box(
-            Modifier
-                .align(Alignment.TopCenter)
-                .size(width = 1.5.dp, height = 7.dp)
-                .background(Color.White.copy(alpha = if (param.writable) 0.7f else 0.25f))
-        )
-        Box(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .size(width = 1.5.dp, height = 7.dp)
-                .background(Color.White.copy(alpha = if (param.writable) 0.7f else 0.25f))
-        )
-        if (!param.writable) {
             Icon(
-                Icons.Default.Lock, contentDescription = null,
-                tint = colors.onSurfaceVariant.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 10.dp)
-                    .size(13.dp)
+                icon, contentDescription = null,
+                tint = Color.White.copy(alpha = if (writable) 0.75f else 0.2f),
+                modifier = Modifier.size(16.dp)
             )
         }
+    }
+
+    Row(
+        modifier = modifier
+            .height(46.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.glassSurface)
+            .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(14.dp)),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        StepZone(-1, Icons.Default.Remove)
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = param != null
+                ) { onOpenList() },
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                param?.let { rcFormat(it.prop, it.current) } ?: "—",
+                color = when {
+                    param == null -> colors.onSurfaceVariant.copy(alpha = 0.4f)
+                    !writable -> colors.onSurfaceVariant.copy(alpha = 0.5f)
+                    else -> Color.White
+                },
+                fontFamily = FontFamily.Monospace,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+            if (param != null && !writable) {
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Default.Lock, contentDescription = null,
+                    tint = colors.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.size(11.dp)
+                )
+            }
+        }
+        StepZone(1, Icons.Default.Add)
     }
 }
 
