@@ -119,4 +119,12 @@
     <string name="ptp_device_error">设备错误 (0x%1$s)</string>
     <string name="ptp_firmware_error_code">固件错误 (0x%1$s)</string>
     <string name="ptp_unknown_error">错误 (0x%1$s)</string>
+
+    <!-- 遥控实验页（临时） -->
+    <string name="lab_title">遥控实验</string>
+    <string name="lab_run_probe">完整探测</string>
+    <string name="lab_live_view">开始监看</string>
+    <string name="lab_live_view_stop">停止监看</string>
+    <string name="lab_capture">试拍一张</string>
+    <string name="lab_copy_log">复制日志</string>
 </resources>

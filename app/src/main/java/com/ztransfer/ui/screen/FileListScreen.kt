@@ -29,6 +29,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -160,7 +161,8 @@ fun groupFilesByDate(files: List<NikonCamera.FileInfo>): List<FileGroup> {
 fun FileListScreen(
     cameraViewModel: CameraViewModel,
     transferViewModel: TransferViewModel,
-    onNavigateToTransfer: () -> Unit
+    onNavigateToTransfer: () -> Unit,
+    onNavigateToLab: () -> Unit
 ) {
     val state by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
@@ -286,7 +288,20 @@ fun FileListScreen(
     }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
-    Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
+    // 横滑手势：向右滑超过阈值打开左侧的遥控实验页。挂在根上只观察未被子组件消费的
+    // 水平拖动——网格滚动是纵向、预览翻页等上层组件消费掉的手势不会误触发。
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .pointerInput(Unit) {
+                var totalDx = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDx = 0f },
+                    onDragEnd = { if (totalDx > 100.dp.toPx()) onNavigateToLab() }
+                ) { _, dragAmount -> totalDx += dragAmount }
+            }
+    ) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (state.isLoadingFiles && state.files.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

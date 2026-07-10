@@ -119,4 +119,12 @@
     <string name="ptp_device_error">裝置錯誤 (0x%1$s)</string>
     <string name="ptp_firmware_error_code">韌體錯誤 (0x%1$s)</string>
     <string name="ptp_unknown_error">錯誤 (0x%1$s)</string>
+
+    <!-- 遙控實驗頁（臨時） -->
+    <string name="lab_title">遙控實驗</string>
+    <string name="lab_run_probe">完整探測</string>
+    <string name="lab_live_view">開始監看</string>
+    <string name="lab_live_view_stop">停止監看</string>
+    <string name="lab_capture">試拍一張</string>
+    <string name="lab_copy_log">複製日誌</string>
 </resources>

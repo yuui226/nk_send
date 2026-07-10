@@ -119,4 +119,12 @@
     <string name="ptp_device_error">Device error (0x%1$s)</string>
     <string name="ptp_firmware_error_code">Firmware error (0x%1$s)</string>
     <string name="ptp_unknown_error">Error (0x%1$s)</string>
+
+    <!-- Remote lab (temporary experiment page) -->
+    <string name="lab_title">Remote Lab</string>
+    <string name="lab_run_probe">Probe</string>
+    <string name="lab_live_view">Live view</string>
+    <string name="lab_live_view_stop">Stop</string>
+    <string name="lab_capture">Test shot</string>
+    <string name="lab_copy_log">Copy log</string>
 </resources>

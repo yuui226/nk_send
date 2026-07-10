@@ -30,7 +30,9 @@ class NikonCamera(private val context: Context) {
     private val cmdReader = PacketReader(context)
     private val evtReader = PacketReader(context)
     private var evtThread: Thread? = null
-    private val ioMutex = Mutex()
+    // internal 而非 private:遥控实验(RemoteLab.kt)以扩展函数复用同一互斥与收发原语,
+    // 保证实验命令与传输/缩略图/心跳严格串行,不引入第二条 IO 路径。
+    internal val ioMutex = Mutex()
     // 会话是否已 OpenSession 成功；用于决定 close() 是否需要发送 CloseSession，
     // 避免在握手中途失败时空等 CloseSession 响应（最长可达 soTimeout）。
     @Volatile private var sessionOpen = false
@@ -269,7 +271,7 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    private fun getObjectInfoInternal(handle: Int): FileInfo? {
+    internal fun getObjectInfoInternal(handle: Int): FileInfo? {
         sendCmd(PtpConstants.GET_OBJECT_INFO, handle)
         val (respCode, data) = recvRespWithPayload()
         if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 53) {
@@ -488,7 +490,7 @@ class NikonCamera(private val context: Context) {
         return pkt
     }
 
-    private fun sendCmd(code: Int, vararg params: Int) {
+    internal fun sendCmd(code: Int, vararg params: Int) {
         val paramCount = params.size.coerceAtMost(5)
         val pkt = ByteBuffer.allocate(18 + paramCount * 4).order(ByteOrder.LITTLE_ENDIAN).apply {
             putInt(18 + paramCount * 4)
@@ -500,6 +502,38 @@ class NikonCamera(private val context: Context) {
                 putInt(params[i])
             }
         }.array()
+        cmdOutput?.write(pkt)
+        cmdOutput?.flush()
+    }
+
+    /**
+     * 带 data-out 数据阶段的命令（如 SetDevicePropValue）：CMD_REQUEST(dataPhase=2)
+     * + Start-Data + End-Data（小载荷一包发完）。仅遥控实验（RemoteLab.kt）使用，
+     * 正式传输路径没有 data-out 场景。
+     */
+    internal fun sendCmdWithData(code: Int, data: ByteArray, vararg params: Int) {
+        val paramCount = params.size.coerceAtMost(5)
+        val t = nextTid()
+        val pkt = ByteBuffer.allocate(18 + paramCount * 4 + 20 + 12 + data.size)
+            .order(ByteOrder.LITTLE_ENDIAN).apply {
+                // CMD_REQUEST，dataPhaseInfo=2（本事务带 data-out 阶段）
+                putInt(18 + paramCount * 4)
+                putInt(PtpConstants.CMD_REQUEST)
+                putInt(2)
+                putShort(code.toShort())
+                putInt(t)
+                for (i in 0 until paramCount) putInt(params[i])
+                // Start-Data：TID + 总长（64 位）
+                putInt(20)
+                putInt(PtpConstants.START_DATA_PACKET)
+                putInt(t)
+                putLong(data.size.toLong())
+                // End-Data：TID + 数据
+                putInt(12 + data.size)
+                putInt(PtpConstants.END_DATA_PACKET)
+                putInt(t)
+                put(data)
+            }.array()
         cmdOutput?.write(pkt)
         cmdOutput?.flush()
     }
@@ -526,7 +560,7 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    private fun recvRespWithPayload(): Pair<Int, ByteArray?> {
+    internal fun recvRespWithPayload(): Pair<Int, ByteArray?> {
         // 用 ByteArrayOutputStream 累积多包数据，避免 responseData + data 的 O(n²) 复制。
         var buffer: java.io.ByteArrayOutputStream? = null
         while (true) {
