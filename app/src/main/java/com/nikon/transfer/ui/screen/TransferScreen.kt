@@ -228,7 +228,9 @@ fun TransferScreen(
                                         text = subText,
                                         style = MaterialTheme.typography.labelMedium,
                                         color = subColor,
-                                        maxLines = 1,
+                                        // 失败原因带具体诊断信息（如"保存失败：复制不完整…"），
+                                        // 放宽到两行让用户截图即含完整线索；其余状态保持单行紧凑。
+                                        maxLines = if (task.status == TransferStatus.FAILED) 2 else 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }

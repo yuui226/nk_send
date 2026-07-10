@@ -1,0 +1,3067 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Z传相机照片传输软件V1.0 源程序</title><style>
+@page { size: A4; margin: 15mm 12mm; }
+body { margin:0; font-family: Consolas, "Courier New", monospace; }
+.page { page-break-after: always; }
+.hdr { display:flex; justify-content:space-between; font-family:SimSun,serif; font-size:10.5pt; border-bottom:1px solid #000; padding-bottom:2px; margin-bottom:6px; }
+pre { margin:0; font-size:7.6pt; line-height:1.32; white-space:pre-wrap; word-break:break-all; }
+</style></head><body>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 1 页 / 共 60 页</span></div><pre>// ============ 文件: MainActivity.kt ============
+package com.nikon.transfer
+
+import android.Manifest
+import android.app.Activity
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import com.nikon.transfer.ui.theme.Motion
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import com.nikon.transfer.ui.screen.*
+import com.nikon.transfer.ui.theme.AppTheme
+import com.nikon.transfer.ui.theme.NikonTransferTheme
+import com.nikon.transfer.viewmodel.CameraViewModel
+import com.nikon.transfer.viewmodel.TransferStatus
+import com.nikon.transfer.viewmodel.TransferViewModel
+import kotlinx.coroutines.delay
+
+class MainActivity : ComponentActivity() {
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 结果不阻断使用 */ }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()   // 内容延伸到系统栏后面，各屏自行处理 inset
+        requestNotificationPermissionIfNeeded()
+        setContent {
+            // 主题模式存在 TransferViewModel（与其它设置同处持久化），
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 2 页 / 共 60 页</span></div><pre>            // 在主题之上先取出来，切换即全局重排配色。
+            val transferViewModel: TransferViewModel = viewModel()
+            val transferState by transferViewModel.state.collectAsState()
+            NikonTransferTheme(themeMode = transferState.themeMode) {
+                MainScreen(transferViewModel)
+            }
+        }
+    }
+
+    /** Android 13+ 需运行时授权才能展示前台传输通知；拒绝不影响服务运行，仅隐藏通知。 */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT &lt; Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+}
+
+sealed class Screen(val route: String) {
+    object Home : Screen("home")
+    object Files : Screen("files")
+    object Transfer : Screen("transfer")
+}
+
+@Composable
+fun MainScreen(transferViewModel: TransferViewModel) {
+    val navController = rememberNavController()
+    val cameraViewModel: CameraViewModel = viewModel()
+
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val cameraState by cameraViewModel.state.collectAsState()
+    val transferState by transferViewModel.state.collectAsState()
+
+    // 把"是否有任务在传输/等待"喂给相机 VM——它是后台缩略图填充的唯一开关。
+    // 桥接放在 MainScreen（所有页面共同的宿主）：填充与页面无关，停在队列页也照常推进。
+    val transfersBusy = transferState.tasks.any {
+        it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
+    }
+    LaunchedEffect(transfersBusy) {
+        cameraViewModel.setTransfersBusy(transfersBusy)
+    }
+
+    // 屏幕常亮（设置项，默认开）：FLAG_KEEP_SCREEN_ON 只在本应用窗口前台可见时生效，
+    // 切到后台/其它应用自动失效，不会全局锁屏幕。
+    val view = LocalView.current
+    DisposableEffect(transferState.keepScreenOn) {
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 3 页 / 共 60 页</span></div><pre>        val window = (view.context as? Activity)?.window
+        val flag = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        if (transferState.keepScreenOn) window?.addFlags(flag) else window?.clearFlags(flag)
+        onDispose { window?.clearFlags(flag) }
+    }
+
+    // 相机连接成功后：连接页先保持"连接中"脉冲一小会（列表与缩略图此间已在全速加载），
+    // 再播成功爆发收尾，播完直接进照片列表——绿色对号 = 马上进入。
+    // 时长与 HomeScreen 的庆祝延迟严格对齐（同一对常量）。
+    LaunchedEffect(cameraState.isConnectedToCamera) {
+        if (cameraState.isConnectedToCamera &amp;&amp; currentRoute == Screen.Home.route) {
+            delay(CONNECT_CELEBRATE_DELAY_MS + CONNECT_SUCCESS_ANIM_MS)
+            navController.navigate(Screen.Files.route) {
+                popUpTo(Screen.Home.route) { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
+        }
+    }
+
+    Scaffold(
+        containerColor = AppTheme.colors.background,
+        // 不消费系统栏 inset，交由各屏自行处理（文件列表 edge-to-edge，其余用 systemBarsPadding）
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { paddingValues -&gt;
+        NavHost(
+            navController = navController,
+            startDestination = Screen.Home.route,
+            modifier = Modifier.padding(paddingValues),
+            // 活泼转场：进入的页面缩放+淡入，退出的页面淡出；返回时反向。
+            enterTransition = { scaleIn(initialScale = 0.90f, animationSpec = tween(Motion.NAV_ENTER_MS)) + fadeIn(tween(Motion.NAV_ENTER_MS)) },
+            exitTransition = { fadeOut(tween(Motion.NAV_EXIT_MS)) },
+            popEnterTransition = { fadeIn(tween(Motion.NAV_EXIT_MS)) },
+            popExitTransition = { scaleOut(targetScale = 0.90f, animationSpec = tween(Motion.NAV_EXIT_MS)) + fadeOut(tween(Motion.NAV_EXIT_MS)) }
+        ) {
+            composable(Screen.Home.route) {
+                HomeScreen(
+                    viewModel = cameraViewModel,
+                    transferViewModel = transferViewModel
+                )
+            }
+            composable(
+                Screen.Files.route,
+                // 空间隐喻：队列页位于本页右侧。去队列页时本页作为底层向左 1/3 视差退场
+                // 并轻微压暗（营造被上层卡片盖住的纵深），返回时反向浮现回来。
+                // enter/popEnter 不设，与连接页之间仍走 NavHost 默认的缩放淡入转场。
+                exitTransition = {
+                    slideOutHorizontally(Motion.pageSlide) { -it / 3 } +
+                            fadeOut(tween(Motion.PAGE_FADE_MS), targetAlpha = 0.5f)
+                },
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 4 页 / 共 60 页</span></div><pre>                popEnterTransition = {
+                    slideInHorizontally(Motion.pageSlide) { -it / 3 } +
+                            fadeIn(tween(Motion.PAGE_FADE_MS), initialAlpha = 0.5f)
+                }
+            ) {
+                FileListScreen(
+                    cameraViewModel = cameraViewModel,
+                    transferViewModel = transferViewModel,
+                    onNavigateToTransfer = {
+                        navController.navigate(Screen.Transfer.route)
+                    }
+                )
+            }
+            composable(
+                Screen.Transfer.route,
+                // 队列页作为上层卡片：前进时整页从右滑入盖住"Z传"页，
+                // 返回（含系统返回键）时向右滑出、露出底层视差归位的"Z传"页。
+                enterTransition = { slideInHorizontally(Motion.pageSlide) { it } },
+                popExitTransition = { slideOutHorizontally(Motion.pageSlide) { it } }
+            ) {
+                TransferScreen(
+                    transferViewModel = transferViewModel,
+                    cameraViewModel = cameraViewModel,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+        }
+    }
+}
+
+// ============ 文件: protocol/PtpConstants.kt ============
+package com.nikon.transfer.protocol
+
+object PtpConstants {
+    // PTP/IP 包类型
+    const val INIT_CMD_REQ = 1
+    const val INIT_CMD_ACK = 2
+    const val INIT_EVT_REQ = 3
+    const val INIT_EVT_ACK = 4
+    const val INIT_FAIL = 5
+    const val CMD_REQUEST = 6
+    const val CMD_RESPONSE = 7
+    // 8 = Event 包（事件通道上收到后直接忽略，无需常量）
+    const val START_DATA_PACKET = 9
+    const val DATA_PACKET = 10
+    const val CANCEL = 11          // Cancel 包：请求对端中止指定事务的数据阶段
+    const val END_DATA_PACKET = 12
+    const val PING = 13
+    const val PONG = 14
+
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 5 页 / 共 60 页</span></div><pre>    // PTP 命令码
+    const val OPEN_SESSION = 0x1002
+    const val CLOSE_SESSION = 0x1003
+    const val GET_STORAGE_IDS = 0x1004
+    const val GET_OBJECT_HANDLES = 0x1007
+    const val GET_OBJECT_INFO = 0x1008
+    const val GET_OBJECT = 0x1009
+    const val GET_THUMB = 0x100A
+
+    // 响应码
+    const val RESPONSE_OK = 0x2001
+    const val SESSION_ALREADY_OPEN = 0x201E
+    // PTP 规范：0x2009 Invalid_Object_Handle / 0x2010 No_Thumbnail_Present。
+    // 用于区分"确认无缩略图"（可负缓存）与"瞬时失败"（如设备忙，绝不能负缓存）。
+    const val INVALID_OBJECT_HANDLE = 0x2009
+    const val NO_THUMBNAIL_PRESENT = 0x2010
+
+    // ObjectInfo 的 32 位大小字段报不出 &gt;4GB 对象的真实大小，此时为全 FF 哨兵（无符号）。
+    const val SIZE_UNKNOWN = 0xFFFFFFFFL
+
+    // 相机地址
+    const val CAMERA_IP = "192.168.1.1"
+    const val PTP_PORT = 15740
+
+    // 格式码 -&gt; 扩展名
+    val FORMAT_EXT = mapOf(
+        0x3001 to ".jpg",
+        0x3801 to ".jpg",
+        0x3802 to ".tif",
+        0x3804 to ".png",
+        0x3805 to ".bmp",
+        0x3806 to ".gif",
+        0x3807 to ".ico",
+        0x3808 to ".jpg",
+        0x300D to ".mov",
+        0x300B to ".avi",
+        0x300E to ".mp4",
+        0xB101 to ".nef",
+        0xB102 to ".nef",
+        0xB103 to ".nef",
+        0xB104 to ".nef",
+        0xB105 to ".nef",
+        0xB106 to ".nef",
+        0xB801 to ".crw",
+        0xB802 to ".cr2",
+        0xB803 to ".cr3",
+        0xB808 to ".arw",
+        0xB809 to ".arw"
+    )
+
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 6 页 / 共 60 页</span></div><pre>    fun getExt(format: Int): String = FORMAT_EXT[format] ?: ".bin"
+
+    private val RESPONSE_MESSAGES = mapOf(
+        0x2002 to "参数无效",
+        0x2003 to "操作不支持",
+        0x2004 to "存储空间不足",
+        0x2005 to "指定的对象不存在",
+        0x2006 to "存储已满",
+        0x2007 to "文件已存在",
+        0x2008 to "未指定文件名",
+        0x2009 to "文件保护",
+        0x200A to "会话未打开",
+        0x200B to "传输已取消",
+        0x200C to "未指定对象",
+        0x200D to "规范不兼容",
+        0x200F to "设备忙",
+        0x2010 to "父对象不存在",
+        0x201E to "会话已打开",
+        0xA801 to "设备固件错误",
+        0xA802 to "存储不可用"
+    )
+
+    fun translateResponse(code: Int): String {
+        if (code == RESPONSE_OK) return "成功"
+        val upper = code and 0xFF00
+        val base = RESPONSE_MESSAGES[code]
+        if (base != null) return base
+        return when (upper) {
+            0x2000 -&gt; "通用错误 (0x${code.toString(16).uppercase()})"
+            0xA000 -&gt; "设备错误 (0x${code.toString(16).uppercase()})"
+            0xA800 -&gt; "固件错误 (0x${code.toString(16).uppercase()})"
+            else -&gt; "错误 (0x${code.toString(16).uppercase()})"
+        }
+    }
+}
+
+// ============ 文件: protocol/PacketReader.kt ============
+package com.nikon.transfer.protocol
+
+import java.io.InputStream
+
+class PacketReader {
+    companion object {
+        const val HEADER_SIZE = 8
+        // 包长上限：远大于任何真实 PTP/IP 包，仅用于拦截损坏/伪造的长度字段。
+        // 不校验的话 length=0x7FFFFFFF 会直接按 2GB 分配缓冲抛 OutOfMemoryError
+        //（Error 不会被上层 catch(Exception) 捕获，App 直接崩溃）；length&lt;8 则会
+        // 让后续读取错位，之后全是脏数据。越界按 IOException 处理，走断线重连。
+        const val MAX_PACKET_SIZE = 256 * 1024 * 1024
+    }
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 7 页 / 共 60 页</span></div><pre>
+    private var buffer = ByteArray(1024 * 1024) // 1MB initial
+    private val headerBuf = ByteArray(HEADER_SIZE)
+    private val raw = RawPacket()
+
+    data class Packet(val type: Int, val payload: ByteArray?)
+
+    /**
+     * 零拷贝包：直接暴露内部共享缓冲区，避免每包分配。调用方必须在下一次 read 之前
+     * 用完 [buffer] 中的数据（下载循环是读-写-读的串行流程，天然满足）。
+     */
+    class RawPacket {
+        var type: Int = 0
+        var payloadLen: Int = 0
+        var buffer: ByteArray = EMPTY
+        companion object { private val EMPTY = ByteArray(0) }
+    }
+
+    fun readPacket(input: InputStream): Packet {
+        val length = readValidatedLength(input)
+        val type = headerBuf.getIntLE(4)
+        val payloadLen = length - HEADER_SIZE
+
+        val payload = if (payloadLen &gt; 0) {
+            ensureCapacity(payloadLen)
+            readFully(input, buffer, payloadLen)
+            buffer.copyOf(payloadLen)
+        } else {
+            null
+        }
+
+        return Packet(type, payload)
+    }
+
+    /**
+     * 读取一个包但不复制 payload —— 返回复用的 [RawPacket]（其 buffer 指向内部缓冲区）。
+     * 仅用于下载热路径，避免每包一次全量分配+复制带来的 GC 压力。
+     */
+    fun readPacketRaw(input: InputStream): RawPacket {
+        val length = readValidatedLength(input)
+        raw.type = headerBuf.getIntLE(4)
+        raw.payloadLen = length - HEADER_SIZE
+        if (raw.payloadLen &gt; 0) {
+            ensureCapacity(raw.payloadLen)
+            readFully(input, buffer, raw.payloadLen)
+        }
+        raw.buffer = buffer
+        return raw
+    }
+
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 8 页 / 共 60 页</span></div><pre>    /** 读包头并校验长度字段合理性；返回校验过的包长（含头），类型字段留在 [headerBuf] 中。 */
+    private fun readValidatedLength(input: InputStream): Int {
+        readFully(input, headerBuf, HEADER_SIZE)
+        val length = headerBuf.getIntLE(0)
+        if (length &lt; HEADER_SIZE || length &gt; MAX_PACKET_SIZE) {
+            throw java.io.IOException("非法包长度 $length: 连接数据已损坏")
+        }
+        return length
+    }
+
+    private fun ensureCapacity(n: Int) {
+        if (n &gt; buffer.size) buffer = ByteArray(n)
+    }
+
+    private fun readFully(input: InputStream, dst: ByteArray, n: Int) {
+        var offset = 0
+        while (offset &lt; n) {
+            val read = input.read(dst, offset, n - offset)
+            if (read == -1) throw java.io.EOFException("连接已断开")
+            offset += read
+        }
+    }
+
+    private fun ByteArray.getIntLE(offset: Int): Int {
+        return (this[offset].toInt() and 0xFF) or
+                ((this[offset + 1].toInt() and 0xFF) shl 8) or
+                ((this[offset + 2].toInt() and 0xFF) shl 16) or
+                ((this[offset + 3].toInt() and 0xFF) shl 24)
+    }
+}
+
+// ============ 文件: protocol/NikonCamera.kt ============
+package com.nikon.transfer.protocol
+
+import android.net.Network
+import com.nikon.transfer.BuildConfig
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.io.OutputStream
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+/** 写入本地文件失败（非相机连接错误），用于区分"掉线"与"磁盘/存储"问题。 */
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 9 页 / 共 60 页</span></div><pre>class OutputWriteException(cause: Throwable) : Exception("写入文件失败: ${cause.message}", cause)
+
+class NikonCamera {
+    private var cmdSocket: Socket? = null
+    private var evtSocket: Socket? = null
+    private var cmdInput: java.io.InputStream? = null
+    private var evtInput: java.io.InputStream? = null
+    private var cmdOutput: OutputStream? = null
+    private var tid = 0
+    private val cmdReader = PacketReader()
+    private val evtReader = PacketReader()
+    private var evtThread: Thread? = null
+    private val ioMutex = Mutex()
+    // 会话是否已 OpenSession 成功；用于决定 close() 是否需要发送 CloseSession，
+    // 避免在握手中途失败时空等 CloseSession 响应（最长可达 soTimeout）。
+    @Volatile private var sessionOpen = false
+
+    private companion object {
+        const val TAG = "NikonTransfer"
+        // 命令/事件通道的常规读超时。
+        const val SO_TIMEOUT_MS = 60_000
+        // TCP 连接超时：本地热点正常握手 &lt;300ms；缩短它让"相机侧 PTP 服务还没就绪"的
+        // 失败尝试更快结束、更快进入下一轮重试。
+        const val CONNECT_TIMEOUT_MS = 3_000
+        // 取消下载的排空安全阀：已向相机发送 Cancel 包后，在途数据只剩 ≈TCP 窗口的数 MB，
+        // 排空应秒级完成；若累计排空超过该预算仍没等到响应包，说明机型不支持 Cancel、
+        // 还在发整个文件——此时才断开由心跳/看护自动重连（断开会让相机侧会话挂起甚至
+        // 关 Wi-Fi，重连可达数十秒，"停止后重试卡很久"，所以只作为兜底而非首选）。
+        const val CANCEL_DRAIN_BUDGET = 32L * 1024 * 1024
+        // 排空期间的读超时：部分机型收到 Cancel 停发数据后并不回 CMD_RESPONSE，按常规
+        // 60s 超时会抱着 ioMutex 白等一分钟——重试的首个下载全程被挡住，表现为
+        // "停止后重试卡半天没速度"。静默 3s 即认定连接不可用，断开走自动重连。
+        const val CANCEL_DRAIN_TIMEOUT_MS = 3_000
+    }
+
+    /** 仅 debug 构建输出协议日志，避免 release 包泄露 handle/size 并拖慢热路径。 */
+    private inline fun log(message: () -&gt; String) {
+        if (BuildConfig.DEBUG) android.util.Log.d(TAG, message())
+    }
+
+    private fun nextTid(): Int {
+        tid++
+        return tid
+    }
+
+    suspend fun connect(
+        ip: String = PtpConstants.CAMERA_IP,
+        network: Network? = null
+    ): Result&lt;Unit&gt; = withContext(Dispatchers.IO) {
+        try {
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 10 页 / 共 60 页</span></div><pre>            // 经 Wi-Fi Network 的 socketFactory 建 socket：相机热点没有互联网，系统验证失败后
+            // 常把【默认网络】切回蜂窝数据——普通 Socket() 走默认路由，连 192.168.1.1 的包进蜂窝
+            // 黑洞，每次尝试烧满连接超时，直到系统把默认网切回 Wi-Fi 才能成功（用户感知
+            // "连上 Wi-Fi 后还要干等一阵"）。绑定到 Wi-Fi 网络后首次尝试即可达。
+            fun newSocket(): Socket = network?.socketFactory?.createSocket() ?: Socket()
+            cmdSocket = newSocket().apply {
+                tcpNoDelay = true
+                soTimeout = SO_TIMEOUT_MS
+                // 显式加大接收缓冲，撑起 TCP 接收窗口（4MB 远大于本地 Wi-Fi 所需，不会成为瓶颈；
+                // 在延迟稍高时也能避免小窗口拖慢吞吐）。必须在 connect 前设置才对窗口缩放生效。
+                receiveBufferSize = 4 * 1024 * 1024
+                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
+            }
+            // 用 BufferedInputStream 批量化 socket 读：每包 8 字节头 + 小数据段本会产生大量 read 系统调用，
+            // 缓冲后合并为大块读，减少系统调用开销（大数据段仍会直读进目标缓冲，无额外拷贝）。
+            cmdInput = java.io.BufferedInputStream(cmdSocket!!.getInputStream(), 64 * 1024)
+            cmdOutput = cmdSocket!!.getOutputStream()
+
+            cmdOutput!!.write(makeInitReq())
+            cmdOutput!!.flush()
+
+            val ack = cmdReader.readPacket(cmdInput!!)
+            if (ack.type != PtpConstants.INIT_CMD_ACK) {
+                // INIT_FAIL = 相机主动拒绝（如未配对/连接数已满），与协议错乱区分开提示。
+                return@withContext Result.failure(
+                    if (ack.type == PtpConstants.INIT_FAIL) Exception("相机拒绝连接")
+                    else Exception("握手失败: 非 ACK 响应")
+                )
+            }
+
+            val payload = ack.payload ?: return@withContext Result.failure(Exception("握手失败: 空响应"))
+            val sessionId = payload.getIntLE(0)
+
+            evtSocket = newSocket().apply {
+                soTimeout = SO_TIMEOUT_MS
+                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
+            }
+            evtInput = evtSocket!!.getInputStream()
+
+            val evtInit = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
+                putInt(12)
+                putInt(PtpConstants.INIT_EVT_REQ)
+                putInt(sessionId)
+            }.array()
+            evtSocket!!.getOutputStream().write(evtInit)
+            evtSocket!!.getOutputStream().flush()
+
+            val evtAck = evtReader.readPacket(evtInput!!)
+            if (evtAck.type != PtpConstants.INIT_EVT_ACK) {
+                return@withContext Result.failure(Exception("事件握手失败"))
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 11 页 / 共 60 页</span></div><pre>            }
+
+            sendCmd(PtpConstants.OPEN_SESSION, sessionId)
+            val resp = recvResp()
+            // 0x201E Session Already Open：App 异常退出后相机侧旧会话可能未清，
+            // 视为会话已就绪继续使用，否则会陷入"反复重连直到相机自己超时"的循环。
+            if (resp != PtpConstants.RESPONSE_OK &amp;&amp; resp != PtpConstants.SESSION_ALREADY_OPEN) {
+                return@withContext Result.failure(Exception("OpenSession 失败: ${PtpConstants.translateResponse(resp)}"))
+            }
+            sessionOpen = true
+
+            startEvtThread()
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            close()
+            Result.failure(e)
+        }
+    }
+
+    private fun startEvtThread() {
+        val socket = evtSocket ?: return
+        val input = evtInput ?: return
+        evtThread = Thread {
+            try {
+                // 事件通道长时间无事件是常态：握手后取消读超时，阻塞等待即可。
+                //（之前沿用 60s 超时会让本线程在空闲后静默退出，之后事件通道无人读、
+                // PING 无人应答，长时间挂机可能被相机判定失联。）
+                socket.soTimeout = 0
+                val output = socket.getOutputStream()
+                while (true) {
+                    val packet = evtReader.readPacket(input)
+                    // 部分机型在事件通道发 PING 保活，必须在本通道应答。
+                    if (packet.type == PtpConstants.PING) {
+                        sendPong(output)
+                    }
+                }
+            } catch (_: Exception) {
+                // socket 关闭/连接断开：线程自然结束。掉线由命令通道的心跳发现并触发重连。
+            }
+        }.apply {
+            isDaemon = true
+            name = "PTP-EvtThread"
+            start()
+        }
+    }
+
+    suspend fun getStorageIds(): List&lt;Int&gt; = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 12 页 / 共 60 页</span></div><pre>                sendCmd(PtpConstants.GET_STORAGE_IDS)
+                val (respCode, data) = recvRespWithPayload()
+                if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size &lt; 4) {
+                    return@withContext emptyList()
+                }
+                val count = data.getIntLE(0)
+                (0 until count).map { data.getIntLE(4 + it * 4) }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun keepalive(): Boolean = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                sendCmd(PtpConstants.GET_STORAGE_IDS)
+                // 能收到【任何】响应就证明链路活着；非 OK（如相机忙碌时的 DeviceBusy）
+                // 不代表断线——按响应码判死会把健康连接误杀掉重连，相机侧反而可能
+                // 因此挂会话/关热点。只有 IO 异常（socket 死）才算失联。
+                recvResp()
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
+    suspend fun getObjectHandles(storageId: Int = -1): List&lt;Int&gt; = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                sendCmd(PtpConstants.GET_OBJECT_HANDLES, storageId, -1, 0)
+                val (respCode, data) = recvRespWithPayload()
+                if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size &lt; 4) {
+                    return@withContext emptyList()
+                }
+                val count = data.getIntLE(0)
+                (0 until count).map { data.getIntLE(4 + it * 4) }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    data class FileInfo(
+        val handle: Int,
+        val size: Long,
+        val fileName: String,
+        /** PTP DateTime 完整串（YYYYMMDDThhmmss…，至少 8 位日期）；分组取前 8 位，组内按完整串排序。 */
+        val captureDate: String?
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 13 页 / 共 60 页</span></div><pre>    ) {
+        /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
+        val extension: String
+            get() {
+                val i = fileName.lastIndexOf('.')
+                return if (i &lt; 0) "" else fileName.substring(i).lowercase()
+            }
+    }
+
+    /**
+     * 通过 PTP GetThumb 获取缩略图 JPEG 字节。相机【确认】无缩略图（No_Thumbnail_Present /
+     * Invalid_Object_Handle）返回 null——调用方可安全负缓存、不再重试；
+     * 其它非 OK 响应（如设备忙）与 IO 失败一律抛出——那是瞬时状态，负缓存会把
+     * 恰好赶上相机忙碌时段的整批缩略图永久打成"无图"。与其它命令共用 ioMutex。
+     */
+    suspend fun getThumbnail(handle: Int): ByteArray? = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            sendCmd(PtpConstants.GET_THUMB, handle)
+            val (respCode, data) = recvRespWithPayload()
+            when (respCode) {
+                PtpConstants.RESPONSE_OK -&gt; data
+                PtpConstants.NO_THUMBNAIL_PRESENT,
+                PtpConstants.INVALID_OBJECT_HANDLE -&gt; null
+                else -&gt; throw Exception("GetThumb: ${PtpConstants.translateResponse(respCode)}")
+            }
+        }
+    }
+
+    suspend fun streamFileInfo(
+        handles: List&lt;Int&gt;,
+        batchSize: Int = 20,
+        onBatch: suspend (List&lt;FileInfo&gt;, Int, Int) -&gt; Unit
+    ) = withContext(Dispatchers.IO) {
+        val total = handles.size
+        var loaded = 0
+        handles.chunked(batchSize).forEach { batch -&gt;
+            // 每批单独持锁，批间释放 ioMutex：缩略图模式下缩略图请求可在批间插入，
+            // 从而随列表一起渐进出图，而不是等整份列表加载完才开始。
+            // IO 异常（掉线/读超时）直接向上抛给调用方终止扫描：逐个 handle 硬试会让
+            // 每个都等满 60s 读超时、扫描假死数十分钟；单文件 PTP 级失败在
+            // getObjectInfoInternal 内已按 null 跳过，不会走到这里。
+            val files = ioMutex.withLock {
+                batch.mapNotNull { handle -&gt; getObjectInfoInternal(handle) }
+            }
+            loaded += files.size
+            if (files.isNotEmpty()) {
+                onBatch(files, loaded, total)
+            }
+        }
+    }
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 14 页 / 共 60 页</span></div><pre>
+    private fun getObjectInfoInternal(handle: Int): FileInfo? {
+        sendCmd(PtpConstants.GET_OBJECT_INFO, handle)
+        val (respCode, data) = recvRespWithPayload()
+        if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size &lt; 53) {
+            return null
+        }
+
+        val format = data.getUShortLE(4)
+        // PTP ObjectInfo 的大小字段是 32 位无符号；&gt;4GB 的对象（长视频）相机报 0xFFFFFFFF（未知）。
+        val size = data.getIntLE(8).toLong() and 0xFFFFFFFFL
+        val ext = PtpConstants.getExt(format)
+
+        val nameLen = data[52].toInt() and 0xFF
+        val fileName = if (nameLen &gt; 0 &amp;&amp; data.size &gt;= 53 + nameLen * 2) {
+            String(data, 53, nameLen * 2, Charsets.UTF_16LE).trimEnd('\u0000')
+        } else {
+            "DSC_%04d%s".format(handle and 0xFFFF, ext)
+        }
+
+        val dateOffset = 53 + nameLen * 2
+        val captureDate = if (data.size &gt; dateOffset) {
+            try {
+                val dateLen = data[dateOffset].toInt() and 0xFF
+                if (dateLen &gt; 0 &amp;&amp; data.size &gt;= dateOffset + 1 + dateLen * 2) {
+                    val dateStr = String(data, dateOffset + 1, dateLen * 2, Charsets.UTF_16LE).trimEnd('\u0000')
+                    // 保留完整的 PTP DateTime（YYYYMMDDThhmmss…），前 8 位为日期。
+                    // UI 按前 8 位分组、按完整串在组内排时间序——只存日期的话组内排序就是无效操作。
+                    dateStr.takeIf { it.length &gt;= 8 }
+                } else null
+            } catch (_: Exception) { null }
+        } else null
+
+        return FileInfo(handle, size, fileName, captureDate)
+    }
+
+    data class DownloadProgress(
+        val downloaded: Long,
+        val total: Long,
+        val elapsed: Float
+    )
+
+    /** 单文件下载完成后的下载速度（MB/s，1024 进制，与 UI formatSpeed 同口径；纯网络读取吞吐）。 */
+    data class DownloadStats(
+        val bytes: Long,
+        val mbps: Float
+    )
+
+    suspend fun downloadToFile(
+        handle: Int,
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 15 页 / 共 60 页</span></div><pre>        output: OutputStream,
+        onProgress: ((DownloadProgress) -&gt; Unit)? = null
+    ): Result&lt;DownloadStats&gt; = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            // 声明在 try 外：取消路径（catch CancellationException）需要按 expected/totalDownloaded
+            // 计算剩余数据量，决定就地排空还是断开重连。
+            var totalDownloaded = 0L
+            var expected = 0L
+            try {
+                sendCmd(PtpConstants.GET_OBJECT, handle)
+
+                val startTime = System.currentTimeMillis()
+                var lastProgressTime = startTime
+                // 下载速度：累计纯网络读耗时算吞吐（写盘极快、可忽略，故只测读）。
+                var readNanos = 0L
+                fun buildStats(): DownloadStats {
+                    // 1024 进制 MB/s，与 UI 的 formatFileSize/formatSpeed 同口径，避免同屏两种单位差 ~5%。
+                    val mbps = if (readNanos &gt; 0) totalDownloaded / (readNanos / 1e9f) / (1024f * 1024f) else 0f
+                    return DownloadStats(totalDownloaded, mbps)
+                }
+                // 完整性校验：相机若异常提前结束数据阶段，绝不能把截断的文件当完整文件返回
+                //（.nkpart_ 改真名的防线就在这一步之后）。0xFFFFFFFF（32 位哨兵）与全 FF（64 位哨兵）
+                // 表示大小未知，无法校验只能放行。
+                fun verifyComplete(): Result&lt;DownloadStats&gt;? =
+                    if (expected &gt; 0 &amp;&amp; expected != PtpConstants.SIZE_UNKNOWN &amp;&amp; expected != -1L &amp;&amp; totalDownloaded != expected) {
+                        Result.failure(Exception("数据不完整: 收到 $totalDownloaded / 预期 $expected 字节"))
+                    } else null
+
+                while (true) {
+                    // 协作式取消：在每个包边界检查，使协程取消（仅 App 退出时发生）能及时中断
+                    ensureActive()
+                    // 零拷贝读取：直接从共享缓冲区写入，避免每包一次全量分配+复制。
+                    val rt0 = System.nanoTime()
+                    val packet = cmdReader.readPacketRaw(cmdInput!!)
+                    readNanos += System.nanoTime() - rt0
+                    val buf = packet.buffer
+                    val len = packet.payloadLen
+
+                    when (packet.type) {
+                        PtpConstants.CMD_RESPONSE -&gt; {
+                            val respCode = if (len &gt;= 2) buf.getUShortLE(0) else 0
+                            log { "DL_CMD_RESPONSE resp=0x${respCode.toString(16)} downloaded=$totalDownloaded" }
+                            if (respCode != PtpConstants.RESPONSE_OK) {
+                                return@withContext Result.failure(Exception("传输失败: ${PtpConstants.translateResponse(respCode)}"))
+                            }
+                            return@withContext verifyComplete() ?: Result.success(buildStats())
+                        }
+                        PtpConstants.START_DATA_PACKET -&gt; {
+                            // PTP/IP Start-Data 载荷 = TID(4) + 总长度(8，64 位小端)。只读低 32 位
+                            // 会把 &gt;4GB 视频的预期大小截断，完整下载后被误判"数据不完整"。
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 16 页 / 共 60 页</span></div><pre>                            expected = when {
+                                len &gt;= 12 -&gt; buf.getLongLE(4)
+                                len &gt;= 8 -&gt; buf.getIntLE(4).toLong() and 0xFFFFFFFFL
+                                else -&gt; 0L
+                            }
+                            log { "DL_START expected=$expected" }
+                        }
+                        PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -&gt; {
+                            // DATA 与 END_DATA 同样携带数据段（前 4 字节为 PTP 数据阶段头）。
+                            // 先写入本包数据，再判断是否为结束包，避免丢失最后一段数据。
+                            if (len &gt; 4) {
+                                try {
+                                    output.write(buf, 4, len - 4)
+                                } catch (e: java.io.IOException) {
+                                    // 写本地文件失败（如存储空间不足）——非相机连接问题，
+                                    // 包装成非 IOException 以便上层按单文件失败处理，而不是误判为掉线。
+                                    return@withContext Result.failure(OutputWriteException(e))
+                                }
+                                totalDownloaded += len - 4
+
+                                val now = System.currentTimeMillis()
+                                if (now - lastProgressTime &gt;= 200) {
+                                    val elapsed = (now - startTime) / 1000f
+                                    onProgress?.invoke(DownloadProgress(totalDownloaded, expected, elapsed))
+                                    lastProgressTime = now
+                                }
+                            }
+                            if (packet.type == PtpConstants.END_DATA_PACKET) {
+                                log { "DL_END total=$totalDownloaded, draining CMD_RESPONSE..." }
+                                // 必须消费掉本次传输的 CMD_RESPONSE，否则残留包会污染下次传输
+                                drainCmdResponse()
+                                return@withContext verifyComplete() ?: Result.success(buildStats())
+                            }
+                        }
+                        PtpConstants.PING -&gt; {
+                            log { "DL_PING during download" }
+                            sendPong(cmdOutput)
+                        }
+                    }
+                }
+                // 不可达（循环内必经 return@withContext），但 try 作为表达式时
+                // 编译器要求块末尾给出 Result 类型的值。
+                @Suppress("UNREACHABLE_CODE")
+                Result.failure(Exception("Unexpected end of stream"))
+            } catch (e: CancellationException) {
+                // 取消时相机仍在发送本文件剩余数据（TCP 背压堆着），残留数据会污染 socket、
+                // 令下一条命令协议错位。处理：先发 PTP/IP Cancel 请求相机中止本事务的数据
+                // 阶段，再把在途数据排空到 CMD_RESPONSE（相机停发后在途只剩 ≈TCP 窗口的
+                // 数 MB，秒级完成）——连接保住，"停止后立刻重试"无需等重连。
+                // 安全阀：不支持 Cancel 的机型会继续发完整个文件，排空超预算即断开兜底。
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 17 页 / 共 60 页</span></div><pre>                try {
+                    withContext(NonCancellable) {
+                        sendCancel()
+                        // 排空期间收紧读超时：相机停发数据又不回响应包时 3s 即放弃，
+                        // 不再按常规 60s 干等（那正是"停止后重试卡半天"的来源）。
+                        cmdSocket?.soTimeout = CANCEL_DRAIN_TIMEOUT_MS
+                        if (drainCmdResponse(CANCEL_DRAIN_BUDGET)) {
+                            cmdSocket?.soTimeout = SO_TIMEOUT_MS   // 连接保住，恢复常规超时
+                        } else {
+                            log { "DL_CANCEL drain budget exceeded, closing" }
+                            closeQuietly()
+                        }
+                    }
+                } catch (_: Exception) {
+                    // 排空静默超时/连接出错：直接断开，由心跳/看护自动重连。
+                    closeQuietly()
+                }
+                throw e   // 取消须向上传播，不能包装成失败结果
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    /**
+     * 关闭会话与连接。为 suspend 并纳入 [ioMutex] + IO 线程：
+     * - 避免在主线程发起 socket 写导致 NetworkOnMainThreadException；
+     * - 与进行中的命令/下载互斥，消除并发读写同一 socket 的竞态；
+     * - 用 NonCancellable 保证即使调用方作用域已取消也能完成清理。
+     */
+    suspend fun close() = withContext(NonCancellable + Dispatchers.IO) {
+        ioMutex.withLock {
+            // 仅在会话确实打开时才发送 CloseSession，否则握手中途失败时会空等响应。
+            if (sessionOpen) {
+                try {
+                    sendCmd(PtpConstants.CLOSE_SESSION)
+                    recvResp()
+                } catch (_: Exception) {}
+            }
+            closeQuietly()
+        }
+    }
+
+    private fun closeQuietly() {
+        sessionOpen = false
+        try { cmdInput?.close() } catch (_: Exception) {}
+        try { cmdSocket?.close() } catch (_: Exception) {}
+        try { evtInput?.close() } catch (_: Exception) {}
+        try { evtSocket?.close() } catch (_: Exception) {}
+        evtThread?.interrupt()
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 18 页 / 共 60 页</span></div><pre>        evtThread = null
+    }
+
+    private fun makeInitReq(): ByteArray {
+        val hostname = "NikonPTP"
+        val nameBytes = hostname.toByteArray(Charsets.UTF_16LE) + byteArrayOf(0, 0)
+        val guid = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        val length = 8 + 16 + nameBytes.size + 2
+        val pkt = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(length)
+            putInt(PtpConstants.INIT_CMD_REQ)
+            put(guid)
+            put(nameBytes)
+            putShort(1)
+        }.array()
+        return pkt
+    }
+
+    private fun sendCmd(code: Int, vararg params: Int) {
+        val paramCount = params.size.coerceAtMost(5)
+        val pkt = ByteBuffer.allocate(18 + paramCount * 4).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(18 + paramCount * 4)
+            putInt(PtpConstants.CMD_REQUEST)
+            putInt(1)
+            putShort(code.toShort())
+            putInt(nextTid())
+            for (i in 0 until paramCount) {
+                putInt(params[i])
+            }
+        }.array()
+        cmdOutput?.write(pkt)
+        cmdOutput?.flush()
+    }
+
+    /** 应答 PING。命令通道传 [cmdOutput]，事件通道传其自身输出流（各自独立，无并发冲突）。 */
+    private fun sendPong(output: OutputStream?) {
+        val pong = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(8)
+            putInt(PtpConstants.PONG)
+        }.array()
+        output?.write(pong)
+        output?.flush()
+    }
+
+    /** 等待并返回响应码。中途丢弃的数据包（如 keepalive 的 GetStorageIds 数据段）用 raw 读，不逐包分配。 */
+    private fun recvResp(): Int {
+        while (true) {
+            val packet = cmdReader.readPacketRaw(cmdInput!!)
+            when (packet.type) {
+                PtpConstants.CMD_RESPONSE -&gt;
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 19 页 / 共 60 页</span></div><pre>                    return if (packet.payloadLen &gt;= 2) packet.buffer.getUShortLE(0) else 0
+                PtpConstants.PING -&gt; sendPong(cmdOutput)
+            }
+        }
+    }
+
+    private fun recvRespWithPayload(): Pair&lt;Int, ByteArray?&gt; {
+        // 用 ByteArrayOutputStream 累积多包数据，避免 responseData + data 的 O(n²) 复制。
+        var buffer: java.io.ByteArrayOutputStream? = null
+        while (true) {
+            val packet = cmdReader.readPacket(cmdInput!!)
+            when (packet.type) {
+                PtpConstants.CMD_RESPONSE -&gt; {
+                    val respCode = packet.payload?.getUShortLE(0) ?: 0
+                    return respCode to buffer?.toByteArray()
+                }
+                PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -&gt; {
+                    val p = packet.payload
+                    if (p != null &amp;&amp; p.size &gt; 4) {
+                        val out = buffer ?: java.io.ByteArrayOutputStream().also { buffer = it }
+                        out.write(p, 4, p.size - 4)
+                    }
+                }
+                PtpConstants.PING -&gt; sendPong(cmdOutput)
+            }
+        }
+    }
+
+    private fun drainCmdResponse() {
+        // 读取并丢弃直到本次传输的 CMD_RESPONSE。成功路径此时只剩 CMD_RESPONSE；
+        // 用 raw 读避免逐包分配。
+        while (true) {
+            val packet = cmdReader.readPacketRaw(cmdInput!!)
+            if (packet.type == PtpConstants.CMD_RESPONSE) return
+            if (packet.type == PtpConstants.PING) sendPong(cmdOutput)
+        }
+    }
+
+    /**
+     * 带预算的排空（取消路径专用）：读取并丢弃直到 CMD_RESPONSE，返回 true；
+     * 累计排空超过 [maxBytes] 仍没等到响应（机型不理会 Cancel、还在发整个文件）返回 false。
+     */
+    private fun drainCmdResponse(maxBytes: Long): Boolean {
+        var drained = 0L
+        while (drained &lt;= maxBytes) {
+            val packet = cmdReader.readPacketRaw(cmdInput!!)
+            when (packet.type) {
+                PtpConstants.CMD_RESPONSE -&gt; return true
+                PtpConstants.PING -&gt; sendPong(cmdOutput)
+                else -&gt; drained += packet.payloadLen
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 20 页 / 共 60 页</span></div><pre>            }
+        }
+        return false
+    }
+
+    /** PTP/IP Cancel 包：请求相机中止当前事务（[tid] 为最后发出的事务号）的数据阶段。 */
+    private fun sendCancel() {
+        val pkt = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(12)
+            putInt(PtpConstants.CANCEL)
+            putInt(tid)
+        }.array()
+        cmdOutput?.write(pkt)
+        cmdOutput?.flush()
+    }
+
+    /** 读取小端无符号 16 位，返回 0..65535，避免高位错误码 (0xAxxx) 被符号扩展。 */
+    private fun ByteArray.getUShortLE(offset: Int): Int {
+        return (this[offset].toInt() and 0xFF) or ((this[offset + 1].toInt() and 0xFF) shl 8)
+    }
+
+    private fun ByteArray.getIntLE(offset: Int): Int {
+        return (this[offset].toInt() and 0xFF) or
+                ((this[offset + 1].toInt() and 0xFF) shl 8) or
+                ((this[offset + 2].toInt() and 0xFF) shl 16) or
+                ((this[offset + 3].toInt() and 0xFF) shl 24)
+    }
+
+    private fun ByteArray.getLongLE(offset: Int): Long {
+        return (getIntLE(offset).toLong() and 0xFFFFFFFFL) or (getIntLE(offset + 4).toLong() shl 32)
+    }
+}
+
+// ============ 文件: service/TransferService.kt ============
+package com.nikon.transfer.service
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.net.wifi.WifiManager
+import androidx.core.app.NotificationCompat
+import com.nikon.transfer.MainActivity
+import com.nikon.transfer.R
+
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 21 页 / 共 60 页</span></div><pre>/**
+ * 前台服务：在传输期间保持进程存活并持有部分唤醒锁，避免锁屏/切后台时被系统回收，
+ * 导致大文件（NEF/视频）传输中断。传输本身仍由 ViewModel 的协程驱动，本服务只负责
+ * 生命周期保活与通知展示。
+ *
+ * 通过 [start]/[stop] 在传输开始/结束时启停，天然幂等（重复 start 只刷新通知）。
+ */
+class TransferService : Service() {
+
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        createChannel()
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification())
+            acquireWakeLock()
+            acquireWifiLock()
+            if (com.nikon.transfer.BuildConfig.DEBUG) {
+                android.util.Log.d("NikonTransfer", "TransferService foreground started, notification posted")
+            }
+        } catch (e: Exception) {
+            // 某些系统状态下 startForeground 可能被拒绝；此时放弃保活但不崩溃，
+            // 传输仍会在前台继续进行。留日志：排查"传输中通知栏没有通知"时先看这里。
+            if (com.nikon.transfer.BuildConfig.DEBUG) {
+                android.util.Log.w("NikonTransfer", "startForeground failed: ${e.javaClass.simpleName}: ${e.message}")
+            }
+            stopSelf()
+        }
+        // 被系统杀死后不自动重建：任务队列在进程内存中，重建无意义。
+        return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        releaseWakeLock()
+        releaseWifiLock()
+        super.onDestroy()
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
+            setReferenceCounted(false)
+            acquire(MAX_WAKELOCK_MS)
+        }
+    }
+
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 22 页 / 共 60 页</span></div><pre>    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (_: Exception) {
+        } finally {
+            wakeLock = null
+        }
+    }
+
+    /**
+     * 传输期间持有高性能 WifiLock，阻止 Wi-Fi 进入省电模式（省电模式下 Wi-Fi 吞吐会明显下降，
+     * 大文件下载速度腰斩）。API 29+ 用低时延模式，更适合本地实时传输；以下用高性能模式。
+     * PARTIAL_WAKE_LOCK 只保 CPU 不管 Wi-Fi 无线功耗，二者互补。
+     */
+    private fun acquireWifiLock() {
+        if (wifiLock?.isHeld == true) return
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+        val mode = if (Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION")
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        wifiLock = wm.createWifiLock(mode, WIFILOCK_TAG).apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseWifiLock() {
+        try {
+            if (wifiLock?.isHeld == true) wifiLock?.release()
+        } catch (_: Exception) {
+        } finally {
+            wifiLock = null
+        }
+    }
+
+    private fun createChannel() {
+        // minSdk 26 = O，通知渠道 API 恒可用，无需版本判断。
+        val manager = getSystemService(NotificationManager::class.java)
+        if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.transfer_channel_name),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply { setShowBadge(false) }
+            manager.createNotificationChannel(channel)
+        }
+    }
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 23 页 / 共 60 页</span></div><pre>
+    private fun buildNotification(): Notification {
+        val contentIntent = android.app.PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.transfer_notification_title))
+            .setContentText(getString(R.string.transfer_notification_text))
+            .setSmallIcon(R.drawable.ic_stat_transfer)
+            .setOngoing(true)
+            .setContentIntent(contentIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "transfer_channel"
+        private const val NOTIFICATION_ID = 1001
+        private const val WAKELOCK_TAG = "NikonTransfer:transfer"
+        private const val WIFILOCK_TAG = "NikonTransfer:wifi"
+        private const val MAX_WAKELOCK_MS = 60L * 60L * 1000L // 兜底超时，防止异常时唤醒锁泄露
+
+        fun start(context: Context) {
+            val intent = Intent(context, TransferService::class.java)
+            try {
+                // minSdk 26 = O，直接走前台服务启动路径。
+                context.startForegroundService(intent)
+            } catch (e: Exception) {
+                // Android 12+ 后台启动前台服务会抛 ForegroundServiceStartNotAllowedException，
+                // 吞掉以免崩溃；传输在前台时不会触发，后台场景下服务已在运行。
+                if (com.nikon.transfer.BuildConfig.DEBUG) {
+                    android.util.Log.w("NikonTransfer", "startForegroundService failed: ${e.javaClass.simpleName}: ${e.message}")
+                }
+            }
+        }
+
+        fun stop(context: Context) {
+            try {
+                context.stopService(Intent(context, TransferService::class.java))
+            } catch (_: Exception) {}
+        }
+    }
+}
+
+// ============ 文件: viewmodel/CameraViewModel.kt ============
+package com.nikon.transfer.viewmodel
+
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 24 页 / 共 60 页</span></div><pre>import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.wifi.WifiManager
+import android.os.Build
+import android.util.LruCache
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.nikon.transfer.protocol.NikonCamera
+import com.nikon.transfer.protocol.PtpConstants
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+data class CameraState(
+    val isWifiConnected: Boolean = false,
+    val isConnectedToCamera: Boolean = false,
+    val isConnecting: Boolean = false,
+    val files: List&lt;NikonCamera.FileInfo&gt; = emptyList(),
+    val isLoadingFiles: Boolean = false,
+    // 当前相机 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；未在相机 Wi-Fi 上时为 null。
+    val wifiRssi: Int? = null
+)
+
+class CameraViewModel(application: Application) : AndroidViewModel(application) {
+    private val _state = MutableStateFlow(CameraState())
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 25 页 / 共 60 页</span></div><pre>    val state: StateFlow&lt;CameraState&gt; = _state.asStateFlow()
+
+    private var camera: NikonCamera? = null
+    private var keepaliveJob: Job? = null
+    private var watcherJob: Job? = null
+
+    // 缩略图内存缓存：按位图字节数限容（约 1/8 可用内存），超限自动淘汰。
+    private val thumbnailCache = object : LruCache&lt;Int, ImageBitmap&gt;(
+        (Runtime.getRuntime().maxMemory() / 1024 / 8).toInt().coerceAtLeast(4 * 1024)
+    ) {
+        override fun sizeOf(key: Int, value: ImageBitmap): Int = value.width * value.height * 4 / 1024
+    }
+    // "确认无缩略图/解码失败"的负缓存：滚动回来不再对同一文件重发无谓的 GetThumb。
+    // IO 瞬时失败（掉线等）不入内。仅主线程访问（loadThumbnail 及其 async 均跑在主调度器）。
+    private val noThumbHandles = HashSet&lt;Int&gt;()
+    // 进行中的缩略图请求：格子与长按预览并发请求同一张时共享同一次取图+解码；
+    // 最后一个等待者取消时连带取消底层请求，保留"滚出屏幕即剪枝"的行为。仅主线程访问。
+    private class InflightThumb(val deferred: Deferred&lt;ImageBitmap?&gt;) { var waiters = 0 }
+    private val inflightThumbs = HashMap&lt;Int, InflightThumb&gt;()
+    // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // 缩略图磁盘缓存目录：后台填充落盘于此，内存 LRU 只服务可见区。
+    private val thumbDiskDir = File(application.cacheDir, "thumbs").apply { mkdirs() }
+    // 磁盘缓存文件名索引：首次使用时一次性列目录建立，写入/删除同步维护——后台填充
+    // 逐张探测"是否已落盘"在内存完成，不再每张跨线程 stat（几千张跳过从数百 ms 降到微秒级）。
+    // 仅主线程访问（prefetch/fetch 的续体都在主调度器）。
+    private var diskIndex: HashSet&lt;String&gt;? = null
+
+    private suspend fun diskIndexSet(): HashSet&lt;String&gt; {
+        diskIndex?.let { return it }
+        val names = withContext(Dispatchers.IO) {
+            thumbDiskDir.list()?.toHashSet() ?: HashSet()
+        }
+        // 挂起期间可能已有并发首调建好索引（且其后可能已有写入），保留已建的。
+        return diskIndex ?: names.also { diskIndex = it }
+    }
+    private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    @Suppress("DEPRECATION")
+    private val wifiManager = application.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+
+    // 会话级 WifiLock：只要连着相机就持有——阻止 Wi-Fi 进省电打盹（打盹的客户端容易被
+    // 相机热点踢掉，也是浏览时"容易断"的主要来源）。与 TransferService 传输期的锁互补：
+    // 那把只覆盖传输窗口，这把覆盖整个会话；持锁期间用户本就在用相机，功耗可接受。
+    private val sessionWifiLock: WifiManager.WifiLock = wifiManager.createWifiLock(
+        if (Build.VERSION.SDK_INT &gt;= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION")
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        },
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 26 页 / 共 60 页</span></div><pre>        "NikonTransfer:session"
+    ).apply { setReferenceCounted(false) }
+
+    private fun acquireSessionWifiLock() {
+        try {
+            if (!sessionWifiLock.isHeld) sessionWifiLock.acquire()
+        } catch (_: Exception) {}
+    }
+
+    private fun releaseSessionWifiLock() {
+        try {
+            if (sessionWifiLock.isHeld) sessionWifiLock.release()
+        } catch (_: Exception) {}
+    }
+
+    // 当前 Wi-Fi 的 Network 对象：socket 必须绑定到它建连——相机热点没有互联网，
+    // 系统常把默认网络留在蜂窝上，不绑定的话连接请求会进蜂窝路由黑洞干等超时。
+    @Volatile
+    private var wifiNetwork: Network? = null
+
+    // LinkProperties 直接认出的"已在相机网段"：网关随 DHCP 完成即刻由系统推送，
+    // 比轮询 dhcpInfo（自身还滞后于 DHCP）早 1~2 秒。与 dhcpInfo 判定取或使用。
+    @Volatile
+    private var linkSaysCameraWifi = false
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            wifiNetwork = network
+            onWifiChanged()
+        }
+
+        override fun onLost(network: Network) {
+            if (wifiNetwork == network) {
+                wifiNetwork = null
+                linkSaysCameraWifi = false
+            }
+            onWifiChanged()
+        }
+
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            wifiNetwork = network
+            onWifiChanged()
+        }
+
+        override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+            wifiNetwork = network
+            linkSaysCameraWifi = linkProperties.routes.any {
+                it.gateway?.hostAddress == PtpConstants.CAMERA_IP
+            }
+            onWifiChanged()
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 27 页 / 共 60 页</span></div><pre>        }
+    }
+
+    // "是否有任务在传输"（含等待中）——后台缩略图填充的唯一开关，由 UI 层喂入
+    //（TransferViewModel 与本 VM 相互独立，经 MainScreen 桥接）。
+    private val transfersBusyFlow = MutableStateFlow(false)
+
+    fun setTransfersBusy(busy: Boolean) {
+        transfersBusyFlow.value = busy
+    }
+
+    init {
+        registerNetworkCallback()
+        startConnectionWatcher()
+        // 磁盘缓存超容淘汰（后台一次，不阻塞启动）。
+        viewModelScope.launch(Dispatchers.IO) { pruneThumbDisk() }
+        startThumbnailFill()
+    }
+
+    /**
+     * 后台缩略图填充：与连接同生共死，【不依赖任何页面】——用户停在队列页/设置里
+     * 照常推进。只有两种状态：未传输=按拍摄时间从新到旧全量填充（prefetchThumbnail
+     * 只落盘）直到每张都有缓存；传输中=完全停止，通道全部让给传输。
+     * 文件列表渐进加载/传输状态翻转都会重启扫描——已落盘的经内存索引微秒级跳过，
+     * 重启代价可忽略，进度单调推进。
+     */
+    private fun startThumbnailFill() {
+        viewModelScope.launch {
+            combine(
+                state.map { it.files }.distinctUntilChanged(),
+                transfersBusyFlow
+            ) { files, busy -&gt; files to busy }.collectLatest { (files, busy) -&gt;
+                if (busy || files.isEmpty()) return@collectLatest
+                // 展示序≈拍摄时间新→旧；无拍摄时间的排最后。
+                val ordered = files.sortedByDescending { it.captureDate ?: "" }
+                log { "THUMB_SWEEP start n=${ordered.size}" }
+                var loaded = 0
+                for (file in ordered) {
+                    if (!state.value.isConnectedToCamera) {
+                        log { "THUMB_SWEEP abort: disconnected, loaded=$loaded" }
+                        return@collectLatest
+                    }
+                    try {
+                        if (prefetchThumbnail(file)) loaded++
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e   // 列表更新/传输开始的正常取消，须向上传播
+                    } catch (e: Exception) {
+                        // 单张异常绝不中断整轮（逃逸异常会悄悄杀死本协程，之后再也不填充）。
+                        log { "THUMB_SWEEP item failed handle=${file.handle}: $e" }
+                    }
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 28 页 / 共 60 页</span></div><pre>                }
+                log { "THUMB_SWEEP done loaded=$loaded/${ordered.size}" }
+            }
+        }
+    }
+
+    /**
+     * 连接看护：只要未连上相机，就周期性检测手机是否已在相机 Wi-Fi 上，一旦在就立即发起连接。
+     * 作为系统网络回调的兜底——部分机型回调触发晚或不稳定（DHCP 时序），此循环保证"手机一进
+     * 相机 Wi-Fi 就连上"。isNikonWifi() 仅读本地 DHCP 网关，开销极小；只有确实在相机 Wi-Fi 上
+     * 才会发起真正的 socket 连接，不在时不做任何无谓尝试（因此不在相机 Wi-Fi 上不会空耗电量）。
+     */
+    private fun startConnectionWatcher() {
+        watcherJob?.cancel()
+        watcherJob = viewModelScope.launch {
+            while (isActive) {
+                // dhcpInfo/connectionInfo 是 Binder IPC，放 IO 线程，不在主线程高频抖动。
+                val (onNikonWifi, rssi) = withContext(Dispatchers.IO) {
+                    val on = linkSaysCameraWifi || isNikonWifi()
+                    on to (if (on) readRssi() else null)
+                }
+                // 顺带纠正 Wi-Fi 状态与信号强度，避免回调漏报导致 UI 显示滞后。
+                if (_state.value.isWifiConnected != onNikonWifi || _state.value.wifiRssi != rssi) {
+                    _state.update { it.copy(isWifiConnected = onNikonWifi, wifiRssi = rssi) }
+                }
+                // 同 onWifiChanged：只负责"在相机 Wi-Fi 上就连上"，绝不主动断开，避免误断打断传输。
+                if (onNikonWifi &amp;&amp; !_state.value.isConnectedToCamera &amp;&amp; !_state.value.isConnecting) {
+                    connectToCameraWithRetry()
+                }
+                delay(WATCH_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun registerNetworkCallback() {
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        // requestNetwork 而非被动 registerNetworkCallback：向系统声明"本应用需要 Wi-Fi"。
+        // 相机热点无互联网，部分厂商系统会把它自动切走/压后；存在活跃请求时系统会保持
+        // 连接，且 LinkProperties 等回调推送更及时。个别 ROM 抛异常则退回纯监听。
+        try {
+            connectivityManager.requestNetwork(request, networkCallback)
+        } catch (_: Exception) {
+            connectivityManager.registerNetworkCallback(request, networkCallback)
+        }
+    }
+
+    private fun onWifiChanged() {
+        viewModelScope.launch {
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 29 页 / 共 60 页</span></div><pre>            val onNikonWifi = linkSaysCameraWifi || checkNikonWifi()
+            _state.update { it.copy(isWifiConnected = onNikonWifi) }
+
+            // 只在"已在相机 Wi-Fi 但尚未连上相机"时发起连接。
+            // 绝不因 isNikonWifi()==false 主动断开：该判断依赖 dhcpInfo 网关，运行中可能瞬时误报，
+            // 一旦在传输途中误断会不断打断并重传文件，速度暴跌。真正掉线由下载失败/心跳自然发现。
+            if (onNikonWifi &amp;&amp; !_state.value.isConnectedToCamera &amp;&amp; !_state.value.isConnecting) {
+                connectToCameraWithRetry()
+            }
+        }
+    }
+
+    /** [isNikonWifi] 的挂起版本：Binder 调用移到 IO 线程执行。 */
+    private suspend fun checkNikonWifi(): Boolean = withContext(Dispatchers.IO) { isNikonWifi() }
+
+    /** 读取当前 Wi-Fi 连接的信号强度（dBm）。取不到返回 null。仅在 IO 线程调用。 */
+    @Suppress("DEPRECATION")
+    private fun readRssi(): Int? {
+        return try {
+            val rssi = wifiManager.connectionInfo?.rssi ?: return null
+            // 未关联/无效时部分机型返回 -127 之类的哨兵值，过滤掉。
+            if (rssi == -127 || rssi &gt;= 0) null else rssi
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun isNikonWifi(): Boolean {
+        try {
+            val dhcp = wifiManager.dhcpInfo ?: return false
+            val gw = dhcp.gateway
+            val ip = "${gw and 0xFF}.${(gw shr 8) and 0xFF}.${(gw shr 16) and 0xFF}.${(gw shr 24) and 0xFF}"
+            return ip == PtpConstants.CAMERA_IP
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
+    /**
+     * 持续尝试连接相机：只要还在相机 Wi-Fi 上就不断重试，直到连上为止，不再在若干次后报错。
+     * 用户流程本就是"必须连上相机 Wi-Fi 才能用"，所以保持探测更符合预期。
+     * 一旦离开相机网段则退出循环，由网络回调在重新连上 Wi-Fi 后再次触发。
+     */
+    private suspend fun connectToCameraWithRetry() {
+        if (_state.value.isConnecting || _state.value.isConnectedToCamera) return
+        _state.update { it.copy(isConnecting = true) }
+
+        while ((linkSaysCameraWifi || checkNikonWifi()) &amp;&amp; !_state.value.isConnectedToCamera) {
+            val cam = NikonCamera()
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 30 页 / 共 60 页</span></div><pre>            var connected = false
+            cam.connect(network = wifiNetwork).fold(
+                onSuccess = {
+                    camera = cam
+                    acquireSessionWifiLock()   // 会话保活：连着就不让 Wi-Fi 打盹
+                    _state.update {
+                        it.copy(
+                            isConnectedToCamera = true,
+                            isConnecting = false
+                        )
+                    }
+                    startKeepalive()
+                    loadFiles()
+                    connected = true
+                },
+                onFailure = {
+                    cam.close()
+                }
+            )
+            if (connected) return
+            delay(RETRY_INTERVAL_MS)   // 未连上，稍后再试，不显示错误
+        }
+
+        // 已离开相机 Wi-Fi（或已连上）；清除"连接中"状态，等待下次网络变化再触发。
+        _state.update { it.copy(isConnecting = false) }
+    }
+
+    /**
+     * 周期性心跳：空闲时每 [KEEPALIVE_INTERVAL_MS] 探测一次相机，及时发现掉线并更新状态。
+     * keepalive() 走 ioMutex，与下载/命令互斥，不会与进行中的传输产生并发冲突。
+     */
+    private fun startKeepalive() {
+        keepaliveJob?.cancel()
+        keepaliveJob = viewModelScope.launch {
+            while (isActive) {
+                delay(KEEPALIVE_INTERVAL_MS)
+                val cam = camera ?: break
+                if (!cam.keepalive()) {
+                    camera = null
+                    releaseSessionWifiLock()   // 会话结束，允许 Wi-Fi 恢复省电
+                    cam.close()
+                    // 掉线不报错，直接进入重连（新协程，避免与当前心跳协程的取消纠缠）。
+                    // 不清空文件列表：网格保留（缩略图走缓存），断开状态由顶栏信号按钮
+                    // 承担（红色断连图标），点击缩略图有抖动+提示反馈；重连后 loadFiles
+                    // 整表刷新，不存在陈旧 handle 被使用的问题（点击已被连接检查挡住）。
+                    _state.update {
+                        it.copy(isConnectedToCamera = false)
+                    }
+                    viewModelScope.launch { connectToCameraWithRetry() }
+                    break
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 31 页 / 共 60 页</span></div><pre>            modifier = Modifier.size(18.dp)
+        )
+        TransferStatus.TRANSFERING -&gt; CircularProgressIndicator(
+            modifier = Modifier.size(16.dp),
+            color = colors.accentBlue,
+            strokeWidth = 2.dp
+        )
+        TransferStatus.WAITING -&gt; Icon(
+            imageVector = Icons.Default.HourglassEmpty,
+            contentDescription = "排队中",
+            tint = colors.accentBlue,
+            modifier = Modifier.size(18.dp)
+        )
+        TransferStatus.FAILED -&gt; Icon(
+            imageVector = Icons.Default.Error,
+            contentDescription = "传输失败",
+            tint = colors.statusError,
+            modifier = Modifier.size(18.dp)
+        )
+        TransferStatus.CANCELLED -&gt; Icon(
+            imageVector = Icons.Default.Cancel,
+            contentDescription = "已取消",
+            tint = colors.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+// ============ 文件: ui/screen/TransferScreen.kt ============
+package com.nikon.transfer.ui.screen
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 32 页 / 共 60 页</span></div><pre>import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.nikon.transfer.protocol.NikonCamera
+import com.nikon.transfer.protocol.PtpConstants
+import com.nikon.transfer.ui.theme.*
+import com.nikon.transfer.ui.util.formatFileSize
+import com.nikon.transfer.ui.util.formatSpeed
+import com.nikon.transfer.ui.util.rememberHaptics
+import com.nikon.transfer.viewmodel.CameraViewModel
+import com.nikon.transfer.viewmodel.TransferStatus
+import com.nikon.transfer.viewmodel.TransferViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun TransferScreen(
+    transferViewModel: TransferViewModel,
+    cameraViewModel: CameraViewModel,
+    onNavigateBack: () -&gt; Unit
+) {
+    val transferState by transferViewModel.state.collectAsState()
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 33 页 / 共 60 页</span></div><pre>    // 响应式连接状态：断开/重连即时反映到重试按钮的可用性（getCamera() 不是快照状态，不能作 gating）。
+    val cameraState by cameraViewModel.state.collectAsState()
+    val colors = AppTheme.colors
+    // 清空/重试二次确认的展开状态（提到这层，便于全屏遮罩接管"点击外部关闭"）。
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var showRetryConfirm by remember { mutableStateOf(false) }
+    // 正在播放移除动画的任务：卡片收合完毕后才真正从队列删除。
+    // 等待中的任务在标记的同时已被 withdraw（置 CANCELLED），动画期间队列不会开始传它。
+    val removingHandles = remember { mutableStateMapOf&lt;Int, Unit&gt;() }
+    val clearScope = rememberCoroutineScope()
+    // 触感反馈（与"Z传"页同一开关）；本页胶囊负责传输全部完成时的成功震动。
+    val haptics = rememberHaptics(transferState.hapticsEnabled)
+
+    // 存在可重试任务（失败/取消）且未在传输：右下角显示"重试全部"FAB。
+    val hasRetryable = !transferState.isTransferring &amp;&amp; transferState.tasks.any {
+        it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
+    }
+    // 清空队列只作用于"不在传输中"的任务（正在传的文件会传完，中途打断会让相机关 Wi-Fi）：
+    // 有可清的卡片才显示扫帚 FAB；确认后卡片集体收合退场、FAB 随之消失。
+    val hasClearable = transferState.tasks.any { it.status != TransferStatus.TRANSFERING }
+
+    val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // 内容 edge-to-edge（与 "Z传" 页一致，无顶部黑条）：顶部让出状态栏 + 悬浮控件；
+    // 底部让出导航栏 + 右下角悬浮按钮（清空/重试，可能同时叠放两颗）的高度。
+    val fabCount = (if (hasClearable) 1 else 0) + (if (hasRetryable) 1 else 0)
+    val listPadding = PaddingValues(
+        start = 12.dp,
+        end = 12.dp,
+        top = topInset + 58.dp,
+        bottom = bottomInset + when (fabCount) {
+            2 -&gt; 168.dp
+            1 -&gt; 96.dp
+            else -&gt; 12.dp
+        }
+    )
+
+    // 根需不透明底色：与"Z传"页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
+    Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
+        // ---------- 内容（铺满，延伸到系统栏后面）----------
+        if (transferState.tasks.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(64.dp), tint = colors.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("暂无传输任务", color = colors.onSurfaceVariant)
+                }
+            }
+        } else {
+            LazyColumn(
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 34 页 / 共 60 页</span></div><pre>                modifier = Modifier.fillMaxSize(),
+                contentPadding = listPadding
+                // 行距烘焙在条目底部（8dp），随移除收合动画一起消失；
+                // 用 spacedBy 的话卡片收合到 0 后仍残留间距，真正删除瞬间会跳一下。
+            ) {
+                // 倒序显示：最新加入队列的排在最上方（asReversed 是视图，不复制列表）。
+                items(transferState.tasks.asReversed(), key = { it.file.handle }) { task -&gt;
+                    val handle = task.file.handle
+                    val removing = removingHandles.containsKey(handle)
+                    // 移除动画：真实高度收合 + 淡出（collapseHeight，与列表页分组收合同款），
+                    // 收合完毕才从队列删除，下方卡片随布局逐帧上移，无跳变。
+                    val removeProgress = remember(handle) { Animatable(1f) }
+                    LaunchedEffect(removing) {
+                        if (removing) {
+                            removeProgress.animateTo(0f, tween(280, easing = FastOutSlowInEasing))
+                            // 先清标记再删数据：同 handle 之后重新入队时不会误播移除动画。
+                            removingHandles.remove(handle)
+                            if (!transferViewModel.removeTask(handle)) {
+                                // 竞态兜底：动画期间任务已开始传输/被重试回等待，不可移除——
+                                // 卡片弹回原高继续显示（成功移除时本条目已随删除离场，走不到这）。
+                                removeProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
+                            }
+                        }
+                    }
+                    // 动画中途条目被外因移出组合（如同时点了重试）：清掉标记，
+                    // 该任务保留在队列里（安全侧），用户可再操作。
+                    DisposableEffect(handle) {
+                        onDispose { removingHandles.remove(handle) }
+                    }
+                    Box(
+                        modifier = Modifier
+                            // 上方卡片增删/长矮时，本卡平滑让位而不是硬跳。
+                            .animateItemPlacement(Motion.itemPlacement)
+                            .collapseHeight { removeProgress.value }
+                            .padding(bottom = 8.dp)
+                    ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        // 浅色下白卡浮在浅灰背景上需要发丝线定界；深色 token 为透明，视觉不变。
+                        border = BorderStroke(1.dp, colors.cardHairline),
+                        colors = CardDefaults.cardColors(
+                            containerColor = when (task.status) {
+                                TransferStatus.TRANSFERING -&gt; colors.accentBlue.copy(alpha = 0.1f)
+                                TransferStatus.COMPLETED -&gt; colors.statusConnected.copy(alpha = 0.1f)
+                                TransferStatus.FAILED -&gt; colors.statusError.copy(alpha = 0.1f)
+                                TransferStatus.CANCELLED -&gt; colors.surfaceVariant
+                                TransferStatus.WAITING -&gt; colors.surface
+                            }
+                        )
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 35 页 / 共 60 页</span></div><pre>                    ) {
+                        // 进度条/重试按钮随状态出现消失时，卡片高度平滑过渡，
+                        // 卡内图标与文字不再瞬移。
+                        Column(
+                            modifier = Modifier
+                                .animateContentSize(tween(250, easing = FastOutSlowInEasing))
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // 前导缩略图：屏幕内的卡片始终允许取图（传输中请求排到
+                                // 文件间隙执行），isTransferring 仅作传输结束后的补载重试键。
+                                QueueThumbnail(
+                                    file = task.file,
+                                    retryNudge = transferState.isTransferring,
+                                    cameraViewModel = cameraViewModel
+                                )
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                // 中部两行：文件名 + 状态副信息，撑满前导高度，充分利用竖向空间。
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = task.file.fileName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (task.status == TransferStatus.CANCELLED) colors.onSurfaceVariant else colors.onBackground,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    val (subText, subColor) = when (task.status) {
+                                        TransferStatus.WAITING -&gt; "等待" to colors.onSurfaceVariant
+                                        TransferStatus.TRANSFERING -&gt; {
+                                            // &gt;4GB 对象的 file.size 只是 SIZE_UNKNOWN 哨兵，别显示假总量。
+                                            val base = if (task.file.size == PtpConstants.SIZE_UNKNOWN) {
+                                                formatFileSize(task.downloaded)
+                                            } else {
+                                                "${formatFileSize(task.downloaded)} / ${formatFileSize(task.file.size)}"
+                                            }
+                                            (if (task.speed &gt; 0) "$base · ${formatSpeed(task.speed)}" else base) to colors.accentBlue
+                                        }
+                                        TransferStatus.COMPLETED -&gt;
+                                            (when {
+                                                task.skipped -&gt; "跳过"
+                                                // 单文件下载速度：一眼看出当前网络快慢。大小取真实落盘字节数
+                                                //（&gt;4GB 对象的 file.size 只是哨兵值）。
+                                                task.downloadMBps &gt; 0f -&gt; "${formatFileSize(task.downloaded)} · %.1f MB/s".format(task.downloadMBps)
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 36 页 / 共 60 页</span></div><pre>                                                else -&gt; formatFileSize(task.downloaded)
+                                            }) to colors.statusConnected
+                                        TransferStatus.FAILED -&gt; (task.error ?: "传输失败") to colors.statusError
+                                        TransferStatus.CANCELLED -&gt; "已取消" to colors.onSurfaceVariant
+                                    }
+                                    Text(
+                                        text = subText,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = subColor,
+                                        // 失败原因带具体诊断信息（如"保存失败：复制不完整…"），
+                                        // 放宽到两行让用户截图即含完整线索；其余状态保持单行紧凑。
+                                        maxLines = if (task.status == TransferStatus.FAILED) 2 else 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                // 尾部：状态图标（前导已被缩略图占用），换状态时交叉淡化不硬切。
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Crossfade(targetState = task.status, animationSpec = tween(220), label = "taskIcon") { st -&gt;
+                                    TaskStatusIcon(st, size = 22.dp)
+                                }
+
+                                // 最尾：毛玻璃移除按钮——把本卡从队列移除。正在传输的
+                                // 不可移除（中途打断会让相机关 Wi-Fi），传完变可移除时淡入。
+                                AnimatedVisibility(
+                                    visible = task.status != TransferStatus.TRANSFERING,
+                                    // 水平展开/收起：出现消失时行内其它内容平滑让位，不硬跳。
+                                    enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
+                                    exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start)
+                                ) {
+                                    Row {
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        GlassButton(
+                                            onClick = {
+                                                // 等待中的先撤下（置 CANCELLED），动画期间队列不会开始传它。
+                                                transferViewModel.withdrawTask(handle)
+                                                removingHandles[handle] = Unit
+                                            },
+                                            shape = CircleShape,
+                                            contentPadding = PaddingValues(6.dp)
+                                        ) {
+                                            // 与右下角"清空队列"同款自绘扫帚——同一动作同一符号。
+                                            BroomMark(
+                                                modifier = Modifier.size(16.dp),
+                                                color = colors.onSurfaceVariant,
+                                                contentDescription = "移出队列"
+                                            )
+                                        }
+                                    }
+                                }
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 37 页 / 共 60 页</span></div><pre>                            }
+
+                            if (task.status == TransferStatus.TRANSFERING) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                LinearProgressIndicator(
+                                    progress = task.progress,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        // 圆角进度条，与卡片圆角语言一致
+                                        .clip(RoundedCornerShape(2.dp)),
+                                    color = colors.accentBlue,
+                                    trackColor = colors.surfaceVariant,
+                                )
+                            }
+
+                            if (task.status == TransferStatus.FAILED) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                // 单个重试（毛玻璃小胶囊，与日期胶囊同规格）；断开时置灰而非消失。
+                                val connected = cameraState.isConnectedToCamera
+                                GlassButton(
+                                    onClick = { transferViewModel.retrySingleTask(task.file.handle, cameraViewModel::getCamera) },
+                                    enabled = connected,
+                                    shape = RoundedCornerShape(14.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        tint = if (connected) colors.accentBlue else colors.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        "重试",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (connected) colors.onBackground else colors.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    }
+                }
+            }
+        }
+
+        // ---------- 顶部渐变 scrim：与"Z传"页同款，保证状态栏与悬浮控件在内容上可读 ----------
+        Box(
+            modifier = Modifier
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 38 页 / 共 60 页</span></div><pre>                .fillMaxWidth()
+                .height(topInset + 56.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0f to colors.background.copy(alpha = 0.85f),
+                        0.45f to colors.background.copy(alpha = 0.5f),
+                        1f to Color.Transparent
+                    )
+                )
+        )
+
+        // ---------- 悬浮顶部控件（毛玻璃，浮在内容上，与 "Z传" 页同款）----------
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 左：返回（毛玻璃按钮，仅返回图标）。顶栏按钮统一 36dp 高。
+            GlassButton(onClick = onNavigateBack, modifier = Modifier.height(36.dp)) {
+                Icon(
+                    Icons.Default.ArrowBack,
+                    contentDescription = "返回",
+                    tint = colors.onBackground,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            // 返回键右侧："Z传"页同款信号按钮（常驻）——传输中最关心信号强弱，断开也一眼可见。
+            Spacer(modifier = Modifier.width(8.dp))
+            SignalPill(
+                rssi = cameraState.wifiRssi,
+                connected = cameraState.isConnectedToCamera
+            )
+
+            // 右：胶囊（传输中显速度/数量，完成后 done→图标）；队列被清空后随之淡出，
+            // 不留一颗没有指代的图标。
+            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                // 顶层重载需显式限定：嵌套的外层 RowScope 会把无限定调用解析到行内专用重载。
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = transferState.tasks.isNotEmpty(),
+                    enter = fadeIn() + scaleIn(initialScale = 0.6f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.6f)
+                ) {
+                    QueuePill(transferState = transferState, haptics = haptics, onClick = {})
+                }
+            }
+        }
+
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 39 页 / 共 60 页</span></div><pre>        // ---------- 右下角悬浮控件（毛玻璃）+ 二次确认：清空队列（扫帚，常驻于有可清卡片时），
+        // 有可重试任务且空闲时在其上方叠放"重试全部" ----------
+        val confirmOpen = (hasClearable &amp;&amp; showClearConfirm) ||
+                (hasRetryable &amp;&amp; showRetryConfirm)
+        // 全屏遮罩：确认卡展开时接管"点击外部任意处关闭"，淡入淡出，位于卡片之下、内容之上。
+        AnimatedVisibility(
+            visible = confirmOpen,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(colors.scrim)
+                    .pointerInput(Unit) {
+                        detectTapGestures {
+                            showClearConfirm = false
+                            showRetryConfirm = false
+                        }
+                    }
+                    // 连拖动一起消费：否则手指在遮罩上滑动会穿透，底下列表照样滚。
+                    .pointerInput(Unit) { detectDragGestures { change, _ -&gt; change.consume() } }
+            )
+        }
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 20.dp, bottom = 24.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // 断开时重试置灰禁用而非消失（配合顶栏红色断连图标，用户能看懂"等重连"）。
+            val connected = cameraState.isConnectedToCamera
+            AnimatedVisibility(
+                visible = hasRetryable,
+                enter = fadeIn() + scaleIn(initialScale = 0.6f),
+                exit = fadeOut() + scaleOut(targetScale = 0.6f)
+            ) {
+                ConfirmFab(
+                    expanded = showRetryConfirm,
+                    icon = {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "重试失败任务",
+                            tint = if (connected) colors.accentBlue else colors.onSurfaceVariant,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    },
+                    title = "重试失败任务？",
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 40 页 / 共 60 页</span></div><pre>                    confirmText = "重试",
+                    confirmColor = colors.accentBlue,
+                    enabled = connected,
+                    onToggle = {
+                        showRetryConfirm = !showRetryConfirm
+                        showClearConfirm = false   // 两张确认卡互斥
+                    },
+                    onConfirm = {
+                        showRetryConfirm = false
+                        transferViewModel.retryFailed(cameraViewModel::getCamera)
+                    },
+                    onDismiss = { showRetryConfirm = false }
+                )
+            }
+            AnimatedVisibility(
+                visible = hasClearable,
+                enter = fadeIn() + scaleIn(initialScale = 0.6f),
+                exit = fadeOut() + scaleOut(targetScale = 0.6f)
+            ) {
+                ConfirmFab(
+                    expanded = showClearConfirm,
+                    icon = {
+                        // 自绘斜握扫帚（CleaningServices 官方图标像叉子，弃用）。
+                        BroomMark(
+                            modifier = Modifier.size(26.dp),
+                            color = colors.onBackground,
+                            contentDescription = "清空队列"
+                        )
+                    },
+                    title = "清空队列？",
+                    subtitle = "移除全部卡片；正在传输的不受影响",
+                    confirmText = "清空",
+                    confirmColor = colors.statusError,
+                    onToggle = {
+                        showClearConfirm = !showClearConfirm
+                        showRetryConfirm = false   // 两张确认卡互斥
+                    },
+                    onConfirm = {
+                        showClearConfirm = false
+                        // 先把等待中的任务撤下（队列不会再开始它们），
+                        // 再给所有非传输中卡片打移除标记——可见卡片集体播放收合动画。
+                        transferViewModel.withdrawPending()
+                        transferState.tasks.forEach {
+                            if (it.status != TransferStatus.TRANSFERING) {
+                                removingHandles[it.file.handle] = Unit
+                            }
+                        }
+                        // 兜底：LazyColumn 只组合可见卡片，屏幕外的卡没有条目协程替它做
+                        // "动画后移除"。等可见卡片收完（280ms）统一清掉所有已终结任务，
+                        // 并回收无主标记——否则同 handle 之后重新入队会误播移除动画。
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 41 页 / 共 60 页</span></div><pre>                        clearScope.launch {
+                            delay(320)
+                            transferViewModel.removeCleared()
+                            val alive = transferViewModel.state.value.tasks
+                                .mapTo(HashSet()) { it.file.handle }
+                            removingHandles.keys.toList().forEach {
+                                if (it !in alive) removingHandles.remove(it)
+                            }
+                        }
+                    },
+                    onDismiss = { showClearConfirm = false }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 右下角悬浮的"图标 FAB + 二次确认"控件（清空/重试全部共用）：毛玻璃圆形按钮，
+ * 点击后在其左上方弹出确认卡片（缩放动画以 FAB 所在的右下角为原点，向左上放大），
+ * 确认后才真正执行。外边距由调用方的叠放容器统一提供（可能同时叠两颗）。
+ */
+@Composable
+private fun ConfirmFab(
+    expanded: Boolean,
+    icon: @Composable () -&gt; Unit,
+    title: String,
+    confirmText: String,
+    confirmColor: Color,
+    onToggle: () -&gt; Unit,
+    onConfirm: () -&gt; Unit,
+    onDismiss: () -&gt; Unit,
+    subtitle: String? = null,
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    Column(horizontalAlignment = Alignment.End, modifier = modifier) {
+        AnimatedVisibility(
+            visible = expanded,
+            // 以右下角为原点缩放弹出，视觉上从 FAB 位置向左上方展开。
+            enter = scaleIn(transformOrigin = TransformOrigin(1f, 1f)) + fadeIn(),
+            exit = scaleOut(transformOrigin = TransformOrigin(1f, 1f)) + fadeOut()
+        ) {
+            ConfirmCard(
+                title = title,
+                subtitle = subtitle,
+                confirmText = confirmText,
+                confirmColor = confirmColor,
+                onConfirm = onConfirm,
+                onDismiss = onDismiss
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 42 页 / 共 60 页</span></div><pre>            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        GlassButton(
+            onClick = onToggle,
+            enabled = enabled,
+            shape = CircleShape,
+            contentPadding = PaddingValues(16.dp),
+            modifier = Modifier.align(Alignment.End)
+        ) {
+            icon()
+        }
+    }
+}
+
+@Composable
+private fun ConfirmCard(
+    title: String,
+    confirmText: String,
+    confirmColor: Color,
+    onConfirm: () -&gt; Unit,
+    onDismiss: () -&gt; Unit,
+    subtitle: String? = null
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        // 与设置面板/提示条同一"重毛玻璃"面板语言，深浅主题下观感统一。
+        color = AppTheme.colors.glassSurfaceHeavy,
+        shadowElevation = 8.dp,
+        border = BorderStroke(1.dp, confirmColor.copy(alpha = 0.4f)),
+        // 消费卡片区域的点击，避免穿透到背后的全屏遮罩而被误关闭。
+        modifier = Modifier
+            .widthIn(max = 260.dp)
+            .pointerInput(Unit) { detectTapGestures { } }
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = AppTheme.colors.onBackground
+            )
+            if (subtitle != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AppTheme.colors.onSurfaceVariant
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 43 页 / 共 60 页</span></div><pre>                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.align(Alignment.End),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text("取消", color = AppTheme.colors.onSurfaceVariant)
+                }
+                Button(
+                    onClick = onConfirm,
+                    colors = ButtonDefaults.buttonColors(containerColor = confirmColor),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(confirmText)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 传输队列行内的小缩略图。命中缓存即显示，未命中即发 GetThumb（传输中请求排到文件
+ * 间隙执行，不拖慢传输中的文件）。[retryNudge] 变化时对加载失败的缩略图再补一次
+ *（传输结束是自然的补载时机）。
+ */
+@Composable
+private fun QueueThumbnail(
+    file: NikonCamera.FileInfo,
+    retryNudge: Boolean,
+    cameraViewModel: CameraViewModel
+) {
+    var thumbnail by remember(file.handle) { mutableStateOf&lt;ImageBitmap?&gt;(null) }
+    LaunchedEffect(file.handle, retryNudge) {
+        if (thumbnail == null) {
+            thumbnail = cameraViewModel.loadThumbnail(file)
+        }
+    }
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(AppTheme.colors.thumbPlaceholder),
+        contentAlignment = Alignment.Center
+    ) {
+        val image = thumbnail
+        if (image != null) {
+            Image(
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 44 页 / 共 60 页</span></div><pre>                bitmap = image,
+                contentDescription = null,
+                // 黑边已在解码时精确裁除（与列表页同源，见 CameraViewModel.cropLetterbox）。
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Icon(
+                Icons.Default.Image,
+                contentDescription = null,
+                tint = AppTheme.colors.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+/** 队列任务状态图标（等待/传输/完成/失败/取消）。前导或尾部复用。 */
+@Composable
+private fun TaskStatusIcon(status: TransferStatus, size: Dp = 20.dp) {
+    val colors = AppTheme.colors
+    Icon(
+        imageVector = when (status) {
+            TransferStatus.WAITING -&gt; Icons.Default.Schedule
+            TransferStatus.TRANSFERING -&gt; Icons.Default.Downloading
+            TransferStatus.COMPLETED -&gt; Icons.Default.CheckCircle
+            TransferStatus.FAILED -&gt; Icons.Default.Error
+            TransferStatus.CANCELLED -&gt; Icons.Default.Cancel
+        },
+        contentDescription = null,
+        tint = when (status) {
+            TransferStatus.WAITING -&gt; colors.statusWaiting
+            TransferStatus.TRANSFERING -&gt; colors.accentBlue
+            TransferStatus.COMPLETED -&gt; colors.statusConnected
+            TransferStatus.FAILED -&gt; colors.statusError
+            TransferStatus.CANCELLED -&gt; colors.onSurfaceVariant
+        },
+        modifier = Modifier.size(size)
+    )
+}
+
+
+// ============ 文件: ui/screen/SettingsScreen.kt ============
+package com.nikon.transfer.ui.screen
+
+import android.provider.DocumentsContract
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 45 页 / 共 60 页</span></div><pre>import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.nikon.transfer.BuildConfig
+import com.nikon.transfer.ui.theme.*
+import com.nikon.transfer.viewmodel.TransferViewModel
+import kotlinx.coroutines.delay
+
+private const val QQ_GROUP = "1054316860"
+
+/**
+ * 轻量设置面板（全屏覆盖层，非系统 Dialog），下拉弹窗观感：
+ * 面板顶边贴在触发按钮（[anchorBounds]，在同一 Compose 根坐标系）下缘、左缘与按钮对齐，
+ * 以按钮中心为缩放原点"从按钮变形展开"（原点在面板左上角附近，展开方向自然朝右下），
+ * 关闭时反向收回到按钮再消失。放在与按钮同一 composition 内，避免跨窗口坐标不一致。
+ */
+@Composable
+fun SettingsOverlay(
+    viewModel: TransferViewModel,
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 46 页 / 共 60 页</span></div><pre>    anchorBounds: Rect?,
+    onDismiss: () -&gt; Unit
+) {
+    val state by viewModel.state.collectAsState()
+    val colors = AppTheme.colors
+
+    val directoryPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri -&gt;
+        // 持久化授权在 setTransferDirUri 内统一处理，这里不重复申请。
+        uri?.let { viewModel.setTransferDirUri(it) }
+    }
+
+    val dirText: String? = state.transferDirUri?.let { dir -&gt;
+        try {
+            val uri = android.net.Uri.parse(dir)
+            val docId = DocumentsContract.getTreeDocumentId(uri)
+            if (docId.startsWith("primary:")) "/sdcard/${docId.removePrefix("primary:")}" else docId
+        } catch (e: Exception) {
+            "已设置"
+        }
+    }
+
+    // 变形动画进度：0=收在按钮处（不可见），1=完全展开。
+    var panelBounds by remember { mutableStateOf&lt;Rect?&gt;(null) }
+    val progress = remember { Animatable(0f) }
+    var closing by remember { mutableStateOf(false) }
+
+    // "加群"按钮复制 QQ 群号后的底部提示；nonce 保证连续点击重启计时。
+    val clipboard = LocalClipboardManager.current
+    var groupCopied by remember { mutableStateOf(false) }
+    var groupCopiedNonce by remember { mutableStateOf(0) }
+    LaunchedEffect(groupCopiedNonce) {
+        if (groupCopied) {
+            delay(1800)
+            groupCopied = false
+        }
+    }
+
+    // 面板测量完成即入场展开。
+    LaunchedEffect(panelBounds, closing) {
+        if (!closing &amp;&amp; panelBounds != null &amp;&amp; progress.value &lt; 1f) {
+            progress.animateTo(1f, Motion.overlayExpand)
+        }
+    }
+    // 关闭：反向收回后再真正移除。
+    LaunchedEffect(closing) {
+        if (closing) {
+            progress.animateTo(0f, Motion.overlayCollapse)
+            onDismiss()
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 47 页 / 共 60 页</span></div><pre>        }
+    }
+    val startClose: () -&gt; Unit = { closing = true }
+
+    BackHandler(enabled = !closing) { startClose() }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 遮罩：随进度淡入；点击外部关闭。拖动一并消费，防止滚动穿透到底下的列表。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = progress.value }
+                .background(colors.scrim)
+                .pointerInput(Unit) { detectTapGestures { startClose() } }
+                .pointerInput(Unit) { detectDragGestures { change, _ -&gt; change.consume() } }
+        )
+
+        // 面板：贴在按钮下缘的下拉位置，以按钮中心为原点缩放展开。
+        // 顶边 = 按钮底边 + 8dp（padding 参与测量，剩余高度自动约束，内容超出由内部滚动兜底）。
+        val density = LocalDensity.current
+        val panelTop = if (anchorBounds != null) {
+            with(density) { anchorBounds.bottom.toDp() } + 8.dp
+        } else 76.dp   // 兜底：按钮尚未测量时按顶栏下方近似定位
+        Surface(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 12.dp, end = 12.dp, top = panelTop)
+                .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
+                .fillMaxWidth()
+                .onGloballyPositioned { panelBounds = it.boundsInRoot() }
+                .graphicsLayer {
+                    val b = panelBounds
+                    if (b != null &amp;&amp; b.width &gt; 0f &amp;&amp; b.height &gt; 0f &amp;&amp; anchorBounds != null) {
+                        // 按钮中心相对于面板自身的比例位置（可超出 0..1，即原点落在面板外）。
+                        transformOrigin = TransformOrigin(
+                            (anchorBounds.center.x - b.left) / b.width,
+                            (anchorBounds.center.y - b.top) / b.height
+                        )
+                    }
+                    val p = progress.value
+                    // 从"约按钮大小"(6%)在按钮位置放大到全尺寸——明显地"从 Z传 按钮长出来"，
+                    // 关闭时反向缩回按钮再消失（从哪来回哪去）。
+                    val s = 0.06f + 0.94f * p
+                    scaleX = s
+                    scaleY = s
+                    // 透明度更快到达不透明，放大过程中面板已清晰可见。
+                    alpha = (p * 2f).coerceAtMost(1f)
+                }
+                // 消费面板内点击，避免穿透到遮罩误关闭。
+                .pointerInput(Unit) { detectTapGestures { } },
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 48 页 / 共 60 页</span></div><pre>            shape = RoundedCornerShape(20.dp),
+            // 毛玻璃：底色保持较高不透明度（不那么透明，保证可读）+ 细描边。
+            color = colors.glassSurfaceHeavy,
+            border = BorderStroke(1.dp, colors.glassPanelBorder),
+            tonalElevation = 6.dp
+        ) {
+          Box {
+            // 自上而下淡出的高光叠层，营造毛玻璃质感。
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(colors.glassSheen, Color.Transparent)
+                        )
+                    )
+            )
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp)
+            ) {
+                // 标题栏
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "设置",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onBackground
+                    )
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = startClose, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "关闭", tint = colors.onSurfaceVariant)
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // ---------- 传输目录 ----------
+                SectionLabel("传输目录")
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.surfaceVariant,
+                    // 未设目录时橙色描边强调：因点图未设目录被弹到这里的新用户能立刻明白来意。
+                    border = if (dirText == null) BorderStroke(1.dp, colors.accentOrange.copy(alpha = 0.8f)) else null,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 49 页 / 共 60 页</span></div><pre>                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = if (dirText != null) colors.statusConnected else colors.accentOrange,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = dirText ?: "未设置",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (dirText != null) colors.onBackground else colors.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = { directoryPicker.launch(null) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.accentBlue),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (dirText != null) "更改目录" else "选择目录")
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // ---------- 每行列数 ----------
+                SectionLabel("列数")
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    (1..4).forEach { col -&gt;
+                        val selected = state.thumbnailColumns == col
+                        Surface(
+                            onClick = { viewModel.setThumbnailColumns(col) },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (selected) colors.accentBlue else colors.surfaceVariant,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = "$col",
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 50 页 / 共 60 页</span></div><pre>                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (selected) colors.onAccent else colors.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // ---------- 外观（深浅色主题）----------
+                SectionLabel("外观")
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ThemeMode.entries.forEach { mode -&gt;
+                        val selected = state.themeMode == mode
+                        Surface(
+                            onClick = { viewModel.setThemeMode(mode) },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (selected) colors.accentBlue else colors.surfaceVariant,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = when (mode) {
+                                        ThemeMode.SYSTEM -&gt; "跟随系统"
+                                        ThemeMode.DARK -&gt; "深色"
+                                        ThemeMode.LIGHT -&gt; "浅色"
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    color = if (selected) colors.onAccent else colors.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // ---------- 触感反馈 ----------
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        SectionLabel("触感反馈")
+                    }
+                    Switch(
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 51 页 / 共 60 页</span></div><pre>                        checked = state.hapticsEnabled,
+                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                    )
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // ---------- 屏幕常亮（默认开）：前台不熄屏，防系统冻结进程/Wi-Fi 打盹断连 ----------
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        SectionLabel("屏幕常亮")
+                        Text(
+                            "应用在前台时不熄屏，防止连接中断",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = state.keepScreenOn,
+                        onCheckedChange = { viewModel.setKeepScreenOn(it) }
+                    )
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // ---------- 页脚：左侧版本号，右侧毛玻璃"加群"按钮（点击复制 QQ 群号，
+                // 面板底部弹玻璃提示显示具体群号 + 已复制）----------
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Z传 v${BuildConfig.VERSION_NAME}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                    Spacer(Modifier.weight(1f))
+                    GlassButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(QQ_GROUP))
+                            groupCopied = true
+                            groupCopiedNonce++
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text(
+                            "加群",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.onBackground
+                        )
+                    }
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 52 页 / 共 60 页</span></div><pre>                }
+            }
+          }
+        }
+
+        // 底部玻璃提示：显示已复制的具体群号（与列表页提示条同款视觉），在遮罩与面板之上。
+        AnimatedVisibility(
+            visible = groupCopied,
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 28.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = colors.glassSurfaceHeavy,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, colors.glassPanelBorder)
+            ) {
+                Text(
+                    text = "QQ群 $QQ_GROUP\n已复制群号",
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.onBackground,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = AppTheme.colors.onBackground
+    )
+}
+
+// ============ 文件: ui/screen/PhotoPreview.kt ============
+package com.nikon.transfer.ui.screen
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 53 页 / 共 60 页</span></div><pre>import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import com.nikon.transfer.protocol.NikonCamera
+import com.nikon.transfer.ui.theme.*
+import com.nikon.transfer.viewmodel.CameraViewModel
+
+/**
+ * 全屏照片预览层：显示缓存缩略图的**未裁切**（Fit）完整画面，可左右翻页浏览整份列表。
+ * 整体从被长按格子 [anchorRect] 的位置缩放展开，关闭时反向缩回（从哪来回哪去）。
+ * 不下载原图（缩略图低清但瞬开、不抢传输通道）。
+ * 本层在深浅两种主题下都保持黑底沉浸式（照片查看器惯例，黑底最衬照片），
+ * 因此内部直接用深色常量而非主题 token——这是有意的，不参与深浅切换。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun PhotoPreviewOverlay(
+    files: List&lt;NikonCamera.FileInfo&gt;,
+    initialIndex: Int,
+    anchorRect: Rect?,
+    cameraViewModel: CameraViewModel,
+    onDismiss: () -&gt; Unit
+) {
+    val pagerState = rememberPagerState(initialPage = initialIndex) { files.size }
+    var overlayBounds by remember { mutableStateOf&lt;Rect?&gt;(null) }
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 54 页 / 共 60 页</span></div><pre>    val progress = remember { Animatable(0f) }
+    var closing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(overlayBounds, closing) {
+        if (!closing &amp;&amp; overlayBounds != null &amp;&amp; progress.value &lt; 1f) {
+            progress.animateTo(1f, Motion.overlayExpand)
+        }
+    }
+    LaunchedEffect(closing) {
+        if (closing) {
+            progress.animateTo(0f, Motion.overlayCollapse)
+            onDismiss()
+        }
+    }
+    val startClose: () -&gt; Unit = { closing = true }
+    BackHandler(enabled = !closing) { startClose() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { overlayBounds = it.boundsInRoot() }
+            // 消费未被翻页器处理的拖动（如竖向滑动），防止滚动穿透到底下的照片网格；
+            // 横向翻页由更深层的 Pager 先消费，不受影响。
+            .pointerInput(Unit) { detectDragGestures { change, _ -&gt; change.consume() } }
+    ) {
+        // 黑色背景：随进度淡入。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = progress.value }
+                .background(Color.Black.copy(alpha = 0.94f))
+        )
+
+        // 图片翻页器：整体从被长按格子的位置缩放展开。相邻页预载一页，快速翻页不用等图。
+        HorizontalPager(
+            state = pagerState,
+            beyondBoundsPageCount = 1,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val ob = overlayBounds
+                    val ar = anchorRect
+                    // 已翻页离开初始张时，关闭不再缩回原格子（位置早对不上，会"飞回"错误
+                    // 的格子造成视觉断裂），改为原地线性淡出。
+                    val shrinkToAnchor = pagerState.currentPage == initialIndex
+                    if (shrinkToAnchor &amp;&amp; ob != null &amp;&amp; ar != null &amp;&amp; ob.width &gt; 0f &amp;&amp; ob.height &gt; 0f) {
+                        transformOrigin = TransformOrigin(
+                            (ar.center.x - ob.left) / ob.width,
+                            (ar.center.y - ob.top) / ob.height
+                        )
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 55 页 / 共 60 页</span></div><pre>                        val startScale = (ar.width / ob.width).coerceIn(0.05f, 1f)
+                        val s = startScale + (1f - startScale) * progress.value
+                        scaleX = s
+                        scaleY = s
+                        alpha = (progress.value * 1.6f).coerceAtMost(1f)
+                    } else {
+                        scaleX = 1f
+                        scaleY = 1f
+                        alpha = progress.value
+                    }
+                }
+        ) { page -&gt;
+            PreviewPage(
+                file = files[page],
+                cameraViewModel = cameraViewModel,
+                onTap = startClose
+            )
+        }
+
+        // 顶部：序号 + 文件名（随进度淡入，不参与缩放）。
+        val current = files.getOrNull(pagerState.currentPage)
+        if (current != null) {
+            Text(
+                text = "${pagerState.currentPage + 1}/${files.size}  ·  ${current.fileName}",
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.85f * progress.value),
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(top = 12.dp, start = 16.dp, end = 16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PreviewPage(
+    file: NikonCamera.FileInfo,
+    cameraViewModel: CameraViewModel,
+    onTap: () -&gt; Unit
+) {
+    var thumbnail by remember(file.handle) { mutableStateOf&lt;ImageBitmap?&gt;(null) }
+    // 取过仍为 null → 该文件确实没有缩略图（如部分视频）。
+    // 用户正盯着的预览始终允许取图；传输中请求排到文件间隙执行，等待期间显示加载圈。
+    var noThumb by remember(file.handle) { mutableStateOf(false) }
+    LaunchedEffect(file.handle) {
+        if (thumbnail == null &amp;&amp; !noThumb) {
+            val t = cameraViewModel.loadThumbnail(file)
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 56 页 / 共 60 页</span></div><pre>            if (t != null) thumbnail = t else noThumb = true
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) { detectTapGestures { onTap() } },
+        contentAlignment = Alignment.Center
+    ) {
+        val img = thumbnail
+        when {
+            img != null -&gt; Image(
+                bitmap = img,
+                contentDescription = file.fileName,
+                contentScale = ContentScale.Fit,   // 不裁切，完整画面
+                modifier = Modifier.fillMaxSize()
+            )
+            noThumb -&gt; Text("无预览", color = DarkOnSurfaceVariant)
+            else -&gt; CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
+        }
+    }
+}
+
+// ============ 文件: ui/screen/GlassButton.kt ============
+package com.nikon.transfer.ui.screen
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.dp
+import com.nikon.transfer.ui.theme.AppTheme
+
+/**
+ * 统一的"毛玻璃"悬浮按钮：半透明底 + 自上而下白色高光渐变 + 上亮下暗细描边，
+ * 与 "Z传" 悬浮按钮同款视觉。全局悬浮控件（返回/标题/清空/重试等）复用，保证设计语言一致。
+ */
+@Composable
+fun GlassButton(
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 57 页 / 共 60 页</span></div><pre>    onClick: () -&gt; Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    shape: Shape = RoundedCornerShape(20.dp),
+    contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+    content: @Composable RowScope.() -&gt; Unit
+) {
+    val colors = AppTheme.colors
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = shape,
+        color = colors.glassSurface,
+        shadowElevation = 4.dp,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier
+                .background(
+                    brush = Brush.verticalGradient(
+                        listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.verticalGradient(
+                        listOf(colors.glassBorderTop, colors.glassBorderBottom)
+                    ),
+                    shape = shape
+                )
+                .padding(contentPadding),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            content = content
+        )
+    }
+}
+
+// ============ 文件: ui/screen/ZMark.kt ============
+package com.nikon.transfer.ui.screen
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 58 页 / 共 60 页</span></div><pre>import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import com.nikon.transfer.ui.theme.AppTheme
+
+// 归一化几何参数（均为高度的倍数），改这里即可整体调形。
+private const val BAR = 0.13f      // 横杠厚度
+private const val DIAG = 0.15f     // 斜杠的水平厚度
+private const val ZW = 0.62f       // 单个 Z 的宽度（剪切前）
+private const val SHEAR = 0.30f    // 斜体剪切量（顶部右移，≈17°）
+private const val DX = 0.44f       // 右 Z 相对左 Z 的偏移
+private const val GAP = 0.06f      // 两 Z 交叠处的分隔缝
+private const val ASPECT = ZW + SHEAR + DX   // 整个标志的宽高比
+
+/**
+ * 尼康 Z 系列风格的双 Z 标志（自绘矢量，无图片资源）：两个斜体 Z 错位叠放，
+ * 右 Z 在上层，交叠处留一道分隔缝。缝隙用 BlendMode.Clear 在离屏层上冲出，
+ * 因此适用于任何背景（包括毛玻璃半透明底）。调用方只需约束高度，宽度按比例自适应。
+ */
+@Composable
+fun ZMark(
+    modifier: Modifier = Modifier,
+    color: Color = AppTheme.colors.onBackground
+) {
+    Canvas(
+        modifier = modifier
+            .aspectRatio(ASPECT)
+            // Clear 混合需要离屏合成，否则会把窗口背景也冲掉（黑洞）。
+            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+    ) {
+        val h = size.height
+        val t = BAR * h
+        val s = DIAG * h
+        val w = ZW * h
+        val shear = SHEAR * h
+
+        // 单个 Z 的轮廓：先按直立 Z 取点，再逐点做斜体剪切 x' = x + shear·(1 - y/h)，
+        // 平行边剪切后保持平行，斜杠的水平厚度不变。顺时针 10 点。
+        fun zPath(offsetX: Float) = Path().apply {
+            fun pt(x: Float, y: Float) = Offset(offsetX + x + shear * (1f - y / h), y)
+            val p = listOf(
+                pt(0f, 0f), pt(w, 0f), pt(w, t),   // 顶杠：上缘与右端
+                pt(s, h - t),                      // 沿斜杠右下缘降至底杠上缘
+                pt(w, h - t), pt(w, h), pt(0f, h), // 底杠
+                pt(0f, h - t),                     // 底杠左端上行
+                pt(w - s, t), pt(0f, t)            // 沿斜杠左上缘升回顶杠下缘
+            )
+            moveTo(p[0].x, p[0].y)
+            for (i in 1 until p.size) lineTo(p[i].x, p[i].y)
+            close()
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 59 页 / 共 60 页</span></div><pre>        }
+
+        val leftZ = zPath(0f)
+        val rightZ = zPath(DX * h)
+
+        drawPath(leftZ, color)
+        // 右 Z 在上层：先把"右 Z 外扩一圈缝宽"的区域从已绘内容中冲掉，再实填右 Z，
+        // 左 Z 上便留出干净的分隔缝——正是尼康 Z 标的层叠效果。
+        val gapStroke = Stroke(width = GAP * h * 2, join = StrokeJoin.Round)
+        drawPath(rightZ, Color.Black, style = gapStroke, blendMode = BlendMode.Clear)
+        drawPath(rightZ, Color.Black, blendMode = BlendMode.Clear)
+        drawPath(rightZ, color)
+    }
+}
+
+// ============ 文件: ui/screen/BroomMark.kt ============
+package com.nikon.transfer.ui.screen
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.nikon.transfer.ui.theme.AppTheme
+import kotlin.math.sqrt
+
+// 归一化几何参数（均为边长的倍数），改这里即可整体调形。竖直姿态绘制，整体旋转 45°。
+private const val HANDLE_TOP = 0.08f       // 木杆顶端
+private const val HANDLE_BOTTOM = 0.55f    // 木杆没入刷头处（与刷头上沿略有重叠）
+private const val HANDLE_W = 0.10f         // 木杆粗细
+private const val HEAD_TOP = 0.52f         // 刷头上沿
+private const val HEAD_BOTTOM = 0.90f      // 刷头下沿
+private const val HEAD_TOP_HALF = 0.09f    // 刷头上沿半宽（略宽于木杆）
+private const val HEAD_BOTTOM_HALF = 0.28f // 刷头下沿半宽（外扩成扇形）
+private const val CORNER_R = 0.06f         // 刷头下沿两角的圆角
+
+/**
+ * 自绘扫帚标志（"清空队列"FAB 与卡片"移出队列"按钮共用）：
+ * 斜握 45° 的极简剪影——修长圆头木杆 + 圆角扇形刷头，只有两个元素，
+ * 小到 16dp 依然清晰可辨。纯单色填充，不依赖背景，深浅主题仅由 [color] 区分。
+ */
+@Composable
+fun BroomMark(
+    modifier: Modifier = Modifier,
+</pre></div>
+<div class="page"><div class="hdr"><span>Z传相机照片传输软件V1.0 源程序</span><span>第 60 页 / 共 60 页</span></div><pre>    color: Color = AppTheme.colors.onBackground,
+    contentDescription: String? = null
+) {
+    Canvas(
+        modifier = modifier
+            .let { m -&gt;
+                if (contentDescription != null) {
+                    m.semantics { this.contentDescription = contentDescription }
+                } else m
+            }
+            .aspectRatio(1f)
+    ) {
+        val s = size.minDimension
+        // 顺时针转 45°：木杆指向右上、刷头扫向左下，经典的"挥扫"姿态。
+        rotate(degrees = 45f, pivot = center) {
+            // 木杆（圆头长杆）
+            drawLine(
+                color = color,
+                start = Offset(0.5f * s, HANDLE_TOP * s),
+                end = Offset(0.5f * s, HANDLE_BOTTOM * s),
+                strokeWidth = HANDLE_W * s,
+                cap = StrokeCap.Round
+            )
+            // 刷头：上窄下宽的扇形，底部两角圆过渡。
+            // 侧边单位方向 × 圆角半径 = 圆角起点沿斜边回退的偏移。
+            val edgeDx = HEAD_BOTTOM_HALF - HEAD_TOP_HALF
+            val edgeDy = HEAD_BOTTOM - HEAD_TOP
+            val edgeLen = sqrt(edgeDx * edgeDx + edgeDy * edgeDy)
+            val ox = edgeDx / edgeLen * CORNER_R
+            val oy = edgeDy / edgeLen * CORNER_R
+            val head = Path().apply {
+                moveTo((0.5f - HEAD_TOP_HALF) * s, HEAD_TOP * s)
+                lineTo((0.5f + HEAD_TOP_HALF) * s, HEAD_TOP * s)
+                lineTo((0.5f + HEAD_BOTTOM_HALF - ox) * s, (HEAD_BOTTOM - oy) * s)
+                quadraticBezierTo(
+                    (0.5f + HEAD_BOTTOM_HALF) * s, HEAD_BOTTOM * s,
+                    (0.5f + HEAD_BOTTOM_HALF - CORNER_R) * s, HEAD_BOTTOM * s
+                )
+                lineTo((0.5f - HEAD_BOTTOM_HALF + CORNER_R) * s, HEAD_BOTTOM * s)
+                quadraticBezierTo(
+                    (0.5f - HEAD_BOTTOM_HALF) * s, HEAD_BOTTOM * s,
+                    (0.5f - HEAD_BOTTOM_HALF + ox) * s, (HEAD_BOTTOM - oy) * s
+                )
+                close()
+            }
+            drawPath(head, color)
+        }
+    }
+}
+
+</pre></div></body></html>

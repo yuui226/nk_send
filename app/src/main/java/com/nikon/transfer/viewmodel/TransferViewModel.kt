@@ -50,7 +50,10 @@ data class TransferState(
     // 相机连接容易断；代价是手机一直亮屏。
     val keepScreenOn: Boolean = true,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
-    val themeMode: ThemeMode = ThemeMode.SYSTEM
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    // 照片类型筛选（归一化扩展名，如 ".jpg"）：null = 全部（不过滤，新类型也放行）。
+    // 持久化跨会话生效；设备上没有所选类型时列表自然为空，不做特殊处理。
+    val filterExtensions: Set<String>? = null
 )
 
 /** 队列剩余待处理数量（正在传 + 等待传）。供顶栏药丸等复用。 */
@@ -68,6 +71,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private var transferJob: Job? = null
     private val prefs = application.getSharedPreferences("nikon_transfer", Context.MODE_PRIVATE)
     private val contentResolver = application.contentResolver
+
+    // 鸿蒙适配：部分华为/荣耀设备的 DocumentsProvider renameDocument 损坏（无论目标名
+    // 是否空闲都失败），下载完好的临时文件改不了正式名 → 每张都"保存失败"。
+    // 首次确认损坏后置位，本会话后续文件跳过改名直接走"复制为正式文件"回退路径，
+    // 不再每个文件白试上百次改名。安卓正常设备永远不会置位，行为零变化。
+    private var renameBroken = false
 
     private companion object {
         const val TAG = "NikonTransfer"
@@ -87,7 +96,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
-                    ?: ThemeMode.SYSTEM
+                    ?: ThemeMode.SYSTEM,
+                // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
+                filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet()
             )
         }
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
@@ -117,6 +128,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setKeepScreenOn(enabled: Boolean) {
         prefs.edit().putBoolean("keep_screen_on", enabled).apply()
         _state.update { it.copy(keepScreenOn = enabled) }
+    }
+
+    /** 照片类型筛选；null = 全部。持久化，跨会话与跨设备连接生效。 */
+    fun setFilterExtensions(exts: Set<String>?) {
+        prefs.edit().apply {
+            if (exts == null) remove("filter_exts") else putStringSet("filter_exts", exts)
+        }.apply()
+        _state.update { it.copy(filterExtensions = exts) }
     }
 
     fun setTransferDirUri(uri: Uri) {
@@ -163,6 +182,37 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     uri,
                     DocumentsContract.getTreeDocumentId(uri)
                 )
+
+                // 队列启动前先校验传输目录仍然存在且可访问：目录被删除/改名/换存储后，
+                // 后续 createDocument 会抛 "Missing file for primary:..." 这类系统原始
+                // 错误直接漏到界面上。失效则清掉设置——用户下次点图会被既有引导
+                //（未设目录自动弹设置面板）带去重新选择。
+                val dirValid = withContext(Dispatchers.IO) {
+                    try {
+                        contentResolver.query(
+                            docUri,
+                            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
+                            null, null, null
+                        )?.use { true } ?: false
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+                if (!dirValid) {
+                    prefs.edit().remove("transfer_dir").apply()
+                    _state.update { s ->
+                        s.copy(
+                            transferDirUri = null,
+                            tasks = s.tasks.map {
+                                if (it.status == TransferStatus.WAITING) {
+                                    it.copy(status = TransferStatus.FAILED, error = "传输目录已失效，请重新选择")
+                                } else it
+                            }
+                        )
+                    }
+                    return@launch   // finally 负责复位 isTransferring（前台服务尚未启动）
+                }
+
                 // 单次遍历：清扫遗留半成品(.nkpart_) + 建立"已存在(名称->大小)"去重表。
                 val existing = withContext(Dispatchers.IO) { sweepAndListExisting(uri) }
                 // 归一化名 -> 大小集合：把重名冲突时落盘的 "DSC_0001 (1).NEF" 副本也归到
@@ -272,8 +322,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 // 下载完整 → 把临时名改成真正文件名（相机上报的文件名即为准）。
                                 val finalName = task.file.fileName
                                 var savedName = finalName
-                                var renamedUri = renameQuietly(createdUri, finalName)
-                                if (renamedUri == null) {
+                                var renamedUri = if (renameBroken) null else renameQuietly(createdUri, finalName)
+                                if (renamedUri == null && !renameBroken) {
                                     // 目标名已被占用（历史残缺文件 / 相机跨文件夹 DSC 编号回卷重名）。
                                     // 绝不覆盖已有文件，也绝不让任务陷入"每次重下、每次改名失败"的
                                     // 死循环：落为 "名字 (n).扩展名" 副本。
@@ -285,6 +335,38 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             savedName = candidate
                                             break
                                         }
+                                    }
+                                }
+                                var saveError: Throwable? = null
+                                if (renamedUri == null) {
+                                    // 鸿蒙回退路径：连不冲突的候选名都改不动 = 该设备 renameDocument
+                                    // 损坏（而非重名问题），把临时文件【复制】成正式文件再删临时。
+                                    // 多一次本地磁盘拷贝，仅发生在改名损坏的设备上。
+                                    var copyName = finalName
+                                    if (existing.containsKey(copyName)) {
+                                        for (n in 1..99) {
+                                            val candidate = suffixedName(finalName, n)
+                                            if (!existing.containsKey(candidate)) {
+                                                copyName = candidate
+                                                break
+                                            }
+                                        }
+                                    }
+                                    val copied = copyAsFallback(
+                                        docUri, createdUri, copyName,
+                                        getMimeType(finalName), stats.bytes
+                                    )
+                                    val copiedUri = copied.getOrNull()
+                                    if (copiedUri != null) {
+                                        renameBroken = true   // 记住：本会话后续文件直接走复制
+                                        deleteQuietly(createdUri)   // 临时文件使命完成
+                                        // provider 重名时会静默改名（如自动加后缀），
+                                        // 去重簿记以实际落盘名为准。
+                                        savedName = displayNameOf(copiedUri) ?: copyName
+                                        renamedUri = copiedUri
+                                        log { "DL_SAVE via copy fallback: $savedName (rename broken)" }
+                                    } else {
+                                        saveError = copied.exceptionOrNull()
                                     }
                                 }
                                 if (renamedUri != null) {
@@ -300,11 +382,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         )
                                     }
                                 } else {
-                                    // 改名彻底失败（非重名问题，如目录权限失效）：删掉临时文件并标记失败
-                                    // 让用户重试，避免完整数据以 .nkpart_ 名残留后被后续 sweep 静默删除。
+                                    // 改名与复制均失败：删掉临时文件并标记失败让用户重试，
+                                    // 避免完整数据以 .nkpart_ 名残留后被后续 sweep 静默删除。
+                                    // 错误文案带上具体原因——用户报障时截图即含一手线索。
                                     deleteQuietly(createdUri)
+                                    val reason = when {
+                                        saveError is java.io.FileNotFoundException ->
+                                            "传输目录已失效，请重新选择"
+                                        saveError?.message != null -> saveError.message
+                                        else -> "系统拒绝改名与复制"
+                                    }
                                     updateTask(handle) {
-                                        it.copy(status = TransferStatus.FAILED, error = "保存失败", speed = 0)
+                                        it.copy(status = TransferStatus.FAILED, error = "保存失败：$reason", speed = 0)
                                     }
                                 }
                             },
@@ -329,8 +418,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         if (BuildConfig.DEBUG) {
                             android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
                         }
+                        // 目录中途失效（如传输期间被文件管理器删除）：翻译成人话，
+                        // 而不是把 SAF 的 "Missing file for primary:..." 原样示人。
+                        val msg = if (e is java.io.FileNotFoundException) {
+                            "传输目录已失效，请重新选择"
+                        } else {
+                            e.message ?: "传输失败"
+                        }
                         updateTask(handle) {
-                            it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
+                            it.copy(status = TransferStatus.FAILED, error = msg, speed = 0)
                         }
                     }
                 }
@@ -411,6 +507,64 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private suspend fun renameQuietly(uri: Uri, newName: String): Uri? = withContext(Dispatchers.IO) {
         try {
             DocumentsContract.renameDocument(contentResolver, uri, newName)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 鸿蒙回退：把下载完好的临时文件【复制】成名为 [name] 的正式文件（renameDocument
+     * 损坏的设备用，见 [renameBroken]）。复制后按 [expectedBytes] 校验字节数，
+     * 不完整/失败则删除半成品正式文件并返回 null。
+     * 权衡说明：改名是原子操作，复制不是——进程在复制中途被杀会留下残缺真名文件
+     *（本地磁盘拷贝很快，窗口极小，且残缺文件因大小不符不会被"已存在跳过"误放行，
+     * 重传会以 " (n)" 副本落盘自愈）。仅在改名损坏的设备上承担此取舍。
+     * 成功返回正式文件 Uri；临时文件的删除由调用方负责。走 IO 线程。
+     */
+    private suspend fun copyAsFallback(
+        parentDocUri: Uri,
+        tempUri: Uri,
+        name: String,
+        mime: String,
+        expectedBytes: Long
+    ): Result<Uri> = withContext(Dispatchers.IO) {
+        var created: Uri? = null
+        try {
+            created = DocumentsContract.createDocument(contentResolver, parentDocUri, mime, name)
+                ?: return@withContext Result.failure(Exception("无法创建文件"))
+            val copiedBytes = contentResolver.openInputStream(tempUri)!!.use { input ->
+                java.io.BufferedOutputStream(
+                    contentResolver.openOutputStream(created)!!, 1024 * 1024
+                ).use { output ->
+                    input.copyTo(output, 1024 * 1024)
+                }
+            }
+            if (copiedBytes != expectedBytes) throw Exception("复制不完整 $copiedBytes/$expectedBytes")
+            Result.success(created)
+        } catch (e: CancellationException) {
+            // 取消（App 退出）不吞：清掉半成品后向上传播，维持"取消必须传播"的全局约定。
+            created?.let {
+                try { DocumentsContract.deleteDocument(contentResolver, it) } catch (_: Exception) {}
+            }
+            throw e
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) {
+                android.util.Log.w(TAG, "copyAsFallback failed: ${e.message}")
+            }
+            created?.let {
+                try { DocumentsContract.deleteDocument(contentResolver, it) } catch (_: Exception) {}
+            }
+            // 带原因返回：界面把它拼进"保存失败：…"，出错自带诊断信息，免大范围排查。
+            Result.failure(e)
+        }
+    }
+
+    /** 查询 SAF 文档的实际显示名（provider 重名时会静默改名，落盘名≠请求名）。走 IO 线程。 */
+    private suspend fun displayNameOf(uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            contentResolver.query(
+                uri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null
+            )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
         } catch (_: Exception) {
             null
         }

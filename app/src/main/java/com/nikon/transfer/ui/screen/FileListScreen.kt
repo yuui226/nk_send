@@ -11,19 +11,25 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -32,9 +38,11 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -48,6 +56,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,10 +70,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -95,7 +106,14 @@ data class FileGroup(
 private enum class PillMode { ICON, DONE, COUNTING }
 
 // 缩略图后台填充没有任何窗口/视口参数：未传输=从新到旧全量填充；传输中=完全停止。
-// 见 ThumbnailGrid 内的填充效应。
+// 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
+
+// 类型筛选下拉面板宽度（位置钳制计算需要显式宽度）。
+private val FILTER_PANEL_WIDTH = 148.dp
+
+// 回到顶部：翻过多少条目（含分组头）才算"够深"；点击回顶时先瞬移到该位置再动画收尾。
+private const val BACK_TO_TOP_MIN_INDEX = 30
+private const val BACK_TO_TOP_SNAP_INDEX = 24
 
 /** 正在播放收合动画的分组：[date] + 保留参与动画的前 [keep] 个格子（收起瞬间可见的那部分）。 */
 private data class CollapsingGroup(val date: String, val keep: Int)
@@ -145,6 +163,42 @@ fun FileListScreen(
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
+    // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
+    var showFilter by remember { mutableStateOf(false) }
+    var filterAnchor by remember { mutableStateOf<Rect?>(null) }
+    // 网格滚动状态提升到页面层：回到顶部按钮需要读取滚动位置/方向并驱动滚动。
+    val gridState = rememberLazyGridState()
+    val scrollScope = rememberCoroutineScope()
+    // 回到顶部按钮的可见性：翻得够深 + 正向顶部方向滚动才出现；往深处翻/接近顶部
+    // 立即隐藏；停止滚动一段时间后自动隐藏——静止画面上没有按钮，误触窗口极小。
+    var showBackTop by remember { mutableStateOf(false) }
+    // 点击回顶后的程序化滚动本身也是"向顶部移动"，会把按钮再次触发出来闪一下——
+    // 返回期间抑制显示。
+    var returningToTop by remember { mutableStateOf(false) }
+    LaunchedEffect(gridState) {
+        var lastIndex = gridState.firstVisibleItemIndex
+        var lastOffset = gridState.firstVisibleItemScrollOffset
+        snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                val towardTop = index < lastIndex ||
+                        (index == lastIndex && offset < lastOffset - 4)
+                val towardBottom = index > lastIndex ||
+                        (index == lastIndex && offset > lastOffset + 4)
+                val deep = index >= BACK_TO_TOP_MIN_INDEX
+                when {
+                    towardTop && deep && !returningToTop -> showBackTop = true
+                    towardBottom || !deep -> showBackTop = false
+                }
+                lastIndex = index
+                lastOffset = offset
+            }
+    }
+    LaunchedEffect(showBackTop, gridState.isScrollInProgress) {
+        if (showBackTop && !gridState.isScrollInProgress) {
+            delay(1800)
+            showBackTop = false
+        }
+    }
 
     // 底部玻璃提示条（通用）：退出确认、"相机未连接"等复用，替代系统 Toast。
     // hintText 在淡出期间保留，避免退场动画里文字先消失；nonce 保证连续触发重启计时。
@@ -177,6 +231,8 @@ fun FileListScreen(
             showHint("再按一次退出")
         }
     }
+    // 筛选下拉打开时，返回键先收起下拉（后注册的 BackHandler 优先于上面的退出确认）。
+    BackHandler(enabled = showFilter) { showFilter = false }
 
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -188,8 +244,19 @@ fun FileListScreen(
         bottom = bottomInset + 12.dp
     )
 
+    // 类型筛选：纯前端过滤——原始 state.files 不动、不触发任何重新读取；
+    // null = 全部。预览翻页/分组/网格全部基于过滤后的数据，自然一致。
+    val filterExts = transferState.filterExtensions
+    // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
+    val availableExts = remember(state.files) {
+        state.files.map { it.extension }.distinct().sorted()
+    }
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
-    val groups = remember(state.files) { groupFilesByDate(state.files) }
+    val groups = remember(state.files, filterExts) {
+        val files = if (filterExts == null) state.files
+        else state.files.filter { it.extension in filterExts }
+        groupFilesByDate(files)
+    }
     val flatFiles = remember(groups) { groups.flatMap { it.files } }
     val transfersBusy = transferState.tasks.any {
         it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
@@ -304,8 +371,20 @@ fun FileListScreen(
                 }
             }
 
-            // transfersBusy 时缩略图转保守模式：可见格子照常加载、预取窗口收窄到 +20，
-            // 加载齐即静默——不再出现"点了传输,列表突然不出图"的观感。
+            // 筛选后无匹配：给出指认原因的空态（原始列表非空，只是被筛掉了）。
+            if (groups.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        FilterMark(
+                            modifier = Modifier.size(44.dp),
+                            color = colors.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("没有符合筛选的照片", color = colors.onSurfaceVariant)
+                    }
+                }
+            }
+
             ThumbnailGrid(
                 groups = groups,
                 queuedByHandle = queuedByHandle,
@@ -318,8 +397,48 @@ fun FileListScreen(
                 onTapFile = onTapFile,
                 onPreview = onPreview,
                 contentPadding = listPadding,
+                gridState = gridState,
                 modifier = Modifier.fillMaxSize()
             )
+        }
+
+        // ---------- 回到顶部（右下角毛玻璃圆钮）：仅在深处向顶部滚动时短暂出现 ----------
+        AnimatedVisibility(
+            visible = showBackTop,
+            enter = fadeIn() + scaleIn(initialScale = 0.6f),
+            exit = fadeOut() + scaleOut(targetScale = 0.6f),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 20.dp, bottom = 24.dp)
+        ) {
+            GlassButton(
+                onClick = {
+                    showBackTop = false
+                    returningToTop = true
+                    scrollScope.launch {
+                        try {
+                            // 深位置先瞬移到近处再动画收尾：既有"滚回去"的动效，
+                            // 又不会从几千行外慢慢卷。
+                            if (gridState.firstVisibleItemIndex > BACK_TO_TOP_SNAP_INDEX) {
+                                gridState.scrollToItem(BACK_TO_TOP_SNAP_INDEX)
+                            }
+                            gridState.animateScrollToItem(0)
+                        } finally {
+                            returningToTop = false
+                        }
+                    }
+                },
+                shape = CircleShape,
+                contentPadding = PaddingValues(14.dp)
+            ) {
+                // 自绘"顶杠+上箭头"标志（与信号条同族的圆头杆件语言）。
+                BackToTopMark(
+                    modifier = Modifier.size(24.dp),
+                    color = colors.accentBlue,
+                    contentDescription = "回到顶部"
+                )
+            }
         }
 
         // ---------- 顶部渐变 scrim：edge-to-edge 内容滚到状态栏后面时，保证状态栏图标
@@ -369,6 +488,25 @@ fun FileListScreen(
                 pulseTrigger = signalPulse
             )
 
+            // 信号按钮右侧：类型筛选按钮。信号条展开/收起的宽度动画是逐帧真实布局，
+            // 本按钮随 Row 重排平滑让位，位置天然跟随动画。已设筛选时图标高亮。
+            Spacer(modifier = Modifier.width(8.dp))
+            GlassButton(
+                onClick = { showFilter = !showFilter },
+                shape = RoundedCornerShape(22.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .height(36.dp)
+                    .onGloballyPositioned { filterAnchor = it.boundsInRoot() }
+            ) {
+                // 自绘筛选标志（与信号条同族的圆头杆件语言）；已设筛选时高亮。
+                FilterMark(
+                    modifier = Modifier.size(19.dp),
+                    color = if (filterExts != null) colors.accentBlue else colors.onBackground,
+                    contentDescription = "筛选类型"
+                )
+            }
+
             // 右：传输胶囊（悬浮）。用"占满剩余宽度 + 靠右对齐"的 Box 承载，
             // 保证胶囊宽度变化时右边缘固定、只向左伸缩，不会向右溢出屏幕。
             Box(
@@ -377,6 +515,44 @@ fun FileListScreen(
             ) {
                 if (transferState.tasks.isNotEmpty()) {
                     QueuePill(transferState = transferState, haptics = haptics, onClick = onNavigateToTransfer)
+                }
+            }
+        }
+
+        // ---------- 类型筛选下拉：贴筛选按钮下缘向下展开；点面板外任意处收起 ----------
+        val filterTransition = remember { MutableTransitionState(false) }
+        filterTransition.targetState = showFilter
+        if (filterTransition.currentState || filterTransition.targetState) {
+            // 透明捕获层：点击面板外任意处（含顶栏其它按钮区域）只收起下拉，不穿透。
+            if (showFilter) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) { detectTapGestures { showFilter = false } }
+                )
+            }
+            val density = LocalDensity.current
+            val panelTop = filterAnchor?.let { with(density) { it.bottom.toDp() } + 8.dp } ?: 76.dp
+            // 左缘对齐按钮，但不许超出屏幕右缘（信号条展开把按钮推得很靠右/窄屏时，
+            // 面板整体向左钳制到贴边 12dp）。
+            val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+            val panelStart = (filterAnchor?.let { with(density) { it.left.toDp() } } ?: 12.dp)
+                .coerceAtMost(screenWidth - FILTER_PANEL_WIDTH - 12.dp)
+                .coerceAtLeast(12.dp)
+            Box(modifier = Modifier.padding(start = panelStart, top = panelTop)) {
+                AnimatedVisibility(
+                    visibleState = filterTransition,
+                    enter = fadeIn(tween(180)) + expandVertically(expandFrom = Alignment.Top),
+                    exit = fadeOut(tween(140)) + shrinkVertically(shrinkTowards = Alignment.Top)
+                ) {
+                    FilterDropdown(
+                        availableExts = availableExts,
+                        current = filterExts,
+                        onConfirm = { sel ->
+                            transferViewModel.setFilterExtensions(sel)
+                            showFilter = false
+                        }
+                    )
                 }
             }
         }
@@ -832,9 +1008,9 @@ private fun ThumbnailGrid(
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
     contentPadding: PaddingValues,
+    gridState: LazyGridState,
     modifier: Modifier = Modifier
 ) {
-    val gridState = rememberLazyGridState()
 
     // 展开/收起动画（手风琴方案；不用条目位移动画——它对"被推出屏幕的条目"有框架级
     // 边缘悬停，对"从屏外移入"的条目又根本不生效，大分组收起时什么动画都看不到）：
@@ -1093,6 +1269,105 @@ private fun LoadingMoreRow() {
 private fun formatDateHeader(date: String): String {
     if (date.length < 8 || date == "未知日期") return date
     return "${date.substring(0, 4)}-${date.substring(4, 6)}-${date.substring(6, 8)}"
+}
+
+/**
+ * 类型筛选下拉面板：自动列出设备上实际存在的类型，多选 + "全部"；点确定才提交生效。
+ * 语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
+ * 全不选或凑齐全部现有类型时自动归位"全部"（不允许空集）。
+ */
+@Composable
+private fun FilterDropdown(
+    availableExts: List<String>,
+    current: Set<String>?,
+    onConfirm: (Set<String>?) -> Unit
+) {
+    val colors = AppTheme.colors
+    // 工作副本：确定前不生效；面板随开合重建，每次打开都从当前设置初始化。
+    var working by remember { mutableStateOf(current) }
+
+    fun extLabel(ext: String) = ext.removePrefix(".").uppercase().ifEmpty { "其他" }
+    fun toggle(ext: String) {
+        val cur = working ?: availableExts.toSet()
+        val next = if (ext in cur) cur - ext else cur + ext
+        working = when {
+            next.isEmpty() -> null                       // 全不选无意义，归位"全部"
+            next.containsAll(availableExts) -> null      // 凑齐全部现有类型 = 全部
+            else -> next
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = colors.glassSurfaceHeavy,
+        border = BorderStroke(1.dp, colors.glassPanelBorder),
+        shadowElevation = 6.dp,
+        // 消费面板内点击，避免穿透到外部捕获层被误关闭。
+        modifier = Modifier
+            .width(FILTER_PANEL_WIDTH)
+            .pointerInput(Unit) { detectTapGestures { } }
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            FilterRow(label = "全部", selected = working == null, onClick = { working = null })
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                    .height(1.dp)
+                    .background(colors.glassPanelBorder)
+            )
+            availableExts.forEach { ext ->
+                FilterRow(
+                    label = extLabel(ext),
+                    selected = working?.contains(ext) ?: true,
+                    onClick = { toggle(ext) }
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            // 确认：毛玻璃对号按钮（与全局悬浮控件同语言，不再用实色大按钮）。
+            GlassButton(
+                onClick = { onConfirm(working) },
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(vertical = 7.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Spacer(modifier = Modifier.weight(1f))
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "确认筛选",
+                    tint = colors.statusConnected,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/**
+ * 筛选面板的选项行：整行可点，选中态用高亮底色 + 主题蓝加粗文字表达（无勾选框）。
+ */
+@Composable
+private fun FilterRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(9.dp))
+            .background(if (selected) colors.accentBlue.copy(alpha = 0.18f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 9.dp)
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) colors.accentBlue else colors.onSurfaceVariant
+        )
+    }
 }
 
 /** 缩略图角标：已入队文件在缩略图右下角显示的传输状态小图标。 */

@@ -34,9 +34,15 @@ class TransferService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification())
             acquireWakeLock()
             acquireWifiLock()
+            if (com.nikon.transfer.BuildConfig.DEBUG) {
+                android.util.Log.d("NikonTransfer", "TransferService foreground started, notification posted")
+            }
         } catch (e: Exception) {
             // 某些系统状态下 startForeground 可能被拒绝；此时放弃保活但不崩溃，
-            // 传输仍会在前台继续进行。
+            // 传输仍会在前台继续进行。留日志：排查"传输中通知栏没有通知"时先看这里。
+            if (com.nikon.transfer.BuildConfig.DEBUG) {
+                android.util.Log.w("NikonTransfer", "startForeground failed: ${e.javaClass.simpleName}: ${e.message}")
+            }
             stopSelf()
         }
         // 被系统杀死后不自动重建：任务队列在进程内存中，重建无意义。
@@ -119,7 +125,7 @@ class TransferService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.transfer_notification_title))
             .setContentText(getString(R.string.transfer_notification_text))
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.ic_stat_transfer)
             .setOngoing(true)
             .setContentIntent(contentIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -141,6 +147,9 @@ class TransferService : Service() {
             } catch (e: Exception) {
                 // Android 12+ 后台启动前台服务会抛 ForegroundServiceStartNotAllowedException，
                 // 吞掉以免崩溃；传输在前台时不会触发，后台场景下服务已在运行。
+                if (com.nikon.transfer.BuildConfig.DEBUG) {
+                    android.util.Log.w("NikonTransfer", "startForegroundService failed: ${e.javaClass.simpleName}: ${e.message}")
+                }
             }
         }
 

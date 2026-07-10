@@ -1,0 +1,157 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Z传相机照片传输软件V1.0 操作说明书</title><style>
+@page { size: A4; margin: 18mm 16mm; }
+body { margin:0; font-family: SimSun, serif; font-size: 12pt; line-height: 1.7; }
+.page { page-break-after: always; }
+.hdr { display:flex; justify-content:space-between; font-size:10.5pt; border-bottom:1px solid #000; padding-bottom:2px; margin-bottom:14px; }
+h1 { font-family: SimHei, sans-serif; font-size: 22pt; text-align:center; margin: 90px 0 30px; }
+h2 { font-family: SimHei, sans-serif; font-size: 15pt; margin: 10px 0 8px; }
+h3 { font-family: SimHei, sans-serif; font-size: 12.5pt; margin: 8px 0 4px; }
+p { margin: 4px 0; text-indent: 2em; }
+ul, ol { margin: 4px 0 8px; }
+li { margin: 2px 0; }
+.shot { border: 1px dashed #888; color:#666; text-align:center; padding: 60px 10px; margin: 10px 30px; font-size: 10.5pt; }
+table { border-collapse: collapse; width: 100%; font-size: 11pt; margin: 8px 0; }
+td, th { border: 1px solid #000; padding: 4px 8px; }
+.center { text-align:center; text-indent: 0; }
+</style></head><body>
+
+<div class="page">
+<div class="hdr"><span>Z传相机照片传输软件V1.0 操作说明书</span><span>第 1 页</span></div>
+<h1>Z传相机照片传输软件<br/>V1.0<br/><br/>操作说明书</h1>
+<p class="center">著作权人：（申请人姓名）</p>
+<p class="center">开发完成日期：2026年7月</p>
+</div>
+
+<div class="page">
+<div class="hdr"><span>Z传相机照片传输软件V1.0 操作说明书</span><span>第 2 页</span></div>
+<h2>一、软件概述</h2>
+<p>Z传相机照片传输软件（以下简称"本软件"）是一款运行于安卓（Android）操作系统的相机照片无线传输工具。本软件通过 Wi-Fi 直连尼康 Z 系列等支持 PTP/IP 协议的数码相机，实现相机内照片、视频文件的浏览、预览与高速传输保存，无需数据线与电脑中转。</p>
+<h3>1.1 主要功能</h3>
+<ul>
+<li>自动发现并连接相机 Wi-Fi 热点，免手动配置；</li>
+<li>按拍摄日期分组浏览相机内全部照片与视频，支持双存储卡；</li>
+<li>缩略图智能加载与本地缓存，浏览流畅，断线重连免重复加载；</li>
+<li>单张、整组批量传输，队列化管理，实时显示速度与进度；</li>
+<li>传输文件完整性校验、重名防覆盖、断点任务重试；</li>
+<li>深色/浅色主题，跟随系统或手动切换。</li>
+</ul>
+<h3>1.2 运行环境</h3>
+<table>
+<tr><th>项目</th><th>要求</th></tr>
+<tr><td>硬件环境</td><td>安卓智能手机，内存 2GB 以上，支持 Wi-Fi</td></tr>
+<tr><td>软件环境</td><td>Android 8.0（API 26）及以上操作系统</td></tr>
+<tr><td>配套设备</td><td>支持"与智能设备连接"（PTP/IP 协议）的尼康 Z 系列等数码相机</td></tr>
+<tr><td>开发语言</td><td>Kotlin（界面采用 Jetpack Compose 框架）</td></tr>
+</table>
+</div>
+
+<div class="page">
+<div class="hdr"><span>Z传相机照片传输软件V1.0 操作说明书</span><span>第 3 页</span></div>
+<h2>二、安装与启动</h2>
+<h3>2.1 安装</h3>
+<p>将安装包（APK 文件）传入手机后点击安装，或从应用商店搜索"Z传"下载安装。安装过程无需任何特殊权限。</p>
+<h3>2.2 首次启动与权限</h3>
+<p>首次启动时，软件会请求"通知"权限，用于在文件传输期间于通知栏显示传输状态；拒绝该权限不影响软件任何功能，仅不显示传输通知。</p>
+<p>本软件不联网（仅与相机在局域网内通信）、无账号体系、不收集个人信息。</p>
+<div class="shot">【截图占位 1：软件启动后的连接引导页】</div>
+</div>
+
+<div class="page">
+<div class="hdr"><span>Z传相机照片传输软件V1.0 操作说明书</span><span>第 4 页</span></div>
+<h2>三、连接相机</h2>
+<h3>3.1 相机端操作</h3>
+<ol>
+<li>在相机菜单中开启「连接至智能设备」（不同机型菜单名称略有差异），相机将开启 Wi-Fi 热点并显示热点名称与密码；</li>
+<li>保持相机处于该等待连接界面。</li>
+</ol>
+<h3>3.2 手机端操作</h3>
+<ol>
+<li>打开本软件，连接页显示橙色圆盘与"请连接相机 Wi-Fi"提示；</li>
+<li>点击「打开 Wi-Fi 设置」按钮跳转系统设置，连接相机热点；</li>
+<li>返回本软件，软件自动识别相机网络并发起连接——圆盘转为蓝色脉冲、显示"正在连接相机…"；</li>
+<li>连接成功后圆盘变为绿色对号并播放脉冲扩散动画，随后自动进入照片列表页。</li>
+</ol>
+<div class="shot">【截图占位 2：连接中的蓝色脉冲状态】</div>
+<p>整个过程无需在软件内输入任何配置；后续再次使用时，只要手机已连接相机热点，打开软件即自动完成连接。</p>
+</div>
+
+<div class="page">
+<div class="hdr"><span>Z传相机照片传输软件V1.0 操作说明书</span><span>第 5 页</span></div>
+<h2>四、照片列表页</h2>
+<p>连接成功后进入照片列表页，以网格形式展示相机内全部照片与视频（插有两张存储卡时自动合并展示）。</p>
+<h3>4.1 页面元素</h3>
+<ul>
+<li><b>顶部左侧 Z 标按钮</b>：点击打开设置面板（见第八节）；</li>
+<li><b>信号按钮</b>：实时显示相机 Wi-Fi 信号强度，点击展开具体数值；连接断开时变为红色断连图标；</li>
+<li><b>顶部右侧队列胶囊</b>：有传输任务时显示剩余数量与实时速度，点击进入传输队列页；</li>
+<li><b>日期分组条</b>：照片按拍摄日期分组，点击日期胶囊可收起/展开该组；右侧"+"按钮将整组加入传输队列。</li>
+</ul>
+<h3>4.2 缩略图加载</h3>
+<p>缩略图自动从最新照片开始后台加载并缓存至本地，滚动浏览不受影响；已缓存的照片下次启动软件或断线重连后无需重新加载，直接显示。</p>
+<div class="shot">【截图占位 3：照片列表页（含日期分组与顶部控件）】</div>
+</div>
+
+<div class="page">
+<div class="hdr"><span>Z传相机照片传输软件V1.0 操作说明书</span><span>第 6 页</span></div>
+<h2>五、照片预览</h2>
+<p>在照片列表中<b>长按</b>任意缩略图，即以全屏方式预览该照片：</p>
+<ul>
+<li>预览层从被长按的格子位置放大展开，点击画面任意处收回；</li>
+<li>左右滑动可翻页浏览相邻照片；</li>
+<li>顶部显示当前序号与文件名。</li>
+</ul>
+<h2>六、传输照片</h2>
+<h3>6.1 首次传输前：选择保存目录</h3>
+<p>首次点击照片传输时，软件自动弹出设置面板引导选择保存目录；通过系统文件选择器选定手机上的任意文件夹后即可开始传输。目录仅需设置一次。</p>
+<h3>6.2 发起传输</h3>
+<ul>
+<li><b>单张传输</b>：轻点缩略图，该照片加入传输队列，角标显示排队/传输/完成状态；</li>
+<li><b>整组传输</b>：点击日期分组右侧"+"按钮，该日期全部照片加入队列；</li>
+<li>已存在于保存目录的同名同大小文件自动跳过，不重复下载。</li>
+</ul>
+<div class="shot">【截图占位 4：传输进行中（缩略图角标与队列胶囊）】</div>
+</div>
+
+<div class="page">
+<div class="hdr"><span>Z传相机照片传输软件V1.0 操作说明书</span><span>第 7 页</span></div>
+<h2>七、传输队列页</h2>
+<p>点击顶部队列胶囊进入传输队列页，每个任务以卡片展示：缩略图、文件名、状态信息（等待/传输中的进度与速度/完成大小与速度/失败原因）。</p>
+<h3>7.1 队列管理</h3>
+<ul>
+<li><b>移除单个任务</b>：点击卡片右侧圆形扫帚按钮，该卡片播放收合动画后从队列移除（正在传输的文件不可移除）；</li>
+<li><b>清空队列</b>：点击右下角扫帚悬浮按钮，确认后移除全部卡片，正在传输的文件不受影响；</li>
+<li><b>重试</b>：失败任务卡片上可单独重试；存在多个失败任务时右下角出现"重试全部"悬浮按钮。</li>
+</ul>
+<h3>7.2 传输保障机制</h3>
+<ul>
+<li>文件以隐藏临时名下载，完整校验后才落为正式文件名，绝不产生残缺文件；</li>
+<li>重名文件自动以"名称 (n)"副本保存，绝不覆盖已有文件；</li>
+<li>传输期间通知栏显示前台通知，锁屏、切后台不中断传输。</li>
+</ul>
+<div class="shot">【截图占位 5：传输队列页（任务卡片与清空按钮）】</div>
+</div>
+
+<div class="page">
+<div class="hdr"><span>Z传相机照片传输软件V1.0 操作说明书</span><span>第 8 页</span></div>
+<h2>八、设置面板</h2>
+<p>点击任意页面左上角 Z 标按钮，设置面板从按钮位置展开：</p>
+<table>
+<tr><th>设置项</th><th>说明</th></tr>
+<tr><td>传输目录</td><td>查看与更改照片保存位置</td></tr>
+<tr><td>列数</td><td>照片网格每行 1~4 列</td></tr>
+<tr><td>外观</td><td>跟随系统 / 深色 / 浅色三选一</td></tr>
+<tr><td>触感反馈</td><td>操作震动反馈开关（默认关）</td></tr>
+<tr><td>屏幕常亮</td><td>软件前台时保持亮屏，防止连接中断（默认开）</td></tr>
+<tr><td>加群</td><td>点击复制用户交流群号</td></tr>
+</table>
+<div class="shot">【截图占位 6：设置面板（含外观三选一）】</div>
+<h2>九、常见问题</h2>
+<ul>
+<li><b>连接不上相机</b>：确认相机停留在"等待连接"界面、手机已连接相机热点；软件会每秒自动重试；</li>
+<li><b>提示"传输目录已失效"</b>：原保存文件夹已被删除或移动，重新点击照片按引导重选目录即可；</li>
+<li><b>清除缓存后缩略图重新加载</b>：属正常现象，缓存会在浏览时自动重建。</li>
+</ul>
+<p class="center">（全文完）</p>
+</div>
+
+</body></html>

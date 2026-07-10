@@ -212,7 +212,7 @@ fun HomeScreen(
 // 连接成功后的入场节奏：先保持"连接中"脉冲 [CONNECT_CELEBRATE_DELAY_MS]（此间列表与
 // 缩略图已在后台全速加载），再播约 [CONNECT_SUCCESS_ANIM_MS] 的爆发收尾——播完由
 // MainScreen 跳转到照片列表。两个值相加即连接成功后在本页的总停留。
-const val CONNECT_CELEBRATE_DELAY_MS = 1200L
+const val CONNECT_CELEBRATE_DELAY_MS = 1_000L
 const val CONNECT_SUCCESS_ANIM_MS = 850L
 
 // 脉冲一轮的周期（秒）与成功时的相位加速倍数。
