@@ -24,7 +24,9 @@ object Lab {
     const val NK_START_LIVE_VIEW = 0x9201
     const val NK_END_LIVE_VIEW = 0x9202
     const val NK_GET_LIVE_VIEW_IMG = 0x9203
+    const val NK_MF_DRIVE = 0x9204
     const val NK_CHANGE_AF_AREA = 0x9205
+    const val NK_AF_DRIVE = 0x90C1
     const val NK_CAPTURE_REC_IN_MEDIA = 0x9207
     const val NK_CAPTURE_REC_IN_SDRAM = 0x90C0
     const val NK_GET_EVENT = 0x90C7
@@ -341,6 +343,10 @@ suspend fun NikonCamera.rcSetValue(param: RcParam, value: Long): Int =
 /** 触摸对焦：坐标为 Live View 图像坐标系（取帧 JPEG 的像素坐标）。 */
 suspend fun NikonCamera.rcChangeAfArea(x: Int, y: Int): Int =
     labCommand(Lab.NK_CHANGE_AF_AREA, x, y).first
+
+/** 驱动 AF（在当前对焦点合焦）。阻塞到合焦/失败；失败返回 0xA002 OutOfFocus。 */
+suspend fun NikonCamera.rcAfDrive(): Int =
+    labCommand(Lab.NK_AF_DRIVE).first
 
 suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
     val (rc, d) = labCommand(Lab.NK_GET_EVENT)

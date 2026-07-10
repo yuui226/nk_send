@@ -19,6 +19,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,7 +33,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
@@ -70,6 +70,7 @@ import com.ztransfer.protocol.RcParam
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
+import com.ztransfer.protocol.rcAfDrive
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcChangeAfArea
 import com.ztransfer.protocol.rcFormat
@@ -188,43 +189,54 @@ private fun RemoteContent(
     // ---------- Live View 会话 ----------
     // 手动管理 + 新任务先 join 旧任务：保证"旧会话的 EndLiveView 一定先于新会话的
     // StartLiveView"（LaunchedEffect 换 key 的取消是异步的，直接依赖它会时序穿插）。
+    // 会话在页面存续期内【永不放弃】：断流退避重启、断线后等重连自动换新连接续播——
+    // 持续取帧本身就是相机的保活信号，会话若静默死掉，相机空闲片刻就按待机计时器休眠。
     var lvJob by remember { mutableStateOf<Job?>(null) }
     fun startSession(hd: Boolean) {
         val prev = lvJob
         lvJob = scope.launch {
             prev?.cancelAndJoin()
-            val cam = cameraViewModel.getCamera() ?: return@launch
             try {
-                // LV 分辨率须在 LV 关闭时设置
-                runCatching { cam.rcSetLvSize(if (hd) 3 else 2) }
-                if (!cam.labStartLiveView { devLog(it) }) return@launch
-                var frames = 0
-                var windowStart = System.currentTimeMillis()
-                var errStreak = 0
                 while (isActive) {
-                    val grabbed = try {
-                        cam.labGrabFrame()
-                    } catch (e: Exception) {
-                        // 非忙失败（如 0xA00B 掉出 LV）：重启一次，连续失败才放弃
-                        errStreak++
-                        devLog("!! LV: ${e.message}")
-                        if (errStreak >= 3) break
-                        if (!cam.labStartLiveView { devLog(it) }) break
-                        continue
+                    // 每轮现取相机实例：断线重连后拿到的是新连接，旧会话自然淘汰
+                    val cam = cameraViewModel.getCamera()
+                    if (cam == null) { delay(2000); continue }
+                    // LV 分辨率须在 LV 关闭时设置
+                    runCatching { cam.rcSetLvSize(if (hd) 3 else 2) }
+                    val started = runCatching { cam.labStartLiveView { devLog(it) } }
+                        .getOrDefault(false)
+                    if (!started) { delay(3000); continue }
+                    var frames = 0
+                    var windowStart = System.currentTimeMillis()
+                    var errStreak = 0
+                    while (isActive) {
+                        val grabbed = try {
+                            cam.labGrabFrame()
+                        } catch (e: Exception) {
+                            // 非忙失败（掉出 LV / 连接异常）：退避后回外层整体重启
+                            errStreak++
+                            devLog("!! LV: ${e.message}")
+                            if (errStreak >= 3) break
+                            delay(300)
+                            continue
+                        }
+                        if (grabbed == null) { delay(40); continue }
+                        errStreak = 0
+                        decode(grabbed.first)?.let { frame = it }
+                        frames++
+                        val now = System.currentTimeMillis()
+                        if (now - windowStart >= 1000) {
+                            fps = frames * 1000f / (now - windowStart)
+                            frames = 0
+                            windowStart = now
+                        }
                     }
-                    if (grabbed == null) { delay(40); continue }
-                    errStreak = 0
-                    decode(grabbed.first)?.let { frame = it }
-                    frames++
-                    val now = System.currentTimeMillis()
-                    if (now - windowStart >= 1000) {
-                        fps = frames * 1000f / (now - windowStart)
-                        frames = 0
-                        windowStart = now
-                    }
+                    delay(2000)
                 }
             } finally {
-                withContext(NonCancellable) { cam.labEndLiveView() }
+                withContext(NonCancellable) {
+                    runCatching { cameraViewModel.getCamera()?.labEndLiveView() }
+                }
             }
         }
     }
@@ -321,7 +333,9 @@ private fun RemoteContent(
     LaunchedEffect(focusNonce) {
         if (focusPos != null) { delay(900); focusPos = null }
     }
+    var afBusy by remember { mutableStateOf(false) }
     fun tapToFocus(pos: Offset) {
+        if (afBusy) return
         val bmp = frame ?: return
         val cam = cameraViewModel.getCamera() ?: return
         val cw = viewSize.width.toFloat()
@@ -335,8 +349,17 @@ private fun RemoteContent(
         focusNonce++
         haptics.tick()
         scope.launch {
-            val rc = runCatching { cam.rcChangeAfArea(bx, by) }.getOrDefault(-1)
-            devLog("AF ($bx,$by) resp=0x%04X".format(rc and 0xFFFF))
+            afBusy = true
+            try {
+                val rc = runCatching { cam.rcChangeAfArea(bx, by) }.getOrDefault(-1)
+                devLog("AF area ($bx,$by) resp=0x%04X".format(rc and 0xFFFF))
+                // 移点只是选点，不驱动对焦；补一发 AfDrive 真正合焦
+                //（阻塞至合焦/失败，期间 LV 暂停一下属正常；0xA002=对不上焦）。
+                val drive = runCatching { cam.rcAfDrive() }.getOrDefault(-1)
+                devLog("AF drive resp=0x%04X".format(drive and 0xFFFF))
+            } finally {
+                afBusy = false
+            }
         }
     }
 
@@ -397,22 +420,28 @@ private fun RemoteContent(
     }
 
     // ---------- 布局 ----------
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    // 根级横滑手势 = 返回（进入是横滑，退出对称）。拨轮自己消费的水平拖动不会到这里，
+    // 两个方向都接受，避免"哪边算回去"的方向歧义。
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .pointerInput(Unit) {
+                var totalDx = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDx = 0f },
+                    onDragEnd = { if (abs(totalDx) > 100.dp.toPx()) onNavigateBack() }
+                ) { _, dragAmount -> totalDx += dragAmount }
+            }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            // 顶栏
+            // 顶栏（无返回按钮：横滑或系统返回退出）
             Row(verticalAlignment = Alignment.CenterVertically) {
-                GlassButton(onClick = onNavigateBack, contentPadding = PaddingValues(10.dp)) {
-                    Icon(
-                        Icons.Default.ArrowBack, contentDescription = null,
-                        tint = colors.onBackground, modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
                 Text(
                     modelName ?: stringResource(R.string.remote_title),
                     style = MaterialTheme.typography.titleMedium,
@@ -607,19 +636,8 @@ private fun RemoteContent(
                     onClick = ::shoot
                 )
                 Spacer(Modifier.weight(1f))
-                // 录像占位：保持快门居中的视觉对称，v2 接 0x920A/0x920B
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .border(1.5.dp, Color.White.copy(alpha = 0.15f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.Videocam, contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.15f), modifier = Modifier.size(20.dp)
-                    )
-                }
-                Spacer(Modifier.width(4.dp))
+                // 与左侧缩略图等宽的占位，保证快门键几何居中
+                Box(Modifier.size(52.dp))
             }
         }
 
