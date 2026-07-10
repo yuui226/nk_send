@@ -44,6 +44,42 @@ fun FilterMark(
     }
 }
 
+/** 遥控标志：取景框四角 + 中心对焦点（监看/遥控拍摄的极简形）。 */
+@Composable
+fun RemoteMark(
+    modifier: Modifier = Modifier,
+    color: Color = AppTheme.colors.onBackground,
+    contentDescription: String? = null
+) {
+    Canvas(modifier = modifier.markSemantics(contentDescription).aspectRatio(1f)) {
+        val s = size.minDimension
+        val stroke = 0.13f * s
+        val edge = 0.16f      // 角点到边缘的距离
+        val arm = 0.18f       // 角臂长度
+        fun corner(x: Float, y: Float, dx: Float, dy: Float) {
+            drawLine(
+                color = color,
+                start = Offset(x * s, y * s),
+                end = Offset((x + arm * dx) * s, y * s),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = color,
+                start = Offset(x * s, y * s),
+                end = Offset(x * s, (y + arm * dy) * s),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        }
+        corner(edge, edge, 1f, 1f)             // 左上
+        corner(1f - edge, edge, -1f, 1f)       // 右上
+        corner(edge, 1f - edge, 1f, -1f)       // 左下
+        corner(1f - edge, 1f - edge, -1f, -1f) // 右下
+        drawCircle(color = color, radius = 0.09f * s, center = Offset(0.5f * s, 0.5f * s))
+    }
+}
+
 /** 回到顶部标志：顶杠 + 上指箭头。 */
 @Composable
 fun BackToTopMark(

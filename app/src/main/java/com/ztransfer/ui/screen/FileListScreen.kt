@@ -29,7 +29,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -51,6 +50,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -288,20 +288,8 @@ fun FileListScreen(
     }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
-    // 横滑手势：向右滑超过阈值打开左侧的遥控页。挂在根上只观察未被子组件消费的
-    // 水平拖动——网格滚动是纵向、预览翻页等上层组件消费掉的手势不会误触发。
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.background)
-            .pointerInput(Unit) {
-                var totalDx = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { totalDx = 0f },
-                    onDragEnd = { if (totalDx > 100.dp.toPx()) onNavigateToRemote() }
-                ) { _, dragAmount -> totalDx += dragAmount }
-            }
-    ) {
+    // 遥控页入口是左下角圆钮（曾试过横滑手势进入，误触率高已去掉）。
+    Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (state.isLoadingFiles && state.files.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -424,6 +412,35 @@ fun FileListScreen(
                 gridState = gridState,
                 modifier = Modifier.fillMaxSize()
             )
+        }
+
+        // ---------- 遥控入口（左下角毛玻璃圆钮）：仅当列表停在最顶部时出现——
+        // 用户翻到深处时不显示，杜绝翻页误触；点击播放与横滑相同的左侧滑入转场 ----------
+        val atTop by remember {
+            derivedStateOf {
+                gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset < 8
+            }
+        }
+        AnimatedVisibility(
+            visible = atTop,
+            enter = fadeIn() + scaleIn(initialScale = 0.6f),
+            exit = fadeOut() + scaleOut(targetScale = 0.6f),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .navigationBarsPadding()
+                .padding(start = 20.dp, bottom = 24.dp)
+        ) {
+            GlassButton(
+                onClick = onNavigateToRemote,
+                shape = CircleShape,
+                contentPadding = PaddingValues(14.dp)
+            ) {
+                RemoteMark(
+                    modifier = Modifier.size(24.dp),
+                    color = colors.accentBlue,
+                    contentDescription = stringResource(R.string.cd_remote_entry)
+                )
+            }
         }
 
         // ---------- 回到顶部（右下角毛玻璃圆钮）：仅在深处向顶部滚动时短暂出现 ----------

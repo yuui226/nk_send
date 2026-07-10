@@ -19,7 +19,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -33,6 +32,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
@@ -430,27 +430,15 @@ private fun RemoteContent(
     }
 
     // ---------- 布局 ----------
-    // 根级横滑手势 = 返回（进入是横滑，退出对称）。拨轮自己消费的水平拖动不会到这里，
-    // 两个方向都接受，避免"哪边算回去"的方向歧义。
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .pointerInput(Unit) {
-                var totalDx = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { totalDx = 0f },
-                    onDragEnd = { if (abs(totalDx) > 100.dp.toPx()) onNavigateBack() }
-                ) { _, dragAmount -> totalDx += dragAmount }
-            }
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            // 顶栏（无返回按钮：横滑或系统返回退出）
+            // 顶栏：机型名（连点 3 次呼出开发者面板）/ 连接点 / 常驻返回按钮。
+            // 返回是【右】箭头——本页位于照片列表左侧，回去的方向是向右。
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     modelName ?: stringResource(R.string.remote_title),
@@ -468,6 +456,13 @@ private fun RemoteContent(
                     color = if (connected) colors.statusConnected else colors.accentOrange,
                     fontSize = 13.sp
                 )
+                Spacer(Modifier.width(12.dp))
+                GlassButton(onClick = onNavigateBack, contentPadding = PaddingValues(10.dp)) {
+                    Icon(
+                        Icons.Default.ArrowForward, contentDescription = null,
+                        tint = colors.onBackground, modifier = Modifier.size(20.dp)
+                    )
+                }
             }
             Spacer(Modifier.height(10.dp))
 
