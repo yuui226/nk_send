@@ -120,11 +120,13 @@
     <string name="ptp_firmware_error_code">Firmware error (0x%1$s)</string>
     <string name="ptp_unknown_error">Error (0x%1$s)</string>
 
-    <!-- Remote lab (temporary experiment page) -->
-    <string name="lab_title">Remote Lab</string>
+    <!-- Remote control page -->
+    <string name="remote_title">Remote</string>
+    <string name="remote_locked_hint">Camera body controls are disabled during remote control</string>
+    <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>
+    <string name="dev_panel_title">Developer</string>
+    <string name="dev_hd_liveview">XGA live view</string>
+    <string name="dev_fps_overlay">FPS overlay</string>
     <string name="lab_run_probe">Probe</string>
-    <string name="lab_live_view">Live view</string>
-    <string name="lab_live_view_stop">Stop</string>
-    <string name="lab_capture">Test shot</string>
     <string name="lab_copy_log">Copy log</string>
 </resources>

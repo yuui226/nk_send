@@ -162,7 +162,7 @@ fun FileListScreen(
     cameraViewModel: CameraViewModel,
     transferViewModel: TransferViewModel,
     onNavigateToTransfer: () -> Unit,
-    onNavigateToLab: () -> Unit
+    onNavigateToRemote: () -> Unit
 ) {
     val state by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
@@ -288,7 +288,7 @@ fun FileListScreen(
     }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
-    // 横滑手势：向右滑超过阈值打开左侧的遥控实验页。挂在根上只观察未被子组件消费的
+    // 横滑手势：向右滑超过阈值打开左侧的遥控页。挂在根上只观察未被子组件消费的
     // 水平拖动——网格滚动是纵向、预览翻页等上层组件消费掉的手势不会误触发。
     Box(
         modifier = Modifier
@@ -298,7 +298,7 @@ fun FileListScreen(
                 var totalDx = 0f
                 detectHorizontalDragGestures(
                     onDragStart = { totalDx = 0f },
-                    onDragEnd = { if (totalDx > 100.dp.toPx()) onNavigateToLab() }
+                    onDragEnd = { if (totalDx > 100.dp.toPx()) onNavigateToRemote() }
                 ) { _, dragAmount -> totalDx += dragAmount }
             }
     ) {

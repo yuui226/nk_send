@@ -6,13 +6,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * 遥控实验（临时探测代码，验证无线遥控可行性，不属于正式功能）。
- *
- * 目标：在现有 PTP/IP 会话上一次性摸清相机开放了哪些遥控能力——
- * DeviceInfo 操作码清单、厂商属性码、曝光属性读/写、Live View 取帧、遥控拍摄。
+ * 无线遥控协议层：Live View、曝光参数读写、触摸对焦、遥控拍摄、事件轮询，
+ * 外加开发者面板用的完整能力探测（runLabProbe）。语义与 libgphoto2 ptp.h/library.c 对照，
+ * 已在 Z 30 (fw1.20) 真机全项验证。
  * 所有命令经 [NikonCamera.ioMutex] 串行，与传输/缩略图/心跳互斥，不碰下载热路径。
  *
- * 探测日志固定英文 + 十六进制（诊断数据，用于与 libgphoto2 语义比对），不做 i18n。
+ * 探测/诊断日志固定英文 + 十六进制（用于与 libgphoto2 语义比对），不做 i18n。
  */
 object Lab {
     // ---- 标准操作码 ----
@@ -25,6 +24,7 @@ object Lab {
     const val NK_START_LIVE_VIEW = 0x9201
     const val NK_END_LIVE_VIEW = 0x9202
     const val NK_GET_LIVE_VIEW_IMG = 0x9203
+    const val NK_CHANGE_AF_AREA = 0x9205
     const val NK_CAPTURE_REC_IN_MEDIA = 0x9207
     const val NK_CAPTURE_REC_IN_SDRAM = 0x90C0
     const val NK_GET_EVENT = 0x90C7
@@ -32,6 +32,12 @@ object Lab {
     const val NK_GET_VENDOR_PROP_CODES = 0x90CA
     const val NK_GET_VENDOR_CODES = 0x9439      // Z8/Z9 世代
     const val NK_GET_EVENT_EX = 0x941C
+
+    // ---- 事件码 ----
+    const val EVT_OBJECT_ADDED = 0x4002
+    const val EVT_DEVICE_PROP_CHANGED = 0x4006
+    const val EVT_CAPTURE_COMPLETE = 0x400D
+    const val EVT_OBJECT_ADDED_SDRAM = 0xC101
 
     // ---- 响应码 ----
     const val OK = 0x2001
@@ -113,13 +119,6 @@ suspend fun NikonCamera.labSetProp(prop: Int, raw: ByteArray): Int =
         withContext(Dispatchers.IO) {
             sendCmdWithData(Lab.SET_DEVICE_PROP_VALUE, raw, prop)
             recvRespWithPayload().first
-        }
-    }
-
-suspend fun NikonCamera.labGetObjectInfo(handle: Int): NikonCamera.FileInfo? =
-    ioMutex.withLock {
-        withContext(Dispatchers.IO) {
-            runCatching { getObjectInfoInternal(handle) }.getOrNull()
         }
     }
 
@@ -281,16 +280,21 @@ private fun findJpegStart(d: ByteArray): Int {
     return -1
 }
 
-// ============================ 调参步进 ============================
+// ============================ 正式遥控页协议支持 ============================
 
-/** DevicePropDesc 的结构化解析结果（调参步进用）。 */
-private data class PropDescData(val dataType: Int, val current: Long, val enumValues: List<Long>)
+/** DevicePropDesc 的结构化解析结果。 */
+private data class PropDescData(
+    val dataType: Int,
+    val writable: Boolean,
+    val current: Long,
+    val enumValues: List<Long>
+)
 
 private fun parsePropDescData(d: ByteArray): PropDescData {
     val c = Cur(d)
     c.u16()
     val dataType = c.u16()
-    c.u8()                               // GetSet
+    val writable = c.u8() == 1           // GetSet
     c.typed(dataType)                    // default
     val (cur, _) = c.typed(dataType)
     val formFlag = c.u8()
@@ -298,7 +302,7 @@ private fun parsePropDescData(d: ByteArray): PropDescData {
         val n = c.u16()
         (0 until n).map { c.typed(dataType).first }
     } else emptyList()
-    return PropDescData(dataType, cur, values)
+    return PropDescData(dataType, writable, cur, values)
 }
 
 private fun encodeScalar(dataType: Int, v: Long): ByteArray {
@@ -311,24 +315,60 @@ private fun encodeScalar(dataType: Int, v: Long): ByteArray {
     return ByteArray(size) { i -> ((v shr (8 * i)) and 0xFF).toByte() }
 }
 
-/**
- * 调参步进：现取 desc 定位当前值在枚举表中的位置，挪 [delta] 档后写回。
- * 会真实改变相机设置（仅实验页手动触发）。返回一行结果日志。
- * 枚举表现取而非缓存：可选值随曝光模式动态变化，缓存会写出相机拒绝的值。
- */
-suspend fun NikonCamera.labStepProp(prop: Int, delta: Int): String {
+/** 一个曝光参数的完整描述。值域来自相机且随曝光模式动态变化，收到
+ *  DevicePropChanged(0x4006) 事件后应重新拉取。 */
+data class RcParam(
+    val prop: Int,
+    val dataType: Int,
+    val writable: Boolean,
+    val current: Long,
+    val values: List<Long>
+)
+
+/** 按属性语义格式化原始值（1/250s、f/2.8、ISO500、+0.3EV…）。 */
+fun rcFormat(prop: Int, raw: Long): String = fmtVal(prop, raw)
+
+suspend fun NikonCamera.rcGetParam(prop: Int): RcParam? {
     val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
-    if (rc != Lab.OK || d == null) return "${hex4(prop)} desc resp=${hex4(rc)}"
-    val desc = runCatching { parsePropDescData(d) }.getOrNull()
-        ?: return "${hex4(prop)} desc parse failed"
-    if (desc.enumValues.isEmpty()) return "${hex4(prop)} no enum form"
-    val idx = desc.enumValues.indexOf(desc.current)
-    if (idx < 0) return "${hex4(prop)} current ${desc.current} not in enum"
-    val newIdx = (idx + delta).coerceIn(0, desc.enumValues.size - 1)
-    if (newIdx == idx) return "${hex4(prop)} already at ${if (delta > 0) "last" else "first"} (${fmtVal(prop, desc.current)})"
-    val newVal = desc.enumValues[newIdx]
-    val src = labSetProp(prop, encodeScalar(desc.dataType, newVal))
-    return "${hex4(prop)} ${fmtVal(prop, desc.current)} -> ${fmtVal(prop, newVal)} resp=${hex4(src)}"
+    if (rc != Lab.OK || d == null) return null
+    val desc = runCatching { parsePropDescData(d) }.getOrNull() ?: return null
+    return RcParam(prop, desc.dataType, desc.writable, desc.current, desc.enumValues)
+}
+
+suspend fun NikonCamera.rcSetValue(param: RcParam, value: Long): Int =
+    labSetProp(param.prop, encodeScalar(param.dataType, value))
+
+/** 触摸对焦：坐标为 Live View 图像坐标系（取帧 JPEG 的像素坐标）。 */
+suspend fun NikonCamera.rcChangeAfArea(x: Int, y: Int): Int =
+    labCommand(Lab.NK_CHANGE_AF_AREA, x, y).first
+
+suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
+    val (rc, d) = labCommand(Lab.NK_GET_EVENT)
+    if (rc != Lab.OK || d == null) return emptyList()
+    return runCatching { parseEvents(d) }.getOrDefault(emptyList())
+}
+
+/** 触发拍摄（无 AF、存卡）。只负责发命令；完成与新照片经事件（ObjectAdded）通知。 */
+suspend fun NikonCamera.rcCapture(): Int {
+    var rc = labCommand(Lab.NK_CAPTURE_REC_IN_MEDIA, -1 /*no AF*/, 0 /*card*/).first
+    var tries = 0
+    while (rc == Lab.DEVICE_BUSY && tries < 5) {
+        delay(200)
+        rc = labCommand(Lab.NK_CAPTURE_REC_IN_MEDIA, -1, 0).first
+        tries++
+    }
+    return rc
+}
+
+/** 设置 Live View 分辨率（1=QVGA 2=VGA 3=XGA）。必须在 LV 关闭时调用才生效。 */
+suspend fun NikonCamera.rcSetLvSize(size: Int): Int =
+    labSetProp(Lab.PROP_NK_LV_IMAGE_SIZE, byteArrayOf(size.toByte()))
+
+/** 相机型号（DeviceInfo.Model），遥控页标题用。 */
+suspend fun NikonCamera.rcModelName(): String? {
+    val (rc, d) = labCommand(Lab.GET_DEVICE_INFO)
+    if (rc != Lab.OK || d == null) return null
+    return runCatching { parseDeviceInfo(d).model }.getOrNull()
 }
 
 // ============================ Live View ============================
@@ -534,61 +574,3 @@ suspend fun NikonCamera.runLabProbe(
     log("=== probe done in ${System.currentTimeMillis() - t0}ms ===")
 }
 
-// ============================ 遥控拍摄测试 ============================
-
-/**
- * 试拍一张（存卡，不 AF——LV 下 AF 变体会被拒；相机对不上焦也不会挂）。
- * 返回新对象 handle（事件里拿到的话），过程写入 [log]。
- */
-suspend fun NikonCamera.runLabCapture(log: suspend (String) -> Unit): Int? {
-    log("=== capture test: 0x9207 (no-AF, to card) ===")
-    var rc = labCommand(Lab.NK_CAPTURE_REC_IN_MEDIA, -1 /*0xFFFFFFFF=no AF*/, 0 /*card*/).first
-    var tries = 0
-    while (rc == Lab.DEVICE_BUSY && tries < 5) {
-        delay(300)
-        rc = labCommand(Lab.NK_CAPTURE_REC_IN_MEDIA, -1, 0).first
-        tries++
-    }
-    log("InitiateCaptureRecInMedia resp=${hex4(rc)}")
-    if (rc != Lab.OK) {
-        // 回退老式 SDRAM 拍摄（老机型/不同固件）
-        rc = labCommand(Lab.NK_CAPTURE_REC_IN_SDRAM, -1).first
-        log("InitiateCaptureRecInSdram(0x90C0) resp=${hex4(rc)}")
-        if (rc != Lab.OK) return null
-    }
-
-    // 等相机就绪（长曝光会久，给 15s）
-    val t0 = System.currentTimeMillis()
-    var ready: Int
-    do {
-        delay(100)
-        ready = labCommand(Lab.NK_DEVICE_READY).first
-    } while (ready == Lab.DEVICE_BUSY && System.currentTimeMillis() - t0 < 15000)
-    log("DeviceReady resp=${hex4(ready)} after ${System.currentTimeMillis() - t0}ms")
-
-    // 轮询事件抓 ObjectAdded / CaptureComplete。
-    //（写成 while + 标志位而不是 repeat{} 内非局部 return：后者与 suspend 内联组合
-    // 会触发 Kotlin 后端 codegen 崩溃。）
-    var handle: Int? = null
-    var complete = false
-    var polls = 0
-    while (polls < 40 && !complete) {
-        val (erc, ed) = labCommand(Lab.NK_GET_EVENT)
-        if (erc == Lab.OK && ed != null) {
-            for ((code, param) in runCatching { parseEvents(ed) }.getOrDefault(emptyList())) {
-                log("event ${hex4(code)} param=${hex8(param)}")
-                // 0x4002 ObjectAdded / 0xC101 ObjectAddedInSDRAM
-                if (code == 0x4002 || code == 0xC101) handle = param.toInt()
-                if (code == 0x400D || code == 0xC102) complete = true   // CaptureComplete
-            }
-        }
-        // 有 handle 但迟迟不见 complete，别干等
-        if (!complete && handle != null && polls > 20) break
-        if (!complete) delay(250)
-        polls++
-    }
-    val handleTxt = handle?.let { h -> hex8(h.toLong() and 0xFFFFFFFFL) } ?: "none"
-    log(if (complete) "capture complete, new handle=$handleTxt"
-        else "event poll ended without CaptureComplete, handle=$handleTxt")
-    return handle
-}

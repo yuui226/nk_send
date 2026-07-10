@@ -77,7 +77,7 @@ sealed class Screen(val route: String) {
     object Home : Screen("home")
     object Files : Screen("files")
     object Transfer : Screen("transfer")
-    object Lab : Screen("lab")   // 遥控实验页（临时），位于文件页左侧
+    object Remote : Screen("remote")   // 无线遥控页，位于文件页左侧
 }
 
 @Composable
@@ -146,18 +146,18 @@ fun MainScreen(transferViewModel: TransferViewModel) {
             }
             composable(
                 Screen.Files.route,
-                // 空间隐喻：队列页位于本页右侧，实验页位于本页左侧。去队列页时本页作为
+                // 空间隐喻：队列页位于本页右侧，遥控页位于本页左侧。去队列页时本页作为
                 // 底层向左 1/3 视差退场并轻微压暗（营造被上层卡片盖住的纵深），返回时反向
-                // 浮现回来；去实验页方向相反（向右 1/3）。
+                // 浮现回来；去遥控页方向相反（向右 1/3）。
                 // enter/popEnter（自连接页）不设，仍走 NavHost 默认的缩放淡入转场。
                 exitTransition = {
-                    val toLab = targetState.destination.route == Screen.Lab.route
-                    slideOutHorizontally(Motion.pageSlide) { if (toLab) it / 3 else -it / 3 } +
+                    val toRemote = targetState.destination.route == Screen.Remote.route
+                    slideOutHorizontally(Motion.pageSlide) { if (toRemote) it / 3 else -it / 3 } +
                             fadeOut(tween(Motion.PAGE_FADE_MS), targetAlpha = 0.5f)
                 },
                 popEnterTransition = {
-                    val fromLab = initialState.destination.route == Screen.Lab.route
-                    slideInHorizontally(Motion.pageSlide) { if (fromLab) it / 3 else -it / 3 } +
+                    val fromRemote = initialState.destination.route == Screen.Remote.route
+                    slideInHorizontally(Motion.pageSlide) { if (fromRemote) it / 3 else -it / 3 } +
                             fadeIn(tween(Motion.PAGE_FADE_MS), initialAlpha = 0.5f)
                 }
             ) {
@@ -167,19 +167,20 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                     onNavigateToTransfer = {
                         navController.navigate(Screen.Transfer.route)
                     },
-                    onNavigateToLab = {
-                        navController.navigate(Screen.Lab.route) { launchSingleTop = true }
+                    onNavigateToRemote = {
+                        navController.navigate(Screen.Remote.route) { launchSingleTop = true }
                     }
                 )
             }
             composable(
-                Screen.Lab.route,
-                // 实验页作为上层卡片从左侧滑入，返回时向左滑出。
+                Screen.Remote.route,
+                // 遥控页作为上层卡片从左侧滑入，返回时向左滑出。
                 enterTransition = { slideInHorizontally(Motion.pageSlide) { -it } },
                 popExitTransition = { slideOutHorizontally(Motion.pageSlide) { -it } }
             ) {
-                RemoteLabScreen(
+                RemoteScreen(
                     cameraViewModel = cameraViewModel,
+                    transferViewModel = transferViewModel,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
