@@ -260,9 +260,11 @@ fun RemoteLabScreen(
                     style = MaterialTheme.typography.labelMedium, color = colors.onBackground
                 )
             }
+            // 监看中允许拍摄：命令层与 LV 取帧共用 ioMutex 严格串行，无 AF 变体在 LV 下
+            // 正是真实使用场景（之前禁用导致"点了没反应"——毛玻璃禁用态肉眼看不出来）。
             GlassButton(
                 onClick = ::runCapture,
-                enabled = connected && !busy && !lvActive,
+                enabled = connected && !busy,
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
             ) {

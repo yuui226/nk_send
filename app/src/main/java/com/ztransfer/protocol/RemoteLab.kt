@@ -256,8 +256,8 @@ private fun parsePropDesc(prop: Int, d: ByteArray): String {
         2 -> {
             val n = c.u16()
             val values = (0 until n).map { c.typed(dataType).first }
-            val shown = values.take(24).joinToString(",") { fmtVal(prop, it) }
-            "enum(${n})[${shown}${if (n > 24) ",…" else ""}]"
+            val shown = values.take(12).joinToString(",") { fmtVal(prop, it) }
+            "enum(${n})[${shown}${if (n > 12) ",…" else ""}]"
         }
         else -> "none"
     }
@@ -297,9 +297,11 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
         log("LV prohibit condition read: resp=${hex4(prc)}")
     }
 
+    // 0x2019 忙 / 0xA004 InvalidStatus（上一次 EndLiveView 后相机内部状态未落定时常见）
+    // 都值得短暂重试。
     var rc = labCommand(Lab.NK_START_LIVE_VIEW).first
     var tries = 0
-    while (rc == Lab.DEVICE_BUSY && tries < 5) {
+    while ((rc == Lab.DEVICE_BUSY || rc == 0xA004) && tries < 5) {
         delay(300)
         rc = labCommand(Lab.NK_START_LIVE_VIEW).first
         tries++
@@ -360,21 +362,18 @@ suspend fun NikonCamera.runLabProbe(
         log("!! GetDeviceInfo resp=${hex4(dirc)}")
     }
     val ops = info?.operations ?: emptySet()
+    // 输出保持紧凑（日志要靠剪贴板带出来）：全量操作码/事件码/属性码清单不打印，
+    // 只打印总数 + 遥控关注码的命中/缺失两行。
     info?.let {
-        log("Model: ${it.manufacturer} ${it.model}  fw=${it.deviceVersion}  sn=${it.serial}")
-        log("VendorExt: id=${hex8(it.vendorExtId)} ver=${it.vendorExtVersion} \"${it.vendorExtDesc}\"")
-        log("OperationsSupported (${it.operations.size}):")
-        it.operations.sorted().chunked(8).forEach { row ->
-            log("  " + row.joinToString(" ") { op -> hex4(op) })
-        }
-        log("EventsSupported: " + it.events.sorted().joinToString(" ") { e -> hex4(e) })
-        log("DevicePropsSupported (${it.props.size}):")
-        it.props.sorted().chunked(8).forEach { row ->
-            log("  " + row.joinToString(" ") { pr -> hex4(pr) })
-        }
-        log("--- remote-control opcode checklist ---")
-        Lab.INTEREST_OPS.forEach { (code, name) ->
-            log("  [${if (code in it.operations) "Y" else "-"}] ${hex4(code)} $name")
+        log("Model: ${it.manufacturer} ${it.model}  fw=${it.deviceVersion}")
+        log("VendorExt: id=${hex8(it.vendorExtId)} ver=${it.vendorExtVersion}")
+        log("ops=${it.operations.size} events=${it.events.size} props=${it.props.size}")
+        val present = Lab.INTEREST_OPS.keys.filter { op -> op in it.operations }
+        val missing = Lab.INTEREST_OPS.filterKeys { op -> op !in it.operations }
+        log("remote ops OK: " + present.joinToString(" ") { op -> hex4(op) })
+        if (missing.isNotEmpty()) {
+            log("remote ops MISSING: " +
+                    missing.entries.joinToString(" ") { (op, name) -> "${hex4(op)}($name)" })
         }
     }
 
@@ -384,10 +383,7 @@ suspend fun NikonCamera.runLabProbe(
         val (rc, d) = labCommand(Lab.NK_GET_VENDOR_PROP_CODES)
         if (rc == Lab.OK && d != null) {
             vendorProps = runCatching { Cur(d).u16Array().toSet() }.getOrDefault(emptySet())
-            log("GetVendorPropCodes(0x90CA) (${vendorProps.size}):")
-            vendorProps.sorted().chunked(8).forEach { row ->
-                log("  " + row.joinToString(" ") { pr -> hex4(pr) })
-            }
+            log("GetVendorPropCodes(0x90CA): ${vendorProps.size} codes")
         } else log("GetVendorPropCodes(0x90CA) resp=${hex4(rc)}")
     }
 
@@ -456,6 +452,8 @@ suspend fun NikonCamera.runLabProbe(
         var got = 0
         var totalMs = 0L
         var attempts = 0
+        var lastTotal = 0
+        var soiOff = -1
         try {
             while (got < 8 && attempts < 30) {
                 attempts++
@@ -466,10 +464,12 @@ suspend fun NikonCamera.runLabProbe(
                 val (jpeg, total, soi) = frame
                 got++
                 totalMs += ms
-                log("frame $got: ${total}B jpeg@$soi ${ms}ms")
+                lastTotal = total
+                soiOff = soi
                 onFrame(jpeg)
             }
-            if (got > 0) log("LV frames: $got ok / $attempts polls, avg ${totalMs / got}ms/frame (~%.1f fps ceiling)".format(1000f / (totalMs / got)))
+            // 逐帧不打印，只汇总一行（帧大小/头偏移/平均耗时足够定位问题）
+            if (got > 0) log("LV: $got frames ok / $attempts polls, ~${lastTotal / 1024}KB jpeg@$soiOff, avg ${totalMs / got}ms (~%.1f fps ceiling)".format(1000f / (totalMs / got)))
         } catch (e: Exception) {
             log("!! LV frame error: ${e.message}")
         }
