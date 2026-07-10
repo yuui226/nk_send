@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.screen
+package com.ztransfer.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -30,11 +30,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.nikon.transfer.protocol.NikonCamera
-import com.nikon.transfer.ui.theme.*
-import com.nikon.transfer.viewmodel.CameraViewModel
+import com.ztransfer.R
+import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.ui.theme.*
+import com.ztransfer.viewmodel.CameraViewModel
 
 /**
  * 全屏照片预览层：显示缓存缩略图的**未裁切**（Fit）完整画面，可左右翻页浏览整份列表。
@@ -172,7 +174,7 @@ private fun PreviewPage(
                 contentScale = ContentScale.Fit,   // 不裁切，完整画面
                 modifier = Modifier.fillMaxSize()
             )
-            noThumb -> Text("无预览", color = DarkOnSurfaceVariant)
+            noThumb -> Text(stringResource(R.string.no_preview), color = DarkOnSurfaceVariant)
             else -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
         }
     }

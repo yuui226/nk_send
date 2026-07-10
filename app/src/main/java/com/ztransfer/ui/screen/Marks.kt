@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.screen
+package com.ztransfer.ui.screen
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.aspectRatio
@@ -9,7 +9,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import com.nikon.transfer.ui.theme.AppTheme
+import com.ztransfer.ui.theme.AppTheme
 
 /**
  * 自绘小标志集合：与信号按钮的信号条同族——统一的"圆头杆件"绘制语言

@@ -1,4 +1,4 @@
-package com.nikon.transfer.viewmodel
+package com.ztransfer.viewmodel
 
 import android.app.Application
 import android.content.Context
@@ -16,8 +16,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.nikon.transfer.protocol.NikonCamera
-import com.nikon.transfer.protocol.PtpConstants
+import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.PtpConstants
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -100,7 +100,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             @Suppress("DEPRECATION")
             WifiManager.WIFI_MODE_FULL_HIGH_PERF
         },
-        "NikonTransfer:session"
+        "ZTransfer:session"
     ).apply { setReferenceCounted(false) }
 
     private fun acquireSessionWifiLock() {
@@ -298,8 +298,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (_state.value.isConnecting || _state.value.isConnectedToCamera) return
         _state.update { it.copy(isConnecting = true) }
 
+        // 经 AppLocale.wrap：协议层错误文案（会显示在失败卡片上）与应用内语言一致。
+        // 提到循环外：语言变更必经 Activity.recreate()，重试循环存续期间不可能变，
+        // 不必每轮重试都重建配置上下文。
+        val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
         while ((linkSaysCameraWifi || checkNikonWifi()) && !_state.value.isConnectedToCamera) {
-            val cam = NikonCamera()
+            val cam = NikonCamera(localizedContext)
             var connected = false
             cam.connect(network = wifiNetwork).fold(
                 onSuccess = {
@@ -606,10 +610,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } catch (_: Exception) {}
     }
 
-    /** 仅 debug 构建输出缩略图链路日志（与协议层同 TAG，logcat 过滤 NikonTransfer 即可）。 */
+    /** 仅 debug 构建输出缩略图链路日志（与协议层同 TAG，logcat 过滤 ZTransfer 即可）。 */
     private inline fun log(message: () -> String) {
-        if (com.nikon.transfer.BuildConfig.DEBUG) {
-            android.util.Log.d("NikonTransfer", message())
+        if (com.ztransfer.BuildConfig.DEBUG) {
+            android.util.Log.d("ZTransfer", message())
         }
     }
 

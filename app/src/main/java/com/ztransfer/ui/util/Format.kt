@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.util
+package com.ztransfer.ui.util
 
 import java.util.Locale
 

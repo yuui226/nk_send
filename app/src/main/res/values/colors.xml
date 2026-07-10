@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 开屏(Android 12+)配色的唯一定义处:分隔缝取背景色才能"隐形",
+         drawable 与 v31 主题都引用这里,深色变体见 values-night/colors.xml。 -->
+    <color name="splash_background">#F2F2F7</color>
+    <color name="splash_mark">#1E1E1E</color>
+</resources>

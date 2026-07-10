@@ -1,7 +1,9 @@
-package com.nikon.transfer.protocol
+package com.ztransfer.protocol
 
+import android.content.Context
 import android.net.Network
-import com.nikon.transfer.BuildConfig
+import com.ztransfer.BuildConfig
+import com.ztransfer.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -16,17 +18,17 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /** 写入本地文件失败（非相机连接错误），用于区分"掉线"与"磁盘/存储"问题。 */
-class OutputWriteException(cause: Throwable) : Exception("写入文件失败: ${cause.message}", cause)
+class OutputWriteException(message: String, cause: Throwable) : Exception(message, cause)
 
-class NikonCamera {
+class NikonCamera(private val context: Context) {
     private var cmdSocket: Socket? = null
     private var evtSocket: Socket? = null
     private var cmdInput: java.io.InputStream? = null
     private var evtInput: java.io.InputStream? = null
     private var cmdOutput: OutputStream? = null
     private var tid = 0
-    private val cmdReader = PacketReader()
-    private val evtReader = PacketReader()
+    private val cmdReader = PacketReader(context)
+    private val evtReader = PacketReader(context)
     private var evtThread: Thread? = null
     private val ioMutex = Mutex()
     // 会话是否已 OpenSession 成功；用于决定 close() 是否需要发送 CloseSession，
@@ -34,7 +36,7 @@ class NikonCamera {
     @Volatile private var sessionOpen = false
 
     private companion object {
-        const val TAG = "NikonTransfer"
+        const val TAG = "ZTransfer"
         // 命令/事件通道的常规读超时。
         const val SO_TIMEOUT_MS = 60_000
         // TCP 连接超时：本地热点正常握手 <300ms；缩短它让"相机侧 PTP 服务还没就绪"的
@@ -91,12 +93,12 @@ class NikonCamera {
             if (ack.type != PtpConstants.INIT_CMD_ACK) {
                 // INIT_FAIL = 相机主动拒绝（如未配对/连接数已满），与协议错乱区分开提示。
                 return@withContext Result.failure(
-                    if (ack.type == PtpConstants.INIT_FAIL) Exception("相机拒绝连接")
-                    else Exception("握手失败: 非 ACK 响应")
+                    if (ack.type == PtpConstants.INIT_FAIL) Exception(context.getString(R.string.error_camera_refused))
+                    else Exception(context.getString(R.string.error_handshake_bad_ack))
                 )
             }
 
-            val payload = ack.payload ?: return@withContext Result.failure(Exception("握手失败: 空响应"))
+            val payload = ack.payload ?: return@withContext Result.failure(Exception(context.getString(R.string.error_handshake_empty)))
             val sessionId = payload.getIntLE(0)
 
             evtSocket = newSocket().apply {
@@ -115,7 +117,7 @@ class NikonCamera {
 
             val evtAck = evtReader.readPacket(evtInput!!)
             if (evtAck.type != PtpConstants.INIT_EVT_ACK) {
-                return@withContext Result.failure(Exception("事件握手失败"))
+                return@withContext Result.failure(Exception(context.getString(R.string.error_event_handshake)))
             }
 
             sendCmd(PtpConstants.OPEN_SESSION, sessionId)
@@ -123,7 +125,7 @@ class NikonCamera {
             // 0x201E Session Already Open：App 异常退出后相机侧旧会话可能未清，
             // 视为会话已就绪继续使用，否则会陷入"反复重连直到相机自己超时"的循环。
             if (resp != PtpConstants.RESPONSE_OK && resp != PtpConstants.SESSION_ALREADY_OPEN) {
-                return@withContext Result.failure(Exception("OpenSession 失败: ${PtpConstants.translateResponse(resp)}"))
+                return@withContext Result.failure(Exception(context.getString(R.string.error_open_session, PtpConstants.translateResponse(context, resp))))
             }
             sessionOpen = true
 
@@ -239,7 +241,7 @@ class NikonCamera {
                 PtpConstants.RESPONSE_OK -> data
                 PtpConstants.NO_THUMBNAIL_PRESENT,
                 PtpConstants.INVALID_OBJECT_HANDLE -> null
-                else -> throw Exception("GetThumb: ${PtpConstants.translateResponse(respCode)}")
+                else -> throw Exception("GetThumb: ${PtpConstants.translateResponse(context, respCode)}")
             }
         }
     }
@@ -341,7 +343,7 @@ class NikonCamera {
                 // 表示大小未知，无法校验只能放行。
                 fun verifyComplete(): Result<DownloadStats>? =
                     if (expected > 0 && expected != PtpConstants.SIZE_UNKNOWN && expected != -1L && totalDownloaded != expected) {
-                        Result.failure(Exception("数据不完整: 收到 $totalDownloaded / 预期 $expected 字节"))
+                        Result.failure(Exception(context.getString(R.string.error_incomplete_data, totalDownloaded, expected)))
                     } else null
 
                 while (true) {
@@ -359,7 +361,7 @@ class NikonCamera {
                             val respCode = if (len >= 2) buf.getUShortLE(0) else 0
                             log { "DL_CMD_RESPONSE resp=0x${respCode.toString(16)} downloaded=$totalDownloaded" }
                             if (respCode != PtpConstants.RESPONSE_OK) {
-                                return@withContext Result.failure(Exception("传输失败: ${PtpConstants.translateResponse(respCode)}"))
+                                return@withContext Result.failure(Exception(context.getString(R.string.error_transfer_failed_reason, PtpConstants.translateResponse(context, respCode))))
                             }
                             return@withContext verifyComplete() ?: Result.success(buildStats())
                         }
@@ -382,7 +384,9 @@ class NikonCamera {
                                 } catch (e: java.io.IOException) {
                                     // 写本地文件失败（如存储空间不足）——非相机连接问题，
                                     // 包装成非 IOException 以便上层按单文件失败处理，而不是误判为掉线。
-                                    return@withContext Result.failure(OutputWriteException(e))
+                                    return@withContext Result.failure(
+                                        OutputWriteException(context.getString(R.string.error_write_file, e.message), e)
+                                    )
                                 }
                                 totalDownloaded += len - 4
 

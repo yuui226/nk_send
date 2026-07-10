@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.theme
+package com.ztransfer.ui.theme
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable

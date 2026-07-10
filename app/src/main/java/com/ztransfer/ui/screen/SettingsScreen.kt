@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.screen
+package com.ztransfer.ui.screen
 
 import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
@@ -34,14 +34,19 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.nikon.transfer.BuildConfig
-import com.nikon.transfer.ui.theme.*
-import com.nikon.transfer.viewmodel.TransferViewModel
+import com.ztransfer.AppLocale
+import com.ztransfer.BuildConfig
+import com.ztransfer.R
+import com.ztransfer.ui.theme.*
+import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 
 private const val QQ_GROUP = "1054316860"
@@ -68,13 +73,15 @@ fun SettingsOverlay(
         uri?.let { viewModel.setTransferDirUri(it) }
     }
 
+    // try/catch 内不能调用 composable，回退文案先在组合期取出。
+    val dirSetFallback = stringResource(R.string.dir_set)
     val dirText: String? = state.transferDirUri?.let { dir ->
         try {
             val uri = android.net.Uri.parse(dir)
             val docId = DocumentsContract.getTreeDocumentId(uri)
             if (docId.startsWith("primary:")) "/sdcard/${docId.removePrefix("primary:")}" else docId
         } catch (e: Exception) {
-            "已设置"
+            dirSetFallback
         }
     }
 
@@ -180,21 +187,21 @@ fun SettingsOverlay(
                 // 标题栏
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "设置",
+                        stringResource(R.string.settings),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = colors.onBackground
                     )
                     Spacer(Modifier.weight(1f))
                     IconButton(onClick = startClose, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭", tint = colors.onSurfaceVariant)
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_close), tint = colors.onSurfaceVariant)
                     }
                 }
 
                 Spacer(Modifier.height(16.dp))
 
                 // ---------- 传输目录 ----------
-                SectionLabel("传输目录")
+                SectionLabel(stringResource(R.string.transfer_directory))
                 Spacer(Modifier.height(8.dp))
                 Surface(
                     shape = RoundedCornerShape(10.dp),
@@ -215,7 +222,7 @@ fun SettingsOverlay(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = dirText ?: "未设置",
+                            text = dirText ?: stringResource(R.string.dir_not_set),
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (dirText != null) colors.onBackground else colors.onSurfaceVariant,
                             maxLines = 2,
@@ -233,66 +240,76 @@ fun SettingsOverlay(
                 ) {
                     Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text(if (dirText != null) "更改目录" else "选择目录")
+                    Text(stringResource(if (dirText != null) R.string.change_directory else R.string.choose_directory))
                 }
 
                 Spacer(Modifier.height(20.dp))
 
                 // ---------- 每行列数 ----------
-                SectionLabel("列数")
+                SectionLabel(stringResource(R.string.columns))
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     (1..4).forEach { col ->
-                        val selected = state.thumbnailColumns == col
-                        Surface(
+                        SelectionChip(
+                            label = "$col",
+                            selected = state.thumbnailColumns == col,
                             onClick = { viewModel.setThumbnailColumns(col) },
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (selected) colors.accentBlue else colors.surfaceVariant,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "$col",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (selected) colors.onAccent else colors.onSurfaceVariant
-                                )
-                            }
-                        }
+                            textStyle = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
 
                 Spacer(Modifier.height(20.dp))
 
                 // ---------- 外观（深浅色主题）----------
-                SectionLabel("外观")
+                SectionLabel(stringResource(R.string.appearance))
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ThemeMode.entries.forEach { mode ->
-                        val selected = state.themeMode == mode
-                        Surface(
+                        SelectionChip(
+                            label = stringResource(when (mode) {
+                                ThemeMode.SYSTEM -> R.string.theme_system
+                                ThemeMode.DARK -> R.string.theme_dark
+                                ThemeMode.LIGHT -> R.string.theme_light
+                            }),
+                            selected = state.themeMode == mode,
                             onClick = { viewModel.setThemeMode(mode) },
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (selected) colors.accentBlue else colors.surfaceVariant,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = when (mode) {
-                                        ThemeMode.SYSTEM -> "跟随系统"
-                                        ThemeMode.DARK -> "深色"
-                                        ThemeMode.LIGHT -> "浅色"
-                                    },
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    color = if (selected) colors.onAccent else colors.onSurfaceVariant
-                                )
-                            }
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // ---------- 语言 ----------
+                SectionLabel(stringResource(R.string.language))
+                Spacer(Modifier.height(8.dp))
+                // 语言名一律用其自身语言书写（国际惯例，不随界面语言翻译），仅"跟随系统"本地化。
+                val languages = listOf(
+                    AppLocale.SYSTEM to stringResource(R.string.language_system),
+                    "en" to "English",
+                    "zh-Hans" to "简体中文",
+                    "zh-Hant" to "繁體中文"
+                )
+                val activity = LocalContext.current.findActivity()
+                languages.chunked(2).forEachIndexed { rowIndex, rowItems ->
+                    if (rowIndex > 0) Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowItems.forEach { (tag, label) ->
+                            val selected = state.appLanguage == tag
+                            SelectionChip(
+                                label = label,
+                                selected = selected,
+                                onClick = {
+                                    if (!selected) {
+                                        viewModel.setAppLanguage(tag)
+                                        // attachBaseContext 在重建时重读偏好，语言即刻生效。
+                                        activity?.recreate()
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
                 }
@@ -302,7 +319,7 @@ fun SettingsOverlay(
                 // ---------- 触感反馈 ----------
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        SectionLabel("触感反馈")
+                        SectionLabel(stringResource(R.string.haptic_feedback))
                     }
                     Switch(
                         checked = state.hapticsEnabled,
@@ -315,9 +332,9 @@ fun SettingsOverlay(
                 // ---------- 屏幕常亮（默认开）：前台不熄屏，防系统冻结进程/Wi-Fi 打盹断连 ----------
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        SectionLabel("屏幕常亮")
+                        SectionLabel(stringResource(R.string.keep_screen_on))
                         Text(
-                            "应用在前台时不熄屏，防止连接中断",
+                            stringResource(R.string.keep_screen_on_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant
                         )
@@ -334,7 +351,7 @@ fun SettingsOverlay(
                 // 面板底部弹玻璃提示显示具体群号 + 已复制）----------
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "Z传 v${BuildConfig.VERSION_NAME}",
+                        text = stringResource(R.string.version_label, BuildConfig.VERSION_NAME),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.onSurfaceVariant.copy(alpha = 0.7f)
                     )
@@ -350,7 +367,7 @@ fun SettingsOverlay(
                         modifier = Modifier.height(28.dp)
                     ) {
                         Text(
-                            "加群",
+                            stringResource(R.string.join_qq_group),
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.onBackground
                         )
@@ -377,13 +394,41 @@ fun SettingsOverlay(
                 border = BorderStroke(1.dp, colors.glassPanelBorder)
             ) {
                 Text(
-                    text = "QQ群 $QQ_GROUP\n已复制群号",
+                    text = stringResource(R.string.qq_group_copied, QQ_GROUP),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelLarge,
                     color = colors.onBackground,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
                 )
             }
+        }
+    }
+}
+
+/** 设置面板的选中态胶囊（列数/外观/语言三组选项共用）：选中 = 主题蓝底 + 反色字。 */
+@Composable
+private fun SelectionChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    textStyle: TextStyle = MaterialTheme.typography.labelLarge
+) {
+    val colors = AppTheme.colors
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = if (selected) colors.accentBlue else colors.surfaceVariant,
+        modifier = modifier.height(40.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = label,
+                style = textStyle,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                color = if (selected) colors.onAccent else colors.onSurfaceVariant
+            )
         }
     }
 }

@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.util
+package com.ztransfer.ui.util
 
 import android.os.Build
 import android.view.HapticFeedbackConstants

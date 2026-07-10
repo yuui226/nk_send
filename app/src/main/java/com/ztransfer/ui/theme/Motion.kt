@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.theme
+package com.ztransfer.ui.theme
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec

@@ -1,4 +1,4 @@
-package com.nikon.transfer.viewmodel
+package com.ztransfer.viewmodel
 
 import android.app.Application
 import android.content.Context
@@ -6,11 +6,13 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.nikon.transfer.BuildConfig
-import com.nikon.transfer.protocol.NikonCamera
-import com.nikon.transfer.protocol.PtpConstants
-import com.nikon.transfer.service.TransferService
-import com.nikon.transfer.ui.theme.ThemeMode
+import com.ztransfer.AppLocale
+import com.ztransfer.BuildConfig
+import com.ztransfer.R
+import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.PtpConstants
+import com.ztransfer.service.TransferService
+import com.ztransfer.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,7 +55,10 @@ data class TransferState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     // 照片类型筛选（归一化扩展名，如 ".jpg"）：null = 全部（不过滤，新类型也放行）。
     // 持久化跨会话生效；设备上没有所选类型时列表自然为空，不做特殊处理。
-    val filterExtensions: Set<String>? = null
+    val filterExtensions: Set<String>? = null,
+    // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
+    // 切换后由设置面板触发 Activity.recreate() 生效。
+    val appLanguage: String = AppLocale.SYSTEM
 )
 
 /** 队列剩余待处理数量（正在传 + 等待传）。供顶栏药丸等复用。 */
@@ -69,8 +74,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     val state: StateFlow<TransferState> = _state.asStateFlow()
 
     private var transferJob: Job? = null
-    private val prefs = application.getSharedPreferences("nikon_transfer", Context.MODE_PRIVATE)
+    private val prefs = application.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
     private val contentResolver = application.contentResolver
+
+    /** 用户可见文案（错误信息等）统一走字符串资源；经 AppLocale.wrap 与应用内语言一致。 */
+    private fun str(resId: Int, vararg args: Any?): String =
+        AppLocale.wrap(getApplication()).getString(resId, *args)
 
     // 鸿蒙适配：部分华为/荣耀设备的 DocumentsProvider renameDocument 损坏（无论目标名
     // 是否空闲都失败），下载完好的临时文件改不了正式名 → 每张都"保存失败"。
@@ -79,7 +88,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private var renameBroken = false
 
     private companion object {
-        const val TAG = "NikonTransfer"
+        const val TAG = "ZTransfer"
         // 未完成文件的临时名前缀（带前导点，在相册中隐藏）。真正文件名只在下载完整后才出现。
         const val PART_PREFIX = ".nkpart_"
         // 重名副本后缀（"DSC_0001 (1).NEF" 中的 " (1)"），用于剥离/生成。
@@ -98,7 +107,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
                     ?: ThemeMode.SYSTEM,
                 // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
-                filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet()
+                filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet(),
+                appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
         }
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
@@ -128,6 +138,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setKeepScreenOn(enabled: Boolean) {
         prefs.edit().putBoolean("keep_screen_on", enabled).apply()
         _state.update { it.copy(keepScreenOn = enabled) }
+    }
+
+    /** 应用内语言；写入后需 Activity.recreate() 才对界面生效（attachBaseContext 重读偏好）。 */
+    fun setAppLanguage(tag: String) {
+        prefs.edit().putString(AppLocale.PREF_KEY, tag).apply()
+        _state.update { it.copy(appLanguage = tag) }
     }
 
     /** 照片类型筛选；null = 全部。持久化，跨会话与跨设备连接生效。 */
@@ -200,12 +216,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 }
                 if (!dirValid) {
                     prefs.edit().remove("transfer_dir").apply()
+                    // 文案只取一次：str() 每次都要构建配置上下文，放 map 里会按任务数重复执行
+                    //（update 遇 CAS 重试还会整体重跑）。
+                    val dirInvalidMsg = str(R.string.error_dir_invalid)
                     _state.update { s ->
                         s.copy(
                             transferDirUri = null,
                             tasks = s.tasks.map {
                                 if (it.status == TransferStatus.WAITING) {
-                                    it.copy(status = TransferStatus.FAILED, error = "传输目录已失效，请重新选择")
+                                    it.copy(status = TransferStatus.FAILED, error = dirInvalidMsg)
                                 } else it
                             }
                         )
@@ -253,7 +272,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     val camera = cameraProvider()
                     if (camera == null) {
                         updateTask(handle) {
-                            it.copy(status = TransferStatus.FAILED, error = "相机未连接", speed = 0)
+                            it.copy(status = TransferStatus.FAILED, error = str(R.string.camera_not_connected), speed = 0)
                         }
                         continue
                     }
@@ -280,11 +299,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 docUri,
                                 getMimeType(task.file.fileName),
                                 PART_PREFIX + task.file.fileName
-                            ) ?: throw Exception("无法创建文件")
+                            ) ?: throw Exception(str(R.string.error_create_file))
                             fileDocUri = createdUri
 
                             val outputStream = contentResolver.openOutputStream(createdUri)
-                                ?: throw Exception("无法打开文件")
+                                ?: throw Exception(str(R.string.error_open_file))
 
                             // 用大缓冲包裹 SAF 输出流，把零散的写批量化，减少 ContentProvider 往返。
                             // 缺了它，每个 PTP-IP 数据包都要跨 Binder 写一次 SAF，吞吐直接腰斩（2M/s→<1M/s）。
@@ -388,12 +407,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     deleteQuietly(createdUri)
                                     val reason = when {
                                         saveError is java.io.FileNotFoundException ->
-                                            "传输目录已失效，请重新选择"
+                                            str(R.string.error_dir_invalid)
                                         saveError?.message != null -> saveError.message
-                                        else -> "系统拒绝改名与复制"
+                                        else -> str(R.string.error_rename_copy_refused)
                                     }
                                     updateTask(handle) {
-                                        it.copy(status = TransferStatus.FAILED, error = "保存失败：$reason", speed = 0)
+                                        it.copy(status = TransferStatus.FAILED, error = str(R.string.error_save_failed, reason), speed = 0)
                                     }
                                 }
                             },
@@ -402,7 +421,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 // 重连后由用户点"重试全部"重新下载。
                                 deleteQuietly(fileDocUri)
                                 updateTask(handle) {
-                                    it.copy(status = TransferStatus.FAILED, error = e.message ?: "传输失败", speed = 0)
+                                    it.copy(status = TransferStatus.FAILED, error = e.message ?: str(R.string.transfer_failed), speed = 0)
                                 }
                             }
                         )
@@ -421,9 +440,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         // 目录中途失效（如传输期间被文件管理器删除）：翻译成人话，
                         // 而不是把 SAF 的 "Missing file for primary:..." 原样示人。
                         val msg = if (e is java.io.FileNotFoundException) {
-                            "传输目录已失效，请重新选择"
+                            str(R.string.error_dir_invalid)
                         } else {
-                            e.message ?: "传输失败"
+                            e.message ?: str(R.string.transfer_failed)
                         }
                         updateTask(handle) {
                             it.copy(status = TransferStatus.FAILED, error = msg, speed = 0)
@@ -531,7 +550,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         var created: Uri? = null
         try {
             created = DocumentsContract.createDocument(contentResolver, parentDocUri, mime, name)
-                ?: return@withContext Result.failure(Exception("无法创建文件"))
+                ?: return@withContext Result.failure(Exception(str(R.string.error_create_file)))
             val copiedBytes = contentResolver.openInputStream(tempUri)!!.use { input ->
                 java.io.BufferedOutputStream(
                     contentResolver.openOutputStream(created)!!, 1024 * 1024
@@ -539,7 +558,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     input.copyTo(output, 1024 * 1024)
                 }
             }
-            if (copiedBytes != expectedBytes) throw Exception("复制不完整 $copiedBytes/$expectedBytes")
+            if (copiedBytes != expectedBytes) throw Exception(str(R.string.error_copy_incomplete, copiedBytes, expectedBytes))
             Result.success(created)
         } catch (e: CancellationException) {
             // 取消（App 退出）不吞：清掉半成品后向上传播，维持"取消必须传播"的全局约定。

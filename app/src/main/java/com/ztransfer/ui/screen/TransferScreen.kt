@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.screen
+package com.ztransfer.ui.screen
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -45,19 +45,21 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.nikon.transfer.protocol.NikonCamera
-import com.nikon.transfer.protocol.PtpConstants
-import com.nikon.transfer.ui.theme.*
-import com.nikon.transfer.ui.util.formatFileSize
-import com.nikon.transfer.ui.util.formatSpeed
-import com.nikon.transfer.ui.util.rememberHaptics
-import com.nikon.transfer.viewmodel.CameraViewModel
-import com.nikon.transfer.viewmodel.TransferStatus
-import com.nikon.transfer.viewmodel.TransferViewModel
+import com.ztransfer.R
+import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.PtpConstants
+import com.ztransfer.ui.theme.*
+import com.ztransfer.ui.util.formatFileSize
+import com.ztransfer.ui.util.formatSpeed
+import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.TransferStatus
+import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -114,7 +116,7 @@ fun TransferScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(64.dp), tint = colors.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("暂无传输任务", color = colors.onSurfaceVariant)
+                    Text(stringResource(R.string.no_transfer_tasks), color = colors.onSurfaceVariant)
                 }
             }
         } else {
@@ -203,7 +205,7 @@ fun TransferScreen(
                                     )
                                     Spacer(modifier = Modifier.height(3.dp))
                                     val (subText, subColor) = when (task.status) {
-                                        TransferStatus.WAITING -> "等待" to colors.onSurfaceVariant
+                                        TransferStatus.WAITING -> stringResource(R.string.status_waiting) to colors.onSurfaceVariant
                                         TransferStatus.TRANSFERING -> {
                                             // >4GB 对象的 file.size 只是 SIZE_UNKNOWN 哨兵，别显示假总量。
                                             val base = if (task.file.size == PtpConstants.SIZE_UNKNOWN) {
@@ -215,14 +217,14 @@ fun TransferScreen(
                                         }
                                         TransferStatus.COMPLETED ->
                                             (when {
-                                                task.skipped -> "跳过"
+                                                task.skipped -> stringResource(R.string.status_skipped)
                                                 // 单文件下载速度：一眼看出当前网络快慢。大小取真实落盘字节数
                                                 //（>4GB 对象的 file.size 只是哨兵值）。
                                                 task.downloadMBps > 0f -> "${formatFileSize(task.downloaded)} · %.1f MB/s".format(task.downloadMBps)
                                                 else -> formatFileSize(task.downloaded)
                                             }) to colors.statusConnected
-                                        TransferStatus.FAILED -> (task.error ?: "传输失败") to colors.statusError
-                                        TransferStatus.CANCELLED -> "已取消" to colors.onSurfaceVariant
+                                        TransferStatus.FAILED -> (task.error ?: stringResource(R.string.transfer_failed)) to colors.statusError
+                                        TransferStatus.CANCELLED -> stringResource(R.string.status_cancelled) to colors.onSurfaceVariant
                                     }
                                     Text(
                                         text = subText,
@@ -264,7 +266,7 @@ fun TransferScreen(
                                             BroomMark(
                                                 modifier = Modifier.size(16.dp),
                                                 color = colors.onSurfaceVariant,
-                                                contentDescription = "移出队列"
+                                                contentDescription = stringResource(R.string.cd_remove_from_queue)
                                             )
                                         }
                                     }
@@ -303,7 +305,7 @@ fun TransferScreen(
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Text(
-                                        "重试",
+                                        stringResource(R.string.retry),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = if (connected) colors.onBackground else colors.onSurfaceVariant
                                     )
@@ -342,7 +344,7 @@ fun TransferScreen(
             GlassButton(onClick = onNavigateBack, modifier = Modifier.height(36.dp)) {
                 Icon(
                     Icons.Default.ArrowBack,
-                    contentDescription = "返回",
+                    contentDescription = stringResource(R.string.cd_back),
                     tint = colors.onBackground,
                     modifier = Modifier.size(22.dp)
                 )
@@ -413,13 +415,13 @@ fun TransferScreen(
                     icon = {
                         Icon(
                             Icons.Default.Refresh,
-                            contentDescription = "重试失败任务",
+                            contentDescription = stringResource(R.string.cd_retry_failed),
                             tint = if (connected) colors.accentBlue else colors.onSurfaceVariant,
                             modifier = Modifier.size(26.dp)
                         )
                     },
-                    title = "重试失败任务？",
-                    confirmText = "重试",
+                    title = stringResource(R.string.retry_failed_title),
+                    confirmText = stringResource(R.string.retry),
                     confirmColor = colors.accentBlue,
                     enabled = connected,
                     onToggle = {
@@ -445,12 +447,12 @@ fun TransferScreen(
                         BroomMark(
                             modifier = Modifier.size(26.dp),
                             color = colors.onBackground,
-                            contentDescription = "清空队列"
+                            contentDescription = stringResource(R.string.cd_clear_queue)
                         )
                     },
-                    title = "清空队列？",
-                    subtitle = "移除全部卡片；正在传输的不受影响",
-                    confirmText = "清空",
+                    title = stringResource(R.string.clear_queue_title),
+                    subtitle = stringResource(R.string.clear_queue_subtitle),
+                    confirmText = stringResource(R.string.clear),
                     confirmColor = colors.statusError,
                     onToggle = {
                         showClearConfirm = !showClearConfirm
@@ -578,7 +580,7 @@ private fun ConfirmCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(onClick = onDismiss) {
-                    Text("取消", color = AppTheme.colors.onSurfaceVariant)
+                    Text(stringResource(R.string.cancel), color = AppTheme.colors.onSurfaceVariant)
                 }
                 Button(
                     onClick = onConfirm,

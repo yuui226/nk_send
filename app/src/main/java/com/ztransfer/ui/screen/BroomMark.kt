@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.screen
+package com.ztransfer.ui.screen
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.aspectRatio
@@ -11,7 +11,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import com.nikon.transfer.ui.theme.AppTheme
+import com.ztransfer.ui.theme.AppTheme
 import kotlin.math.sqrt
 
 // 归一化几何参数（均为边长的倍数），改这里即可整体调形。竖直姿态绘制，整体旋转 45°。

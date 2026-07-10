@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 开屏专用双 Z 标(无圆形底盘,深浅色由 @color 的 night 变体自动切换,单文件覆盖两主题)。
+     几何与 ic_launcher_foreground 完全一致,整体放大 1.4 倍居中;
+     分隔缝引用 @color/splash_background,天然与开屏背景一致,无需人工同步。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="1.4"
+        android:scaleY="1.4"
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- 左 Z -->
+        <path
+            android:fillColor="@color/splash_mark"
+            android:pathData="M39.56,35 L63.12,35 L61.64,39.94 L35.34,68.06 L53.2,68.06 L51.72,73 L28.16,73 L29.64,68.06 L55.94,39.94 L38.08,39.94 Z" />
+        <!-- 右 Z 的分隔缝(背景色外扩一圈) -->
+        <path
+            android:fillColor="@color/splash_background"
+            android:strokeColor="@color/splash_background"
+            android:strokeWidth="4.6"
+            android:strokeLineJoin="round"
+            android:pathData="M56.28,35 L79.84,35 L78.36,39.94 L52.06,68.06 L69.92,68.06 L68.44,73 L44.88,73 L46.36,68.06 L72.66,39.94 L54.8,39.94 Z" />
+        <!-- 右 Z -->
+        <path
+            android:fillColor="@color/splash_mark"
+            android:pathData="M56.28,35 L79.84,35 L78.36,39.94 L52.06,68.06 L69.92,68.06 L68.44,73 L44.88,73 L46.36,68.06 L72.66,39.94 L54.8,39.94 Z" />
+    </group>
+</vector>

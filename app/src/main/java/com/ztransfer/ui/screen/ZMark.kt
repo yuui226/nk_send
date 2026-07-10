@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.screen
+package com.ztransfer.ui.screen
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.aspectRatio
@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import com.nikon.transfer.ui.theme.AppTheme
+import com.ztransfer.ui.theme.AppTheme
 
 // 归一化几何参数（均为高度的倍数），改这里即可整体调形。
 private const val BAR = 0.13f      // 横杠厚度

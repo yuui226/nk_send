@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ 开屏定制:背景跟随浅色启动背景,图标换成无底盘的双 Z 标
+         (系统默认会把启动图标套进圆形底盘,斜体双 Z 在正圆里会被读成"图标歪了")。 -->
+    <style name="Theme.ZTransfer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#F2F2F7</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_mark</item>
+    </style>
+</resources>

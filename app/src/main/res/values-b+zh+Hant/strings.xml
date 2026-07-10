@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Z傳</string>
+    <string name="transfer_channel_name">檔案傳輸</string>
+    <string name="transfer_notification_title">Z傳</string>
+    <string name="transfer_notification_text">正在傳輸檔案…</string>
+
+    <!-- 連線頁 -->
+    <string name="connecting_camera">正在連線至相機…</string>
+    <string name="connect_camera_wifi">請連線至相機 Wi-Fi</string>
+    <string name="open_wifi_settings">開啟 Wi-Fi 設定</string>
+    <string name="step_camera_wifi">相機開啟「與智慧裝置建立 Wi-Fi 連線」</string>
+    <string name="step_phone_wifi">手機 Wi-Fi 連線到相機的熱點</string>
+
+    <!-- 檔案清單 -->
+    <string name="loading_file_list">正在取得檔案清單…</string>
+    <string name="connection_lost">連線已中斷</string>
+    <string name="no_photos_on_camera">相機中沒有照片</string>
+    <string name="camera_not_connected">相機未連線</string>
+    <string name="press_back_to_exit">再按一次離開</string>
+    <string name="no_photos_match_filter">沒有符合篩選的照片</string>
+    <string name="loading_more">正在載入更多…</string>
+    <string name="unknown_date">未知日期</string>
+    <string name="filter_all">全部</string>
+    <string name="filter_other">其他</string>
+    <string name="cd_back_to_top">回到頂部</string>
+    <string name="cd_filter_type">篩選類型</string>
+    <string name="cd_transfer">傳輸</string>
+    <string name="cd_expand">展開</string>
+    <string name="cd_collapse">收起</string>
+    <string name="cd_all_queued">已全部加入佇列</string>
+    <string name="cd_transfer_group">傳輸整組</string>
+    <string name="cd_apply_filter">確認篩選</string>
+    <string name="cd_transferred">已傳輸</string>
+    <string name="cd_queued">排隊中</string>
+    <string name="cd_failed">傳輸失敗</string>
+    <string name="cd_cancelled">已取消</string>
+
+    <!-- 傳輸佇列 -->
+    <string name="no_transfer_tasks">暫無傳輸任務</string>
+    <string name="status_waiting">等待</string>
+    <string name="status_skipped">跳過</string>
+    <string name="status_cancelled">已取消</string>
+    <string name="transfer_failed">傳輸失敗</string>
+    <string name="retry">重試</string>
+    <string name="cancel">取消</string>
+    <string name="clear">清空</string>
+    <string name="cd_back">返回</string>
+    <string name="cd_remove_from_queue">移出佇列</string>
+    <string name="cd_retry_failed">重試失敗任務</string>
+    <string name="retry_failed_title">重試失敗任務？</string>
+    <string name="cd_clear_queue">清空佇列</string>
+    <string name="clear_queue_title">清空佇列？</string>
+    <string name="clear_queue_subtitle">移除全部卡片；正在傳輸的不受影響</string>
+
+    <!-- 設定 -->
+    <string name="settings">設定</string>
+    <string name="cd_close">關閉</string>
+    <string name="transfer_directory">傳輸目錄</string>
+    <string name="dir_set">已設定</string>
+    <string name="dir_not_set">未設定</string>
+    <string name="change_directory">變更目錄</string>
+    <string name="choose_directory">選擇目錄</string>
+    <string name="columns">欄數</string>
+    <string name="appearance">外觀</string>
+    <string name="theme_system">跟隨系統</string>
+    <string name="theme_dark">深色</string>
+    <string name="theme_light">淺色</string>
+    <string name="language">語言</string>
+    <string name="language_system">跟隨系統</string>
+    <string name="haptic_feedback">觸覺回饋</string>
+    <string name="keep_screen_on">保持螢幕開啟</string>
+    <string name="keep_screen_on_desc">App 在前景時螢幕不熄滅，防止連線中斷</string>
+    <string name="version_label">Z傳 v%1$s</string>
+    <string name="join_qq_group">加群</string>
+    <string name="qq_group_copied">QQ群 %1$s\n已複製群號</string>
+
+    <!-- 照片預覽 -->
+    <string name="no_preview">無預覽</string>
+
+    <!-- 傳輸錯誤 -->
+    <string name="error_dir_invalid">傳輸目錄已失效，請重新選擇</string>
+    <string name="error_create_file">無法建立檔案</string>
+    <string name="error_open_file">無法開啟檔案</string>
+    <string name="error_rename_copy_refused">系統拒絕重新命名與複製</string>
+    <string name="error_save_failed">儲存失敗：%1$s</string>
+    <string name="error_copy_incomplete">複製不完整 %1$d/%2$d</string>
+
+    <!-- 協定錯誤（冒號統一全形，與「儲存失敗：」一致） -->
+    <string name="error_write_file">寫入檔案失敗：%1$s</string>
+    <string name="error_camera_refused">相機拒絕連線</string>
+    <string name="error_handshake_bad_ack">交握失敗：非 ACK 回應</string>
+    <string name="error_handshake_empty">交握失敗：空回應</string>
+    <string name="error_event_handshake">事件交握失敗</string>
+    <string name="error_open_session">OpenSession 失敗：%1$s</string>
+    <string name="error_incomplete_data">資料不完整：收到 %1$d / 預期 %2$d 位元組</string>
+    <string name="error_transfer_failed_reason">傳輸失敗：%1$s</string>
+    <string name="error_bad_packet_length">非法封包長度 %1$d：連線資料已損壞</string>
+
+    <!-- PTP 回應碼 -->
+    <string name="ptp_invalid_parameter">參數無效</string>
+    <string name="ptp_operation_not_supported">操作不支援</string>
+    <string name="ptp_insufficient_storage">儲存空間不足</string>
+    <string name="ptp_object_not_exist">指定的物件不存在</string>
+    <string name="ptp_storage_full">儲存空間已滿</string>
+    <string name="ptp_file_exists">檔案已存在</string>
+    <string name="ptp_no_filename">未指定檔案名稱</string>
+    <string name="ptp_file_protected">檔案受保護</string>
+    <string name="ptp_session_not_open">工作階段未開啟</string>
+    <string name="ptp_transfer_cancelled">傳輸已取消</string>
+    <string name="ptp_no_object">未指定物件</string>
+    <string name="ptp_incompatible_spec">規格不相容</string>
+    <string name="ptp_device_busy">裝置忙碌</string>
+    <string name="ptp_no_parent">父物件不存在</string>
+    <string name="ptp_session_already_open">工作階段已開啟</string>
+    <string name="ptp_firmware_error">裝置韌體錯誤</string>
+    <string name="ptp_storage_unavailable">儲存空間不可用</string>
+    <string name="ptp_general_error">一般錯誤 (0x%1$s)</string>
+    <string name="ptp_device_error">裝置錯誤 (0x%1$s)</string>
+    <string name="ptp_firmware_error_code">韌體錯誤 (0x%1$s)</string>
+    <string name="ptp_unknown_error">錯誤 (0x%1$s)</string>
+</resources>

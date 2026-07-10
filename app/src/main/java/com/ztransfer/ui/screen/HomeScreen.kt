@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.screen
+package com.ztransfer.ui.screen
 
 import android.content.Intent
 import android.provider.Settings
@@ -38,11 +38,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.nikon.transfer.ui.theme.*
-import com.nikon.transfer.viewmodel.CameraViewModel
-import com.nikon.transfer.viewmodel.TransferViewModel
+import com.ztransfer.R
+import com.ztransfer.ui.theme.*
+import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 
 /**
@@ -127,7 +129,7 @@ fun HomeScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "正在连接相机…",
+                                text = stringResource(R.string.connecting_camera),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.accentBlue
@@ -140,7 +142,7 @@ fun HomeScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "请连接相机 Wi-Fi",
+                                text = stringResource(R.string.connect_camera_wifi),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.accentOrange
@@ -156,7 +158,7 @@ fun HomeScreen(
                             ) {
                                 Icon(Icons.Default.Wifi, contentDescription = null, tint = colors.accentBlue, modifier = Modifier.size(20.dp))
                                 Text(
-                                    "打开 Wi-Fi 设置",
+                                    stringResource(R.string.open_wifi_settings),
                                     style = MaterialTheme.typography.labelLarge,
                                     fontWeight = FontWeight.Medium,
                                     color = colors.onBackground
@@ -167,8 +169,8 @@ fun HomeScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 horizontalAlignment = Alignment.Start
                             ) {
-                                StepRow(1, "相机开启「与智能设备建立 Wi-Fi 连接」")
-                                StepRow(2, "手机 Wi-Fi 连接到相机的热点")
+                                StepRow(1, stringResource(R.string.step_camera_wifi))
+                                StepRow(2, stringResource(R.string.step_phone_wifi))
                             }
                         }
                     }

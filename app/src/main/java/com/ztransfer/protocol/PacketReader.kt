@@ -1,8 +1,10 @@
-package com.nikon.transfer.protocol
+package com.ztransfer.protocol
 
+import android.content.Context
+import com.ztransfer.R
 import java.io.InputStream
 
-class PacketReader {
+class PacketReader(private val context: Context) {
     companion object {
         const val HEADER_SIZE = 8
         // 包长上限：远大于任何真实 PTP/IP 包，仅用于拦截损坏/伪造的长度字段。
@@ -66,7 +68,7 @@ class PacketReader {
         readFully(input, headerBuf, HEADER_SIZE)
         val length = headerBuf.getIntLE(0)
         if (length < HEADER_SIZE || length > MAX_PACKET_SIZE) {
-            throw java.io.IOException("非法包长度 $length: 连接数据已损坏")
+            throw java.io.IOException(context.getString(R.string.error_bad_packet_length, length))
         }
         return length
     }
@@ -79,7 +81,7 @@ class PacketReader {
         var offset = 0
         while (offset < n) {
             val read = input.read(dst, offset, n - offset)
-            if (read == -1) throw java.io.EOFException("连接已断开")
+            if (read == -1) throw java.io.EOFException(context.getString(R.string.connection_lost))
             offset += read
         }
     }

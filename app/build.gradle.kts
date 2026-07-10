@@ -15,8 +15,8 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "com.nikon.transfer"
-    compileSdk = 34
+    namespace = "com.ztransfer"
+    compileSdk = 35
 
     signingConfigs {
         if (hasReleaseKeystore) {
@@ -30,9 +30,9 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.nikon.transfer"
+        applicationId = "com.ztransfer"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
     }
@@ -107,7 +107,7 @@ tasks.register("installToDevice") {
             throw GradleException("adb install failed with exit code ${result.exitValue}")
         }
         exec {
-            commandLine("adb", "shell", "am", "start", "-n", "com.nikon.transfer/.MainActivity")
+            commandLine("adb", "shell", "am", "start", "-n", "com.ztransfer/.MainActivity")
         }
     }
 }

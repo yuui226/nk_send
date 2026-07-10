@@ -1,4 +1,7 @@
-package com.nikon.transfer.protocol
+package com.ztransfer.protocol
+
+import android.content.Context
+import com.ztransfer.R
 
 object PtpConstants {
     // PTP/IP 包类型
@@ -69,36 +72,36 @@ object PtpConstants {
 
     fun getExt(format: Int): String = FORMAT_EXT[format] ?: ".bin"
 
+    // 响应码 -> 文案资源 ID（随系统语言本地化，仅错误路径调用，不在热路径上）。
     private val RESPONSE_MESSAGES = mapOf(
-        0x2002 to "参数无效",
-        0x2003 to "操作不支持",
-        0x2004 to "存储空间不足",
-        0x2005 to "指定的对象不存在",
-        0x2006 to "存储已满",
-        0x2007 to "文件已存在",
-        0x2008 to "未指定文件名",
-        0x2009 to "文件保护",
-        0x200A to "会话未打开",
-        0x200B to "传输已取消",
-        0x200C to "未指定对象",
-        0x200D to "规范不兼容",
-        0x200F to "设备忙",
-        0x2010 to "父对象不存在",
-        0x201E to "会话已打开",
-        0xA801 to "设备固件错误",
-        0xA802 to "存储不可用"
+        0x2002 to R.string.ptp_invalid_parameter,
+        0x2003 to R.string.ptp_operation_not_supported,
+        0x2004 to R.string.ptp_insufficient_storage,
+        0x2005 to R.string.ptp_object_not_exist,
+        0x2006 to R.string.ptp_storage_full,
+        0x2007 to R.string.ptp_file_exists,
+        0x2008 to R.string.ptp_no_filename,
+        0x2009 to R.string.ptp_file_protected,
+        0x200A to R.string.ptp_session_not_open,
+        0x200B to R.string.ptp_transfer_cancelled,
+        0x200C to R.string.ptp_no_object,
+        0x200D to R.string.ptp_incompatible_spec,
+        0x200F to R.string.ptp_device_busy,
+        0x2010 to R.string.ptp_no_parent,
+        0x201E to R.string.ptp_session_already_open,
+        0xA801 to R.string.ptp_firmware_error,
+        0xA802 to R.string.ptp_storage_unavailable
     )
 
-    fun translateResponse(code: Int): String {
-        if (code == RESPONSE_OK) return "成功"
-        val upper = code and 0xFF00
-        val base = RESPONSE_MESSAGES[code]
-        if (base != null) return base
-        return when (upper) {
-            0x2000 -> "通用错误 (0x${code.toString(16).uppercase()})"
-            0xA000 -> "设备错误 (0x${code.toString(16).uppercase()})"
-            0xA800 -> "固件错误 (0x${code.toString(16).uppercase()})"
-            else -> "错误 (0x${code.toString(16).uppercase()})"
+    // 纯错误翻译器：所有调用点都在排除 RESPONSE_OK 之后才调用，不处理成功码。
+    fun translateResponse(context: Context, code: Int): String {
+        RESPONSE_MESSAGES[code]?.let { return context.getString(it) }
+        val hex = code.toString(16).uppercase()
+        return when (code and 0xFF00) {
+            0x2000 -> context.getString(R.string.ptp_general_error, hex)
+            0xA000 -> context.getString(R.string.ptp_device_error, hex)
+            0xA800 -> context.getString(R.string.ptp_firmware_error_code, hex)
+            else -> context.getString(R.string.ptp_unknown_error, hex)
         }
     }
 }

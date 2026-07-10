@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "NikonTransfer"
+rootProject.name = "ZTransfer"
 include(":app")

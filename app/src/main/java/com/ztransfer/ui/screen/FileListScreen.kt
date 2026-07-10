@@ -1,4 +1,4 @@
-package com.nikon.transfer.ui.screen
+package com.ztransfer.ui.screen
 
 import android.app.Activity
 import android.content.Context
@@ -78,21 +78,23 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nikon.transfer.protocol.NikonCamera
-import com.nikon.transfer.ui.theme.*
-import com.nikon.transfer.ui.util.Haptics
-import com.nikon.transfer.ui.util.formatSpeed
-import com.nikon.transfer.ui.util.rememberHaptics
-import com.nikon.transfer.viewmodel.CameraViewModel
-import com.nikon.transfer.viewmodel.TransferStatus
-import com.nikon.transfer.viewmodel.TransferTask
-import com.nikon.transfer.viewmodel.TransferViewModel
-import com.nikon.transfer.viewmodel.currentFileProgress
-import com.nikon.transfer.viewmodel.remainingCount
+import com.ztransfer.R
+import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.ui.theme.*
+import com.ztransfer.ui.util.Haptics
+import com.ztransfer.ui.util.formatSpeed
+import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.TransferStatus
+import com.ztransfer.viewmodel.TransferTask
+import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.viewmodel.currentFileProgress
+import com.ztransfer.viewmodel.remainingCount
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -110,6 +112,10 @@ private enum class PillMode { ICON, DONE, COUNTING }
 
 // 类型筛选下拉面板宽度（位置钳制计算需要显式宽度）。
 private val FILTER_PANEL_WIDTH = 148.dp
+
+// 无拍摄日期文件的分组键（非显示文案，显示时映射到 R.string.unknown_date）。
+// 以 "zzz" 开头保证按键降序排序时排在所有 "yyyyMMdd" 日期之前，与原行为一致。
+private const val UNKNOWN_DATE_KEY = "zzz_unknown"
 
 // 回到顶部：翻过多少条目（含分组头）才算"够深"；点击回顶时先瞬移到该位置再动画收尾。
 private const val BACK_TO_TOP_MIN_INDEX = 30
@@ -133,8 +139,8 @@ internal fun Modifier.collapseHeight(progress: () -> Float): Modifier =
         }
     }
 
-/** 从 Compose 的 Context 逐层向上找到宿主 Activity（用于返回键退出应用）。 */
-private fun Context.findActivity(): Activity? {
+/** 从 Compose 的 Context 逐层向上找到宿主 Activity（返回键退出应用、切语言后 recreate 共用）。 */
+internal fun Context.findActivity(): Activity? {
     var ctx: Context? = this
     while (ctx is ContextWrapper) {
         if (ctx is Activity) return ctx
@@ -144,7 +150,7 @@ private fun Context.findActivity(): Activity? {
 }
 
 fun groupFilesByDate(files: List<NikonCamera.FileInfo>): List<FileGroup> {
-    val grouped = files.groupBy { it.captureDate?.take(8) ?: "未知日期" }
+    val grouped = files.groupBy { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
     return grouped.map { (date, groupFiles) ->
         FileGroup(date = date, files = groupFiles.sortedByDescending { it.captureDate ?: "" })
     }.sortedByDescending { it.date }
@@ -218,6 +224,9 @@ fun FileListScreen(
     }
     // 断开时点击缩略图/整组按钮：信号按钮放大缩回强调一下，配合提示条指向"病因"。
     var signalPulse by remember { mutableStateOf(0) }
+    // 提示条文案在非组合的回调（BackHandler/onClick）里使用，先在组合期取出。
+    val exitHint = stringResource(R.string.press_back_to_exit)
+    val notConnectedHint = stringResource(R.string.camera_not_connected)
 
     // 文件列表是连接成功后的主页面：返回不回到连接页，而是"再按一次退出应用"。
     val context = LocalContext.current
@@ -228,7 +237,7 @@ fun FileListScreen(
             context.findActivity()?.finish()
         } else {
             lastBackTime = now
-            showHint("再按一次退出")
+            showHint(exitHint)
         }
     }
     // 筛选下拉打开时，返回键先收起下拉（后注册的 BackHandler 优先于上面的退出确认）。
@@ -284,7 +293,7 @@ fun FileListScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = colors.accentBlue)
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("正在获取文件列表…", color = colors.onSurfaceVariant)
+                    Text(stringResource(R.string.loading_file_list), color = colors.onSurfaceVariant)
                 }
             }
         }
@@ -300,10 +309,10 @@ fun FileListScreen(
                         // 由顶栏信号按钮指示状态，不会走到这里）。
                         Icon(Icons.Default.WifiOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = colors.accentOrange)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("连接已断开", color = colors.onBackground, style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.connection_lost), color = colors.onBackground, style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "请连接相机 Wi-Fi",
+                            stringResource(R.string.connect_camera_wifi),
                             color = colors.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center
@@ -319,7 +328,7 @@ fun FileListScreen(
                         ) {
                             Icon(Icons.Default.Wifi, contentDescription = null, tint = colors.accentBlue, modifier = Modifier.size(20.dp))
                             Text(
-                                "打开 Wi-Fi 设置",
+                                stringResource(R.string.open_wifi_settings),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Medium,
                                 color = colors.onBackground
@@ -328,7 +337,7 @@ fun FileListScreen(
                     } else {
                         Icon(Icons.Default.FolderOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = colors.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("相机中没有照片", color = colors.onSurfaceVariant)
+                        Text(stringResource(R.string.no_photos_on_camera), color = colors.onSurfaceVariant)
                     }
                 }
             }
@@ -351,7 +360,7 @@ fun FileListScreen(
                 if (!state.isConnectedToCamera) {
                     // 未连接：信号按钮放大强调 + 提示，而不是静默无响应。
                     signalPulse++
-                    showHint("相机未连接")
+                    showHint(notConnectedHint)
                 } else if (remaining.isNotEmpty()) {
                     haptics.tick()   // 整组入队只震一次
                     // 只加入队列、原地继续浏览，不跳转到队列页（想看进度可点右上角胶囊进入）。
@@ -364,7 +373,7 @@ fun FileListScreen(
                 }
                 if (!state.isConnectedToCamera) {
                     signalPulse++
-                    showHint("相机未连接")
+                    showHint(notConnectedHint)
                 } else {
                     haptics.tick()   // 只在真正入队时震（引导去设置时不震）
                     transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
@@ -380,7 +389,7 @@ fun FileListScreen(
                             color = colors.onSurfaceVariant.copy(alpha = 0.6f)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text("没有符合筛选的照片", color = colors.onSurfaceVariant)
+                        Text(stringResource(R.string.no_photos_match_filter), color = colors.onSurfaceVariant)
                     }
                 }
             }
@@ -436,7 +445,7 @@ fun FileListScreen(
                 BackToTopMark(
                     modifier = Modifier.size(24.dp),
                     color = colors.accentBlue,
-                    contentDescription = "回到顶部"
+                    contentDescription = stringResource(R.string.cd_back_to_top)
                 )
             }
         }
@@ -503,7 +512,7 @@ fun FileListScreen(
                 FilterMark(
                     modifier = Modifier.size(19.dp),
                     color = if (filterExts != null) colors.accentBlue else colors.onBackground,
-                    contentDescription = "筛选类型"
+                    contentDescription = stringResource(R.string.cd_filter_type)
                 )
             }
 
@@ -608,7 +617,7 @@ fun FileListScreen(
 
 @Composable
 fun QueuePill(
-    transferState: com.nikon.transfer.viewmodel.TransferState,
+    transferState: com.ztransfer.viewmodel.TransferState,
     haptics: Haptics,
     onClick: () -> Unit
 ) {
@@ -752,7 +761,7 @@ fun QueuePill(
                                 // 传输入口图标：清单勾选，直观表示"传输"。
                                 Icon(
                                     imageVector = Icons.Default.Checklist,
-                                    contentDescription = "传输",
+                                    contentDescription = stringResource(R.string.cd_transfer),
                                     tint = colors.statusConnected,
                                     modifier = Modifier
                                         .padding(horizontal = 12.dp)
@@ -889,7 +898,7 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
                 } else {
                     Icon(
                         Icons.Default.WifiOff,
-                        contentDescription = "相机未连接",
+                        contentDescription = stringResource(R.string.camera_not_connected),
                         tint = colors.statusError,
                         // 图标比 15dp 内容行略大，溢出居中进 padding（与 dBm 文本同法）。
                         modifier = Modifier
@@ -954,14 +963,15 @@ private fun GroupHeader(
             modifier = Modifier.height(28.dp)
         ) {
             Text(
-                text = formatDateHeader(group.date),
+                text = if (group.date == UNKNOWN_DATE_KEY) stringResource(R.string.unknown_date)
+                       else formatDateHeader(group.date),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 color = colors.onBackground
             )
             Icon(
                 Icons.Default.ExpandMore,
-                contentDescription = if (collapsed) "展开" else "收起",
+                contentDescription = stringResource(if (collapsed) R.string.cd_expand else R.string.cd_collapse),
                 tint = colors.accentBlue,
                 modifier = Modifier
                     .size(18.dp)
@@ -987,7 +997,7 @@ private fun GroupHeader(
             val allQueued = remainingGroupFiles.isEmpty()
             Icon(
                 if (allQueued) Icons.Default.Check else Icons.Default.Add,
-                contentDescription = if (allQueued) "已全部加入队列" else "传输整组",
+                contentDescription = stringResource(if (allQueued) R.string.cd_all_queued else R.string.cd_transfer_group),
                 tint = if (allQueued) colors.statusConnected else colors.accentBlue,
                 modifier = Modifier.size(18.dp)
             )
@@ -1262,12 +1272,12 @@ private fun LoadingMoreRow() {
             strokeWidth = 2.dp
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text("正在加载更多…", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+        Text(stringResource(R.string.loading_more), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
     }
 }
 
 private fun formatDateHeader(date: String): String {
-    if (date.length < 8 || date == "未知日期") return date
+    if (date.length < 8 || date == UNKNOWN_DATE_KEY) return date
     return "${date.substring(0, 4)}-${date.substring(4, 6)}-${date.substring(6, 8)}"
 }
 
@@ -1286,7 +1296,8 @@ private fun FilterDropdown(
     // 工作副本：确定前不生效；面板随开合重建，每次打开都从当前设置初始化。
     var working by remember { mutableStateOf(current) }
 
-    fun extLabel(ext: String) = ext.removePrefix(".").uppercase().ifEmpty { "其他" }
+    val otherLabel = stringResource(R.string.filter_other)
+    fun extLabel(ext: String) = ext.removePrefix(".").uppercase().ifEmpty { otherLabel }
     fun toggle(ext: String) {
         val cur = working ?: availableExts.toSet()
         val next = if (ext in cur) cur - ext else cur + ext
@@ -1311,7 +1322,7 @@ private fun FilterDropdown(
             modifier = Modifier.padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            FilterRow(label = "全部", selected = working == null, onClick = { working = null })
+            FilterRow(label = stringResource(R.string.filter_all), selected = working == null, onClick = { working = null })
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1337,7 +1348,7 @@ private fun FilterDropdown(
                 Spacer(modifier = Modifier.weight(1f))
                 Icon(
                     Icons.Default.Check,
-                    contentDescription = "确认筛选",
+                    contentDescription = stringResource(R.string.cd_apply_filter),
                     tint = colors.statusConnected,
                     modifier = Modifier.size(20.dp)
                 )
@@ -1377,7 +1388,7 @@ private fun TransferStatusIndicator(status: TransferStatus) {
     when (status) {
         TransferStatus.COMPLETED -> Icon(
             imageVector = Icons.Default.CheckCircle,
-            contentDescription = "已传输",
+            contentDescription = stringResource(R.string.cd_transferred),
             tint = colors.statusConnected,
             modifier = Modifier.size(18.dp)
         )
@@ -1388,19 +1399,19 @@ private fun TransferStatusIndicator(status: TransferStatus) {
         )
         TransferStatus.WAITING -> Icon(
             imageVector = Icons.Default.HourglassEmpty,
-            contentDescription = "排队中",
+            contentDescription = stringResource(R.string.cd_queued),
             tint = colors.accentBlue,
             modifier = Modifier.size(18.dp)
         )
         TransferStatus.FAILED -> Icon(
             imageVector = Icons.Default.Error,
-            contentDescription = "传输失败",
+            contentDescription = stringResource(R.string.cd_failed),
             tint = colors.statusError,
             modifier = Modifier.size(18.dp)
         )
         TransferStatus.CANCELLED -> Icon(
             imageVector = Icons.Default.Cancel,
-            contentDescription = "已取消",
+            contentDescription = stringResource(R.string.cd_cancelled),
             tint = colors.onSurfaceVariant,
             modifier = Modifier.size(18.dp)
         )

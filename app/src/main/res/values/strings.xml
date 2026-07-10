@@ -1,7 +1,122 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Z传</string>
-    <string name="transfer_channel_name">文件传输</string>
-    <string name="transfer_notification_title">Z传</string>
-    <string name="transfer_notification_text">正在传输文件…</string>
+    <string name="app_name">ZTransfer</string>
+    <string name="transfer_channel_name">File transfer</string>
+    <string name="transfer_notification_title">ZTransfer</string>
+    <string name="transfer_notification_text">Transferring files…</string>
+
+    <!-- Home / connection -->
+    <string name="connecting_camera">Connecting to camera…</string>
+    <string name="connect_camera_wifi">Connect to the camera\'s Wi-Fi</string>
+    <string name="open_wifi_settings">Open Wi-Fi Settings</string>
+    <string name="step_camera_wifi">On the camera, enable “Connect to smart device (Wi-Fi)”</string>
+    <string name="step_phone_wifi">Connect your phone\'s Wi-Fi to the camera\'s hotspot</string>
+
+    <!-- File list -->
+    <string name="loading_file_list">Loading file list…</string>
+    <string name="connection_lost">Connection lost</string>
+    <string name="no_photos_on_camera">No photos on the camera</string>
+    <string name="camera_not_connected">Camera not connected</string>
+    <string name="press_back_to_exit">Press back again to exit</string>
+    <string name="no_photos_match_filter">No photos match the filter</string>
+    <string name="loading_more">Loading more…</string>
+    <string name="unknown_date">Unknown date</string>
+    <string name="filter_all">All</string>
+    <string name="filter_other">Other</string>
+    <string name="cd_back_to_top">Back to top</string>
+    <string name="cd_filter_type">Filter by type</string>
+    <string name="cd_transfer">Transfer</string>
+    <string name="cd_expand">Expand</string>
+    <string name="cd_collapse">Collapse</string>
+    <string name="cd_all_queued">All added to queue</string>
+    <string name="cd_transfer_group">Transfer this group</string>
+    <string name="cd_apply_filter">Apply filter</string>
+    <string name="cd_transferred">Transferred</string>
+    <string name="cd_queued">Queued</string>
+    <string name="cd_failed">Transfer failed</string>
+    <string name="cd_cancelled">Cancelled</string>
+
+    <!-- Transfer queue -->
+    <string name="no_transfer_tasks">No transfer tasks</string>
+    <string name="status_waiting">Waiting</string>
+    <string name="status_skipped">Skipped</string>
+    <string name="status_cancelled">Cancelled</string>
+    <string name="transfer_failed">Transfer failed</string>
+    <string name="retry">Retry</string>
+    <string name="cancel">Cancel</string>
+    <string name="clear">Clear</string>
+    <string name="cd_back">Back</string>
+    <string name="cd_remove_from_queue">Remove from queue</string>
+    <string name="cd_retry_failed">Retry failed tasks</string>
+    <string name="retry_failed_title">Retry failed tasks?</string>
+    <string name="cd_clear_queue">Clear queue</string>
+    <string name="clear_queue_title">Clear the queue?</string>
+    <string name="clear_queue_subtitle">Removes all cards; the file currently transferring is not affected</string>
+
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="cd_close">Close</string>
+    <string name="transfer_directory">Transfer folder</string>
+    <string name="dir_set">Folder selected</string>
+    <string name="dir_not_set">Not set</string>
+    <string name="change_directory">Change folder</string>
+    <string name="choose_directory">Choose folder</string>
+    <string name="columns">Columns</string>
+    <string name="appearance">Appearance</string>
+    <string name="theme_system">System</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_light">Light</string>
+    <string name="language">Language</string>
+    <string name="language_system">System</string>
+    <string name="haptic_feedback">Haptic feedback</string>
+    <string name="keep_screen_on">Keep screen on</string>
+    <string name="keep_screen_on_desc">Keeps the screen on while the app is in the foreground to prevent disconnection</string>
+    <string name="version_label">ZTransfer v%1$s</string>
+    <string name="join_qq_group">QQ Group</string>
+    <string name="qq_group_copied">QQ group %1$s\nGroup number copied</string>
+
+    <!-- Photo preview -->
+    <string name="no_preview">No preview</string>
+
+    <!-- Transfer errors -->
+    <string name="error_dir_invalid">Transfer folder is no longer valid. Please choose it again</string>
+    <string name="error_create_file">Couldn\'t create file</string>
+    <string name="error_open_file">Couldn\'t open file</string>
+    <string name="error_rename_copy_refused">System refused to rename or copy the file</string>
+    <string name="error_save_failed">Save failed: %1$s</string>
+    <string name="error_copy_incomplete">Copy incomplete %1$d/%2$d</string>
+
+    <!-- Protocol errors -->
+    <string name="error_write_file">Failed to write file: %1$s</string>
+    <string name="error_camera_refused">Camera refused the connection</string>
+    <string name="error_handshake_bad_ack">Handshake failed: unexpected response</string>
+    <string name="error_handshake_empty">Handshake failed: empty response</string>
+    <string name="error_event_handshake">Event channel handshake failed</string>
+    <string name="error_open_session">OpenSession failed: %1$s</string>
+    <string name="error_incomplete_data">Incomplete data: received %1$d of %2$d bytes</string>
+    <string name="error_transfer_failed_reason">Transfer failed: %1$s</string>
+    <string name="error_bad_packet_length">Invalid packet length %1$d: connection data corrupted</string>
+
+    <!-- PTP response codes -->
+    <string name="ptp_invalid_parameter">Invalid parameter</string>
+    <string name="ptp_operation_not_supported">Operation not supported</string>
+    <string name="ptp_insufficient_storage">Not enough storage</string>
+    <string name="ptp_object_not_exist">Object does not exist</string>
+    <string name="ptp_storage_full">Storage full</string>
+    <string name="ptp_file_exists">File already exists</string>
+    <string name="ptp_no_filename">No file name specified</string>
+    <string name="ptp_file_protected">File is protected</string>
+    <string name="ptp_session_not_open">Session not open</string>
+    <string name="ptp_transfer_cancelled">Transfer cancelled</string>
+    <string name="ptp_no_object">No object specified</string>
+    <string name="ptp_incompatible_spec">Incompatible specification</string>
+    <string name="ptp_device_busy">Camera busy</string>
+    <string name="ptp_no_parent">Parent object does not exist</string>
+    <string name="ptp_session_already_open">Session already open</string>
+    <string name="ptp_firmware_error">Camera firmware error</string>
+    <string name="ptp_storage_unavailable">Storage unavailable</string>
+    <string name="ptp_general_error">General error (0x%1$s)</string>
+    <string name="ptp_device_error">Device error (0x%1$s)</string>
+    <string name="ptp_firmware_error_code">Firmware error (0x%1$s)</string>
+    <string name="ptp_unknown_error">Error (0x%1$s)</string>
 </resources>

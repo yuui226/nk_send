@@ -1,4 +1,4 @@
-package com.nikon.transfer
+package com.ztransfer
 
 import android.Manifest
 import android.app.Activity
@@ -18,7 +18,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import com.nikon.transfer.ui.theme.Motion
+import com.ztransfer.ui.theme.Motion
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,17 +29,22 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.nikon.transfer.ui.screen.*
-import com.nikon.transfer.ui.theme.AppTheme
-import com.nikon.transfer.ui.theme.NikonTransferTheme
-import com.nikon.transfer.viewmodel.CameraViewModel
-import com.nikon.transfer.viewmodel.TransferStatus
-import com.nikon.transfer.viewmodel.TransferViewModel
+import com.ztransfer.ui.screen.*
+import com.ztransfer.ui.theme.AppTheme
+import com.ztransfer.ui.theme.ZTransferTheme
+import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.TransferStatus
+import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 结果不阻断使用 */ }
+
+    // 应用内语言：设置里切换后 recreate()，这里重新包装基座 Context 使其生效。
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(AppLocale.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,7 +55,7 @@ class MainActivity : ComponentActivity() {
             // 在主题之上先取出来，切换即全局重排配色。
             val transferViewModel: TransferViewModel = viewModel()
             val transferState by transferViewModel.state.collectAsState()
-            NikonTransferTheme(themeMode = transferState.themeMode) {
+            ZTransferTheme(themeMode = transferState.themeMode) {
                 MainScreen(transferViewModel)
             }
         }
