@@ -32,6 +32,10 @@ object PtpConstants {
     // 标准 PTP 0x101B 在 Nikon 机身上不被识别（返回 0x2004），须用此操作码。
     // 参数: handle, offset_low, offset_high, maxsize_low, maxsize_high (均为 u32)
     const val NK_GET_PARTIAL_OBJECT_EX = 0x9431
+    // Nikon 专有 64 位文件大小查询 (libgphoto2: PTP_OC_NIKON_GetObjectSize)
+    // 标准 ObjectInfo(0x1008) 的 size 字段是 32 位，>4GB 文件报 0xFFFFFFFF；
+    // 调此操作码获取真实 64 位字节数。参数: handle，返回 8 字节小端 u64。
+    const val NK_GET_OBJECT_SIZE = 0x9421
 
     // 响应码
     const val RESPONSE_OK = 0x2001

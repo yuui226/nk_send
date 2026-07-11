@@ -323,6 +323,35 @@ class NikonCamera(private val context: Context) {
         val elapsed: Float
     )
 
+    /**
+     * 查询文件真实 64 位大小（字节）。当 ObjectInfo 对 >4GB 文件报 SIZE_UNKNOWN (0xFFFFFFFF)
+     * 时调用此方法获取精确值，以便分块下载和完整性校验。
+     * 返回 null 表示操作码不支持或 IO 失败——调用方应回退到 SIZE_UNKNOWN 路径。
+     *
+     * 通过 [ioMutex] 与其它命令串行。downloadToFile 内部调用时走 [getObjectSizeInternal]
+     * 避免重复获取同一 Mutex（kotlinx Mutex 不可重入）。
+     */
+    suspend fun getObjectSize(handle: Int): Long? = ioMutex.withLock {
+        withContext(Dispatchers.IO) { getObjectSizeInternal(handle) }
+    }
+
+    /** 不持锁的 [getObjectSize] 实现，仅供已持有 [ioMutex] 的上下文（如 downloadToFile）调用。 */
+    private fun getObjectSizeInternal(handle: Int): Long? {
+        try {
+            sendCmd(PtpConstants.NK_GET_OBJECT_SIZE, handle)
+            val (respCode, data) = recvRespWithPayload()
+            if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 8) {
+                log { "GetObjectSize failed: resp=0x${respCode.toString(16)}" }
+                return null
+            }
+            val size = data.getLongLE(0)
+            log { "GetObjectSize handle=$handle size=$size" }
+            return if (size > 0) size else null
+        } catch (_: Exception) {
+            return null
+        }
+    }
+
     /** 单文件下载完成后的下载速度（MB/s，1024 进制，与 UI formatSpeed 同口径；纯网络读取吞吐）。 */
     data class DownloadStats(
         val bytes: Long,
@@ -357,8 +386,19 @@ class NikonCamera(private val context: Context) {
                     Result.failure(Exception(context.getString(R.string.error_incomplete_data, totalDownloaded, expected)))
                 } else null
 
+            // 对 >4GB 文件（ObjectInfo 报 SIZE_UNKNOWN）用 GetObjectSize 获取真实 64 位大小。
+            // 用 internal 版本：当前已在 ioMutex 内，不可重入。
+            var effectiveSize = totalSize
+            if (totalSize == PtpConstants.SIZE_UNKNOWN || totalSize <= 0L) {
+                val realSize = getObjectSizeInternal(handle)
+                if (realSize != null && realSize > 0) {
+                    effectiveSize = realSize
+                    log { "DL_SIZE resolved: $totalSize -> $realSize via GetObjectSize" }
+                }
+            }
+
             // 决定是否走分块下载
-            val useChunked = totalSize > CHUNK_DOWNLOAD_THRESHOLD && totalSize != PtpConstants.SIZE_UNKNOWN
+            val useChunked = effectiveSize > CHUNK_DOWNLOAD_THRESHOLD && effectiveSize != PtpConstants.SIZE_UNKNOWN
                 && partialObjectSupported != false
 
             if (useChunked) {
@@ -367,9 +407,9 @@ class NikonCamera(private val context: Context) {
                 var firstChunk = true
                 var fallbackToFull = false
                 try {
-                    while (offset < totalSize && !fallbackToFull) {
+                    while (offset < effectiveSize && !fallbackToFull) {
                         ensureActive()
-                        val chunkSize = minOf(CHUNK_SIZE, totalSize - offset).toInt()
+                        val chunkSize = minOf(CHUNK_SIZE, effectiveSize - offset).toInt()
                         val offsetLow = (offset and 0xFFFFFFFFL).toInt()
                         val offsetHigh = (offset shr 32).toInt()
 
@@ -436,7 +476,7 @@ class NikonCamera(private val context: Context) {
                                         val now = System.currentTimeMillis()
                                         if (now - lastProgressTime >= 200) {
                                             val elapsed = (now - startTime) / 1000f
-                                            onProgress?.invoke(DownloadProgress(totalDownloaded, totalSize, elapsed))
+                                            onProgress?.invoke(DownloadProgress(totalDownloaded, effectiveSize, elapsed))
                                             lastProgressTime = now
                                         }
                                     }
