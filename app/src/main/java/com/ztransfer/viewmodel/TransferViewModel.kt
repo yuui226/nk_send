@@ -3,6 +3,7 @@ package com.ztransfer.viewmodel
 import android.app.Application
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.FileOutputStream
 
 enum class TransferStatus {
     WAITING, TRANSFERING, COMPLETED, FAILED, CANCELLED
@@ -93,7 +95,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         const val PART_PREFIX = ".nkpart_"
         // 重名副本后缀（"DSC_0001 (1).NEF" 中的 " (1)"），用于剥离/生成。
         val COPY_SUFFIX_REGEX = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
+        // 分块大小引用协议层常量，保证断点续传偏移与分块下载粒度的严格一致。
+        val RESUME_CHUNK_SIZE: Long get() = NikonCamera.CHUNK_SIZE
     }
+
+    /** 半成品文件信息：用于断点续传。 */
+    private data class PartInfo(val uri: Uri, val size: Long)
 
     init {
         val dir = prefs.getString("transfer_dir", null)
@@ -114,7 +121,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
         if (dir != null) {
             viewModelScope.launch(Dispatchers.IO) {
-                try { sweepAndListExisting(Uri.parse(dir)) } catch (_: Exception) {}
+                try { sweepAndListExisting(Uri.parse(dir), deleteParts = true) } catch (_: Exception) {}
             }
         }
     }
@@ -232,8 +239,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     return@launch   // finally 负责复位 isTransferring（前台服务尚未启动）
                 }
 
-                // 单次遍历：清扫遗留半成品(.nkpart_) + 建立"已存在(名称->大小)"去重表。
-                val existing = withContext(Dispatchers.IO) { sweepAndListExisting(uri) }
+                // 单次遍历：保留半成品(.nkpart_)供断点续传 + 建立"已存在(名称->大小)"去重表。
+                val (existing, partFiles) = withContext(Dispatchers.IO) {
+                    sweepAndListExisting(uri, deleteParts = false)
+                }
                 // 归一化名 -> 大小集合：把重名冲突时落盘的 "DSC_0001 (1).NEF" 副本也归到
                 // "DSC_0001.NEF" 名下参与"已存在则跳过"，跨会话不再重复下载这些副本。
                 val existingSizes = HashMap<String, MutableSet<Long>>()
@@ -286,54 +295,115 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         serviceStarted = true
                     }
 
-                    // 追踪已创建的文档，失败/取消时删除半成品，避免残留与重试时产生重名副本。
+                    // 断点续传：检查是否存在上次传输留下的半成品文件。
+                    var resumeOffset = 0L
                     var fileDocUri: Uri? = null
+                    val partFile = partFiles[task.file.fileName]
+                    if (partFile != null) {
+                        val partSize = partFile.size
+                        if (partSize > 0 && task.file.size > 0 && partSize < task.file.size) {
+                            // 按块边界对齐续传偏移（丢弃可能损坏的不完整尾块）。
+                            resumeOffset = (partSize / RESUME_CHUNK_SIZE) * RESUME_CHUNK_SIZE
+                            if (resumeOffset > 0) {
+                                fileDocUri = partFile.uri
+                                log { "DL_RESUME: ${task.file.fileName} partSize=$partSize resumeOffset=$resumeOffset" }
+                            } else {
+                                // 半成品太小（<64MB 且未传完），不续传，删掉重建。
+                                deleteQuietly(partFile.uri)
+                            }
+                        } else if (partSize >= task.file.size) {
+                            // 半成品已完整：直接改名跳过下载（上次在下载完成后改名之前崩了）。
+                            log { "DL_RESUME_COMPLETE: ${task.file.fileName} partSize=$partSize" }
+                            val finalName = task.file.fileName
+                            var renamed = renameQuietly(partFile.uri, finalName)
+                            if (renamed == null) {
+                                // 改名失败：复用已有副本逻辑
+                                for (n in 1..99) {
+                                    val candidate = suffixedName(finalName, n)
+                                    if (existing.containsKey(candidate)) continue
+                                    renamed = renameQuietly(partFile.uri, candidate)
+                                    if (renamed != null) break
+                                }
+                            }
+                            if (renamed != null) {
+                                existing[finalName] = partSize
+                                existingSizes.getOrPut(baseName(finalName)) { HashSet() }.add(partSize)
+                                updateTask(handle) {
+                                    it.copy(status = TransferStatus.COMPLETED, skipped = true,
+                                        progress = 1f, downloaded = partSize, speed = 0)
+                                }
+                            } else {
+                                // 改不了，删半成品让正常路径重下
+                                deleteQuietly(partFile.uri)
+                            }
+                            continue  // 跳过本次下载（无论成功改名还是已删除重下）
+                        } else {
+                            // size==0 或未知大小的异常半成品，删掉重建
+                            deleteQuietly(partFile.uri)
+                        }
+                    }
+
                     try {
                         // SAF 的建文件/开流/关闭冲刷都是跨进程 Binder + 磁盘 IO，放 IO 线程，
                         // 不在主线程随每个文件抖一下（状态更新经 StateFlow.update，线程安全）。
                         val result = withContext(Dispatchers.IO) {
-                            // 写入临时名 .nkpart_原名（扩展名保留，与 mime 匹配，避免 SAF 追加扩展名）。
-                            // 下载完整后再改名成真正文件名——崩溃/被杀只会留下 .nkpart_ 半成品，绝不出现残缺的真名文件。
-                            val createdUri = DocumentsContract.createDocument(
-                                contentResolver,
-                                docUri,
-                                getMimeType(task.file.fileName),
-                                PART_PREFIX + task.file.fileName
-                            ) ?: throw Exception(str(R.string.error_create_file))
-                            fileDocUri = createdUri
+                            if (fileDocUri == null) {
+                                // 新建临时文件
+                                val createdUri = DocumentsContract.createDocument(
+                                    contentResolver,
+                                    docUri,
+                                    getMimeType(task.file.fileName),
+                                    PART_PREFIX + task.file.fileName
+                                ) ?: throw Exception(str(R.string.error_create_file))
+                                fileDocUri = createdUri
+                            }
 
-                            val outputStream = contentResolver.openOutputStream(createdUri)
-                                ?: throw Exception(str(R.string.error_open_file))
+                            // 续传时用 ParcelFileDescriptor "rw" 模式实现 seekable 写入；
+                            // 新文件用 openOutputStream（截断写入，行为不变）。
+                            val outputStream: java.io.OutputStream
+                            if (resumeOffset > 0) {
+                                val pfd = contentResolver.openFileDescriptor(fileDocUri!!, "rw")
+                                    ?: throw Exception(str(R.string.error_open_file))
+                                outputStream = FileOutputStream(pfd.fileDescriptor).apply {
+                                    channel.position(resumeOffset)
+                                }
+                            } else {
+                                outputStream = contentResolver.openOutputStream(fileDocUri!!)
+                                    ?: throw Exception(str(R.string.error_open_file))
+                            }
 
                             // 用大缓冲包裹 SAF 输出流，把零散的写批量化，减少 ContentProvider 往返。
                             // 缺了它，每个 PTP-IP 数据包都要跨 Binder 写一次 SAF，吞吐直接腰斩（2M/s→<1M/s）。
                             java.io.BufferedOutputStream(outputStream, 1024 * 1024).use { out ->
-                                camera.downloadToFile(handle, out) { progress ->
-                                    val speed = if (progress.elapsed > 0) {
-                                        (progress.downloaded / progress.elapsed).toLong()
-                                    } else 0
-                                    // 单次原子更新：同时写当前速度与该任务进度，避免每个进度 tick
-                                    // 触发两次 StateFlow 发射 / 两次全量列表拷贝（5Hz 下累积可观）。
-                                    _state.update { state ->
-                                        state.copy(
-                                            currentSpeed = speed,
-                                            tasks = state.tasks.map { t ->
-                                                if (t.file.handle == handle && t.status == TransferStatus.TRANSFERING) {
-                                                    t.copy(
-                                                        progress = if (progress.total > 0) {
-                                                            progress.downloaded.toFloat() / progress.total
-                                                        } else 0f,
-                                                        downloaded = progress.downloaded,
-                                                        speed = speed
-                                                    )
-                                                } else t
-                                            }
-                                        )
-                                    }
-                                }
+                                camera.downloadToFile(
+                                    handle, out,
+                                    onProgress = { progress ->
+                                        val speed = if (progress.elapsed > 0) {
+                                            (progress.downloaded / progress.elapsed).toLong()
+                                        } else 0
+                                        _state.update { state ->
+                                            state.copy(
+                                                currentSpeed = speed,
+                                                tasks = state.tasks.map { t ->
+                                                    if (t.file.handle == handle && t.status == TransferStatus.TRANSFERING) {
+                                                        t.copy(
+                                                            progress = if (progress.total > 0) {
+                                                                progress.downloaded.toFloat() / progress.total
+                                                            } else 0f,
+                                                            downloaded = progress.downloaded,
+                                                            speed = speed
+                                                        )
+                                                    } else t
+                                                }
+                                            )
+                                        }
+                                    },
+                                    resumeOffset = resumeOffset,
+                                    totalSize = task.file.size
+                                )
                             }
                         }
-                        // withContext 正常返回则临时文件必已创建（否则内部已抛异常）。
+                        // withContext 正常返回则 fileDocUri 必已赋值。
                         val createdUri = checkNotNull(fileDocUri)
 
                         result.fold(
@@ -343,9 +413,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 var savedName = finalName
                                 var renamedUri = if (renameBroken) null else renameQuietly(createdUri, finalName)
                                 if (renamedUri == null && !renameBroken) {
-                                    // 目标名已被占用（历史残缺文件 / 相机跨文件夹 DSC 编号回卷重名）。
-                                    // 绝不覆盖已有文件，也绝不让任务陷入"每次重下、每次改名失败"的
-                                    // 死循环：落为 "名字 (n).扩展名" 副本。
                                     for (n in 1..99) {
                                         val candidate = suffixedName(finalName, n)
                                         if (existing.containsKey(candidate)) continue
@@ -358,9 +425,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                                 var saveError: Throwable? = null
                                 if (renamedUri == null) {
-                                    // 鸿蒙回退路径：连不冲突的候选名都改不动 = 该设备 renameDocument
-                                    // 损坏（而非重名问题），把临时文件【复制】成正式文件再删临时。
-                                    // 多一次本地磁盘拷贝，仅发生在改名损坏的设备上。
                                     var copyName = finalName
                                     if (existing.containsKey(copyName)) {
                                         for (n in 1..99) {
@@ -377,10 +441,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     )
                                     val copiedUri = copied.getOrNull()
                                     if (copiedUri != null) {
-                                        renameBroken = true   // 记住：本会话后续文件直接走复制
-                                        deleteQuietly(createdUri)   // 临时文件使命完成
-                                        // provider 重名时会静默改名（如自动加后缀），
-                                        // 去重簿记以实际落盘名为准。
+                                        renameBroken = true
+                                        deleteQuietly(createdUri)
                                         savedName = displayNameOf(copiedUri) ?: copyName
                                         renamedUri = copiedUri
                                         log { "DL_SAVE via copy fallback: $savedName (rename broken)" }
@@ -389,8 +451,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     }
                                 }
                                 if (renamedUri != null) {
-                                    // 供后续任务与跨会话去重（副本按归一化名归档）。记真实落盘字节数
-                                    // 而非 ObjectInfo 大小——>4GB 对象后者只是哨兵值，与磁盘对不上。
                                     existing[savedName] = stats.bytes
                                     existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(stats.bytes)
                                     updateTask(handle) {
@@ -401,9 +461,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         )
                                     }
                                 } else {
-                                    // 改名与复制均失败：删掉临时文件并标记失败让用户重试，
-                                    // 避免完整数据以 .nkpart_ 名残留后被后续 sweep 静默删除。
-                                    // 错误文案带上具体原因——用户报障时截图即含一手线索。
+                                    // 改名与复制均失败：删掉临时文件并标记失败——
+                                    // 重试时从头下载（改名失败不是传输层问题，续传解决不了）。
                                     deleteQuietly(createdUri)
                                     val reason = when {
                                         saveError is java.io.FileNotFoundException ->
@@ -417,9 +476,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                             },
                             onFailure = { e ->
-                                // 掉线也当普通失败处理（相机断开后会省电关 Wi-Fi，无法即时续传）；
-                                // 重连后由用户点"重试全部"重新下载。
-                                deleteQuietly(fileDocUri)
+                                // 传输失败：保留半成品文件，重试时从块边界续传。
+                                // 不删 .nkpart_：断点续传依赖它。下次队列启动的 sweep
+                                // 只在 App 启动的 init 中清扫（deleteParts=true），
+                                // 队列里的重试走 deleteParts=false 保留半成品。
                                 updateTask(handle) {
                                     it.copy(status = TransferStatus.FAILED, error = e.message ?: str(R.string.transfer_failed), speed = 0)
                                 }
@@ -428,17 +488,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     } catch (e: CancellationException) {
                         // 协程取消只发生在 ViewModel 销毁（App 退出）时——界面上的"停止"
                         // 不再取消协程（正在传的文件自然传完，见 withdrawPending）。
-                        // 此处【不】就地删除半成品：清理要等协议层收尾后才执行，时序难保证，
-                        // 半成品交给每次队列启动/App 启动的 sweep 统一清扫
-                        //（.nkpart_ 前缀带前导点，相册中本就不可见）。
-                        throw e   // 取消须向上传播
+                        // 此处【不】就地删除半成品：半成品交给 App 启动的 sweep 统一清扫
+                        //（.nkpart_ 前缀带前导点，相册中本就不可见），也是断点续传的基础。
+                        throw e
                     } catch (e: Exception) {
-                        deleteQuietly(fileDocUri)
+                        // 异常保留半成品——不是传输层错误（如目录失效），但半成品仍有价值
+                        // 保留可让用户修好设置后重试时续传。
                         if (BuildConfig.DEBUG) {
                             android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
                         }
-                        // 目录中途失效（如传输期间被文件管理器删除）：翻译成人话，
-                        // 而不是把 SAF 的 "Missing file for primary:..." 原样示人。
                         val msg = if (e is java.io.FileNotFoundException) {
                             str(R.string.error_dir_invalid)
                         } else {
@@ -462,12 +520,20 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * 单次遍历目标目录：
-     * 1) 删除遗留的半成品（[PART_PREFIX] 开头的临时文件，上次崩溃/被杀留下）；
-     * 2) 返回其余"完整文件"的 显示名->大小（字节，未知记 -1），用于"已存在则跳过"。
+     * 1) 当 [deleteParts]=true 时删除遗留的半成品（[PART_PREFIX] 开头的临时文件，上次崩溃/被杀留下）；
+     * 2) 返回完整文件的 显示名->大小（字节，未知记 -1），用于"已存在则跳过"；
+     * 3) 收集半成品文件信息到 parts 映射（原文件名 -> PartInfo），用于断点续传。
      * 合并清扫与列举，避免两次全目录扫描；正常完成的文件已改真名，不会被误删。
+     *
+     * @param deleteParts true=清空半成品（App 启动/新队列）, false=保留半成品供续传（队列启动重试）
+     * @return Pair(完整文件映射, 半成品映射: 去掉前缀后的原文件名 -> PartInfo)
      */
-    private fun sweepAndListExisting(treeUri: Uri): MutableMap<String, Long> {
+    private fun sweepAndListExisting(
+        treeUri: Uri,
+        deleteParts: Boolean = true
+    ): Pair<MutableMap<String, Long>, Map<String, PartInfo>> {
         val map = HashMap<String, Long>()
+        val parts = HashMap<String, PartInfo>()
         try {
             val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
                 treeUri,
@@ -489,7 +555,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     while (c.moveToNext()) {
                         val name = c.getString(nameIdx) ?: continue
                         if (name.startsWith(PART_PREFIX)) {
-                            if (idIdx >= 0) {
+                            if (deleteParts && idIdx >= 0) {
                                 val docId = c.getString(idIdx) ?: continue
                                 try {
                                     DocumentsContract.deleteDocument(
@@ -497,6 +563,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
                                     )
                                 } catch (_: Exception) {}
+                            } else if (!deleteParts && idIdx >= 0) {
+                                // 续传模式：保留半成品，记录 URI 和大小
+                                val docId = c.getString(idIdx) ?: continue
+                                val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else 0L
+                                val origName = name.removePrefix(PART_PREFIX)
+                                if (origName.isNotEmpty()) {
+                                    parts[origName] = PartInfo(
+                                        uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
+                                        size = size
+                                    )
+                                }
                             }
                         } else {
                             val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else -1L
@@ -506,7 +583,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 }
             }
         } catch (_: Exception) {}
-        return map
+        return map to parts
     }
 
     /**

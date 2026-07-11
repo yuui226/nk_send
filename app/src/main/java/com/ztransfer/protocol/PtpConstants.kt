@@ -28,6 +28,10 @@ object PtpConstants {
     const val GET_OBJECT_INFO = 0x1008
     const val GET_OBJECT = 0x1009
     const val GET_THUMB = 0x100A
+    // Nikon 专有分块读取 (libgphoto2: PTP_OC_NIKON_GetPartialObjectEx)
+    // 标准 PTP 0x101B 在 Nikon 机身上不被识别（返回 0x2004），须用此操作码。
+    // 参数: handle, offset_low, offset_high, maxsize_low, maxsize_high (均为 u32)
+    const val NK_GET_PARTIAL_OBJECT_EX = 0x9431
 
     // 响应码
     const val RESPONSE_OK = 0x2001

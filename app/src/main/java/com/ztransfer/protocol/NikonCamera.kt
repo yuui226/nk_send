@@ -36,8 +36,12 @@ class NikonCamera(private val context: Context) {
     // 会话是否已 OpenSession 成功；用于决定 close() 是否需要发送 CloseSession，
     // 避免在握手中途失败时空等 CloseSession 响应（最长可达 soTimeout）。
     @Volatile private var sessionOpen = false
+    // Nikon GetPartialObjectEx (0x9431) 支持探测：null=未探测, true=支持, false=不支持。
+    // 仅首块失败时置为 false 并回退到全量下载；同一会话后续大文件不再试探。
+    // 标准 PTP 0x101B 在 Nikon 机身上不被识别，须用此专有操作码。
+    @Volatile private var partialObjectSupported: Boolean? = null
 
-    private companion object {
+    companion object {
         const val TAG = "ZTransfer"
         // 命令/事件通道的常规读超时。
         const val SO_TIMEOUT_MS = 60_000
@@ -53,6 +57,13 @@ class NikonCamera(private val context: Context) {
         // 60s 超时会抱着 ioMutex 白等一分钟——重试的首个下载全程被挡住，表现为
         // "停止后重试卡半天没速度"。静默 3s 即认定连接不可用，断开走自动重连。
         const val CANCEL_DRAIN_TIMEOUT_MS = 3_000
+        // 大于此阈值的文件走分块下载 (GetPartialObject)，防止相机 PTP 事务超时断连。
+        // Nikon 相机单次 PTP 事务通常有 2-3 分钟超时，大视频全量下载容易触发。
+        const val CHUNK_DOWNLOAD_THRESHOLD = 128L * 1024 * 1024  // 128 MB
+        // 每块大小：足够大以最小化块间命令开销，足够小以远低于相机超时 (64MB @2MB/s ≈32s)。
+        // 也是断点续传的检查点粒度——传输中断后最多重传当前块。
+        // internal: TransferViewModel 引用此值做续传偏移对齐。
+        const val CHUNK_SIZE = 64L * 1024 * 1024                 // 64 MB
     }
 
     /** 仅 debug 构建输出协议日志，避免 release 包泄露 handle/size 并拖慢热路径。 */
@@ -318,130 +329,256 @@ class NikonCamera(private val context: Context) {
         val mbps: Float
     )
 
+    /**
+     * 下载文件到 [output]。[totalSize] 为 ObjectInfo 中的文件大小（0 或 SIZE_UNKNOWN 表示未知，
+     * 走全量下载）；[resumeOffset] 非零时分块下载从该偏移开始（断点续传入口），
+     * 调用方负责确保 output 已定位到该偏移。
+     */
     suspend fun downloadToFile(
         handle: Int,
         output: OutputStream,
-        onProgress: ((DownloadProgress) -> Unit)? = null
+        onProgress: ((DownloadProgress) -> Unit)? = null,
+        resumeOffset: Long = 0L,
+        totalSize: Long = 0L
     ): Result<DownloadStats> = ioMutex.withLock {
         withContext(Dispatchers.IO) {
-            // 声明在 try 外：取消路径（catch CancellationException）需要按 expected/totalDownloaded
-            // 计算剩余数据量，决定就地排空还是断开重连。
-            var totalDownloaded = 0L
+            var totalDownloaded = resumeOffset
             var expected = 0L
-            try {
-                sendCmd(PtpConstants.GET_OBJECT, handle)
+            val startTime = System.currentTimeMillis()
+            var lastProgressTime = startTime
+            var readNanos = 0L
 
-                val startTime = System.currentTimeMillis()
-                var lastProgressTime = startTime
-                // 下载速度：累计纯网络读耗时算吞吐（写盘极快、可忽略，故只测读）。
-                var readNanos = 0L
-                fun buildStats(): DownloadStats {
-                    // 1024 进制 MB/s，与 UI 的 formatFileSize/formatSpeed 同口径，避免同屏两种单位差 ~5%。
-                    val mbps = if (readNanos > 0) totalDownloaded / (readNanos / 1e9f) / (1024f * 1024f) else 0f
-                    return DownloadStats(totalDownloaded, mbps)
-                }
-                // 完整性校验：相机若异常提前结束数据阶段，绝不能把截断的文件当完整文件返回
-                //（.nkpart_ 改真名的防线就在这一步之后）。0xFFFFFFFF（32 位哨兵）与全 FF（64 位哨兵）
-                // 表示大小未知，无法校验只能放行。
-                fun verifyComplete(): Result<DownloadStats>? =
-                    if (expected > 0 && expected != PtpConstants.SIZE_UNKNOWN && expected != -1L && totalDownloaded != expected) {
-                        Result.failure(Exception(context.getString(R.string.error_incomplete_data, totalDownloaded, expected)))
-                    } else null
+            fun buildStats(): DownloadStats {
+                val mbps = if (readNanos > 0) totalDownloaded / (readNanos / 1e9f) / (1024f * 1024f) else 0f
+                return DownloadStats(totalDownloaded, mbps)
+            }
+            fun verifyComplete(): Result<DownloadStats>? =
+                if (expected > 0 && expected != PtpConstants.SIZE_UNKNOWN && expected != -1L && totalDownloaded != expected) {
+                    Result.failure(Exception(context.getString(R.string.error_incomplete_data, totalDownloaded, expected)))
+                } else null
 
-                while (true) {
-                    // 协作式取消：在每个包边界检查，使协程取消（仅 App 退出时发生）能及时中断
-                    ensureActive()
-                    // 零拷贝读取：直接从共享缓冲区写入，避免每包一次全量分配+复制。
-                    val rt0 = System.nanoTime()
-                    val packet = cmdReader.readPacketRaw(cmdInput!!)
-                    readNanos += System.nanoTime() - rt0
-                    val buf = packet.buffer
-                    val len = packet.payloadLen
+            // 决定是否走分块下载
+            val useChunked = totalSize > CHUNK_DOWNLOAD_THRESHOLD && totalSize != PtpConstants.SIZE_UNKNOWN
+                && partialObjectSupported != false
 
-                    when (packet.type) {
-                        PtpConstants.CMD_RESPONSE -> {
-                            val respCode = if (len >= 2) buf.getUShortLE(0) else 0
-                            log { "DL_CMD_RESPONSE resp=0x${respCode.toString(16)} downloaded=$totalDownloaded" }
-                            if (respCode != PtpConstants.RESPONSE_OK) {
-                                return@withContext Result.failure(Exception(context.getString(R.string.error_transfer_failed_reason, PtpConstants.translateResponse(context, respCode))))
-                            }
-                            return@withContext verifyComplete() ?: Result.success(buildStats())
-                        }
-                        PtpConstants.START_DATA_PACKET -> {
-                            // PTP/IP Start-Data 载荷 = TID(4) + 总长度(8，64 位小端)。只读低 32 位
-                            // 会把 >4GB 视频的预期大小截断，完整下载后被误判"数据不完整"。
-                            expected = when {
-                                len >= 12 -> buf.getLongLE(4)
-                                len >= 8 -> buf.getIntLE(4).toLong() and 0xFFFFFFFFL
-                                else -> 0L
-                            }
-                            log { "DL_START expected=$expected" }
-                        }
-                        PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
-                            // DATA 与 END_DATA 同样携带数据段（前 4 字节为 PTP 数据阶段头）。
-                            // 先写入本包数据，再判断是否为结束包，避免丢失最后一段数据。
-                            if (len > 4) {
-                                try {
-                                    output.write(buf, 4, len - 4)
-                                } catch (e: java.io.IOException) {
-                                    // 写本地文件失败（如存储空间不足）——非相机连接问题，
-                                    // 包装成非 IOException 以便上层按单文件失败处理，而不是误判为掉线。
-                                    return@withContext Result.failure(
-                                        OutputWriteException(context.getString(R.string.error_write_file, e.message), e)
-                                    )
-                                }
-                                totalDownloaded += len - 4
-
-                                val now = System.currentTimeMillis()
-                                if (now - lastProgressTime >= 200) {
-                                    val elapsed = (now - startTime) / 1000f
-                                    onProgress?.invoke(DownloadProgress(totalDownloaded, expected, elapsed))
-                                    lastProgressTime = now
-                                }
-                            }
-                            if (packet.type == PtpConstants.END_DATA_PACKET) {
-                                log { "DL_END total=$totalDownloaded, draining CMD_RESPONSE..." }
-                                // 必须消费掉本次传输的 CMD_RESPONSE，否则残留包会污染下次传输
-                                drainCmdResponse()
-                                return@withContext verifyComplete() ?: Result.success(buildStats())
-                            }
-                        }
-                        PtpConstants.PING -> {
-                            log { "DL_PING during download" }
-                            sendPong(cmdOutput)
-                        }
-                    }
-                }
-                // 不可达（循环内必经 return@withContext），但 try 作为表达式时
-                // 编译器要求块末尾给出 Result 类型的值。
-                @Suppress("UNREACHABLE_CODE")
-                Result.failure(Exception("Unexpected end of stream"))
-            } catch (e: CancellationException) {
-                // 取消时相机仍在发送本文件剩余数据（TCP 背压堆着），残留数据会污染 socket、
-                // 令下一条命令协议错位。处理：先发 PTP/IP Cancel 请求相机中止本事务的数据
-                // 阶段，再把在途数据排空到 CMD_RESPONSE（相机停发后在途只剩 ≈TCP 窗口的
-                // 数 MB，秒级完成）——连接保住，"停止后立刻重试"无需等重连。
-                // 安全阀：不支持 Cancel 的机型会继续发完整个文件，排空超预算即断开兜底。
+            if (useChunked) {
+                // ===== 分块下载路径 =====
+                var offset = resumeOffset
+                var firstChunk = true
+                var fallbackToFull = false
                 try {
-                    withContext(NonCancellable) {
-                        sendCancel()
-                        // 排空期间收紧读超时：相机停发数据又不回响应包时 3s 即放弃，
-                        // 不再按常规 60s 干等（那正是"停止后重试卡半天"的来源）。
-                        cmdSocket?.soTimeout = CANCEL_DRAIN_TIMEOUT_MS
-                        if (drainCmdResponse(CANCEL_DRAIN_BUDGET)) {
-                            cmdSocket?.soTimeout = SO_TIMEOUT_MS   // 连接保住，恢复常规超时
-                        } else {
-                            log { "DL_CANCEL drain budget exceeded, closing" }
-                            closeQuietly()
+                    while (offset < totalSize && !fallbackToFull) {
+                        ensureActive()
+                        val chunkSize = minOf(CHUNK_SIZE, totalSize - offset).toInt()
+                        val offsetLow = (offset and 0xFFFFFFFFL).toInt()
+                        val offsetHigh = (offset shr 32).toInt()
+
+                        log { "DL_CHUNK offset=$offset size=$chunkSize" }
+                        // Nikon 专有 GetPartialObjectEx: 5 参数 (handle, offLo, offHi, sizeLo, sizeHi)
+                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, offsetLow, offsetHigh, chunkSize, 0)
+
+                        var chunkExpected = 0L
+                        var chunkDownloaded = 0L
+                        var chunkDone = false
+
+                        while (!chunkDone) {
+                            ensureActive()
+                            val rt0 = System.nanoTime()
+                            val packet = cmdReader.readPacketRaw(cmdInput!!)
+                            readNanos += System.nanoTime() - rt0
+                            val buf = packet.buffer
+                            val len = packet.payloadLen
+
+                            when (packet.type) {
+                                PtpConstants.CMD_RESPONSE -> {
+                                    val respCode = if (len >= 2) buf.getUShortLE(0) else 0
+                                    log { "DL_CHUNK_RESP resp=0x${respCode.toString(16)} offset=$offset" }
+                                    if (firstChunk && respCode != PtpConstants.RESPONSE_OK) {
+                                        // 首块非 OK → 操作码不支持或参数非法，标记回退出分块循环
+                                        partialObjectSupported = false
+                                        fallbackToFull = true
+                                        log { "DL_PARTIAL not supported (resp=0x${respCode.toString(16)}), falling back to full" }
+                                        chunkDone = true
+                                    } else if (respCode != PtpConstants.RESPONSE_OK) {
+                                        return@withContext Result.failure(Exception(
+                                            context.getString(R.string.error_transfer_failed_reason, PtpConstants.translateResponse(context, respCode))
+                                        ))
+                                    } else {
+                                        // OK：校验本块完整性（可能比 END_DATA_PACKET 先到，统一在此校验）
+                                        if (chunkExpected > 0 && chunkDownloaded != chunkExpected) {
+                                            return@withContext Result.failure(Exception(
+                                                context.getString(R.string.error_incomplete_data, chunkDownloaded, chunkExpected)
+                                            ))
+                                        }
+                                        chunkDone = true
+                                    }
+                                }
+                                PtpConstants.START_DATA_PACKET -> {
+                                    chunkExpected = when {
+                                        len >= 12 -> buf.getLongLE(4)
+                                        len >= 8 -> buf.getIntLE(4).toLong() and 0xFFFFFFFFL
+                                        else -> 0L
+                                    }
+                                    log { "DL_CHUNK_START expected=$chunkExpected" }
+                                }
+                                PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
+                                    if (len > 4) {
+                                        try {
+                                            output.write(buf, 4, len - 4)
+                                        } catch (e: java.io.IOException) {
+                                            return@withContext Result.failure(
+                                                OutputWriteException(context.getString(R.string.error_write_file, e.message), e)
+                                            )
+                                        }
+                                        totalDownloaded += len - 4
+                                        chunkDownloaded += len - 4
+
+                                        val now = System.currentTimeMillis()
+                                        if (now - lastProgressTime >= 200) {
+                                            val elapsed = (now - startTime) / 1000f
+                                            onProgress?.invoke(DownloadProgress(totalDownloaded, totalSize, elapsed))
+                                            lastProgressTime = now
+                                        }
+                                    }
+                                    if (packet.type == PtpConstants.END_DATA_PACKET) {
+                                        drainCmdResponse()
+                                        if (chunkExpected > 0 && chunkDownloaded != chunkExpected) {
+                                            return@withContext Result.failure(Exception(
+                                                context.getString(R.string.error_incomplete_data, chunkDownloaded, chunkExpected)
+                                            ))
+                                        }
+                                        chunkDone = true
+                                    }
+                                }
+                                PtpConstants.PING -> {
+                                    sendPong(cmdOutput)
+                                }
+                            }
+                        }
+
+                        offset += chunkSize
+                        firstChunk = false
+                    }
+
+                    // 全部分块完成（非回退场景才返回；回退场景走全量下载）
+                    if (!fallbackToFull) {
+                        return@withContext Result.success(buildStats())
+                    }
+                    // fallbackToFull: 重置累加器，继续走全量下载
+                    totalDownloaded = 0L
+                    expected = 0L
+                    readNanos = 0L
+                    lastProgressTime = System.currentTimeMillis()
+                } catch (e: CancellationException) {
+                    try {
+                        withContext(NonCancellable) {
+                            sendCancel()
+                            cmdSocket?.soTimeout = CANCEL_DRAIN_TIMEOUT_MS
+                            if (drainCmdResponse(CANCEL_DRAIN_BUDGET)) {
+                                cmdSocket?.soTimeout = SO_TIMEOUT_MS
+                            } else {
+                                log { "DL_CHUNK_CANCEL drain budget exceeded, closing" }
+                                closeQuietly()
+                            }
+                        }
+                    } catch (_: Exception) {
+                        closeQuietly()
+                    }
+                    throw e
+                } catch (e: Exception) {
+                    return@withContext Result.failure(e)
+                }
+            }
+
+            // ===== 全量下载路径（含分块不支持回退） =====
+            totalDownloaded = 0L
+            expected = 0L
+            val savedTimeout = cmdSocket?.soTimeout
+            cmdSocket?.soTimeout = 0
+            try {
+                try {
+                    sendCmd(PtpConstants.GET_OBJECT, handle)
+
+                    while (true) {
+                        ensureActive()
+                        val rt0 = System.nanoTime()
+                        val packet = cmdReader.readPacketRaw(cmdInput!!)
+                        readNanos += System.nanoTime() - rt0
+                        val buf = packet.buffer
+                        val len = packet.payloadLen
+
+                        when (packet.type) {
+                            PtpConstants.CMD_RESPONSE -> {
+                                val respCode = if (len >= 2) buf.getUShortLE(0) else 0
+                                log { "DL_CMD_RESPONSE resp=0x${respCode.toString(16)} downloaded=$totalDownloaded" }
+                                if (respCode != PtpConstants.RESPONSE_OK) {
+                                    return@withContext Result.failure(Exception(
+                                        context.getString(R.string.error_transfer_failed_reason, PtpConstants.translateResponse(context, respCode))
+                                    ))
+                                }
+                                return@withContext (verifyComplete() ?: Result.success(buildStats()))
+                            }
+                            PtpConstants.START_DATA_PACKET -> {
+                                expected = when {
+                                    len >= 12 -> buf.getLongLE(4)
+                                    len >= 8 -> buf.getIntLE(4).toLong() and 0xFFFFFFFFL
+                                    else -> 0L
+                                }
+                                log { "DL_START expected=$expected" }
+                            }
+                            PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
+                                if (len > 4) {
+                                    try {
+                                        output.write(buf, 4, len - 4)
+                                    } catch (e: java.io.IOException) {
+                                        return@withContext Result.failure(
+                                            OutputWriteException(context.getString(R.string.error_write_file, e.message), e)
+                                        )
+                                    }
+                                    totalDownloaded += len - 4
+
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastProgressTime >= 200) {
+                                        val elapsed = (now - startTime) / 1000f
+                                        onProgress?.invoke(DownloadProgress(totalDownloaded, expected, elapsed))
+                                        lastProgressTime = now
+                                    }
+                                }
+                                if (packet.type == PtpConstants.END_DATA_PACKET) {
+                                    log { "DL_END total=$totalDownloaded, draining CMD_RESPONSE..." }
+                                    drainCmdResponse()
+                                    return@withContext (verifyComplete() ?: Result.success(buildStats()))
+                                }
+                            }
+                            PtpConstants.PING -> {
+                                log { "DL_PING during download" }
+                                sendPong(cmdOutput)
+                            }
                         }
                     }
-                } catch (_: Exception) {
-                    // 排空静默超时/连接出错：直接断开，由心跳/看护自动重连。
-                    closeQuietly()
+                    @Suppress("UNREACHABLE_CODE")
+                    Result.failure(Exception("Unexpected end of stream"))
+                } catch (e: CancellationException) {
+                    try {
+                        withContext(NonCancellable) {
+                            sendCancel()
+                            cmdSocket?.soTimeout = CANCEL_DRAIN_TIMEOUT_MS
+                            if (drainCmdResponse(CANCEL_DRAIN_BUDGET)) {
+                                cmdSocket?.soTimeout = SO_TIMEOUT_MS
+                            } else {
+                                log { "DL_CANCEL drain budget exceeded, closing" }
+                                closeQuietly()
+                            }
+                        }
+                    } catch (_: Exception) {
+                        closeQuietly()
+                    }
+                    throw e
+                } catch (e: Exception) {
+                    Result.failure(e)
                 }
-                throw e   // 取消须向上传播，不能包装成失败结果
-            } catch (e: Exception) {
-                Result.failure(e)
+            } finally {
+                cmdSocket?.soTimeout = savedTimeout ?: SO_TIMEOUT_MS
             }
         }
     }
