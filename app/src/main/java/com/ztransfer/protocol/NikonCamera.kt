@@ -259,6 +259,52 @@ class NikonCamera(private val context: Context) {
         }
     }
 
+    /**
+     * 获取 FHD (1920×1080) 预览图 JPEG 字节。与 [getThumbnail] 共用 [ioMutex] 串行化。
+     * 任何失败（固件不支持、IO 异常、非 OK 响应）均返回 null，调用方静默回退到缩略图。
+     * 不抛异常——这是纯体验增强功能，失败不应打扰用户。
+     */
+    suspend fun getFhdPicture(handle: Int): ByteArray? = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                sendCmd(PtpConstants.NK_GET_FHD_PICTURE, handle)
+                val (respCode, data) = recvRespWithPayload()
+                if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) data
+                else {
+                    log { "GetFhdPicture handle=$handle resp=0x${respCode.toString(16)}" }
+                    null
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    /**
+     * 下载文件头若干字节用于 EXIF 解析。通过 [NK_GET_PARTIAL_OBJECT_EX] 从偏移 0 读取
+     * [maxSize] 字节（默认 128KB，足以覆盖绝大多数 JPEG 的 EXIF 段）；与 [ioMutex]
+     * 串行化。任何失败返回 null——EXIF 是纯体验增强，不应为失败产生视觉噪音。
+     */
+    suspend fun readExifHeader(handle: Int, maxSize: Int = 128 * 1024): ByteArray? = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
+                val (respCode, data) = recvRespWithPayload()
+                if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) data
+                else {
+                    log { "ReadExifHeader handle=$handle resp=0x${respCode.toString(16)} len=${data?.size ?: 0}" }
+                    null
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
     suspend fun streamFileInfo(
         handles: List<Int>,
         batchSize: Int = 20,

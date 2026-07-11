@@ -16,8 +16,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
+import java.io.ByteArrayInputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +50,26 @@ data class CameraState(
     val wifiRssi: Int? = null
 )
 
+/**
+ * 从相机文件头（JPEG EXIF）解析的照片参数。所有字段均可为 null——解析不到时静默缺省。
+ * [afX]/[afY]/[afWidth]/[afHeight] 为**归一化坐标**（0..1，相对于原图像素尺寸），
+ * 使用前需按 ContentScale 映射到显示区域。
+ */
+data class PhotoExif(
+    val aperture: String?,       // "f/2.8"
+    val shutterSpeed: String?,   // "1/250"
+    val iso: String?,            // "400"
+    val focalLength: String?,    // "50mm"
+    /** 原始图像像素尺寸（用于 ContentScale.Fit 坐标映射）。 */
+    val imageWidth: Int?,
+    val imageHeight: Int?,
+    // 对焦点信息（归一化坐标 0..1，相对原图尺寸）
+    val afX: Float?,
+    val afY: Float?,
+    val afWidth: Float?,
+    val afHeight: Float?
+)
+
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(CameraState())
     val state: StateFlow<CameraState> = _state.asStateFlow()
@@ -69,6 +91,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 最后一个等待者取消时连带取消底层请求，保留"滚出屏幕即剪枝"的行为。仅主线程访问。
     private class InflightThumb(val deferred: Deferred<ImageBitmap?>) { var waiters = 0 }
     private val inflightThumbs = HashMap<Int, InflightThumb>()
+    // EXIF 会话级缓存：handle → 解析结果。预览关闭时 clear。null value 表示"已尝试但失败"，
+    // 避免重复下载 header（与 noThumbHandles 负缓存同模式）。
+    private val exifCache = HashMap<Int, PhotoExif?>()
+
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     // 缩略图磁盘缓存目录：后台填充落盘于此，内存 LRU 只服务可见区。
@@ -170,6 +196,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         remoteActiveFlow.value = active
     }
 
+    // FHD 长按预览活跃期间暂停后台缩略图填充：FHD 取图比缩略图慢得多（1-3s vs 100ms），
+    // 持续填充的 GetThumb 排队会把 FHD 请求憋在 ioMutex 队列后面、用户感知加载慢。
+    // 与 remoteActive 同机制——前台交互独占通道；退出预览自动恢复。
+    private val fhdActiveFlow = MutableStateFlow(false)
+
+    fun setFhdActive(active: Boolean) {
+        fhdActiveFlow.value = active
+    }
+
     init {
         registerNetworkCallback()
         startConnectionWatcher()
@@ -190,9 +225,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             combine(
                 state.map { it.files }.distinctUntilChanged(),
                 transfersBusyFlow,
-                remoteActiveFlow
-            ) { files, busy, remote -> Triple(files, busy, remote) }.collectLatest { (files, busy, remote) ->
-                if (busy || remote || files.isEmpty()) return@collectLatest
+                remoteActiveFlow,
+                fhdActiveFlow
+            ) { files, busy, remote, fhd -> Quad(files, busy, remote, fhd) }.collectLatest { (files, busy, remote, fhd) ->
+                if (busy || remote || fhd || files.isEmpty()) return@collectLatest
                 // 展示序≈拍摄时间新→旧；无拍摄时间的排最后。
                 val ordered = files.sortedByDescending { it.captureDate ?: "" }
                 log { "THUMB_SWEEP start n=${ordered.size}" }
@@ -585,6 +621,118 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * 长按预览专用：加载 FHD (1920×1080) 预览图。直接从相机拉 FHD JPEG 并解码。
+     * 任何环节失败均返回 null，调用方静默回退到缩略图。
+     *
+     * 不主动取消 inflightThumbs——后台填充已由 [setFhdActive] 暂停，PreviewPage
+     * 自身的缩略图请求走 ioMutex 自然排队即可。强行 cancel 会杀掉 PreviewPage 的
+     * LaunchedEffect（key 不变不复启），导致缩略图永久丢失、FHD 加载期间无占位图。
+     *
+     * FHD 图片不缓存（每次长按实时拉），预览关闭时 ImageBitmap 随 Composable 销毁释放。
+     * 调用方应先通过 [setFhdActive] 暂停后台缩略图填充，再调用本方法。
+     */
+    suspend fun loadFhdPreview(file: NikonCamera.FileInfo): ImageBitmap? {
+        val cam = camera ?: return null
+        val bytes = try {
+            cam.getFhdPicture(file.handle)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } ?: return null
+
+        return withContext(Dispatchers.Default) {
+            try {
+                // FHD 预览图是相机直出的 1920×1080 JPEG，非缩略图，不做黑边裁切。
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    /**
+     * 加载文件的 EXIF 元数据（光圈/快门/ISO/焦距/对焦点）。先从 [exifCache] 命中，
+     * 未命中时通过 [NikonCamera.readExifHeader] 下载文件头 128KB，再用
+     * [androidx.exifinterface.media.ExifInterface] 解析标准标签 + Nikon MakerNote。
+     * 任何环节失败返回 null——EXIF 是纯体验增强，静默失败。
+     */
+    suspend fun loadExif(file: NikonCamera.FileInfo): PhotoExif? {
+        val handle = file.handle
+        exifCache[handle]?.let { return it }
+        val cam = camera ?: return null
+        val bytes = cam.readExifHeader(handle) ?: run {
+            exifCache[handle] = null
+            return null
+        }
+        return parseExif(bytes)?.also { exifCache[handle] = it }
+            ?: run { exifCache[handle] = null; null }
+    }
+
+    /** 清空 EXIF 缓存（预览会话结束/重连时调用）。 */
+    fun clearExifCache() { exifCache.clear() }
+
+    /** 解析 JPEG 字节中的 EXIF 数据，标准标签走 ExifInterface，对焦点走 MakerNote 解析。 */
+    private suspend fun parseExif(jpegBytes: ByteArray): PhotoExif? =
+        withContext(Dispatchers.Default) {
+            try {
+                val exif = ExifInterface(ByteArrayInputStream(jpegBytes))
+                val aperture = exif.getAttribute(ExifInterface.TAG_APERTURE_VALUE)
+                    ?.toFloatOrNull()?.let { "f/%.1f".format(it) }
+                val shutter = exif.getAttribute(ExifInterface.TAG_SHUTTER_SPEED_VALUE)
+                    ?.toFloatOrNull()?.let { formatShutter(it) }
+                val iso = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
+                val focal = exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH)
+                    ?.toFloatOrNull()?.let { "%.0fmm".format(it) }
+                val imgW = exif.getAttribute(ExifInterface.TAG_IMAGE_WIDTH)?.toIntOrNull()
+                val imgH = exif.getAttribute(ExifInterface.TAG_IMAGE_LENGTH)?.toIntOrNull()
+                val af = parseNikonAfPoints(exif)
+                PhotoExif(aperture, shutter, iso, focal, imgW, imgH, af?.x, af?.y, af?.w, af?.h)
+            } catch (_: Exception) { null }
+        }
+
+    /** APEX 快门值 → 可读分数（如 7.64 → "1/200"）。 */
+    private fun formatShutter(apex: Float): String {
+        val sec = 1.0f / StrictMath.pow(2.0, apex.toDouble()).toFloat()
+        return if (sec >= 1f) "%.1fs".format(sec) else "1/%.0f".format(1f / sec)
+    }
+
+    private data class AfCoords(val x: Float, val y: Float, val w: Float, val h: Float)
+
+    /**
+     * 从 [exif] 的 Nikon MakerNote 中提取对焦点坐标，归一化到 [0..1]。
+     * 优先尝试 ExifInterface 已知的 Nikon 标签名，失败则退回到手动 MakerNote IFD 解析。
+     * 彻底失败返回 null → 对焦按钮隐藏。
+     */
+    private fun parseNikonAfPoints(exif: ExifInterface): AfCoords? {
+        val imgW = exif.getAttribute(ExifInterface.TAG_IMAGE_WIDTH)?.toFloatOrNull() ?: return null
+        val imgH = exif.getAttribute(ExifInterface.TAG_IMAGE_LENGTH)?.toFloatOrNull() ?: return null
+
+        // 路径 1：尝试已知的 Nikon 对焦点属性名（兼容性取决于 Android 版本）
+        fun attr(name: String): String? = try { exif.getAttribute(name) } catch (_: Exception) { null }
+        val afX = attr("AFAreaXPosition") ?: attr("Nikon:AFAreaXPosition")
+        val afY = attr("AFAreaYPosition") ?: attr("Nikon:AFAreaYPosition")
+        val afW = attr("AFAreaWidth") ?: attr("Nikon:AFAreaWidth")
+        val afH = attr("AFAreaHeight") ?: attr("Nikon:AFAreaHeight")
+        if (afX != null && afY != null) {
+            val x = afX.toFloatOrNull() ?: return null
+            val y = afY.toFloatOrNull() ?: return null
+            val w = afW?.toFloatOrNull() ?: 40f
+            val h = afH?.toFloatOrNull() ?: 40f
+            return AfCoords(x / imgW, y / imgH, w / imgW, h / imgH)
+        }
+
+        // 路径 2：手动解析 Nikon MakerNote IFD（骨架——tag ID 需实机验证）
+        val makerNote = try { exif.getAttributeBytes("MakerNote") }
+            catch (_: Exception) { null } ?: return null
+        if (makerNote.size < 10) return null
+        val header = String(makerNote, 0, 6, Charsets.US_ASCII)
+        if (header != "Nikon ") return null
+        // TODO: 实机测试确认 Z 系列 AF point 子 IFD tag IDs 后填充
+        return null
+    }
+
     /** 磁盘缓存键：文件名+大小+拍摄时间的稳定身份（与会话级 handle 无关，重连后依旧命中）。 */
     private fun diskFile(file: NikonCamera.FileInfo): File {
         val key = "${file.fileName}_${file.size}_${file.captureDate ?: "0"}"
@@ -654,4 +802,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 缩略图磁盘缓存容量上限（原始 JPEG 每张几 KB，64MB 足够上万张）。
         const val THUMB_DISK_MAX_BYTES = 64L * 1024 * 1024
     }
+
+    private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 }

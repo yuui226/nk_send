@@ -36,6 +36,10 @@ object PtpConstants {
     // 标准 ObjectInfo(0x1008) 的 size 字段是 32 位，>4GB 文件报 0xFFFFFFFF；
     // 调此操作码获取真实 64 位字节数。参数: handle，返回 8 字节小端 u64。
     const val NK_GET_OBJECT_SIZE = 0x9421
+    // Nikon 专有 FHD 预览图 (libgphoto2: PTP_OC_NIKON_GetFhdPicture)
+    // 参数: handle，返回 1920×1080 JPEG。比 GetThumb (160×120) 清晰得多，
+    // 用于长按预览提高清晰度；固件不支持时静默回退到缩略图。
+    const val NK_GET_FHD_PICTURE = 0x920F
 
     // 响应码
     const val RESPONSE_OK = 0x2001
