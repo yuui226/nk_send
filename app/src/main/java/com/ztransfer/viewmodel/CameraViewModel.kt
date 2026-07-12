@@ -660,9 +660,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     suspend fun loadExif(file: NikonCamera.FileInfo): PhotoExif? {
         val handle = file.handle
-        exifCache[handle]?.let { return it }
+        // containsKey 区分"未尝试"与"已尝试但为 null（负缓存）"——?.let 无法区分。
+        if (handle in exifCache) return exifCache[handle]
+        // 非图片格式（视频、音频等）不包含 JPEG EXIF，直接负缓存避免浪费 PTP 请求。
+        val ext = file.extension
+        if (ext !in EXIF_SUPPORTED_EXTENSIONS) {
+            exifCache[handle] = null
+            return null
+        }
         val cam = camera ?: return null
-        val bytes = cam.readExifHeader(handle) ?: run {
+        // NEF/TIFF 等 RAW 格式的 MakerNote 可能位于较高偏移处，用更大 header 确保覆盖。
+        val maxSize = if (ext in RAW_EXTENSIONS) 2048 * 1024 else 128 * 1024
+        val bytes = cam.readExifHeader(handle, maxSize) ?: run {
             exifCache[handle] = null
             return null
         }
@@ -673,43 +682,104 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     /** 清空 EXIF 缓存（预览会话结束/重连时调用）。 */
     fun clearExifCache() { exifCache.clear() }
 
-    /** 解析 JPEG 字节中的 EXIF 数据，标准标签走 ExifInterface，对焦点走 MakerNote 解析。 */
-    private suspend fun parseExif(jpegBytes: ByteArray): PhotoExif? =
+    /**
+     * 解析 ExifInterface RATIONAL/SRATIONAL 属性值（"num/denom" → Float）。
+     * SHORT/LONG 等整数类型直接解析为 Float。null 或格式异常返回 null。
+     */
+    private fun parseRational(raw: String?): Float? {
+        if (raw == null) return null
+        val slash = raw.indexOf('/')
+        return if (slash > 0) {
+            val num = raw.substring(0, slash).toFloatOrNull() ?: return null
+            val den = raw.substring(slash + 1).toFloatOrNull() ?: return null
+            if (den == 0f) null else num / den
+        } else {
+            raw.toFloatOrNull()
+        }
+    }
+
+    /**
+     * 解析文件头字节中的 EXIF 数据。
+     *
+     * ExifInterface(InputStream) 文档明确仅支持 JPEG；对于 TIFF 派生格式
+     * （NEF/NRW 等 Nikon RAW）流式构造在不同 Android 版本上行为不一致——
+     * 部分版本静默返回空壳（不抛异常），导致回退路径永远不被触发。
+     * 因此改为主**动检测 magic bytes**，TIFF 直接走临时文件 + ExifInterface(File)。
+     */
+    private suspend fun parseExif(headerBytes: ByteArray): PhotoExif? =
         withContext(Dispatchers.Default) {
             try {
-                val exif = ExifInterface(ByteArrayInputStream(jpegBytes))
-                val aperture = exif.getAttribute(ExifInterface.TAG_APERTURE_VALUE)
-                    ?.toFloatOrNull()?.let { "f/%.1f".format(it) }
-                val shutter = exif.getAttribute(ExifInterface.TAG_SHUTTER_SPEED_VALUE)
-                    ?.toFloatOrNull()?.let { formatShutter(it) }
-                val iso = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
-                val focal = exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH)
-                    ?.toFloatOrNull()?.let { "%.0fmm".format(it) }
-                val imgW = exif.getAttribute(ExifInterface.TAG_IMAGE_WIDTH)?.toIntOrNull()
-                val imgH = exif.getAttribute(ExifInterface.TAG_IMAGE_LENGTH)?.toIntOrNull()
-                val af = parseNikonAfPoints(exif)
-                PhotoExif(aperture, shutter, iso, focal, imgW, imgH, af?.x, af?.y, af?.w, af?.h)
-            } catch (_: Exception) { null }
+                val exif = if (headerBytes.size >= 2
+                    && headerBytes[0] == 0xFF.toByte() && headerBytes[1] == 0xD8.toByte()
+                ) {
+                    // JPEG → 流式构造是官方推荐路径
+                    ExifInterface(ByteArrayInputStream(headerBytes))
+                } else if (headerBytes.size >= 2
+                    && ((headerBytes[0] == 'I'.code.toByte() && headerBytes[1] == 'I'.code.toByte())
+                        || (headerBytes[0] == 'M'.code.toByte() && headerBytes[1] == 'M'.code.toByte()))
+                ) {
+                    // TIFF/NEF/NRW → 必须经文件路径构造；临时文件用完即删
+                    val cacheDir = getApplication<android.app.Application>().cacheDir
+                    val tmp = java.io.File.createTempFile("exif_", ".tif", cacheDir)
+                    try {
+                        tmp.writeBytes(headerBytes)
+                        ExifInterface(tmp)
+                    } finally {
+                        tmp.delete()
+                    }
+                } else {
+                    return@withContext null
+                }
+                parseExifImpl(exif)
+            } catch (_: Exception) {
+                null
+            }
         }
 
-    /** APEX 快门值 → 可读分数（如 7.64 → "1/200"）。 */
-    private fun formatShutter(apex: Float): String {
-        val sec = 1.0f / StrictMath.pow(2.0, apex.toDouble()).toFloat()
-        return if (sec >= 1f) "%.1fs".format(sec) else "1/%.0f".format(1f / sec)
+    /** 从已构造的 [exif] 中提取 EXIF 标签 + MakerNote 对焦点。 */
+    private fun parseExifImpl(exif: ExifInterface): PhotoExif? {
+        // 光圈：RATIONAL APEX → f-number (f = 2^(apex/2))
+        val aperture = parseRational(exif.getAttribute(ExifInterface.TAG_APERTURE_VALUE))
+            ?.let { apex -> Math.pow(2.0, apex.toDouble() / 2.0).toFloat() }
+            ?.let { f -> if (f % 1f < 0.05f) "f/%.0f".format(f) else "f/%.1f".format(f) }
+
+        // 快门：TAG_EXPOSURE_TIME 直接返回秒数 RATIONAL（如 "1/250"）
+        val exposureTime = parseRational(exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME))
+        val shutter = exposureTime?.let { sec ->
+            if (sec >= 1f) "%.1fs".format(sec) else "1/%.0f".format(1f / sec)
+        }
+
+        // ISO：SHORT 整数
+        val isoRaw = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
+        val iso = if (isoRaw != null) "ISO$isoRaw" else null
+
+        // 焦距：RATIONAL mm
+        val focal = parseRational(exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH))
+            ?.let { "%.0fmm".format(it) }
+
+        // 图像尺寸：SHORT/LONG 整数
+        val imgW = exif.getAttribute(ExifInterface.TAG_IMAGE_WIDTH)?.toIntOrNull()
+        val imgH = exif.getAttribute(ExifInterface.TAG_IMAGE_LENGTH)?.toIntOrNull()
+
+        // 对焦点：从 MakerNote 字节解析
+        val af = imgW?.let { w -> imgH?.let { h -> parseNikonAfPoints(exif, w, h) } }
+
+        return PhotoExif(aperture, shutter, iso, focal, imgW, imgH, af?.x, af?.y, af?.w, af?.h)
     }
 
     private data class AfCoords(val x: Float, val y: Float, val w: Float, val h: Float)
 
     /**
-     * 从 [exif] 的 Nikon MakerNote 中提取对焦点坐标，归一化到 [0..1]。
-     * 优先尝试 ExifInterface 已知的 Nikon 标签名，失败则退回到手动 MakerNote IFD 解析。
-     * 彻底失败返回 null → 对焦按钮隐藏。
+     * 从 Nikon MakerNote 字节中提取对焦点像素坐标，归一化到 [0..1]。
+     *
+     * 策略（3 级 fallback）：
+     * 1. 尝试 ExifInterface 已知 Nikon 标签名（取决于 Android 版本）
+     * 2. 解析 MakerNote TIFF IFD——遍历所有嵌套 IFD，搜索已知 AF tag IDs
+     * 3. 扫描 MakerNote 中"长得像 AF 坐标"的相邻 SHORT 对
+     * 全部失败返回 null → 对焦按钮隐藏。
      */
-    private fun parseNikonAfPoints(exif: ExifInterface): AfCoords? {
-        val imgW = exif.getAttribute(ExifInterface.TAG_IMAGE_WIDTH)?.toFloatOrNull() ?: return null
-        val imgH = exif.getAttribute(ExifInterface.TAG_IMAGE_LENGTH)?.toFloatOrNull() ?: return null
-
-        // 路径 1：尝试已知的 Nikon 对焦点属性名（兼容性取决于 Android 版本）
+    private fun parseNikonAfPoints(exif: ExifInterface, imgW: Int, imgH: Int): AfCoords? {
+        // 路径 1: ExifInterface 已知标签名：尝试已知的 Nikon 对焦点属性名
         fun attr(name: String): String? = try { exif.getAttribute(name) } catch (_: Exception) { null }
         val afX = attr("AFAreaXPosition") ?: attr("Nikon:AFAreaXPosition")
         val afY = attr("AFAreaYPosition") ?: attr("Nikon:AFAreaYPosition")
@@ -718,22 +788,146 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (afX != null && afY != null) {
             val x = afX.toFloatOrNull() ?: return null
             val y = afY.toFloatOrNull() ?: return null
-            val w = afW?.toFloatOrNull() ?: 40f
-            val h = afH?.toFloatOrNull() ?: 40f
+            // 安全性：坐标必须在图像边界内
+            if (x !in 0f..imgW.toFloat() || y !in 0f..imgH.toFloat()) return null
+            val w = afW?.toFloatOrNull()?.takeIf { it in 10f..imgW.toFloat() / 2f } ?: 40f
+            val h = afH?.toFloatOrNull()?.takeIf { it in 10f..imgH.toFloat() / 2f } ?: 40f
             return AfCoords(x / imgW, y / imgH, w / imgW, h / imgH)
         }
 
-        // 路径 2：手动解析 Nikon MakerNote IFD（骨架——tag ID 需实机验证）
+        // 路径 2: 解析 MakerNote IFD → 找 Tag 0x00B7 (AFInfo2) → 解析二进制块
         val makerNote = try { exif.getAttributeBytes("MakerNote") }
             catch (_: Exception) { null } ?: return null
-        if (makerNote.size < 10) return null
-        val header = String(makerNote, 0, 6, Charsets.US_ASCII)
-        if (header != "Nikon ") return null
-        // TODO: 实机测试确认 Z 系列 AF point 子 IFD tag IDs 后填充
+        if (makerNote.size < 18 || makerNote[0] != 'N'.code.toByte()) return null
+
+
+        val le = makerNote[6] == 0x49.toByte()
+
+        fun ByteArray.u16(o: Int): Int {
+            val a = this[o].toInt() and 0xFF; val b = this[o + 1].toInt() and 0xFF
+            return if (le) a or (b shl 8) else (a shl 8) or b
+        }
+        fun ByteArray.u32(o: Int): Long {
+            val a = this[o].toLong() and 0xFF; val b = this[o + 1].toLong() and 0xFF
+            val c = this[o + 2].toLong() and 0xFF; val d = this[o + 3].toLong() and 0xFF
+            return if (le) a or (b shl 8) or (c shl 16) or (d shl 24)
+            else d or (c shl 8) or (b shl 16) or (a shl 24)
+        }
+
+        // 遍历 MakerNote IFD 找 Tag 0x00B7 (AFInfo2 二进制数据指针)
+        val tiffStart = 6
+        val base = tiffStart + makerNote.u32(tiffStart + 4).toInt()
+        var afOff = -1L; var afLen = 0L; val v = HashSet<Int>()
+
+        fun findAf(dfBase: Int, d: Int) {
+            if (d > 2 || dfBase < 0 || dfBase + 2 > makerNote.size || !v.add(dfBase)) return
+            val n = makerNote.u16(dfBase)
+            if (n == 0 || n > 256) return
+            for (i in 0 until n) {
+                val e = dfBase + 2 + i * 12
+                if (e + 12 > makerNote.size) break
+                if (makerNote.u16(e) == 0x00B7 && afOff < 0) {
+                    afOff = tiffStart + makerNote.u32(e + 8); afLen = makerNote.u32(e + 4); return
+                }
+                if (makerNote.u16(e + 2).toInt() == 13) findAf(tiffStart + makerNote.u32(e + 8).toInt(), d + 1)
+            }
+            val nx = makerNote.u32(dfBase + 2 + n * 12).toInt()
+            if (nx > 0) findAf(tiffStart + nx, d)
+        }
+        findAf(base, 0)
+
+        if (afOff >= 0 && afLen >= 16) {
+            parseAfInfo2(makerNote, afOff.toInt(), le, imgW, imgH, afLen.toInt())?.let { af -> return af }
+        }
+
+        // 路径 3: Tag 0x00B7 没找到——尝试在 MakerNote 中找到 AFInfo2 版本签名
+        // ("0100"/"0200"/"0300") 然后从该位置解析。不传 len，由 parseAfInfo2 用保守策略。
+        val verOff = findAfInfo2Signature(makerNote, tiffStart)
+        if (verOff >= 0) {
+            parseAfInfo2(makerNote, verOff, le, imgW, imgH)?.let { af -> return af }
+        }
         return null
     }
 
-    /** 磁盘缓存键：文件名+大小+拍摄时间的稳定身份（与会话级 handle 无关，重连后依旧命中）。 */
+    /**
+     * 扫描 MakerNote 查找 AFInfo2 版本签名 ("0100" / "0200" / "0300")。
+     * 返回签名在 makerNote 中的偏移，未找到返回 -1。
+     */
+    private fun findAfInfo2Signature(makerNote: ByteArray, start: Int): Int {
+        for (i in start until makerNote.size - 4) {
+            val b0 = makerNote[i].toInt() and 0xFF
+            val b1 = makerNote[i + 1].toInt() and 0xFF
+            val b2 = makerNote[i + 2].toInt() and 0xFF
+            val b3 = makerNote[i + 3].toInt() and 0xFF
+            // "0100" / "0200" / "0300" — Nikon AFInfo2 已知版本号
+            if (b0 == '0'.code && b2 == '0'.code && b3 == '0'.code && b1 in listOf('1'.code, '2'.code, '3'.code)) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    /**
+     * 解析 AFInfo2 二进制数据块 (MakerNote Tag 0x00B7)。
+     *
+     * AFInfo2 结构末尾 12 字节固定为:
+     *   [AFImageWidth:2] [AFImageHeight:2] [AFAreaXPosition:2] [AFAreaYPosition:2] [AFAreaWidth:2] [AFAreaHeight:2]
+     *
+     * 当 [len] 已知时，从数据块末端回扫——头部可变长字段（版本号、属性、AFPointsUsed
+     * 长度因机身和 AF 区域模式不同而剧烈变化）不再需要猜测偏移。
+     * [len] 未知时使用保守前向扫描，但校验阈值比旧版严格得多。
+     * 参考: exiftool Nikon.pm / exiv2 nikonmn_int.cpp
+     */
+    private fun parseAfInfo2(data: ByteArray, off: Int, le: Boolean, imgW: Int, imgH: Int, len: Int? = null): AfCoords? {
+        fun ByteArray.u16(o: Int): Int {
+            if (o < 0 || o + 1 >= this.size) return -1
+            val a = this[o].toInt() and 0xFF; val b = this[o + 1].toInt() and 0xFF
+            return if (le) a or (b shl 8) else (a shl 8) or b
+        }
+
+        // ---- 路径 A: 已知长度 → 从数据块末端回扫 ----
+        if (len != null && len >= 16) {
+            val blockEnd = off + len
+            // 从后往前扫（步进 2 字节），AF 区 6 字段是连续 12 字节。
+            // 注意 AFInfo2 内 AF 区字段之后可能还有少量扩展字段，不能只假定在最后 12 字节。
+            // 因此扫描范围覆盖整个块（跳过前 4 字节版本号），从末尾逐对 uint16 向前匹配。
+            for (cursor in blockEnd - 12 downTo off + 4 step 2) {
+                val dimW = data.u16(cursor)
+                val dimH = data.u16(cursor + 2)
+                // AFImageWidth/Height 必须贴近实际图像尺寸（±25%，覆盖 DX 裁切）
+                if (dimW < imgW * 3 / 4 || dimW > imgW * 5 / 4) continue
+                if (dimH < imgH * 3 / 4 || dimH > imgH * 5 / 4) continue
+                val x = data.u16(cursor + 4)
+                val y = data.u16(cursor + 6)
+                if (x !in 0 until dimW || y !in 0 until dimH) continue
+                val w = data.u16(cursor + 8)
+                val h = data.u16(cursor + 10)
+                // 单点 AF 区域通常 50–500px，最多不超过画面 1/3
+                if (w < 20 || w > dimW / 3 || h < 20 || h > dimH / 3) continue
+                return AfCoords(x.toFloat() / dimW, y.toFloat() / dimH, w.toFloat() / dimW, h.toFloat() / dimH)
+            }
+            // 精确回扫没命中 → 在已知边界内做前向扫描兜底
+        }
+
+        // ---- 路径 B: 长度未知或回扫未命中 → 在限定范围内前向扫描 ----
+        val scanEnd = if (len != null) minOf(off + len - 10, data.size - 2) else minOf(off + 200, data.size - 2)
+        if (scanEnd <= off + 12) return null
+        for (i in off + 4 until scanEnd step 2) {
+            val dimW = data.u16(i)
+            val dimH = data.u16(i + 2)
+            if (dimW < imgW * 3 / 4 || dimW > imgW * 5 / 4) continue
+            if (dimH < imgH * 3 / 4 || dimH > imgH * 5 / 4) continue
+            val x = data.u16(i + 4)
+            val y = data.u16(i + 6)
+            if (x !in 0 until dimW || y !in 0 until dimH) continue
+            val w = data.u16(i + 8).coerceAtLeast(1)
+            val h = data.u16(i + 10).coerceAtLeast(1)
+            if (w < 20 || w > dimW / 3 || h < 20 || h > dimH / 3) continue
+            return AfCoords(x.toFloat() / dimW, y.toFloat() / dimH, w.toFloat() / dimW, h.toFloat() / dimH)
+        }
+        return null
+    }
+
     private fun diskFile(file: NikonCamera.FileInfo): File {
         val key = "${file.fileName}_${file.size}_${file.captureDate ?: "0"}"
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
@@ -801,6 +995,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val BAR_MAX_FRACTION = 0.15f
         // 缩略图磁盘缓存容量上限（原始 JPEG 每张几 KB，64MB 足够上万张）。
         const val THUMB_DISK_MAX_BYTES = 64L * 1024 * 1024
+        // EXIF 解析支持的图片扩展名——视频/音频等格式不会有 EXIF 头。
+        val EXIF_SUPPORTED_EXTENSIONS = setOf(".jpg", ".jpeg", ".nef", ".tif", ".tiff", ".nrw")
+        // RAW 格式需要更大的 header（2MB）以确保 MakerNote 等嵌套 IFD 被完整覆盖。
+        val RAW_EXTENSIONS = setOf(".nef", ".nrw", ".tif", ".tiff")
     }
 
     private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)

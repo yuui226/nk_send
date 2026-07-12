@@ -146,21 +146,22 @@ fun PhotoPreviewOverlay(
     }
 
     // ---- EXIF 元数据加载 ----
-    // 按 handle 存储解析结果，与 FHD bitmap 同生命周期、同淘汰策略。
-    val exifData = remember { mutableStateMapOf<Int, PhotoExif>() }
+    // 按 handle 存储解析结果（可为 null = 解析失败/无 EXIF），与 FHD bitmap 同生命周期。
+    val exifData = remember { mutableStateMapOf<Int, PhotoExif?>() }
     val exifLoading = remember { mutableStateMapOf<Int, Boolean>() }
 
     // 对焦点显示开关：按住对焦按钮时置 true，松手恢复 false。
     var showAfPoint by remember { mutableStateOf(false) }
 
     // EXIF 加载（复用 loadFhdPage 的去重+状态守卫模式）。
+    // null 结果也存入 exifData，防止守卫失效导致同文件重复下载 header。
     suspend fun loadExifPage(page: Int) {
         val file = files.getOrNull(page) ?: return
         val handle = file.handle
         if (handle in exifData || exifLoading.containsKey(handle)) return
         exifLoading[handle] = true
         try {
-            cameraViewModel.loadExif(file)?.let { exifData[handle] = it }
+            exifData[handle] = cameraViewModel.loadExif(file)
         } finally {
             exifLoading.remove(handle)
         }
@@ -256,31 +257,36 @@ fun PhotoPreviewOverlay(
             )
         }
 
-        // ---- 底部 EXIF 参数条（毛玻璃面板，随进度淡入）----
+        // ---- 底部栏：EXIF 参数 + 对焦点按钮，同一水平线 ----
         val curExif = files.getOrNull(pagerState.currentPage)?.let { exifData[it.handle] }
         val hasExif = curExif != null && (curExif.aperture != null || curExif.shutterSpeed != null
             || curExif.iso != null || curExif.focalLength != null)
-        if (hasExif) {
-            ExifMetadataBar(
-                exif = curExif!!,
-                alpha = progress.value,
+        val hasAf = curExif?.afX != null
+        if (hasExif || hasAf) {
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(bottom = 28.dp)
-            )
-        }
-
-        // ---- 对焦点查看按钮（毛玻璃圆形，按住查看）----
-        if (curExif?.afX != null) {
-            FocusPointButton(
-                pressed = showAfPoint,
-                onPressChange = { showAfPoint = it },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .padding(end = 20.dp, bottom = 76.dp)
-            )
+                    .padding(horizontal = 16.dp, vertical = 24.dp)
+                    .graphicsLayer { alpha = progress.value },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (hasExif) {
+                    ExifMetadataBar(
+                        exif = curExif!!,
+                        alpha = 1f,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                }
+                if (hasAf) {
+                    Spacer(modifier = Modifier.width(12.dp))
+                    FocusPointButton(
+                        pressed = showAfPoint,
+                        onPressChange = { showAfPoint = it }
+                    )
+                }
+            }
         }
     }
 }
@@ -301,14 +307,14 @@ private fun ExifMetadataBar(
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = colors.glassSurfaceHeavy,
-        shadowElevation = if (alpha > 0.5f) 6.dp else 0.dp,
+        shadowElevation = 4.dp,
         border = BorderStroke(1.dp, colors.glassPanelBorder),
-        modifier = modifier.graphicsLayer { this.alpha = alpha }
+        modifier = modifier
     ) {
         Text(
             text = parts.joinToString("  ·  "),
             style = MaterialTheme.typography.labelLarge,
-            color = Color.White,
+            color = colors.onBackground,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
         )
@@ -316,32 +322,33 @@ private fun ExifMetadataBar(
 }
 
 /**
- * 对焦点查看按钮：玻璃圆形，按住期间置 [pressed] 为 true（视觉高亮 + 对焦点红框叠加）。
- * 无 onClick——点击不做任何事，仅 onPress 的 press/release 周期驱动 [onPressChange]。
+ * 对焦点查看按钮：玻璃圆形，按住期间 [pressed]=true（视觉高亮 + 对焦点红框叠加）。
+ * 手势处理与 RemoteScreen 参数加减按钮一致：detectTapGestures(onPress = ...) + tryAwaitRelease。
  */
 @Composable
 private fun FocusPointButton(
     pressed: Boolean,
-    onPressChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    onPressChange: (Boolean) -> Unit
 ) {
     val colors = AppTheme.colors
-    Surface(
-        onClick = {},
-        shape = CircleShape,
-        color = if (pressed) colors.accentBlue.copy(alpha = 0.35f) else colors.glassSurface,
-        shadowElevation = 4.dp,
-        modifier = modifier
+    Box(
+        modifier = Modifier
             .size(44.dp)
+            .clip(CircleShape)
+            .background(if (pressed) colors.accentBlue.copy(alpha = 0.35f) else colors.glassSurface)
             .pointerInput(Unit) {
                 detectTapGestures(onPress = {
                     onPressChange(true)
-                    try { awaitRelease() } finally { onPressChange(false) }
+                    tryAwaitRelease()
+                    onPressChange(false)
                 })
-            }
+            },
+        contentAlignment = Alignment.Center
     ) {
+        // 毛玻璃高光 + 描边
         Box(
             modifier = Modifier
+                .fillMaxSize()
                 .background(Brush.verticalGradient(listOf(colors.glassHighlightTop, colors.glassHighlightBottom)))
                 .border(1.dp, Brush.verticalGradient(listOf(colors.glassBorderTop, colors.glassBorderBottom)), CircleShape),
             contentAlignment = Alignment.Center
@@ -349,7 +356,7 @@ private fun FocusPointButton(
             Icon(
                 imageVector = Icons.Default.FilterCenterFocus,
                 contentDescription = "Focus point",
-                tint = if (pressed) AccentBlue else colors.onSurfaceVariant,
+                tint = if (pressed) colors.accentBlue else colors.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
         }
