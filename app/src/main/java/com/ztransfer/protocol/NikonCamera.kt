@@ -47,6 +47,12 @@ class NikonCamera(private val context: Context) {
     // 仅首块失败时置为 false 并回退到全量下载；同一会话后续大文件不再试探。
     // 标准 PTP 0x101B 在 Nikon 机身上不被识别，须用此专有操作码。
     @Volatile private var partialObjectSupported: Boolean? = null
+    // FHD 预览(0x920F)支持探测：null=未知, true=支持, false=不支持（整会话不再尝试）。
+    // 精准熔断：明确 Operation_Not_Supported 立即熔断，其它非 OK 累计 2 次才熔断，
+    // 一次成功即永久置 true——避免把"临时忙"的支持机型误降级为只缩略图。
+    // 每次 connect 新建 NikonCamera 实例，故换相机自动重新探测。仅 ioMutex 内访问。
+    @Volatile private var fhdSupported: Boolean? = null
+    private var fhdFailCount = 0
 
     companion object {
         const val TAG = "ZTransfer"
@@ -273,17 +279,30 @@ class NikonCamera(private val context: Context) {
      */
     suspend fun getFhdPicture(handle: Int): ByteArray? = ioMutex.withLock {
         withContext(Dispatchers.IO) {
+            // 已判定不支持：直接返回，免去每页一次注定失败的往返（预览秒回退缩略图）。
+            if (fhdSupported == false) return@withContext null
             try {
                 sendCmd(PtpConstants.NK_GET_FHD_PICTURE, handle)
                 val (respCode, data) = recvRespWithPayload()
-                if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) data
-                else {
-                    log { "GetFhdPicture handle=$handle resp=0x${respCode.toString(16)}" }
-                    null
+                if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) {
+                    fhdSupported = true      // 一次成功即永久支持，关闭熔断计数
+                    fhdFailCount = 0
+                    return@withContext data
                 }
+                // 相机明确回了响应但非 OK：判定是否熔断。
+                if (fhdSupported == null) {
+                    fhdFailCount++
+                    if (respCode == PtpConstants.OPERATION_NOT_SUPPORTED || fhdFailCount >= 2) {
+                        fhdSupported = false
+                        log { "GetFhdPicture unsupported (resp=0x${respCode.toString(16)}), latched off for session" }
+                    }
+                }
+                log { "GetFhdPicture handle=$handle resp=0x${respCode.toString(16)}" }
+                null
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
+                // IO/网络异常：不计数、不熔断（是连接问题，非机型不支持）。
                 null
             }
         }

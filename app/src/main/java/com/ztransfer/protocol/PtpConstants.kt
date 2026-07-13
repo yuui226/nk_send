@@ -43,6 +43,9 @@ object PtpConstants {
 
     // 响应码
     const val RESPONSE_OK = 0x2001
+    // PTP 规范 0x2005 Operation_Not_Supported：机型不支持该操作码时返回。
+    // 用于 FHD 预览的会话级熔断（明确不支持才熔断，瞬时错误不误伤）。
+    const val OPERATION_NOT_SUPPORTED = 0x2005
     const val SESSION_ALREADY_OPEN = 0x201E
     // PTP 规范：0x2009 Invalid_Object_Handle / 0x2010 No_Thumbnail_Present。
     // 用于区分"确认无缩略图"（可负缓存）与"瞬时失败"（如设备忙，绝不能负缓存）。

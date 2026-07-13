@@ -9,6 +9,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -31,6 +36,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +58,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
+import kotlin.math.max
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
@@ -181,10 +190,14 @@ fun PhotoPreviewOverlay(
                 .background(Color.Black.copy(alpha = 0.94f))
         )
 
+        // 当前页是否已放大——放大时禁用翻页，横向平移才不会误翻到下一张。
+        var currentZoomed by remember { mutableStateOf(false) }
+
         // 图片翻页器：整体从被长按格子的位置缩放展开。相邻页预载一页，快速翻页不用等图。
         HorizontalPager(
             state = pagerState,
             beyondBoundsPageCount = 1,
+            userScrollEnabled = !currentZoomed,
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -218,6 +231,8 @@ fun PhotoPreviewOverlay(
                 isLoadingFhd = fhdLoading.containsKey(file.handle),
                 exif = exifData[file.handle],
                 showAfPoint = showAfPoint,
+                isCurrent = page == pagerState.currentPage,
+                onZoomedChange = { currentZoomed = it },
                 onTap = startClose
             )
         }
@@ -360,6 +375,10 @@ private fun FocusPointButton(
     }
 }
 
+// 手势缩放参数（参考主流相册）：捏合上限 4x，双击在 1x 与 2.5x 间切换。
+private const val MAX_ZOOM = 4f
+private const val DOUBLE_TAP_ZOOM = 2.5f
+
 @Composable
 private fun PreviewPage(
     file: NikonCamera.FileInfo,
@@ -368,11 +387,12 @@ private fun PreviewPage(
     isLoadingFhd: Boolean,
     exif: PhotoExif?,
     showAfPoint: Boolean,
+    isCurrent: Boolean,
+    onZoomedChange: (Boolean) -> Unit,
     onTap: () -> Unit
 ) {
     var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
     // 取过仍为 null → 该文件确实没有缩略图（如部分视频）。
-    // 用户正盯着的预览始终允许取图；传输中请求排到文件间隙执行，等待期间显示加载圈。
     var noThumb by remember(file.handle) { mutableStateOf(false) }
     LaunchedEffect(file.handle) {
         if (thumbnail == null && !noThumb) {
@@ -381,8 +401,7 @@ private fun PreviewPage(
         }
     }
 
-    // FHD 到位后从缩略图平滑过渡（300ms 淡入），视觉上"画面变清晰"。
-    // 如果 FHD 比缩略图先到（如预加载的邻居页），直接瞬间显示，不播黑屏动画。
+    // FHD 到位后从缩略图平滑过渡（300ms 淡入），视觉上"画面变清晰"（blur-up）。
     val fhdAlpha = remember { Animatable(0f) }
     LaunchedEffect(fhdBitmap) {
         if (fhdBitmap != null) {
@@ -393,57 +412,136 @@ private fun PreviewPage(
         }
     }
 
-    // 容器 pixel 尺寸，用于 ContentScale.Fit 坐标映射（AF 点叠加用）。
+    // 容器 pixel 尺寸，用于 AF 点叠加的 Fit 坐标映射。
     var containerSize by remember { mutableStateOf<IntSize?>(null) }
+
+    // ---- 缩放/平移状态（按 handle 记忆；离开本页复位，与主流相册一致）----
+    var scale by remember(file.handle) { mutableStateOf(1f) }
+    var offset by remember(file.handle) { mutableStateOf(Offset.Zero) }
+    val scope = rememberCoroutineScope()
+    // 双击缩放动画的 Job：新手势/新双击/离页复位前先取消它，避免多方同时写 scale/offset 打架。
+    var zoomAnimJob by remember(file.handle) { mutableStateOf<Job?>(null) }
+    val zoomed = scale > 1.01f
+    LaunchedEffect(isCurrent) { if (!isCurrent) { zoomAnimJob?.cancel(); scale = 1f; offset = Offset.Zero } }
+    // 报告当前页是否已放大——预览层据此在放大时禁用翻页（否则横向平移会误翻页）。
+    LaunchedEffect(isCurrent, zoomed) { if (isCurrent) onZoomedChange(zoomed) }
+
+    val displayBitmap = fhdBitmap ?: thumbnail
+    val imgAspect = displayBitmap?.let { it.width.toFloat() / it.height.toFloat() }
+
+    // 把 offset 钳制在"图片边缘不越过容器边缘"的范围内（防止拖出黑边）。
+    fun clampOffset(s: Float, o: Offset, dispW: Float, dispH: Float, cw: Float, ch: Float): Offset {
+        val maxX = max(0f, (dispW * s - cw) / 2f)
+        val maxY = max(0f, (dispH * s - ch) / 2f)
+        return Offset(o.x.coerceIn(-maxX, maxX), o.y.coerceIn(-maxY, maxY))
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .onGloballyPositioned { containerSize = it.size }
-            .pointerInput(Unit) { detectTapGestures { onTap() } },
+            // 捏合缩放 + 放大后单指平移。关键：单指且未放大时【不消费】事件，
+            // 把手势让给 HorizontalPager 翻页 / 单击关闭；双指或已放大才接管并消费。
+            .pointerInput(imgAspect) {
+                if (imgAspect == null) return@pointerInput
+                val cw = size.width.toFloat(); val ch = size.height.toFloat()
+                val containerAspect = cw / ch
+                val dispW = if (imgAspect > containerAspect) cw else ch * imgAspect
+                val dispH = if (imgAspect > containerAspect) cw / imgAspect else ch
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    zoomAnimJob?.cancel()   // 用户开始触摸即让双击动画让位，交互立即接管
+                    do {
+                        val event = awaitPointerEvent()
+                        val pressed = event.changes.count { it.pressed }
+                        if (pressed >= 2 || scale > 1.01f) {
+                            val zoomChange = event.calculateZoom()
+                            val panChange = event.calculatePan()
+                            if (zoomChange != 1f || panChange != Offset.Zero) {
+                                val newScale = (scale * zoomChange).coerceIn(1f, MAX_ZOOM)
+                                val centroid = event.calculateCentroid(useCurrent = true)
+                                // 以捏合中心为不动点：中心到容器心的向量按 (旧-新) 缩放补偿，再叠加平移。
+                                val c = Offset(centroid.x - cw / 2f, centroid.y - ch / 2f)
+                                offset = clampOffset(newScale, offset + c * (scale - newScale) + panChange, dispW, dispH, cw, ch)
+                                scale = newScale
+                                event.changes.forEach { if (it.pressed) it.consume() }
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
+                }
+            }
+            // 单击：未放大时关闭（放大时不关，避免查看时误触）；双击：1x ↔ 2.5x 在点击处切换（带动画）。
+            .pointerInput(imgAspect) {
+                val cw = size.width.toFloat(); val ch = size.height.toFloat()
+                detectTapGestures(
+                    onTap = { if (scale <= 1.01f) onTap() },
+                    onDoubleTap = { tap ->
+                        val a = imgAspect ?: return@detectTapGestures
+                        val containerAspect = cw / ch
+                        val dispW = if (a > containerAspect) cw else ch * a
+                        val dispH = if (a > containerAspect) cw / a else ch
+                        val target = if (scale > 1.01f) 1f else DOUBLE_TAP_ZOOM
+                        val startS = scale
+                        val startO = offset
+                        val targetO = if (target == 1f) Offset.Zero
+                        else clampOffset(target, Offset(tap.x - cw / 2f, tap.y - ch / 2f) * (1f - target), dispW, dispH, cw, ch)
+                        zoomAnimJob?.cancel()   // 二次双击前取消上一个动画，避免两个 tween 同帧抢写
+                        zoomAnimJob = scope.launch {
+                            Animatable(0f).animateTo(1f, tween(240)) {
+                                scale = startS + (target - startS) * value
+                                offset = androidx.compose.ui.geometry.lerp(startO, targetO, value)
+                            }
+                        }
+                    }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
-        val displayBitmap = fhdBitmap ?: thumbnail
         val thumb = thumbnail  // 本地变量，delegate 属性无法被编译器 smart cast
-        // 是否有任何图像数据在加载或已就绪。FHD 加载中就算缩略图失败也不判"无预览"——
-        // FHD 正在路上，应显示加载圈而非"无预览"文本，避免用户误以为此页不可用。
         val anyLoading = isLoadingFhd || (!noThumb && thumbnail == null)
         when {
             displayBitmap != null -> {
-                // 缩略图层（FHD 就绪时淡出），仅在淡入动画期间渲染，完成后 alpha=0 跳过绘制。
-                if (fhdBitmap != null && thumb != null && fhdAlpha.value < 1f) {
+                // 图像栈（缩略图淡出 + FHD 淡入）统一套用缩放/平移变换。
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = scale; scaleY = scale
+                            translationX = offset.x; translationY = offset.y
+                        }
+                ) {
+                    if (fhdBitmap != null && thumb != null && fhdAlpha.value < 1f) {
+                        Image(
+                            bitmap = thumb,
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                            alpha = 1f - fhdAlpha.value
+                        )
+                    }
                     Image(
-                        bitmap = thumb,
-                        contentDescription = null,
+                        bitmap = displayBitmap,
+                        contentDescription = file.fileName,
                         contentScale = ContentScale.Fit,
                         modifier = Modifier.fillMaxSize(),
-                        alpha = 1f - fhdAlpha.value
+                        alpha = if (fhdBitmap != null) fhdAlpha.value else 1f
                     )
                 }
-                // FHD 层（淡入覆盖，或仅缩略图时直接显示）
-                Image(
-                    bitmap = displayBitmap,
-                    contentDescription = file.fileName,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize(),
-                    alpha = if (fhdBitmap != null) fhdAlpha.value else 1f
-                )
 
-                // 对焦点红框叠加（按住 AF 按钮时绘制）
-                val exifNonNull = exif // 仅用于 smart cast 消弭 ?.
+                // 对焦点红框叠加（按住 AF 按钮时绘制；不随缩放变换，与放大同用是罕见组合）。
+                val exifNonNull = exif
                 if (showAfPoint && exifNonNull != null && exifNonNull.afX != null && containerSize != null) {
                     val density = LocalDensity.current
                     val cw = containerSize!!.width.toFloat()
                     val ch = containerSize!!.height.toFloat()
-                    // ContentScale.Fit：等比缩放 + 居中，有留白时计算偏移
                     val imgW = exifNonNull.imageWidth?.toFloat() ?: displayBitmap.width.toFloat()
                     val imgH = exifNonNull.imageHeight?.toFloat() ?: displayBitmap.height.toFloat()
-                    val imgAspect = imgW / imgH
+                    val imgAsp = imgW / imgH
                     val containerAspect = cw / ch
-                    val (dispW, dispH) = if (imgAspect > containerAspect) {
-                        cw to (cw / imgAspect)
+                    val (dispW, dispH) = if (imgAsp > containerAspect) {
+                        cw to (cw / imgAsp)
                     } else {
-                        (ch * imgAspect) to ch
+                        (ch * imgAsp) to ch
                     }
                     val offX = (cw - dispW) / 2f
                     val offY = (ch - dispH) / 2f
@@ -467,6 +565,5 @@ private fun PreviewPage(
             noThumb -> Text(stringResource(R.string.no_preview), color = DarkOnSurfaceVariant)
             else -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
         }
-        // "正在加载高清"改由预览层顶部的极细进度条统一提示（不再在此叠底部小转圈）。
     }
 }
