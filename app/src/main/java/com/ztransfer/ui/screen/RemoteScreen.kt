@@ -773,10 +773,40 @@ private fun paramLabel(prop: Int): String = when (prop) {
 }
 
 /**
+ * 参数的"物理量"度量：数值越大 = 向下拖趋近的方向（用户定义的向下语义）。
+ * 快门→速度(分母/分子,越快越大)、光圈→开口(用 -f,f 越小开口越大)、ISO→感光度、EV→补偿值。
+ */
+private fun paramMetric(prop: Int, raw: Long): Double = when (prop) {
+    Lab.PROP_NK_SHUTTER -> when (raw) {
+        0xFFFFFFFFL, 0xFFFFFFFEL, 0xFFFFFFFDL -> 0.0   // Bulb/x200/Time：当作极慢
+        else -> {
+            val num = ((raw ushr 16) and 0xFFFFL).toDouble()
+            val den = (raw and 0xFFFFL).toDouble()
+            if (num > 0) den / num else 0.0
+        }
+    }
+    Lab.PROP_F_NUMBER -> -raw.toDouble()                       // f 越小开口越大
+    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX -> raw.toDouble()        // ISO 越大越高
+    Lab.PROP_EXP_COMPENSATION -> raw.toDouble()               // EV（已带符号）
+    else -> raw.toDouble()
+}
+
+/**
+ * 向下拖对应的 enum 步进方向（+1 / -1）：使"向下拖 = 增大物理量"。
+ * 通过比较枚举首尾值的度量得到，与枚举本身升/降序无关（换机型也稳）。
+ */
+private fun downStepSign(param: RcParam): Int {
+    val vals = param.values
+    if (vals.size < 2) return -1
+    return if (paramMetric(param.prop, vals.last()) > paramMetric(param.prop, vals.first())) 1 else -1
+}
+
+/**
  * 参数微调 tile：在数值上【上下拖动】按位移一格一档地调（无惯性、不过冲，拖多少走多少档），
  * 每档触感反馈（走 onStep→sendValue→haptics）；拖动时上/下边缘淡显相邻档位示意方向。
  * 点一下打开完整值表大跨度直跳。只读参数整块压暗 + 锁，拖动禁用。
- * 手指上移 = 下一档（enum 索引 +1），下移 = 上一档。
+ * 方向按物理量：向下拖 = 增大物理量（快门更快 / 光圈开口更大 / ISO 更高 / EV 更正），
+ * 具体 enum 步进方向由 [downStepSign] 判定（不依赖枚举升/降序）。
  */
 @Composable
 private fun ParamTile(
@@ -788,14 +818,17 @@ private fun ParamTile(
 ) {
     val colors = AppTheme.colors
     val density = LocalDensity.current
-    val writable = param != null && param.writable && param.values.isNotEmpty()
+    val writable = param != null && param.values.isNotEmpty() && param.writable
     var dragging by remember { mutableStateOf(false) }
     val stepPx = with(density) { PARAM_DRAG_STEP_DP.toPx() }
 
-    // 相邻档位（拖动时淡显示意方向与"下一档是什么"）。
+    // 向下拖对应的 enum 步进方向（向下=增大物理量）。
+    val downSign = if (writable && param != null) downStepSign(param) else -1
+
+    // 相邻档位（拖动时淡显，方向与物理量一致）：向下拖趋近的显示在下边缘，向上拖的在上边缘。
     val idx = param?.values?.indexOf(param.current) ?: -1
-    val nextV = if (idx >= 0) param?.values?.getOrNull(idx + 1) else null   // 上移趋近
-    val prevV = if (idx >= 0) param?.values?.getOrNull(idx - 1) else null   // 下移趋近
+    val downTarget = if (idx >= 0) param?.values?.getOrNull(idx + downSign) else null
+    val upTarget = if (idx >= 0) param?.values?.getOrNull(idx - downSign) else null
 
     Box(
         modifier = modifier
@@ -807,8 +840,8 @@ private fun ParamTile(
                 color = if (dragging && writable) colors.accentBlue else colors.glassPanelBorder,
                 shape = RoundedCornerShape(14.dp)
             )
-            // 上下拖动微调：位移累加，每跨过 stepPx 走一档（无惯性）。
-            .pointerInput(writable) {
+            // 上下拖动微调：位移累加，每跨过 stepPx 走一档（无惯性）。向下拖走 downSign 方向。
+            .pointerInput(writable, downSign) {
                 if (!writable) return@pointerInput
                 var acc = 0f
                 detectVerticalDragGestures(
@@ -816,9 +849,9 @@ private fun ParamTile(
                     onDragEnd = { dragging = false },
                     onDragCancel = { dragging = false }
                 ) { _, dy ->
-                    acc -= dy   // 手指上移 dy<0 → acc 增 → 档位+
-                    while (acc >= stepPx) { onStep(+1); acc -= stepPx }
-                    while (acc <= -stepPx) { onStep(-1); acc += stepPx }
+                    acc += dy   // 手指向下 dy>0 → acc 增 → 向下方向
+                    while (acc >= stepPx) { onStep(downSign); acc -= stepPx }
+                    while (acc <= -stepPx) { onStep(-downSign); acc += stepPx }
                 }
             }
             // 单击打开完整值表（仅可写参数；只读已由锁图标表明不可调）。
@@ -844,9 +877,9 @@ private fun ParamTile(
                 modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 6.dp).size(11.dp)
             )
         }
-        // 拖动时的相邻档位淡显（上=下一档，下=上一档）
+        // 拖动时的相邻档位淡显（上边缘=向上拖趋近，下边缘=向下拖趋近，方向与物理量一致）
         if (dragging && writable) {
-            nextV?.let {
+            upTarget?.let {
                 Text(
                     rcFormat(param!!.prop, it),
                     color = Color.White.copy(alpha = 0.35f),
@@ -854,7 +887,7 @@ private fun ParamTile(
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 3.dp)
                 )
             }
-            prevV?.let {
+            downTarget?.let {
                 Text(
                     rcFormat(param!!.prop, it),
                     color = Color.White.copy(alpha = 0.35f),
