@@ -44,6 +44,7 @@ object Lab {
     // ---- 响应码 ----
     const val OK = 0x2001
     const val DEVICE_BUSY = 0x2019
+    const val NK_OUT_OF_FOCUS = 0xA002   // AfDrive 未能合焦
     const val NK_NOT_LIVE_VIEW = 0xA00B
 
     // ---- 关注的属性 ----

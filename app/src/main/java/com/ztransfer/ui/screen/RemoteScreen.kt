@@ -360,25 +360,33 @@ private fun RemoteContent(
     //（用 AfDrive 半按而非 ChangeAfArea 移点：后者响应 0x2001 但落点语义与机身对不上、
     // 连发还会把相机踢出 LV(0xA00B)；半按模式行为可预期。）
     var afHeld by remember { mutableStateOf(false) }
+    var afLocked by remember { mutableStateOf(false) }   // 当前是否已合焦（对焦框变绿）
     var afJob by remember { mutableStateOf<Job?>(null) }
     fun startFocus() {
         if (afHeld) return
         afHeld = true
-        haptics.tick()
+        afLocked = false
+        haptics.tick()   // 开始半按的轻反馈
         afJob?.cancel()
         afJob = scope.launch {
             val cam = cameraViewModel.getCamera() ?: return@launch
-            // 循环驱动 AF 模拟"持续半按"：每次 AfDrive 阻塞至合焦/失败，短歇再来，
-            // 让按住期间画面保持跟焦。0xA002=对不上焦（正常，继续尝试）。
+            // 循环驱动 AF 模拟"持续半按"：每次 AfDrive 阻塞至合焦/失败，短歇再来。
+            // AfDrive 返回码即合焦结果：0x2001=合上，0xA002=对不上焦。
+            // 合焦震动【边沿触发】：仅在"未合焦→刚合上"那一下震一次，避免每轮嗡嗡震；
+            // 失焦后再合上会再震。震动本身经全局设置门控（haptics 内部判 enabled）。
             while (isActive) {
                 val drive = runCatching { cam.rcAfDrive() }.getOrDefault(-1)
                 devLog("AF drive resp=0x%04X".format(drive and 0xFFFF))
+                val locked = drive == Lab.OK
+                if (locked && !afLocked) haptics.tick()   // 合焦成功那一刻
+                afLocked = locked
                 delay(120)
             }
         }
     }
     fun endFocus() {
         afHeld = false
+        afLocked = false
         afJob?.cancel()
         afJob = null
     }
@@ -492,10 +500,11 @@ private fun RemoteContent(
                             .padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 }
-                // 半按对焦指示：按住期间显示中央对焦框，收缩入场（合焦位置由机身当前对焦点决定）
+                // 半按对焦指示：按住期间显示中央对焦框，收缩入场。合焦成功转绿、未合焦保持蓝。
                 if (afHeld) {
                     val reticleScale = remember { Animatable(1.4f) }
                     LaunchedEffect(Unit) { reticleScale.animateTo(1f, tween(180)) }
+                    val reticleColor = if (afLocked) colors.statusConnected else colors.accentBlue
                     Box(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -504,7 +513,7 @@ private fun RemoteContent(
                                 scaleX = reticleScale.value
                                 scaleY = reticleScale.value
                             }
-                            .border(1.5.dp, colors.accentBlue.copy(alpha = 0.95f), RoundedCornerShape(8.dp))
+                            .border(1.5.dp, reticleColor.copy(alpha = 0.95f), RoundedCornerShape(8.dp))
                     )
                 }
                 if (showFps && fps > 0f) {
