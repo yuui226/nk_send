@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.ui.theme.*
+import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.PhotoExif
 
@@ -72,6 +74,7 @@ fun PhotoPreviewOverlay(
     initialIndex: Int,
     anchorRect: Rect?,
     cameraViewModel: CameraViewModel,
+    hapticsEnabled: Boolean,
     onDismiss: () -> Unit
 ) {
     val pagerState = rememberPagerState(initialPage = initialIndex) { files.size }
@@ -93,95 +96,73 @@ fun PhotoPreviewOverlay(
     val startClose: () -> Unit = { closing = true }
     BackHandler(enabled = !closing) { startClose() }
 
-    // ---- FHD 预览加载 ----
-    // 按 handle 存储已加载的 FHD ImageBitmap；本 overlay 关闭时随 Composable 一起释放。
+    // ---- FHD 预览：优先级加载 + 即时淘汰 + RGB_565 解码 ----
+    // 三个状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放），
+    // 无跨会话复用问题。fhdFailed=已试且失败（不再重试，直到被淘汰后重新进入才重试）。
     val fhdBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
-    // 正在加载 FHD 的 handle（显示加载指示器）；已失败的 handle（不再重试）。
     val fhdLoading = remember { mutableStateMapOf<Int, Boolean>() }
     val fhdFailed = remember { mutableStateMapOf<Int, Boolean>() }
+    val exifData = remember { mutableStateMapOf<Int, PhotoExif?>() }
+    val exifLoading = remember { mutableStateMapOf<Int, Boolean>() }
+    // 对焦点显示开关：按住对焦按钮时置 true，松手恢复 false。
+    var showAfPoint by remember { mutableStateOf(false) }
 
-    // 预览期间暂停后台缩略图填充，让出 ioMutex 给 FHD 取图。
+    val haptics = rememberHaptics(hapticsEnabled)
+
+    // 预览期间暂停后台缩略图填充，把 ioMutex 让给 FHD/EXIF 取图。
     DisposableEffect(Unit) {
         cameraViewModel.setFhdActive(true)
         onDispose { cameraViewModel.setFhdActive(false) }
     }
 
-    // 加载单页 FHD：去重守卫 + 取消 inflight 缩略图后拉相机 + 解码。
-    // 两个 LaunchedEffect 共用，避免重复代码。
-    suspend fun loadFhdPage(page: Int) {
-        val file = files.getOrNull(page) ?: return
-        val handle = file.handle
-        if (handle in fhdBitmaps || fhdLoading.containsKey(handle) || fhdFailed.containsKey(handle)) return
-        fhdLoading[handle] = true
+    // 加载单页 FHD；返回 true 表示"本次确实取到并解码成功"（用于当前页到位的触感反馈）。
+    suspend fun loadFhdPage(page: Int): Boolean {
+        val file = files.getOrNull(page) ?: return false
+        val h = file.handle
+        if (h in fhdBitmaps || fhdLoading.containsKey(h) || fhdFailed.containsKey(h)) return false
+        fhdLoading[h] = true
         try {
-            when (val result = cameraViewModel.loadFhdPreview(file)) {
-                null -> fhdFailed[handle] = true
-                else -> fhdBitmaps[handle] = result
-            }
+            val res = cameraViewModel.loadFhdPreview(file) ?: run { fhdFailed[h] = true; return false }
+            fhdBitmaps[h] = res
+            return true
         } finally {
-            fhdLoading.remove(handle)
+            fhdLoading.remove(h)
         }
     }
 
-    // 长按打开时：锚定页 FHD 优先加载，完成后预加载相邻页。
-    LaunchedEffect(Unit) {
-        loadFhdPage(initialIndex)
-        if (initialIndex > 0) loadFhdPage(initialIndex - 1)
-        if (initialIndex < files.lastIndex) loadFhdPage(initialIndex + 1)
-    }
-
-    // 翻页时：新页面 FHD 优先，然后预加载邻居。顺便淘汰远离当前页的 FHD 位图，
-    // 防止用户连续翻几十张后 fhdBitmaps 无界膨胀（每张 ~8MB ARGB_8888）。
-    LaunchedEffect(pagerState.currentPage) {
-        val cp = pagerState.currentPage
-        loadFhdPage(cp)
-        if (cp > 0) loadFhdPage(cp - 1)
-        if (cp < files.lastIndex) loadFhdPage(cp + 1)
-
-        // 淘汰超出 ±3 范围的 FHD 位图（保留当前页 + 两侧预加载 + 一页缓冲）。
-        val keepRange = (cp - 3).coerceAtLeast(0)..(cp + 3).coerceAtMost(files.lastIndex)
-        val keepHandles = keepRange.mapNotNull { files.getOrNull(it)?.handle }.toSet()
-        fhdBitmaps.keys.filter { it !in keepHandles }.forEach { fhdBitmaps.remove(it) }
-        fhdFailed.keys.filter { it !in keepHandles }.forEach { fhdFailed.remove(it) }
-    }
-
-    // ---- EXIF 元数据加载 ----
-    // 按 handle 存储解析结果（可为 null = 解析失败/无 EXIF），与 FHD bitmap 同生命周期。
-    val exifData = remember { mutableStateMapOf<Int, PhotoExif?>() }
-    val exifLoading = remember { mutableStateMapOf<Int, Boolean>() }
-
-    // 对焦点显示开关：按住对焦按钮时置 true，松手恢复 false。
-    var showAfPoint by remember { mutableStateOf(false) }
-
-    // EXIF 加载（复用 loadFhdPage 的去重+状态守卫模式）。
-    // null 结果也存入 exifData，防止守卫失效导致同文件重复下载 header。
+    // 加载单页 EXIF（仅当前页，不预加载邻居——EXIF 只在当前页底栏显示，预加载纯浪费通道）。
     suspend fun loadExifPage(page: Int) {
         val file = files.getOrNull(page) ?: return
-        val handle = file.handle
-        if (handle in exifData || exifLoading.containsKey(handle)) return
-        exifLoading[handle] = true
+        val h = file.handle
+        if (h in exifData || exifLoading.containsKey(h)) return
+        exifLoading[h] = true
         try {
-            exifData[handle] = cameraViewModel.loadExif(file)
+            exifData[h] = cameraViewModel.loadExif(file)
         } finally {
-            exifLoading.remove(handle)
+            exifLoading.remove(h)
         }
     }
 
-    LaunchedEffect(Unit) {
-        loadExifPage(initialIndex)
-        if (initialIndex > 0) loadExifPage(initialIndex - 1)
-        if (initialIndex < files.lastIndex) loadExifPage(initialIndex + 1)
-    }
-
+    // 即时淘汰（独立 effect，翻页瞬间就跑，不排在 1–3s 的慢加载后面）：保留窗口 ±2。
+    // 与加载解耦是关键——否则快速翻页时淘汰永远排在慢加载之后、来不及执行，内存会一路涨。
     LaunchedEffect(pagerState.currentPage) {
         val cp = pagerState.currentPage
+        val keep = (cp - 2).coerceAtLeast(0)..(cp + 2).coerceAtMost(files.lastIndex)
+        val keepH = keep.mapNotNull { files.getOrNull(it)?.handle }.toSet()
+        fhdBitmaps.keys.filter { it !in keepH }.forEach { fhdBitmaps.remove(it) }
+        fhdFailed.keys.filter { it !in keepH }.forEach { fhdFailed.remove(it) }
+        exifData.keys.filter { it !in keepH }.forEach { exifData.remove(it) }
+    }
+
+    // 优先级加载：当前页 FHD（到位轻震一下）→ 当前页 EXIF → ±1 邻居 FHD 预取。
+    // 换页即取消本协程，未完成的慢加载自动中止（getFhdPicture 会抛 Cancellation 释放锁），
+    // 通道立刻让给新的当前页。首次打开也走这里（currentPage 初值即 initialIndex）。
+    LaunchedEffect(pagerState.currentPage) {
+        val cp = pagerState.currentPage
+        if (loadFhdPage(cp)) haptics.tick()   // 仅"当前页真正取到高清"这一刻反馈
         loadExifPage(cp)
-        if (cp > 0) loadExifPage(cp - 1)
-        if (cp < files.lastIndex) loadExifPage(cp + 1)
-        // 淘汰超出 ±3 的 EXIF 缓存
-        val keepRange = (cp - 3).coerceAtLeast(0)..(cp + 3).coerceAtMost(files.lastIndex)
-        val keepHandles = keepRange.mapNotNull { files.getOrNull(it)?.handle }.toSet()
-        exifData.keys.filter { it !in keepHandles }.forEach { exifData.remove(it) }
+        if (cp > 0) loadFhdPage(cp - 1)
+        if (cp < files.lastIndex) loadFhdPage(cp + 1)
     }
 
     Box(
@@ -254,6 +235,22 @@ fun PhotoPreviewOverlay(
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .padding(top = 12.dp, start = 16.dp, end = 16.dp)
+            )
+        }
+
+        // 顶部极细进度条：当前页正在取 FHD 高清版时显示（"正在加载高清"的低调提示，
+        // 取代旧的突兀底部小转圈）。随展开动画淡入，取到即消失。
+        val curLoadingFhd = current?.let { fhdLoading.containsKey(it.handle) } == true
+        if (curLoadingFhd) {
+            LinearProgressIndicator(
+                color = AccentBlue.copy(alpha = 0.9f),
+                trackColor = Color.Transparent,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .height(2.dp)
+                    .graphicsLayer { alpha = progress.value }
             )
         }
 
@@ -470,17 +467,6 @@ private fun PreviewPage(
             noThumb -> Text(stringResource(R.string.no_preview), color = DarkOnSurfaceVariant)
             else -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
         }
-
-        // FHD 加载中且缩略图已显示时：底部半透明进度圈，低调提示"正在加载高清版"。
-        if (isLoadingFhd && fhdBitmap == null && thumbnail != null) {
-            CircularProgressIndicator(
-                color = Color.White.copy(alpha = 0.55f),
-                strokeWidth = 2.dp,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 24.dp)
-                    .size(20.dp)
-            )
-        }
+        // "正在加载高清"改由预览层顶部的极细进度条统一提示（不再在此叠底部小转圈）。
     }
 }

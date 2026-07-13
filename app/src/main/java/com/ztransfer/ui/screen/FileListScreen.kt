@@ -646,6 +646,7 @@ fun FileListScreen(
                     initialIndex = idx,
                     anchorRect = previewAnchor,
                     cameraViewModel = cameraViewModel,
+                    hapticsEnabled = transferState.hapticsEnabled,
                     onDismiss = { previewIndex = null }
                 )
             }

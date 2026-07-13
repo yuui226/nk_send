@@ -650,7 +650,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return withContext(Dispatchers.Default) {
             try {
                 // FHD 预览图是相机直出的 1920×1080 JPEG，非缩略图，不做黑边裁切。
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                // 用 RGB_565 解码：不透明 JPEG 无需 alpha，2 字节/像素（1920×1080≈4MB，
+                // 比 ARGB_8888 减半），屏幕预览肉眼无差别，多页预览内存峰值大降。
+                val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap()
             } catch (_: Exception) {
                 null
             }
