@@ -19,6 +19,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -28,13 +29,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -48,8 +47,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -535,13 +534,15 @@ private fun RemoteContent(
             }
             Spacer(Modifier.height(12.dp))
 
-            // 2×2 直控胶囊：读数即控件——单击 ±1 档、长按连调、点中间值弹全表直跳；
-            // 只读参数整个胶囊压暗 + 锁。无选中态、无隐藏手势。
+            // 2×2 数值拖拽微调：读数即控件——在数值上【上下拖动】按位移一格一档地调
+            // （无惯性、不过冲），拖动时边缘淡显相邻档位示意方向；点一下弹全表直跳。
+            // 只读参数整块压暗 + 锁。第一排 曝光补偿/ISO，第二排 光圈/快门。
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 EXPOSURE_PROPS.chunked(2).forEach { rowProps ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         rowProps.forEach { prop ->
-                            ParamCapsule(
+                            ParamTile(
+                                label = paramLabel(prop),
                                 param = params[prop],
                                 modifier = Modifier.weight(1f),
                                 onStep = { delta -> stepParam(prop, delta) },
@@ -759,95 +760,132 @@ private fun RemoteContent(
     }
 }
 
+// 参数拖拽微调：每拖动这么多像素高度 = 走一档（点动式、无惯性，拖多少走多少）。
+private val PARAM_DRAG_STEP_DP = 15.dp
+
+/** 参数在 tile 左上角的短标（相机通用符号，不进 i18n）。 */
+private fun paramLabel(prop: Int): String = when (prop) {
+    Lab.PROP_NK_SHUTTER -> "S"
+    Lab.PROP_F_NUMBER -> "f"
+    Lab.PROP_ISO -> "ISO"
+    Lab.PROP_EXP_COMPENSATION -> "EV"
+    else -> ""
+}
+
 /**
- * 参数直控胶囊：[− 值 ＋]。单击 ±1 档、长按连调（420ms 后每 140ms 一档）、
- * 点中间值打开完整值表大跨度直跳；只读参数整体压暗 + 锁图标，步进与弹表不可用。
+ * 参数微调 tile：在数值上【上下拖动】按位移一格一档地调（无惯性、不过冲，拖多少走多少档），
+ * 每档触感反馈（走 onStep→sendValue→haptics）；拖动时上/下边缘淡显相邻档位示意方向。
+ * 点一下打开完整值表大跨度直跳。只读参数整块压暗 + 锁，拖动禁用。
+ * 手指上移 = 下一档（enum 索引 +1），下移 = 上一档。
  */
 @Composable
-private fun ParamCapsule(
+private fun ParamTile(
+    label: String,
     param: RcParam?,
     modifier: Modifier = Modifier,
     onStep: (Int) -> Unit,
     onOpenList: () -> Unit
 ) {
     val colors = AppTheme.colors
-    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     val writable = param != null && param.writable && param.values.isNotEmpty()
+    var dragging by remember { mutableStateOf(false) }
+    val stepPx = with(density) { PARAM_DRAG_STEP_DP.toPx() }
 
-    @Composable
-    fun StepZone(delta: Int, icon: ImageVector) {
-        Box(
-            modifier = Modifier
-                .width(42.dp)
-                .fillMaxHeight()
-                .pointerInput(writable, delta) {
-                    if (!writable) return@pointerInput
-                    detectTapGestures(onPress = {
-                        onStep(delta)
-                        val repeater = scope.launch {
-                            delay(420)
-                            while (isActive) {
-                                onStep(delta)
-                                delay(140)
-                            }
-                        }
-                        tryAwaitRelease()
-                        repeater.cancel()
-                    })
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                icon, contentDescription = null,
-                tint = Color.White.copy(alpha = if (writable) 0.75f else 0.2f),
-                modifier = Modifier.size(16.dp)
-            )
-        }
-    }
+    // 相邻档位（拖动时淡显示意方向与"下一档是什么"）。
+    val idx = param?.values?.indexOf(param.current) ?: -1
+    val nextV = if (idx >= 0) param?.values?.getOrNull(idx + 1) else null   // 上移趋近
+    val prevV = if (idx >= 0) param?.values?.getOrNull(idx - 1) else null   // 下移趋近
 
-    Row(
+    Box(
         modifier = modifier
-            .height(46.dp)
+            .height(54.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(colors.glassSurface)
-            .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(14.dp)),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        StepZone(-1, Icons.Default.Remove)
-        Row(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    enabled = param != null
-                ) { onOpenList() },
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                param?.let { rcFormat(it.prop, it.current) } ?: "—",
-                color = when {
-                    param == null -> colors.onSurfaceVariant.copy(alpha = 0.4f)
-                    !writable -> colors.onSurfaceVariant.copy(alpha = 0.5f)
-                    else -> Color.White
-                },
-                fontFamily = FontFamily.Monospace,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1
+            .border(
+                width = if (dragging) 1.5.dp else 1.dp,
+                color = if (dragging && writable) colors.accentBlue else colors.glassPanelBorder,
+                shape = RoundedCornerShape(14.dp)
             )
-            if (param != null && !writable) {
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    Icons.Default.Lock, contentDescription = null,
-                    tint = colors.onSurfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier.size(11.dp)
+            // 上下拖动微调：位移累加，每跨过 stepPx 走一档（无惯性）。
+            .pointerInput(writable) {
+                if (!writable) return@pointerInput
+                var acc = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { dragging = true; acc = 0f },
+                    onDragEnd = { dragging = false },
+                    onDragCancel = { dragging = false }
+                ) { _, dy ->
+                    acc -= dy   // 手指上移 dy<0 → acc 增 → 档位+
+                    while (acc >= stepPx) { onStep(+1); acc -= stepPx }
+                    while (acc <= -stepPx) { onStep(-1); acc += stepPx }
+                }
+            }
+            // 单击打开完整值表（仅可写参数；只读已由锁图标表明不可调）。
+            .pointerInput(writable) {
+                detectTapGestures { if (writable) onOpenList() }
+            }
+    ) {
+        // 左上短标
+        if (label.isNotEmpty()) {
+            Text(
+                label,
+                color = colors.onSurfaceVariant.copy(alpha = if (writable) 0.85f else 0.4f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = 6.dp)
+            )
+        }
+        // 只读锁（右上）
+        if (param != null && !writable) {
+            Icon(
+                Icons.Default.Lock, contentDescription = null,
+                tint = colors.onSurfaceVariant.copy(alpha = 0.55f),
+                modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 6.dp).size(11.dp)
+            )
+        }
+        // 拖动时的相邻档位淡显（上=下一档，下=上一档）
+        if (dragging && writable) {
+            nextV?.let {
+                Text(
+                    rcFormat(param!!.prop, it),
+                    color = Color.White.copy(alpha = 0.35f),
+                    fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 3.dp)
+                )
+            }
+            prevV?.let {
+                Text(
+                    rcFormat(param!!.prop, it),
+                    color = Color.White.copy(alpha = 0.35f),
+                    fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp)
                 )
             }
         }
-        StepZone(1, Icons.Default.Add)
+        // 拖拽提示（可写且未拖动时，右侧极淡上下箭头，暗示"可上下拖"）
+        if (writable && !dragging) {
+            Text(
+                "⇅",
+                color = Color.White.copy(alpha = 0.22f),
+                fontSize = 12.sp,
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 9.dp)
+            )
+        }
+        // 中心当前值
+        Text(
+            param?.let { rcFormat(it.prop, it.current) } ?: "—",
+            color = when {
+                param == null -> colors.onSurfaceVariant.copy(alpha = 0.4f)
+                !writable -> colors.onSurfaceVariant.copy(alpha = 0.5f)
+                else -> Color.White
+            },
+            fontFamily = FontFamily.Monospace,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            modifier = Modifier.align(Alignment.Center)
+        )
     }
 }
 
