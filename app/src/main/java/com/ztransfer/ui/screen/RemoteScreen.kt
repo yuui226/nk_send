@@ -760,8 +760,10 @@ private fun RemoteContent(
     }
 }
 
-// 参数拖拽微调：每拖动这么多像素高度 = 走一档（点动式、无惯性，拖多少走多少）。
-private val PARAM_DRAG_STEP_DP = 15.dp
+// 参数拖拽微调：每拖动这么多高度 = 走一档（点动式、无惯性，拖多少走多少）。
+// 12dp/档：相机 1/3 挡一步,故一整挡(3 步)≈36dp 的小拖动,跟手又能精确单步(> 触摸 slop);
+// 大跨度不靠拖,点数值弹全表直跳。太钝调大、太跳调小,一个常量的事。
+private val PARAM_DRAG_STEP_DP = 12.dp
 
 /** 参数在 tile 左上角的短标（相机通用符号，不进 i18n）。 */
 private fun paramLabel(prop: Int): String = when (prop) {
