@@ -355,7 +355,7 @@ private fun FocusPointButton(
         ) {
             Icon(
                 imageVector = Icons.Default.FilterCenterFocus,
-                contentDescription = "Focus point",
+                contentDescription = stringResource(R.string.cd_focus_point),
                 tint = if (pressed) colors.accentBlue else colors.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )

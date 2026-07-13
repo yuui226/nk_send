@@ -12,6 +12,7 @@ import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
+import com.ztransfer.protocol.ResumeUnavailableException
 import com.ztransfer.service.TransferService
 import com.ztransfer.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
@@ -24,7 +25,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.FileOutputStream
 
 enum class TransferStatus {
     WAITING, TRANSFERING, COMPLETED, FAILED, CANCELLED
@@ -99,8 +99,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val RESUME_CHUNK_SIZE: Long get() = NikonCamera.CHUNK_SIZE
     }
 
-    /** 半成品文件信息：用于断点续传。 */
-    private data class PartInfo(val uri: Uri, val size: Long)
+    /** 半成品文件信息：用于断点续传。[token] = 文件内容身份（大小+拍摄时间），
+     *  防止同名不同文件（DSC 编号跨文件夹回卷）续传时张冠李戴、把两份数据拼接成损坏文件。 */
+    private data class PartInfo(val uri: Uri, val size: Long, val token: String)
+
+    /** 文件内容身份令牌：大小+拍摄时间，仅留字母数字与点（内嵌半成品名，不含下划线分隔符）。 */
+    private fun identityToken(file: NikonCamera.FileInfo): String =
+        "${file.size}.${file.captureDate ?: "0"}".replace(Regex("[^A-Za-z0-9.]"), "")
+
+    /** 半成品文件名 = 前缀 + 身份令牌 + "_" + 原文件名（原名可含下划线，解析按【首个】下划线切分）。 */
+    private fun partFileName(file: NikonCamera.FileInfo): String =
+        PART_PREFIX + identityToken(file) + "_" + file.fileName
 
     init {
         val dir = prefs.getString("transfer_dir", null)
@@ -295,24 +304,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         serviceStarted = true
                     }
 
-                    // 断点续传：检查是否存在上次传输留下的半成品文件。
+                    // 断点续传：检查是否存在上次传输留下的、【身份令牌匹配】的半成品文件。
                     var resumeOffset = 0L
                     var fileDocUri: Uri? = null
-                    val partFile = partFiles[task.file.fileName]
+                    val partFile = partFiles[task.file.fileName]?.takeIf { it.token == identityToken(task.file) }
                     if (partFile != null) {
                         val partSize = partFile.size
-                        if (partSize > 0 && task.file.size > 0 && partSize < task.file.size) {
-                            // 按块边界对齐续传偏移（丢弃可能损坏的不完整尾块）。
-                            resumeOffset = (partSize / RESUME_CHUNK_SIZE) * RESUME_CHUNK_SIZE
-                            if (resumeOffset > 0) {
-                                fileDocUri = partFile.uri
-                                log { "DL_RESUME: ${task.file.fileName} partSize=$partSize resumeOffset=$resumeOffset" }
-                            } else {
-                                // 半成品太小（<64MB 且未传完），不续传，删掉重建。
-                                deleteQuietly(partFile.uri)
-                            }
-                        } else if (partSize >= task.file.size) {
-                            // 半成品已完整：直接改名跳过下载（上次在下载完成后改名之前崩了）。
+                        // task.file.size 对 >4GB 文件是 SIZE_UNKNOWN 哨兵，绝不能拿它当真实大小比较。
+                        val sizeKnown = task.file.size > 0 && task.file.size != PtpConstants.SIZE_UNKNOWN
+                        if (sizeKnown && partSize >= task.file.size) {
+                            // 半成品已达完整大小：上次下载完在改名前崩了，直接改名跳过下载。
+                            // 仅在大小【已知】时走此捷径——SIZE_UNKNOWN 下 partSize>=哨兵会把
+                            // 4.3GB 的截断视频误判为完整，造成静默数据丢失。
                             log { "DL_RESUME_COMPLETE: ${task.file.fileName} partSize=$partSize" }
                             val finalName = task.file.fileName
                             var renamed = renameQuietly(partFile.uri, finalName)
@@ -337,8 +340,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 deleteQuietly(partFile.uri)
                             }
                             continue  // 跳过本次下载（无论成功改名还是已删除重下）
+                        } else if (partSize >= RESUME_CHUNK_SIZE && (!sizeKnown || partSize < task.file.size)) {
+                            // 半成品够大（≥1 块）且未完整：从块边界续传。大小未知(>4GB)也允许——
+                            // 由协议层用 GetObjectSize 解析真实大小后做全文件完整性校验。
+                            resumeOffset = (partSize / RESUME_CHUNK_SIZE) * RESUME_CHUNK_SIZE
+                            fileDocUri = partFile.uri
+                            log { "DL_RESUME: ${task.file.fileName} partSize=$partSize resumeOffset=$resumeOffset" }
                         } else {
-                            // size==0 或未知大小的异常半成品，删掉重建
+                            // 太小（<64MB）或异常半成品，删掉重建。
                             deleteQuietly(partFile.uri)
                         }
                     }
@@ -353,7 +362,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     contentResolver,
                                     docUri,
                                     getMimeType(task.file.fileName),
-                                    PART_PREFIX + task.file.fileName
+                                    partFileName(task.file)
                                 ) ?: throw Exception(str(R.string.error_create_file))
                                 fileDocUri = createdUri
                             }
@@ -364,9 +373,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             if (resumeOffset > 0) {
                                 val pfd = contentResolver.openFileDescriptor(fileDocUri!!, "rw")
                                     ?: throw Exception(str(R.string.error_open_file))
-                                outputStream = FileOutputStream(pfd.fileDescriptor).apply {
-                                    channel.position(resumeOffset)
-                                }
+                                // AutoCloseOutputStream 持有 pfd 所有权：BufferedOutputStream.use{} 关闭
+                                // 输出流时一并 close 掉 pfd，既不泄漏 fd，也确保 DocumentsProvider 收到
+                                // 写完成信号后才发生改名（裸 FileOutputStream(pfd.fileDescriptor) 两者皆失）。
+                                val fos = ParcelFileDescriptor.AutoCloseOutputStream(pfd)
+                                fos.channel.position(resumeOffset)
+                                outputStream = fos
                             } else {
                                 outputStream = contentResolver.openOutputStream(fileDocUri!!)
                                     ?: throw Exception(str(R.string.error_open_file))
@@ -476,12 +488,19 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                             },
                             onFailure = { e ->
-                                // 传输失败：保留半成品文件，重试时从块边界续传。
-                                // 不删 .nkpart_：断点续传依赖它。下次队列启动的 sweep
-                                // 只在 App 启动的 init 中清扫（deleteParts=true），
-                                // 队列里的重试走 deleteParts=false 保留半成品。
-                                updateTask(handle) {
-                                    it.copy(status = TransferStatus.FAILED, error = e.message ?: str(R.string.transfer_failed), speed = 0)
+                                if (e is ResumeUnavailableException) {
+                                    // 走不了续传（相机不支持分块 / >4GB 拿不到真实大小）：删掉半成品，
+                                    // 本次标记失败，重试将从头全新下载——绝不用错位的全量数据续写。
+                                    deleteQuietly(fileDocUri)
+                                    updateTask(handle) {
+                                        it.copy(status = TransferStatus.FAILED, error = str(R.string.transfer_failed), speed = 0)
+                                    }
+                                } else {
+                                    // 普通传输失败：保留半成品，重试时从块边界续传。
+                                    // 不删 .nkpart_：断点续传依赖它，交给 App 启动 init 的 sweep 统一清扫。
+                                    updateTask(handle) {
+                                        it.copy(status = TransferStatus.FAILED, error = e.message ?: str(R.string.transfer_failed), speed = 0)
+                                    }
                                 }
                             }
                         )
@@ -564,16 +583,22 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     )
                                 } catch (_: Exception) {}
                             } else if (!deleteParts && idIdx >= 0) {
-                                // 续传模式：保留半成品，记录 URI 和大小
+                                // 续传模式：保留半成品，解析出身份令牌与原文件名（按首个下划线切分）。
                                 val docId = c.getString(idIdx) ?: continue
                                 val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else 0L
-                                val origName = name.removePrefix(PART_PREFIX)
-                                if (origName.isNotEmpty()) {
-                                    parts[origName] = PartInfo(
-                                        uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
-                                        size = size
-                                    )
+                                val afterPrefix = name.removePrefix(PART_PREFIX)
+                                val sep = afterPrefix.indexOf('_')
+                                if (sep > 0) {
+                                    val token = afterPrefix.substring(0, sep)
+                                    val origName = afterPrefix.substring(sep + 1)
+                                    if (origName.isNotEmpty()) {
+                                        parts[origName] = PartInfo(
+                                            uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
+                                            size = size, token = token
+                                        )
+                                    }
                                 }
+                                // sep<=0：旧格式/异常半成品名，不记录（App 启动 init sweep 会清掉）。
                             }
                         } else {
                             val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else -1L

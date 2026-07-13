@@ -122,6 +122,7 @@
 
     <!-- 遙控頁 -->
     <string name="cd_remote_entry">遙控</string>
+    <string name="cd_focus_point">對焦點</string>
     <string name="remote_title">遙控</string>
     <string name="remote_locked_hint">遙控期間相機機身暫不可操作</string>
     <string name="remote_transfer_busy_hint">傳輸進行中，監看可能卡頓</string>

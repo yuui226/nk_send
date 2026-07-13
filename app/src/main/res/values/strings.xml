@@ -122,6 +122,7 @@
 
     <!-- Remote control page -->
     <string name="cd_remote_entry">Remote control</string>
+    <string name="cd_focus_point">Focus point</string>
     <string name="remote_title">Remote</string>
     <string name="remote_locked_hint">Camera body controls are disabled during remote control</string>
     <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>

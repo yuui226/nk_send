@@ -91,9 +91,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 最后一个等待者取消时连带取消底层请求，保留"滚出屏幕即剪枝"的行为。仅主线程访问。
     private class InflightThumb(val deferred: Deferred<ImageBitmap?>) { var waiters = 0 }
     private val inflightThumbs = HashMap<Int, InflightThumb>()
-    // EXIF 会话级缓存：handle → 解析结果。预览关闭时 clear。null value 表示"已尝试但失败"，
-    // 避免重复下载 header（与 noThumbHandles 负缓存同模式）。
-    private val exifCache = HashMap<Int, PhotoExif?>()
+    // EXIF 缓存：键为【稳定身份】(文件名+大小+拍摄时间)，与磁盘缩略图缓存同口径——
+    // 不用会话级 handle 作键，因 handle 跨会话/换卡会复用，否则重连后同一 handle 会把
+    // 上一张照片的参数/对焦点串给新照片。null value = 已尝试但失败（负缓存）。
+    private val exifCache = HashMap<String, PhotoExif?>()
+
+    /** EXIF 缓存键：与 [diskFile] 同一稳定身份，跨会话/重连命中同一张照片。 */
+    private fun exifKey(file: NikonCamera.FileInfo): String =
+        "${file.fileName}_${file.size}_${file.captureDate ?: "0"}"
 
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -659,28 +664,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 任何环节失败返回 null——EXIF 是纯体验增强，静默失败。
      */
     suspend fun loadExif(file: NikonCamera.FileInfo): PhotoExif? {
-        val handle = file.handle
+        val key = exifKey(file)
         // containsKey 区分"未尝试"与"已尝试但为 null（负缓存）"——?.let 无法区分。
-        if (handle in exifCache) return exifCache[handle]
+        if (key in exifCache) return exifCache[key]
         // 非图片格式（视频、音频等）不包含 JPEG EXIF，直接负缓存避免浪费 PTP 请求。
         val ext = file.extension
         if (ext !in EXIF_SUPPORTED_EXTENSIONS) {
-            exifCache[handle] = null
+            exifCache[key] = null
             return null
         }
         val cam = camera ?: return null
+        // 读取用会话级 handle（当下有效）；缓存键用稳定身份。
         // NEF/TIFF 等 RAW 格式的 MakerNote 可能位于较高偏移处，用更大 header 确保覆盖。
         val maxSize = if (ext in RAW_EXTENSIONS) 2048 * 1024 else 128 * 1024
-        val bytes = cam.readExifHeader(handle, maxSize) ?: run {
-            exifCache[handle] = null
+        val bytes = cam.readExifHeader(file.handle, maxSize) ?: run {
+            exifCache[key] = null
             return null
         }
-        return parseExif(bytes)?.also { exifCache[handle] = it }
-            ?: run { exifCache[handle] = null; null }
+        return parseExif(bytes)?.also { exifCache[key] = it }
+            ?: run { exifCache[key] = null; null }
     }
-
-    /** 清空 EXIF 缓存（预览会话结束/重连时调用）。 */
-    fun clearExifCache() { exifCache.clear() }
 
     /**
      * 解析 ExifInterface RATIONAL/SRATIONAL 属性值（"num/denom" → Float）。
@@ -800,8 +803,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             catch (_: Exception) { null } ?: return null
         if (makerNote.size < 18 || makerNote[0] != 'N'.code.toByte()) return null
 
-
-        val le = makerNote[6] == 0x49.toByte()
+        // Nikon Type-3 MakerNote 头 = "Nikon\0"(0..5) + 版本(6..9) + 内嵌 TIFF 头【从偏移 10 起】：
+        // 10..11 字节序标记(II/MM)、12..13 魔数 0x002A、14..17 IFD0 偏移。IFD 内的偏移均相对
+        // 该 TIFF 头(偏移 10)。此前误用 tiffStart=6（读到版本字节），字节序恒判为大端、base 为
+        // 垃圾值 → 路径 2 的 IFD 遍历永远失败。参考 exiftool Nikon.pm / exiv2 nikonmn_int.cpp。
+        val tiffStart = 10
+        val le = makerNote[tiffStart] == 0x49.toByte()
 
         fun ByteArray.u16(o: Int): Int {
             val a = this[o].toInt() and 0xFF; val b = this[o + 1].toInt() and 0xFF
@@ -815,7 +822,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         // 遍历 MakerNote IFD 找 Tag 0x00B7 (AFInfo2 二进制数据指针)
-        val tiffStart = 6
         val base = tiffStart + makerNote.u32(tiffStart + 4).toInt()
         var afOff = -1L; var afLen = 0L; val v = HashSet<Int>()
 
@@ -831,7 +837,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 if (makerNote.u16(e + 2).toInt() == 13) findAf(tiffStart + makerNote.u32(e + 8).toInt(), d + 1)
             }
-            val nx = makerNote.u32(dfBase + 2 + n * 12).toInt()
+            // 下一 IFD 指针紧随目录项之后（dfBase+2+n*12，共 4 字节）；越界则无后继目录。
+            val nextPtrOff = dfBase + 2 + n * 12
+            if (nextPtrOff + 4 > makerNote.size) return
+            val nx = makerNote.u32(nextPtrOff).toInt()
             if (nx > 0) findAf(tiffStart + nx, d)
         }
         findAf(base, 0)
@@ -860,7 +869,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val b2 = makerNote[i + 2].toInt() and 0xFF
             val b3 = makerNote[i + 3].toInt() and 0xFF
             // "0100" / "0200" / "0300" — Nikon AFInfo2 已知版本号
-            if (b0 == '0'.code && b2 == '0'.code && b3 == '0'.code && b1 in listOf('1'.code, '2'.code, '3'.code)) {
+            //（用范围判断而非 listOf：此循环对 2MB RAW header 逐字节跑，勿在热路径每字节建表装箱）
+            if (b0 == '0'.code && b2 == '0'.code && b3 == '0'.code && b1 >= '1'.code && b1 <= '3'.code) {
                 return i
             }
         }
