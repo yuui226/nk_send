@@ -228,7 +228,18 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
         0xFFFFFFFFL -> "Bulb"
         0xFFFFFFFEL -> "x200"
         0xFFFFFFFDL -> "Time"
-        else -> "${(raw ushr 16) and 0xFFFF}/${raw and 0xFFFF}s"
+        else -> {
+            // 分子/分母编码，慢速档分子>1（如 300/10=30s），直接打分数不像人话，约分展示。
+            val num = (raw ushr 16) and 0xFFFFL
+            val den = raw and 0xFFFFL
+            when {
+                num == 0L || den == 0L -> "$raw"
+                num == 1L -> "1/${den}s"
+                num % den == 0L -> "${num / den}s"            // 300/10 → 30s
+                den % num == 0L -> "1/${den / num}s"          // 2/500 → 1/250s
+                else -> "%.1fs".format(num.toDouble() / den)  // 13/10 → 1.3s
+            }
+        }
     }
     Lab.PROP_EXPOSURE_TIME_STD -> "%.4fs".format(raw / 10000.0)
     Lab.PROP_EXP_COMPENSATION -> "%+.1fEV".format(raw / 1000.0)
@@ -419,16 +430,17 @@ suspend fun NikonCamera.labEndLiveView(): Int =
     runCatching { labCommand(Lab.NK_END_LIVE_VIEW).first }.getOrDefault(-1)
 
 /**
- * 取一帧 Live View。返回 (JPEG字节, 整包大小, JPEG偏移)；
+ * 取一帧 Live View。返回 (整包数据, JPEG偏移)——不剥离头部，调用方拿偏移直接解码
+ * （BitmapFactory 支持 offset），省掉热路径上每帧一次 100KB+ 的整包拷贝。
  * 相机忙返回 null（调用方稍后重试）；其它失败抛响应码异常。
  */
-suspend fun NikonCamera.labGrabFrame(): Triple<ByteArray, Int, Int>? {
+suspend fun NikonCamera.labGrabFrame(): Pair<ByteArray, Int>? {
     val (rc, d) = labCommand(Lab.NK_GET_LIVE_VIEW_IMG)
     if (rc == Lab.DEVICE_BUSY) return null
     if (rc != Lab.OK || d == null) throw Exception("GetLiveViewImg resp=${hex4(rc)}")
     val soi = findJpegStart(d)
     if (soi < 0) throw Exception("GetLiveViewImg: no JPEG SOI in ${d.size} bytes")
-    return Triple(d.copyOfRange(soi, d.size), d.size, soi)
+    return d to soi
 }
 
 // ============================ 一次性完整探测 ============================
@@ -556,12 +568,12 @@ suspend fun NikonCamera.runLabProbe(
                 val frame = labGrabFrame()
                 if (frame == null) { delay(40); continue }
                 val ms = System.currentTimeMillis() - f0
-                val (jpeg, total, soi) = frame
+                val (buf, soi) = frame
                 got++
                 totalMs += ms
-                lastTotal = total
+                lastTotal = buf.size
                 soiOff = soi
-                onFrame(jpeg)
+                onFrame(buf.copyOfRange(soi, buf.size))   // 探测仅 8 帧，拷贝无所谓
             }
             // 逐帧不打印，只汇总一行（帧大小/头偏移/平均耗时足够定位问题）
             if (got > 0) log("LV: $got frames ok / $attempts polls, ~${lastTotal / 1024}KB jpeg@$soiOff, avg ${totalMs / got}ms (~%.1f fps ceiling)".format(1000f / (totalMs / got)))

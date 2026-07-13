@@ -85,7 +85,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
@@ -163,9 +165,10 @@ private fun RemoteContent(
     // 拍摄流程从这里等 ObjectAdded。
     val eventFlow = remember { MutableSharedFlow<Pair<Int, Long>>(extraBufferCapacity = 32) }
 
-    suspend fun decode(bytes: ByteArray): ImageBitmap? = withContext(Dispatchers.Default) {
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-    }
+    suspend fun decode(bytes: ByteArray, offset: Int = 0): ImageBitmap? =
+        withContext(Dispatchers.Default) {
+            BitmapFactory.decodeByteArray(bytes, offset, bytes.size - offset)?.asImageBitmap()
+        }
 
     suspend fun refreshParam(prop: Int) {
         val cam = cameraViewModel.getCamera() ?: return
@@ -189,6 +192,15 @@ private fun RemoteContent(
         val prev = lvJob
         lvJob = scope.launch {
             prev?.cancelAndJoin()
+            fps = 0f   // 换会话（HD 切换/重启）时清掉上一会话的陈旧读数
+            // 解码流水线：取帧（网络 IO）与解码（Default 线程）并行——取下一帧的同时
+            // 解上一帧；CONFLATED 只留最新帧，解码偶尔跟不上时丢旧帧而不排队积压。
+            val frameCh = Channel<Pair<ByteArray, Int>>(Channel.CONFLATED)
+            launch {
+                for ((buf, off) in frameCh) {
+                    decode(buf, off)?.let { frame = it }
+                }
+            }
             try {
                 while (isActive) {
                     // 每轮现取相机实例：断线重连后拿到的是新连接，旧会话自然淘汰
@@ -217,7 +229,7 @@ private fun RemoteContent(
                         }
                         if (grabbed == null) { delay(40); continue }
                         errStreak = 0
-                        decode(grabbed.first)?.let { frame = it }
+                        frameCh.trySend(grabbed)
                         frames++
                         val now = System.currentTimeMillis()
                         if (now - windowStart >= 1000) {
@@ -226,6 +238,11 @@ private fun RemoteContent(
                             windowStart = now
                         }
                     }
+                    // 断流重启前先主动关一次 LV：错误退出时相机侧 LV 状态未知，带着
+                    // 未关的 LV 直接重开会吃 InvalidStatus、rcSetLvSize 也不生效；
+                    // 关闭失败无所谓（可能本就已掉出 LV）。
+                    fps = 0f
+                    if (isActive) runCatching { cam.labEndLiveView() }
                     delay(2000)
                 }
             } finally {
@@ -247,7 +264,12 @@ private fun RemoteContent(
     // 反正要等相机预热（DeviceReady 常见 1s+），参数若排在取帧流后面才真叫慢；
     // 型号是装饰信息，最后后台拉。
     LaunchedEffect(connected) {
-        if (!connected) return@LaunchedEffect
+        if (!connected) {
+            // 掉线时暂停事件轮询（下面的 initialLoaded 门），重连后参数重读
+            // 依然先于轮询，与首次进页同样不抢锁。
+            initialLoaded = false
+            return@LaunchedEffect
+        }
         // 先把通道让给参数读取（此时事件轮询尚未开始、缩略图填充已停），参数最快点亮，
         // 再放开事件轮询并启动监看。
         EXPOSURE_PROPS.forEach { refreshParam(it) }
@@ -275,12 +297,15 @@ private fun RemoteContent(
                     }
                     if (prop == Lab.PROP_EXPOSURE_PROGRAM) {
                         refreshMode()
-                        // 曝光模式变化会连带改变各参数的可写性/值域
-                        EXPOSURE_PROPS.forEach { refreshParam(it) }
+                        // 曝光模式变化会连带改变各参数的可写性/值域（正在连调中的除外，同上）
+                        EXPOSURE_PROPS.forEach {
+                            if (pendingSets[it]?.isActive != true) refreshParam(it)
+                        }
                     }
                 }
             }
-            delay(600)
+            // 等拍摄确认期间加快轮询，快门转圈更快收到 ObjectAdded；平时 600ms 少占通道。
+            delay(if (capturing) 150 else 600)
         }
     }
 
@@ -295,7 +320,13 @@ private fun RemoteContent(
         pendingSets[prop] = scope.launch {
             if (!immediate) delay(160)
             val cam = cameraViewModel.getCamera() ?: return@launch
-            val rc = runCatching { cam.rcSetValue(p, value) }.getOrDefault(-1)
+            val rc = try {
+                cam.rcSetValue(p, value)
+            } catch (e: CancellationException) {
+                throw e   // 被更新一步的 sendValue 顶掉，不是写失败：别记日志、别回读
+            } catch (e: Exception) {
+                -1
+            }
             if (rc != Lab.OK) {
                 devLog("!! set 0x%04X resp=0x%04X".format(prop, rc and 0xFFFF))
                 refreshParam(prop)   // 写失败刷回真实值
@@ -307,9 +338,14 @@ private fun RemoteContent(
         val p = params[prop] ?: return
         if (!p.writable || p.values.isEmpty()) return
         val idx = p.values.indexOf(p.current)
-        if (idx < 0) return
-        val newIdx = (idx + delta).coerceIn(0, p.values.size - 1)
-        if (newIdx == idx) return
+        // 当前值不在枚举里（非标准档位/值域刚随模式变化）：按物理量找最近档位当起点，
+        // 否则拖动完全失灵（indexOf 永远 -1）。此时哪怕 delta 走不动也发一次，把值吸附回枚举。
+        val from = if (idx >= 0) idx else {
+            val m = paramMetric(prop, p.current)
+            p.values.indices.minByOrNull { abs(paramMetric(prop, p.values[it]) - m) } ?: return
+        }
+        val newIdx = (from + delta).coerceIn(0, p.values.size - 1)
+        if (idx >= 0 && newIdx == idx) return
         sendValue(prop, p.values[newIdx], immediate = false)
     }
 
@@ -410,9 +446,14 @@ private fun RemoteContent(
     var hintVisible by remember { mutableStateOf(false) }
     val lockedHint = stringResource(R.string.remote_locked_hint)
     LaunchedEffect(Unit) {
-        val prefs = context.getSharedPreferences("remote_page", Context.MODE_PRIVATE)
-        if (!prefs.getBoolean("locked_hint_shown", false)) {
-            prefs.edit().putBoolean("locked_hint_shown", true).apply()
+        // 首次读 SharedPreferences 会同步读盘，挪到 IO 免得进页时卡主线程一拍
+        val alreadyShown = withContext(Dispatchers.IO) {
+            val prefs = context.getSharedPreferences("remote_page", Context.MODE_PRIVATE)
+            val shown = prefs.getBoolean("locked_hint_shown", false)
+            if (!shown) prefs.edit().putBoolean("locked_hint_shown", true).apply()
+            shown
+        }
+        if (!alreadyShown) {
             hintText = lockedHint
             hintVisible = true
             delay(3000)
@@ -464,18 +505,9 @@ private fun RemoteContent(
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color(0xFF0D0D0D))
             ) {
-                frame?.let {
-                    Image(
-                        bitmap = it,
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } ?: Icon(
-                    Icons.Default.Videocam, contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.18f),
-                    modifier = Modifier.size(44.dp).align(Alignment.Center)
-                )
+                // 帧的 state 读取推迟到子组件内部：让 15-30fps 的换帧只重组那一张
+                // Image，而不是整页（tile/快门/顶栏全部跟着每帧重跑一遍）。
+                ViewfinderImage { frame }
                 // 曝光模式徽标（只读；带物理拨盘的机身无法远程切换）——取景器左上角，
                 // 相机副屏的自然位置。
                 modeText?.let {
@@ -668,8 +700,13 @@ private fun RemoteContent(
             }
         }
 
-        // 开发者面板
-        if (devPanel) {
+        // 开发者面板遮罩：淡入淡出（与值表遮罩一致，此前是硬切）
+        AnimatedVisibility(
+            visible = devPanel,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(200)),
+            modifier = Modifier.fillMaxSize()
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -736,7 +773,18 @@ private fun RemoteContent(
                     )
                 }
                 Spacer(Modifier.height(8.dp))
+                // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
+                // 停在底部附近才跟到底，用户上翻查看时不打扰。
+                val logState = rememberLazyListState()
+                LaunchedEffect(logLines.size) {
+                    if (logLines.isEmpty()) return@LaunchedEffect
+                    val lastVisible = logState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                    if (lastVisible == -1 || lastVisible >= logLines.size - 3) {
+                        logState.scrollToItem(logLines.size - 1)
+                    }
+                }
                 LazyColumn(
+                    state = logState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(170.dp)
@@ -756,6 +804,31 @@ private fun RemoteContent(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * 监看画面本体。[frameProvider] 延迟到此处才读 frame state——换帧重组被限制在
+ * 这个小组件内，页面其余部分（tile/快门/顶栏）不随帧率重跑。
+ */
+@Composable
+private fun ViewfinderImage(frameProvider: () -> ImageBitmap?) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val bmp = frameProvider()
+        if (bmp != null) {
+            Image(
+                bitmap = bmp,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Icon(
+                Icons.Default.Videocam, contentDescription = null,
+                tint = Color.White.copy(alpha = 0.18f),
+                modifier = Modifier.size(44.dp)
+            )
         }
     }
 }

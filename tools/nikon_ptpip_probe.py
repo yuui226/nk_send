@@ -3,30 +3,72 @@
 """
 nikon_ptpip_probe.py —— 尼康「连接到电脑」PTP/IP 握手实验探针
 
-用途(一次运行拿全信息):
+这个脚本做什么:
   1) 在杂乱的局域网里【精准】定位哪台设备是尼康相机;
   2) 主动完成 PTP/IP Init 握手,观察相机是否要求配对(Init Ack / Init Fail);
-  3) 若放行,再 OpenSession + GetDeviceInfo,dump 机型/序列号/操作码/属性码;
-  4) 打印本机 IP 与我们用的 GUID/名称,便于在 Wireshark 里对齐 WTU 配对流量;
-  5) 全部结果落盘成带时间戳的 JSON + 日志,单次实验即可复盘。
+  3) 若放行,再 OpenSession + GetDeviceInfo,dump 机型/序列号/操作码/属性码,并判定
+     "仅下载类 / 含控制类"操作码;
+  4) --hold 保持会话,观测相机是否/多久主动掐断、心跳能否保住(方案成立与否的关键数据);
+  5) 全部结果落盘成带时间戳的 JSON + 控制台日志,单次实验即可复盘。
 
-精准识别相机的三重信号(越往后越硬):
-  A. mDNS 广播 `_ptp._tcp`  —— 只有相机这类 PTP/IP 设备会播(需要 pip install zeroconf)
-  B. TCP 15740 端口开放      —— 局域网里几乎只有相机监听
-  C. PTP/IP Init 握手成功并回读到相机 FriendlyName(如 "Z50")—— 不可伪造,确定就是它
-MAC/OUI 仅作辅助提示;真正的判据是 C。
+精准识别相机的三重信号(越往后越硬,MAC/OUI 仅辅助):
+  A. mDNS 广播(枚举全部服务类型,实证尼康真实服务名)  —— 需 pip install zeroconf
+  B. TCP 15740 端口开放  —— 局域网里几乎只有相机监听
+  C. PTP/IP Init 握手成功并回读到相机 FriendlyName(如 "Z50") —— 不可伪造,确定就是它
 
-依赖:
-  python -m pip install zeroconf        # 可选;没有则跳过 mDNS,只做端口扫描
-标准库即可运行(端口扫描/握手不依赖第三方库)。
+============================ 实验前提(缺一不可) ============================
+一、网络:相机和电脑连【同一个 wifi / 同一网段】(家里路由器或手机热点均可)
+   - 路由器不能开 "AP 隔离 / 客户端隔离"(会禁止设备互通,脚本扫不到相机)。
 
-典型用法:
-  # 自动发现并探测(推荐先读相机菜单里的 IP,直连最稳):
-  python nikon_ptpip_probe.py --subnet 192.168.137.0/24
-  # 已知相机 IP(手机热点 / 相机菜单能看到 IP 时):
-  python nikon_ptpip_probe.py --ip 192.168.137.55
-  # 只发现不握手(纯扫描):
-  python nikon_ptpip_probe.py --subnet 192.168.1.0/24 --discover-only
+二、相机:进【连接到电脑 Connect to PC】,不是「连接到智能设备/SnapBridge」
+   - 设置菜单 → 连接到电脑 → 网络设置 → 创建配置文件 → 搜索 Wi-Fi 网络(infrastructure)
+     → 选 wifi → 输密码;把 "Wi-Fi 连接" 设为启用,保持在线(相机 wifi 会休眠,别熄屏)。
+   - 记下相机拿到的 IP(连接状态里能看到),运行时 --ip 传进去最稳;看不到则脚本扫描。
+
+三、配对岔路(这正是实验目的,两种都要跑):
+   - A. 先【不配对】直接跑脚本:相机只加入了 wifi、不开 WTU → 看 Init 成功还是被拒,
+        直接回答"未配对到底连不连得上"。
+   - B. 再用【WTU 配对】后跑:电脑装 WTU 走一遍官方配对(相机显示认证码输入 WTU),
+        全程 Wireshark 抓包;配对完再跑脚本(尤其 --hold 看会话、--guid 做 A/B)。
+
+四、电脑:
+   - 连同一 wifi。
+   - 防火墙:一般【不用改】——连相机(TCP 15740)和端口扫描都是"出站",Windows 默认放行。
+     只有走 mDNS 自动发现时,zeroconf 要监听"入站"UDP 5353,首次运行 Windows 会弹窗
+     问是否允许 python,勾"专用网络"即可;不想用 mDNS 就直接 --ip / --subnet,无需任何放行。
+   - pip install zeroconf(mDNS 用,可选);
+   - 同一时刻只连一个:别让 WTU / SnapBridge / 手机 App 同时连着相机(尼康单会话会互抢)。
+
+================================ 使用步骤 ================================
+  # ① 基本探测:定位相机 + Init + DeviceInfo + 操作码判定
+  python nikon_ptpip_probe.py --ip 192.168.1.55
+  #   (不知道 IP 就扫网段:--subnet 192.168.1.0/24;只发现不握手加 --discover-only)
+
+  # ② 关键:观测相机是否/多久掐断会话(先只观察 60 秒)
+  python nikon_ptpip_probe.py --ip 192.168.1.55 --hold 60
+  #   若被掐,试心跳能否续命:
+  python nikon_ptpip_probe.py --ip 192.168.1.55 --hold 120 --keepalive getdeviceinfo
+
+  # ③ 抓完 WTU 配对后,做 GUID A/B(判定相机是否按固定 GUID 放行)
+  python nikon_ptpip_probe.py --ip 192.168.1.55 --guid <pcap里WTU用的GUID>
+  python nikon_ptpip_probe.py --ip 192.168.1.55 --guid <把上面改一位>
+
+  每次生成 ptpip_probe_<时间戳>.json,留好。
+
+=========================== Wireshark 抓包(第③步前置) ===========================
+  官方唯一能配对的 WTU 只有 Win/Mac 版,故用 PC 抓一次配对流量(与产品无关):
+   1) Wireshark 选【连该 wifi 的那张网卡】,capture filter 填:host <相机IP> or udp port 5353
+   2) 相机上先删掉旧配对记录 → 开 WTU 走一遍首次配对(输认证码)→ 配对后再传一张图多抓点;
+   3) 停止,File→Save As 存成 .pcapng。
+  抓包重点(认证码是带外的,别指望找"认证码字段"):
+   - 配对后那次连接里 WTU 填的 GUID(拿去做第③步 A/B);
+   - 连接建立后 WTU 每隔几秒发什么包维持会话不掉(→ 我们的 --keepalive 依据);
+   - GetDeviceInfo 响应里的 OperationsSupported 是否只有下载类;
+   - udp 5353 里尼康真实的 mDNS 服务名(是不是 _ptp._tcp)。
+  追一条流:右键任一 15740 包 → Follow → TCP Stream。
+
+三个新开关:--hold <秒>(保持会话观测掐断)、--keepalive none|ping|getdeviceinfo(试心跳)、
+           --guid <32位hex>(做 GUID A/B)。判定出口见 docs/连接到手机热点调研.md 第六节。
 
 作者备注:PTP/IP 帧格式与操作码事实来源于 ISO 15740 与 libgphoto2 camlibs/ptp2/ptpip.c,
 仅参考协议事实,代码为独立实现。
@@ -36,6 +78,7 @@ import argparse
 import ipaddress
 import json
 import os
+import select
 import socket
 import struct
 import subprocess
@@ -78,11 +121,40 @@ DEFAULT_NAME = "nk_send-probe"
 # Nikon 厂商扩展 ID(GetDeviceInfo 里出现即为尼康)
 NIKON_VENDOR_EXT_ID = 0x0000000A
 
-# 尼康 MAC OUI —— 仅作弱提示,可能不全;真判据是能否完成 PTP/IP 握手。
-# 以相机菜单「网络设置 → MAC 地址」显示的实际前缀为准,自行往这里补。
-NIKON_OUI_HINTS = {
-    "b8:e9:37", "00:0f:d9", "e0:d5:5e", "34:2e:b7", "9c:04:73",
+# 操作码名(够用即可,用于判定"仅下载类 / 含控制类")
+OPCODE_NAMES = {
+    0x1001: "GetDeviceInfo", 0x1002: "OpenSession", 0x1003: "CloseSession",
+    0x1004: "GetStorageIDs", 0x1005: "GetStorageInfo", 0x1006: "GetNumObjects",
+    0x1007: "GetObjectHandles", 0x1008: "GetObjectInfo", 0x1009: "GetObject",
+    0x100A: "GetThumb", 0x100B: "DeleteObject", 0x100E: "InitiateCapture",
+    0x1014: "GetDevicePropDesc", 0x1015: "GetDevicePropValue", 0x1016: "SetDevicePropValue",
+    0x101B: "GetPartialObject", 0x9201: "Nikon_StartLiveView", 0x9203: "Nikon_GetLiveViewImg",
+    0x9207: "Nikon_InitiateCaptureRecInMedia", 0x90C0: "Nikon_InitiateCaptureRecInSdram",
+    0x90C7: "Nikon_GetEvent", 0x90C8: "Nikon_DeviceReady",
 }
+# 判定"含控制/遥控能力"的关键操作码(有其一即非纯下载)
+CONTROL_OPCODES = {0x1016, 0x100E, 0x9201, 0x9203, 0x9207, 0x90C0, 0x90CB}
+# 判定"具备下载能力"的关键操作码
+DOWNLOAD_OPCODES = {0x1007, 0x1009}
+
+
+def classify_ops(ops):
+    ops = set(ops)
+    has_dl = DOWNLOAD_OPCODES.issubset(ops)
+    has_ctrl = bool(ops & CONTROL_OPCODES)
+    if has_ctrl:
+        verdict = "含控制/遥控类操作码(不止下载)"
+    elif has_dl:
+        verdict = "仅下载类操作码(与 gphoto2 #1135 的 STA 模式观察一致)"
+    else:
+        verdict = "操作码集异常/受限(连基本下载码都不全)"
+    named = [f"0x{c:04X} {OPCODE_NAMES.get(c, '?')}" for c in sorted(ops)]
+    return {"verdict": verdict, "has_download": has_dl,
+            "has_control": has_ctrl, "named": named}
+
+# 尼康 MAC OUI 提示 —— 默认空:真判据是能否完成 PTP/IP 握手,OUI 只是可选的眼力辅助。
+# 想用就把相机菜单「网络设置 → MAC 地址」显示的前 3 段(如 "b8:e9:37")填进来。
+NIKON_OUI_HINTS = set()
 
 
 def log(msg=""):
@@ -234,6 +306,80 @@ def ptp_transaction(sock, opcode, params=(), tid=0, dataphase=DP_NODATA_OR_IN):
             continue
 
 
+def hold_session(sock, seconds, keepalive="none", ping_interval=5.0, tid_start=1):
+    """
+    保持会话打开 `seconds` 秒,观测相机是否/何时主动掐断——回答"该模式会话能不能保持"。
+    keepalive:
+      none          只观察,不发任何包(测相机自然掐断时间)
+      ping          每 ping_interval 秒发一个 PTP/IP Ping(type 13)
+      getdeviceinfo 每 ping_interval 秒重发一次 GetDeviceInfo 当心跳
+    返回 dict:{mode, dropped(bool), alive_seconds, note, events}
+    """
+    start = time.monotonic()
+    events = []
+    res = {"mode": keepalive, "dropped": None, "alive_seconds": None,
+           "note": "", "events": events}
+
+    if keepalive == "getdeviceinfo":
+        # 主动轮询法:靠"发得出去且收得到 OK"判断会话是否还活着
+        sock.settimeout(max(ping_interval, 6.0))
+        tid = tid_start
+        while True:
+            elapsed = time.monotonic() - start
+            if elapsed >= seconds:
+                res.update(dropped=False, alive_seconds=round(elapsed, 1),
+                           note=f"周期 GetDeviceInfo 心跳下保持 {seconds}s 未断")
+                return res
+            try:
+                rc, _, _ = ptp_transaction(sock, OP_GET_DEVICE_INFO, tid=tid,
+                                           dataphase=DP_NODATA_OR_IN)
+                tid += 1
+                events.append({"t": round(elapsed, 1), "getdeviceinfo_rc": f"0x{rc:04X}"})
+            except Exception as e:
+                res.update(dropped=True, alive_seconds=round(elapsed, 1),
+                           note=f"心跳在 {round(elapsed,1)}s 时失败,会话已断:{e}")
+                return res
+            remaining = seconds - (time.monotonic() - start)
+            if remaining <= 0:
+                res.update(dropped=False, alive_seconds=round(time.monotonic() - start, 1),
+                           note=f"周期 GetDeviceInfo 心跳下保持 {seconds}s 未断")
+                return res
+            time.sleep(min(ping_interval, remaining))
+
+    # 被动观察(none)/ ping:靠 select 捕获相机的 FIN 或事件包
+    sock.settimeout(1.0)
+    last_ka = start
+    while True:
+        now = time.monotonic()
+        elapsed = now - start
+        if elapsed >= seconds:
+            res.update(dropped=False, alive_seconds=round(elapsed, 1),
+                       note=f"保持 {seconds}s 未被掐断(keepalive={keepalive})")
+            return res
+        if keepalive == "ping" and (now - last_ka) >= ping_interval:
+            try:
+                send_packet(sock, PKT_PING, b"")
+                last_ka = now
+            except Exception as e:
+                res.update(dropped=True, alive_seconds=round(elapsed, 1),
+                           note=f"发 Ping 失败,会话已断:{e}")
+                return res
+        try:
+            r, _, _ = select.select([sock], [], [], 0.5)
+        except Exception:
+            r = []
+        if r:
+            try:
+                ptype, body = read_packet(sock)
+                events.append({"t": round(time.monotonic() - start, 1),
+                               "pkt_type": ptype, "len": len(body)})
+            except Exception as e:
+                dropped_at = round(time.monotonic() - start, 1)
+                res.update(dropped=True, alive_seconds=dropped_at,
+                           note=f"相机在 {dropped_at}s 时掐断连接:{e}")
+                return res
+
+
 # ---- DeviceInfo 数据集解析 ----
 def _read_u16(data, o): return struct.unpack("<H", data[o:o + 2])[0], o + 2
 def _read_u32(data, o): return struct.unpack("<I", data[o:o + 4])[0], o + 4
@@ -276,10 +422,11 @@ def parse_device_info(data):
     return info
 
 
-def probe_device_info(ip, guid, name):
-    """完整流程:Init → OpenSession → GetDeviceInfo。返回结果 dict。"""
+def probe_device_info(ip, guid, name, hold=0, keepalive="none"):
+    """完整流程:Init → OpenSession → GetDeviceInfo(→ 可选 hold 观测会话保持)。返回结果 dict。"""
     out = {"ip": ip, "init": None, "open_session_rc": None,
-           "get_device_info_rc": None, "device_info": None, "error": None}
+           "get_device_info_rc": None, "device_info": None,
+           "ops_classification": None, "hold": None, "error": None}
     init = ptpip_init(ip, guid, name)
     out["init"] = {k: init[k] for k in
                    ("ok", "camera_name", "camera_guid", "connection_number",
@@ -302,9 +449,16 @@ def probe_device_info(ip, guid, name):
             # 仍尝试 GetDeviceInfo(部分机型允许无会话取)
         rc, _, data = ptp_transaction(cmd, OP_GET_DEVICE_INFO, tid=tid,
                                       dataphase=DP_NODATA_OR_IN)
+        tid += 1
         out["get_device_info_rc"] = f"0x{rc:04X}"
         if rc == RC_OK and data:
-            out["device_info"] = parse_device_info(data)
+            di = parse_device_info(data)
+            out["device_info"] = di
+            out["ops_classification"] = classify_ops(di["operations_supported"])
+        # 会话保持观测(最关键的新数据)
+        if hold > 0:
+            log(f"    [hold] 保持会话 {hold}s,keepalive={keepalive},观测相机是否掐断...")
+            out["hold"] = hold_session(cmd, hold, keepalive=keepalive, tid_start=tid)
     except Exception as e:
         out["error"] = f"事务异常:{e}"
     finally:
@@ -385,34 +539,52 @@ def oui_hint(mac):
 
 
 def mdns_discover(timeout=5.0):
-    """用 zeroconf 浏览 _ptp._tcp。返回 [(name, ip, port)]。无 zeroconf 则返回 None。"""
+    """
+    用 zeroconf 发现相机。返回 (found, service_types):
+      found         = [(name, ip, port, service_type)]  各服务实例
+      service_types = 局域网上枚举到的全部服务类型(用来实证尼康到底用哪个服务名,
+                      而不是想当然认定 _ptp._tcp)
+    无 zeroconf 返回 (None, None)。
+    """
     try:
-        from zeroconf import Zeroconf, ServiceBrowser
+        from zeroconf import Zeroconf, ServiceBrowser, ZeroconfServiceTypes
     except ImportError:
-        return None
-
-    found = []
-
-    class Listener:
-        def add_service(self, zc, type_, name):
-            info = zc.get_service_info(type_, name, timeout=3000)
-            if info:
-                for addr in info.parsed_addresses():
-                    found.append((name, addr, info.port))
-
-        def update_service(self, *a):
-            pass
-
-        def remove_service(self, *a):
-            pass
+        return None, None
 
     zc = Zeroconf()
+    service_types = []
     try:
-        ServiceBrowser(zc, "_ptp._tcp.local.", Listener())
-        time.sleep(timeout)
+        # 1) 先枚举局域网广告的所有服务类型(元查询)
+        try:
+            service_types = sorted(ZeroconfServiceTypes.find(zc=zc, timeout=timeout))
+        except Exception:
+            service_types = []
+
+        # 2) 对每个类型(至少包含 _ptp._tcp)逐一浏览,拿实例地址
+        browse_types = sorted(set(service_types) | {"_ptp._tcp.local."})
+        found = []
+
+        class Listener:
+            def __init__(self, stype):
+                self.stype = stype
+
+            def add_service(self, zc_, type_, name):
+                info = zc_.get_service_info(type_, name, timeout=3000)
+                if info:
+                    for addr in info.parsed_addresses():
+                        found.append((name, addr, info.port, type_))
+
+            def update_service(self, *a):
+                pass
+
+            def remove_service(self, *a):
+                pass
+
+        browsers = [ServiceBrowser(zc, t, Listener(t)) for t in browse_types]
+        time.sleep(min(timeout, 4.0))
+        return found, service_types
     finally:
         zc.close()
-    return found
 
 
 # ======================================================================
@@ -428,6 +600,10 @@ def main():
     ap.add_argument("--no-mdns", action="store_true", help="跳过 mDNS 浏览")
     ap.add_argument("--guid", help="自定义本机 GUID(32 位十六进制)")
     ap.add_argument("--name", default=DEFAULT_NAME, help=f"本机 FriendlyName(默认 {DEFAULT_NAME})")
+    ap.add_argument("--hold", type=int, default=0, metavar="SEC",
+                    help="握手后保持会话 SEC 秒,观测相机是否/何时掐断(0=不保持)")
+    ap.add_argument("--keepalive", choices=("none", "ping", "getdeviceinfo"),
+                    default="none", help="hold 期间的心跳方式(默认 none 只观察)")
     ap.add_argument("--out", help="结果 JSON 输出路径(默认 ./ptpip_probe_<时间戳>.json)")
     args = ap.parse_args()
 
@@ -454,18 +630,23 @@ def main():
     if args.ip:
         candidates.append((args.ip, "手动指定", None))
     else:
-        # 1) mDNS
+        # 1) mDNS(枚举全部服务类型 + 拿实例)
         if not args.no_mdns:
-            log("[发现-1] mDNS 浏览 _ptp._tcp(5 秒)...")
-            m = mdns_discover()
+            log("[发现-1] mDNS:枚举局域网服务类型 + 浏览(约 5 秒)...")
+            m, stypes = mdns_discover()
             if m is None:
                 log("    未安装 zeroconf,跳过 mDNS(pip install zeroconf 可启用)")
-            elif not m:
-                log("    mDNS 未发现 _ptp._tcp 设备")
             else:
-                for name, ip, port in m:
-                    log(f"    mDNS 命中:{ip}:{port}  ({name})")
-                    candidates.append((ip, f"mDNS:{name}", None))
+                if stypes:
+                    log(f"    局域网广告的服务类型({len(stypes)} 种,用于确认尼康真实服务名):")
+                    for t in stypes:
+                        log(f"      - {t}")
+                    report["mdns_service_types"] = stypes
+                if not m:
+                    log("    未解析到具体服务实例(相机可能不广播 mDNS,靠端口扫描兜底)")
+                for name, ip, port, stype in m:
+                    log(f"    mDNS 实例:{ip}:{port}  type={stype}  ({name})")
+                    candidates.append((ip, f"mDNS:{stype}", None))
 
         # 2) 端口扫描
         subnet = args.subnet or guess_subnet()
@@ -513,7 +694,8 @@ def main():
     for ip, src, mac in uniq:
         log("")
         log(f">>> 探测 {ip} ...")
-        res = probe_device_info(ip, guid, args.name)
+        res = probe_device_info(ip, guid, args.name, hold=args.hold,
+                                keepalive=args.keepalive)
         res["source"] = src
         res["mac"] = mac
         report["probes"].append(res)
@@ -522,7 +704,7 @@ def main():
     _dump(report, out_path)
     log("")
     log(f"[完成] 完整结果已写入:{out_path}")
-    log("       把这个 JSON 连同 Wireshark 的 .pcapng 一起发我,即可分析配对握手。")
+    log("       把这个 JSON 连同 Wireshark 的 .pcapng 一起发我,即可分析。")
 
 
 def _print_probe(res):
@@ -540,6 +722,16 @@ def _print_probe(res):
             log(f"       操作码 {len(di['operations_supported'])} 个,"
                 f"属性码 {len(di['device_props_supported'])} 个 "
                 f"(详见 JSON)")
+        cls = res.get("ops_classification")
+        if cls:
+            log(f"       操作码判定:{cls['verdict']}")
+        hold = res.get("hold")
+        if hold:
+            if hold["dropped"] is True:
+                log(f"       ⏱ 会话保持:相机在 {hold['alive_seconds']}s 掐断"
+                    f"(keepalive={hold['mode']})—— {hold['note']}")
+            elif hold["dropped"] is False:
+                log(f"       ⏱ 会话保持:{hold['note']} ✅")
         if res.get("error"):
             log(f"       ⚠ {res['error']}")
     else:
