@@ -16,3 +16,9 @@ local.properties
 *.keystore
 *.jks
 keystore.properties
+
+# PTP/IP 探针实验产物 / 抓包
+tools/ptpip_probe_*.json
+*.pcapng
+*.pcap
+__pycache__/
