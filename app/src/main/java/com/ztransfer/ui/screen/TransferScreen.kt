@@ -54,6 +54,7 @@ import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
+import com.ztransfer.ui.util.formatDuration
 import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
@@ -218,10 +219,13 @@ fun TransferScreen(
                                         TransferStatus.COMPLETED ->
                                             (when {
                                                 task.skipped -> stringResource(R.string.status_skipped)
-                                                // 单文件下载速度：一眼看出当前网络快慢。大小取真实落盘字节数
-                                                //（>4GB 对象的 file.size 只是哨兵值）。
-                                                task.downloadMBps > 0f -> "${formatFileSize(task.downloaded)} · %.1f MB/s".format(task.downloadMBps)
-                                                else -> formatFileSize(task.downloaded)
+                                                // 大小 · 速度 · 耗时：一眼看出快慢与用时。大小取真实落盘字节数
+                                                //（>4GB 对象的 file.size 只是哨兵值）；耗时完成后填入。
+                                                else -> buildString {
+                                                    append(formatFileSize(task.downloaded))
+                                                    if (task.downloadMBps > 0f) append(" · %.1f MB/s".format(task.downloadMBps))
+                                                    task.elapsedMs?.let { append(" · ${formatDuration(it)}") }
+                                                }
                                             }) to colors.statusConnected
                                         TransferStatus.FAILED -> (task.error ?: stringResource(R.string.transfer_failed)) to colors.statusError
                                         TransferStatus.CANCELLED -> stringResource(R.string.status_cancelled) to colors.onSurfaceVariant

@@ -39,7 +39,9 @@ data class TransferTask(
     val error: String? = null,
     val skipped: Boolean = false,  // 目标目录已存在同名文件而跳过
     // 单文件下载速度（MB/s），完成后填入，显示在卡片上。
-    val downloadMBps: Float = 0f
+    val downloadMBps: Float = 0f,
+    // 本次传输耗时（毫秒），完成后填入并显示在卡片上；跳过/未传的为 null。
+    val elapsedMs: Long? = null
 )
 
 data class TransferState(
@@ -296,6 +298,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
 
                     updateTask(handle) { it.copy(status = TransferStatus.TRANSFERING) }
+                    // 本次传输计时起点：只在此处与完成处各读一次时钟，不进收包热路径。
+                    val transferStart = System.currentTimeMillis()
                     log { "DL_BEGIN: ${task.file.fileName} handle=$handle size=${task.file.size}" }
 
                     // 首个真正要下载的文件才拉起前台服务（全部命中"已存在"时不必启动，避免通知闪一下）。
@@ -465,11 +469,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 if (renamedUri != null) {
                                     existing[savedName] = stats.bytes
                                     existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(stats.bytes)
+                                    val elapsed = System.currentTimeMillis() - transferStart
                                     updateTask(handle) {
                                         it.copy(
                                             status = TransferStatus.COMPLETED, progress = 1f,
                                             downloaded = stats.bytes, speed = 0,
-                                            downloadMBps = stats.mbps
+                                            downloadMBps = stats.mbps,
+                                            elapsedMs = elapsed
                                         )
                                     }
                                 } else {
