@@ -2,7 +2,6 @@ package com.ztransfer.ui.screen
 
 import android.content.Context
 import android.graphics.BitmapFactory
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -13,7 +12,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -141,8 +139,6 @@ private fun RemoteContent(
     var frame by remember { mutableStateOf<ImageBitmap?>(null) }
     var fps by remember { mutableStateOf(0f) }
     var capturing by remember { mutableStateOf(false) }
-    var lastShot by remember { mutableStateOf<ImageBitmap?>(null) }
-    var showLastShotLarge by remember { mutableStateOf(false) }
     var modeText by remember { mutableStateOf<String?>(null) }
     val params = remember { mutableStateMapOf<Int, RcParam>() }
     // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
@@ -318,12 +314,14 @@ private fun RemoteContent(
         sendValue(prop, p.values[newIdx], immediate = false)
     }
 
+    // 拍摄：capturing 从触发一直保持到收到 ObjectAdded（相机确认新照片已生成）——
+    // 快门键转圈即"正在等待拍摄确认"，收到确认/超时/失败即停。不读取也不展示缩略图。
     fun shoot() {
         if (capturing) return
         val cam = cameraViewModel.getCamera() ?: return
         scope.launch {
             capturing = true
-            haptics.longPress()
+            haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
             try {
                 // 先挂事件等待、再触发拍摄：ObjectAdded 是取走即消费的，
                 // 订阅晚于轮询取走就永远等不到了。
@@ -340,15 +338,9 @@ private fun RemoteContent(
                     devLog("!! capture resp=0x%04X".format(rc and 0xFFFF))
                     return@launch
                 }
-                val handle = pending.await()
-                if (handle == null) {
-                    devLog("!! capture: no ObjectAdded in 12s")
-                    return@launch
-                }
-                devLog("shot: handle=0x%08X".format(handle))
-                runCatching { cam.getThumbnail(handle) }.getOrNull()
-                    ?.let { decode(it) }
-                    ?.let { lastShot = it }
+                val handle = pending.await()   // 拍摄成功的确认信号
+                if (handle == null) devLog("!! capture: no ObjectAdded in 12s")
+                else devLog("shot ok: handle=0x%08X".format(handle))
             } finally {
                 capturing = false
             }
@@ -564,38 +556,12 @@ private fun RemoteContent(
 
             Spacer(Modifier.weight(1f))
 
-            // 底部：最近一张 / 快门 / 录像占位（v2）
-            Row(
+            // 底部：居中快门键（不再显示拍摄缩略图）。
+            // 按住=半按对焦，松开在键内=拍摄、移出取消；拍摄中转圈=正在等相机确认拍好。
+            Box(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+                contentAlignment = Alignment.Center
             ) {
-                Box(Modifier.size(52.dp)) {
-                    AnimatedContent(
-                        targetState = lastShot,
-                        transitionSpec = {
-                            (scaleIn(initialScale = 0.5f, animationSpec = tween(260)) + fadeIn(tween(260)))
-                                .togetherWith(fadeOut(tween(120)))
-                        },
-                        label = "lastShot"
-                    ) { shot ->
-                        if (shot != null) {
-                            Image(
-                                bitmap = shot,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(52.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
-                                    .clickable { showLastShotLarge = true }
-                            )
-                        } else {
-                            Box(Modifier.size(52.dp))
-                        }
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                // 按住=半按对焦，松开在键内=拍摄，移出取消。对焦与拍照合一（真机两段式快门隐喻）。
                 ShutterButton(
                     capturing = capturing,
                     focusing = afHeld,
@@ -606,9 +572,6 @@ private fun RemoteContent(
                         if (fire) shoot()
                     }
                 )
-                Spacer(Modifier.weight(1f))
-                // 与左侧缩略图等宽的占位，保证快门键几何居中
-                Box(Modifier.size(52.dp))
             }
         }
 
@@ -701,27 +664,6 @@ private fun RemoteContent(
                         }
                     }
                 }
-            }
-        }
-
-        // 最近一张放大回显（缩略图放大，非原图；下载走照片列表）
-        if (showLastShotLarge && lastShot != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.92f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { showLastShotLarge = false },
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    bitmap = lastShot!!,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxWidth().padding(12.dp)
-                )
             }
         }
 
