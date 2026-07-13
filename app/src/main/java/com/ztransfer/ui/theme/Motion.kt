@@ -25,6 +25,10 @@ object Motion {
     val overlayExpand: TweenSpec<Float> = tween(340, easing = FastOutSlowInEasing)
     val overlayCollapse: TweenSpec<Float> = tween(260, easing = FastOutSlowInEasing)
 
+    /** 底部面板滑入/滑出（开发者面板等）：与 overlayExpand/Collapse 同节奏的位移版。 */
+    val sheetSlideIn: TweenSpec<IntOffset> = tween(340, easing = FastOutSlowInEasing)
+    val sheetSlideOut: TweenSpec<IntOffset> = tween(260, easing = FastOutSlowInEasing)
+
     /**
      * "Z传"页 ↔ 队列页左右滑动转场：进/出双方共用同一弹簧——弹簧位移与初始距离成正比，
      * 上层整页与底层 1/3 视差才全程同步；临界阻尼，横向整页滑动过冲会露出屏幕边缘。

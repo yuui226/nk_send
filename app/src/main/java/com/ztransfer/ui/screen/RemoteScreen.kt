@@ -2,16 +2,24 @@ package com.ztransfer.ui.screen
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,12 +46,18 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.center
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -76,6 +90,7 @@ import com.ztransfer.protocol.runLabProbe
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.DarkAppColors
 import com.ztransfer.ui.theme.LocalAppColors
+import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferViewModel
@@ -94,6 +109,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.hypot
 
 // 直控胶囊覆盖的四个曝光参数，2×2 网格顺序：
 // 第一排 曝光补偿 / ISO，第二排 光圈 / 快门速度。
@@ -105,10 +121,10 @@ private val EXPOSURE_PROPS = listOf(
  * 无线遥控页（正式功能）：取景器隐喻，恒黑底不随主题——通过覆盖 [LocalAppColors]
  * 让页内所有玻璃组件走深色 token（与 PhotoPreview 恒黑同理，但组件无需特判）。
  *
- * 布局：顶栏（返回/机型名/连接点）→ 监看画面（点击=触摸对焦）→ 曝光读数条
- * （点谁调谁）→ 吸附拨轮（值域来自相机枚举，RO 置灰+锁+抖动）→ 快门键 + 最近一张。
- * 进页自动开监看、退页自动关；拍摄结果仅回显不入队（下载走照片列表）。
- * 开发者面板：连点机型名 3 次呼出（探测/日志/XGA/帧率）。
+ * 布局：顶栏（信号/开发者/HD/FPS/返回）→ 监看画面 → 2×2 参数拖拽微调 tile
+ * （值域来自相机枚举，只读压暗+锁；点数值弹全表直跳）→ 大圆快门键
+ * （按住=半按对焦、松开在键内=拍摄）。进页自动开监看、退页自动关；
+ * 拍摄结果仅确认不入队（下载走照片列表）。开发者面板：顶栏虫子按钮呼出（探测/日志）。
  */
 @Composable
 fun RemoteScreen(
@@ -475,8 +491,14 @@ private fun RemoteContent(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SignalPill(rssi = camState.wifiRssi, connected = connected)
                 Spacer(Modifier.weight(1f))
-                // 开发者工具入口（放在 HD/FPS 左侧）
-                GlassButton(onClick = { devPanel = true }, contentPadding = PaddingValues(9.dp)) {
+                // 开发者工具入口（放在 HD/FPS 左侧）。顶栏控件统一 22dp 圆角 + 36dp 高
+                //（与照片列表页顶栏一致）。
+                GlassButton(
+                    onClick = { devPanel = true },
+                    shape = RoundedCornerShape(22.dp),
+                    contentPadding = PaddingValues(9.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
                     Icon(
                         Icons.Default.BugReport,
                         contentDescription = stringResource(R.string.cd_dev_panel),
@@ -488,9 +510,15 @@ private fun RemoteContent(
                 Spacer(Modifier.width(6.dp))
                 TopToggle("FPS", showFps) { showFps = !showFps }
                 Spacer(Modifier.width(6.dp))
-                GlassButton(onClick = onNavigateBack, contentPadding = PaddingValues(9.dp)) {
+                GlassButton(
+                    onClick = onNavigateBack,
+                    shape = RoundedCornerShape(22.dp),
+                    contentPadding = PaddingValues(9.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
                     Icon(
-                        Icons.Default.ArrowForward, contentDescription = null,
+                        Icons.Default.ArrowForward,
+                        contentDescription = stringResource(R.string.cd_back),
                         tint = colors.onBackground, modifier = Modifier.size(18.dp)
                     )
                 }
@@ -519,25 +547,48 @@ private fun RemoteContent(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 }
-                // 半按对焦指示：按住期间显示中央对焦框，收缩入场。合焦成功转绿、未合焦保持蓝。
+                // 半按对焦指示：按住期间显示中央对焦框（相机取景器语言的四角 L 形括号），
+                // 收缩入场；合焦成功转绿并轻微收拢一下（与合焦触感同步的视觉确认）。
                 if (afHeld) {
                     val reticleScale = remember { Animatable(1.4f) }
                     LaunchedEffect(Unit) { reticleScale.animateTo(1f, tween(180)) }
-                    val reticleColor = if (afLocked) colors.statusConnected else colors.accentBlue
-                    Box(
+                    val lockScale by animateFloatAsState(
+                        targetValue = if (afLocked) 0.9f else 1f,
+                        animationSpec = Motion.bouncy(),
+                        label = "afLock"
+                    )
+                    val reticleColor =
+                        (if (afLocked) colors.statusConnected else colors.accentBlue)
+                            .copy(alpha = 0.95f)
+                    Canvas(
                         modifier = Modifier
                             .align(Alignment.Center)
                             .size(64.dp)
                             .graphicsLayer {
-                                scaleX = reticleScale.value
-                                scaleY = reticleScale.value
+                                val s = reticleScale.value * lockScale
+                                scaleX = s
+                                scaleY = s
                             }
-                            .border(1.5.dp, reticleColor.copy(alpha = 0.95f), RoundedCornerShape(8.dp))
-                    )
+                    ) {
+                        val len = 12.dp.toPx()
+                        val sw = 2.dp.toPx()
+                        val inset = sw / 2
+                        val w = size.width - inset
+                        val h = size.height - inset
+                        // 四角 L 形括号（圆头短杆）
+                        drawLine(reticleColor, Offset(inset, inset + len), Offset(inset, inset), sw, StrokeCap.Round)
+                        drawLine(reticleColor, Offset(inset, inset), Offset(inset + len, inset), sw, StrokeCap.Round)
+                        drawLine(reticleColor, Offset(w - len, inset), Offset(w, inset), sw, StrokeCap.Round)
+                        drawLine(reticleColor, Offset(w, inset), Offset(w, inset + len), sw, StrokeCap.Round)
+                        drawLine(reticleColor, Offset(inset, h - len), Offset(inset, h), sw, StrokeCap.Round)
+                        drawLine(reticleColor, Offset(inset, h), Offset(inset + len, h), sw, StrokeCap.Round)
+                        drawLine(reticleColor, Offset(w, h - len), Offset(w, h), sw, StrokeCap.Round)
+                        drawLine(reticleColor, Offset(w - len, h), Offset(w, h), sw, StrokeCap.Round)
+                    }
                 }
                 if (showFps && fps > 0f) {
                     Text(
@@ -548,7 +599,7 @@ private fun RemoteContent(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
@@ -608,7 +659,8 @@ private fun RemoteContent(
             }
         }
 
-        // 顶部提示条
+        // 顶部提示条：视觉与照片列表页的底部玻璃提示条同款（22dp 玻璃 Surface + 投影 +
+        // labelLarge）；位置留在顶部——本页底部是快门键，提示不能压它。
         AnimatedVisibility(
             visible = hintVisible,
             enter = fadeIn(tween(200)) + slideInVertically(tween(200)) { -it / 2 },
@@ -618,27 +670,30 @@ private fun RemoteContent(
                 .statusBarsPadding()
                 .padding(top = 60.dp)
         ) {
-            Text(
-                hintText,
-                color = colors.onBackground,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(colors.glassSurfaceHeavy)
-                    .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-            )
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = colors.glassSurfaceHeavy,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, colors.glassPanelBorder)
+            ) {
+                Text(
+                    hintText,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.onBackground,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                )
+            }
         }
 
         // 完整值表（点胶囊中间值弹出）：呼出=缩放淡入、消失=淡出（item 9 动画）。
         // 用 lastListProp 记住最后一次的参数，让消失动画期间仍有数据可渲染。
         var lastListProp by remember { mutableStateOf<Int?>(null) }
         LaunchedEffect(listProp) { if (listProp != null) lastListProp = listProp }
-        // 遮罩：淡入淡出
+        // 遮罩：淡入淡出（180/140，与面板本体及全局筛选面板同节奏）
         AnimatedVisibility(
             visible = listProp != null,
-            enter = fadeIn(tween(160)),
-            exit = fadeOut(tween(160)),
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(140)),
             modifier = Modifier.fillMaxSize()
         ) {
             Box(
@@ -667,44 +722,55 @@ private fun RemoteContent(
                         val idx = listParam.values.indexOf(listParam.current)
                         if (idx > 3) valueListState.scrollToItem(idx - 3)
                     }
-                    LazyColumn(
-                        state = valueListState,
-                        modifier = Modifier
-                            .width(190.dp)
-                            .heightIn(max = 340.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(colors.glassSurfaceHeavy)
-                            .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(16.dp))
-                            .padding(vertical = 6.dp)
+                    // 面板走全局玻璃面板惯用法（Surface + 细描边 + 投影，同类型筛选面板）；
+                    // 当前值行用全局选中语言：高亮底 + 蓝色加粗（同 FilterRow）。
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = colors.glassSurfaceHeavy,
+                        border = BorderStroke(1.dp, colors.glassPanelBorder),
+                        shadowElevation = 6.dp,
+                        modifier = Modifier.width(190.dp)
                     ) {
-                        items(listParam.values) { v ->
-                            val isCurrent = v == listParam.current
-                            Text(
-                                rcFormat(prop, v),
-                                color = if (isCurrent) colors.accentBlue else colors.onBackground,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 15.sp,
-                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        sendValue(prop, v, immediate = true)
-                                        listProp = null
-                                    }
-                                    .padding(vertical = 10.dp)
-                            )
+                        LazyColumn(
+                            state = valueListState,
+                            modifier = Modifier
+                                .heightIn(max = 340.dp)
+                                .padding(horizontal = 6.dp, vertical = 6.dp)
+                        ) {
+                            items(listParam.values) { v ->
+                                val isCurrent = v == listParam.current
+                                Text(
+                                    rcFormat(prop, v),
+                                    color = if (isCurrent) colors.accentBlue else colors.onBackground,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 15.sp,
+                                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(
+                                            if (isCurrent) colors.accentBlue.copy(alpha = 0.18f)
+                                            else Color.Transparent
+                                        )
+                                        .clickable {
+                                            sendValue(prop, v, immediate = true)
+                                            listProp = null
+                                        }
+                                        .padding(vertical = 10.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 开发者面板遮罩：淡入淡出（与值表遮罩一致，此前是硬切）
+        // 开发者面板遮罩：淡入淡出，与面板本体同节奏（全局 overlay 规格）
         AnimatedVisibility(
             visible = devPanel,
-            enter = fadeIn(tween(200)),
-            exit = fadeOut(tween(200)),
+            enter = fadeIn(Motion.overlayExpand),
+            exit = fadeOut(Motion.overlayCollapse),
             modifier = Modifier.fillMaxSize()
         ) {
             Box(
@@ -719,88 +785,100 @@ private fun RemoteContent(
         }
         AnimatedVisibility(
             visible = devPanel,
-            enter = slideInVertically(tween(240)) { it } + fadeIn(tween(240)),
-            exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(200)),
+            // 底部面板出入场走全局 overlay 节奏（与设置面板一致）
+            enter = slideInVertically(Motion.sheetSlideIn) { it } + fadeIn(Motion.overlayExpand),
+            exit = slideOutVertically(Motion.sheetSlideOut) { it } + fadeOut(Motion.overlayCollapse),
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
-                    .background(colors.glassSurfaceHeavy)
-                    .border(
-                        1.dp, colors.glassPanelBorder,
-                        RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
-                    )
-                    .navigationBarsPadding()
-                    .padding(14.dp)
+            // 底板走全局面板惯用法：Surface + 细描边 + 投影 + 顶部 sheen 高光
+            //（与设置面板同款），顶角 20dp 同设置面板。
+            Surface(
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                color = colors.glassSurfaceHeavy,
+                border = BorderStroke(1.dp, colors.glassPanelBorder),
+                shadowElevation = 6.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        stringResource(R.string.dev_panel_title),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.onBackground
-                    )
-                    Spacer(Modifier.weight(1f))
-                    GlassButton(
-                        onClick = {
-                            clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
-                        },
-                        contentPadding = PaddingValues(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.ContentCopy,
-                            contentDescription = stringResource(R.string.lab_copy_log),
-                            tint = colors.onSurfaceVariant, modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    GlassButton(onClick = { devPanel = false }, contentPadding = PaddingValues(8.dp)) {
-                        Icon(
-                            Icons.Default.Close, contentDescription = null,
-                            tint = colors.onSurfaceVariant, modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                // HD / FPS 开关已移到顶栏；此处只保留探测与日志。
-                GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
-                    Text(
-                        stringResource(R.string.lab_run_probe),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.onBackground
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
-                // 停在底部附近才跟到底，用户上翻查看时不打扰。
-                val logState = rememberLazyListState()
-                LaunchedEffect(logLines.size) {
-                    if (logLines.isEmpty()) return@LaunchedEffect
-                    val lastVisible = logState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                    if (lastVisible == -1 || lastVisible >= logLines.size - 3) {
-                        logState.scrollToItem(logLines.size - 1)
-                    }
-                }
-                LazyColumn(
-                    state = logState,
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(170.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.Black.copy(alpha = 0.35f))
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                ) {
-                    items(logLines) { line ->
-                        Text(
-                            line,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp,
-                            lineHeight = 14.sp,
-                            color = if (line.startsWith("!!")) colors.accentOrange
-                            else colors.onSurfaceVariant
+                        .background(
+                            Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent))
                         )
+                        .navigationBarsPadding()
+                        .padding(14.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.dev_panel_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onBackground
+                        )
+                        Spacer(Modifier.weight(1f))
+                        GlassButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(logLines.joinToString("\n")))
+                            },
+                            contentPadding = PaddingValues(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.ContentCopy,
+                                contentDescription = stringResource(R.string.lab_copy_log),
+                                tint = colors.onSurfaceVariant, modifier = Modifier.size(14.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        GlassButton(
+                            onClick = { devPanel = false },
+                            contentPadding = PaddingValues(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.cd_close),
+                                tint = colors.onSurfaceVariant, modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // HD / FPS 开关已移到顶栏；此处只保留探测与日志。
+                    GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
+                        Text(
+                            stringResource(R.string.lab_run_probe),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.onBackground
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
+                    // 停在底部附近才跟到底，用户上翻查看时不打扰。
+                    val logState = rememberLazyListState()
+                    LaunchedEffect(logLines.size) {
+                        if (logLines.isEmpty()) return@LaunchedEffect
+                        val lastVisible =
+                            logState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                        if (lastVisible == -1 || lastVisible >= logLines.size - 3) {
+                            logState.scrollToItem(logLines.size - 1)
+                        }
+                    }
+                    LazyColumn(
+                        state = logState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(170.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.Black.copy(alpha = 0.35f))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        items(logLines) { line ->
+                            Text(
+                                line,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp,
+                                color = if (line.startsWith("!!")) colors.accentOrange
+                                else colors.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
@@ -822,6 +900,23 @@ private fun ViewfinderImage(frameProvider: () -> ImageBitmap?) {
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize()
+            )
+            // 暗角：四周极淡压暗，画面"坐进"边框（相机目镜语言），角标叠其上不受影响。
+            // 半径必须取【半对角线】——默认的"短边一半"在 3:2 宽幅上圆罩不住左右两侧，
+            // 半径之外会被涂成均匀实色（两条黑带而非渐晕）。drawWithCache 只在尺寸
+            // 变化时重建 Brush，不随帧率重建。
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .drawWithCache {
+                        val brush = Brush.radialGradient(
+                            0.72f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.30f),
+                            center = size.center,
+                            radius = hypot(size.width, size.height) / 2f
+                        )
+                        onDrawBehind { drawRect(brush) }
+                    }
             )
         } else {
             Icon(
@@ -905,15 +1000,28 @@ private fun ParamTile(
     val downTarget = if (idx >= 0) param?.values?.getOrNull(idx + downSign) else null
     val upTarget = if (idx >= 0) param?.values?.getOrNull(idx - downSign) else null
 
+    // 与 GlassButton 同族的玻璃质感：半透明底 + 自上而下高光渐变 + 上亮下暗渐变描边；
+    // 拖动中描边整体换成主题蓝示意"正在调"。
+    val tileShape = RoundedCornerShape(14.dp)
     Box(
         modifier = modifier
             .height(54.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(tileShape)
             .background(colors.glassSurface)
-            .border(
-                width = if (dragging) 1.5.dp else 1.dp,
-                color = if (dragging && writable) colors.accentBlue else colors.glassPanelBorder,
-                shape = RoundedCornerShape(14.dp)
+            .background(
+                Brush.verticalGradient(
+                    listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
+                )
+            )
+            .then(
+                if (dragging && writable) Modifier.border(1.5.dp, colors.accentBlue, tileShape)
+                else Modifier.border(
+                    1.dp,
+                    Brush.verticalGradient(
+                        listOf(colors.glassBorderTop, colors.glassBorderBottom)
+                    ),
+                    tileShape
+                )
             )
             // 上下拖动微调：位移累加，每跨过 stepPx 走一档（无惯性）。向下拖走 downSign 方向。
             .pointerInput(writable, downSign) {
@@ -957,7 +1065,7 @@ private fun ParamTile(
             upTarget?.let {
                 Text(
                     rcFormat(param!!.prop, it),
-                    color = Color.White.copy(alpha = 0.35f),
+                    color = colors.onSurfaceVariant.copy(alpha = 0.65f),
                     fontFamily = FontFamily.Monospace, fontSize = 10.sp,
                     modifier = Modifier.align(Alignment.TopCenter).padding(top = 3.dp)
                 )
@@ -965,7 +1073,7 @@ private fun ParamTile(
             downTarget?.let {
                 Text(
                     rcFormat(param!!.prop, it),
-                    color = Color.White.copy(alpha = 0.35f),
+                    color = colors.onSurfaceVariant.copy(alpha = 0.65f),
                     fontFamily = FontFamily.Monospace, fontSize = 10.sp,
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp)
                 )
@@ -975,32 +1083,63 @@ private fun ParamTile(
         if (writable && !dragging) {
             Text(
                 "⇅",
-                color = Color.White.copy(alpha = 0.22f),
+                color = colors.onSurfaceVariant.copy(alpha = 0.35f),
                 fontSize = 12.sp,
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 9.dp)
             )
         }
-        // 中心当前值
-        Text(
-            param?.let { rcFormat(it.prop, it.current) } ?: "—",
-            color = when {
-                param == null -> colors.onSurfaceVariant.copy(alpha = 0.4f)
-                !writable -> colors.onSurfaceVariant.copy(alpha = 0.5f)
-                else -> Color.White
+        // 加载占位呼吸：参数未到时"—"缓慢脉动，表达"正在加载"而非死值。
+        val loadingAlpha = if (param == null) {
+            val pulse = rememberInfiniteTransition(label = "paramLoading")
+            pulse.animateFloat(
+                initialValue = 0.25f, targetValue = 0.55f,
+                animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+                label = "paramLoadingAlpha"
+            ).value
+        } else 1f
+        // 中心当前值：换值时沿拖动方向滑动（向下拖→新值从下缘滑入、旧值向上滑出），
+        // 与边缘淡显的相邻档位方向一致，做出"拨轮走档"的连续感。
+        val propCode = param?.prop
+        AnimatedContent(
+            targetState = param?.current,
+            transitionSpec = {
+                val vals = param?.values ?: emptyList()
+                val from = initialState?.let { vals.indexOf(it) } ?: -1
+                val to = targetState?.let { vals.indexOf(it) } ?: -1
+                // d>0 = 朝"向下拖"的方向走档；值不明（首载/值域变化）只做淡变
+                val d = if (from >= 0 && to >= 0) (to - from) * downSign else 0
+                when {
+                    d > 0 -> (slideInVertically(tween(130)) { it / 2 } + fadeIn(tween(130)))
+                        .togetherWith(slideOutVertically(tween(130)) { -it / 2 } + fadeOut(tween(130)))
+                    d < 0 -> (slideInVertically(tween(130)) { -it / 2 } + fadeIn(tween(130)))
+                        .togetherWith(slideOutVertically(tween(130)) { it / 2 } + fadeOut(tween(130)))
+                    else -> fadeIn(tween(130)) togetherWith fadeOut(tween(130))
+                }
             },
-            fontFamily = FontFamily.Monospace,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
+            contentAlignment = Alignment.Center,
+            label = "paramValue",
             modifier = Modifier.align(Alignment.Center)
-        )
+        ) { cur ->
+            Text(
+                if (cur != null && propCode != null) rcFormat(propCode, cur) else "—",
+                color = when {
+                    param == null -> colors.onSurfaceVariant.copy(alpha = loadingAlpha)
+                    !writable -> colors.onSurfaceVariant.copy(alpha = 0.5f)
+                    else -> colors.onBackground
+                },
+                fontFamily = FontFamily.Monospace,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
+        }
     }
 }
 
 /**
  * 大圆快门键（两段式）：
  * - 按下（onFocusStart）= 半按对焦；[focusing] 期间内圈收缩 + 边框转蓝，示意"正在合焦"。
- * - 抬手在键内（tryAwaitRelease 返回 true）→ onRelease(true) 拍摄；移出键外 → onRelease(false) 取消。
+ * - 抬手落点在键内 → onRelease(true) 拍摄；移出键外抬手/手势被取消 → onRelease(false) 取消。
  * - 拍摄中（capturing）转圈并禁手势。
  */
 @Composable
@@ -1016,6 +1155,12 @@ private fun ShutterButton(
         animationSpec = tween(120),
         label = "shutterFocus"
     )
+    // 按压下沉：按住（=半按对焦期间）整键轻微下沉，松开弹性回弹——与 GlassButton 同手感。
+    val pressScale by animateFloatAsState(
+        targetValue = if (focusing) 0.95f else 1f,
+        animationSpec = if (focusing) tween(100) else Motion.bouncy(),
+        label = "shutterPress"
+    )
     val ringColor = when {
         !enabled -> Color.White.copy(alpha = 0.3f)
         focusing -> AppTheme.colors.accentBlue
@@ -1024,6 +1169,10 @@ private fun ShutterButton(
     Box(
         modifier = Modifier
             .size(76.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .border(3.dp, ringColor, CircleShape)
             .then(
                 if (enabled && !capturing)
@@ -1066,14 +1215,16 @@ private fun ShutterButton(
     }
 }
 
-/** 顶栏小切换按钮（HD / FPS）：激活时蓝底高亮，未激活时低调玻璃底。 */
+/** 顶栏小切换按钮（HD / FPS）：激活时蓝字高亮，未激活时低调玻璃底。
+ *  规格与顶栏其它控件一致（22dp 圆角 + 36dp 高）。 */
 @Composable
 private fun TopToggle(label: String, active: Boolean, onClick: () -> Unit) {
     val colors = AppTheme.colors
     GlassButton(
         onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp)
+        shape = RoundedCornerShape(22.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier.height(36.dp)
     ) {
         Text(
             label,

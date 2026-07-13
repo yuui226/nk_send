@@ -12,9 +12,13 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
@@ -35,6 +39,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -288,8 +294,9 @@ fun FileListScreen(
     }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
+    // 用全局背景渐变刷（而非纯 background 色），与 Scaffold 底的纵深一致。
     // 遥控页入口是左下角圆钮（曾试过横滑手势进入，误触率高已去掉）。
-    Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
+    Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (state.isLoadingFiles && state.files.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -338,7 +345,18 @@ fun FileListScreen(
                             )
                         }
                     } else {
-                        Icon(Icons.Default.FolderOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = colors.onSurfaceVariant)
+                        // 空态缓慢呼吸（与队列页空态同参数）：页面此时无其它动态，不至于死板。
+                        val breathe = rememberInfiniteTransition(label = "emptyList")
+                        val breatheAlpha by breathe.animateFloat(
+                            initialValue = 0.35f, targetValue = 0.6f,
+                            animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
+                            label = "emptyListAlpha"
+                        )
+                        Icon(
+                            Icons.Default.FolderOff, contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
+                        )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(stringResource(R.string.no_photos_on_camera), color = colors.onSurfaceVariant)
                     }
@@ -387,9 +405,16 @@ fun FileListScreen(
             if (groups.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // 空态缓慢呼吸（与其余空态同参数）。
+                        val breathe = rememberInfiniteTransition(label = "emptyFilter")
+                        val breatheAlpha by breathe.animateFloat(
+                            initialValue = 0.35f, targetValue = 0.6f,
+                            animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
+                            label = "emptyFilterAlpha"
+                        )
                         FilterMark(
                             modifier = Modifier.size(44.dp),
-                            color = colors.onSurfaceVariant.copy(alpha = 0.6f)
+                            color = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(stringResource(R.string.no_photos_match_filter), color = colors.onSurfaceVariant)
@@ -495,9 +520,11 @@ fun FileListScreen(
                 .fillMaxWidth()
                 .height(topInset + 56.dp)
                 .background(
+                    // 用 backgroundTop（页面顶端的实际底色）而非名义中间色，
+                    // 否则在渐变底上会压出一条色差带。
                     Brush.verticalGradient(
-                        0f to colors.background.copy(alpha = 0.85f),
-                        0.45f to colors.background.copy(alpha = 0.5f),
+                        0f to colors.backgroundTop.copy(alpha = 0.85f),
+                        0.45f to colors.backgroundTop.copy(alpha = 0.5f),
                         1f to Color.Transparent
                     )
                 )
@@ -724,13 +751,26 @@ fun QueuePill(
         }
     }
 
+    // 按压微缩放：本胶囊是顶栏唯一手写 Surface（不经 GlassButton），手感与全局按钮对齐。
+    val pillInteraction = remember { MutableInteractionSource() }
+    val pillPressed by pillInteraction.collectIsPressedAsState()
+    val pillPressScale by animateFloatAsState(
+        targetValue = if (pillPressed) 0.95f else 1f,
+        animationSpec = if (pillPressed) tween(80) else Motion.bouncy(),
+        label = "pillPress"
+    )
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(22.dp),
         color = colors.glassSurface,   // 毛玻璃半透明底（与 "Z传" 一致）
         shadowElevation = 4.dp,
+        interactionSource = pillInteraction,
         modifier = Modifier
             .height(36.dp)
+            .graphicsLayer {
+                scaleX = pillPressScale
+                scaleY = pillPressScale
+            }
             // 用动画宽度；首帧未测量时先按内容自适应，测到后即锁定为动画宽度。
             .then(if (contentWidthPx > 0) Modifier.width(with(density) { widthAnim.value.toDp() }) else Modifier)
     ) {
@@ -1277,19 +1317,30 @@ private fun ThumbnailCell(
             )
         }
 
-        // 已入队：遮罩 + 状态角标
-        if (task != null) {
+        // 已入队：遮罩 + 状态角标。入队/移出时淡入淡出（网格上唯一的硬切，抹掉它）；
+        // lastTask 保留最后一次的任务，退场动画期间角标仍有内容可渲染。
+        var lastTask by remember(file.handle) { mutableStateOf(task) }
+        LaunchedEffect(task) { if (task != null) lastTask = task }
+        AnimatedVisibility(
+            visible = task != null,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150)),
+            modifier = Modifier.matchParentSize()
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(colors.background.copy(alpha = 0.35f))
-            )
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(4.dp)
             ) {
-                TransferStatusIndicator(status = task.status)
+                (task ?: lastTask)?.let { t ->
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(4.dp)
+                    ) {
+                        TransferStatusIndicator(status = t.status)
+                    }
+                }
             }
         }
     }

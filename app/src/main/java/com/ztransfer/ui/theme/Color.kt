@@ -3,7 +3,9 @@ package com.ztransfer.ui.theme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 // 深色主题配色
@@ -49,6 +51,10 @@ val LightStatusWaiting = Color(0xFF8E8E93)
 @Immutable
 data class AppColors(
     val background: Color,
+    /** 页面背景纵向微渐变（顶部略亮→底部略暗）：替代纯平底色，给页面一点纵深。
+     *  [background] 仍是名义底色（取中间值），供叠层/渐变遮罩等继续引用。 */
+    val backgroundTop: Color,
+    val backgroundBottom: Color,
     val surface: Color,
     val surfaceVariant: Color,
     val onBackground: Color,
@@ -85,6 +91,8 @@ data class AppColors(
 
 val DarkAppColors = AppColors(
     background = DarkBackground,
+    backgroundTop = Color(0xFF181818),
+    backgroundBottom = Color(0xFF0D0D0D),
     surface = DarkSurface,
     surfaceVariant = DarkSurfaceVariant,
     onBackground = DarkOnBackground,
@@ -111,6 +119,8 @@ val DarkAppColors = AppColors(
 
 val LightAppColors = AppColors(
     background = LightBackground,
+    backgroundTop = Color(0xFFF8F8FB),
+    backgroundBottom = Color(0xFFEBEBF1),
     surface = LightSurface,
     surfaceVariant = LightSurfaceVariant,
     onBackground = LightOnBackground,
@@ -147,4 +157,17 @@ object AppTheme {
         @Composable
         @ReadOnlyComposable
         get() = LocalAppColors.current
+}
+
+/**
+ * 页面背景渐变刷（[AppColors.backgroundTop] → [AppColors.backgroundBottom]）。
+ * Scaffold 底与"需要不透明根"的页面（列表/队列页，转场层叠不透底）共用同一渐变，
+ * 保证各页背景纵深一致。
+ */
+@Composable
+fun rememberAppBackgroundBrush(): Brush {
+    val colors = AppTheme.colors
+    return remember(colors) {
+        Brush.verticalGradient(listOf(colors.backgroundTop, colors.backgroundBottom))
+    }
 }

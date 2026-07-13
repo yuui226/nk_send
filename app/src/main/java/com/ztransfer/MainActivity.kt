@@ -19,10 +19,12 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import com.ztransfer.ui.theme.Motion
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -32,6 +34,7 @@ import androidx.navigation.compose.rememberNavController
 import com.ztransfer.ui.screen.*
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.ZTransferTheme
+import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
@@ -123,8 +126,12 @@ fun MainScreen(transferViewModel: TransferViewModel) {
         }
     }
 
+    // 页面底色：纵向微渐变（顶部略亮→底部略暗）替代纯平色，各页共用这一处，
+    // 换一处全局生效。恒黑页（遥控/预览）自绘黑底不受影响。
+    val backgroundBrush = rememberAppBackgroundBrush()
     Scaffold(
-        containerColor = AppTheme.colors.background,
+        containerColor = Color.Transparent,
+        modifier = Modifier.background(backgroundBrush),
         // 不消费系统栏 inset，交由各屏自行处理（文件列表 edge-to-edge，其余用 systemBarsPadding）
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { paddingValues ->
