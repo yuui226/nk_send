@@ -10,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -17,9 +18,11 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
@@ -37,7 +41,6 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -69,7 +72,6 @@ import com.ztransfer.protocol.rcAfDrive
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFormat
 import com.ztransfer.protocol.rcGetParam
-import com.ztransfer.protocol.rcModelName
 import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.protocol.rcSetLvSize
 import com.ztransfer.protocol.rcSetValue
@@ -79,7 +81,6 @@ import com.ztransfer.ui.theme.DarkAppColors
 import com.ztransfer.ui.theme.LocalAppColors
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
-import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -95,9 +96,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-// 直控胶囊覆盖的四个曝光参数（顺序即 2×2 网格顺序：快门/光圈/ISO/曝光补偿）
+// 直控胶囊覆盖的四个曝光参数，2×2 网格顺序：
+// 第一排 曝光补偿 / ISO，第二排 光圈 / 快门速度。
 private val EXPOSURE_PROPS = listOf(
-    Lab.PROP_NK_SHUTTER, Lab.PROP_F_NUMBER, Lab.PROP_ISO, Lab.PROP_EXP_COMPENSATION
+    Lab.PROP_EXP_COMPENSATION, Lab.PROP_ISO, Lab.PROP_F_NUMBER, Lab.PROP_NK_SHUTTER
 )
 
 /**
@@ -141,19 +143,21 @@ private fun RemoteContent(
     var capturing by remember { mutableStateOf(false) }
     var lastShot by remember { mutableStateOf<ImageBitmap?>(null) }
     var showLastShotLarge by remember { mutableStateOf(false) }
-    var modelName by remember { mutableStateOf<String?>(null) }
     var modeText by remember { mutableStateOf<String?>(null) }
     val params = remember { mutableStateMapOf<Int, RcParam>() }
     // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
     val pendingSets = remember { mutableMapOf<Int, Job>() }
+    // 初始参数是否已加载完：用于把事件轮询推迟到之后开始，避免进页时 GetEvent 与
+    // 5 条参数读取抢 ioMutex、拖慢参数首次显示。
+    var initialLoaded by remember { mutableStateOf(false) }
     // 弹出完整值表的参数（点胶囊中间值触发）
     var listProp by remember { mutableStateOf<Int?>(null) }
 
     // ---------- 开发者面板 ----------
     val logLines = remember { mutableStateListOf<String>() }
     var devPanel by remember { mutableStateOf(false) }
-    var devFps by remember { mutableStateOf(false) }
-    var hdLiveView by remember { mutableStateOf(false) }
+    var showFps by remember { mutableStateOf(true) }    // 帧率覆盖默认显示（右下角）
+    var hdLiveView by remember { mutableStateOf(false) } // 高清监看(XGA)开关
     var probing by remember { mutableStateOf(false) }
     fun devLog(line: String) {
         logLines.add(line)
@@ -249,19 +253,19 @@ private fun RemoteContent(
     // 型号是装饰信息，最后后台拉。
     LaunchedEffect(connected) {
         if (!connected) return@LaunchedEffect
+        // 先把通道让给参数读取（此时事件轮询尚未开始、缩略图填充已停），参数最快点亮，
+        // 再放开事件轮询并启动监看。
         EXPOSURE_PROPS.forEach { refreshParam(it) }
         refreshMode()
+        initialLoaded = true
         startSession(hdLiveView)
-        if (modelName == null) {
-            launch {
-                modelName = runCatching { cameraViewModel.getCamera()?.rcModelName() }.getOrNull()
-            }
-        }
     }
 
     // 事件轮询：唯一的 GetEvent 消费者。参数被机身侧改动（0x4006）时刷新对应值域。
     LaunchedEffect(Unit) {
         while (isActive) {
+            // 让初始参数先加载完再开始轮询，避免抢锁拖慢进页
+            if (!initialLoaded) { delay(150); continue }
             val cam = cameraViewModel.getCamera()
             if (cam == null) { delay(1500); continue }
             val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
@@ -351,34 +355,37 @@ private fun RemoteContent(
         }
     }
 
-    // 模拟半按对焦：点画面任意处 = AfDrive 在【当前对焦点】合焦，与机身半按一致。
-    //（曾试过 ChangeAfArea 移点：响应 0x2001 但焦点落点与预期不符——坐标系语义与
-    // 机身预期对不上，且连发后相机掉出 LV(0xA00B)。半按模式行为可预期。）
-    var afNonce by remember { mutableStateOf(0) }
-    var afVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(afNonce) {
-        if (afNonce > 0) {
-            afVisible = true
-            delay(900)
-            afVisible = false
-        }
-    }
-    var afBusy by remember { mutableStateOf(false) }
-    fun halfPressFocus() {
-        if (afBusy) return
-        val cam = cameraViewModel.getCamera() ?: return
-        afNonce++
+    // 模拟半按对焦：按住快门键 = 持续半按（循环 AfDrive 在【当前对焦点】合焦），
+    // 松开手指在按钮内 = 拍摄，手指移出按钮 = 取消不拍。对焦框在按住期间显示。
+    //（用 AfDrive 半按而非 ChangeAfArea 移点：后者响应 0x2001 但落点语义与机身对不上、
+    // 连发还会把相机踢出 LV(0xA00B)；半按模式行为可预期。）
+    var afHeld by remember { mutableStateOf(false) }
+    var afJob by remember { mutableStateOf<Job?>(null) }
+    fun startFocus() {
+        if (afHeld) return
+        afHeld = true
         haptics.tick()
-        scope.launch {
-            afBusy = true
-            try {
-                // 阻塞至合焦/失败，期间 LV 暂停一下属正常；0xA002 = 对不上焦
+        afJob?.cancel()
+        afJob = scope.launch {
+            val cam = cameraViewModel.getCamera() ?: return@launch
+            // 循环驱动 AF 模拟"持续半按"：每次 AfDrive 阻塞至合焦/失败，短歇再来，
+            // 让按住期间画面保持跟焦。0xA002=对不上焦（正常，继续尝试）。
+            while (isActive) {
                 val drive = runCatching { cam.rcAfDrive() }.getOrDefault(-1)
                 devLog("AF drive resp=0x%04X".format(drive and 0xFFFF))
-            } finally {
-                afBusy = false
+                delay(120)
             }
         }
+    }
+    fun endFocus() {
+        afHeld = false
+        afJob?.cancel()
+        afJob = null
+    }
+    // 断连兜底：若在按住对焦期间相机掉线，快门键手势节点会被卸载、onRelease 不再执行，
+    // 导致 afHeld/afJob 卡住（对焦框不消失、对空相机空转刷日志）。这里主动复位。
+    LaunchedEffect(connected) {
+        if (!connected) endFocus()
     }
 
     fun runProbe() {
@@ -398,39 +405,16 @@ private fun RemoteContent(
         }
     }
 
-    // 开发者面板入口：连点机型名 3 次
-    var titleTaps by remember { mutableStateOf(0) }
-    var lastTitleTap by remember { mutableStateOf(0L) }
-    fun onTitleTap() {
-        val now = System.currentTimeMillis()
-        titleTaps = if (now - lastTitleTap < 1200) titleTaps + 1 else 1
-        lastTitleTap = now
-        if (titleTaps >= 3) {
-            titleTaps = 0
-            devPanel = true
-        }
-    }
-
-    // ---------- 提示条（一次性机身锁定提示 / 传输中卡顿提示）----------
+    // ---------- 提示条（首次进页的一次性机身锁定提示）----------
+    // 传输中已在照片列表侧禁止进入本页，故不再需要"传输卡顿"提示。
     var hintText by remember { mutableStateOf("") }
     var hintVisible by remember { mutableStateOf(false) }
     val lockedHint = stringResource(R.string.remote_locked_hint)
-    val busyHint = stringResource(R.string.remote_transfer_busy_hint)
     LaunchedEffect(Unit) {
         val prefs = context.getSharedPreferences("remote_page", Context.MODE_PRIVATE)
-        val transfersBusy = transferState.tasks.any {
-            it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
-        }
-        val text = when {
-            !prefs.getBoolean("locked_hint_shown", false) -> {
-                prefs.edit().putBoolean("locked_hint_shown", true).apply()
-                lockedHint
-            }
-            transfersBusy -> busyHint
-            else -> null
-        }
-        if (text != null) {
-            hintText = text
+        if (!prefs.getBoolean("locked_hint_shown", false)) {
+            prefs.edit().putBoolean("locked_hint_shown", true).apply()
+            hintText = lockedHint
             hintVisible = true
             delay(3000)
             hintVisible = false
@@ -445,56 +429,41 @@ private fun RemoteContent(
                 .systemBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            // 顶栏：机型名（连点 3 次呼出开发者面板）/ 连接点 / 常驻返回按钮。
-            // 返回是【右】箭头——本页位于照片列表左侧，回去的方向是向右。
+            // 顶栏：左＝复用照片列表的信号按钮（连接/信号状态，取代原来的小圆点）；
+            // 右＝开发者 / HD / FPS 三个小按钮 + 返回。返回用【右】箭头——本页位于
+            // 照片列表左侧，回去的方向向右。
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    modelName ?: stringResource(R.string.remote_title),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onBackground,
-                    modifier = Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onTitleTap() }
-                )
+                SignalPill(rssi = camState.wifiRssi, connected = connected)
                 Spacer(Modifier.weight(1f))
-                // 曝光模式徽标（只读；带物理拨盘的机身无法远程切换）
-                modeText?.let {
-                    Text(
-                        it,
-                        color = colors.onSurfaceVariant,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                // 开发者工具入口（放在 HD/FPS 左侧）
+                GlassButton(onClick = { devPanel = true }, contentPadding = PaddingValues(9.dp)) {
+                    Icon(
+                        Icons.Default.BugReport,
+                        contentDescription = stringResource(R.string.cd_dev_panel),
+                        tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp)
                     )
-                    Spacer(Modifier.width(10.dp))
                 }
-                Text(
-                    text = if (connected) "●" else "○",
-                    color = if (connected) colors.statusConnected else colors.accentOrange,
-                    fontSize = 13.sp
-                )
-                Spacer(Modifier.width(12.dp))
-                GlassButton(onClick = onNavigateBack, contentPadding = PaddingValues(10.dp)) {
+                Spacer(Modifier.width(6.dp))
+                TopToggle("HD", hdLiveView) { hdLiveView = !hdLiveView; startSession(hdLiveView) }
+                Spacer(Modifier.width(6.dp))
+                TopToggle("FPS", showFps) { showFps = !showFps }
+                Spacer(Modifier.width(6.dp))
+                GlassButton(onClick = onNavigateBack, contentPadding = PaddingValues(9.dp)) {
                     Icon(
                         Icons.Default.ArrowForward, contentDescription = null,
-                        tint = colors.onBackground, modifier = Modifier.size(20.dp)
+                        tint = colors.onBackground, modifier = Modifier.size(18.dp)
                     )
                 }
             }
             Spacer(Modifier.height(10.dp))
 
-            // 监看画面
+            // 监看画面（取景器：不再点击对焦——对焦改由按住快门键触发，见底部）
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(3f / 2f)
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color(0xFF0D0D0D))
-                    .pointerInput(Unit) { detectTapGestures { halfPressFocus() } }
             ) {
                 frame?.let {
                     Image(
@@ -508,10 +477,25 @@ private fun RemoteContent(
                     tint = Color.White.copy(alpha = 0.18f),
                     modifier = Modifier.size(44.dp).align(Alignment.Center)
                 )
-                // 半按对焦指示：中央对焦框收缩入场（合焦位置由机身当前对焦点决定）
-                if (afVisible) {
-                    val reticleScale = remember(afNonce) { Animatable(1.4f) }
-                    LaunchedEffect(afNonce) { reticleScale.animateTo(1f, tween(180)) }
+                // 曝光模式徽标（只读；带物理拨盘的机身无法远程切换）——取景器左上角，
+                // 相机副屏的自然位置。
+                modeText?.let {
+                    Text(
+                        it,
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+                // 半按对焦指示：按住期间显示中央对焦框，收缩入场（合焦位置由机身当前对焦点决定）
+                if (afHeld) {
+                    val reticleScale = remember { Animatable(1.4f) }
+                    LaunchedEffect(Unit) { reticleScale.animateTo(1f, tween(180)) }
                     Box(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -520,10 +504,10 @@ private fun RemoteContent(
                                 scaleX = reticleScale.value
                                 scaleY = reticleScale.value
                             }
-                            .border(1.5.dp, Color.White.copy(alpha = 0.9f), RoundedCornerShape(8.dp))
+                            .border(1.5.dp, colors.accentBlue.copy(alpha = 0.95f), RoundedCornerShape(8.dp))
                     )
                 }
-                if (devFps && fps > 0f) {
+                if (showFps && fps > 0f) {
                     Text(
                         "%.1f fps".format(fps),
                         color = Color.White,
@@ -602,10 +586,16 @@ private fun RemoteContent(
                     }
                 }
                 Spacer(Modifier.weight(1f))
+                // 按住=半按对焦，松开在键内=拍摄，移出取消。对焦与拍照合一（真机两段式快门隐喻）。
                 ShutterButton(
                     capturing = capturing,
+                    focusing = afHeld,
                     enabled = connected,
-                    onClick = ::shoot
+                    onFocusStart = { startFocus() },
+                    onRelease = { fire ->
+                        endFocus()
+                        if (fire) shoot()
+                    }
                 )
                 Spacer(Modifier.weight(1f))
                 // 与左侧缩略图等宽的占位，保证快门键几何居中
@@ -635,10 +625,17 @@ private fun RemoteContent(
             )
         }
 
-        // 完整值表（点胶囊中间值弹出）：当前值高亮并自动滚到附近，点选即设、立即发送
-        val listParam = listProp?.let { params[it] }
-        if (listProp != null && listParam != null) {
-            val prop = listProp!!
+        // 完整值表（点胶囊中间值弹出）：呼出=缩放淡入、消失=淡出（item 9 动画）。
+        // 用 lastListProp 记住最后一次的参数，让消失动画期间仍有数据可渲染。
+        var lastListProp by remember { mutableStateOf<Int?>(null) }
+        LaunchedEffect(listProp) { if (listProp != null) lastListProp = listProp }
+        // 遮罩：淡入淡出
+        AnimatedVisibility(
+            visible = listProp != null,
+            enter = fadeIn(tween(160)),
+            exit = fadeOut(tween(160)),
+            modifier = Modifier.fillMaxSize()
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -646,41 +643,53 @@ private fun RemoteContent(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
-                    ) { listProp = null },
-                contentAlignment = Alignment.Center
-            ) {
-                val valueListState = rememberLazyListState()
-                LaunchedEffect(prop) {
-                    val idx = listParam.values.indexOf(listParam.current)
-                    if (idx > 3) valueListState.scrollToItem(idx - 3)
-                }
-                LazyColumn(
-                    state = valueListState,
-                    modifier = Modifier
-                        .width(190.dp)
-                        .heightIn(max = 340.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(colors.glassSurfaceHeavy)
-                        .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(16.dp))
-                        .padding(vertical = 6.dp)
-                ) {
-                    items(listParam.values) { v ->
-                        val isCurrent = v == listParam.current
-                        Text(
-                            rcFormat(prop, v),
-                            color = if (isCurrent) colors.accentBlue else colors.onBackground,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 15.sp,
-                            fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    sendValue(prop, v, immediate = true)
-                                    listProp = null
-                                }
-                                .padding(vertical = 10.dp)
-                        )
+                    ) { listProp = null }
+            )
+        }
+        // 面板：缩放+淡入呼出、缩放+淡出消失
+        AnimatedVisibility(
+            visible = listProp != null,
+            enter = fadeIn(tween(180)) + scaleIn(initialScale = 0.88f, animationSpec = tween(180)),
+            exit = fadeOut(tween(140)) + scaleOut(targetScale = 0.9f, animationSpec = tween(140)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            val prop = lastListProp
+            val listParam = prop?.let { params[it] }
+            if (prop != null && listParam != null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    val valueListState = rememberLazyListState()
+                    LaunchedEffect(prop) {
+                        val idx = listParam.values.indexOf(listParam.current)
+                        if (idx > 3) valueListState.scrollToItem(idx - 3)
+                    }
+                    LazyColumn(
+                        state = valueListState,
+                        modifier = Modifier
+                            .width(190.dp)
+                            .heightIn(max = 340.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(colors.glassSurfaceHeavy)
+                            .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(16.dp))
+                            .padding(vertical = 6.dp)
+                    ) {
+                        items(listParam.values) { v ->
+                            val isCurrent = v == listParam.current
+                            Text(
+                                rcFormat(prop, v),
+                                color = if (isCurrent) colors.accentBlue else colors.onBackground,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 15.sp,
+                                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        sendValue(prop, v, immediate = true)
+                                        listProp = null
+                                    }
+                                    .padding(vertical = 10.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -765,31 +774,8 @@ private fun RemoteContent(
                         )
                     }
                 }
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        stringResource(R.string.dev_hd_liveview),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Switch(
-                        checked = hdLiveView,
-                        onCheckedChange = {
-                            hdLiveView = it
-                            startSession(it)   // 重启会话使分辨率生效
-                        }
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        stringResource(R.string.dev_fps_overlay),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Switch(checked = devFps, onCheckedChange = { devFps = it })
-                }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(8.dp))
+                // HD / FPS 开关已移到顶栏；此处只保留探测与日志。
                 GlassButton(onClick = ::runProbe, enabled = connected && !probing) {
                     Text(
                         stringResource(R.string.lab_run_probe),
@@ -914,25 +900,52 @@ private fun ParamCapsule(
     }
 }
 
-/** 大圆快门键：按下内圈收缩，拍摄中转圈。 */
+/**
+ * 大圆快门键（两段式）：
+ * - 按下（onFocusStart）= 半按对焦；[focusing] 期间内圈收缩 + 边框转蓝，示意"正在合焦"。
+ * - 抬手在键内（tryAwaitRelease 返回 true）→ onRelease(true) 拍摄；移出键外 → onRelease(false) 取消。
+ * - 拍摄中（capturing）转圈并禁手势。
+ */
 @Composable
-private fun ShutterButton(capturing: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
+private fun ShutterButton(
+    capturing: Boolean,
+    focusing: Boolean,
+    enabled: Boolean,
+    onFocusStart: () -> Unit,
+    onRelease: (fire: Boolean) -> Unit
+) {
     val innerScale by animateFloatAsState(
-        targetValue = if (pressed) 0.82f else 1f,
-        animationSpec = tween(90),
-        label = "shutterPress"
+        targetValue = if (focusing) 0.8f else 1f,
+        animationSpec = tween(120),
+        label = "shutterFocus"
     )
+    val ringColor = when {
+        !enabled -> Color.White.copy(alpha = 0.3f)
+        focusing -> AppTheme.colors.accentBlue
+        else -> Color.White.copy(alpha = 0.9f)
+    }
     Box(
         modifier = Modifier
             .size(76.dp)
-            .border(3.dp, Color.White.copy(alpha = if (enabled) 0.9f else 0.3f), CircleShape)
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                enabled = enabled && !capturing,
-                onClick = onClick
+            .border(3.dp, ringColor, CircleShape)
+            .then(
+                if (enabled && !capturing)
+                    Modifier.pointerInput(Unit) {
+                        // 按下即半按对焦；抬手时按【落点是否在键内】判定拍摄/取消——
+                        // waitForUpOrCancellation 返回抬手事件(取消返回 null)，据其 position
+                        // 判断在界内(拍摄)还是滑出界外(取消)，比 tryAwaitRelease 的键内/取消
+                        // 语义更可靠（无滚动父级时移出再松手仍会被算作释放）。
+                        awaitEachGesture {
+                            awaitFirstDown()
+                            onFocusStart()
+                            val up = waitForUpOrCancellation()
+                            val fire = up != null &&
+                                up.position.x in 0f..size.width.toFloat() &&
+                                up.position.y in 0f..size.height.toFloat()
+                            onRelease(fire)
+                        }
+                    }
+                else Modifier
             ),
         contentAlignment = Alignment.Center
     ) {
@@ -953,5 +966,23 @@ private fun ShutterButton(capturing: Boolean, enabled: Boolean, onClick: () -> U
                     .background(Color.White.copy(alpha = if (enabled) 1f else 0.3f), CircleShape)
             )
         }
+    }
+}
+
+/** 顶栏小切换按钮（HD / FPS）：激活时蓝底高亮，未激活时低调玻璃底。 */
+@Composable
+private fun TopToggle(label: String, active: Boolean, onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    GlassButton(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 7.dp)
+    ) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (active) colors.accentBlue else colors.onSurfaceVariant
+        )
     }
 }

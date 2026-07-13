@@ -741,10 +741,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     /** 从已构造的 [exif] 中提取 EXIF 标签 + MakerNote 对焦点。 */
     private fun parseExifImpl(exif: ExifInterface): PhotoExif? {
-        // 光圈：RATIONAL APEX → f-number (f = 2^(apex/2))
-        val aperture = parseRational(exif.getAttribute(ExifInterface.TAG_APERTURE_VALUE))
-            ?.let { apex -> Math.pow(2.0, apex.toDouble() / 2.0).toFloat() }
-            ?.let { f -> if (f % 1f < 0.05f) "f/%.0f".format(f) else "f/%.1f".format(f) }
+        // 光圈：优先 TAG_F_NUMBER（0x829D，直接的 f 值 RATIONAL，多数尼康机身填这个）；
+        // 缺失时回退 TAG_APERTURE_VALUE（APEX 编码，f = 2^(apex/2)）。两者都试以免漏显。
+        val fNumber = parseRational(exif.getAttribute(ExifInterface.TAG_F_NUMBER))
+            ?: parseRational(exif.getAttribute(ExifInterface.TAG_APERTURE_VALUE))
+                ?.let { apex -> Math.pow(2.0, apex.toDouble() / 2.0).toFloat() }
+        val aperture = fNumber?.let { f -> if (f % 1f < 0.05f) "f/%.0f".format(f) else "f/%.1f".format(f) }
 
         // 快门：TAG_EXPOSURE_TIME 直接返回秒数 RATIONAL（如 "1/250"）
         val exposureTime = parseRational(exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME))

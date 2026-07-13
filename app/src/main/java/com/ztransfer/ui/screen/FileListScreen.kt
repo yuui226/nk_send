@@ -421,6 +421,9 @@ fun FileListScreen(
                 gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset < 8
             }
         }
+        // 传输进行中禁止进入监看：监看要独占相机通道（LV 取帧连续占锁），与下载抢锁会两败俱伤。
+        // 图标压暗示意不可用，点击给出提示而非静默无响应。
+        val remoteBlockedHint = stringResource(R.string.remote_blocked_transfer)
         AnimatedVisibility(
             visible = atTop,
             enter = fadeIn() + scaleIn(initialScale = 0.6f),
@@ -431,13 +434,16 @@ fun FileListScreen(
                 .padding(start = 20.dp, bottom = 24.dp)
         ) {
             GlassButton(
-                onClick = onNavigateToRemote,
+                onClick = {
+                    if (transfersBusy) showHint(remoteBlockedHint)
+                    else onNavigateToRemote()
+                },
                 shape = CircleShape,
                 contentPadding = PaddingValues(14.dp)
             ) {
                 RemoteMark(
                     modifier = Modifier.size(24.dp),
-                    color = colors.accentBlue,
+                    color = if (transfersBusy) colors.onSurfaceVariant.copy(alpha = 0.5f) else colors.accentBlue,
                     contentDescription = stringResource(R.string.cd_remote_entry)
                 )
             }
