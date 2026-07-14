@@ -1,0 +1,17 @@
+[Unit]
+Description=ZTransfer license server
+After=network.target
+
+[Service]
+Type=simple
+User=ztlicense
+WorkingDirectory=/opt/ztransfer-license
+ExecStart=/opt/node/bin/node /opt/ztransfer-license/license-server.js /opt/ztransfer-license/config.json
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ztransfer-license
+
+[Install]
+WantedBy=multi-user.target
