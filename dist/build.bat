@@ -46,4 +46,12 @@ if not exist "%SRC%" (
 copy /Y "%SRC%" "%DST%" >nul
 echo.
 echo Artifact copied to: %DST%
+
+rem R8 mapping file: required to de-obfuscate crash stack traces from this
+rem exact build. Keep it local (do NOT distribute it with the app).
+set "MAPPING=app\build\outputs\mapping\release\mapping.txt"
+if exist "%MAPPING%" (
+    copy /Y "%MAPPING%" "%~dp0ztransfer_%STAMP%.mapping.txt" >nul
+    echo Mapping copied to:  %~dp0ztransfer_%STAMP%.mapping.txt
+)
 pause
