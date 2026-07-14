@@ -134,4 +134,28 @@
     <string name="dev_fps_overlay">幀率顯示</string>
     <string name="lab_run_probe">完整探測</string>
     <string name="lab_copy_log">複製日誌</string>
+
+    <!-- 授權/啟用 -->
+    <string name="license">授權</string>
+    <string name="license_free_status">免費版</string>
+    <string name="license_pro_status">已啟用</string>
+    <string name="device_code_label">裝置碼 %1$s</string>
+    <string name="activate">啟用</string>
+    <string name="activating">啟用中…</string>
+    <string name="activation_title">啟用 ZTransfer</string>
+    <string name="activation_privacy">啟用時會將裝置識別碼傳送至啟用伺服器，僅用於授權驗證。</string>
+    <string name="activation_success">啟用成功，感謝支持！</string>
+    <string name="err_code_not_found">啟用碼不存在</string>
+    <string name="err_code_revoked">該啟用碼已被停用</string>
+    <string name="err_slots_full">該啟用碼已綁滿裝置，換機請聯絡客服解綁</string>
+    <string name="err_rate_limited">嘗試過於頻繁，請一分鐘後再試</string>
+    <string name="err_server_unreachable">無法連接啟用伺服器，請檢查網路；若網路正常，可能需要更新到新版本（QQ 群取得）。</string>
+    <string name="err_generic">啟用失敗（%1$s）</string>
+    <string name="revert_free">恢復為免費版（測試）</string>
+    <string name="paywall_quota_title">今日免費額度已用完</string>
+    <string name="paywall_batch_title">整組傳輸是付費功能</string>
+    <string name="paywall_body">免費版：每天 %1$d 個傳輸、單張點傳、遙控體驗 %2$d 分鐘。\n付費版：傳輸與遙控無限制，一碼可用於兩台裝置。</string>
+    <string name="paywall_enter_code">輸入啟用碼</string>
+    <string name="remote_trial_left">體驗 %1$s</string>
+    <string name="remote_trial_ended">遙控體驗結束，啟用後不限時使用</string>
 </resources>

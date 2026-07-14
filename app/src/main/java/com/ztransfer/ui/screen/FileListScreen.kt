@@ -91,6 +91,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.R
+import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.Haptics
@@ -175,6 +176,9 @@ fun FileListScreen(
     val colors = AppTheme.colors
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
+    // 免费版付费引导：null=不显示，true=今日额度用完，false=批量传输是付费功能。
+    var paywallQuota by remember { mutableStateOf<Boolean?>(null) }
+    var showActivation by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
@@ -383,6 +387,10 @@ fun FileListScreen(
                     signalPulse++
                     showHint(notConnectedHint)
                 } else if (remaining.isNotEmpty()) {
+                    // 免费版不开放批量传输（付费引导），额度判定只在点击瞬间、不碰传输热路径。
+                    if (!LicenseManager.isPro.value) {
+                        paywallQuota = false; return@onTransferGroup
+                    }
                     haptics.tick()   // 整组入队只震一次
                     // 只加入队列、原地继续浏览，不跳转到队列页（想看进度可点右上角胶囊进入）。
                     transferViewModel.addToQueue(remaining, cameraViewModel::getCamera)
@@ -396,6 +404,10 @@ fun FileListScreen(
                     signalPulse++
                     showHint(notConnectedHint)
                 } else {
+                    // 免费版入队即扣当日额度;已在队列的（addToQueue 会去重跳过）不重复扣。
+                    if (file.handle !in queuedByHandle && !LicenseManager.tryConsumeQuota()) {
+                        paywallQuota = true; return@onTapFile
+                    }
                     haptics.tick()   // 只在真正入队时震（引导去设置时不震）
                     transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
                 }
@@ -654,6 +666,18 @@ fun FileListScreen(
                     color = colors.onBackground
                 )
             }
+        }
+
+        // 免费版付费引导 / 激活对话框。
+        paywallQuota?.let { quotaExhausted ->
+            PaywallDialog(
+                quotaExhausted = quotaExhausted,
+                onDismiss = { paywallQuota = null },
+                onEnterCode = { paywallQuota = null; showActivation = true }
+            )
+        }
+        if (showActivation) {
+            ActivationDialog(onDismiss = { showActivation = false })
         }
 
         // 设置面板（点击 "Z传" 或未设目录时弹出），从 "Z传" 按钮位置变形展开。

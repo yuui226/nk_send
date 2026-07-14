@@ -134,4 +134,28 @@
     <string name="dev_fps_overlay">帧率显示</string>
     <string name="lab_run_probe">完整探测</string>
     <string name="lab_copy_log">复制日志</string>
+
+    <!-- 授权/激活 -->
+    <string name="license">授权</string>
+    <string name="license_free_status">免费版</string>
+    <string name="license_pro_status">已激活</string>
+    <string name="device_code_label">设备码 %1$s</string>
+    <string name="activate">激活</string>
+    <string name="activating">激活中…</string>
+    <string name="activation_title">激活 ZTransfer</string>
+    <string name="activation_privacy">激活时会将设备标识发送至激活服务器，仅用于授权验证。</string>
+    <string name="activation_success">激活成功，感谢支持！</string>
+    <string name="err_code_not_found">激活码不存在</string>
+    <string name="err_code_revoked">该激活码已被停用</string>
+    <string name="err_slots_full">该激活码已绑满设备，换机请联系客服解绑</string>
+    <string name="err_rate_limited">尝试过于频繁，请一分钟后再试</string>
+    <string name="err_server_unreachable">无法连接激活服务器，请检查网络；若网络正常，可能需要更新到新版本（QQ 群获取）。</string>
+    <string name="err_generic">激活失败（%1$s）</string>
+    <string name="revert_free">恢复为免费版（测试）</string>
+    <string name="paywall_quota_title">今日免费额度已用完</string>
+    <string name="paywall_batch_title">整组传输是付费功能</string>
+    <string name="paywall_body">免费版：每天 %1$d 个传输、单张点传、遥控体验 %2$d 分钟。\n付费版：传输与遥控无限制，一码可用于两台设备。</string>
+    <string name="paywall_enter_code">输入激活码</string>
+    <string name="remote_trial_left">体验 %1$s</string>
+    <string name="remote_trial_ended">遥控体验结束，激活后不限时使用</string>
 </resources>

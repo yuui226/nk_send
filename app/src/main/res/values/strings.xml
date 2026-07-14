@@ -134,4 +134,28 @@
     <string name="dev_fps_overlay">FPS overlay</string>
     <string name="lab_run_probe">Probe</string>
     <string name="lab_copy_log">Copy log</string>
+
+    <!-- License / activation -->
+    <string name="license">License</string>
+    <string name="license_free_status">Free version</string>
+    <string name="license_pro_status">Activated</string>
+    <string name="device_code_label">Device code %1$s</string>
+    <string name="activate">Activate</string>
+    <string name="activating">Activating…</string>
+    <string name="activation_title">Activate ZTransfer</string>
+    <string name="activation_privacy">Activation sends this device\'s identifier to the activation server, used only for license verification.</string>
+    <string name="activation_success">Activated — thank you!</string>
+    <string name="err_code_not_found">Activation code not found</string>
+    <string name="err_code_revoked">This activation code has been revoked</string>
+    <string name="err_slots_full">This code is already used on the maximum number of devices — contact us to rebind</string>
+    <string name="err_rate_limited">Too many attempts — try again in a minute</string>
+    <string name="err_server_unreachable">Couldn\'t reach the activation server. Check your network; if the network is fine, update to the latest version (via QQ group).</string>
+    <string name="err_generic">Activation failed (%1$s)</string>
+    <string name="revert_free">Revert to free (testing)</string>
+    <string name="paywall_quota_title">Daily free limit reached</string>
+    <string name="paywall_batch_title">Batch transfer is a paid feature</string>
+    <string name="paywall_body">Free: %1$d transfers per day, one at a time, %2$d-minute remote trial.\nPaid: unlimited transfers and remote control, one code for two devices.</string>
+    <string name="paywall_enter_code">Enter activation code</string>
+    <string name="remote_trial_left">Trial %1$s</string>
+    <string name="remote_trial_ended">Remote trial ended — activate for unlimited use</string>
 </resources>

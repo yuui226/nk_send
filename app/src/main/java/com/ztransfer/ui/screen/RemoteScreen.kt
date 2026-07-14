@@ -72,7 +72,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import com.ztransfer.R
+import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.RcParam
 import com.ztransfer.protocol.labEndLiveView
@@ -147,7 +149,48 @@ fun RemoteScreen(
     onNavigateBack: () -> Unit
 ) {
     CompositionLocalProvider(LocalAppColors provides DarkAppColors) {
-        RemoteContent(cameraViewModel, transferViewModel, onNavigateBack)
+        // 免费版试用限时:每次进入给 FREE_REMOTE_TRIAL_MS,倒计时归零退回列表页;
+        // 试用中途激活成功(isPro 翻转)立即解除限时。PRO 无任何额外开销。
+        val isPro by LicenseManager.isPro.collectAsState()
+        var trialLeftMs by remember { mutableStateOf(LicenseManager.FREE_REMOTE_TRIAL_MS) }
+        val context = LocalContext.current
+        val trialEndedMsg = stringResource(R.string.remote_trial_ended)
+        if (!isPro) {
+            LaunchedEffect(Unit) {
+                while (trialLeftMs > 0) {
+                    delay(1000)
+                    trialLeftMs -= 1000
+                }
+                Toast.makeText(context, trialEndedMsg, Toast.LENGTH_LONG).show()
+                onNavigateBack()
+            }
+        }
+
+        Box {
+            RemoteContent(cameraViewModel, transferViewModel, onNavigateBack)
+            if (!isPro) {
+                val sec = (trialLeftMs / 1000).coerceAtLeast(0)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Black.copy(alpha = 0.55f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 6.dp)
+                ) {
+                    Text(
+                        stringResource(
+                            R.string.remote_trial_left,
+                            "%d:%02d".format(sec / 60, sec % 60)
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
     }
 }
 

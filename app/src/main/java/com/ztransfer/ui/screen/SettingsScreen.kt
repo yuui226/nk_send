@@ -45,11 +45,12 @@ import androidx.compose.ui.unit.dp
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 
-private const val QQ_GROUP = "1054316860"
+internal const val QQ_GROUP = "1054316860"
 
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），下拉弹窗观感：
@@ -343,6 +344,75 @@ fun SettingsOverlay(
                         checked = state.keepScreenOn,
                         onCheckedChange = { viewModel.setKeepScreenOn(it) }
                     )
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // ---------- 授权：免费/已激活状态 + 设备码；免费显示激活按钮 ----------
+                val isPro by LicenseManager.isPro.collectAsState()
+                var showActivation by remember { mutableStateOf(false) }
+                SectionLabel(stringResource(R.string.license))
+                Spacer(Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = colors.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            if (isPro) Icons.Default.Verified else Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = if (isPro) colors.statusConnected else colors.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(
+                                    if (isPro) R.string.license_pro_status
+                                    else R.string.license_free_status
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.onBackground
+                            )
+                            Text(
+                                stringResource(R.string.device_code_label, LicenseManager.displayCode()),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant
+                            )
+                        }
+                        if (!isPro) {
+                            GlassButton(
+                                onClick = { showActivation = true },
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Text(
+                                    stringResource(R.string.activate),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.accentBlue
+                                )
+                            }
+                        }
+                    }
+                }
+                if (isPro) {
+                    // 测试阶段的一键退回免费版：只清本地通行证，不动服务器绑定，
+                    // 重新输入激活码即恢复。公开发售前移除或藏进开发者面板。
+                    TextButton(onClick = { LicenseManager.revertToFree() }) {
+                        Text(
+                            stringResource(R.string.revert_free),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant
+                        )
+                    }
+                }
+                if (showActivation) {
+                    ActivationDialog(onDismiss = { showActivation = false })
                 }
 
                 Spacer(Modifier.height(20.dp))

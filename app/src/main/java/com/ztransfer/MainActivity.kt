@@ -51,6 +51,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 恢复授权状态（本地验签，毫秒级）并在后台触发静默续签（≥7 天且有网时）。
+        com.ztransfer.license.LicenseManager.init(applicationContext)
         enableEdgeToEdge()   // 内容延伸到系统栏后面，各屏自行处理 inset
         requestNotificationPermissionIfNeeded()
         setContent {
