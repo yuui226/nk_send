@@ -39,13 +39,14 @@ import javax.net.ssl.X509TrustManager
  */
 object LicenseManager {
 
-    // ==================== 部署后需要填写的三个常量(见 server/部署指南.md)====================
+    // ==================== 部署产出的三个常量(见 server/部署指南.md)====================
     // 服务器地址列表,按序尝试。将来换 IP/上域名:在新版本里更新此列表即可。
-    private val SERVERS = listOf("https://127.0.0.1:8443") // TODO: 换成 ECS 公网 IP
-    // setup-keys.js init 输出的"App 内置公钥"
-    private const val PUBLIC_KEY_B64 = "TODO-PUBLIC-KEY"
-    // setup-keys.js pin tls-cert.pem 输出的"App 内置证书指纹"
-    private const val CERT_PIN_B64 = "TODO-CERT-PIN"
+    private val SERVERS = listOf("https://106.15.239.203:8443")
+    // setup-keys.js init 输出的"App 内置公钥"(ECDSA P-256 SPKI)
+    private const val PUBLIC_KEY_B64 =
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqiQGFyGSVfCF2d96gr9wEQcjhOzQ1Iyxbeml+4uEYLiWDSEmf0AstKOnvg2YNIKPg25bLaY+xg5hrvLPhBks3w=="
+    // setup-keys.js pin tls-cert.pem 输出的"App 内置证书指纹"(SPKI SHA-256)
+    private const val CERT_PIN_B64 = "9SNNH7dEGfIVJ0bMGIKxEYTjHUAMDy3+t/+dVZzJfzA="
     // =====================================================================================
 
     // 免费版限制(集中定义,调整数值只改这里)
