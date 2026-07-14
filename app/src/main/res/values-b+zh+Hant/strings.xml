@@ -72,8 +72,9 @@
     <string name="keep_screen_on">保持螢幕開啟</string>
     <string name="keep_screen_on_desc">App 在前景時螢幕不熄滅，防止連線中斷</string>
     <string name="version_label">Z傳 v%1$s</string>
-    <string name="join_qq_group">加群</string>
-    <string name="qq_group_copied">QQ群 %1$s\n已複製群號</string>
+    <string name="qq_group_copied">已複製 QQ 號 %1$s\n加我購買取得啟用碼</string>
+    <string name="feedback">回饋</string>
+    <string name="feedback_qq_copied">已複製 QQ 號 %1$s\n請加 QQ 回饋</string>
 
     <!-- 照片預覽 -->
     <string name="no_preview">無預覽</string>
@@ -152,10 +153,23 @@
     <string name="err_server_unreachable">無法連接啟用伺服器，請檢查網路；若網路正常，可能需要更新到新版本（QQ 群取得）。</string>
     <string name="err_generic">啟用失敗（%1$s）</string>
     <string name="revert_free">恢復為免費版（測試）</string>
-    <string name="paywall_quota_title">今日免費額度已用完</string>
-    <string name="paywall_batch_title">整組傳輸是付費功能</string>
-    <string name="paywall_body">免費版：每天 %1$d 個傳輸、單張點傳、遙控體驗 %2$d 分鐘。\n付費版：傳輸與遙控無限制，一碼可用於兩台裝置。</string>
-    <string name="paywall_enter_code">輸入啟用碼</string>
+    <string name="pro_version">高級版</string>
+    <string name="unlock_pro">解鎖高級版</string>
+    <string name="unlock">解鎖</string>
+    <string name="enter_code">輸入啟用碼</string>
+    <string name="tier_free">免費</string>
+    <string name="compare_transfer">每日傳輸</string>
+    <string name="compare_transfer_free">%1$d 個</string>
+    <string name="compare_batch">一鍵傳輸</string>
+    <string name="compare_remote">遙控 · 監看</string>
+    <string name="compare_remote_free">%1$d 分鐘</string>
+    <string name="compare_unlimited">無限</string>
+    <string name="compare_no_limit">不限時</string>
+    <string name="pro_price_line">一次性買斷 %1$s</string>
+    <string name="pro_hint_batch">免費版僅支援單張傳輸 · 解鎖高級版詳見設定</string>
+    <string name="pro_perks">一次買斷 · 無訂閱 · 更新免費</string>
+    <string name="quota_left_hint">今日免費額度還剩 %1$d 個</string>
+    <string name="pro_hint_quota">今日免費額度已用完，明天自動恢復\n高級版無限傳輸 · 入口在設定</string>
     <string name="remote_trial_left">體驗 %1$s</string>
-    <string name="remote_trial_ended">遙控體驗結束，啟用後不限時使用</string>
+    <string name="remote_trial_ended">遙控體驗結束 · 解鎖高級版詳見設定</string>
 </resources>

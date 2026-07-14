@@ -176,9 +176,6 @@ fun FileListScreen(
     val colors = AppTheme.colors
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
-    // 免费版付费引导：null=不显示，true=今日额度用完，false=批量传输是付费功能。
-    var paywallQuota by remember { mutableStateOf<Boolean?>(null) }
-    var showActivation by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
@@ -239,6 +236,9 @@ fun FileListScreen(
     // 提示条文案在非组合的回调（BackHandler/onClick）里使用，先在组合期取出。
     val exitHint = stringResource(R.string.press_back_to_exit)
     val notConnectedHint = stringResource(R.string.camera_not_connected)
+    // 免费版触限的轻量引导（指向设置里的"高级版"入口），不打断式弹窗。
+    val proBatchHint = stringResource(R.string.pro_hint_batch)
+    val proQuotaHint = stringResource(R.string.pro_hint_quota)
 
     // 文件列表是连接成功后的主页面：返回不回到连接页，而是"再按一次退出应用"。
     val context = LocalContext.current
@@ -387,9 +387,9 @@ fun FileListScreen(
                     signalPulse++
                     showHint(notConnectedHint)
                 } else if (remaining.isNotEmpty()) {
-                    // 免费版不开放批量传输（付费引导），额度判定只在点击瞬间、不碰传输热路径。
+                    // 免费版不开放批量传输（轻量提示引导），额度判定只在点击瞬间、不碰传输热路径。
                     if (!LicenseManager.isPro.value) {
-                        paywallQuota = false; return@onTransferGroup
+                        showHint(proBatchHint); return@onTransferGroup
                     }
                     haptics.tick()   // 整组入队只震一次
                     // 只加入队列、原地继续浏览，不跳转到队列页（想看进度可点右上角胶囊进入）。
@@ -406,10 +406,18 @@ fun FileListScreen(
                 } else {
                     // 免费版入队即扣当日额度;已在队列的（addToQueue 会去重跳过）不重复扣。
                     if (file.handle !in queuedByHandle && !LicenseManager.tryConsumeQuota()) {
-                        paywallQuota = true; return@onTapFile
+                        showHint(proQuotaHint); return@onTapFile
                     }
                     haptics.tick()   // 只在真正入队时震（引导去设置时不震）
                     transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
+                    // 额度预警:剩 ≤5 个时随入队轻提示剩余数——撞墙前先看见墙,
+                    // 只报事实不催购(带参数文案组合期取不到,用 context.getString)。
+                    if (!LicenseManager.isPro.value) {
+                        val left = LicenseManager.quotaRemaining()
+                        if (left in 1..5) {
+                            showHint(context.getString(R.string.quota_left_hint, left))
+                        }
+                    }
                 }
             }
 
@@ -666,18 +674,6 @@ fun FileListScreen(
                     color = colors.onBackground
                 )
             }
-        }
-
-        // 免费版付费引导 / 激活对话框。
-        paywallQuota?.let { quotaExhausted ->
-            PaywallDialog(
-                quotaExhausted = quotaExhausted,
-                onDismiss = { paywallQuota = null },
-                onEnterCode = { paywallQuota = null; showActivation = true }
-            )
-        }
-        if (showActivation) {
-            ActivationDialog(onDismiss = { showActivation = false })
         }
 
         // 设置面板（点击 "Z传" 或未设目录时弹出），从 "Z传" 按钮位置变形展开。

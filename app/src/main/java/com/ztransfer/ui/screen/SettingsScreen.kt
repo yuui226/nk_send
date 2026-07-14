@@ -6,8 +6,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
@@ -45,12 +54,14 @@ import androidx.compose.ui.unit.dp
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
-import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 
-internal const val QQ_GROUP = "1054316860"
+// 客服/购买 QQ 号（用户使用场景多为连着相机 Wi-Fi 无外网，只能靠复制号码离线联系）。
+internal const val QQ_NUMBER = "953000922"
+// 高级版展示定价（纯文案，改价只动这里）。留空 = 弹窗不显示价格行（定价未定）。
+internal const val PRO_PRICE = ""
 
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），下拉弹窗观感：
@@ -91,14 +102,17 @@ fun SettingsOverlay(
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
 
-    // "加群"按钮复制 QQ 群号后的底部提示；nonce 保证连续点击重启计时。
+    // 右上角"解锁高级版"徽标打开的介绍对话框（免费/高级版对比 + 解锁按钮复制 QQ 号）。
+    var showPro by remember { mutableStateOf(false) }
+
+    // 页脚"反馈"按钮复制 QQ 号后的底部提示；nonce 保证连续点击重启计时。
     val clipboard = LocalClipboardManager.current
-    var groupCopied by remember { mutableStateOf(false) }
-    var groupCopiedNonce by remember { mutableStateOf(0) }
-    LaunchedEffect(groupCopiedNonce) {
-        if (groupCopied) {
+    var feedbackCopied by remember { mutableStateOf(false) }
+    var feedbackNonce by remember { mutableStateOf(0) }
+    LaunchedEffect(feedbackNonce) {
+        if (feedbackCopied) {
             delay(1800)
-            groupCopied = false
+            feedbackCopied = false
         }
     }
 
@@ -185,7 +199,7 @@ fun SettingsOverlay(
                     .verticalScroll(rememberScrollState())
                     .padding(20.dp)
             ) {
-                // 标题栏
+                // 标题栏：标题 + 右上角"高级版"入口（全 app 唯一购买入口）+ 关闭。
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         stringResource(R.string.settings),
@@ -194,9 +208,17 @@ fun SettingsOverlay(
                         color = colors.onBackground
                     )
                     Spacer(Modifier.weight(1f))
+                    ProBadgeButton(
+                        label = stringResource(R.string.unlock_pro),
+                        onClick = { showPro = true }
+                    )
+                    Spacer(Modifier.width(8.dp))
                     IconButton(onClick = startClose, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_close), tint = colors.onSurfaceVariant)
                     }
+                }
+                if (showPro) {
+                    ProDialog(onDismiss = { showPro = false })
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -283,9 +305,8 @@ fun SettingsOverlay(
 
                 Spacer(Modifier.height(20.dp))
 
-                // ---------- 语言 ----------
-                SectionLabel(stringResource(R.string.language))
-                Spacer(Modifier.height(8.dp))
+                // ---------- 语言：收起时只占一行（标签 + 当前语言小玻璃按钮），
+                // 点按钮向下展开选项，比常驻 2×2 大胶囊省一大截面板高度 ----------
                 // 语言名一律用其自身语言书写（国际惯例，不随界面语言翻译），仅"跟随系统"本地化。
                 val languages = listOf(
                     AppLocale.SYSTEM to stringResource(R.string.language_system),
@@ -294,23 +315,64 @@ fun SettingsOverlay(
                     "zh-Hant" to "繁體中文"
                 )
                 val activity = LocalContext.current.findActivity()
-                languages.chunked(2).forEachIndexed { rowIndex, rowItems ->
-                    if (rowIndex > 0) Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        rowItems.forEach { (tag, label) ->
-                            val selected = state.appLanguage == tag
-                            SelectionChip(
-                                label = label,
-                                selected = selected,
-                                onClick = {
-                                    if (!selected) {
-                                        viewModel.setAppLanguage(tag)
-                                        // attachBaseContext 在重建时重读偏好，语言即刻生效。
-                                        activity?.recreate()
-                                    }
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
+                var languageExpanded by remember { mutableStateOf(false) }
+                val chevron by animateFloatAsState(
+                    targetValue = if (languageExpanded) 180f else 0f,
+                    label = "langChevron"
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        SectionLabel(stringResource(R.string.language))
+                    }
+                    // 与页脚"反馈"按钮同款规格的小玻璃按钮，显示当前语言 + 展开箭头。
+                    GlassButton(
+                        onClick = { languageExpanded = !languageExpanded },
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(start = 14.dp, end = 8.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text(
+                            languages.firstOrNull { it.first == state.appLanguage }?.second
+                                ?: languages.first().second,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.onBackground
+                        )
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = colors.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .graphicsLayer { rotationZ = chevron }
+                        )
+                    }
+                }
+                AnimatedVisibility(
+                    visible = languageExpanded,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Column {
+                        Spacer(Modifier.height(8.dp))
+                        languages.chunked(2).forEachIndexed { rowIndex, rowItems ->
+                            if (rowIndex > 0) Spacer(Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                rowItems.forEach { (tag, label) ->
+                                    val selected = state.appLanguage == tag
+                                    SelectionChip(
+                                        label = label,
+                                        selected = selected,
+                                        onClick = {
+                                            if (!selected) {
+                                                viewModel.setAppLanguage(tag)
+                                                // attachBaseContext 在重建时重读偏好，语言即刻生效。
+                                                activity?.recreate()
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -348,77 +410,8 @@ fun SettingsOverlay(
 
                 Spacer(Modifier.height(20.dp))
 
-                // ---------- 授权：免费/已激活状态 + 设备码；免费显示激活按钮 ----------
-                val isPro by LicenseManager.isPro.collectAsState()
-                var showActivation by remember { mutableStateOf(false) }
-                SectionLabel(stringResource(R.string.license))
-                Spacer(Modifier.height(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = colors.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            if (isPro) Icons.Default.Verified else Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = if (isPro) colors.statusConnected else colors.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(
-                                    if (isPro) R.string.license_pro_status
-                                    else R.string.license_free_status
-                                ),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colors.onBackground
-                            )
-                            Text(
-                                stringResource(R.string.device_code_label, LicenseManager.displayCode()),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.onSurfaceVariant
-                            )
-                        }
-                        if (!isPro) {
-                            GlassButton(
-                                onClick = { showActivation = true },
-                                shape = RoundedCornerShape(14.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp),
-                                modifier = Modifier.height(28.dp)
-                            ) {
-                                Text(
-                                    stringResource(R.string.activate),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = colors.accentBlue
-                                )
-                            }
-                        }
-                    }
-                }
-                if (isPro) {
-                    // 测试阶段的一键退回免费版：只清本地通行证，不动服务器绑定，
-                    // 重新输入激活码即恢复。公开发售前移除或藏进开发者面板。
-                    TextButton(onClick = { LicenseManager.revertToFree() }) {
-                        Text(
-                            stringResource(R.string.revert_free),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant
-                        )
-                    }
-                }
-                if (showActivation) {
-                    ActivationDialog(onDismiss = { showActivation = false })
-                }
-
-                Spacer(Modifier.height(20.dp))
-
-                // ---------- 页脚：左侧版本号，右侧毛玻璃"加群"按钮（点击复制 QQ 群号，
-                // 面板底部弹玻璃提示显示具体群号 + 已复制）----------
+                // ---------- 页脚：左侧版本号，右侧毛玻璃"反馈"按钮（点击复制 QQ 号，
+                // 面板底部弹玻璃提示：请加 QQ 反馈）----------
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = stringResource(R.string.version_label, BuildConfig.VERSION_NAME),
@@ -428,16 +421,16 @@ fun SettingsOverlay(
                     Spacer(Modifier.weight(1f))
                     GlassButton(
                         onClick = {
-                            clipboard.setText(AnnotatedString(QQ_GROUP))
-                            groupCopied = true
-                            groupCopiedNonce++
+                            clipboard.setText(AnnotatedString(QQ_NUMBER))
+                            feedbackCopied = true
+                            feedbackNonce++
                         },
                         shape = RoundedCornerShape(14.dp),
                         contentPadding = PaddingValues(horizontal = 14.dp),
                         modifier = Modifier.height(28.dp)
                     ) {
                         Text(
-                            stringResource(R.string.join_qq_group),
+                            stringResource(R.string.feedback),
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.onBackground
                         )
@@ -447,9 +440,9 @@ fun SettingsOverlay(
           }
         }
 
-        // 底部玻璃提示：显示已复制的具体群号（与列表页提示条同款视觉），在遮罩与面板之上。
+        // 底部玻璃提示：反馈按钮复制 QQ 号后的确认（与列表页提示条同款视觉），在遮罩与面板之上。
         AnimatedVisibility(
-            visible = groupCopied,
+            visible = feedbackCopied,
             enter = fadeIn() + slideInVertically { it / 2 },
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier
@@ -464,11 +457,76 @@ fun SettingsOverlay(
                 border = BorderStroke(1.dp, colors.glassPanelBorder)
             ) {
                 Text(
-                    text = stringResource(R.string.qq_group_copied, QQ_GROUP),
+                    text = stringResource(R.string.feedback_qq_copied, QQ_NUMBER),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.labelLarge,
                     color = colors.onBackground,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 金色闪亮胶囊按钮（购买入口专用）：金渐变 + 缓慢周期性扫过的高光，
+ * 刻意比周围的玻璃元素更亮眼。入口处 [label] 用"解锁高级版"，
+ * ProDialog 内的确认按钮用"解锁"。金色在深浅两套主题下都成立，
+ * 文字/图标用深棕保证对比度。
+ */
+@Composable
+internal fun ProBadgeButton(label: String, onClick: () -> Unit) {
+    // 高光带相位：-1（完全在按钮左侧外）扫到 +2（完全出右侧），尾段停顿让闪光有呼吸感。
+    val sheen = rememberInfiniteTransition(label = "proSheen")
+    val sheenX by sheen.animateFloat(
+        initialValue = -1f,
+        targetValue = 2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "proSheenX"
+    )
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = Color.Transparent,
+        shadowElevation = 4.dp,
+        modifier = Modifier.height(28.dp)
+    ) {
+        Box(
+            modifier = Modifier.background(
+                Brush.verticalGradient(listOf(Color(0xFFFFE082), Color(0xFFF0A93B)))
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer { translationX = size.width * sheenX }
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color.Transparent, Color.White.copy(alpha = 0.55f), Color.Transparent)
+                        )
+                    )
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(horizontal = 12.dp)
+            ) {
+                Icon(
+                    Icons.Default.WorkspacePremium,
+                    contentDescription = null,
+                    tint = Color(0xFF5D4023),
+                    modifier = Modifier.size(15.dp)
+                )
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF4A3216)
                 )
             }
         }

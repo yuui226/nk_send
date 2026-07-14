@@ -72,8 +72,9 @@
     <string name="keep_screen_on">Keep screen on</string>
     <string name="keep_screen_on_desc">Keeps the screen on while the app is in the foreground to prevent disconnection</string>
     <string name="version_label">ZTransfer v%1$s</string>
-    <string name="join_qq_group">QQ Group</string>
-    <string name="qq_group_copied">QQ group %1$s\nGroup number copied</string>
+    <string name="qq_group_copied">QQ %1$s copied\nAdd me to get an activation code</string>
+    <string name="feedback">Feedback</string>
+    <string name="feedback_qq_copied">QQ %1$s copied\nAdd on QQ to send feedback</string>
 
     <!-- Photo preview -->
     <string name="no_preview">No preview</string>
@@ -152,10 +153,23 @@
     <string name="err_server_unreachable">Couldn\'t reach the activation server. Check your network; if the network is fine, update to the latest version (via QQ group).</string>
     <string name="err_generic">Activation failed (%1$s)</string>
     <string name="revert_free">Revert to free (testing)</string>
-    <string name="paywall_quota_title">Daily free limit reached</string>
-    <string name="paywall_batch_title">Batch transfer is a paid feature</string>
-    <string name="paywall_body">Free: %1$d transfers per day, one at a time, %2$d-minute remote trial.\nPaid: unlimited transfers and remote control, one code for two devices.</string>
-    <string name="paywall_enter_code">Enter activation code</string>
+    <string name="pro_version">Pro</string>
+    <string name="unlock_pro">Unlock Pro</string>
+    <string name="unlock">Unlock</string>
+    <string name="enter_code">Enter activation code</string>
+    <string name="tier_free">Free</string>
+    <string name="compare_transfer">Daily transfers</string>
+    <string name="compare_transfer_free">%1$d</string>
+    <string name="compare_batch">One-tap transfer</string>
+    <string name="compare_remote">Remote control</string>
+    <string name="compare_remote_free">%1$d min</string>
+    <string name="compare_unlimited">Unlimited</string>
+    <string name="compare_no_limit">No limit</string>
+    <string name="pro_price_line">One-time purchase — %1$s</string>
+    <string name="pro_hint_batch">Free version transfers one photo at a time — unlock Pro in Settings</string>
+    <string name="pro_perks">One-time purchase · No subscription · Free updates</string>
+    <string name="quota_left_hint">%1$d free transfers left today</string>
+    <string name="pro_hint_quota">Daily free limit reached — resets tomorrow\nPro is unlimited · see Settings</string>
     <string name="remote_trial_left">Trial %1$s</string>
-    <string name="remote_trial_ended">Remote trial ended — activate for unlimited use</string>
+    <string name="remote_trial_ended">Remote trial ended — unlock Pro in Settings</string>
 </resources>

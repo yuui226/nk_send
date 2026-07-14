@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatDuration
@@ -409,6 +410,22 @@ fun TransferScreen(
                 rssi = cameraState.wifiRssi,
                 connected = cameraState.isConnectedToCamera
             )
+
+            // 免费版：信号右侧放"高级版"入口（与设置面板右上角同款金徽标）。
+            // 传完 25 个额度的用户多半正停在本页，是最自然的转化位；已购用户不显示。
+            val isPro by LicenseManager.isPro.collectAsState()
+            var showPro by remember { mutableStateOf(false) }
+            if (!isPro) {
+                Spacer(modifier = Modifier.width(8.dp))
+                ProBadgeButton(
+                    label = stringResource(R.string.unlock_pro),
+                    onClick = { showPro = true }
+                )
+            }
+            if (showPro) {
+                // 传输页多半在家整理/回看时打开(可能有外网),放出"输入激活码"入口。
+                ProDialog(onDismiss = { showPro = false }, showEnterCode = true)
+            }
 
             // 右：胶囊（传输中显速度/数量，完成后 done→图标）；队列被清空后随之淡出，
             // 不留一颗没有指代的图标。

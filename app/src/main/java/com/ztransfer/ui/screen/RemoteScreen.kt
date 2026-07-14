@@ -72,7 +72,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.widget.Toast
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.Lab
@@ -149,25 +148,33 @@ fun RemoteScreen(
     onNavigateBack: () -> Unit
 ) {
     CompositionLocalProvider(LocalAppColors provides DarkAppColors) {
-        // 免费版试用限时:每次进入给 FREE_REMOTE_TRIAL_MS,倒计时归零退回列表页;
-        // 试用中途激活成功(isPro 翻转)立即解除限时。PRO 无任何额外开销。
+        // 免费版试用限时:每次进入给 FREE_REMOTE_TRIAL_MS。计时从"参数加载完 + 监看
+        // 首帧已显示"（onReady）才开始——进页加载耗时不占用体验时长。相机 Wi-Fi 下
+        // 无外网,试用中途不存在在线激活,isPro 只看进页时刻。PRO 无任何额外开销。
         val isPro by LicenseManager.isPro.collectAsState()
         var trialLeftMs by remember { mutableStateOf(LicenseManager.FREE_REMOTE_TRIAL_MS) }
-        val context = LocalContext.current
-        val trialEndedMsg = stringResource(R.string.remote_trial_ended)
+        var trialArmed by remember { mutableStateOf(false) }
+        // 归零:先在页内弹轻量玻璃气泡（与列表页提示条同款，替代系统 Toast），
+        // 停留够读完文案再自动"按返回"退回列表页。
+        var trialEnded by remember { mutableStateOf(false) }
         if (!isPro) {
-            LaunchedEffect(Unit) {
+            LaunchedEffect(trialArmed) {
+                if (!trialArmed) return@LaunchedEffect
                 while (trialLeftMs > 0) {
                     delay(1000)
                     trialLeftMs -= 1000
                 }
-                Toast.makeText(context, trialEndedMsg, Toast.LENGTH_LONG).show()
+                trialEnded = true
+                delay(2200)
                 onNavigateBack()
             }
         }
 
         Box {
-            RemoteContent(cameraViewModel, transferViewModel, onNavigateBack)
+            RemoteContent(
+                cameraViewModel, transferViewModel, onNavigateBack,
+                onReady = { trialArmed = true }
+            )
             if (!isPro) {
                 val sec = (trialLeftMs / 1000).coerceAtLeast(0)
                 Surface(
@@ -175,9 +182,9 @@ fun RemoteScreen(
                     color = Color.Black.copy(alpha = 0.55f),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .statusBarsPadding()
-                        .padding(top = 6.dp)
+                        .align(Alignment.BottomStart)
+                        .navigationBarsPadding()
+                        .padding(start = 10.dp, bottom = 10.dp)
                 ) {
                     Text(
                         stringResource(
@@ -190,6 +197,31 @@ fun RemoteScreen(
                     )
                 }
             }
+            // 体验结束的轻量气泡（引导到设置的"高级版"入口），随后自动返回列表页。
+            AnimatedVisibility(
+                visible = trialEnded,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut() + slideOutVertically { it / 2 },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 28.dp)
+            ) {
+                val colors = AppTheme.colors
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = colors.glassSurfaceHeavy,
+                    shadowElevation = 6.dp,
+                    border = BorderStroke(1.dp, colors.glassPanelBorder)
+                ) {
+                    Text(
+                        stringResource(R.string.remote_trial_ended),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.onBackground,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -198,7 +230,8 @@ fun RemoteScreen(
 private fun RemoteContent(
     cameraViewModel: CameraViewModel,
     transferViewModel: TransferViewModel,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onReady: () -> Unit = {}
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
@@ -220,6 +253,11 @@ private fun RemoteContent(
     // 初始参数是否已加载完：用于把事件轮询推迟到之后开始，避免进页时 GetEvent 与
     // 5 条参数读取抢 ioMutex、拖慢参数首次显示。
     var initialLoaded by remember { mutableStateOf(false) }
+    // 参数加载完且监看首帧已显示 → 通知外层（免费版试用计时以此为起点）。
+    // 键取 frame 是否为空而非 frame 本身，避免每帧重启 effect。
+    LaunchedEffect(initialLoaded, frame == null) {
+        if (initialLoaded && frame != null) onReady()
+    }
     // 弹出完整值表的参数（点胶囊中间值触发）
     var listProp by remember { mutableStateOf<Int?>(null) }
 

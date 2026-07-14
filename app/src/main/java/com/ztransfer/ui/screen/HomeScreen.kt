@@ -51,6 +51,7 @@ import kotlinx.coroutines.delay
  * 连接（引导）页：展示连接状态与引导。左上角 "Z传" 玻璃按钮为设置入口，
  * 与照片列表页完全一致（同一 GlassButton + SettingsOverlay，点击从按钮变形展开设置面板）。
  * 连接成功后自动跳到文件列表，且用户不会再返回本页。
+ * 激活入口不在本页：在"解锁高级版"弹窗（传输页/设置右上角打开）里输入激活码。
  */
 @Composable
 fun HomeScreen(

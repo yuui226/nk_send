@@ -72,8 +72,9 @@
     <string name="keep_screen_on">屏幕常亮</string>
     <string name="keep_screen_on_desc">应用在前台时不熄屏，防止连接中断</string>
     <string name="version_label">Z传 v%1$s</string>
-    <string name="join_qq_group">加群</string>
-    <string name="qq_group_copied">QQ群 %1$s\n已复制群号</string>
+    <string name="qq_group_copied">已复制 QQ 号 %1$s\n加我购买获取激活码</string>
+    <string name="feedback">反馈</string>
+    <string name="feedback_qq_copied">已复制 QQ 号 %1$s\n请加 QQ 反馈</string>
 
     <!-- 照片预览 -->
     <string name="no_preview">无预览</string>
@@ -152,10 +153,23 @@
     <string name="err_server_unreachable">无法连接激活服务器，请检查网络；若网络正常，可能需要更新到新版本（QQ 群获取）。</string>
     <string name="err_generic">激活失败（%1$s）</string>
     <string name="revert_free">恢复为免费版（测试）</string>
-    <string name="paywall_quota_title">今日免费额度已用完</string>
-    <string name="paywall_batch_title">整组传输是付费功能</string>
-    <string name="paywall_body">免费版：每天 %1$d 个传输、单张点传、遥控体验 %2$d 分钟。\n付费版：传输与遥控无限制，一码可用于两台设备。</string>
-    <string name="paywall_enter_code">输入激活码</string>
+    <string name="pro_version">高级版</string>
+    <string name="unlock_pro">解锁高级版</string>
+    <string name="unlock">解锁</string>
+    <string name="enter_code">输入激活码</string>
+    <string name="tier_free">免费</string>
+    <string name="compare_transfer">每日传输</string>
+    <string name="compare_transfer_free">%1$d 个</string>
+    <string name="compare_batch">一键传输</string>
+    <string name="compare_remote">遥控 · 监看</string>
+    <string name="compare_remote_free">%1$d 分钟</string>
+    <string name="compare_unlimited">无限</string>
+    <string name="compare_no_limit">不限时</string>
+    <string name="pro_price_line">一次性买断 %1$s</string>
+    <string name="pro_hint_batch">免费版仅支持单张传输 · 解锁高级版详见设置</string>
+    <string name="pro_perks">一次买断 · 无订阅 · 更新免费</string>
+    <string name="quota_left_hint">今日免费额度还剩 %1$d 个</string>
+    <string name="pro_hint_quota">今日免费额度已用完，明天自动恢复\n高级版无限传输 · 入口在设置</string>
     <string name="remote_trial_left">体验 %1$s</string>
-    <string name="remote_trial_ended">遥控体验结束，激活后不限时使用</string>
+    <string name="remote_trial_ended">遥控体验结束 · 解锁高级版详见设置</string>
 </resources>
