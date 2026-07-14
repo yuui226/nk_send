@@ -8,26 +8,50 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
-import kotlin.math.sqrt
 
-// 归一化几何参数（均为边长的倍数），改这里即可整体调形。竖直姿态绘制，整体旋转 45°。
-private const val HANDLE_TOP = 0.08f       // 木杆顶端
-private const val HANDLE_BOTTOM = 0.55f    // 木杆没入刷头处（与刷头上沿略有重叠）
-private const val HANDLE_W = 0.10f         // 木杆粗细
-private const val HEAD_TOP = 0.52f         // 刷头上沿
-private const val HEAD_BOTTOM = 0.90f      // 刷头下沿
-private const val HEAD_TOP_HALF = 0.09f    // 刷头上沿半宽（略宽于木杆）
-private const val HEAD_BOTTOM_HALF = 0.28f // 刷头下沿半宽（外扩成扇形）
-private const val CORNER_R = 0.06f         // 刷头下沿两角的圆角
+// 归一化几何参数（均为边长的倍数），改这里即可整体调形。
+// 竖直姿态绘制、整体旋转 45°：杆指向右上，毛束向左下甩出。
+private const val HANDLE_TOP = 0.07f       // 木杆顶端
+private const val HANDLE_BOTTOM = 0.44f    // 木杆没入箍带处
+private const val HANDLE_W = 0.09f         // 木杆粗细
+private const val BAND_Y = 0.505f          // 箍带（圆头粗横杠，略宽于杆）
+private const val BAND_HALF = 0.105f
+private const val BAND_W = 0.095f
+private const val STRAND_TOP = 0.565f      // 毛束根部（略叠进箍带下方）
+private const val STRAND_W = 0.05f         // 单根毛粗细
+// 毛的控制点右移量：毛束先向右微鼓、再向左甩出——鞭梢式的弧线，整束同向弯曲。
+private const val STRAND_CTRL_PULL = 0.045f
+private const val STRAND_CTRL_SINK = 0.01f
+
+// 五根毛：根部 x（窄间距，读作"一束"而非叉齿）/ 毛尖 (x, y)（沿弧线错落，斜切出扫过的动势）。
+private val STRAND_START_X = floatArrayOf(0.425f, 0.4625f, 0.5f, 0.5375f, 0.575f)
+private val STRAND_END = arrayOf(
+    0.305f to 0.865f,
+    0.365f to 0.895f,
+    0.43f to 0.915f,
+    0.50f to 0.925f,
+    0.575f to 0.925f
+)
+
+// 扬尘两粒 (cx, cy, r)——【屏幕坐标】，落在旋转后毛尖甩出的左下方向。
+// 只在足够大的尺寸绘制（见 SPECK_MIN_DP）：16dp 的卡片小按钮上会糊成噪点。
+private val SPECKS = arrayOf(
+    floatArrayOf(0.085f, 0.775f, 0.017f),
+    floatArrayOf(0.175f, 0.925f, 0.012f)
+)
+private val SPECK_MIN_DP = 22.dp
 
 /**
  * 自绘扫帚标志（"清空队列"FAB 与卡片"移出队列"按钮共用）：
- * 斜握 45° 的极简剪影——修长圆头木杆 + 圆角扇形刷头，只有两个元素，
- * 小到 16dp 依然清晰可辨。纯单色填充，不依赖背景，深浅主题仅由 [color] 区分。
+ * 斜握 45° 的挥扫姿态——圆头木杆 + 箍带 + 五根鞭梢式曲线毛束（窄扇、整束同向
+ * 弯曲、毛尖沿弧线错落），大尺寸下加两粒扬尘。圆头线条与信号条/筛选标同族。
+ * 纯单色，深浅主题仅由 [color] 区分。
  */
 @Composable
 fun BroomMark(
@@ -45,7 +69,6 @@ fun BroomMark(
             .aspectRatio(1f)
     ) {
         val s = size.minDimension
-        // 顺时针转 45°：木杆指向右上、刷头扫向左下，经典的"挥扫"姿态。
         rotate(degrees = 45f, pivot = center) {
             // 木杆（圆头长杆）
             drawLine(
@@ -55,29 +78,34 @@ fun BroomMark(
                 strokeWidth = HANDLE_W * s,
                 cap = StrokeCap.Round
             )
-            // 刷头：上窄下宽的扇形，底部两角圆过渡。
-            // 侧边单位方向 × 圆角半径 = 圆角起点沿斜边回退的偏移。
-            val edgeDx = HEAD_BOTTOM_HALF - HEAD_TOP_HALF
-            val edgeDy = HEAD_BOTTOM - HEAD_TOP
-            val edgeLen = sqrt(edgeDx * edgeDx + edgeDy * edgeDy)
-            val ox = edgeDx / edgeLen * CORNER_R
-            val oy = edgeDy / edgeLen * CORNER_R
-            val head = Path().apply {
-                moveTo((0.5f - HEAD_TOP_HALF) * s, HEAD_TOP * s)
-                lineTo((0.5f + HEAD_TOP_HALF) * s, HEAD_TOP * s)
-                lineTo((0.5f + HEAD_BOTTOM_HALF - ox) * s, (HEAD_BOTTOM - oy) * s)
-                quadraticBezierTo(
-                    (0.5f + HEAD_BOTTOM_HALF) * s, HEAD_BOTTOM * s,
-                    (0.5f + HEAD_BOTTOM_HALF - CORNER_R) * s, HEAD_BOTTOM * s
-                )
-                lineTo((0.5f - HEAD_BOTTOM_HALF + CORNER_R) * s, HEAD_BOTTOM * s)
-                quadraticBezierTo(
-                    (0.5f - HEAD_BOTTOM_HALF) * s, HEAD_BOTTOM * s,
-                    (0.5f - HEAD_BOTTOM_HALF + ox) * s, (HEAD_BOTTOM - oy) * s
-                )
-                close()
+            // 箍带（圆头粗横杠）
+            drawLine(
+                color = color,
+                start = Offset((0.5f - BAND_HALF) * s, BAND_Y * s),
+                end = Offset((0.5f + BAND_HALF) * s, BAND_Y * s),
+                strokeWidth = BAND_W * s,
+                cap = StrokeCap.Round
+            )
+            // 毛束：五根二次贝塞尔曲线，先右鼓再左甩
+            for (i in STRAND_START_X.indices) {
+                val sx = STRAND_START_X[i]
+                val (ex, ey) = STRAND_END[i]
+                val strand = Path().apply {
+                    moveTo(sx * s, STRAND_TOP * s)
+                    quadraticBezierTo(
+                        ((sx + ex) / 2 + STRAND_CTRL_PULL) * s,
+                        ((STRAND_TOP + ey) / 2 + STRAND_CTRL_SINK) * s,
+                        ex * s, ey * s
+                    )
+                }
+                drawPath(strand, color, style = Stroke(width = STRAND_W * s, cap = StrokeCap.Round))
             }
-            drawPath(head, color)
+        }
+        // 扬尘（屏幕坐标，旋转之外；小尺寸不画）
+        if (s >= SPECK_MIN_DP.toPx()) {
+            for ((cx, cy, r) in SPECKS) {
+                drawCircle(color, radius = r * s, center = Offset(cx * s, cy * s))
+            }
         }
     }
 }

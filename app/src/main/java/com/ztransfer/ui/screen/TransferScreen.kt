@@ -5,6 +5,10 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
@@ -43,6 +47,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
@@ -54,6 +59,7 @@ import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
+import com.ztransfer.ui.util.formatDuration
 import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
@@ -83,6 +89,13 @@ fun TransferScreen(
     val clearScope = rememberCoroutineScope()
     // 触感反馈（与"Z传"页同一开关）；本页胶囊负责传输全部完成时的成功震动。
     val haptics = rememberHaptics(transferState.hapticsEnabled)
+    // 卡片顶部 sheen 高光刷（与玻璃面板同族材质）；提升到列表外，所有卡片共用一个实例。
+    // 透明度封顶 10%：面板用的 glassSheen 在浅色主题高达 55%（白面板上白高光看不出来），
+    // 直接叠在蓝/绿调的状态卡上会把卡片上半部洗白；深色主题 8% 原样通过。
+    val cardSheen = remember(colors) {
+        val sheen = colors.glassSheen.copy(alpha = minOf(colors.glassSheen.alpha, 0.10f))
+        Brush.verticalGradient(listOf(sheen, Color.Transparent))
+    }
 
     // 存在可重试任务（失败/取消）且未在传输：右下角显示"重试全部"FAB。
     val hasRetryable = !transferState.isTransferring && transferState.tasks.any {
@@ -109,12 +122,24 @@ fun TransferScreen(
     )
 
     // 根需不透明底色：与"Z传"页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
-    Box(modifier = Modifier.fillMaxSize().background(colors.background)) {
+    // 用全局背景渐变刷（而非纯 background 色），与 Scaffold 底的纵深一致。
+    Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (transferState.tasks.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(64.dp), tint = colors.onSurfaceVariant)
+                    // 空状态图标缓慢呼吸：页面此时无其它动态，一点"活感"不至于死板。
+                    val breathe = rememberInfiniteTransition(label = "emptyQueue")
+                    val breatheAlpha by breathe.animateFloat(
+                        initialValue = 0.35f, targetValue = 0.6f,
+                        animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
+                        label = "emptyQueueAlpha"
+                    )
+                    Icon(
+                        Icons.Default.CloudDownload, contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
+                    )
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(stringResource(R.string.no_transfer_tasks), color = colors.onSurfaceVariant)
                 }
@@ -159,7 +184,8 @@ fun TransferScreen(
                     ) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        // 14dp 与列表页卡片/监看页 tile 的中型控件圆角一致（原 12dp 家族外）。
+                        shape = RoundedCornerShape(14.dp),
                         // 浅色下白卡浮在浅灰背景上需要发丝线定界；深色 token 为透明，视觉不变。
                         border = BorderStroke(1.dp, colors.cardHairline),
                         colors = CardDefaults.cardColors(
@@ -173,9 +199,10 @@ fun TransferScreen(
                         )
                     ) {
                         // 进度条/重试按钮随状态出现消失时，卡片高度平滑过渡，
-                        // 卡内图标与文字不再瞬移。
+                        // 卡内图标与文字不再瞬移。顶部 sheen 高光与玻璃面板同族材质。
                         Column(
                             modifier = Modifier
+                                .background(cardSheen)
                                 .animateContentSize(tween(250, easing = FastOutSlowInEasing))
                                 .padding(12.dp)
                         ) {
@@ -218,10 +245,13 @@ fun TransferScreen(
                                         TransferStatus.COMPLETED ->
                                             (when {
                                                 task.skipped -> stringResource(R.string.status_skipped)
-                                                // 单文件下载速度：一眼看出当前网络快慢。大小取真实落盘字节数
-                                                //（>4GB 对象的 file.size 只是哨兵值）。
-                                                task.downloadMBps > 0f -> "${formatFileSize(task.downloaded)} · %.1f MB/s".format(task.downloadMBps)
-                                                else -> formatFileSize(task.downloaded)
+                                                // 大小 · 速度 · 耗时：一眼看出快慢与用时。大小取真实落盘字节数
+                                                //（>4GB 对象的 file.size 只是哨兵值）；耗时完成后填入。
+                                                else -> buildString {
+                                                    append(formatFileSize(task.downloaded))
+                                                    if (task.downloadMBps > 0f) append(" · %.1f MB/s".format(task.downloadMBps))
+                                                    task.elapsedMs?.let { append(" · ${formatDuration(it)}") }
+                                                }
                                             }) to colors.statusConnected
                                         TransferStatus.FAILED -> (task.error ?: stringResource(R.string.transfer_failed)) to colors.statusError
                                         TransferStatus.CANCELLED -> stringResource(R.string.status_cancelled) to colors.onSurfaceVariant
@@ -237,10 +267,29 @@ fun TransferScreen(
                                     )
                                 }
 
-                                // 尾部：状态图标（前导已被缩略图占用），换状态时交叉淡化不硬切。
+                                // 尾部：状态图标（前导已被缩略图占用），换状态时交叉淡化不硬切；
+                                // 传输→完成的瞬间图标弹一下（事件驱动、只在真在传时触发——
+                                // 已完成卡片滚回屏幕不会重播），与全局"确认"手感一致。
                                 Spacer(modifier = Modifier.width(10.dp))
-                                Crossfade(targetState = task.status, animationSpec = tween(220), label = "taskIcon") { st ->
-                                    TaskStatusIcon(st, size = 22.dp)
+                                val iconPop = remember(handle) { Animatable(1f) }
+                                var prevStatus by remember(handle) { mutableStateOf(task.status) }
+                                LaunchedEffect(task.status) {
+                                    val was = prevStatus
+                                    prevStatus = task.status
+                                    if (task.status == TransferStatus.COMPLETED && was == TransferStatus.TRANSFERING) {
+                                        iconPop.snapTo(0.5f)
+                                        iconPop.animateTo(1f, Motion.bouncy())
+                                    }
+                                }
+                                Box(
+                                    Modifier.graphicsLayer {
+                                        scaleX = iconPop.value
+                                        scaleY = iconPop.value
+                                    }
+                                ) {
+                                    Crossfade(targetState = task.status, animationSpec = tween(220), label = "taskIcon") { st ->
+                                        TaskStatusIcon(st, size = 22.dp)
+                                    }
                                 }
 
                                 // 最尾：毛玻璃移除按钮——把本卡从队列移除。正在传输的
@@ -283,7 +332,9 @@ fun TransferScreen(
                                         // 圆角进度条，与卡片圆角语言一致
                                         .clip(RoundedCornerShape(2.dp)),
                                     color = colors.accentBlue,
-                                    trackColor = colors.surfaceVariant,
+                                    // 轨道用主题蓝的极淡版而非灰色：与蓝调传输卡同色系，
+                                    // "已走/未走"读作同一根条的深浅，而不是两种材质。
+                                    trackColor = colors.accentBlue.copy(alpha = 0.18f),
                                 )
                             }
 
@@ -324,9 +375,11 @@ fun TransferScreen(
                 .fillMaxWidth()
                 .height(topInset + 56.dp)
                 .background(
+                    // 用 backgroundTop（页面顶端的实际底色）而非名义中间色，
+                    // 否则在渐变底上会压出一条色差带。
                     Brush.verticalGradient(
-                        0f to colors.background.copy(alpha = 0.85f),
-                        0.45f to colors.background.copy(alpha = 0.5f),
+                        0f to colors.backgroundTop.copy(alpha = 0.85f),
+                        0.45f to colors.backgroundTop.copy(alpha = 0.5f),
                         1f to Color.Transparent
                     )
                 )

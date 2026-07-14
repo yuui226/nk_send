@@ -128,6 +128,7 @@
     <string name="remote_title">遙控</string>
     <string name="remote_locked_hint">遙控期間相機機身暫不可操作</string>
     <string name="remote_transfer_busy_hint">傳輸進行中，監看可能卡頓</string>
+    <string name="remote_rec_start_failed">無法開始錄影，請檢查記憶卡與相機狀態</string>
     <string name="dev_panel_title">開發者</string>
     <string name="dev_hd_liveview">高清監看 (XGA)</string>
     <string name="dev_fps_overlay">幀率顯示</string>

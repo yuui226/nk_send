@@ -128,6 +128,7 @@
     <string name="remote_title">Remote</string>
     <string name="remote_locked_hint">Camera body controls are disabled during remote control</string>
     <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>
+    <string name="remote_rec_start_failed">Couldn\'t start recording — check the memory card and camera status</string>
     <string name="dev_panel_title">Developer</string>
     <string name="dev_hd_liveview">XGA live view</string>
     <string name="dev_fps_overlay">FPS overlay</string>
