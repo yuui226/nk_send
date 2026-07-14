@@ -22,3 +22,6 @@ tools/ptpip_probe_*.json
 *.pcapng
 *.pcap
 __pycache__/
+
+# 激活码管理脚本保存的管理员令牌(密钥)
+server/admin-token.txt
