@@ -2,10 +2,10 @@ package com.ztransfer.ui.screen
 
 import android.content.Context
 import android.graphics.BitmapFactory
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -13,7 +13,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
@@ -81,11 +80,16 @@ import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
 import com.ztransfer.protocol.rcAfDrive
 import com.ztransfer.protocol.rcCapture
+import com.ztransfer.protocol.rcChangeApplicationMode
+import com.ztransfer.protocol.rcEndMovie
 import com.ztransfer.protocol.rcFormat
+import com.ztransfer.protocol.rcGetMovieMode
 import com.ztransfer.protocol.rcGetParam
 import com.ztransfer.protocol.rcPollEvents
+import com.ztransfer.protocol.rcSetApplicationMode
 import com.ztransfer.protocol.rcSetLvSize
 import com.ztransfer.protocol.rcSetValue
+import com.ztransfer.protocol.rcStartMovie
 import com.ztransfer.protocol.runLabProbe
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.DarkAppColors
@@ -103,6 +107,8 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlin.math.abs
+import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
@@ -113,9 +119,17 @@ import kotlin.math.hypot
 
 // 直控胶囊覆盖的四个曝光参数，2×2 网格顺序：
 // 第一排 曝光补偿 / ISO，第二排 光圈 / 快门速度。
+// 照片与录像的参数在机内是两套独立属性（Z 30 实测：拨杆在录像位时照片侧属性
+// 读不到/不可写），拨杆位置决定网格绑定哪一组。
 private val EXPOSURE_PROPS = listOf(
     Lab.PROP_EXP_COMPENSATION, Lab.PROP_ISO, Lab.PROP_F_NUMBER, Lab.PROP_NK_SHUTTER
 )
+private val MOVIE_EXPOSURE_PROPS = listOf(
+    Lab.PROP_NK_MOVIE_EXP_COMP, Lab.PROP_NK_MOVIE_ISO,
+    Lab.PROP_NK_MOVIE_F_NUMBER, Lab.PROP_NK_MOVIE_SHUTTER
+)
+// 事件刷新的匹配范围（两套都听：拨杆随时可能切换）
+private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
 
 /**
  * 无线遥控页（正式功能）：取景器隐喻，恒黑底不随主题——通过覆盖 [LocalAppColors]
@@ -195,6 +209,54 @@ private fun RemoteContent(
         val cam = cameraViewModel.getCamera() ?: return
         runCatching { cam.rcGetParam(Lab.PROP_EXPOSURE_PROGRAM) }.getOrNull()?.let {
             modeText = rcFormat(Lab.PROP_EXPOSURE_PROGRAM, it.current)
+        }
+    }
+
+    // ---------- 照片/录像模式 ----------
+    // movieMode 跟随相机的实体照片/录像拨杆（0xD1A6 LiveViewSelector）：录像位时
+    // 快门键变成开始/停止录像。读不到该属性的机型永远按照片模式（优雅降级）。
+    // recording 以事件为准（0xC10A 开始 / 0xC108 完成 / 0xC105 中断），发命令成功时
+    // 乐观置位让 UI 立即响应；lastStopCmdAt 用于滤掉停止后才轮询到的迟到"已开始"回声。
+    var movieMode by remember { mutableStateOf(false) }
+    var recording by remember { mutableStateOf(false) }
+    var lastStopCmdAt by remember { mutableStateOf(0L) }
+    // 远程开录放行（Z 30 实测直发 0x920A 被拒）：两条路线——属性 0xD1F0=1 或操作码
+    // 0x9435 ChangeApplicationMode(1)，开录失败时逐级尝试并分别记账；录像一停/拨杆
+    // 离开录像位就按账恢复，成对使用不让相机滞留在应用模式。
+    var appModeSet by remember { mutableStateOf(false) }   // 经属性 0xD1F0 设过 1
+    var appOpSet by remember { mutableStateOf(false) }     // 经操作码 0x9435 设过 1
+    suspend fun clearAppMode() {
+        if (!appModeSet && !appOpSet) return
+        val cam = cameraViewModel.getCamera()
+        if (appOpSet) {
+            appOpSet = false
+            val rc = cam?.let { runCatching { it.rcChangeApplicationMode(0) }.getOrDefault(-1) }
+            if (rc != null && rc != Lab.OK) {
+                devLog("!! ChangeApplicationMode(0) resp=0x%04X".format(rc and 0xFFFF))
+            }
+        }
+        if (appModeSet) {
+            appModeSet = false
+            val rc = cam?.let { runCatching { it.rcSetApplicationMode(false) }.getOrDefault(-1) }
+            if (rc != null && rc != Lab.OK) {
+                devLog("!! ApplicationMode=0 resp=0x%04X".format(rc and 0xFFFF))
+            }
+        }
+    }
+    suspend fun refreshMovieMode() {
+        val cam = cameraViewModel.getCamera() ?: return
+        val mv = runCatching { cam.rcGetMovieMode() }.getOrNull() ?: return
+        val was = movieMode
+        movieMode = mv
+        if (mv && !was) {
+            // 切入录像位：拉取录像侧独立参数组（照片/录像两套属性互不相通）
+            MOVIE_EXPOSURE_PROPS.forEach { refreshParam(it) }
+        }
+        if (!mv) {
+            recording = false   // 拨杆离开录像位，录制状态必然已结束
+            clearAppMode()
+            // 切回照片位：照片侧值域/可写性可能在录像期间变过，重新拉一遍
+            if (was) EXPOSURE_PROPS.forEach { refreshParam(it) }
         }
     }
 
@@ -292,10 +354,13 @@ private fun RemoteContent(
         refreshMode()
         initialLoaded = true
         startSession(hdLiveView)
+        // 拨杆位置放监看启动之后：只影响快门键形态，不值得让首帧多等一个往返
+        refreshMovieMode()
     }
 
     // 事件轮询：唯一的 GetEvent 消费者。参数被机身侧改动（0x4006）时刷新对应值域。
     LaunchedEffect(Unit) {
+        var pollTick = 0
         while (isActive) {
             // 让初始参数先加载完再开始轮询，避免抢锁拖慢进页
             if (!initialLoaded) { delay(150); continue }
@@ -304,22 +369,41 @@ private fun RemoteContent(
             val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
             for (e in events) {
                 eventFlow.emit(e)
-                if (e.first == Lab.EVT_DEVICE_PROP_CHANGED) {
-                    val prop = e.second.toInt()
-                    // 本地还有未发出的乐观值时不刷新——自己刚设的值触发的事件
-                    // 会把正在连调的显示值拽回去
-                    if (prop in EXPOSURE_PROPS && pendingSets[prop]?.isActive != true) {
-                        refreshParam(prop)
+                when (e.first) {
+                    // 录像状态以相机事件为准（卡满/过热等相机自行停录也能收到）。
+                    // 例外：本地刚（2s 内）发过停止命令时忽略"已开始"——那是上一次开始
+                    // 的迟到回声（开始+停止落在同一轮询窗口内），别把 UI 翻回录制中。
+                    // 停止方向的事件永远接受：宁可误停（可再按开始），不可卡在录制态。
+                    Lab.EVT_NK_MOVIE_REC_STARTED -> {
+                        if (System.currentTimeMillis() - lastStopCmdAt > 2000) recording = true
                     }
-                    if (prop == Lab.PROP_EXPOSURE_PROGRAM) {
-                        refreshMode()
-                        // 曝光模式变化会连带改变各参数的可写性/值域（正在连调中的除外，同上）
-                        EXPOSURE_PROPS.forEach {
-                            if (pendingSets[it]?.isActive != true) refreshParam(it)
+                    Lab.EVT_NK_MOVIE_REC_COMPLETE, Lab.EVT_NK_MOVIE_REC_INTERRUPTED ->
+                        recording = false
+                    Lab.EVT_DEVICE_PROP_CHANGED -> {
+                        val prop = e.second.toInt()
+                        // 本地还有未发出的乐观值时不刷新——自己刚设的值触发的事件
+                        // 会把正在连调的显示值拽回去。照片/录像两套参数都听。
+                        if (prop in ALL_EXPOSURE_PROPS && pendingSets[prop]?.isActive != true) {
+                            refreshParam(prop)
                         }
+                        if (prop == Lab.PROP_EXPOSURE_PROGRAM) {
+                            refreshMode()
+                            // 曝光模式变化会连带改变各参数的可写性/值域（正在连调中的
+                            // 除外，同上）。只刷当前拨杆位对应的那组。
+                            val active = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                            active.forEach {
+                                if (pendingSets[it]?.isActive != true) refreshParam(it)
+                            }
+                        }
+                        if (prop == Lab.PROP_NK_LV_SELECTOR) refreshMovieMode()
                     }
                 }
             }
+            // 照片/录像拨杆兜底轮询：拨杆切换不一定可靠地发 0x4006（机型差异），
+            // 每 5 轮（约 3s）主动读一次——单条小命令，相对取帧流量可忽略。
+            // 拍摄确认期间跳过：那时轮询提速到 150ms，通道要让给 ObjectAdded。
+            pollTick++
+            if (pollTick % 5 == 0 && !capturing) refreshMovieMode()
             // 等拍摄确认期间加快轮询，快门转圈更快收到 ObjectAdded；平时 600ms 少占通道。
             delay(if (capturing) 150 else 600)
         }
@@ -353,15 +437,11 @@ private fun RemoteContent(
     fun stepParam(prop: Int, delta: Int) {
         val p = params[prop] ?: return
         if (!p.writable || p.values.isEmpty()) return
-        val idx = p.values.indexOf(p.current)
-        // 当前值不在枚举里（非标准档位/值域刚随模式变化）：按物理量找最近档位当起点，
-        // 否则拖动完全失灵（indexOf 永远 -1）。此时哪怕 delta 走不动也发一次，把值吸附回枚举。
-        val from = if (idx >= 0) idx else {
-            val m = paramMetric(prop, p.current)
-            p.values.indices.minByOrNull { abs(paramMetric(prop, p.values[it]) - m) } ?: return
-        }
+        // 起点用共用锚点（精确命中或按物理量最近档）：当前值不在枚举里时哪怕 delta
+        // 走不动也发一次，把值吸附回枚举，否则拖动完全失灵（indexOf 永远 -1）。
+        val from = paramAnchorIdx(prop, p.values, p.current)
         val newIdx = (from + delta).coerceIn(0, p.values.size - 1)
-        if (idx >= 0 && newIdx == idx) return
+        if (newIdx == from && p.values[from] == p.current) return
         sendValue(prop, p.values[newIdx], immediate = false)
     }
 
@@ -435,8 +515,12 @@ private fun RemoteContent(
     }
     // 断连兜底：若在按住对焦期间相机掉线，快门键手势节点会被卸载、onRelease 不再执行，
     // 导致 afHeld/afJob 卡住（对焦框不消失、对空相机空转刷日志）。这里主动复位。
+    // 录制状态一并复位（相机侧断线会自行停录）。
     LaunchedEffect(connected) {
-        if (!connected) endFocus()
+        if (!connected) {
+            endFocus()
+            recording = false
+        }
     }
 
     fun runProbe() {
@@ -456,11 +540,27 @@ private fun RemoteContent(
         }
     }
 
-    // ---------- 提示条（首次进页的一次性机身锁定提示）----------
+    // ---------- 提示条（首次进页的一次性机身锁定提示 + 录像失败等瞬时提示）----------
     // 传输中已在照片列表侧禁止进入本页，故不再需要"传输卡顿"提示。
+    // nonce 方案（与照片列表页同款）：唯一的隐藏计时器跟着 nonce 重启，连续触发时
+    // 后一条重新计满时长，不会被前一条的旧计时器提前掐掉。
     var hintText by remember { mutableStateOf("") }
     var hintVisible by remember { mutableStateOf(false) }
+    var hintNonce by remember { mutableStateOf(0) }
+    var hintDurationMs by remember { mutableStateOf(2500L) }
     val lockedHint = stringResource(R.string.remote_locked_hint)
+    fun showHint(text: String, durationMs: Long = 2500L) {
+        hintText = text
+        hintDurationMs = durationMs
+        hintVisible = true
+        hintNonce++
+    }
+    LaunchedEffect(hintNonce) {
+        if (hintVisible) {
+            delay(hintDurationMs)
+            hintVisible = false
+        }
+    }
     LaunchedEffect(Unit) {
         // 首次读 SharedPreferences 会同步读盘，挪到 IO 免得进页时卡主线程一拍
         val alreadyShown = withContext(Dispatchers.IO) {
@@ -469,11 +569,70 @@ private fun RemoteContent(
             if (!shown) prefs.edit().putBoolean("locked_hint_shown", true).apply()
             shown
         }
-        if (!alreadyShown) {
-            hintText = lockedHint
-            hintVisible = true
-            delay(3000)
-            hintVisible = false
+        if (!alreadyShown) showHint(lockedHint, 3000L)
+    }
+
+    // ---------- 录像开关 ----------
+    // 开始：命令成功即乐观置位（UI 立即变停止键），事件 0xC10A 再确认；失败弹瞬时提示
+    //（常见原因：无卡/禁止条件）。停止：本地先置停——EndMovieRec 失败多半是相机已自行
+    // 停录（卡满/过热），事件会再纠正。recBusy 防抖：命令往返期间忽略连点。
+    var recBusy by remember { mutableStateOf(false) }
+    var recSeconds by remember { mutableStateOf(0) }
+    val recFailHint = stringResource(R.string.remote_rec_start_failed)
+    fun toggleRecord() {
+        if (recBusy) return
+        val cam = cameraViewModel.getCamera() ?: return
+        scope.launch {
+            recBusy = true
+            try {
+                haptics.longPress()   // 与拍照同级的触发反馈（经全局震动设置门控）
+                if (!recording) {
+                    var rc = runCatching { cam.rcStartMovie { devLog(it) } }.getOrDefault(-1)
+                    // 被拒时按放行序列逐级尝试（Z 30 实测需要）：属性路线 → 操作码路线，
+                    // 每级成功即记账（clearAppMode 成对恢复），再重发开录。
+                    if (rc != Lab.OK && !appModeSet) {
+                        val src = runCatching { cam.rcSetApplicationMode(true) }.getOrDefault(-1)
+                        devLog("ApplicationMode=1 resp=0x%04X".format(src and 0xFFFF))
+                        if (src == Lab.OK) {
+                            appModeSet = true
+                            rc = runCatching { cam.rcStartMovie { devLog(it) } }.getOrDefault(-1)
+                        }
+                    }
+                    if (rc != Lab.OK && !appOpSet) {
+                        val orc = runCatching { cam.rcChangeApplicationMode(1) }.getOrDefault(-1)
+                        devLog("ChangeApplicationMode(1) resp=0x%04X".format(orc and 0xFFFF))
+                        if (orc == Lab.OK) {
+                            appOpSet = true
+                            rc = runCatching { cam.rcStartMovie { devLog(it) } }.getOrDefault(-1)
+                        }
+                    }
+                    if (rc == Lab.OK) {
+                        recording = true
+                        devLog("movie rec started")
+                    } else {
+                        devLog("!! movie start resp=0x%04X".format(rc and 0xFFFF))
+                        clearAppMode()   // 没开成录像就别让相机留在应用模式
+                        showHint(recFailHint)
+                    }
+                } else {
+                    lastStopCmdAt = System.currentTimeMillis()   // 之后 2s 内的"已开始"事件按迟到回声忽略
+                    val rc = runCatching { cam.rcEndMovie() }.getOrDefault(-1)
+                    recording = false
+                    if (rc == Lab.OK) devLog("movie rec ended")
+                    else devLog("!! movie end resp=0x%04X".format(rc and 0xFFFF))
+                    clearAppMode()   // 录像已停，恢复应用模式记账
+                }
+            } finally {
+                recBusy = false
+            }
+        }
+    }
+    // 录制计时（REC 徽标显示）：以本地 recording 状态起停，秒级精度足够。
+    LaunchedEffect(recording) {
+        recSeconds = 0
+        while (recording) {
+            delay(1000)
+            recSeconds++
         }
     }
 
@@ -551,6 +710,39 @@ private fun RemoteContent(
                             .padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 }
+                // 录制中指示：脉动红点 + 已录时长，取景器右上角（左上是模式徽标、
+                // 右下是 FPS）。本页固定 DarkAppColors，statusError 即恒定红。
+                if (recording) {
+                    val recPulse = rememberInfiniteTransition(label = "recPulse")
+                    val dotAlpha by recPulse.animateFloat(
+                        initialValue = 1f, targetValue = 0.3f,
+                        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
+                        label = "recDot"
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Box(
+                            Modifier
+                                .size(7.dp)
+                                .graphicsLayer { alpha = dotAlpha }
+                                .background(colors.statusError, CircleShape)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "%d:%02d".format(recSeconds / 60, recSeconds % 60),
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
                 // 半按对焦指示：按住期间显示中央对焦框（相机取景器语言的四角 L 形括号），
                 // 收缩入场；合焦成功转绿并轻微收拢一下（与合焦触感同步的视觉确认）。
                 if (afHeld) {
@@ -617,11 +809,13 @@ private fun RemoteContent(
             }
             Spacer(Modifier.height(12.dp))
 
-            // 2×2 数值拖拽微调：读数即控件——在数值上【上下拖动】按位移一格一档地调
-            // （无惯性、不过冲），拖动时边缘淡显相邻档位示意方向；点一下弹全表直跳。
-            // 只读参数整块压暗 + 锁。第一排 曝光补偿/ISO，第二排 光圈/快门。
+            // 2×2 数值拨轮微调：读数即控件——在数值上【上下拖动】，数值列随手指 1:1
+            // 同向滚动、跨档步进、松手吸附最近档（iOS 拨轮手感，无惯性甩动）；
+            // 点一下弹全表直跳。只读参数整块压暗 + 锁。第一排 曝光补偿/ISO，第二排 光圈/快门。
+            // 拨杆在录像位时绑定录像侧独立参数组（照片/录像两套属性）。
+            val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                EXPOSURE_PROPS.chunked(2).forEach { rowProps ->
+                activeProps.chunked(2).forEach { rowProps ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         rowProps.forEach { prop ->
                             ParamTile(
@@ -640,23 +834,30 @@ private fun RemoteContent(
 
             Spacer(Modifier.weight(1f))
 
-            // 底部：居中快门键（不再显示拍摄缩略图）。
-            // 按住=半按对焦，松开在键内=拍摄、移出取消；拍摄中转圈=正在等相机确认拍好。
+            // 快门键：悬在参数区与屏底之间留白的正中（上下 weight 等分），典型长屏上
+            // 约落在屏高 3/4 的拇指自然落点——比贴屏底好按，也离刚调完的参数更近；
+            // 固定 padding 保证小屏上下限间距。按住=半按对焦，松开在键内=拍摄、
+            // 移出取消；拍摄中转圈=正在等相机确认拍好。（不再显示拍摄缩略图）
             Box(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
                 ShutterButton(
                     capturing = capturing,
                     focusing = afHeld,
                     enabled = connected,
+                    movie = movieMode,
+                    recording = recording,
                     onFocusStart = { startFocus() },
                     onRelease = { fire ->
                         endFocus()
-                        if (fire) shoot()
+                        if (fire) {
+                            if (movieMode) toggleRecord() else shoot()
+                        }
                     }
                 )
             }
+            Spacer(Modifier.weight(1f))
         }
 
         // 顶部提示条：视觉与照片列表页的底部玻璃提示条同款（22dp 玻璃 Surface + 投影 +
@@ -928,17 +1129,17 @@ private fun ViewfinderImage(frameProvider: () -> ImageBitmap?) {
     }
 }
 
-// 参数拖拽微调：每拖动这么多高度 = 走一档（点动式、无惯性，拖多少走多少）。
-// 12dp/档：相机 1/3 挡一步,故一整挡(3 步)≈36dp 的小拖动,跟手又能精确单步(> 触摸 slop);
-// 大跨度不靠拖,点数值弹全表直跳。太钝调大、太跳调小,一个常量的事。
-private val PARAM_DRAG_STEP_DP = 12.dp
+// 参数拨轮行高：一行 = 一档，滚轮内容与手指位移 1:1（iOS 拨轮式跟手），
+// 拖动灵敏度即由行高决定。18dp/档：相机 1/3 挡一步,一整挡(3 步)≈54dp,
+// 跟手又能精确单步(> 触摸 slop);大跨度不靠拖,点数值弹全表直跳。太钝调小、太跳调大。
+private val PARAM_WHEEL_ROW_DP = 18.dp
 
 /** 参数在 tile 左上角的短标（相机通用符号，不进 i18n）。 */
 private fun paramLabel(prop: Int): String = when (prop) {
-    Lab.PROP_NK_SHUTTER -> "S"
-    Lab.PROP_F_NUMBER -> "f"
-    Lab.PROP_ISO -> "ISO"
-    Lab.PROP_EXP_COMPENSATION -> "EV"
+    Lab.PROP_NK_SHUTTER, Lab.PROP_NK_MOVIE_SHUTTER -> "S"
+    Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> "f"
+    Lab.PROP_ISO, Lab.PROP_NK_MOVIE_ISO -> "ISO"
+    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP -> "EV"
     else -> ""
 }
 
@@ -947,7 +1148,7 @@ private fun paramLabel(prop: Int): String = when (prop) {
  * 快门→速度(分母/分子,越快越大)、光圈→开口(用 -f,f 越小开口越大)、ISO→感光度、EV→补偿值。
  */
 private fun paramMetric(prop: Int, raw: Long): Double = when (prop) {
-    Lab.PROP_NK_SHUTTER -> when (raw) {
+    Lab.PROP_NK_SHUTTER, Lab.PROP_NK_MOVIE_SHUTTER -> when (raw) {
         0xFFFFFFFFL, 0xFFFFFFFEL, 0xFFFFFFFDL -> 0.0   // Bulb/x200/Time：当作极慢
         else -> {
             val num = ((raw ushr 16) and 0xFFFFL).toDouble()
@@ -955,9 +1156,9 @@ private fun paramMetric(prop: Int, raw: Long): Double = when (prop) {
             if (num > 0) den / num else 0.0
         }
     }
-    Lab.PROP_F_NUMBER -> -raw.toDouble()                       // f 越小开口越大
-    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX -> raw.toDouble()        // ISO 越大越高
-    Lab.PROP_EXP_COMPENSATION -> raw.toDouble()               // EV（已带符号）
+    Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> -raw.toDouble()   // f 越小开口越大
+    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_MOVIE_ISO -> raw.toDouble()  // ISO 越大越高
+    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP -> raw.toDouble()    // EV（已带符号）
     else -> raw.toDouble()
 }
 
@@ -972,11 +1173,25 @@ private fun downStepSign(param: RcParam): Int {
 }
 
 /**
- * 参数微调 tile：在数值上【上下拖动】按位移一格一档地调（无惯性、不过冲，拖多少走多少档），
- * 每档触感反馈（走 onStep→sendValue→haptics）；拖动时上/下边缘淡显相邻档位示意方向。
- * 点一下打开完整值表大跨度直跳。只读参数整块压暗 + 锁，拖动禁用。
+ * 当前值的锚点索引：优先精确命中；不在枚举里（非标准档位/值域刚随模式变化）时按
+ * 物理量取最近档。拨轮定位与 stepParam 的步进起点共用，保证两者永不打架。
+ * 仅在 [values] 为空时返回 -1。
+ */
+private fun paramAnchorIdx(prop: Int, values: List<Long>, current: Long): Int {
+    val i = values.indexOf(current)
+    if (i >= 0) return i
+    val m = paramMetric(prop, current)
+    return values.indices.minByOrNull { abs(paramMetric(prop, values[it]) - m) } ?: -1
+}
+
+/**
+ * 参数微调 tile：iOS 拨轮式交互——数值列随手指 1:1 同向连续滚动（可停在档间），
+ * 每跨过一档触感反馈（走 onStep→sendValue→haptics），松手平滑吸附最近档位，
+ * 端点橡皮筋阻尼。无惯性甩动（有意为之：拖动只管微调，大跨度靠点数值弹全表直跳）。
+ * 点一下打开完整值表。只读参数整块压暗 + 锁，拖动禁用。
  * 方向按物理量：向下拖 = 增大物理量（快门更快 / 光圈开口更大 / ISO 更高 / EV 更正），
- * 具体 enum 步进方向由 [downStepSign] 判定（不依赖枚举升/降序）。
+ * 具体 enum 步进方向由 [downStepSign] 判定（不依赖枚举升/降序）。跟手滚动决定了
+ * 向下拖趋近的档位显示在【上】缘、随手指落入中心（内容与手指同向，苹果拨轮语义）。
  */
 @Composable
 private fun ParamTile(
@@ -990,15 +1205,35 @@ private fun ParamTile(
     val density = LocalDensity.current
     val writable = param != null && param.values.isNotEmpty() && param.writable
     var dragging by remember { mutableStateOf(false) }
-    val stepPx = with(density) { PARAM_DRAG_STEP_DP.toPx() }
+    val rowPx = with(density) { PARAM_WHEEL_ROW_DP.toPx() }
+    val scope = rememberCoroutineScope()
 
     // 向下拖对应的 enum 步进方向（向下=增大物理量）。
     val downSign = if (writable && param != null) downStepSign(param) else -1
 
-    // 相邻档位（拖动时淡显，方向与物理量一致）：向下拖趋近的显示在下边缘，向上拖的在上边缘。
-    val idx = param?.values?.indexOf(param.current) ?: -1
-    val downTarget = if (idx >= 0) param?.values?.getOrNull(idx + downSign) else null
-    val upTarget = if (idx >= 0) param?.values?.getOrNull(idx - downSign) else null
+    // 当前值的锚点索引（精确命中或按物理量最近档；remember 避免值不在枚举时每次重组
+    // 都全表扫描）。与 stepParam 共用 paramAnchorIdx，保证拨轮位置和步进起点不打架。
+    val values = param?.values ?: emptyList()
+    val curIdx = if (param == null || values.isEmpty()) -1
+        else remember(param) { paramAnchorIdx(param.prop, values, param.current) }
+
+    // 拨轮位置：枚举索引空间的连续值，拖动/吸附过程中可停在档间，静止时必为整数档。
+    val pos = remember { Animatable(0f) }
+    // 拨轮与真值的唯一同步点：外部值变化（相机实体拨盘/全表直跳/模式切换）时滚过去；
+    // 松手吸附也走这里——dragging 是 key，拖动一结束就重新对齐 curIdx，因此拖动期间
+    // 发生的外部变化（写失败回读/机身侧改动）不会丢。拖动中不抢（期间的 current 变化
+    // 是自己乐观步进出来的，pos 已在正确位置）。
+    LaunchedEffect(curIdx, values, dragging) {
+        if (curIdx < 0 || dragging) return@LaunchedEffect
+        val target = curIdx.toFloat()
+        if (abs(pos.value - target) > 2.5f) pos.snapTo(target)   // 大跳（全表直跳）不慢滚
+        else if (pos.value != target) pos.animateTo(target, tween(180))
+    }
+    // 拖动手势内经 rememberUpdatedState 取最新值，避免 pointerInput 捕获过期的
+    // 值域长度/锚点/回调（值域随模式变化时不必重启手势）。
+    val valueCount = rememberUpdatedState(values.size)
+    val anchorIdx = rememberUpdatedState(curIdx)
+    val curOnStep = rememberUpdatedState(onStep)
 
     // 与 GlassButton 同族的玻璃质感：半透明底 + 自上而下高光渐变 + 上亮下暗渐变描边；
     // 拖动中描边整体换成主题蓝示意"正在调"。
@@ -1023,18 +1258,57 @@ private fun ParamTile(
                     tileShape
                 )
             )
-            // 上下拖动微调：位移累加，每跨过 stepPx 走一档（无惯性）。向下拖走 downSign 方向。
+            // 拨轮拖动：内容随手指 1:1 同向滚动，跨档即步进（tick 在 sendValue 里），
+            // 端点橡皮筋。无惯性（有意），大跳靠点全表。松手吸附不在这里做——只把
+            // dragging 置回 false，由上面的同步 LaunchedEffect 统一滚到 curIdx
+            //（正常松手 = 吸附最近档；拖动期间发生过外部变化 = 顺带对齐真值）。
             .pointerInput(writable, downSign) {
                 if (!writable) return@pointerInput
-                var acc = 0f
-                detectVerticalDragGestures(
-                    onDragStart = { dragging = true; acc = 0f },
-                    onDragEnd = { dragging = false },
-                    onDragCancel = { dragging = false }
-                ) { _, dy ->
-                    acc += dy   // 手指向下 dy>0 → acc 增 → 向下方向
-                    while (acc >= stepPx) { onStep(downSign); acc -= stepPx }
-                    while (acc <= -stepPx) { onStep(-downSign); acc += stepPx }
+                var raw = 0f        // 未加阻尼的手指位置（索引空间），越界阻尼只作用于显示
+                var lastDetent = 0
+                try {
+                    detectVerticalDragGestures(
+                        onDragStart = {
+                            dragging = true
+                            // 锚定到当前真值索引而非 pos：半路抓住滚动中的拨轮时，
+                            // 步进基点与 stepParam 的 current 起点保持一致，不会错档。
+                            val anchor = anchorIdx.value.coerceAtLeast(0)
+                            raw = anchor.toFloat()
+                            lastDetent = anchor
+                            scope.launch { pos.stop(); pos.snapTo(anchor.toFloat()) }
+                        },
+                        onDragEnd = { dragging = false },
+                        onDragCancel = { dragging = false }
+                    ) { _, dy ->
+                        val last = valueCount.value - 1
+                        if (last < 0) return@detectVerticalDragGestures   // 值域中途清空
+                        // 值域中途收窄（模式切换）：把游标拉回新范围，不发巨幅补差步进
+                        if (lastDetent > last) {
+                            lastDetent = last
+                            raw = raw.coerceAtMost(last.toFloat())
+                        }
+                        raw += downSign * dy / rowPx   // 手指向下 dy>0 → 朝 downSign 方向走档
+                        // 未阻尼位置也封顶（±1.5 行）：大幅甩出端点后反向拖立即有响应，
+                        // 不必先把看不见的越界量"还"完
+                        raw = raw.coerceIn(-1.5f, last + 1.5f)
+                        // 端点橡皮筋：越界部分打 3 折，最多探出 0.45 行
+                        val shown = when {
+                            raw < 0f -> -min(-raw * 0.3f, 0.45f)
+                            raw > last -> last + min((raw - last) * 0.3f, 0.45f)
+                            else -> raw
+                        }
+                        scope.launch { pos.snapTo(shown) }
+                        val detent = shown.roundToInt().coerceIn(0, last)
+                        if (detent != lastDetent) {
+                            curOnStep.value(detent - lastDetent)
+                            lastDetent = detent
+                        }
+                    }
+                } finally {
+                    // key（writable/downSign）变化重启 pointerInput 时，手势协程被静默
+                    // 取消而【不】回调 onDragCancel——这里兜底复位，否则 dragging 卡在
+                    // true：蓝框常亮、同步 LaunchedEffect 永远早退、拨轮再也不跟真值。
+                    dragging = false
                 }
             }
             // 单击打开完整值表（仅可写参数；只读已由锁图标表明不可调）。
@@ -1060,25 +1334,6 @@ private fun ParamTile(
                 modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 6.dp).size(11.dp)
             )
         }
-        // 拖动时的相邻档位淡显（上边缘=向上拖趋近，下边缘=向下拖趋近，方向与物理量一致）
-        if (dragging && writable) {
-            upTarget?.let {
-                Text(
-                    rcFormat(param!!.prop, it),
-                    color = colors.onSurfaceVariant.copy(alpha = 0.65f),
-                    fontFamily = FontFamily.Monospace, fontSize = 10.sp,
-                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 3.dp)
-                )
-            }
-            downTarget?.let {
-                Text(
-                    rcFormat(param!!.prop, it),
-                    color = colors.onSurfaceVariant.copy(alpha = 0.65f),
-                    fontFamily = FontFamily.Monospace, fontSize = 10.sp,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp)
-                )
-            }
-        }
         // 拖拽提示（可写且未拖动时，右侧极淡上下箭头，暗示"可上下拖"）
         if (writable && !dragging) {
             Text(
@@ -1088,49 +1343,63 @@ private fun ParamTile(
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 9.dp)
             )
         }
-        // 加载占位呼吸：参数未到时"—"缓慢脉动，表达"正在加载"而非死值。
-        val loadingAlpha = if (param == null) {
-            val pulse = rememberInfiniteTransition(label = "paramLoading")
-            pulse.animateFloat(
-                initialValue = 0.25f, targetValue = 0.55f,
-                animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-                label = "paramLoadingAlpha"
-            ).value
-        } else 1f
-        // 中心当前值：换值时沿拖动方向滑动（向下拖→新值从下缘滑入、旧值向上滑出），
-        // 与边缘淡显的相邻档位方向一致，做出"拨轮走档"的连续感。
-        val propCode = param?.prop
-        AnimatedContent(
-            targetState = param?.current,
-            transitionSpec = {
-                val vals = param?.values ?: emptyList()
-                val from = initialState?.let { vals.indexOf(it) } ?: -1
-                val to = targetState?.let { vals.indexOf(it) } ?: -1
-                // d>0 = 朝"向下拖"的方向走档；值不明（首载/值域变化）只做淡变
-                val d = if (from >= 0 && to >= 0) (to - from) * downSign else 0
-                when {
-                    d > 0 -> (slideInVertically(tween(130)) { it / 2 } + fadeIn(tween(130)))
-                        .togetherWith(slideOutVertically(tween(130)) { -it / 2 } + fadeOut(tween(130)))
-                    d < 0 -> (slideInVertically(tween(130)) { -it / 2 } + fadeIn(tween(130)))
-                        .togetherWith(slideOutVertically(tween(130)) { it / 2 } + fadeOut(tween(130)))
-                    else -> fadeIn(tween(130)) togetherWith fadeOut(tween(130))
+        if (writable && param != null) {
+            // 数值拨轮：中心 ±2 行作为一列真实滚动。每帧位移/淡显在 graphicsLayer 里读
+            // pos（绘制期读，页面不逐帧重组），跨档才经 derivedStateOf 重组换行。
+            // 静止时只见中心行，拖动/吸附中相邻行淡入，离中心越远越淡越小（拨筒纵深感）。
+            val neighborVis by animateFloatAsState(
+                if (dragging || pos.isRunning) 1f else 0f,
+                tween(150), label = "wheelNeighbors"
+            )
+            val centerRow by remember { derivedStateOf { pos.value.roundToInt() } }
+            val propCode = param.prop
+            for (i in (centerRow - 2)..(centerRow + 2)) {
+                val v = values.getOrNull(i) ?: continue
+                // 锚点行显示真实 current：值在枚举里时两者相同；不在枚举里（非标准
+                // 档位）时读数不撒谎，显示真值而非最近档位。
+                val shownValue = if (i == curIdx) param.current else v
+                key(i) {
+                    Text(
+                        rcFormat(propCode, shownValue),
+                        color = colors.onBackground,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        modifier = Modifier.align(Alignment.Center).graphicsLayer {
+                            // 内容与手指同向：向下拖趋近的档位（i = pos+downSign 方向）
+                            // 初始 rel<0 在上缘，随手指下移落入中心。
+                            val rel = (pos.value - i) * downSign
+                            translationY = rel * rowPx
+                            val centered = (1f - abs(rel)).coerceIn(0f, 1f)
+                            alpha = (1f - abs(rel) * 0.62f).coerceIn(0f, 1f) *
+                                (centered + (1f - centered) * neighborVis)
+                            val s = 1f - 0.15f * min(abs(rel), 2f)
+                            scaleX = s
+                            scaleY = s
+                        }
+                    )
                 }
-            },
-            contentAlignment = Alignment.Center,
-            label = "paramValue",
-            modifier = Modifier.align(Alignment.Center)
-        ) { cur ->
+            }
+        } else {
+            // 只读/未加载：静态中心值。参数未到时"—"缓慢脉动，表达"正在加载"而非死值。
+            val loadingAlpha = if (param == null) {
+                val pulse = rememberInfiniteTransition(label = "paramLoading")
+                pulse.animateFloat(
+                    initialValue = 0.25f, targetValue = 0.55f,
+                    animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+                    label = "paramLoadingAlpha"
+                ).value
+            } else 1f
             Text(
-                if (cur != null && propCode != null) rcFormat(propCode, cur) else "—",
-                color = when {
-                    param == null -> colors.onSurfaceVariant.copy(alpha = loadingAlpha)
-                    !writable -> colors.onSurfaceVariant.copy(alpha = 0.5f)
-                    else -> colors.onBackground
-                },
+                if (param != null) rcFormat(param.prop, param.current) else "—",
+                color = if (param == null) colors.onSurfaceVariant.copy(alpha = loadingAlpha)
+                        else colors.onSurfaceVariant.copy(alpha = 0.5f),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 1
+                maxLines = 1,
+                modifier = Modifier.align(Alignment.Center)
             )
         }
     }
@@ -1147,6 +1416,8 @@ private fun ShutterButton(
     capturing: Boolean,
     focusing: Boolean,
     enabled: Boolean,
+    movie: Boolean,
+    recording: Boolean,
     onFocusStart: () -> Unit,
     onRelease: (fire: Boolean) -> Unit
 ) {
@@ -1166,6 +1437,18 @@ private fun ShutterButton(
         focusing -> AppTheme.colors.accentBlue
         else -> Color.White.copy(alpha = 0.9f)
     }
+    // 内芯形态：照片=白色大圆；录像待机=红色大圆；录制中=红色小圆角方块（通用停止
+    // 语义），尺寸与圆角同步动画做圆→方块的连续变形。本页固定 DarkAppColors，
+    // statusError 即恒定红。
+    val innerColor = if (movie) AppTheme.colors.statusError else Color.White
+    val innerSize by animateDpAsState(
+        targetValue = if (recording) 28.dp else 60.dp,
+        animationSpec = tween(160), label = "recInnerSize"
+    )
+    val innerCorner by animateDpAsState(
+        targetValue = if (recording) 7.dp else 30.dp,
+        animationSpec = tween(160), label = "recInnerCorner"
+    )
     Box(
         modifier = Modifier
             .size(76.dp)
@@ -1175,6 +1458,7 @@ private fun ShutterButton(
             }
             .border(3.dp, ringColor, CircleShape)
             .then(
+                // 照片拍摄确认中禁手势；录制中保持可用——停止靠的就是再按一下。
                 if (enabled && !capturing)
                     Modifier.pointerInput(Unit) {
                         // 按下即半按对焦；抬手时按【落点是否在键内】判定拍摄/取消——
@@ -1204,12 +1488,15 @@ private fun ShutterButton(
         } else {
             Box(
                 Modifier
-                    .size(60.dp)
+                    .size(innerSize)
                     .graphicsLayer {
                         scaleX = innerScale
                         scaleY = innerScale
                     }
-                    .background(Color.White.copy(alpha = if (enabled) 1f else 0.3f), CircleShape)
+                    .background(
+                        innerColor.copy(alpha = if (enabled) 1f else 0.3f),
+                        RoundedCornerShape(innerCorner)
+                    )
             )
         }
     }

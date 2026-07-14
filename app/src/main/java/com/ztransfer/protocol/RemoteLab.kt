@@ -35,11 +35,18 @@ object Lab {
     const val NK_GET_VENDOR_CODES = 0x9439      // Z8/Z9 世代
     const val NK_GET_EVENT_EX = 0x941C
 
+    const val NK_START_MOVIE_REC = 0x920A   // StartMovieRecInCard
+    const val NK_END_MOVIE_REC = 0x920B     // EndMovieRec
+    const val NK_CHANGE_APP_MODE = 0x9435   // ChangeApplicationMode(mode)，远程录像放行
+
     // ---- 事件码 ----
     const val EVT_OBJECT_ADDED = 0x4002
     const val EVT_DEVICE_PROP_CHANGED = 0x4006
     const val EVT_CAPTURE_COMPLETE = 0x400D
     const val EVT_OBJECT_ADDED_SDRAM = 0xC101
+    const val EVT_NK_MOVIE_REC_INTERRUPTED = 0xC105
+    const val EVT_NK_MOVIE_REC_COMPLETE = 0xC108
+    const val EVT_NK_MOVIE_REC_STARTED = 0xC10A
 
     // ---- 响应码 ----
     const val OK = 0x2001
@@ -60,6 +67,15 @@ object Lab {
     const val PROP_NK_LV_PROHIBIT = 0xD1A4
     const val PROP_NK_LV_IMAGE_SIZE = 0xD1AC
     const val PROP_NK_ISO_EX = 0xD0B4
+    const val PROP_NK_MOV_PROHIBIT = 0xD0A4      // 录像禁止条件 bitmask，0=可录
+    const val PROP_NK_LV_SELECTOR = 0xD1A6       // 照片/录像实体拨杆：0=照片 1=录像
+    const val PROP_NK_APPLICATION_MODE = 0xD1F0  // Z 系远程录像放行开关（Z 30 实测需要）
+    // 录像模式独立的曝光参数（与照片侧 0x5007/0xD100/0x500F/0x5010 平行的一套，
+    // 拨杆在录像位时读写这组；编码与照片侧同构）
+    const val PROP_NK_MOVIE_SHUTTER = 0xD1A8
+    const val PROP_NK_MOVIE_F_NUMBER = 0xD1A9
+    const val PROP_NK_MOVIE_ISO = 0xD1AA
+    const val PROP_NK_MOVIE_EXP_COMP = 0xD1AB
 
     /** 探测清单：操作码 -> 可读名称（勾选表用）。 */
     val INTEREST_OPS = linkedMapOf(
@@ -101,6 +117,13 @@ object Lab {
         PROP_NK_LV_STATUS to "LiveViewStatus",
         PROP_NK_LV_PROHIBIT to "LiveViewProhibit",
         PROP_NK_LV_IMAGE_SIZE to "LiveViewImageSize",
+        PROP_NK_LV_SELECTOR to "LiveViewSelector",
+        PROP_NK_MOV_PROHIBIT to "MovRecProhibitCond",
+        PROP_NK_APPLICATION_MODE to "ApplicationMode",
+        PROP_NK_MOVIE_SHUTTER to "MovieShutterSpeed",
+        PROP_NK_MOVIE_F_NUMBER to "MovieFNumber",
+        PROP_NK_MOVIE_ISO to "MovieISO",
+        PROP_NK_MOVIE_EXP_COMP to "MovieExpComp",
     )
 }
 
@@ -223,8 +246,8 @@ private fun parseDeviceInfo(d: ByteArray): LabDeviceInfo {
 
 /** 按属性语义把原始值排成人话（快门分数、光圈 f 值、EV 等）。 */
 private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
-    Lab.PROP_F_NUMBER -> "f/%.1f".format(raw / 100.0)
-    Lab.PROP_NK_SHUTTER -> when (raw) {
+    Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> "f/%.1f".format(raw / 100.0)
+    Lab.PROP_NK_SHUTTER, Lab.PROP_NK_MOVIE_SHUTTER -> when (raw) {
         0xFFFFFFFFL -> "Bulb"
         0xFFFFFFFEL -> "x200"
         0xFFFFFFFDL -> "Time"
@@ -242,8 +265,8 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
         }
     }
     Lab.PROP_EXPOSURE_TIME_STD -> "%.4fs".format(raw / 10000.0)
-    Lab.PROP_EXP_COMPENSATION -> "%+.1fEV".format(raw / 1000.0)
-    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX -> "ISO$raw"
+    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP -> "%+.1fEV".format(raw / 1000.0)
+    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_MOVIE_ISO -> "ISO$raw"
     Lab.PROP_EXPOSURE_PROGRAM -> when (raw) {
         1L -> "M"; 2L -> "P"; 3L -> "A"; 4L -> "S"; else -> "0x${raw.toString(16)}"
     }
@@ -366,21 +389,64 @@ suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
     return runCatching { parseEvents(d) }.getOrDefault(emptyList())
 }
 
-/** 触发拍摄（无 AF、存卡）。只负责发命令；完成与新照片经事件（ObjectAdded）通知。 */
-suspend fun NikonCamera.rcCapture(): Int {
-    var rc = labCommand(Lab.NK_CAPTURE_REC_IN_MEDIA, -1 /*no AF*/, 0 /*card*/).first
+/** 发单条命令，DEVICE_BUSY 时退避重试（200ms × 5）。拍摄/录像触发类命令共用。 */
+private suspend fun NikonCamera.cmdBusyRetry(code: Int, vararg params: Int): Int {
+    var rc = labCommand(code, *params).first
     var tries = 0
     while (rc == Lab.DEVICE_BUSY && tries < 5) {
         delay(200)
-        rc = labCommand(Lab.NK_CAPTURE_REC_IN_MEDIA, -1, 0).first
+        rc = labCommand(code, *params).first
         tries++
     }
     return rc
 }
 
+/** 触发拍摄（无 AF、存卡）。只负责发命令；完成与新照片经事件（ObjectAdded）通知。 */
+suspend fun NikonCamera.rcCapture(): Int =
+    cmdBusyRetry(Lab.NK_CAPTURE_REC_IN_MEDIA, -1 /*no AF*/, 0 /*card*/)
+
 /** 设置 Live View 分辨率（1=QVGA 2=VGA 3=XGA）。必须在 LV 关闭时调用才生效。 */
 suspend fun NikonCamera.rcSetLvSize(size: Int): Int =
     labSetProp(Lab.PROP_NK_LV_IMAGE_SIZE, byteArrayOf(size.toByte()))
+
+/** 实体照片/录像拨杆位置（LiveViewSelector 0xD1A6）：false=照片 true=录像。
+ *  读不到（机型无此属性/暂不可读）返回 null，调用方按"照片"处理。 */
+suspend fun NikonCamera.rcGetMovieMode(): Boolean? {
+    val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_LV_SELECTOR)
+    if (rc != Lab.OK || d == null || d.isEmpty()) return null
+    return d[0].toInt() != 0
+}
+
+/** 开始录像（存卡）。忙则重试。失败时读录像禁止条件（0xD0A4 bitmask）记日志便于
+ *  排查（无卡/机身菜单占用等）；成功路径不多花往返（同 labStartLiveView 的取舍）。
+ *  调研提到个别 Z 机型需先设 ApplicationMode(0xD1F0)=1 才放行——【刻意不自动写】：
+ *  改属性会永久改变机身状态且无恢复路径，还会在无卡等无关失败时误触发；
+ *  若真机验证（清单 4A.2）失败，再按实测响应码显式支持。 */
+suspend fun NikonCamera.rcStartMovie(log: (String) -> Unit = {}): Int {
+    val rc = cmdBusyRetry(Lab.NK_START_MOVIE_REC)
+    if (rc != Lab.OK) {
+        log("StartMovieRec resp=${hex4(rc)}")
+        val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_MOV_PROHIBIT)
+        if (prc == Lab.OK && pd != null && pd.size >= 4) {
+            val cond = Cur(pd).u32()
+            if (cond != 0L) log("MovRecProhibit=${hex8(cond)}")
+        }
+    }
+    return rc
+}
+
+/** 结束录像。忙则重试；实际停止以事件（0xC108 完成 / 0xC105 中断）为准。 */
+suspend fun NikonCamera.rcEndMovie(): Int = cmdBusyRetry(Lab.NK_END_MOVIE_REC)
+
+/** 设/清应用模式（0xD1F0）：Z 系（Z 30 实测）远程开录的放行开关。
+ *  调用方负责成对使用——设 1 后在录像结束/拨杆离开录像位时清回 0，
+ *  不让相机滞留在应用模式。 */
+suspend fun NikonCamera.rcSetApplicationMode(on: Boolean): Int =
+    labSetProp(Lab.PROP_NK_APPLICATION_MODE, byteArrayOf(if (on) 1 else 0))
+
+/** ChangeApplicationMode（0x9435）：放行的操作码路线（属性路线不通时的备选）。 */
+suspend fun NikonCamera.rcChangeApplicationMode(mode: Int): Int =
+    labCommand(Lab.NK_CHANGE_APP_MODE, mode).first
 
 /** 相机型号（DeviceInfo.Model），遥控页标题用。 */
 suspend fun NikonCamera.rcModelName(): String? {
