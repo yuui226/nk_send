@@ -5,8 +5,8 @@
 # 用法:
 #   .\admin.ps1 new 5 "7月QQ群批次"      生成 5 个激活码
 #   .\admin.ps1 list                     台账(码 + 绑定)
-#   .\admin.ps1 unbind ZT-XXXX-XXXX-XXXX ZT-YYYY-YYYY   解绑(第二个参数是设备码)
-#   .\admin.ps1 revoke ZT-XXXX-XXXX-XXXX "退款"          吊销
+#   .\admin.ps1 unbind KRMXTP ZT-YYYY-YYYY   解绑(激活码 6 位;第二个参数是设备码)
+#   .\admin.ps1 revoke KRMXTP "退款"          吊销
 param(
     [Parameter(Mandatory = $true)][string]$Cmd,
     [string]$A1,

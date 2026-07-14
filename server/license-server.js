@@ -55,12 +55,12 @@ CREATE INDEX IF NOT EXISTS idx_bindings_code ON bindings(code);
 const now = () => new Date().toISOString();
 const log = (...a) => console.log(now(), ...a);
 
-// 激活码字符集:大写字母数字,去掉易混淆的 0 O 1 I
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+// 激活码:6 位纯大写字母,去掉易混淆的 I O(手抄/口述不易错)。
+// 空间 24^6 ≈ 1.9 亿,配合 /v1/activate 的 IP 限速足够挡枚举(手动发码的小众场景)。
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 function newCode() {
-    const group = () =>
-        Array.from({ length: 4 }, () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join('');
-    return `ZT-${group()}-${group()}-${group()}`;
+    return Array.from({ length: 6 },
+        () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join('');
 }
 
 // 通行证:base64url(payload JSON) + "." + base64url(ECDSA P-256 DER 签名)
@@ -73,7 +73,7 @@ function issueToken(code, fp) {
 }
 
 const FP_RE = /^[0-9a-f]{32}$/;
-const CODE_RE = /^ZT-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
+const CODE_RE = /^[A-HJ-NP-Z]{6}$/;   // 6 位大写字母,排除 I O
 const normCode = (s) => String(s || '').trim().toUpperCase();
 // 展示码 ZT-XXXX-XXXX 是指纹前 8 个 hex 的人读形式;解绑时两种都接受
 const normFpPrefix = (s) => String(s || '').trim().toLowerCase().replace(/^zt-/, '').replace(/-/g, '');

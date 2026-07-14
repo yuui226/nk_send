@@ -59,10 +59,14 @@ fun ActivationDialog(onDismiss: () -> Unit) {
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = input,
-                    onValueChange = { input = it; error = null },
+                    // 6 位大写字母(排除 I O);自动转大写、过滤非字母,让用户不必纠结大小写。
+                    onValueChange = { raw ->
+                        input = raw.uppercase().filter { it in 'A'..'Z' }.take(6)
+                        error = null
+                    },
                     enabled = !busy && !success,
                     singleLine = true,
-                    placeholder = { Text("ZT-XXXX-XXXX-XXXX") },
+                    placeholder = { Text("ABCDEF") },
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -89,7 +93,7 @@ fun ActivationDialog(onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(
-                enabled = !busy && !success && input.isNotBlank(),
+                enabled = !busy && !success && input.length == 6,
                 onClick = {
                     busy = true; error = null
                     scope.launch {
