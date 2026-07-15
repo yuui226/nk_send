@@ -26,5 +26,9 @@ __pycache__/
 # 激活码管理脚本保存的管理员令牌(密钥)
 server/admin-token.txt
 
+# 支付宝当面付密钥(应用私钥/支付宝公钥,不入库)
+server/alipay-*.pem
+server/alipay-*.txt
+
 # 打包附带产出的混淆映射文件
 dist/*.mapping.txt
