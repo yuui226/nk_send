@@ -1512,9 +1512,9 @@ private fun ThumbnailCell(
         }
 
         // 右上角连拍角标：与左上角类型标签同族的角贴(实色底 + 白色内容),
-        // 青绿是连拍的专属色(蓝/紫/橙已被类型占用,绿是传输状态色),
-        // 图标(叠帧) + "连拍"文字,一眼读出"这一串是按住快门扫出来的"。
-        // 算法见 computeBurstHandles;将来升级"连拍组折叠"后由组 UI 取代。
+        // 青绿是连拍的专属色(蓝/紫/橙已被类型占用,绿是传输状态色)。
+        // 叠帧图标 + 三条渐短的速度线("嗖"地扫过的拖尾),不用文字也一眼读出
+        // "这一串是按住快门快速扫出来的"。算法见 computeBurstHandles。
         if (inBurst) {
             Surface(
                 shape = RoundedCornerShape(bottomStart = 6.dp),
@@ -1524,37 +1524,45 @@ private fun ThumbnailCell(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                 ) {
                     Icon(
                         Icons.Default.BurstMode,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.burst_label),
                         tint = colors.onAccent,
                         modifier = Modifier.size(10.dp)
                     )
-                    Text(
-                        text = stringResource(R.string.burst_label),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
-                        fontWeight = FontWeight.Medium,
-                        color = colors.onAccent
-                    )
+                    // 三条渐短的速度线(拖尾越短越靠下),表现"快"。
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(1.5.dp),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        listOf(7.dp, 5.dp, 3.dp).forEach { w ->
+                            Box(
+                                modifier = Modifier
+                                    .width(w)
+                                    .height(1.5.dp)
+                                    .clip(RoundedCornerShape(1.dp))
+                                    .background(colors.onAccent)
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        // 左下角保护角标（机内 🔑 选片标记）：黑底白钥匙,安静地标注状态,不与
-        // 彩色的类型/连拍角贴争抢注意力。四角分工:左上类型、右上连拍、
-        // 左下保护、右下传输状态。
+        // 左下角保护角标（机内 🔑 选片标记）：黄底深色钥匙,像一枚金钥匙,标注
+        // "这张被机内选中/保护"。四角分工:左上类型、右上连拍、左下保护、右下传输状态。
         if (file.isProtected) {
             Surface(
                 shape = RoundedCornerShape(topEnd = 6.dp),
-                color = Color.Black.copy(alpha = 0.45f),
+                color = ProtectBadgeColor.copy(alpha = 0.9f),
                 modifier = Modifier.align(Alignment.BottomStart)
             ) {
                 Icon(
                     Icons.Default.Key,
                     contentDescription = stringResource(R.string.filter_protected),
-                    tint = Color.White.copy(alpha = 0.9f),
+                    tint = Color.Black.copy(alpha = 0.75f),
                     modifier = Modifier
                         .padding(3.dp)
                         .size(11.dp)
@@ -1825,6 +1833,10 @@ private const val MAX_PACK_GHOSTS = 8
 // 实色 0.85 底上配白色内容,深浅主题通用(与金徽标同为"单值双主题"的少数例外)。
 // internal:预览大图的左上角连拍角标(PhotoPreview)与此同色。
 internal val BurstBadgeColor = Color(0xFF26A69A)
+
+// 保护角标底色(琥珀黄):机内选片/保护标记,黄底配深色钥匙如一枚金钥匙,
+// 与彩色分类角贴分层。单值双主题(深浅通用)。
+internal val ProtectBadgeColor = Color(0xFFFFC107)
 
 // "吸入"节奏:前段缓(残影凝聚成形、离巢慢),后段陡(加速俯冲进胶囊)——
 // 到达时带着冲量,与胶囊的"接住"弹跳在动量上衔接。
