@@ -22,7 +22,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BurstMode
 import androidx.compose.material.icons.filled.FilterCenterFocus
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -56,8 +58,10 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.sp
 import kotlin.math.max
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -84,6 +88,8 @@ fun PhotoPreviewOverlay(
     anchorRect: Rect?,
     cameraViewModel: CameraViewModel,
     hapticsEnabled: Boolean,
+    // 连拍成员 handle 集(列表页的检测结果):预览左上角展示连拍角标用;空集即不展示。
+    burstHandles: Set<Int> = emptySet(),
     onDismiss: () -> Unit
 ) {
     val pagerState = rememberPagerState(initialPage = initialIndex) { files.size }
@@ -251,6 +257,63 @@ fun PhotoPreviewOverlay(
                     .statusBarsPadding()
                     .padding(top = 12.dp, start = 16.dp, end = 16.dp)
             )
+        }
+
+        // 左上角：连拍/保护角标——与列表页缩略图的角标同语义,预览中集中到左上,
+        // 圆角胶囊形态适配大图舞台;位于标题行下方一行,随展开进度淡入,不参与缩放。
+        if (current != null && (current.handle in burstHandles || current.isProtected)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(top = 36.dp, start = 12.dp)
+                    .graphicsLayer { alpha = progress.value }
+            ) {
+                if (current.handle in burstHandles) {
+                    Surface(
+                        shape = RoundedCornerShape(7.dp),
+                        color = BurstBadgeColor.copy(alpha = 0.85f)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.BurstMode,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.burst_label),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 11.sp),
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+                if (current.isProtected) {
+                    // 黑底胶囊在黑幕/暗部照片上需要细描边定界(列表页衬在照片上无此问题)。
+                    Surface(
+                        shape = RoundedCornerShape(7.dp),
+                        color = Color.Black.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
+                    ) {
+                        Icon(
+                            Icons.Default.Key,
+                            contentDescription = stringResource(R.string.filter_protected),
+                            tint = Color.White.copy(alpha = 0.9f),
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .size(12.dp)
+                        )
+                    }
+                }
+            }
         }
 
         // 顶部极细进度条：当前页正在取 FHD 高清版时显示（"正在加载高清"的低调提示，

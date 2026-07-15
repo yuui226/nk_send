@@ -243,7 +243,9 @@ class NikonCamera(private val context: Context) {
         val size: Long,
         val fileName: String,
         /** PTP DateTime 完整串（YYYYMMDDThhmmss…，至少 8 位日期）；分组取前 8 位，组内按完整串排序。 */
-        val captureDate: String?
+        val captureDate: String?,
+        /** 机内"保护"(🔑)标记（ObjectInfo ProtectionStatus ≠ 0）。摄影师机内选片的常用手段。 */
+        val isProtected: Boolean = false
     ) {
         /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
         val extension: String
@@ -362,6 +364,10 @@ class NikonCamera(private val context: Context) {
         }
 
         val format = data.getUShortLE(4)
+        // 关联对象（0x3001 = 文件夹）不是文件，一律不收录：常见机型的全量枚举可能不含它，
+        // 但换卡/目录滚动时相机新建文件夹会带 ObjectAdded 事件，实时新增路径必须拦住，
+        // 否则列表会冒出一个 0 字节的"100NIKON"条目。
+        if (format == 0x3001) return null
         // PTP ObjectInfo 的大小字段是 32 位无符号；>4GB 的对象（长视频）相机报 0xFFFFFFFF（未知）。
         val size = data.getIntLE(8).toLong() and 0xFFFFFFFFL
         val ext = PtpConstants.getExt(format)
@@ -386,7 +392,14 @@ class NikonCamera(private val context: Context) {
             } catch (_: Exception) { null }
         } else null
 
-        return FileInfo(handle, size, fileName, captureDate)
+        // ProtectionStatus(偏移 6,u16) 与文件同载荷,解析零额外流量。
+        //（ObjectInfo 里还有两组刻意不用的字段:SequenceNumber(48)——机型可能恒填 0、
+        // 语义不统一,连拍检测走"文件编号 + 秒级时间戳"的自有算法(computeBurstHandles);
+        // ImagePixWidth/Height(26/30)——竖拍存的也是传感器原生横向像素,方向只在
+        // EXIF Orientation 里且依赖机内"自动旋转图像"设置,判不出构图。）
+        val isProtected = data.getUShortLE(6) != 0
+
+        return FileInfo(handle, size, fileName, captureDate, isProtected = isProtected)
     }
 
     data class DownloadProgress(

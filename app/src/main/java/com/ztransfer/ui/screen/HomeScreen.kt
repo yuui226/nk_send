@@ -42,16 +42,20 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
+import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * 连接（引导）页：展示连接状态与引导。左上角 "Z传" 玻璃按钮为设置入口，
  * 与照片列表页完全一致（同一 GlassButton + SettingsOverlay，点击从按钮变形展开设置面板）。
  * 连接成功后自动跳到文件列表，且用户不会再返回本页。
- * 激活入口不在本页：在"解锁高级版"弹窗（传输页/设置右上角打开）里输入激活码。
+ * 右上角"解锁高级版"徽标（免费版）打开的弹窗是全 app 唯一带"输入激活码"的入口——
+ * 本页尚未连相机热点，多半还有外网；进入 app 深处后连着相机 Wi-Fi 无法在线激活。
  */
 @Composable
 fun HomeScreen(
@@ -60,6 +64,8 @@ fun HomeScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+    // 右上角"解锁高级版"入口的显隐 + 成功爆发的金色粒子彩蛋都依赖它。
+    val isPro by LicenseManager.isPro.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
@@ -105,7 +111,11 @@ fun HomeScreen(
             Spacer(modifier = Modifier.weight(1f))
 
             // 连接中脉冲；连接成功时播放"脉冲爆发散开 + 图标渐变绿"的收尾动画。
-            StatusHero(color = heroColor, icon = heroIcon, pulsing = pulsing, success = celebrate)
+            // 高级版彩蛋:爆发时附一圈金色粒子(正向差异,免费版无感知)。
+            StatusHero(
+                color = heroColor, icon = heroIcon,
+                pulsing = pulsing, success = celebrate, goldBurst = isPro
+            )
 
             Box(modifier = Modifier.weight(2f).fillMaxWidth()) {
                 Crossfade(
@@ -179,7 +189,10 @@ fun HomeScreen(
             }
         }
 
-        // ---------- 左上角 "Z传" 悬浮按钮（设置入口，与照片列表页一致）----------
+        // ---------- 左上角 "Z传" 悬浮按钮（设置入口，与照片列表页一致）；
+        // 右上角：免费版显示"解锁高级版"金徽标。本页尚未连相机热点、多半还有外网，
+        // 因此是全 app 唯一放"输入激活码"入口的弹窗（其余页面连着相机 Wi-Fi 无外网）----------
+        var showPro by remember { mutableStateOf(false) }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -199,6 +212,16 @@ fun HomeScreen(
                 // 双 Z 标（原"Z传"文本，换成自绘的尼康 Z 系列标志更简洁）。
                 ZMark(modifier = Modifier.height(20.dp))
             }
+            Spacer(modifier = Modifier.weight(1f))
+            if (!isPro) {
+                ProBadgeButton(
+                    label = stringResource(R.string.unlock_pro),
+                    onClick = { showPro = true }
+                )
+            }
+        }
+        if (showPro) {
+            ProDialog(onDismiss = { showPro = false }, showEnterCode = true)
         }
 
         // ---------- 设置面板：从 "Z传" 按钮位置变形展开 ----------
@@ -215,7 +238,7 @@ fun HomeScreen(
 // 连接成功后的入场节奏：先保持"连接中"脉冲 [CONNECT_CELEBRATE_DELAY_MS]（此间列表与
 // 缩略图已在后台全速加载），再播约 [CONNECT_SUCCESS_ANIM_MS] 的爆发收尾——播完由
 // MainScreen 跳转到照片列表。两个值相加即连接成功后在本页的总停留。
-const val CONNECT_CELEBRATE_DELAY_MS = 1_000L
+const val CONNECT_CELEBRATE_DELAY_MS = 500L
 const val CONNECT_SUCCESS_ANIM_MS = 850L
 
 // 脉冲一轮的周期（秒）与成功时的相位加速倍数。
@@ -234,9 +257,17 @@ private enum class HomeHint { NONE, CONNECTING, OFF_WIFI }
  * [pulsing] 切换时环整体平滑淡入/淡出，绝不硬切。
  * [success]：相位加速 [BURST_SPEED] 倍——正在扩散的环猛地向外冲出（爆发散开）并淡出，
  * 颜色随 animColor 一路转绿；中心图标 Crossfade 渐变换形 + 轻微弹跳。
+ * [goldBurst]：高级版彩蛋——爆发时一圈金色粒子从圆盘后迸出（与"解锁高级版"徽标
+ * 同色系的正向差异,免费版不显示,无任何"惩罚感"设计）。
  */
 @Composable
-private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, success: Boolean) {
+private fun StatusHero(
+    color: Color,
+    icon: ImageVector,
+    pulsing: Boolean,
+    success: Boolean,
+    goldBurst: Boolean = false
+) {
     val colors = AppTheme.colors
     val animColor by animateColorAsState(targetValue = color, animationSpec = tween(500), label = "heroColor")
 
@@ -293,6 +324,31 @@ private fun StatusHero(color: Color, icon: ImageVector, pulsing: Boolean, succes
                                     (0.7f + 0.3f * burst) * ringsAlpha
                         }
                         .border(3.5.dp, animColor, CircleShape)
+                )
+            }
+        }
+
+        // 高级版彩蛋:成功爆发时 12 颗金色粒子从圆盘后向四周迸出,随 burst 飞散、
+        // 收缩、抛物线式明灭(峰值在前 1/4 行程),与环的爆发同拍。角度带确定性
+        // 抖动、距离/大小分三层,免随机数也不呆板。断开时 success 立灭,不播回吸。
+        if (goldBurst && success) {
+            repeat(12) { i ->
+                Box(
+                    modifier = Modifier
+                        .size(if (i % 3 == 0) 7.dp else 5.dp)
+                        .graphicsLayer {
+                            val angleRad = (i * 30f + if (i % 2 == 0) 9f else -7f) *
+                                    (Math.PI.toFloat() / 180f)
+                            val dist = (58 + (i % 3) * 16).dp.toPx() * burst
+                            translationX = cos(angleRad) * dist
+                            translationY = sin(angleRad) * dist
+                            val s = 1f - 0.45f * burst
+                            scaleX = s
+                            scaleY = s
+                            alpha = (burst * 4f).coerceAtMost(1f) * (1f - burst)
+                        }
+                        .clip(CircleShape)
+                        .background(if (i % 2 == 0) Color(0xFFFFE082) else Color(0xFFF0A93B))
                 )
             }
         }

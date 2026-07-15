@@ -17,8 +17,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
+import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
+import com.ztransfer.protocol.rcPollEvents
 import java.io.ByteArrayInputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -77,6 +79,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
     private var watcherJob: Job? = null
+    private var eventPollJob: Job? = null
 
     // 缩略图内存缓存：按位图字节数限容（约 1/8 可用内存），超限自动淘汰。
     private val thumbnailCache = object : LruCache<Int, ImageBitmap>(
@@ -368,6 +371,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     startKeepalive()
                     loadFiles()
+                    startEventPolling()
                     connected = true
                 },
                 onFailure = {
@@ -406,6 +410,64 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     viewModelScope.launch { connectToCameraWithRetry() }
                     break
                 }
+            }
+        }
+    }
+
+    /**
+     * 事件轮询(照片列表实时新增):连接空闲时每 [EVENT_POLL_INTERVAL_MS] 拉一次相机
+     * 事件,收到 ObjectAdded(机身快门产生的新照片)即经 [onCameraObjectAdded] 插入
+     * 列表顶部——用户在照片列表页(或回到列表)就能看到新拍的照片,无需整表刷新。
+     * 通道纪律(与缩略图填充同哲学,绝不打扰前台交互):
+     * - 传输中完全停:不碰传输热路径;事件在相机侧排队,传完下一轮一次性补上;
+     * - 遥控页打开时完全停:GetEvent 取走即消费,监看页的事件循环是彼时唯一消费者
+     *   (拍摄确认依赖 ObjectAdded,被这里抢走会破坏快门流程),它会代为转交;
+     * - FHD 预览/初始列表加载期间同样让路。
+     * 不支持 0x90C7 的机型 rcPollEvents 恒返回空列表,循环退化为偶发一条被拒绝的
+     * 小命令,无副作用。掉线后 camera 置空,循环自然退出;重连时重启。
+     */
+    private fun startEventPolling() {
+        eventPollJob?.cancel()
+        eventPollJob = viewModelScope.launch {
+            while (isActive) {
+                delay(EVENT_POLL_INTERVAL_MS)
+                val cam = camera ?: break
+                if (!_state.value.isConnectedToCamera) break
+                if (_state.value.isLoadingFiles) continue
+                if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value) continue
+                val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
+                for (e in events) {
+                    if (e.first == Lab.EVT_OBJECT_ADDED) onCameraObjectAdded(e.second.toInt())
+                }
+            }
+        }
+    }
+
+    /**
+     * 相机新增对象(机身快门/遥控拍摄):取该 handle 的对象信息,插到列表顶部。
+     * handle 降序 ≈ 拍摄从新到旧,新对象 handle 最大,前插即保持既有顺序;日期分组、
+     * 类型筛选都由 UI 层从 files 派生,新照片自动归入当天分组。与 loadFiles 同键
+     * 去重(双卡备份模式同一张照片两个 handle,只显示一份)。
+     * 遥控页打开时由其事件循环转交调用;平时由 [startEventPolling] 驱动。
+     */
+    fun onCameraObjectAdded(handle: Int) {
+        val cam = camera ?: return
+        if (_state.value.files.any { it.handle == handle }) return
+        viewModelScope.launch {
+            val info = runCatching {
+                var got: NikonCamera.FileInfo? = null
+                cam.streamFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
+                    got = batch.firstOrNull()
+                }
+                got
+            }.getOrNull() ?: return@launch
+            _state.update { s ->
+                val dup = s.files.any {
+                    it.handle == handle ||
+                            (it.fileName == info.fileName && it.size == info.size &&
+                                    it.captureDate == info.captureDate)
+                }
+                if (dup) s else s.copy(files = listOf(info) + s.files)
             }
         }
     }
@@ -459,6 +521,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun getCamera(): NikonCamera? = camera
+
+    /** 内存缓存的同步只读引用（未缓存返回 null,绝不发起取图）。仅主线程,与缓存同约束。 */
+    fun cachedThumbnail(handle: Int): ImageBitmap? = thumbnailCache.get(handle)
 
     /**
      * 加载指定文件的缩略图（用于可见格子/预览/队列小图）。三级查找：
@@ -1000,6 +1065,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private companion object {
         const val KEEPALIVE_INTERVAL_MS = 10_000L
+        // 事件轮询间隔:机身快门新照片出现在列表的最大延迟。单条小命令,
+        // 相对 10s 心跳的通道占用可忽略;再快意义不大(拍完掏出手机也要几秒)。
+        const val EVENT_POLL_INTERVAL_MS = 2_000L
         // 连接失败重试间隔：相机刚开热点时 PTP 服务可能晚于 Wi-Fi 就绪，快节奏重试
         // 让"差一步"的场景少等一秒。看护轮询同理（开销只是读本地 DHCP，可忽略）。
         const val RETRY_INTERVAL_MS = 1_000L

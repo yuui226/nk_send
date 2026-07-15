@@ -22,6 +22,8 @@
     <string name="loading_more">Loading more…</string>
     <string name="unknown_date">Unknown date</string>
     <string name="filter_all">All</string>
+    <string name="filter_protected">Protected (🔑)</string>
+    <string name="burst_label">Burst</string>
     <string name="filter_other">Other</string>
     <string name="cd_back_to_top">Back to top</string>
     <string name="cd_filter_type">Filter by type</string>
@@ -81,6 +83,7 @@
 
     <!-- Transfer errors -->
     <string name="error_dir_invalid">Transfer folder is no longer valid. Please choose it again</string>
+    <string name="error_camera_connection_lost">Camera connection lost — retry to resume after reconnecting</string>
     <string name="error_create_file">Couldn\'t create file</string>
     <string name="error_open_file">Couldn\'t open file</string>
     <string name="error_rename_copy_refused">System refused to rename or copy the file</string>
@@ -160,16 +163,17 @@
     <string name="tier_free">Free</string>
     <string name="compare_transfer">Daily transfers</string>
     <string name="compare_transfer_free">%1$d</string>
-    <string name="compare_batch">One-tap transfer</string>
+    <string name="compare_filesize">Max file size</string>
+    <string name="compare_filesize_free">%1$d MB</string>
     <string name="compare_remote">Remote control</string>
-    <string name="compare_remote_free">%1$d min</string>
+    <string name="compare_remote_free">%1$d min/day</string>
     <string name="compare_unlimited">Unlimited</string>
     <string name="compare_no_limit">No limit</string>
     <string name="pro_price_line">One-time purchase — %1$s</string>
-    <string name="pro_hint_batch">Free version transfers one photo at a time — unlock Pro in Settings</string>
     <string name="pro_perks">One-time purchase · No subscription · Free updates</string>
-    <string name="quota_left_hint">%1$d free transfers left today</string>
-    <string name="pro_hint_quota">Daily free limit reached — resets tomorrow\nPro is unlimited · see Settings</string>
-    <string name="remote_trial_left">Trial %1$s</string>
-    <string name="remote_trial_ended">Remote trial ended — unlock Pro in Settings</string>
+    <string name="quota_left_hint">%1$d/%2$d left today</string>
+    <string name="transfer_limit_reached">Daily limit reached — unlock Pro</string>
+    <string name="transfer_size_limit">Over %1$d MB — unlock Pro</string>
+    <string name="remote_trial_left">%1$s left today</string>
+    <string name="remote_trial_ended">Daily remote time used up — unlock Pro for unlimited</string>
 </resources>

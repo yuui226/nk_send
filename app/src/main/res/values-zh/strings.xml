@@ -22,6 +22,8 @@
     <string name="loading_more">正在加载更多…</string>
     <string name="unknown_date">未知日期</string>
     <string name="filter_all">全部</string>
+    <string name="filter_protected">已保护(🔑)</string>
+    <string name="burst_label">连拍</string>
     <string name="filter_other">其他</string>
     <string name="cd_back_to_top">回到顶部</string>
     <string name="cd_filter_type">筛选类型</string>
@@ -81,6 +83,7 @@
 
     <!-- 传输错误 -->
     <string name="error_dir_invalid">传输目录已失效，请重新选择</string>
+    <string name="error_camera_connection_lost">相机连接中断，重连后重试可续传</string>
     <string name="error_create_file">无法创建文件</string>
     <string name="error_open_file">无法打开文件</string>
     <string name="error_rename_copy_refused">系统拒绝改名与复制</string>
@@ -160,16 +163,17 @@
     <string name="tier_free">免费</string>
     <string name="compare_transfer">每日传输</string>
     <string name="compare_transfer_free">%1$d 个</string>
-    <string name="compare_batch">一键传输</string>
+    <string name="compare_filesize">单文件大小</string>
+    <string name="compare_filesize_free">%1$d MB</string>
     <string name="compare_remote">遥控 · 监看</string>
-    <string name="compare_remote_free">%1$d 分钟</string>
+    <string name="compare_remote_free">%1$d 分钟/天</string>
     <string name="compare_unlimited">无限</string>
     <string name="compare_no_limit">不限时</string>
     <string name="pro_price_line">一次性买断 %1$s</string>
-    <string name="pro_hint_batch">免费版仅支持单张传输 · 解锁高级版详见设置</string>
     <string name="pro_perks">一次买断 · 无订阅 · 更新免费</string>
-    <string name="quota_left_hint">今日免费额度还剩 %1$d 个</string>
-    <string name="pro_hint_quota">今日免费额度已用完，明天自动恢复\n高级版无限传输 · 入口在设置</string>
-    <string name="remote_trial_left">体验 %1$s</string>
-    <string name="remote_trial_ended">遥控体验结束 · 解锁高级版详见设置</string>
+    <string name="quota_left_hint">今日剩余额度 %1$d/%2$d</string>
+    <string name="transfer_limit_reached">今日额度已用完，请解锁高级版</string>
+    <string name="transfer_size_limit">超过 %1$d MB，请解锁高级版</string>
+    <string name="remote_trial_left">今日剩余 %1$s</string>
+    <string name="remote_trial_ended">今日监看时长已用完，解锁高级版不限时</string>
 </resources>

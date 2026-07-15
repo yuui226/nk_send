@@ -11,14 +11,18 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
@@ -58,10 +62,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -75,6 +82,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -103,8 +111,10 @@ import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.currentFileProgress
 import com.ztransfer.viewmodel.remainingCount
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 data class FileGroup(
@@ -178,6 +188,26 @@ fun FileListScreen(
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
+    // "整组吸入"动画：飞行中的卡片摞（可并发多摞）、队列胶囊容器区域（飞行终点）、
+    // 胶囊"接住"弹跳（每摞到达 nonce+1，胶囊放大回弹一次）。
+    val queueFlights = remember { mutableStateListOf<QueueFlight>() }
+    var nextFlightId by remember { mutableStateOf(0L) }
+    // 在途文件数(显示层押扣):飞行中的摞承载的文件先不计入胶囊数字,落袋才释放——
+    // 数字在包裹到达那一刻跳上去,符合"队列收到了"的直觉;实际传输在点击瞬间已开始。
+    var heldFiles by remember { mutableStateOf(0) }
+    var queueArea by remember { mutableStateOf<Rect?>(null) }
+    // 每个格子在根坐标系的精确 bounds(格子本就为长按预览挂了 onGloballyPositioned,
+    // 顺手写进注册表,零额外监听)。普通 HashMap 而非快照状态:只在点击瞬间读取,
+    // 滚动期间的高频写入不触发任何重组。滚出屏幕的旧条目用可见 key 过滤,不会误用。
+    val cellBoundsRegistry = remember { HashMap<Int, Rect>() }
+    var pillCatchNonce by remember { mutableStateOf(0) }
+    val pillCatchScale = remember { Animatable(1f) }
+    LaunchedEffect(pillCatchNonce) {
+        if (pillCatchNonce > 0) {
+            pillCatchScale.animateTo(1.18f, tween(110, easing = FastOutSlowInEasing))
+            pillCatchScale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
+        }
+    }
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
     var showFilter by remember { mutableStateOf(false) }
     var filterAnchor by remember { mutableStateOf<Rect?>(null) }
@@ -236,12 +266,36 @@ fun FileListScreen(
     // 提示条文案在非组合的回调（BackHandler/onClick）里使用，先在组合期取出。
     val exitHint = stringResource(R.string.press_back_to_exit)
     val notConnectedHint = stringResource(R.string.camera_not_connected)
-    // 免费版触限的轻量引导（指向设置里的"高级版"入口），不打断式弹窗。
-    val proBatchHint = stringResource(R.string.pro_hint_batch)
-    val proQuotaHint = stringResource(R.string.pro_hint_quota)
+    // 免费版监看时长用完的引导（指向设置里的"高级版"入口），轻提示不打断。
+    val remoteEndedHint = stringResource(R.string.remote_trial_ended)
+    // 带参数的文案组合期取不到,回调/协程里经 context.getString 现取;返回键退出也用它。
+    val context = LocalContext.current
+
+    // 监看时长归零自动退回本页:落地后弹提示气泡（监看页已消失，提示只能显示在这里）。
+    // 本页在去监看页时离开组合、返回时重新进入，LaunchedEffect(Unit) 恰好每次落地都跑。
+    LaunchedEffect(Unit) {
+        if (RemoteTrialNotice.pending) {
+            RemoteTrialNotice.pending = false
+            showHint(remoteEndedHint)
+        }
+    }
+
+    // 额度预警:订阅"传输完成计数"流,每完成一个(+1 之后)在临近上限时提示最新剩余——
+    // 提示与计数同源,失败/跳过不触发。drop(1) 跳过订阅时的当前值,只对新完成反应。
+    LaunchedEffect(Unit) {
+        LicenseManager.quotaLeft.drop(1).collect { left ->
+            if (left in 1..5) {
+                showHint(
+                    context.getString(
+                        R.string.quota_left_hint,
+                        left, LicenseManager.FREE_DAILY_TRANSFER_LIMIT
+                    )
+                )
+            }
+        }
+    }
 
     // 文件列表是连接成功后的主页面：返回不回到连接页，而是"再按一次退出应用"。
-    val context = LocalContext.current
     var lastBackTime by remember { mutableStateOf(0L) }
     BackHandler {
         val now = System.currentTimeMillis()
@@ -265,17 +319,29 @@ fun FileListScreen(
         bottom = bottomInset + 12.dp
     )
 
-    // 类型筛选：纯前端过滤——原始 state.files 不动、不触发任何重新读取；
-    // null = 全部。预览翻页/分组/网格全部基于过滤后的数据，自然一致。
+    // 筛选（类型/保护标记）：纯前端过滤——原始 state.files 不动、不触发任何重新读取；
+    // 预览翻页/分组/网格全部基于过滤后的数据，自然一致。
+    //（曾有"横竖构图"筛选,已摘除:ObjectInfo 的宽高是传感器原生方向,竖拍的方向
+    // 只在 EXIF Orientation 里且依赖机内"自动旋转图像"设置——ObjectInfo 这条路
+    // 判不出构图。将来若做,走 EXIF 头懒采集 + 磁盘缓存,可顺带修显示旋转。）
     val filterExts = transferState.filterExtensions
+    val filterProtected = transferState.filterProtectedOnly
+    val filterBurst = transferState.filterBurstOnly
+    val filterActive = filterExts != null || filterProtected || filterBurst
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
     val availableExts = remember(state.files) {
         state.files.map { it.extension }.distinct().sorted()
     }
+    // 连拍检测:基于原始列表计算,只在文件列表变化时重算。
+    // 驱动缩略图右上角的连拍角标 + "连拍"筛选(同一数据源,标记与筛选天然一致)。
+    val burstHandles = remember(state.files) { computeBurstHandles(state.files) }
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
-    val groups = remember(state.files, filterExts) {
-        val files = if (filterExts == null) state.files
-        else state.files.filter { it.extension in filterExts }
+    val groups = remember(state.files, filterExts, filterProtected, filterBurst) {
+        val files = state.files.asSequence()
+            .filter { filterExts == null || it.extension in filterExts }
+            .filter { !filterProtected || it.isProtected }
+            .filter { !filterBurst || it.handle in burstHandles }
+            .toList()
         groupFilesByDate(files)
     }
     val flatFiles = remember(groups) { groups.flatMap { it.files } }
@@ -378,7 +444,7 @@ fun FileListScreen(
 
             // 分组批量传输 / 单文件点击。gating 用响应式的 isConnectedToCamera；
             // 队列内部经 provider 现取当前相机实例，中途重连后续传任务自动用新连接。
-            val onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit = onTransferGroup@{ remaining ->
+            val onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit = onTransferGroup@{ remaining, fromBounds ->
                 if (transferState.transferDirUri == null) {
                     showSettings = true; return@onTransferGroup
                 }
@@ -387,13 +453,42 @@ fun FileListScreen(
                     signalPulse++
                     showHint(notConnectedHint)
                 } else if (remaining.isNotEmpty()) {
-                    // 免费版不开放批量传输（轻量提示引导），额度判定只在点击瞬间、不碰传输热路径。
-                    if (!LicenseManager.isPro.value) {
-                        showHint(proBatchHint); return@onTransferGroup
-                    }
+                    // 批量对免费版同样开放:额度按"传输完成"计数,超限的任务由队列
+                    // 逐个标注"已达上限"卡片(见 TransferViewModel),入队本身不设卡。
                     haptics.tick()   // 整组入队只震一次
                     // 只加入队列、原地继续浏览，不跳转到队列页（想看进度可点右上角胶囊进入）。
                     transferViewModel.addToQueue(remaining, cameraViewModel::getCamera)
+                    // 两幕动画:先"打包"(该组可见缩略图的残影错峰汇聚到 + 按钮),
+                    // 再"吸入"(成摞飞向右上角队列胶囊)。真正的入队/传输已在上面发生,
+                    // 动画纯叙事。可见格子坐标 = 网格根原点 + 视口内偏移;超过上限均匀抽样,
+                    // 组收起时一张可见格子也没有,自动只播第二幕。
+                    // 同源去重:同帧双击会穿过 remaining 的快照守卫(状态未及重组),
+                    // addToQueue 会去重、押扣也对称,但会飞出两摞一样的残影——
+                    // 同一起点已有在途飞行就不再放飞。
+                    if (fromBounds != null && queueFlights.none { it.from == fromBounds }) {
+                        // 起点取注册表里的真实格子 bounds(可见 key 过滤掉滚出屏幕的旧记录),
+                        // 顺序即传输顺序——"灵魂"按将要传输的先后依次被吸走;
+                        // 每个灵魂带自己格子的缩略图(缓存同步引用,未缓存回退半透明色块)。
+                        val visibleKeys = gridState.layoutInfo.visibleItemsInfo
+                            .mapNotNullTo(HashSet()) { it.key as? Int }
+                        val cells = remaining
+                            .filter { it.handle in visibleKeys }
+                            .mapNotNull { f ->
+                                cellBoundsRegistry[f.handle]?.let {
+                                    PackSoul(it, cameraViewModel.cachedThumbnail(f.handle))
+                                }
+                            }
+                        val sampled = if (cells.size <= MAX_PACK_GHOSTS) cells
+                            else List(MAX_PACK_GHOSTS) { cells[it * cells.size / MAX_PACK_GHOSTS] }
+                        queueFlights += QueueFlight(
+                            id = nextFlightId++, from = fromBounds,
+                            packs = sampled, count = remaining.size,
+                            // 摞顶显示本次传输顺序第一张的缩略图(内存缓存同步引用,
+                            // 未缓存则为 null,摞顶回退为纯色+图标)。
+                            topThumb = cameraViewModel.cachedThumbnail(remaining.first().handle)
+                        )
+                        heldFiles += remaining.size
+                    }
                 }
             }
             val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
@@ -404,19 +499,21 @@ fun FileListScreen(
                     signalPulse++
                     showHint(notConnectedHint)
                 } else {
-                    // 免费版入队即扣当日额度;已在队列的（addToQueue 会去重跳过）不重复扣。
-                    if (file.handle !in queuedByHandle && !LicenseManager.tryConsumeQuota()) {
-                        showHint(proQuotaHint); return@onTapFile
-                    }
-                    haptics.tick()   // 只在真正入队时震（引导去设置时不震）
+                    haptics.tick()
                     transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
-                    // 额度预警:剩 ≤5 个时随入队轻提示剩余数——撞墙前先看见墙,
-                    // 只报事实不催购(带参数文案组合期取不到,用 context.getString)。
-                    if (!LicenseManager.isPro.value) {
-                        val left = LicenseManager.quotaRemaining()
-                        if (left in 1..5) {
-                            showHint(context.getString(R.string.quota_left_hint, left))
-                        }
+                    // 单张同款"吸入":这张照片的缩略图从格子位置起飞(count=1 → 单卡无叠影,
+                    // 无打包幕),同一条弧线进胶囊,落袋数字 +1。押扣与整组同一套。
+                    val fromCell = cellBoundsRegistry[file.handle]
+                    // 同源去重理由同整组(同帧双击防重复残影)。
+                    if (file.handle !in queuedByHandle && fromCell != null &&
+                        queueFlights.none { it.from == fromCell }
+                    ) {
+                        queueFlights += QueueFlight(
+                            id = nextFlightId++, from = fromCell,
+                            packs = emptyList(), count = 1,
+                            topThumb = cameraViewModel.cachedThumbnail(file.handle)
+                        )
+                        heldFiles += 1
                     }
                 }
             }
@@ -453,6 +550,8 @@ fun FileListScreen(
                 onTransferGroup = onTransferGroup,
                 onTapFile = onTapFile,
                 onPreview = onPreview,
+                cellBoundsRegistry = cellBoundsRegistry,
+                burstHandles = burstHandles,
                 contentPadding = listPadding,
                 gridState = gridState,
                 modifier = Modifier.fillMaxSize()
@@ -481,6 +580,8 @@ fun FileListScreen(
             GlassButton(
                 onClick = {
                     if (transfersBusy) showHint(remoteBlockedHint)
+                    // 免费版当日监看时长已用完:入口处直接提示,不进页再弹回。
+                    else if (LicenseManager.remoteTimeLeftMs() <= 0L) showHint(remoteEndedHint)
                     else onNavigateToRemote()
                 },
                 shape = CircleShape,
@@ -596,20 +697,61 @@ fun FileListScreen(
                 // 自绘筛选标志（与信号条同族的圆头杆件语言）；已设筛选时高亮。
                 FilterMark(
                     modifier = Modifier.size(19.dp),
-                    color = if (filterExts != null) colors.accentBlue else colors.onBackground,
+                    color = if (filterActive) colors.accentBlue else colors.onBackground,
                     contentDescription = stringResource(R.string.cd_filter_type)
                 )
             }
 
             // 右：传输胶囊（悬浮）。用"占满剩余宽度 + 靠右对齐"的 Box 承载，
             // 保证胶囊宽度变化时右边缘固定、只向左伸缩，不会向右溢出屏幕。
+            // 容器同时是"入队吸入"动画的落点锚（右缘与胶囊右缘钉死重合）。
             Box(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .onGloballyPositioned {
+                        // 分离/复用瞬间的回调会报出零矩形(boundsInRoot 对未附着节点
+                        // 返回 Rect.Zero),存下它会让残影飞向屏幕左上角外——只收有效样本。
+                        if (it.isAttached) {
+                            val b = it.boundsInRoot()
+                            if (b.width > 0f && b.height > 0f) queueArea = b
+                        }
+                    },
                 contentAlignment = Alignment.CenterEnd
             ) {
-                if (transferState.tasks.isNotEmpty()) {
-                    QueuePill(transferState = transferState, haptics = haptics, onClick = onNavigateToTransfer)
+                // 胶囊常驻:队列为空时收成图标态——明确"这里有个队列",也让首次入队的
+                // 吸入动画始终有可见落点(曾随 tasks 隐藏,首飞落在空气里)。
+                // 读数为 0(押扣在途/全部完成)同样是图标态,不闪不藏。
+                // 卡片摞到达时胶囊"接住"弹跳。原点锚在右缘:向左生长,
+                // 不会把贴屏幕右缘的胶囊顶出屏幕。
+                Box(
+                    modifier = Modifier.graphicsLayer {
+                        transformOrigin = TransformOrigin(1f, 0.5f)
+                        scaleX = pillCatchScale.value
+                        scaleY = pillCatchScale.value
+                    }
+                ) {
+                    QueuePill(
+                        transferState = transferState,
+                        heldCount = heldFiles,
+                        haptics = haptics,
+                        onClick = onNavigateToTransfer
+                    )
                 }
+            }
+        }
+
+        // ---------- "整组吸入"动画层：一摞卡片残影沿弧线飞向队列胶囊，到达即触发胶囊弹跳 ----------
+        queueFlights.forEach { flight ->
+            key(flight.id) {
+                QueueFlightGhost(
+                    flight = flight,
+                    target = queueArea,
+                    onDone = {
+                        queueFlights.remove(flight)
+                        heldFiles -= flight.count   // 落袋:释放押扣,胶囊数字此刻跳上去
+                        pillCatchNonce++
+                    }
+                )
             }
         }
 
@@ -642,8 +784,10 @@ fun FileListScreen(
                     FilterDropdown(
                         availableExts = availableExts,
                         current = filterExts,
-                        onConfirm = { sel ->
-                            transferViewModel.setFilterExtensions(sel)
+                        currentProtected = filterProtected,
+                        currentBurst = filterBurst,
+                        onConfirm = { sel, prot, burst ->
+                            transferViewModel.setFilters(sel, prot, burst)
                             showFilter = false
                         }
                     )
@@ -694,6 +838,7 @@ fun FileListScreen(
                     anchorRect = previewAnchor,
                     cameraViewModel = cameraViewModel,
                     hapticsEnabled = transferState.hapticsEnabled,
+                    burstHandles = burstHandles,
                     onDismiss = { previewIndex = null }
                 )
             }
@@ -705,10 +850,13 @@ fun FileListScreen(
 fun QueuePill(
     transferState: com.ztransfer.viewmodel.TransferState,
     haptics: Haptics,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    // 显示层押扣:飞行中的"整组包裹"承载的文件数,落袋前不计入读数
+    //（数字在包裹到达时才跳上去);实际队列不受影响,仅影响本胶囊显示。
+    heldCount: Int = 0
 ) {
     val colors = AppTheme.colors
-    val remaining = transferState.remainingCount
+    val remaining = (transferState.remainingCount - heldCount).coerceAtLeast(0)
     val allDone = remaining == 0
     val transferring = transferState.isTransferring
     val hasActive = transferState.tasks.any { it.status == TransferStatus.TRANSFERING }
@@ -1041,7 +1189,7 @@ private fun GroupHeader(
     queuedByHandle: Map<Int, TransferTask>,
     collapsed: Boolean,
     onToggleCollapse: () -> Unit,
-    onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit
+    onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit
 ) {
     val colors = AppTheme.colors
     Row(
@@ -1086,11 +1234,21 @@ private fun GroupHeader(
         Spacer(modifier = Modifier.weight(1f))
         val remainingGroupFiles = group.files.filter { it.handle !in queuedByHandle }
         // 整组传输：图标化（+ 加入队列 / ✓ 已全部加入），无文字更简约；与日期胶囊同规格。
+        // 按钮在根坐标系的 bounds 供"整组吸入"动画定位起飞点。
+        var plusBounds by remember { mutableStateOf<Rect?>(null) }
         GlassButton(
-            onClick = { onTransferGroup(remainingGroupFiles) },
+            onClick = { onTransferGroup(remainingGroupFiles, plusBounds) },
             enabled = remainingGroupFiles.isNotEmpty(),
             shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.height(28.dp),
+            modifier = Modifier
+                .height(28.dp)
+                .onGloballyPositioned {
+                    // 只收有效样本(零矩形防护,见 queueArea 处)。
+                    if (it.isAttached) {
+                        val b = it.boundsInRoot()
+                        if (b.width > 0f && b.height > 0f) plusBounds = b
+                    }
+                },
             contentPadding = PaddingValues(horizontal = 12.dp)
         ) {
             val allQueued = remainingGroupFiles.isEmpty()
@@ -1113,9 +1271,11 @@ private fun ThumbnailGrid(
     transfersBusy: Boolean,
     collapsedDates: MutableMap<String, Boolean>,
     cameraViewModel: CameraViewModel,
-    onTransferGroup: (List<NikonCamera.FileInfo>) -> Unit,
+    onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
+    cellBoundsRegistry: MutableMap<Int, Rect>,
+    burstHandles: Set<Int>,
     contentPadding: PaddingValues,
     gridState: LazyGridState,
     modifier: Modifier = Modifier
@@ -1219,6 +1379,8 @@ private fun ThumbnailGrid(
                         cameraViewModel = cameraViewModel,
                         onTapFile = onTapFile,
                         onPreview = onPreview,
+                        cellBoundsRegistry = cellBoundsRegistry,
+                        inBurst = file.handle in burstHandles,
                         reveal = group.date == recentlyExpanded,
                         // 级联错峰：组内前 18 格按 15ms 递增，其余同批（基本都在屏外）。
                         revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
@@ -1245,6 +1407,8 @@ private fun ThumbnailCell(
     cameraViewModel: CameraViewModel,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
+    cellBoundsRegistry: MutableMap<Int, Rect>,
+    inBurst: Boolean = false,
     reveal: Boolean = false,
     revealDelayMs: Long = 0L,
     modifier: Modifier = Modifier
@@ -1285,7 +1449,17 @@ private fun ThumbnailCell(
             }
             .clip(RoundedCornerShape(8.dp))
             .background(colors.thumbPlaceholder)
-            .onGloballyPositioned { cellBounds = it.boundsInRoot() }
+            .onGloballyPositioned {
+                // 同一份 bounds 双用:长按预览的放大起点 + 打包动画的灵魂起点。
+                // 只收有效样本:分离/复用瞬间的零矩形会让动画从屏幕外冒出(见 queueArea 处)。
+                if (it.isAttached) {
+                    val b = it.boundsInRoot()
+                    if (b.width > 0f && b.height > 0f) {
+                        cellBounds = b
+                        cellBoundsRegistry[file.handle] = b
+                    }
+                }
+            }
             // 轻触加入队列（已入队则无操作），长按预览大图（任何状态都可预览）。
             .combinedClickable(
                 onClick = { if (task == null) onTapFile(file) },
@@ -1337,6 +1511,57 @@ private fun ThumbnailCell(
             )
         }
 
+        // 右上角连拍角标：与左上角类型标签同族的角贴(实色底 + 白色内容),
+        // 青绿是连拍的专属色(蓝/紫/橙已被类型占用,绿是传输状态色),
+        // 图标(叠帧) + "连拍"文字,一眼读出"这一串是按住快门扫出来的"。
+        // 算法见 computeBurstHandles;将来升级"连拍组折叠"后由组 UI 取代。
+        if (inBurst) {
+            Surface(
+                shape = RoundedCornerShape(bottomStart = 6.dp),
+                color = BurstBadgeColor.copy(alpha = 0.85f),
+                modifier = Modifier.align(Alignment.TopEnd)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                ) {
+                    Icon(
+                        Icons.Default.BurstMode,
+                        contentDescription = null,
+                        tint = colors.onAccent,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text(
+                        text = stringResource(R.string.burst_label),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
+                        fontWeight = FontWeight.Medium,
+                        color = colors.onAccent
+                    )
+                }
+            }
+        }
+
+        // 左下角保护角标（机内 🔑 选片标记）：黑底白钥匙,安静地标注状态,不与
+        // 彩色的类型/连拍角贴争抢注意力。四角分工:左上类型、右上连拍、
+        // 左下保护、右下传输状态。
+        if (file.isProtected) {
+            Surface(
+                shape = RoundedCornerShape(topEnd = 6.dp),
+                color = Color.Black.copy(alpha = 0.45f),
+                modifier = Modifier.align(Alignment.BottomStart)
+            ) {
+                Icon(
+                    Icons.Default.Key,
+                    contentDescription = stringResource(R.string.filter_protected),
+                    tint = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier
+                        .padding(3.dp)
+                        .size(11.dp)
+                )
+            }
+        }
+
         // 已入队：遮罩 + 状态角标。入队/移出时淡入淡出（网格上唯一的硬切，抹掉它）；
         // lastTask 保留最后一次的任务，退场动画期间角标仍有内容可渲染。
         var lastTask by remember(file.handle) { mutableStateOf(task) }
@@ -1358,7 +1583,7 @@ private fun ThumbnailCell(
                             .align(Alignment.BottomEnd)
                             .padding(4.dp)
                     ) {
-                        TransferStatusIndicator(status = t.status)
+                        TransferStatusIndicator(task = t)
                     }
                 }
             }
@@ -1392,19 +1617,24 @@ private fun formatDateHeader(date: String): String {
 }
 
 /**
- * 类型筛选下拉面板：自动列出设备上实际存在的类型，多选 + "全部"；点确定才提交生效。
- * 语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
+ * 筛选下拉面板：类型（自动列出设备上实际存在的，多选 + "全部"）+ 保护标记 + 连拍,
+ * 点确定才一次性提交生效。
+ * 类型语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
  * 全不选或凑齐全部现有类型时自动归位"全部"（不允许空集）。
  */
 @Composable
 private fun FilterDropdown(
     availableExts: List<String>,
     current: Set<String>?,
-    onConfirm: (Set<String>?) -> Unit
+    currentProtected: Boolean,
+    currentBurst: Boolean,
+    onConfirm: (Set<String>?, Boolean, Boolean) -> Unit
 ) {
     val colors = AppTheme.colors
     // 工作副本：确定前不生效；面板随开合重建，每次打开都从当前设置初始化。
     var working by remember { mutableStateOf(current) }
+    var workingProtected by remember { mutableStateOf(currentProtected) }
+    var workingBurst by remember { mutableStateOf(currentBurst) }
 
     val otherLabel = stringResource(R.string.filter_other)
     fun extLabel(ext: String) = ext.removePrefix(".").uppercase().ifEmpty { otherLabel }
@@ -1447,10 +1677,28 @@ private fun FilterDropdown(
                     onClick = { toggle(ext) }
                 )
             }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                    .height(1.dp)
+                    .background(colors.glassPanelBorder)
+            )
+            // 标记类筛选(保护/连拍)：独立开关,与类型叠加生效。
+            FilterRow(
+                label = stringResource(R.string.filter_protected),
+                selected = workingProtected,
+                onClick = { workingProtected = !workingProtected }
+            )
+            FilterRow(
+                label = stringResource(R.string.burst_label),
+                selected = workingBurst,
+                onClick = { workingBurst = !workingBurst }
+            )
             Spacer(modifier = Modifier.height(4.dp))
             // 确认：毛玻璃对号按钮（与全局悬浮控件同语言，不再用实色大按钮）。
             GlassButton(
-                onClick = { onConfirm(working) },
+                onClick = { onConfirm(working, workingProtected, workingBurst) },
                 shape = RoundedCornerShape(10.dp),
                 contentPadding = PaddingValues(vertical = 7.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -1491,39 +1739,313 @@ private fun FilterRow(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 缩略图角标：已入队文件在缩略图右下角显示的传输状态小图标。 */
+/**
+ * 缩略图右下角传输状态角标:统一的暗色圆片承载各状态图形——圆片给图形提供
+ * 恒定的对比度,不再让裸图标的可读性赌照片内容的深浅(旧版即是如此,观感过时)。
+ * 等待=时钟、传输中=【确定型】进度环(与队列卡片同一进度语义,不再放空转圈)、
+ * 完成=绿钩、失败=红色感叹、取消=灰叉;状态切换交叉淡化不硬切。
+ * 与左下保护角标同底色,四角的"状态类"标识(左下/右下)共享一种安静的暗片语言,
+ * 与"分类类"的彩色角贴(左上类型/右上连拍)分层。
+ */
 @Composable
-private fun TransferStatusIndicator(status: TransferStatus) {
+private fun TransferStatusIndicator(task: TransferTask) {
     val colors = AppTheme.colors
-    when (status) {
-        TransferStatus.COMPLETED -> Icon(
-            imageVector = Icons.Default.CheckCircle,
-            contentDescription = stringResource(R.string.cd_transferred),
-            tint = colors.statusConnected,
-            modifier = Modifier.size(18.dp)
-        )
-        TransferStatus.TRANSFERING -> CircularProgressIndicator(
-            modifier = Modifier.size(16.dp),
-            color = colors.accentBlue,
-            strokeWidth = 2.dp
-        )
-        TransferStatus.WAITING -> Icon(
-            imageVector = Icons.Default.HourglassEmpty,
-            contentDescription = stringResource(R.string.cd_queued),
-            tint = colors.accentBlue,
-            modifier = Modifier.size(18.dp)
-        )
-        TransferStatus.FAILED -> Icon(
-            imageVector = Icons.Default.Error,
-            contentDescription = stringResource(R.string.cd_failed),
-            tint = colors.statusError,
-            modifier = Modifier.size(18.dp)
-        )
-        TransferStatus.CANCELLED -> Icon(
-            imageVector = Icons.Default.Cancel,
-            contentDescription = stringResource(R.string.cd_cancelled),
-            tint = colors.onSurfaceVariant,
-            modifier = Modifier.size(18.dp)
-        )
+    Box(
+        modifier = Modifier
+            .size(22.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.45f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Crossfade(targetState = task.status, animationSpec = tween(200), label = "cellStatus") { st ->
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                when (st) {
+                    TransferStatus.TRANSFERING -> CircularProgressIndicator(
+                        progress = task.progress,
+                        modifier = Modifier.size(15.dp),
+                        color = colors.accentBlue,
+                        trackColor = Color.White.copy(alpha = 0.25f),
+                        strokeWidth = 2.dp,
+                        strokeCap = StrokeCap.Round
+                    )
+                    TransferStatus.WAITING -> Icon(
+                        imageVector = Icons.Default.Schedule,
+                        contentDescription = stringResource(R.string.cd_queued),
+                        tint = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.size(13.dp)
+                    )
+                    TransferStatus.COMPLETED -> Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = stringResource(R.string.cd_transferred),
+                        tint = colors.statusConnected,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    TransferStatus.FAILED -> Icon(
+                        imageVector = Icons.Default.PriorityHigh,
+                        contentDescription = stringResource(R.string.cd_failed),
+                        tint = colors.statusError,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    TransferStatus.CANCELLED -> Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(R.string.cd_cancelled),
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+        }
     }
+}
+
+/** 打包幕的单个"灵魂":从 [bounds](格子原位原尺寸)浮起被吸向 + 按钮;[thumb] = 该格缩略图。 */
+private data class PackSoul(val bounds: Rect, val thumb: ImageBitmap?)
+
+/**
+ * 一次"入队吸入"动画的参数([id] 供 key 复用隔离),整组与单张共用:
+ * [from] = 起飞点根坐标 bounds(整组 = + 按钮,兼灵魂汇聚点;单张 = 该格子);
+ * [packs] = 打包幕的各"灵魂"(整组时为该组可见缩略图;单张恒空 = 跳过打包幕);
+ * [count] = 承载的文件数——飞行期间从胶囊计数里"押扣"这么多,落袋才释放,
+ * 数字在包裹到达那一刻才跳上去(实际传输在点击瞬间已开始,押扣只是显示层);
+ * count==1 时摞退化为不倾斜的单卡;
+ * [topThumb] = 顶卡缩略图(整组取本次传输顺序第一张;内存缓存引用,null 回退纯色+图标)。
+ */
+private data class QueueFlight(
+    val id: Long,
+    val from: Rect,
+    val packs: List<PackSoul>,
+    val count: Int,
+    val topThumb: ImageBitmap?
+)
+
+// 打包幕最多放飞的缩略图残影数(超出按均匀间隔抽样,视觉密度足够又不糊成一团)。
+private const val MAX_PACK_GHOSTS = 8
+
+// 连拍角标专属色(青绿):蓝/紫/橙被类型标签占用、绿是传输状态色,须与两族都区分;
+// 实色 0.85 底上配白色内容,深浅主题通用(与金徽标同为"单值双主题"的少数例外)。
+// internal:预览大图的左上角连拍角标(PhotoPreview)与此同色。
+internal val BurstBadgeColor = Color(0xFF26A69A)
+
+// "吸入"节奏:前段缓(残影凝聚成形、离巢慢),后段陡(加速俯冲进胶囊)——
+// 到达时带着冲量,与胶囊的"接住"弹跳在动量上衔接。
+private val FlightEasing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.35f)
+
+/**
+ * "打包 → 吸入"两幕连播:
+ * 第一幕(~420ms,吸取灵魂):每张可见照片的半透明本体(原位原尺寸、真实缩略图)
+ * 先浮起"出窍",再被 + 按钮平方加速吸走、骤缩、吸入即灭,按传输顺序错峰鱼贯;
+ * 组收起时没有可见格子,自动跳过本幕。
+ * 第二幕(~560ms):三张错位叠放的卡片摞在 + 按钮处凝聚成形(恰接第一幕收尾),
+ * 沿二次贝塞尔弧线加速飞向 [target] 右缘的队列胶囊落点,途中收拢缩小、临近终点
+ * 淡出;播完 [onDone] 移除自身并触发胶囊"接住"弹跳。
+ * 弧线对任意起点自适应:弧高随行程缩放并钳制峰值不飞出屏幕顶(组头可滚到贴着状态栏);
+ * 组头 + 按钮与胶囊几乎同在屏幕右缘竖线上,水平行程越小控制点越向左偏,
+ * 把近乎竖直的路径弯成一道向内的弧,避免直上直下的呆板。
+ * [target] 是胶囊的承载容器(右缘与胶囊右缘钉死重合,不随胶囊宽度动画抖动),
+ * 落点取其右缘内侧即胶囊身上。逐帧只写 graphicsLayer,零重组/重布局。
+ */
+@Composable
+private fun QueueFlightGhost(flight: QueueFlight, target: Rect?, onDone: () -> Unit) {
+    val colors = AppTheme.colors
+    val pack = remember { Animatable(0f) }
+    val progress = remember { Animatable(0f) }
+    val currentOnDone by rememberUpdatedState(onDone)
+    LaunchedEffect(Unit) {
+        // 兜底:落点未知(理论上只在首帧布局前存在)就不播——立即收尾释放押扣,
+        // 不让残影按退化坐标乱飞。
+        if (target == null) {
+            currentOnDone()
+            return@LaunchedEffect
+        }
+        // 打包幕总时间线用线性——各灵魂的错峰窗口均匀推进,吸走的加速感
+        // 由窗口内的平方曲线提供(见下),不叠加两层缓动。
+        if (flight.packs.isNotEmpty()) {
+            pack.animateTo(1f, tween(420, easing = LinearEasing))
+        }
+        progress.animateTo(1f, tween(560, easing = FlightEasing))
+        currentOnDone()
+    }
+
+    // ---------- 第一幕:吸取灵魂。每张可见照片的半透明本体(原位原尺寸、真实缩略图)
+    // 先从格子里浮起(上移 + 微放大 + 淡入 = 出窍),再被 + 按钮平方加速吸走,
+    // 途中骤缩,吸入瞬间消失。按传输顺序错峰,鱼贯归巢。----------
+    val n = flight.packs.size
+    val density = LocalDensity.current
+    flight.packs.forEachIndexed { i, soul ->
+        Box(
+            modifier = Modifier
+                .size(with(density) { soul.bounds.width.toDp() })
+                .graphicsLayer {
+                    // 错峰窗口:第 i 张在总进度 [i·step, i·step+span] 内走完自己的行程,
+                    // 首尾两张恰好铺满 0..1;只有一个灵魂时窗口铺满全程,
+                    // 避免"吸完等半拍才起摞"的空档。
+                    // 错峰预算 28%:间隔短、重叠多——一波带着次序的同吸,而非逐张排队。
+                    val step = if (n <= 1) 0f else 0.28f / (n - 1)
+                    val span = if (n <= 1) 1f else 0.72f
+                    val t = ((pack.value - i * step) / span).coerceIn(0f, 1f)
+                    if (t <= 0f || t >= 1f) {
+                        alpha = 0f
+                        return@graphicsLayer
+                    }
+                    // 出窍(前 30% 窗口):原位上浮 10dp、放大到 1.06、淡入到 0.75;
+                    // 吸走(后 70%):suck 取平方 = 起步慢、越来越快的吸力。
+                    val rise = (t / 0.3f).coerceAtMost(1f)
+                    val suckLinear = ((t - 0.3f) / 0.7f).coerceIn(0f, 1f)
+                    val suck = suckLinear * suckLinear
+                    val sx = soul.bounds.center.x
+                    val sy = soul.bounds.center.y - 10.dp.toPx() * rise
+                    val ex = flight.from.center.x
+                    val ey = flight.from.center.y
+                    translationX = sx + (ex - sx) * suck - size.width / 2f
+                    translationY = sy + (ey - sy) * suck - size.height / 2f
+                    val s = (1f + 0.06f * rise) * (1f - 0.85f * suck)
+                    scaleX = s
+                    scaleY = s
+                    // 半透明的"魂体":出窍时淡入,被吸走途中再轻微变淡,吸入即灭(t=1 归零)。
+                    alpha = 0.75f * rise * (1f - 0.3f * suck)
+                }
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.accentBlue.copy(alpha = 0.4f))
+        ) {
+            soul.thumb?.let {
+                Image(
+                    bitmap = it,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+
+    // ---------- 第二幕:卡片摞吸入(打包完成后成形起飞)。----------
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .graphicsLayer {
+                val t = progress.value
+                val sx = flight.from.center.x
+                val sy = flight.from.center.y
+                // 落点：胶囊容器右缘向内 28dp、垂直居中（即常驻胶囊身上）。
+                val ex = (target?.right ?: sx) - 28.dp.toPx()
+                val ey = target?.center?.y ?: sy
+                val dx = abs(ex - sx)
+                // 弧高随行程自适应(短程小弧、长程大弧,上限 90dp);
+                // 控制点下界钳制峰值 y ≥ 12dp:峰值 = (sy + 2·cy + ey)/4,不飞出屏幕顶。
+                val lift = (0.35f * dx + 36.dp.toPx()).coerceAtMost(90.dp.toPx())
+                val cy = maxOf(minOf(sy, ey) - lift, (4f * 12.dp.toPx() - sy - ey) / 2f)
+                // 水平行程 < 160dp 时控制点向左偏(行程越小偏得越多,至多 52dp)。
+                val bow = 52.dp.toPx() * (1f - (dx / 160.dp.toPx()).coerceAtMost(1f))
+                val cx = (sx + ex) / 2f - bow
+                val mt = 1f - t
+                translationX = mt * mt * sx + 2f * mt * t * cx + t * t * ex - size.width / 2f
+                translationY = mt * mt * sy + 2f * mt * t * cy + t * t * ey - size.height / 2f
+                // 出场"凝聚"微弹(0.7→1,占前 12% 行程,配合缓起的 easing 约有 200ms 成形感),
+                // 随后一路收拢缩小。淡出窗口必须极窄(最后 6% 行程):它按路径参数走,
+                // 长路径(从屏幕下方点单张)上稍宽的窗口就意味着残影在离胶囊几百像素的
+                // 半空消失,看起来像"飞去了错误的位置";6% 配合加速曲线只有最后 ~25ms,
+                // 肉眼可见地贴到胶囊上才灭,消失时机恰接胶囊弹跳。
+                val appear = (t / 0.12f).coerceAtMost(1f)
+                val s = (0.7f + 0.3f * appear) * (1f - 0.62f * t)
+                scaleX = s
+                scaleY = s
+                alpha = appear * (if (t > 0.94f) (1f - t) / 0.06f else 1f)
+            }
+    ) {
+        // 整组(count>1)= 三张错位叠影读作"一摞照片";单张(count==1)只有顶卡一张,
+        // 正着飞、不倾斜——"这张照片"本人飞过去。顶卡放缩略图(整组取本次传输顺序
+        // 第一张;白描边像相纸),未缓存时回退实色+图标。
+        val layers = if (flight.count > 1) 3 else 1
+        repeat(layers) { i ->
+            val top = i == layers - 1
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        if (layers > 1) {
+                            rotationZ = (i - 1) * 9f
+                            translationX = (i - 1) * 3.dp.toPx()
+                            translationY = (1 - i) * 2.dp.toPx()
+                        }
+                    }
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(
+                        if (top && flight.topThumb == null) colors.accentBlue
+                        else colors.accentBlue.copy(alpha = 0.35f)
+                    )
+                    .then(
+                        if (top && flight.topThumb != null) {
+                            Modifier.border(
+                                1.dp, Color.White.copy(alpha = 0.8f), RoundedCornerShape(9.dp)
+                            )
+                        } else Modifier
+                    )
+            ) {
+                if (top && flight.topThumb != null) {
+                    Image(
+                        bitmap = flight.topThumb,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }
+        if (flight.topThumb == null) {
+            Icon(
+                Icons.Default.Photo,
+                contentDescription = null,
+                tint = colors.onAccent,
+                modifier = Modifier
+                    .size(20.dp)
+                    .align(Alignment.Center)
+            )
+        }
+    }
+}
+
+/**
+ * 连拍检测（试验期，当前仅驱动缩略图右上角的连拍角标）：
+ * 同扩展名内按「拍摄日期 + 文件编号」排序，"编号连续 且 相邻拍摄间隔 ≤1 秒"的
+ * 连续段长度 ≥3 视为一组连拍，返回全部成员 handle。
+ * 不依赖 ObjectInfo.SequenceNumber（机型可能恒填 0），只用文件名编号 + 秒级时间戳,
+ * 对 RAW+JPG 双格式连拍两条轨各自成组。O(n log n)，仅在文件列表变化时重算。
+ * 已知边界：编号 9999 回卷、跨零点的连拍会被切成两段——都只影响标记完整性，可接受。
+ */
+private fun computeBurstHandles(files: List<NikonCamera.FileInfo>): Set<Int> {
+    if (files.size < 3) return emptySet()
+
+    class Shot(val handle: Int, val num: Int, val daySec: Int, val date: String)
+
+    val result = HashSet<Int>()
+    files.groupBy { it.extension }.forEach { (_, group) ->
+        val shots = group.mapNotNull { f ->
+            // 时间：PTP DateTime "YYYYMMDDThhmmss…"，取日期串 + 当日秒数。
+            val d = f.captureDate ?: return@mapNotNull null
+            if (d.length < 15 || !d.substring(9, 15).all { it.isDigit() }) return@mapNotNull null
+            val daySec = d.substring(9, 11).toInt() * 3600 +
+                    d.substring(11, 13).toInt() * 60 + d.substring(13, 15).toInt()
+            // 编号：文件名主干末尾的数字段（"DSC_1234" → 1234）；无编号不参与。
+            val dot = f.fileName.lastIndexOf('.')
+            val stem = if (dot < 0) f.fileName else f.fileName.substring(0, dot)
+            val digits = stem.takeLastWhile { it.isDigit() }
+            if (digits.isEmpty() || digits.length > 9) return@mapNotNull null
+            Shot(f.handle, digits.toInt(), daySec, d.substring(0, 8))
+        }.sortedWith(compareBy({ it.date }, { it.num }))
+
+        var runStart = 0
+        for (i in 1..shots.size) {
+            val broke = i == shots.size ||
+                    shots[i].date != shots[i - 1].date ||
+                    shots[i].num != shots[i - 1].num + 1 ||
+                    shots[i].daySec - shots[i - 1].daySec > 1
+            if (broke) {
+                if (i - runStart >= 3) {
+                    for (j in runStart until i) result.add(shots[j].handle)
+                }
+                runStart = i
+            }
+        }
+    }
+    return result
 }

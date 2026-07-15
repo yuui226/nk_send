@@ -148,24 +148,24 @@ fun RemoteScreen(
     onNavigateBack: () -> Unit
 ) {
     CompositionLocalProvider(LocalAppColors provides DarkAppColors) {
-        // 免费版试用限时:每次进入给 FREE_REMOTE_TRIAL_MS。计时从"参数加载完 + 监看
-        // 首帧已显示"（onReady）才开始——进页加载耗时不占用体验时长。相机 Wi-Fi 下
-        // 无外网,试用中途不存在在线激活,isPro 只看进页时刻。PRO 无任何额外开销。
+        // 免费版监看限时:每天累计 FREE_REMOTE_DAILY_MS(无单次概念),自然日重置。
+        // 计时从"参数加载完 + 监看首帧已显示"（onReady）才开始——进页加载不占时长;
+        // 退出本页协程随组合销毁而取消,计时自动暂停,再进来接着剩余走。
+        // 每秒经 LicenseManager 落一次账,进程被杀最多丢 1 秒。PRO 无任何额外开销。
         val isPro by LicenseManager.isPro.collectAsState()
-        var trialLeftMs by remember { mutableStateOf(LicenseManager.FREE_REMOTE_TRIAL_MS) }
+        var trialLeftMs by remember { mutableStateOf(LicenseManager.remoteTimeLeftMs()) }
         var trialArmed by remember { mutableStateOf(false) }
-        // 归零:先在页内弹轻量玻璃气泡（与列表页提示条同款，替代系统 Toast），
-        // 停留够读完文案再自动"按返回"退回列表页。
-        var trialEnded by remember { mutableStateOf(false) }
         if (!isPro) {
             LaunchedEffect(trialArmed) {
                 if (!trialArmed) return@LaunchedEffect
                 while (trialLeftMs > 0) {
                     delay(1000)
                     trialLeftMs -= 1000
+                    LicenseManager.consumeRemoteTime(1000)
                 }
-                trialEnded = true
-                delay(2200)
+                // 归零:自动"按返回"退出。提示气泡显示在退回后的照片列表页——
+                // 本页即刻消失,页内气泡没人看得见(跨页标记由列表页读取并清除)。
+                RemoteTrialNotice.pending = true
                 onNavigateBack()
             }
         }
@@ -197,33 +197,17 @@ fun RemoteScreen(
                     )
                 }
             }
-            // 体验结束的轻量气泡（引导到设置的"高级版"入口），随后自动返回列表页。
-            AnimatedVisibility(
-                visible = trialEnded,
-                enter = fadeIn() + slideInVertically { it / 2 },
-                exit = fadeOut() + slideOutVertically { it / 2 },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 28.dp)
-            ) {
-                val colors = AppTheme.colors
-                Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = colors.glassSurfaceHeavy,
-                    shadowElevation = 6.dp,
-                    border = BorderStroke(1.dp, colors.glassPanelBorder)
-                ) {
-                    Text(
-                        stringResource(R.string.remote_trial_ended),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = colors.onBackground,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                    )
-                }
-            }
         }
     }
+}
+
+/**
+ * 监看时长归零自动退出后的跨页提示标记:照片列表页回到组合时读取并清除、弹提示气泡。
+ * 自动返回瞬间监看页已消失,提示只能落在退回后的页面上。
+ */
+object RemoteTrialNotice {
+    @Volatile
+    var pending = false
 }
 
 @Composable
@@ -451,6 +435,11 @@ private fun RemoteContent(
             for (e in events) {
                 eventFlow.emit(e)
                 when (e.first) {
+                    // 新照片入卡(遥控拍摄或此刻按了机身快门都会到这):转交列表层插入,
+                    // 用户退回照片列表就能看到。本页开着时 VM 的事件轮询是停的
+                    //(GetEvent 取走即消费),转交是新照片进列表的唯一通路。
+                    Lab.EVT_OBJECT_ADDED ->
+                        cameraViewModel.onCameraObjectAdded(e.second.toInt())
                     // 录像状态以相机事件为准（卡满/过热等相机自行停录也能收到）。
                     // 例外：本地刚（2s 内）发过停止命令时忽略"已开始"——那是上一次开始
                     // 的迟到回声（开始+停止落在同一轮询窗口内），别把 UI 翻回录制中。

@@ -50,8 +50,11 @@ object LicenseManager {
     // =====================================================================================
 
     // 免费版限制(集中定义,调整数值只改这里)
+    // 传输:每天完成 25 个(完成才计数,入队/跳过不计) + 单文件 ≤400MB;
+    // 监看:每天累计 3 分钟。
     const val FREE_DAILY_TRANSFER_LIMIT = 25
-    const val FREE_REMOTE_TRIAL_MS = 2 * 60_000L
+    const val FREE_MAX_FILE_BYTES = 400L * 1024 * 1024
+    const val FREE_REMOTE_DAILY_MS = 3 * 60_000L
 
     private const val RENEW_INTERVAL_MS = 7 * 24 * 3600_000L
     private const val PREFS = "license"
@@ -62,6 +65,11 @@ object LicenseManager {
     private val _isPro = MutableStateFlow(false)
     val isPro: StateFlow<Boolean> get() = _isPro
 
+    // 今日剩余免费传输数,随 recordTransferDone 即时更新;PRO 恒 Int.MAX_VALUE。
+    // UI 订阅它做"临近上限"预警——提示与计数同源,在完成 +1 之后弹出而非入队时。
+    private val _quotaLeft = MutableStateFlow(Int.MAX_VALUE)
+    val quotaLeft: StateFlow<Int> get() = _quotaLeft
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** 在 MainActivity.onCreate 调用一次:恢复本地状态并触发静默续签。 */
@@ -71,6 +79,7 @@ object LicenseManager {
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         fingerprint = computeFingerprint(app)
         _isPro.value = verifyToken(prefs.getString("token", null)) != null
+        _quotaLeft.value = quotaRemaining()
         scope.launch { renewIfDue() }
     }
 
@@ -124,34 +133,62 @@ object LicenseManager {
             .putLong("last_renew", System.currentTimeMillis())
             .apply()
         _isPro.value = true
+        _quotaLeft.value = quotaRemaining()
     }
 
     /** 清除本地授权(测试按钮/被吊销)。不动服务器绑定,重新输入激活码即可恢复。 */
     fun revertToFree() {
         prefs.edit().remove("token").remove("code").remove("last_renew").apply()
         _isPro.value = false
+        _quotaLeft.value = quotaRemaining()
     }
 
     // ---------------------------------------------------------------- 免费额度
+    // 两本"日账":传输完成数(q_*)与监看已用毫秒(r_*)。值只在 date 键等于今天时有效,
+    // 跨天读到旧日期即视为 0,无须任何定时清零。计数规则:
+    // 传输只在【真正传完】时 +1——失败/取消/已存在跳过都不计;监看每天累计,退出即停。
 
     private fun today(): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 
-    /** 今日剩余免费传输数;PRO 恒为 Int.MAX_VALUE。 */
-    fun quotaRemaining(): Int {
-        if (_isPro.value) return Int.MAX_VALUE
-        val used = if (prefs.getString("q_date", "") == today()) prefs.getInt("q_used", 0) else 0
-        return (FREE_DAILY_TRANSFER_LIMIT - used).coerceAtLeast(0)
+    private fun transfersDoneToday(): Int =
+        if (prefs.getString("q_date", "") == today()) prefs.getInt("q_used", 0) else 0
+
+    private fun remoteUsedTodayMs(): Long =
+        if (prefs.getString("r_date", "") == today()) prefs.getLong("r_used", 0L) else 0L
+
+    /** 今日剩余免费传输数;PRO 恒为 Int.MAX_VALUE。也以 [quotaLeft] 流的形式对 UI 暴露。 */
+    fun quotaRemaining(): Int =
+        if (_isPro.value) Int.MAX_VALUE
+        else (FREE_DAILY_TRANSFER_LIMIT - transfersDoneToday()).coerceAtLeast(0)
+
+    /** 免费版今日完成数是否已达上限(传输队列每个任务开始前检查)。PRO 恒 false。 */
+    fun transferLimitReached(): Boolean =
+        !_isPro.value && transfersDoneToday() >= FREE_DAILY_TRANSFER_LIMIT
+
+    /**
+     * 免费版单文件大小是否超限(传输队列每个任务开始前检查)。PRO 恒 false。
+     * >4GB 对象的 size 是 0xFFFFFFFF 哨兵,数值上必然超限——恰好一并拦住,无需特判。
+     */
+    fun freeSizeLimitExceeded(sizeBytes: Long): Boolean =
+        !_isPro.value && sizeBytes > FREE_MAX_FILE_BYTES
+
+    /** 传输完成计数 +1,并推送最新剩余到 [quotaLeft](触发 UI 的临近上限预警)。PRO 空操作。 */
+    fun recordTransferDone() {
+        if (_isPro.value) return
+        prefs.edit().putString("q_date", today()).putInt("q_used", transfersDoneToday() + 1).apply()
+        _quotaLeft.value = quotaRemaining()
     }
 
-    /** 入队即计数:占用一个今日额度。成功返回 true;额度耗尽返回 false(UI 弹付费引导)。 */
-    fun tryConsumeQuota(): Boolean {
-        if (_isPro.value) return true
-        val t = today()
-        val used = if (prefs.getString("q_date", "") == t) prefs.getInt("q_used", 0) else 0
-        if (used >= FREE_DAILY_TRANSFER_LIMIT) return false
-        prefs.edit().putString("q_date", t).putInt("q_used", used + 1).apply()
-        return true
+    /** 免费版今日剩余监看时长(毫秒,每天累计 [FREE_REMOTE_DAILY_MS]);PRO 恒为 Long.MAX_VALUE。 */
+    fun remoteTimeLeftMs(): Long =
+        if (_isPro.value) Long.MAX_VALUE
+        else (FREE_REMOTE_DAILY_MS - remoteUsedTodayMs()).coerceAtLeast(0L)
+
+    /** 累计已用监看时长(监看页计时每秒记账,退出页面即停止;跨天自动换日重记)。PRO 空操作。 */
+    fun consumeRemoteTime(ms: Long) {
+        if (_isPro.value) return
+        prefs.edit().putString("r_date", today()).putLong("r_used", remoteUsedTodayMs() + ms).apply()
     }
 
     // ---------------------------------------------------------------- 激活/续签

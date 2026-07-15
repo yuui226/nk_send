@@ -145,7 +145,8 @@ private val CompareColWidth = 64.dp
  * 高级版介绍对话框("解锁高级版"徽标打开,设置面板与传输页共用):
  * 免费/高级版三列对比表(窄弹窗适配) + 金色"解锁"按钮复制 QQ 号购买。
  * [showEnterCode] 控制"输入激活码"入口(6 位限长在 ActivationDialog 内):
- * 传输页开;设置面板关——设置只在连着相机 Wi-Fi 时可达,无外网激活必失败。
+ * 仅连接页开——彼时尚未连相机热点,多半还有外网;其余入口(设置面板)关,
+ * 连着相机 Wi-Fi 无外网,在线激活必失败。
  * 触限处只弹轻量提示引导到这里,不直接打断弹窗。
  */
 @Composable
@@ -196,12 +197,19 @@ fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false) {
                     stringResource(R.string.compare_transfer_free, LicenseManager.FREE_DAILY_TRANSFER_LIMIT),
                     stringResource(R.string.compare_unlimited)
                 )
-                CompareRow(stringResource(R.string.compare_batch), "—", "✓")
+                CompareRow(
+                    stringResource(R.string.compare_filesize),
+                    stringResource(
+                        R.string.compare_filesize_free,
+                        LicenseManager.FREE_MAX_FILE_BYTES / (1024 * 1024)
+                    ),
+                    stringResource(R.string.compare_unlimited)
+                )
                 CompareRow(
                     stringResource(R.string.compare_remote),
                     stringResource(
                         R.string.compare_remote_free,
-                        (LicenseManager.FREE_REMOTE_TRIAL_MS / 60_000L).toInt()
+                        (LicenseManager.FREE_REMOTE_DAILY_MS / 60_000L).toInt()
                     ),
                     stringResource(R.string.compare_no_limit)
                 )

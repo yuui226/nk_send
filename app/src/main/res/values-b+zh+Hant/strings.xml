@@ -22,6 +22,8 @@
     <string name="loading_more">正在載入更多…</string>
     <string name="unknown_date">未知日期</string>
     <string name="filter_all">全部</string>
+    <string name="filter_protected">已保護(🔑)</string>
+    <string name="burst_label">連拍</string>
     <string name="filter_other">其他</string>
     <string name="cd_back_to_top">回到頂部</string>
     <string name="cd_filter_type">篩選類型</string>
@@ -81,6 +83,7 @@
 
     <!-- 傳輸錯誤 -->
     <string name="error_dir_invalid">傳輸目錄已失效，請重新選擇</string>
+    <string name="error_camera_connection_lost">相機連線中斷，重連後重試可續傳</string>
     <string name="error_create_file">無法建立檔案</string>
     <string name="error_open_file">無法開啟檔案</string>
     <string name="error_rename_copy_refused">系統拒絕重新命名與複製</string>
@@ -160,16 +163,17 @@
     <string name="tier_free">免費</string>
     <string name="compare_transfer">每日傳輸</string>
     <string name="compare_transfer_free">%1$d 個</string>
-    <string name="compare_batch">一鍵傳輸</string>
+    <string name="compare_filesize">單檔大小</string>
+    <string name="compare_filesize_free">%1$d MB</string>
     <string name="compare_remote">遙控 · 監看</string>
-    <string name="compare_remote_free">%1$d 分鐘</string>
+    <string name="compare_remote_free">%1$d 分鐘/天</string>
     <string name="compare_unlimited">無限</string>
     <string name="compare_no_limit">不限時</string>
     <string name="pro_price_line">一次性買斷 %1$s</string>
-    <string name="pro_hint_batch">免費版僅支援單張傳輸 · 解鎖高級版詳見設定</string>
     <string name="pro_perks">一次買斷 · 無訂閱 · 更新免費</string>
-    <string name="quota_left_hint">今日免費額度還剩 %1$d 個</string>
-    <string name="pro_hint_quota">今日免費額度已用完，明天自動恢復\n高級版無限傳輸 · 入口在設定</string>
-    <string name="remote_trial_left">體驗 %1$s</string>
-    <string name="remote_trial_ended">遙控體驗結束 · 解鎖高級版詳見設定</string>
+    <string name="quota_left_hint">今日剩餘額度 %1$d/%2$d</string>
+    <string name="transfer_limit_reached">今日額度已用完，請解鎖高級版</string>
+    <string name="transfer_size_limit">超過 %1$d MB，請解鎖高級版</string>
+    <string name="remote_trial_left">今日剩餘 %1$s</string>
+    <string name="remote_trial_ended">今日監看時長已用完，解鎖高級版不限時</string>
 </resources>

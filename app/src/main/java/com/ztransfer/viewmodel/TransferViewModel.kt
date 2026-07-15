@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.ResumeUnavailableException
@@ -60,6 +61,10 @@ data class TransferState(
     // 照片类型筛选（归一化扩展名，如 ".jpg"）：null = 全部（不过滤，新类型也放行）。
     // 持久化跨会话生效；设备上没有所选类型时列表自然为空，不做特殊处理。
     val filterExtensions: Set<String>? = null,
+    // 只看机内"保护"(🔑)标记过的照片（机内选片工作流）。持久化。
+    val filterProtectedOnly: Boolean = false,
+    // 只看连拍照片（检测算法见 FileListScreen.computeBurstHandles）。持久化。
+    val filterBurstOnly: Boolean = false,
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
     // 切换后由设置面板触发 Activity.recreate() 生效。
     val appLanguage: String = AppLocale.SYSTEM
@@ -84,6 +89,26 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     /** 用户可见文案（错误信息等）统一走字符串资源；经 AppLocale.wrap 与应用内语言一致。 */
     private fun str(resId: Int, vararg args: Any?): String =
         AppLocale.wrap(getApplication()).getString(resId, *args)
+
+    /**
+     * 把底层异常翻译成用户可读的三语文案：网络类异常（断联/超时/连接重置——卡片上
+     * 曾裸露 "software caused connection abort" 这类系统原文）统一显示"相机连接中断"；
+     * 目录失效单独指认；其余保留自带信息（多为我们自己抛出的已本地化业务文案）。
+     */
+    private fun friendlyError(e: Throwable?): String {
+        val msg = e?.message ?: return str(R.string.transfer_failed)
+        val connectionLost = e is java.net.SocketException ||
+                e is java.net.SocketTimeoutException ||
+                e is java.io.EOFException ||
+                listOf("connection abort", "connection reset", "broken pipe",
+                    "socket", "econn", "etimedout", "network is unreachable")
+                    .any { msg.contains(it, ignoreCase = true) }
+        return when {
+            connectionLost -> str(R.string.error_camera_connection_lost)
+            e is java.io.FileNotFoundException -> str(R.string.error_dir_invalid)
+            else -> msg
+        }
+    }
 
     // 鸿蒙适配：部分华为/荣耀设备的 DocumentsProvider renameDocument 损坏（无论目标名
     // 是否空闲都失败），下载完好的临时文件改不了正式名 → 每张都"保存失败"。
@@ -126,6 +151,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     ?: ThemeMode.SYSTEM,
                 // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
                 filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet(),
+                filterProtectedOnly = prefs.getBoolean("filter_protected", false),
+                filterBurstOnly = prefs.getBoolean("filter_burst", false),
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
         }
@@ -164,12 +191,20 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(appLanguage = tag) }
     }
 
-    /** 照片类型筛选；null = 全部。持久化，跨会话与跨设备连接生效。 */
-    fun setFilterExtensions(exts: Set<String>?) {
+    /** 应用筛选（类型/保护标记/连拍，面板点确定一次性提交）。持久化，跨会话与跨设备连接生效。 */
+    fun setFilters(exts: Set<String>?, protectedOnly: Boolean, burstOnly: Boolean) {
         prefs.edit().apply {
             if (exts == null) remove("filter_exts") else putStringSet("filter_exts", exts)
+            if (protectedOnly) putBoolean("filter_protected", true) else remove("filter_protected")
+            if (burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")
         }.apply()
-        _state.update { it.copy(filterExtensions = exts) }
+        _state.update {
+            it.copy(
+                filterExtensions = exts,
+                filterProtectedOnly = protectedOnly,
+                filterBurstOnly = burstOnly
+            )
+        }
     }
 
     fun setTransferDirUri(uri: Uri) {
@@ -281,6 +316,36 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 skipped = true,
                                 progress = 1f,
                                 downloaded = task.file.size,
+                                speed = 0
+                            )
+                        }
+                        continue
+                    }
+
+                    // 免费版每日完成数已达上限：不再开始新传输，卡片直接标注并引导解锁。
+                    // 检查放在"已存在跳过"之后——跳过不占额度，到了上限也照常放行。
+                    if (LicenseManager.transferLimitReached()) {
+                        updateTask(handle) {
+                            it.copy(
+                                status = TransferStatus.FAILED,
+                                error = str(R.string.transfer_limit_reached),
+                                speed = 0
+                            )
+                        }
+                        continue
+                    }
+
+                    // 免费版单文件超限（>400MB，长视频/RAW 连拍段）：同样入队不拦、
+                    // 轮到才检，卡片标注引导解锁后跳过，队列继续传后面的。
+                    // >4GB 对象的 size 是哨兵值，数值上必然超限，一并拦住。
+                    if (LicenseManager.freeSizeLimitExceeded(task.file.size)) {
+                        updateTask(handle) {
+                            it.copy(
+                                status = TransferStatus.FAILED,
+                                error = str(
+                                    R.string.transfer_size_limit,
+                                    LicenseManager.FREE_MAX_FILE_BYTES / (1024 * 1024)
+                                ),
                                 speed = 0
                             )
                         }
@@ -470,6 +535,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     existing[savedName] = stats.bytes
                                     existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(stats.bytes)
                                     val elapsed = System.currentTimeMillis() - transferStart
+                                    // 免费额度按"真正传输完成"计数(此处是唯一完成点;
+                                    // 跳过/续传改名捷径都不经过这里,不计)。
+                                    LicenseManager.recordTransferDone()
                                     updateTask(handle) {
                                         it.copy(
                                             status = TransferStatus.COMPLETED, progress = 1f,
@@ -505,7 +573,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     // 普通传输失败：保留半成品，重试时从块边界续传。
                                     // 不删 .nkpart_：断点续传依赖它，交给 App 启动 init 的 sweep 统一清扫。
                                     updateTask(handle) {
-                                        it.copy(status = TransferStatus.FAILED, error = e.message ?: str(R.string.transfer_failed), speed = 0)
+                                        it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                                     }
                                 }
                             }
@@ -522,13 +590,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         if (BuildConfig.DEBUG) {
                             android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
                         }
-                        val msg = if (e is java.io.FileNotFoundException) {
-                            str(R.string.error_dir_invalid)
-                        } else {
-                            e.message ?: str(R.string.transfer_failed)
-                        }
                         updateTask(handle) {
-                            it.copy(status = TransferStatus.FAILED, error = msg, speed = 0)
+                            it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                         }
                     }
                 }

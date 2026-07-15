@@ -57,7 +57,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
-import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatDuration
@@ -211,7 +210,33 @@ fun TransferScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // 前导缩略图：屏幕内的卡片始终允许取图（传输中请求排到
+                                // 前导状态标志：独立成卡片最左的"状态列"，与右侧操作按钮分居
+                                // 两端——状态归状态、操作归操作。换状态交叉淡化不硬切；
+                                // 传输→完成的瞬间弹一下（事件驱动、只在真在传时触发——
+                                // 已完成卡片滚回屏幕不会重播），与全局"确认"手感一致。
+                                val iconPop = remember(handle) { Animatable(1f) }
+                                var prevStatus by remember(handle) { mutableStateOf(task.status) }
+                                LaunchedEffect(task.status) {
+                                    val was = prevStatus
+                                    prevStatus = task.status
+                                    if (task.status == TransferStatus.COMPLETED && was == TransferStatus.TRANSFERING) {
+                                        iconPop.snapTo(0.5f)
+                                        iconPop.animateTo(1f, Motion.bouncy())
+                                    }
+                                }
+                                Box(
+                                    Modifier.graphicsLayer {
+                                        scaleX = iconPop.value
+                                        scaleY = iconPop.value
+                                    }
+                                ) {
+                                    Crossfade(targetState = task.status, animationSpec = tween(220), label = "taskIcon") { st ->
+                                        TaskStatusIcon(st, size = 20.dp)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+
+                                // 缩略图：屏幕内的卡片始终允许取图（传输中请求排到
                                 // 文件间隙执行），isTransferring 仅作传输结束后的补载重试键。
                                 QueueThumbnail(
                                     file = task.file,
@@ -268,28 +293,29 @@ fun TransferScreen(
                                     )
                                 }
 
-                                // 尾部：状态图标（前导已被缩略图占用），换状态时交叉淡化不硬切；
-                                // 传输→完成的瞬间图标弹一下（事件驱动、只在真在传时触发——
-                                // 已完成卡片滚回屏幕不会重播），与全局"确认"手感一致。
-                                Spacer(modifier = Modifier.width(10.dp))
-                                val iconPop = remember(handle) { Animatable(1f) }
-                                var prevStatus by remember(handle) { mutableStateOf(task.status) }
-                                LaunchedEffect(task.status) {
-                                    val was = prevStatus
-                                    prevStatus = task.status
-                                    if (task.status == TransferStatus.COMPLETED && was == TransferStatus.TRANSFERING) {
-                                        iconPop.snapTo(0.5f)
-                                        iconPop.animateTo(1f, Motion.bouncy())
-                                    }
-                                }
-                                Box(
-                                    Modifier.graphicsLayer {
-                                        scaleX = iconPop.value
-                                        scaleY = iconPop.value
-                                    }
+                                // 尾部操作列：重试(仅失败时,断开置灰) + 移除,同规格图标圆钮
+                                // 并排——同为"对这张卡的操作",与最左的状态列互不混淆。
+                                AnimatedVisibility(
+                                    visible = task.status == TransferStatus.FAILED,
+                                    enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
+                                    exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start)
                                 ) {
-                                    Crossfade(targetState = task.status, animationSpec = tween(220), label = "taskIcon") { st ->
-                                        TaskStatusIcon(st, size = 22.dp)
+                                    Row {
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        val connected = cameraState.isConnectedToCamera
+                                        GlassButton(
+                                            onClick = { transferViewModel.retrySingleTask(task.file.handle, cameraViewModel::getCamera) },
+                                            enabled = connected,
+                                            shape = CircleShape,
+                                            contentPadding = PaddingValues(6.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Refresh,
+                                                contentDescription = stringResource(R.string.retry),
+                                                tint = if (connected) colors.accentBlue else colors.onSurfaceVariant,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
                                 }
 
@@ -339,30 +365,6 @@ fun TransferScreen(
                                 )
                             }
 
-                            if (task.status == TransferStatus.FAILED) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                // 单个重试（毛玻璃小胶囊，与日期胶囊同规格）；断开时置灰而非消失。
-                                val connected = cameraState.isConnectedToCamera
-                                GlassButton(
-                                    onClick = { transferViewModel.retrySingleTask(task.file.handle, cameraViewModel::getCamera) },
-                                    enabled = connected,
-                                    shape = RoundedCornerShape(14.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = null,
-                                        tint = if (connected) colors.accentBlue else colors.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        stringResource(R.string.retry),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = if (connected) colors.onBackground else colors.onSurfaceVariant
-                                    )
-                                }
-                            }
                         }
                     }
                     }
@@ -410,22 +412,6 @@ fun TransferScreen(
                 rssi = cameraState.wifiRssi,
                 connected = cameraState.isConnectedToCamera
             )
-
-            // 免费版：信号右侧放"高级版"入口（与设置面板右上角同款金徽标）。
-            // 传完 25 个额度的用户多半正停在本页，是最自然的转化位；已购用户不显示。
-            val isPro by LicenseManager.isPro.collectAsState()
-            var showPro by remember { mutableStateOf(false) }
-            if (!isPro) {
-                Spacer(modifier = Modifier.width(8.dp))
-                ProBadgeButton(
-                    label = stringResource(R.string.unlock_pro),
-                    onClick = { showPro = true }
-                )
-            }
-            if (showPro) {
-                // 传输页多半在家整理/回看时打开(可能有外网),放出"输入激活码"入口。
-                ProDialog(onDismiss = { showPro = false }, showEnterCode = true)
-            }
 
             // 右：胶囊（传输中显速度/数量，完成后 done→图标）；队列被清空后随之淡出，
             // 不留一颗没有指代的图标。
