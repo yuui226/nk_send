@@ -176,4 +176,16 @@
     <string name="transfer_size_limit">超过 %1$d MB，请解锁高级版</string>
     <string name="remote_trial_left">今日剩余 %1$s</string>
     <string name="remote_trial_ended">今日监看时长已用完，解锁高级版不限时</string>
+    <string name="buy_now">立即购买</string>
+    <string name="contact_support">购买遇到问题？联系客服（QQ）</string>
+    <string name="purchase_loading">正在创建订单…</string>
+    <string name="purchase_opening_alipay">正在打开支付宝…</string>
+    <string name="purchase_waiting">请在支付宝完成支付，到账后自动激活。</string>
+    <string name="purchase_success">支付成功，高级版已激活！</string>
+    <string name="purchase_keep_code">你的激活码（点击复制），请截图保存：还可在另一台设备上使用。</string>
+    <string name="purchase_paid_not_active">已收到付款但自动激活未成功，请复制上方激活码，用「输入激活码」完成激活。</string>
+    <string name="purchase_code_copied">已复制激活码</string>
+    <string name="purchase_done">完成</string>
+    <string name="err_purchase_unreachable">无法连接服务器。若当前连着相机 Wi-Fi，请先断开，用有外网的网络重试。</string>
+    <string name="err_purchase_failed">下单失败，请稍后重试或联系客服。</string>
 </resources>

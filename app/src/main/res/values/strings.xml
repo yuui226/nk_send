@@ -176,4 +176,16 @@
     <string name="transfer_size_limit">Over %1$d MB — unlock Pro</string>
     <string name="remote_trial_left">%1$s left today</string>
     <string name="remote_trial_ended">Daily remote time used up — unlock Pro for unlimited</string>
+    <string name="buy_now">Buy Now</string>
+    <string name="contact_support">Purchase issues? Contact support (QQ)</string>
+    <string name="purchase_loading">Creating order…</string>
+    <string name="purchase_opening_alipay">Opening Alipay…</string>
+    <string name="purchase_waiting">Complete the payment in Alipay — activation is automatic once confirmed.</string>
+    <string name="purchase_success">Payment received — Pro activated!</string>
+    <string name="purchase_keep_code">Your activation code (tap to copy). Keep it — it also works on one more device.</string>
+    <string name="purchase_paid_not_active">Payment received but auto-activation failed — copy the code above and use "Enter activation code".</string>
+    <string name="purchase_code_copied">Activation code copied</string>
+    <string name="purchase_done">Done</string>
+    <string name="err_purchase_unreachable">Couldn\'t reach the server. If you\'re on the camera\'s Wi-Fi, disconnect first and retry on a network with internet access.</string>
+    <string name="err_purchase_failed">Couldn\'t create the order — try again later or contact support.</string>
 </resources>

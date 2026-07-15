@@ -244,6 +244,49 @@ object LicenseManager {
         }
     }
 
+    // ---------------------------------------------------------------- 购买(自动售码)
+
+    sealed class OrderResult {
+        /** 有待支付订单;payUrl 非空时 WebView 打开即到收银台唤起支付宝/微信。 */
+        data class Pending(val order: String, val payUrl: String?) : OrderResult()
+        /** 已支付;code 为服务器发放的激活码(尚未绑定本机,走 [activate])。 */
+        data class Paid(val order: String, val code: String) : OrderResult()
+        object Unreachable : OrderResult()
+        data class Failed(val err: String) : OrderResult()
+    }
+
+    /** 上次未走完的订单号:付款后 App 被杀等场景,重开购买页凭它续单不丢码。 */
+    fun pendingOrder(): String? = prefs.getString("pending_order", null)
+
+    /** 购买闭环走完(激活成功)后清除续单记录。 */
+    fun clearPendingOrder() {
+        prefs.edit().remove("pending_order").apply()
+    }
+
+    suspend fun createOrder(): OrderResult = withContext(Dispatchers.IO) {
+        val resp = post("/v1/order/create", JSONObject().put("fp", fingerprint))
+            ?: return@withContext OrderResult.Unreachable
+        val order = resp.optString("order")
+        if (!resp.optBoolean("ok") || order.isEmpty())
+            return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
+        prefs.edit().putString("pending_order", order).apply()
+        OrderResult.Pending(order, resp.optString("pay_url").takeIf { it.isNotEmpty() })
+    }
+
+    /** 查单;服务器在确认到账的瞬间发码并随响应返回。[wantUrl] 仅续单时置真。 */
+    suspend fun orderStatus(order: String, wantUrl: Boolean = false): OrderResult =
+        withContext(Dispatchers.IO) {
+            val resp = post("/v1/order/status", JSONObject().apply {
+                put("fp", fingerprint)
+                put("order", order)
+                if (wantUrl) put("want_url", true)
+            }) ?: return@withContext OrderResult.Unreachable
+            if (!resp.optBoolean("ok"))
+                return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
+            if (resp.optString("status") == "paid") OrderResult.Paid(order, resp.optString("code"))
+            else OrderResult.Pending(order, resp.optString("pay_url").takeIf { it.isNotEmpty() })
+        }
+
     // ---------------------------------------------------------------- 网络
 
     /** 依次尝试所有服务器地址;全部失败返回 null。业务成败由响应 JSON 的 ok/err 表达。 */

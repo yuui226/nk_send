@@ -176,4 +176,16 @@
     <string name="transfer_size_limit">超過 %1$d MB，請解鎖高級版</string>
     <string name="remote_trial_left">今日剩餘 %1$s</string>
     <string name="remote_trial_ended">今日監看時長已用完，解鎖高級版不限時</string>
+    <string name="buy_now">立即購買</string>
+    <string name="contact_support">購買遇到問題？聯絡客服（QQ）</string>
+    <string name="purchase_loading">正在建立訂單…</string>
+    <string name="purchase_opening_alipay">正在開啟支付寶…</string>
+    <string name="purchase_waiting">請在支付寶完成付款，到帳後自動啟用。</string>
+    <string name="purchase_success">付款成功，高級版已啟用！</string>
+    <string name="purchase_keep_code">你的啟用碼（點擊複製），請截圖保存：還可在另一台裝置上使用。</string>
+    <string name="purchase_paid_not_active">已收到付款但自動啟用未成功，請複製上方啟用碼，用「輸入啟用碼」完成啟用。</string>
+    <string name="purchase_code_copied">已複製啟用碼</string>
+    <string name="purchase_done">完成</string>
+    <string name="err_purchase_unreachable">無法連接伺服器。若目前連著相機 Wi-Fi，請先斷開，改用有外網的網路重試。</string>
+    <string name="err_purchase_failed">下單失敗，請稍後重試或聯絡客服。</string>
 </resources>

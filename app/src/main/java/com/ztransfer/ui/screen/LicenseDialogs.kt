@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -143,10 +144,12 @@ private val CompareColWidth = 64.dp
 
 /**
  * 高级版介绍对话框("解锁高级版"徽标打开,设置面板与传输页共用):
- * 免费/高级版三列对比表(窄弹窗适配) + 金色"解锁"按钮复制 QQ 号购买。
+ * 免费/高级版三列对比表(窄弹窗适配) + 金色"立即购买"按钮拉起支付购买流程,
+ * "联系客服"小入口复制 QQ 号兜底(支付出问题/换绑等人工场景)。
  * [showEnterCode] 控制"输入激活码"入口(6 位限长在 ActivationDialog 内):
  * 仅连接页开——彼时尚未连相机热点,多半还有外网;其余入口(设置面板)关,
- * 连着相机 Wi-Fi 无外网,在线激活必失败。
+ * 连着相机 Wi-Fi 无外网,在线激活必失败。购买同理需要外网,但入口不藏:
+ * 下单失败的报错文案会引导先断开相机 Wi-Fi。
  * 触限处只弹轻量提示引导到这里,不直接打断弹窗。
  */
 @Composable
@@ -154,10 +157,14 @@ fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false) {
     val colors = AppTheme.colors
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
-    // 激活输入框叠在本弹窗之上;关闭后回到本弹窗(激活成功后由用户自行关闭)。
+    // 激活输入框/购买流程叠在本弹窗之上;关闭后回到本弹窗(成功后由用户自行关闭)。
     var showActivation by remember { mutableStateOf(false) }
+    var showPurchase by remember { mutableStateOf(false) }
     if (showActivation) {
         ActivationDialog(onDismiss = { showActivation = false })
+    }
+    if (showPurchase) {
+        PurchaseDialog(onDismiss = { showPurchase = false })
     }
 
     AlertDialog(
@@ -230,24 +237,25 @@ fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false) {
                         color = ProGold
                     )
                 }
-                if (copied) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        stringResource(R.string.qq_group_copied, QQ_NUMBER),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.statusConnected
-                    )
-                }
+                // 人工兜底入口:复制客服 QQ(支付异常/换绑等场景)。
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    if (copied) stringResource(R.string.qq_group_copied, QQ_NUMBER)
+                    else stringResource(R.string.contact_support),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (copied) colors.statusConnected else colors.accentBlue,
+                    modifier = Modifier.clickable {
+                        clipboard.setText(AnnotatedString(QQ_NUMBER))
+                        copied = true
+                    }
+                )
             }
         },
         confirmButton = {
-            // 金色闪亮"解锁"按钮(与入口徽标同款):点击复制 QQ 号,提示加号购买。
+            // 金色闪亮"立即购买"按钮(与入口徽标同款):拉起支付宝购买流程,付款自动激活。
             ProBadgeButton(
-                label = stringResource(R.string.unlock),
-                onClick = {
-                    clipboard.setText(AnnotatedString(QQ_NUMBER))
-                    copied = true
-                }
+                label = stringResource(R.string.buy_now),
+                onClick = { showPurchase = true }
             )
         },
         dismissButton = {

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZTransfer · Z传 — 尼康相机照片无线传输</title>
+<meta name="description" content="ZTransfer(Z传):安卓手机直连尼康 Z 系列相机,无线浏览与传输 RAW/JPEG 照片,支持实时监看。免费下载,高级版一次买断。">
+<style>
+  :root {
+    --bg: #1E1E1E; --surface: #2A2A2A; --text: #F2F2F2; --muted: #A8A8A8;
+    --gold: #E09B2D; --blue: #4A9EDE; --line: rgba(255,255,255,.12);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    line-height: 1.7;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 72px 0 48px; text-align: center; }
+  .logo { width: 96px; height: 96px; border-radius: 22px; background: var(--bg);
+          box-shadow: 0 0 0 1px var(--line); }
+  h1 { font-size: 2.2rem; margin-top: 20px; letter-spacing: .02em; }
+  .tagline { color: var(--muted); margin-top: 8px; font-size: 1.05rem; }
+  .cta { margin-top: 28px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: 12px 30px; border-radius: 999px;
+         text-decoration: none; font-weight: 600; }
+  .btn-gold { background: linear-gradient(135deg, #F0B24A, #D98A18); color: #1A1A1A; }
+  .btn-ghost { border: 1px solid var(--line); color: var(--text); }
+  section { padding: 40px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 1.4rem; margin-bottom: 20px; }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: var(--surface); border-radius: 14px; padding: 20px; }
+  .card b { display: block; margin-bottom: 6px; font-size: 1.02rem; }
+  .card span { color: var(--muted); font-size: .92rem; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  th, td { padding: 10px 8px; text-align: center; border-bottom: 1px solid var(--line); font-size: .95rem; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; }
+  .pro { color: var(--gold); font-weight: 600; }
+  .price { margin-top: 18px; color: var(--muted); font-size: .95rem; }
+  .price b { color: var(--gold); font-size: 1.15rem; }
+  footer { padding: 36px 0 48px; border-top: 1px solid var(--line);
+           color: var(--muted); font-size: .88rem; text-align: center; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <svg class="logo" viewBox="21 21 66 66" xmlns="http://www.w3.org/2000/svg" aria-label="ZTransfer logo">
+    <rect x="21" y="21" width="66" height="66" fill="#1E1E1E"/>
+    <path fill="#FFFFFF" d="M39.56,35 L63.12,35 L61.64,39.94 L35.34,68.06 L53.2,68.06 L51.72,73 L28.16,73 L29.64,68.06 L55.94,39.94 L38.08,39.94 Z"/>
+    <path fill="#1E1E1E" stroke="#1E1E1E" stroke-width="4.6" stroke-linejoin="round" d="M56.28,35 L79.84,35 L78.36,39.94 L52.06,68.06 L69.92,68.06 L68.44,73 L44.88,73 L46.36,68.06 L72.66,39.94 L54.8,39.94 Z"/>
+    <path fill="#FFFFFF" d="M56.28,35 L79.84,35 L78.36,39.94 L52.06,68.06 L69.92,68.06 L68.44,73 L44.88,73 L46.36,68.06 L72.66,39.94 L54.8,39.94 Z"/>
+  </svg>
+  <h1>ZTransfer · Z传</h1>
+  <p class="tagline">尼康相机照片,无线直达安卓手机</p>
+  <div class="cta">
+    <a class="btn btn-gold" href="#download">免费下载</a>
+    <a class="btn btn-ghost" href="#pro">高级版</a>
+  </div>
+</header>
+
+<section class="wrap" id="features">
+  <h2>功能</h2>
+  <div class="features">
+    <div class="card"><b>相机直连</b><span>手机连接尼康 Z 系列相机 Wi-Fi,无需电脑、无需读卡器,拍完即传。</span></div>
+    <div class="card"><b>RAW / JPEG 全支持</b><span>浏览缩略图、大图预览缩放,按日期筛选,RAW 大文件稳定传输。</span></div>
+    <div class="card"><b>实时新增照片</b><span>边拍边收:相机新拍摄的照片实时出现在手机列表,连拍标记一目了然。</span></div>
+    <div class="card"><b>实时监看</b><span>手机作为相机取景监视器,构图检查不再凑眼看小屏。</span></div>
+  </div>
+</section>
+
+<section class="wrap" id="pro">
+  <h2>免费版 / 高级版</h2>
+  <table>
+    <tr><th>功能</th><th>免费版</th><th class="pro">高级版</th></tr>
+    <tr><td>每日传输</td><td>25 张</td><td class="pro">无限</td></tr>
+    <tr><td>单文件大小</td><td>≤ 400 MB</td><td class="pro">无限</td></tr>
+    <tr><td>实时监看</td><td>每日 3 分钟</td><td class="pro">不限时</td></tr>
+  </table>
+  <p class="price">高级版<b>一次买断</b>,无订阅,更新免费,激活码可在两台设备使用。App 内点击「立即购买」,支付宝付款后自动激活。</p>
+</section>
+
+<section class="wrap" id="download">
+  <h2>下载</h2>
+  <p>安卓 8.0 及以上。加入 QQ 群获取最新安装包与使用答疑:<b>953000922</b></p>
+</section>
+
+<footer class="wrap">
+  ZTransfer(Z传)· 独立开发的尼康相机传图工具<br>
+  联系与售后:QQ 953000922
+</footer>
+
+</body>
+</html>
