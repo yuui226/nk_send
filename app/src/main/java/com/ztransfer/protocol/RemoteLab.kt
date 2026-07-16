@@ -425,11 +425,11 @@ suspend fun NikonCamera.rcGetMovieMode(): Boolean? {
 suspend fun NikonCamera.rcStartMovie(log: (String) -> Unit = {}): Int {
     val rc = cmdBusyRetry(Lab.NK_START_MOVIE_REC)
     if (rc != Lab.OK) {
-        log("StartMovieRec resp=${hex4(rc)}")
+        log("!! StartMovieRec resp=${hex4(rc)}")
         val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_MOV_PROHIBIT)
         if (prc == Lab.OK && pd != null && pd.size >= 4) {
             val cond = Cur(pd).u32()
-            if (cond != 0L) log("MovRecProhibit=${hex8(cond)}")
+            if (cond != 0L) log("!! MovRecProhibit=${hex8(cond)}")
         }
     }
     return rc
@@ -471,12 +471,13 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
         rc = labCommand(Lab.NK_START_LIVE_VIEW).first
         tries++
     }
-    log("StartLiveView(0x9201) resp=${hex4(rc)}${if (tries > 0) " after $tries busy-retries" else ""}")
+    log((if (rc == Lab.OK) "" else "!! ") +
+        "StartLiveView(0x9201) resp=${hex4(rc)}${if (tries > 0) " after $tries busy-retries" else ""}")
     if (rc != Lab.OK) {
         // 失败才读禁止条件用于诊断——成功路径省掉这条往返，进页更快。
         val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_LV_PROHIBIT)
         if (prc == Lab.OK && pd != null && pd.size >= 4) {
-            log("LV prohibit condition = ${hex8(Cur(pd).u32())}")
+            log("!! LV prohibit condition = ${hex8(Cur(pd).u32())}")
         }
         return false
     }
@@ -488,7 +489,10 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
         if (ready != Lab.DEVICE_BUSY) break
         delay(20)   // 相机通常 20-80ms 就绪，20ms 步进能少等半拍
     }
-    log("DeviceReady(0x90C8) resp=${hex4(ready)} after ${System.currentTimeMillis() - t0}ms")
+    // 就绪属正常路径不记日志（StartLiveView 那条已标记会话启动）；没等到才值得留痕。
+    if (ready != Lab.OK) {
+        log("!! DeviceReady(0x90C8) resp=${hex4(ready)} after ${System.currentTimeMillis() - t0}ms")
+    }
     return true
 }
 

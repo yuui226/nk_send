@@ -60,6 +60,9 @@ fun GlassButton(
         modifier = modifier.graphicsLayer {
             scaleX = pressScale
             scaleY = pressScale
+            // 禁用态整体压淡：M3 Surface 的 enabled 只拦点击不改视觉，
+            // 不加这行会出现"看起来可点、点了没反应"的假活按钮。
+            alpha = if (enabled) 1f else 0.45f
         }
     ) {
         Row(

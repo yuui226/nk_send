@@ -64,6 +64,13 @@ CREATE TABLE IF NOT EXISTS bindings (
   UNIQUE (code, device_fp)
 );
 CREATE INDEX IF NOT EXISTS idx_bindings_code ON bindings(code);
+CREATE TABLE IF NOT EXISTS activations (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  code      TEXT NOT NULL,
+  device_fp TEXT NOT NULL,
+  at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_act_code_at ON activations(code, at);
 CREATE TABLE IF NOT EXISTS orders (
   out_trade_no TEXT PRIMARY KEY,
   device_fp    TEXT NOT NULL,
@@ -72,11 +79,14 @@ CREATE TABLE IF NOT EXISTS orders (
   code         TEXT,
   charge_id    TEXT,
   pay_url      TEXT,
+  pay_qr       TEXT,
   created_at   TEXT NOT NULL,
   paid_at      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_orders_fp ON orders(device_fp);
 `);
+// 迁移:老库的 orders 表可能没有 pay_qr 列,补上(已存在则抛错,忽略即可)
+try { db.exec('ALTER TABLE orders ADD COLUMN pay_qr TEXT'); } catch { /* 列已存在 */ }
 
 // ---------------------------------------------------------------- 工具
 
@@ -91,10 +101,17 @@ function newCode() {
         () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join('');
 }
 
+// 通行证离线硬有效期:签发后 N 天内本地有效,到期必须联网续签,否则 App 降级。
+// 短=防白嫖更狠但极端离线的正版用户(如多日外拍无外网)可能被误降级;
+// 长=对正版更友好。查重(24h)才是快速反滥用主力,exp 只是兜底,可适当放长。
+// ★ 改天数只动这一个常量。
+const HARD_GRACE_SEC = 7 * 24 * 3600;   // 7 天
+
 // 通行证:base64url(payload JSON) + "." + base64url(ECDSA P-256 DER 签名)
 function issueToken(code, fp) {
+    const iat = Math.floor(Date.now() / 1000);
     const payload = Buffer.from(JSON.stringify({
-        v: 1, code, fp, plan: 'pro', iat: Math.floor(Date.now() / 1000),
+        v: 1, code, fp, plan: 'pro', iat, exp: iat + HARD_GRACE_SEC,
     }));
     const sig = crypto.sign('sha256', payload, signingKey); // EC 密钥默认输出 DER,Android SHA256withECDSA 可直接验
     return `${payload.toString('base64url')}.${sig.toString('base64url')}`;
@@ -124,30 +141,66 @@ function rateLimited(ip) {
 
 // ---------------------------------------------------------------- 业务
 
+// 单设备浮动授权:一个码同时只有一台在用,新设备激活即"顶替"旧设备。
+// 反滥用:一个码在滚动 30 天窗口内累计激活 ≥ CHURN_MAX 次 → 判定共享/倒卖,永久吊销整码;
+// 各持有设备下次联网续签即被踢成免费(离线也会在硬过期后降级)。
+// 计"激活次数"(含被顶替后又回来激活的设备,即 A↔B 来回共享的每一下);
+// 不含:当前在用设备原地重装(幂等)与 /v1/restore(合法单机找回,且被踢设备无法 restore)。
+// 代价:在自有两台设备间频繁来回切换的正版用户可能被误判(与两人共享机器上无法区分)。
+const CHURN_WINDOW_MS = 30 * 24 * 3600_000;
+const CHURN_MAX = 6;
+
 function apiActivate(body) {
     const code = normCode(body.code), fp = String(body.fp || '').toLowerCase();
     if (!CODE_RE.test(code) || !FP_RE.test(fp)) return { ok: false, err: 'CODE_NOT_FOUND' };
 
-    const row = db.prepare('SELECT status, max_devices FROM codes WHERE code = ?').get(code);
+    const row = db.prepare('SELECT status FROM codes WHERE code = ?').get(code);
     if (!row) return { ok: false, err: 'CODE_NOT_FOUND' };
     if (row.status !== 'active') return { ok: false, err: 'CODE_REVOKED' };
 
     const bound = db.prepare('SELECT id FROM bindings WHERE code = ? AND device_fp = ?').get(code, fp);
     if (bound) {
-        // 幂等:同一设备重复激活(卸载重装)直接重发通行证
+        // 幂等:同一设备重复激活(卸载重装/再次点激活)直接重发通行证,不算换机、不计查重
         db.prepare('UPDATE bindings SET last_renew_at = ?, app_ver = ? WHERE id = ?')
             .run(now(), String(body.app_ver || ''), bound.id);
         return { ok: true, token: issueToken(code, fp) };
     }
 
-    const used = db.prepare('SELECT COUNT(*) AS n FROM bindings WHERE code = ?').get(code).n;
-    if (used >= row.max_devices) return { ok: false, err: 'SLOTS_FULL' };
+    // 新设备:先记一次激活事件并做查重(顺手清理 30 天前的旧事件)
+    db.prepare('DELETE FROM activations WHERE at < ?')
+        .run(new Date(Date.now() - 30 * 24 * 3600_000).toISOString());
+    db.prepare('INSERT INTO activations (code, device_fp, at) VALUES (?, ?, ?)').run(code, fp, now());
+    const uses = db.prepare(
+        'SELECT COUNT(*) AS n FROM activations WHERE code = ? AND at > ?'
+    ).get(code, new Date(Date.now() - CHURN_WINDOW_MS).toISOString()).n;
+    if (uses >= CHURN_MAX) {
+        db.prepare(`UPDATE codes SET status = 'revoked', revoked_at = ?, revoke_reason = ?
+                    WHERE code = ? AND status = 'active'`).run(now(), 'abuse:churn', code);
+        log(`ABUSE_REVOKE ${code} uses=${uses}/30d`);
+        return { ok: false, err: 'CODE_REVOKED' };
+    }
 
+    // 顶替:删掉该码其它设备的绑定,只保留本机(换机自助生效;被顶替设备下次续签得 NOT_BOUND 降级)
+    const kicked = db.prepare('DELETE FROM bindings WHERE code = ?').run(code).changes;
     db.prepare(`INSERT INTO bindings (code, device_fp, device_model, app_ver, activated_at, last_renew_at)
                 VALUES (?, ?, ?, ?, ?, ?)`)
         .run(code, fp, String(body.model || ''), String(body.app_ver || ''), now(), now());
-    log(`ACTIVATE ${code} fp=${fp.slice(0, 8)} model=${body.model || '-'} (${used + 1}/${row.max_devices})`);
+    log(`ACTIVATE ${code} fp=${fp.slice(0, 8)} model=${body.model || '-'} kicked=${kicked}`);
     return { ok: true, token: issueToken(code, fp) };
+}
+
+// 按设备指纹恢复(重装后无本地码时用户主动触发):仅当本机仍是该码当前绑定设备才成功。
+// 被顶替过的旧设备查不到绑定 → NOT_BOUND(符合单设备语义)。返回码供本地保存与"查看激活码"。
+function apiRestore(body) {
+    const fp = String(body.fp || '').toLowerCase();
+    if (!FP_RE.test(fp)) return { ok: false, err: 'NOT_BOUND' };
+    const b = db.prepare(`SELECT b.code AS code FROM bindings b JOIN codes c ON c.code = b.code
+                          WHERE b.device_fp = ? AND c.status = 'active'`).get(fp);
+    if (!b) return { ok: false, err: 'NOT_BOUND' };
+    db.prepare('UPDATE bindings SET last_renew_at = ? WHERE code = ? AND device_fp = ?')
+        .run(now(), b.code, fp);
+    log(`RESTORE ${b.code} fp=${fp.slice(0, 8)}`);
+    return { ok: true, token: issueToken(b.code, fp), code: b.code };
 }
 
 function apiRenew(body) {
@@ -266,6 +319,10 @@ function xhPost(apiPath, params) {
     });
 }
 
+// 同设备未支付订单的复用窗口:短于虎皮椒二维码 5 分钟有效期,
+// 保证复用到的码仍可扫;超过则新建(配合 App 端 5 分钟"过期刷新")。
+const PENDING_REUSE_MS = 4 * 60_000;
+
 function newOrderId() {
     // ZT + 毫秒时间戳36进制 + 4位随机,全大写字母数字,唯一性由 PRIMARY KEY 兜底
     return 'ZT' + Date.now().toString(36).toUpperCase()
@@ -281,13 +338,12 @@ async function apiOrderCreate(body) {
     db.prepare("DELETE FROM orders WHERE status = 'pending' AND created_at < ?")
         .run(new Date(Date.now() - 7 * 24 * 3600_000).toISOString());
 
-    // 同设备 15 分钟内的未支付订单直接复用,反复点购买不会刷出一堆新单
-    // (窗口对齐虎皮椒收银台链接的短有效期,过期就换新单新链接)
-    const pending = db.prepare(`SELECT out_trade_no, pay_url FROM orders
+    // 同设备复用窗口(PENDING_REUSE_MS)内的未支付订单直接复用,反复点购买不会刷出一堆新单
+    const pending = db.prepare(`SELECT out_trade_no, pay_url, pay_qr FROM orders
                                 WHERE device_fp = ? AND status = 'pending' AND created_at > ?
                                 ORDER BY created_at DESC`)
-        .get(fp, new Date(Date.now() - 15 * 60_000).toISOString());
-    if (pending) return { ok: true, order: pending.out_trade_no, pay_url: pending.pay_url };
+        .get(fp, new Date(Date.now() - PENDING_REUSE_MS).toISOString());
+    if (pending) return { ok: true, order: pending.out_trade_no, pay_url: pending.pay_url, pay_qr: pending.pay_qr };
 
     const order = newOrderId();
     let resp;
@@ -303,15 +359,17 @@ async function apiOrderCreate(body) {
         log(`ORDER_UPSTREAM_FAIL ${e.message}`);
         return { ok: false, err: 'PAY_UPSTREAM' };
     }
-    if (Number(resp.errcode) !== 0 || !resp.url) {
+    // url_qrcode:现成的二维码图片地址(微信个人支付主用扫码);url:手机端支付链接。
+    // 至少要有其一才算下单成功。
+    if (Number(resp.errcode) !== 0 || (!resp.url && !resp.url_qrcode)) {
         log(`ORDER_CREATE_REJECTED ${resp.errmsg || JSON.stringify(resp).slice(0, 200)}`);
         return { ok: false, err: 'PAY_UPSTREAM' };
     }
-    db.prepare(`INSERT INTO orders (out_trade_no, device_fp, amount_fen, pay_url, created_at)
-                VALUES (?, ?, ?, ?, ?)`)
-        .run(order, fp, cfg.priceFen, resp.url, now());
+    db.prepare(`INSERT INTO orders (out_trade_no, device_fp, amount_fen, pay_url, pay_qr, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(order, fp, cfg.priceFen, resp.url || '', resp.url_qrcode || '', now());
     log(`ORDER_NEW ${order} fp=${fp.slice(0, 8)} ¥${cfg.priceFen / 100}`);
-    return { ok: true, order, pay_url: resp.url };
+    return { ok: true, order, pay_url: resp.url || '', pay_qr: resp.url_qrcode || '' };
 }
 
 // 对上游查单限频:同一订单 4.5s 内只查一次。App 轮询 2s,叠加节流后实际上游
@@ -367,10 +425,11 @@ async function apiOrderStatus(body) {
 
     if (row.code) return { ok: true, status: 'paid', code: row.code };
     // want_url:App 重进购买页续用旧单时才要支付链接,常规轮询不带。
-    // 超过 15 分钟的旧链接可能已过期,不再给出——App 拿不到链接会自行新建订单。
+    // 超过复用窗口的旧链接码可能已过期,不再给出——App 拿不到会自行新建订单。
     const out = { ok: true, status: 'pending' };
-    if (body.want_url && row.created_at > new Date(Date.now() - 15 * 60_000).toISOString()) {
+    if (body.want_url && row.created_at > new Date(Date.now() - PENDING_REUSE_MS).toISOString()) {
         out.pay_url = row.pay_url;
+        out.pay_qr = row.pay_qr;
     }
     return out;
 }
@@ -449,6 +508,10 @@ const server = https.createServer(
                 return send(res, 200, apiActivate(await readBody(req)));
             }
             if (route === 'POST /v1/renew') return send(res, 200, apiRenew(await readBody(req)));
+            if (route === 'POST /v1/restore') {
+                if (rateLimited(ip)) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
+                return send(res, 200, apiRestore(await readBody(req)));
+            }
 
             // 购买下单与限速共用一本账(下单也是敏感写操作);轮询查单不限速,
             // 上游查询频率由 confirmPaid 内部的 2.5s 节流兜住。

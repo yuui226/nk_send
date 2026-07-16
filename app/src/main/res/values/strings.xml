@@ -11,6 +11,9 @@
     <string name="open_wifi_settings">Open Wi-Fi Settings</string>
     <string name="step_camera_wifi">On the camera, enable “Connect to smart device (Wi-Fi)”</string>
     <string name="step_phone_wifi">Connect your phone\'s Wi-Fi to the camera\'s hotspot</string>
+    <string name="tip_title">A faster way to connect</string>
+    <string name="tip_body">Add “Wi-Fi connection” to your camera\'s i menu, then just press the i button to turn it on in one tap — no menu digging. Path:</string>
+    <string name="tip_path">MENU → Custom Settings Menu → Controls → Customize i menu → pick a slot → Wi-Fi connection</string>
 
     <!-- File list -->
     <string name="loading_file_list">Loading file list…</string>
@@ -22,7 +25,7 @@
     <string name="loading_more">Loading more…</string>
     <string name="unknown_date">Unknown date</string>
     <string name="filter_all">All</string>
-    <string name="filter_protected">Protected (🔑)</string>
+    <string name="filter_protected">Protected</string>
     <string name="burst_label">Burst</string>
     <string name="filter_other">Other</string>
     <string name="cd_back_to_top">Back to top</string>
@@ -33,10 +36,6 @@
     <string name="cd_all_queued">All added to queue</string>
     <string name="cd_transfer_group">Transfer this group</string>
     <string name="cd_apply_filter">Apply filter</string>
-    <string name="cd_transferred">Transferred</string>
-    <string name="cd_queued">Queued</string>
-    <string name="cd_failed">Transfer failed</string>
-    <string name="cd_cancelled">Cancelled</string>
 
     <!-- Transfer queue -->
     <string name="no_transfer_tasks">No transfer tasks</string>
@@ -80,6 +79,7 @@
 
     <!-- Photo preview -->
     <string name="no_preview">No preview</string>
+    <string name="video_no_preview">Video · preview not supported</string>
 
     <!-- Transfer errors -->
     <string name="error_dir_invalid">Transfer folder is no longer valid. Please choose it again</string>
@@ -146,7 +146,6 @@
     <string name="device_code_label">Device code %1$s</string>
     <string name="activate">Activate</string>
     <string name="activating">Activating…</string>
-    <string name="activation_title">Activate ZTransfer</string>
     <string name="activation_privacy">Activation sends this device\'s identifier to the activation server, used only for license verification.</string>
     <string name="activation_success">Activated — thank you!</string>
     <string name="err_code_not_found">Activation code not found</string>
@@ -155,9 +154,10 @@
     <string name="err_rate_limited">Too many attempts — try again in a minute</string>
     <string name="err_server_unreachable">Couldn\'t reach the activation server. Check your network; if the network is fine, update to the latest version (via QQ group).</string>
     <string name="err_generic">Activation failed (%1$s)</string>
-    <string name="revert_free">Revert to free (testing)</string>
+    <string name="revert_free">Reverted to free (testing)</string>
     <string name="pro_version">Pro</string>
     <string name="unlock_pro">Unlock Pro</string>
+    <string name="pro_label">Pro</string>
     <string name="unlock">Unlock</string>
     <string name="enter_code">Enter activation code</string>
     <string name="tier_free">Free</string>
@@ -169,7 +169,7 @@
     <string name="compare_remote_free">%1$d min/day</string>
     <string name="compare_unlimited">Unlimited</string>
     <string name="compare_no_limit">No limit</string>
-    <string name="pro_price_line">One-time purchase — %1$s</string>
+    <string name="price_promo_tag">Limited-time offer</string>
     <string name="pro_perks">One-time purchase · No subscription · Free updates</string>
     <string name="quota_left_hint">%1$d/%2$d left today</string>
     <string name="transfer_limit_reached">Daily limit reached — unlock Pro</string>
@@ -177,12 +177,27 @@
     <string name="remote_trial_left">%1$s left today</string>
     <string name="remote_trial_ended">Daily remote time used up — unlock Pro for unlimited</string>
     <string name="buy_now">Buy Now</string>
-    <string name="contact_support">Purchase issues? Contact support (QQ)</string>
+    <string name="contact_support">Purchase or activation issues? Contact support</string>
     <string name="purchase_loading">Creating order…</string>
+    <string name="purchase_qr_loading">Generating payment QR…</string>
+    <string name="purchase_scan_hint">WeChat can\'t scan a code on the same phone. Show this QR on another screen (computer / tablet / another phone) and scan it with WeChat to pay. This device activates automatically after payment.</string>
+    <string name="purchase_copy_link">Copy payment link (open on a computer to show the QR)</string>
+    <string name="purchase_link_copied">Payment link copied</string>
+    <string name="purchase_open_link">Open payment page</string>
+    <string name="purchase_qr_expired">QR code expired</string>
+    <string name="purchase_qr_refresh">Refresh QR code</string>
+    <string name="renewal_needed">Pro license expired — connect to the internet and reopen to renew automatically.</string>
     <string name="purchase_opening_alipay">Opening Alipay…</string>
     <string name="purchase_waiting">Complete the payment in Alipay — activation is automatic once confirmed.</string>
     <string name="purchase_success">Payment received — Pro activated!</string>
-    <string name="purchase_keep_code">Your activation code (tap to copy). Keep it — it also works on one more device.</string>
+    <string name="purchase_activated">Purchased · Pro activated</string>
+    <string name="purchase_view_code">View activation code (for a 2nd device)</string>
+    <string name="restore_action">Restore purchase</string>
+    <string name="restore_restoring">Restoring…</string>
+    <string name="restore_none">No license found for this device (not purchased, or now in use on another device).</string>
+    <string name="settings_view_code">View my activation code</string>
+    <string name="settings_code_hint">Keep your activation code private. To switch phones, enter it on the new device (the old one deactivates). Sharing it across many devices disables the code and downgrades all of them.</string>
+    <string name="purchase_keep_code">Your activation code (tap to copy). Keep it private — enter it on a new phone to switch (the old one deactivates). Sharing it across devices will disable it.</string>
     <string name="purchase_paid_not_active">Payment received but auto-activation failed — copy the code above and use "Enter activation code".</string>
     <string name="purchase_code_copied">Activation code copied</string>
     <string name="purchase_done">Done</string>

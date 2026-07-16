@@ -139,7 +139,8 @@ private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
  * 布局：顶栏（信号/开发者/HD/FPS/返回）→ 监看画面 → 2×2 参数拖拽微调 tile
  * （值域来自相机枚举，只读压暗+锁；点数值弹全表直跳）→ 大圆快门键
  * （按住=半按对焦、松开在键内=拍摄）。进页自动开监看、退页自动关；
- * 拍摄结果仅确认不入队（下载走照片列表）。开发者面板：顶栏虫子按钮呼出（探测/日志）。
+ * 拍摄结果仅确认不入队（下载走照片列表）。开发者面板：顶栏虫子按钮呼出（探测/日志），
+ * 按钮默认隐藏——连按 4 次 FPS 键显示（仅本次进页有效）。
  */
 @Composable
 fun RemoteScreen(
@@ -248,6 +249,11 @@ private fun RemoteContent(
     // ---------- 开发者面板 ----------
     val logLines = remember { mutableStateListOf<String>() }
     var devPanel by remember { mutableStateOf(false) }
+    // 开发者入口默认隐藏：1.5s 内连按 4 次 FPS 键才现身（FPS 连按 4 次开关状态
+    // 恰好复原，不留副作用）。仅本次进页有效，退页复位——这是诊断后门不是常驻功能。
+    var devUnlocked by remember { mutableStateOf(false) }
+    var fpsTaps by remember { mutableStateOf(0) }
+    var lastFpsTapAt by remember { mutableStateOf(0L) }
     var showFps by remember { mutableStateOf(true) }    // 帧率覆盖默认显示（右下角）
     var hdLiveView by remember { mutableStateOf(false) } // 高清监看(XGA)开关
     var probing by remember { mutableStateOf(false) }
@@ -567,10 +573,17 @@ private fun RemoteContent(
             // AfDrive 返回码即合焦结果：0x2001=合上，0xA002=对不上焦。
             // 合焦震动【边沿触发】：仅在"未合焦→刚合上"那一下震一次，避免每轮嗡嗡震；
             // 失焦后再合上会再震。震动本身经全局设置门控（haptics 内部判 enabled）。
+            // 日志同为边沿触发（响应码变化才记）：120ms 一轮的循环逐轮打印会刷掉
+            // 面板里其它关键日志。
+            var lastDrive: Int? = null
             while (isActive) {
                 val drive = runCatching { cam.rcAfDrive() }.getOrDefault(-1)
-                devLog("AF drive resp=0x%04X".format(drive and 0xFFFF))
                 val locked = drive == Lab.OK
+                if (drive != lastDrive) {
+                    lastDrive = drive
+                    if (locked) devLog("AF locked")
+                    else devLog("!! AF drive resp=0x%04X".format(drive and 0xFFFF))
+                }
                 if (locked && !afLocked) haptics.tick()   // 合焦成功那一刻
                 afLocked = locked
                 delay(120)
@@ -721,23 +734,32 @@ private fun RemoteContent(
                 SignalPill(rssi = camState.wifiRssi, connected = connected)
                 Spacer(Modifier.weight(1f))
                 // 开发者工具入口（放在 HD/FPS 左侧）。顶栏控件统一 22dp 圆角 + 36dp 高
-                //（与照片列表页顶栏一致）。
-                GlassButton(
-                    onClick = { devPanel = true },
-                    shape = RoundedCornerShape(22.dp),
-                    contentPadding = PaddingValues(9.dp),
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    Icon(
-                        Icons.Default.BugReport,
-                        contentDescription = stringResource(R.string.cd_dev_panel),
-                        tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp)
-                    )
+                //（与照片列表页顶栏一致）。默认隐藏，连按 4 次 FPS 解锁（见 devUnlocked）。
+                if (devUnlocked) {
+                    GlassButton(
+                        onClick = { devPanel = true },
+                        shape = RoundedCornerShape(22.dp),
+                        contentPadding = PaddingValues(9.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.BugReport,
+                            contentDescription = stringResource(R.string.cd_dev_panel),
+                            tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
                 }
-                Spacer(Modifier.width(6.dp))
                 TopToggle("HD", hdLiveView) { hdLiveView = !hdLiveView; startSession(hdLiveView) }
                 Spacer(Modifier.width(6.dp))
-                TopToggle("FPS", showFps) { showFps = !showFps }
+                TopToggle("FPS", showFps) {
+                    showFps = !showFps
+                    // 隐藏入口计数：间隔超 1.5s 视为重新开始（"连续"按 4 次）
+                    val now = System.currentTimeMillis()
+                    fpsTaps = if (now - lastFpsTapAt < 1500) fpsTaps + 1 else 1
+                    lastFpsTapAt = now
+                    if (fpsTaps >= 4) devUnlocked = true
+                }
                 Spacer(Modifier.width(6.dp))
                 GlassButton(
                     onClick = onNavigateBack,

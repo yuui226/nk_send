@@ -21,6 +21,15 @@ object Motion {
         stiffness = Spring.StiffnessMediumLow
     )
 
+    /**
+     * 进度条 / 进度环的数值插值：新进度到来时平滑「追」上而非硬跳，让进度流动起来。
+     * 临界阻尼不回弹（进度不应倒退）；StiffnessMediumLow 兼顾灵动与跟手，settle 约几百毫秒。
+     */
+    val progress: SpringSpec<Float> = spring(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessMediumLow
+    )
+
     /** 覆盖层"从锚点变形展开/收回"（设置面板、长按预览共用，保证节奏一致）。 */
     val overlayExpand: TweenSpec<Float> = tween(340, easing = FastOutSlowInEasing)
     val overlayCollapse: TweenSpec<Float> = tween(260, easing = FastOutSlowInEasing)
