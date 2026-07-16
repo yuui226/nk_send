@@ -78,7 +78,7 @@ private val CompareColWidth = 64.dp
  * 触限处只弹轻量提示引导到这里,不直接打断弹窗。
  */
 @Composable
-fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false) {
+fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false, onCelebrate: () -> Unit = {}) {
     val colors = AppTheme.colors
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
@@ -86,7 +86,11 @@ fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false) {
     // 购买流程叠在本弹窗之上;关闭后回到本弹窗(成功后由用户自行关闭)。
     var showPurchase by remember { mutableStateOf(false) }
     if (showPurchase) {
-        PurchaseDialog(onDismiss = { showPurchase = false })
+        PurchaseDialog(
+            onDismiss = { showPurchase = false },
+            // 购买+激活成功:关掉购买弹窗与本弹窗,再放烟花(烟花在页面顶层,须先关弹窗才可见)。
+            onCelebrate = { showPurchase = false; onDismiss(); onCelebrate() }
+        )
     }
     // 内联激活区状态:点"输入激活码"展开;成功后短暂显示成功文案、自动关闭整个弹窗。
     var codeMode by remember { mutableStateOf(false) }
@@ -98,8 +102,9 @@ fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false) {
     // 恢复已购授权(重装后本地无码时按指纹找回)
     var restoring by remember { mutableStateOf(false) }
     var restoreMsg by remember { mutableStateOf<Int?>(null) }
+    // 内联激活成功 / 恢复授权成功:短暂显示成功后关闭本弹窗并放烟花庆祝。
     if (success) {
-        LaunchedEffect(Unit) { delay(1200); onDismiss() }
+        LaunchedEffect(Unit) { delay(1200); onDismiss(); onCelebrate() }
     }
 
     Dialog(onDismissRequest = onDismiss) {

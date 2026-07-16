@@ -130,7 +130,6 @@
     <string name="cd_dev_panel">开发者工具</string>
     <string name="remote_blocked_transfer">传输进行中，完成后再进入监看</string>
     <string name="remote_title">遥控</string>
-    <string name="remote_locked_hint">遥控期间相机机身暂不可操作</string>
     <string name="remote_transfer_busy_hint">传输进行中，监看可能卡顿</string>
     <string name="remote_rec_start_failed">无法开始录像，请检查存储卡与相机状态</string>
     <string name="dev_panel_title">开发者</string>
@@ -190,12 +189,13 @@
     <string name="purchase_opening_alipay">正在打开支付宝…</string>
     <string name="purchase_waiting">请在支付宝完成支付，到账后自动激活。</string>
     <string name="purchase_success">支付成功，高级版已激活！</string>
-    <string name="purchase_activated">购买成功 · 高级版已激活</string>
+    <string name="purchase_activated">🎉 购买成功 · 高级版已解锁</string>
+    <string name="purchase_restored">🎉 本设备已购买过 · 已免费恢复,未重复扣款</string>
     <string name="purchase_view_code">查看激活码（可用于第二台设备）</string>
-    <string name="restore_action">恢复已购授权</string>
+    <string name="restore_action">恢复授权</string>
     <string name="restore_restoring">恢复中…</string>
     <string name="restore_none">未找到本机的授权（尚未购买，或已在新设备上使用）</string>
-    <string name="settings_view_code">查看我的激活码</string>
+    <string name="settings_view_code">我要换机</string>
     <string name="settings_code_hint">请妥善保管激活码，切勿外传。换新手机时在新机输入即可（旧机自动停用）；被多台设备滥用会导致此码失效、所有设备降级。</string>
     <string name="purchase_keep_code">你的激活码（点击复制），请妥善保管、切勿外传：换新机时在新机输入激活（旧机自动停用），被多台设备滥用会导致此码失效。</string>
     <string name="purchase_paid_not_active">已收到付款但自动激活未成功，请复制上方激活码，用「输入激活码」完成激活。</string>
@@ -203,4 +203,13 @@
     <string name="purchase_done">完成</string>
     <string name="err_purchase_unreachable">无法连接服务器。若当前连着相机 Wi-Fi，请先断开，用有外网的网络重试。</string>
     <string name="err_purchase_failed">下单失败，请稍后重试或联系客服。</string>
+
+    <!-- 检查更新（连接页） -->
+    <string name="check_update">检查更新</string>
+    <string name="checking_update">检查中…</string>
+    <string name="update_latest">已是最新版本</string>
+    <string name="update_check_failed">检查更新失败，请确认当前网络可以上网</string>
+    <string name="update_found_title">发现新版本 %1$s</string>
+    <string name="update_download">去下载</string>
+    <string name="update_password_hint">提取码 %1$s 将在点击「去下载」时自动复制，在下载页粘贴即可。</string>
 </resources>

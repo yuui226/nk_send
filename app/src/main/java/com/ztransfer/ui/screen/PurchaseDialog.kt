@@ -49,7 +49,7 @@ import kotlinx.coroutines.delay
  * 激活失败不阻塞:码已到手并展示,用户可稍后走"输入激活码"。
  */
 @Composable
-fun PurchaseDialog(onDismiss: () -> Unit) {
+fun PurchaseDialog(onDismiss: () -> Unit, onCelebrate: () -> Unit = {}) {
     val colors = AppTheme.colors
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -66,6 +66,7 @@ fun PurchaseDialog(onDismiss: () -> Unit) {
     var linkCopied by remember { mutableStateOf(false) } // 复制支付链接的反馈
     var qrExpired by remember { mutableStateOf(false) }  // 二维码超 5 分钟未支付 → 提示刷新
     var refreshKey by remember { mutableStateOf(0) }     // 递增触发重新建单(刷新)
+    var restored by remember { mutableStateOf(false) }   // 本机已拥有 → 免费恢复(而非新购买)
 
     // 建单/续单:首次(refreshKey==0)先试本地旧单,拿不到再新建;刷新(>0)一律新建。
     LaunchedEffect(refreshKey) {
@@ -83,7 +84,8 @@ fun PurchaseDialog(onDismiss: () -> Unit) {
         }
         when (r) {
             is LicenseManager.OrderResult.Pending -> { order = r.order; payQr = r.payQr; payUrl = r.payUrl }
-            is LicenseManager.OrderResult.Paid -> { order = r.order; code = r.code }
+            // order 为空 = 服务器认出本机已拥有、免费恢复(见 createOrder 的 already_pro),文案区别于购买
+            is LicenseManager.OrderResult.Paid -> { order = r.order; code = r.code; if (r.order.isEmpty()) restored = true }
             LicenseManager.OrderResult.Unreachable -> error = R.string.err_purchase_unreachable
             is LicenseManager.OrderResult.Failed -> error = R.string.err_purchase_failed
             null -> Unit
@@ -105,15 +107,17 @@ fun PurchaseDialog(onDismiss: () -> Unit) {
         qrBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
     }
 
-    // 轮询到账 → 自动激活。网络抖动静默重试;对话框关闭即随组合取消。
+    // 轮询到账 → 自动激活。二维码过期(5 分钟未付)即停止轮询,不再空打死单;
+    // 用户刷新会换新 order 令本效重启。对话框关闭随组合取消。
     LaunchedEffect(order) {
         val o = order ?: return@LaunchedEffect
-        while (code == null) {
+        while (code == null && !qrExpired) {
             delay(2000)
             val r = LicenseManager.orderStatus(o)
             if (r is LicenseManager.OrderResult.Paid) code = r.code
         }
-        when (LicenseManager.activate(code!!, BuildConfig.VERSION_NAME)) {
+        val c = code ?: return@LaunchedEffect   // 过期未支付:不激活,停轮询
+        when (LicenseManager.activate(c, BuildConfig.VERSION_NAME)) {
             LicenseManager.ActivationResult.Success -> {
                 activated = true
                 LicenseManager.clearPendingOrder()
@@ -151,7 +155,7 @@ fun PurchaseDialog(onDismiss: () -> Unit) {
                     code != null -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         if (activated) {
                             Text(
-                                stringResource(R.string.purchase_activated),
+                                stringResource(if (restored) R.string.purchase_restored else R.string.purchase_activated),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.statusConnected
@@ -342,7 +346,8 @@ fun PurchaseDialog(onDismiss: () -> Unit) {
 
                 Spacer(Modifier.height(8.dp))
                 TextButton(
-                    onClick = onDismiss,
+                    // 激活成功点"完成":交给父层关闭全部弹窗并放烟花庆祝;否则普通关闭。
+                    onClick = { if (activated) onCelebrate() else onDismiss() },
                     modifier = Modifier.align(Alignment.End)
                 ) {
                     Text(

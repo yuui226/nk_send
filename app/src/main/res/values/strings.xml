@@ -130,7 +130,6 @@
     <string name="cd_dev_panel">Developer tools</string>
     <string name="remote_blocked_transfer">Transfer in progress — enter live view after it finishes</string>
     <string name="remote_title">Remote</string>
-    <string name="remote_locked_hint">Camera body controls are disabled during remote control</string>
     <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>
     <string name="remote_rec_start_failed">Couldn\'t start recording — check the memory card and camera status</string>
     <string name="dev_panel_title">Developer</string>
@@ -190,12 +189,13 @@
     <string name="purchase_opening_alipay">Opening Alipay…</string>
     <string name="purchase_waiting">Complete the payment in Alipay — activation is automatic once confirmed.</string>
     <string name="purchase_success">Payment received — Pro activated!</string>
-    <string name="purchase_activated">Purchased · Pro activated</string>
+    <string name="purchase_activated">🎉 Purchased · Pro unlocked</string>
+    <string name="purchase_restored">🎉 This device already owns Pro — restored, no charge</string>
     <string name="purchase_view_code">View activation code (for a 2nd device)</string>
-    <string name="restore_action">Restore purchase</string>
+    <string name="restore_action">Restore</string>
     <string name="restore_restoring">Restoring…</string>
     <string name="restore_none">No license found for this device (not purchased, or now in use on another device).</string>
-    <string name="settings_view_code">View my activation code</string>
+    <string name="settings_view_code">Switch to a new phone</string>
     <string name="settings_code_hint">Keep your activation code private. To switch phones, enter it on the new device (the old one deactivates). Sharing it across many devices disables the code and downgrades all of them.</string>
     <string name="purchase_keep_code">Your activation code (tap to copy). Keep it private — enter it on a new phone to switch (the old one deactivates). Sharing it across devices will disable it.</string>
     <string name="purchase_paid_not_active">Payment received but auto-activation failed — copy the code above and use "Enter activation code".</string>
@@ -203,4 +203,13 @@
     <string name="purchase_done">Done</string>
     <string name="err_purchase_unreachable">Couldn\'t reach the server. If you\'re on the camera\'s Wi-Fi, disconnect first and retry on a network with internet access.</string>
     <string name="err_purchase_failed">Couldn\'t create the order — try again later or contact support.</string>
+
+    <!-- Check for updates (connect page) -->
+    <string name="check_update">Check for updates</string>
+    <string name="checking_update">Checking…</string>
+    <string name="update_latest">You\'re on the latest version</string>
+    <string name="update_check_failed">Couldn\'t check for updates — make sure you\'re on a network with internet access</string>
+    <string name="update_found_title">New version %1$s</string>
+    <string name="update_download">Download</string>
+    <string name="update_password_hint">Access code %1$s copies automatically when you tap Download — paste it on the download page.</string>
 </resources>

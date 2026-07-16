@@ -2,7 +2,6 @@ package com.ztransfer.ui.screen
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,23 +40,10 @@ class FireworksState {
 fun rememberFireworksState(): FireworksState = remember { FireworksState() }
 
 /**
- * 渲染当前所有活跃烟花（各自全屏 Canvas、不拦截触摸）。放在页面最上层。
- * 有烟花在放时叠一层淡入的暗幕当"夜空"——否则浅色主题页面上火花会发灰、白热核看不见；
- * 全放完后暗幕淡出，页面恢复。暗幕同样不拦截触摸。
+ * 渲染当前所有活跃烟花（各自全屏 Canvas、不拦截触摸）。放在页面最上层,不加暗幕,直接放。
  */
 @Composable
 fun FireworksOverlay(state: FireworksState) {
-    val active = state.active.isNotEmpty()
-    // 暗幕透明度：进场快、退场缓（像夜空压下来、再慢慢亮回）。在 draw 里读 .value，只重绘不重组。
-    val scrim = animateFloatAsState(
-        targetValue = if (active) 0.42f else 0f,
-        animationSpec = tween(if (active) 220 else 650, easing = LinearEasing),
-        label = "fwScrim"
-    )
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val a = scrim.value
-        if (a > 0.004f) drawRect(Color.Black, alpha = a)
-    }
     state.active.forEach { id ->
         key(id) { Firework(seed = id, onFinished = { state.active.remove(id) }) }
     }

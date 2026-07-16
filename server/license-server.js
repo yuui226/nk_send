@@ -65,10 +65,12 @@ CREATE TABLE IF NOT EXISTS bindings (
 );
 CREATE INDEX IF NOT EXISTS idx_bindings_code ON bindings(code);
 CREATE TABLE IF NOT EXISTS activations (
-  id        INTEGER PRIMARY KEY AUTOINCREMENT,
-  code      TEXT NOT NULL,
-  device_fp TEXT NOT NULL,
-  at        TEXT NOT NULL
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  code         TEXT NOT NULL,
+  device_fp    TEXT NOT NULL,
+  device_model TEXT,
+  app_ver      TEXT,
+  at           TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_act_code_at ON activations(code, at);
 CREATE TABLE IF NOT EXISTS orders (
@@ -85,8 +87,10 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 CREATE INDEX IF NOT EXISTS idx_orders_fp ON orders(device_fp);
 `);
-// 迁移:老库的 orders 表可能没有 pay_qr 列,补上(已存在则抛错,忽略即可)
+// 迁移:老库缺列时补上(已存在则抛错,忽略即可)
 try { db.exec('ALTER TABLE orders ADD COLUMN pay_qr TEXT'); } catch { /* 列已存在 */ }
+try { db.exec('ALTER TABLE activations ADD COLUMN device_model TEXT'); } catch { /* 列已存在 */ }
+try { db.exec('ALTER TABLE activations ADD COLUMN app_ver TEXT'); } catch { /* 列已存在 */ }
 
 // ---------------------------------------------------------------- 工具
 
@@ -102,8 +106,8 @@ function newCode() {
 }
 
 // 通行证离线硬有效期:签发后 N 天内本地有效,到期必须联网续签,否则 App 降级。
-// 短=防白嫖更狠但极端离线的正版用户(如多日外拍无外网)可能被误降级;
-// 长=对正版更友好。查重(24h)才是快速反滥用主力,exp 只是兜底,可适当放长。
+// 与 App 端"每天续签"配合:有网设备每天滚动刷新有效期,离线最多用 N 天;
+// 被顶替/吊销的设备下次续签即降级。反滥用的快速主力是查重(见下 CHURN_*),exp 只是离线兜底。
 // ★ 改天数只动这一个常量。
 const HARD_GRACE_SEC = 7 * 24 * 3600;   // 7 天
 
@@ -166,10 +170,9 @@ function apiActivate(body) {
         return { ok: true, token: issueToken(code, fp) };
     }
 
-    // 新设备:先记一次激活事件并做查重(顺手清理 30 天前的旧事件)
-    db.prepare('DELETE FROM activations WHERE at < ?')
-        .run(new Date(Date.now() - 30 * 24 * 3600_000).toISOString());
-    db.prepare('INSERT INTO activations (code, device_fp, at) VALUES (?, ?, ?)').run(code, fp, now());
+    // 新设备:记一次激活事件(含机型/版本,永久保留作历史与取证;查重只看近 30 天窗口)
+    db.prepare('INSERT INTO activations (code, device_fp, device_model, app_ver, at) VALUES (?, ?, ?, ?, ?)')
+        .run(code, fp, String(body.model || ''), String(body.app_ver || ''), now());
     const uses = db.prepare(
         'SELECT COUNT(*) AS n FROM activations WHERE code = ? AND at > ?'
     ).get(code, new Date(Date.now() - CHURN_WINDOW_MS).toISOString()).n;
@@ -195,7 +198,8 @@ function apiRestore(body) {
     const fp = String(body.fp || '').toLowerCase();
     if (!FP_RE.test(fp)) return { ok: false, err: 'NOT_BOUND' };
     const b = db.prepare(`SELECT b.code AS code FROM bindings b JOIN codes c ON c.code = b.code
-                          WHERE b.device_fp = ? AND c.status = 'active'`).get(fp);
+                          WHERE b.device_fp = ? AND c.status = 'active'
+                          ORDER BY b.activated_at DESC`).get(fp);
     if (!b) return { ok: false, err: 'NOT_BOUND' };
     db.prepare('UPDATE bindings SET last_renew_at = ? WHERE code = ? AND device_fp = ?')
         .run(now(), b.code, fp);
@@ -245,12 +249,20 @@ function adminListCodes() {
             activated_at: b.activated_at, last_renew_at: b.last_renew_at,
         });
     }
+    // 激活历史(含被顶替过的旧设备,永久保留):机型/版本/时间,供取证与统计
+    const acts = db.prepare('SELECT code, device_fp, device_model, app_ver, at FROM activations ORDER BY at').all();
+    const actByCode = new Map();
+    for (const a of acts) {
+        if (!actByCode.has(a.code)) actByCode.set(a.code, []);
+        actByCode.get(a.code).push({ fp: a.device_fp, model: a.device_model, app_ver: a.app_ver, at: a.at });
+    }
     return {
         ok: true,
         codes: codes.map((c) => ({
             code: c.code, status: c.status, max_devices: c.max_devices, note: c.note,
             created_at: c.created_at, revoked_at: c.revoked_at, revoke_reason: c.revoke_reason,
             bindings: byCode.get(c.code) || [],
+            activations: actByCode.get(c.code) || [],
         })),
     };
 }
@@ -333,6 +345,16 @@ async function apiOrderCreate(body) {
     if (!PAY_ENABLED) return { ok: false, err: 'PAY_DISABLED' };
     const fp = String(body.fp || '').toLowerCase();
     if (!FP_RE.test(fp)) return { ok: false, err: 'BAD_REQUEST' };
+
+    // 防重复购买:本机已是某个有效码的绑定设备(如重装后没走"恢复"就又点了购买),
+    // 不建单不收钱,直接把已绑的码返回给 App 免费恢复。
+    const owned = db.prepare(`SELECT b.code AS code FROM bindings b JOIN codes c ON c.code = b.code
+                              WHERE b.device_fp = ? AND c.status = 'active'
+                              ORDER BY b.activated_at DESC`).get(fp);
+    if (owned) {
+        log(`ORDER_SKIP_OWNED fp=${fp.slice(0, 8)} code=${owned.code}`);
+        return { ok: true, already_pro: true, code: owned.code };
+    }
 
     // 顺手清理超过 7 天仍未支付的死单
     db.prepare("DELETE FROM orders WHERE status = 'pending' AND created_at < ?")
@@ -481,6 +503,30 @@ function send(res, status, obj) {
     res.end(body);
 }
 
+// ---------------------------------------------------------------- App 检查更新
+// 版本信息放 config.json 同目录的 app-latest.json,发新版 = 上传 APK 到网盘后改这个
+// 文件(versionCode/versionName/url/password/notes),无需重启服务。每次请求现读,
+// 文件缺失/损坏返回 NO_VERSION_INFO,App 侧按"检查失败"提示。
+const APP_LATEST_PATH = path.join(path.dirname(CONFIG_PATH), 'app-latest.json');
+function apiAppLatest() {
+    try {
+        const j = JSON.parse(fs.readFileSync(APP_LATEST_PATH, 'utf8'));
+        if (!Number.isInteger(j.versionCode) || j.versionCode <= 0 || !j.url) {
+            return { ok: false, err: 'NO_VERSION_INFO' };
+        }
+        return {
+            ok: true,
+            versionCode: j.versionCode,
+            versionName: String(j.versionName || ''),
+            url: String(j.url),
+            password: String(j.password || ''),
+            notes: String(j.notes || ''),
+        };
+    } catch {
+        return { ok: false, err: 'NO_VERSION_INFO' };
+    }
+}
+
 const server = https.createServer(
     { cert: fs.readFileSync(cfg.tlsCertPath), key: fs.readFileSync(cfg.tlsKeyPath) },
     async (req, res) => {
@@ -490,6 +536,8 @@ const server = https.createServer(
             const route = `${req.method} ${url.pathname}`;
 
             if (route === 'GET /healthz') return send(res, 200, { ok: true });
+            // App 检查更新(只读公开信息,不限速:无写操作、响应极小)
+            if (route === 'GET /v1/app/latest') return send(res, 200, apiAppLatest());
 
             if (url.pathname.startsWith('/admin/')) {
                 if (!constantTimeEq(req.headers['x-admin-token'] || '', cfg.adminToken)) {
@@ -514,7 +562,7 @@ const server = https.createServer(
             }
 
             // 购买下单与限速共用一本账(下单也是敏感写操作);轮询查单不限速,
-            // 上游查询频率由 confirmPaid 内部的 2.5s 节流兜住。
+            // 上游查询频率由 confirmPaid 内部的 4.5s 节流兜住。
             if (route === 'POST /v1/order/create') {
                 if (rateLimited(ip)) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
                 return send(res, 200, await apiOrderCreate(await readBody(req)));

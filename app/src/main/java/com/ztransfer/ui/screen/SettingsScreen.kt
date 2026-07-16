@@ -193,7 +193,7 @@ fun SettingsOverlay(
                 }
             }
             if (showPro) {
-                ProDialog(onDismiss = { showPro = false })
+                ProDialog(onDismiss = { showPro = false }, onCelebrate = onPlayFireworks)
             }
 
             // 高级版专属:查看/复制我的激活码(换新手机时在新机输入此码,旧机自动顶替停用)。

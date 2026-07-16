@@ -631,7 +631,6 @@ private fun RemoteContent(
     var hintVisible by remember { mutableStateOf(false) }
     var hintNonce by remember { mutableStateOf(0) }
     var hintDurationMs by remember { mutableStateOf(2500L) }
-    val lockedHint = stringResource(R.string.remote_locked_hint)
     fun showHint(text: String, durationMs: Long = 2500L) {
         hintText = text
         hintDurationMs = durationMs
@@ -644,17 +643,6 @@ private fun RemoteContent(
             hintVisible = false
         }
     }
-    LaunchedEffect(Unit) {
-        // 首次读 SharedPreferences 会同步读盘，挪到 IO 免得进页时卡主线程一拍
-        val alreadyShown = withContext(Dispatchers.IO) {
-            val prefs = context.getSharedPreferences("remote_page", Context.MODE_PRIVATE)
-            val shown = prefs.getBoolean("locked_hint_shown", false)
-            if (!shown) prefs.edit().putBoolean("locked_hint_shown", true).apply()
-            shown
-        }
-        if (!alreadyShown) showHint(lockedHint, 3000L)
-    }
-
     // ---------- 录像开关 ----------
     // 开始：命令成功即乐观置位（UI 立即变停止键），事件 0xC10A 再确认；失败弹瞬时提示
     //（常见原因：无卡/禁止条件）。停止：本地先置停——EndMovieRec 失败多半是相机已自行

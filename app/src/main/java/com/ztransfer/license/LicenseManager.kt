@@ -335,6 +335,12 @@ object LicenseManager {
     suspend fun createOrder(): OrderResult = withContext(Dispatchers.IO) {
         val resp = post("/v1/order/create", JSONObject().put("fp", fingerprint))
             ?: return@withContext OrderResult.Unreachable
+        // 防重复购买:服务器认出本机已是某码的绑定设备 → 直接返码免费恢复,不再收钱。
+        if (resp.optBoolean("already_pro")) {
+            val owned = resp.optString("code")
+            return@withContext if (owned.isNotEmpty()) OrderResult.Paid("", owned)
+            else OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
+        }
         val order = resp.optString("order")
         if (!resp.optBoolean("ok") || order.isEmpty())
             return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
@@ -381,22 +387,69 @@ object LicenseManager {
         }
     }
 
+    // ---------------------------------------------------------------- 检查更新
+
+    /** 服务器 app-latest.json 描述的最新版本(下载走网盘分享页,[password] 为提取码,可空)。 */
+    data class UpdateInfo(
+        val versionCode: Int,
+        val versionName: String,
+        val url: String,
+        val password: String,
+        val notes: String
+    )
+
+    sealed class UpdateResult {
+        data class Available(val info: UpdateInfo) : UpdateResult()
+        object UpToDate : UpdateResult()
+        /** 联不上服务器,或服务器尚未配置版本信息。 */
+        object Unreachable : UpdateResult()
+    }
+
+    /** 拉取最新版本信息并与 [currentVersionCode] 比较(整数比,不解析版本名)。 */
+    suspend fun checkAppUpdate(currentVersionCode: Int): UpdateResult =
+        withContext(Dispatchers.IO) {
+            val resp = get("/v1/app/latest") ?: return@withContext UpdateResult.Unreachable
+            val vc = resp.optInt("versionCode", 0)
+            val url = resp.optString("url")
+            if (!resp.optBoolean("ok") || vc <= 0 || url.isEmpty())
+                return@withContext UpdateResult.Unreachable
+            if (vc <= currentVersionCode) UpdateResult.UpToDate
+            else UpdateResult.Available(
+                UpdateInfo(
+                    versionCode = vc,
+                    versionName = resp.optString("versionName"),
+                    url = url,
+                    password = resp.optString("password"),
+                    notes = resp.optString("notes")
+                )
+            )
+        }
+
     // ---------------------------------------------------------------- 网络
 
     /** 依次尝试所有服务器地址;全部失败返回 null。业务成败由响应 JSON 的 ok/err 表达。 */
-    private fun post(path: String, body: JSONObject): JSONObject? {
+    private fun post(path: String, body: JSONObject): JSONObject? = request(path, body)
+
+    private fun get(path: String): JSONObject? = request(path, null)
+
+    /** [body] 非空走 POST(JSON),为空走 GET;证书 pin 与超时两者共用。 */
+    private fun request(path: String, body: JSONObject?): JSONObject? {
         for (base in SERVERS) {
             try {
                 val conn = URL(base + path).openConnection() as HttpsURLConnection
                 conn.sslSocketFactory = pinnedSocketFactory
                 // 证书本身已由 pin 唯一确认,无需再校验主机名(自签证书对裸 IP 签发)
                 conn.hostnameVerifier = HostnameVerifier { _, _ -> true }
-                conn.requestMethod = "POST"
-                conn.doOutput = true
                 conn.connectTimeout = 8000
                 conn.readTimeout = 8000
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                if (body != null) {
+                    conn.requestMethod = "POST"
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                } else {
+                    conn.requestMethod = "GET"
+                }
                 val text = (if (conn.responseCode < 400) conn.inputStream else conn.errorStream)
                     .bufferedReader().use { it.readText() }
                 return JSONObject(text)
