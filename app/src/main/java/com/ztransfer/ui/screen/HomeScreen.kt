@@ -1,15 +1,9 @@
 package com.ztransfer.ui.screen
 
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -19,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,7 +26,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -45,23 +39,19 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -83,6 +73,12 @@ fun HomeScreen(
     val isPro by LicenseManager.isPro.collectAsState()
     // 曾购买、通行证过期且续签联不上网 → 顶部提示连网续期(连上重开自动恢复)。
     val renewalNeeded by LicenseManager.renewalNeeded.collectAsState()
+    // 订阅到期(要花钱才能继续用)——与 renewalNeeded 是两回事,别混:那个连上网就自己好了。
+    val subExpired by LicenseManager.subExpired.collectAsState()
+    var showRenew by remember { mutableStateOf(false) }
+    // 徽标左侧"续费"按钮打开的续费弹窗(剩余天数 + 续费价,再进付款);
+    // 与 showRenew(提示条直进付款)分开:一个是常驻入口,一个是临期/到期的急路径。
+    var showRenewInfo by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
@@ -137,19 +133,40 @@ fun HomeScreen(
                 pulsing = pulsing, success = celebrate, goldBurst = isPro
             )
 
-            // 高级版过期且离线:提示连网续期(不惩罚正版——连上重开即自动恢复)。
-            if (renewalNeeded) {
+            // 一条橙色提示条,三种互斥的到期状况共用(优先级从急到缓):
+            //   renewalNeeded → 通行证过期但没网:不用花钱,连上网重开即恢复,故【不可点】
+            //   subExpired    → 订阅到期:要花钱,点了直接进付款
+            //   剩 ≤7 天      → 临期预警:同样点了就能续,省得他到期当天才发现
+            // 前两者长得像,是两回事:一个是网络问题,一个是钱的问题。
+            val soonDays = if (isPro) {
+                val subExp = remember(showRenew, showRenewInfo) { LicenseManager.subExpiresAtSec() }
+                if (subExp > 0L) subDaysLeft(subExp) else -1
+            } else -1
+            val banner: Pair<String, Boolean>? = when {   // (文案, 点了能不能续费)
+                renewalNeeded -> stringResource(R.string.renewal_needed) to false
+                subExpired -> stringResource(R.string.sub_expired_renew) to true
+                soonDays in 0..SUB_ALERT_DAYS ->
+                    pluralStringResource(R.plurals.sub_expiring_soon, soonDays, soonDays) to true
+                else -> null
+            }
+            if (banner != null) {
+                val (bannerText, renewable) = banner
+                val bannerShape = RoundedCornerShape(10.dp)
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
-                    text = stringResource(R.string.renewal_needed),
+                    text = bannerText,
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.accentOrange,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
-                        .background(
-                            colors.accentOrange.copy(alpha = 0.12f),
-                            RoundedCornerShape(10.dp)
+                        // clip 在 clickable 之前:否则水波纹是方的,溢出圆角提示条。
+                        .then(
+                            if (renewable) Modifier
+                                .clip(bannerShape)
+                                .clickable { showRenew = true }
+                            else Modifier
                         )
+                        .background(colors.accentOrange.copy(alpha = 0.12f), bannerShape)
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 )
             }
@@ -275,6 +292,26 @@ fun HomeScreen(
                     onClick = { showPro = true }
                 )
             } else {
+                // 订阅用户(有到期日;永久码没有):徽标左侧一颗与顶栏同规格的"续费"玻璃按钮。
+                // 常驻但安静——想续随时点得到,不想理它也不碍眼;到期日等细节都收进弹窗里。
+                val subExp = remember(showRenewInfo, showRenew) { LicenseManager.subExpiresAtSec() }
+                if (subExp > 0L) {
+                    // 与右邻的"高级版"徽标同高同圆角(28dp/14dp),两颗并排像一对。
+                    GlassButton(
+                        onClick = { showRenewInfo = true },
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text(
+                            stringResource(R.string.renew_action),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.accentBlue
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
                 ProBadgeButton(
                     label = stringResource(R.string.pro_label),
                     onClick = { fireworks.launch() }
@@ -286,7 +323,26 @@ fun HomeScreen(
                 onDismiss = { showPro = false },
                 showEnterCode = true,
                 onCelebrate = { fireworks.launch() },
+                onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
+                // 到期的老用户从徽标再买 = 续原来那个码,不发新码。
+                renew = subExpired
+            )
+        }
+        // 徽标左侧"续费"按钮:先看剩余天数与价格,认可了再进付款。
+        if (showRenewInfo) {
+            RenewDialog(
+                onDismiss = { showRenewInfo = false },
+                onCelebrate = { fireworks.launch() },
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
+            )
+        }
+        // 提示条点开的续费:他已经买过且临期/到期,不必再看一遍天数和价格,直接付款页。
+        if (showRenew) {
+            PurchaseDialog(
+                onDismiss = { showRenew = false },
+                onCelebrate = { showRenew = false; fireworks.launch() },
+                onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
+                renew = true
             )
         }
 
@@ -306,99 +362,10 @@ fun HomeScreen(
             TipsBubble(anchorBounds = tipsAnchor, onDismiss = { showTips = false })
         }
 
-        // ---------- 检查更新：底部居中的低调小入口。放本页与激活码入口同一逻辑——
-        // 这是全 app 唯一确定有外网的页面(其余页面连着相机 Wi-Fi)。
-        // 结果轻反馈走底部玻璃提示条(已最新/检查失败);有新版弹对话框跳网盘下载 ----------
-        if (SHOW_UPDATE_CHECK) {
-            var checkingUpdate by remember { mutableStateOf(false) }
-            var updateInfo by remember { mutableStateOf<LicenseManager.UpdateInfo?>(null) }
-            // 提示条文案与可见性分开存,消失动画期间仍有文字可渲染;nonce 重启计时(全局同款模式)。
-            var updateHintText by remember { mutableStateOf("") }
-            var updateHintVisible by remember { mutableStateOf(false) }
-            var updateHintNonce by remember { mutableStateOf(0) }
-            LaunchedEffect(updateHintNonce) {
-                if (updateHintVisible) {
-                    delay(1800)
-                    updateHintVisible = false
-                }
-            }
-            val updateScope = rememberCoroutineScope()
-            val latestHint = stringResource(R.string.update_latest)
-            val checkFailedHint = stringResource(R.string.update_check_failed)
-            GlassButton(
-                onClick = {
-                    if (!checkingUpdate) {
-                        checkingUpdate = true
-                        updateScope.launch {
-                            when (val r = LicenseManager.checkAppUpdate(BuildConfig.VERSION_CODE)) {
-                                is LicenseManager.UpdateResult.Available -> updateInfo = r.info
-                                LicenseManager.UpdateResult.UpToDate -> {
-                                    updateHintText = latestHint
-                                    updateHintVisible = true
-                                    updateHintNonce++
-                                }
-                                LicenseManager.UpdateResult.Unreachable -> {
-                                    updateHintText = checkFailedHint
-                                    updateHintVisible = true
-                                    updateHintNonce++
-                                }
-                            }
-                            checkingUpdate = false
-                        }
-                    }
-                },
-                shape = RoundedCornerShape(14.dp),
-                contentPadding = PaddingValues(horizontal = 14.dp),
-                // 与设置页脚"反馈"按钮同规格(28dp 高小胶囊);次要文字色保持低调,不与主引导抢视线。
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 16.dp)
-                    .height(28.dp)
-            ) {
-                Text(
-                    stringResource(if (checkingUpdate) R.string.checking_update else R.string.check_update),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.onSurfaceVariant
-                )
-            }
-            // 结果提示条(与列表页底部玻璃提示同款),浮在入口按钮上方。
-            AnimatedVisibility(
-                visible = updateHintVisible,
-                enter = fadeIn() + slideInVertically { it / 2 },
-                exit = fadeOut() + slideOutVertically { it / 2 },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 56.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = colors.glassSurfaceHeavy,
-                    shadowElevation = 6.dp,
-                    border = BorderStroke(1.dp, colors.glassPanelBorder)
-                ) {
-                    Text(
-                        updateHintText,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = colors.onBackground,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                    )
-                }
-            }
-            updateInfo?.let { info ->
-                UpdateDialog(info = info, onDismiss = { updateInfo = null })
-            }
-        }
-
         // ---------- 高级版烟花彩蛋：放在最上层（含设置面板之上），不拦截触摸，播完自行移除 ----------
         FireworksOverlay(fireworks)
     }
 }
-
-// 检查更新入口的显隐开关:功能已接好(服务器接口/对话框/提示条齐备),但版本尚未稳定,
-// 先不对用户暴露。稳定后置 true 即恢复显示,勿删相关代码。
-private const val SHOW_UPDATE_CHECK = false
 
 // 连接成功后的入场节奏：先保持"连接中"脉冲 [CONNECT_CELEBRATE_DELAY_MS]（此间列表与
 // 缩略图已在后台全速加载），再播约 [CONNECT_SUCCESS_ANIM_MS] 的爆发收尾——播完由
@@ -587,79 +554,6 @@ private fun StepRow(index: Int, text: String) {
             fontWeight = FontWeight.SemiBold,
             color = colors.onBackground
         )
-    }
-}
-
-/**
- * 发现新版本对话框:版本号 + 更新说明 + "去下载"跳浏览器打开网盘分享页。
- * 分享链接带提取码时,点"去下载"先把提取码写进剪贴板再跳转(对话框内先行明示)。
- * 不做 App 内下载:网盘无稳定直链,浏览器下载 + 手动点安装是最小成本路径。
- */
-@Composable
-private fun UpdateDialog(info: LicenseManager.UpdateInfo, onDismiss: () -> Unit) {
-    val colors = AppTheme.colors
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(22.dp),
-            color = colors.glassSurfaceHeavy,
-            border = BorderStroke(1.dp, colors.glassPanelBorder)
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                Text(
-                    stringResource(R.string.update_found_title, info.versionName),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.onBackground
-                )
-                if (info.notes.isNotBlank()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        info.notes,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.onSurfaceVariant
-                    )
-                }
-                if (info.password.isNotEmpty()) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        stringResource(R.string.update_password_hint, info.password),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.accentOrange
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier.align(Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.cancel), color = colors.onSurfaceVariant)
-                    }
-                    Button(
-                        onClick = {
-                            // 先复制提取码再跳转:落到网盘页时码已在剪贴板,粘贴即可。
-                            if (info.password.isNotEmpty()) {
-                                clipboard.setText(AnnotatedString(info.password))
-                            }
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(info.url))
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                )
-                            }
-                            onDismiss()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.accentBlue),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text(stringResource(R.string.update_download))
-                    }
-                }
-            }
-        }
     }
 }
 

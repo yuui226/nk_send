@@ -280,7 +280,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _state.update { it.copy(isWifiConnected = onNikonWifi, wifiRssi = rssi) }
                 }
                 // 同 onWifiChanged：只负责"在相机 Wi-Fi 上就连上"，绝不主动断开，避免误断打断传输。
-                if (onNikonWifi && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
+                // 购买挂起期间(purchaseHold)不重连:此时是我们自己主动断的，接回去热点就关不掉了。
+                if (onNikonWifi && !purchaseHold && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
                     connectToCameraWithRetry()
                 }
                 delay(WATCH_INTERVAL_MS)
@@ -306,19 +307,45 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         wifiHeld = true
     }
 
+    // 购买挂起:为 true 期间禁止一切自动重连(watcher / onWifiChanged / 重试循环)。
+    // 只松开 requestNetwork 不够——心跳仍连着相机,相机不会关热点,手机也切不走;
+    // 且 watcher 只要看到还在相机网段就会立刻把刚断开的会话连回去。
+    @Volatile private var purchaseHold = false
+
     /**
-     * 购买期间临时松开对相机 Wi-Fi 的占用([hold]=false),买完再握回来([hold]=true)。
+     * 购买期间临时断开相机([hold]=false),买完再握回来([hold]=true)。
      *
-     * 上面那个 requestNetwork 正是把手机摁在"没有外网的相机热点"上的原因——付款要联网
-     * (我们下单、以及微信付款都走默认网络),不松手就都没网。松手后系统会自行切走没网的
-     * 热点、落回蜂窝;买完重新握住,相机 Wi-Fi 回来,onWifiChanged 会触发既有的自动重连。
+     * 付款要外网(下单、微信付款都走默认网络),而相机热点没有外网。松手要做三件事,缺一不可:
+     * 1. 挂起自动重连(purchaseHold)——否则 watcher 下一拍就把连接接回去;
+     * 2. 主动关闭 PTP 会话(发 CloseSession + 关 socket)——相机看到客户端断开才会关掉
+     *    自己的 Wi-Fi 热点;光撤 requestNetwork,socket 连着、心跳还在,热点永远不关;
+     * 3. 撤销 requestNetwork 占用——系统才会把默认网络从没外网的热点切回蜂窝。
+     *    顺序上先发 CloseSession 再撤占用(CloseSession 本身要走相机 Wi-Fi 才送得到)。
+     * 买完重新握住:恢复占用、放开重连,watcher/onWifiChanged 沿既有路径自动接管。
      */
     fun holdCameraWifi(hold: Boolean) {
+        purchaseHold = !hold
         if (hold) {
             registerNetworkCallback()
-        } else if (wifiHeld) {
-            runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
-            wifiHeld = false
+            return
+        }
+        keepaliveJob?.cancel()
+        eventPollJob?.cancel()
+        releaseSessionWifiLock()
+        val cam = camera
+        camera = null
+        _state.update { it.copy(isConnectedToCamera = false, isConnecting = false) }
+        viewModelScope.launch {
+            cam?.close()   // 先发 CloseSession(需相机网络在),再松开对该网络的占用
+            // 弹窗若在 close 完成前已关闭(hold 已握回),占用保持不动,避免撤掉刚握回的回调。
+            if (purchaseHold && wifiHeld) {
+                runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
+                wifiHeld = false
+                // 注销后系统不再推送 onLost,主动清掉链路缓存——否则残留"仍在相机网段"
+                // 的旧值,买完握回后重试循环会绑着已死的 Network 空转到用户真正回连为止。
+                wifiNetwork = null
+                linkSaysCameraWifi = false
+            }
         }
     }
 
@@ -330,7 +357,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // 只在"已在相机 Wi-Fi 但尚未连上相机"时发起连接。
             // 绝不因 isNikonWifi()==false 主动断开：该判断依赖 dhcpInfo 网关，运行中可能瞬时误报，
             // 一旦在传输途中误断会不断打断并重传文件，速度暴跌。真正掉线由下载失败/心跳自然发现。
-            if (onNikonWifi && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
+            // 购买挂起期间(purchaseHold)不重连,理由见 startConnectionWatcher。
+            if (onNikonWifi && !purchaseHold && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
                 connectToCameraWithRetry()
             }
         }
@@ -369,14 +397,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 一旦离开相机网段则退出循环，由网络回调在重新连上 Wi-Fi 后再次触发。
      */
     private suspend fun connectToCameraWithRetry() {
-        if (_state.value.isConnecting || _state.value.isConnectedToCamera) return
+        if (purchaseHold || _state.value.isConnecting || _state.value.isConnectedToCamera) return
         _state.update { it.copy(isConnecting = true) }
 
         // 经 AppLocale.wrap：协议层错误文案（会显示在失败卡片上）与应用内语言一致。
         // 提到循环外：语言变更必经 Activity.recreate()，重试循环存续期间不可能变，
         // 不必每轮重试都重建配置上下文。
         val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
-        while ((linkSaysCameraWifi || checkNikonWifi()) && !_state.value.isConnectedToCamera) {
+        // purchaseHold 也随轮检查:重试循环可能在购买挂起前就已在跑,得让它当轮退出。
+        while (!purchaseHold && (linkSaysCameraWifi || checkNikonWifi()) && !_state.value.isConnectedToCamera) {
             val cam = NikonCamera(localizedContext)
             var connected = false
             cam.connect(network = wifiNetwork).fold(
@@ -398,7 +427,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     cam.close()
                 }
             )
-            if (connected) return
+            if (connected) {
+                // 握手期间购买挂起被置起(connect 要几秒,窗口真实存在):
+                // 立即拆掉刚建立的会话,不给相机热点续命。
+                if (purchaseHold) holdCameraWifi(false)
+                return
+            }
             delay(RETRY_INTERVAL_MS)   // 未连上，稍后再试，不显示错误
         }
 

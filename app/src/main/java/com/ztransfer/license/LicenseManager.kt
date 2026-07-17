@@ -71,6 +71,11 @@ object LicenseManager {
     private val _renewalNeeded = MutableStateFlow(false)
     val renewalNeeded: StateFlow<Boolean> get() = _renewalNeeded
 
+    // 订阅到期:降级时本地的码一并清掉,单看"没有码"分不清【从没买过】和【买过但到期】。
+    // 故另存一位,让首页能说"已到期,续费继续使用";拿到新通行证(saveToken)即清除。
+    private val _subExpired = MutableStateFlow(false)
+    val subExpired: StateFlow<Boolean> get() = _subExpired
+
     // 今日剩余免费传输数,随 recordTransferDone 即时更新;PRO 恒 Int.MAX_VALUE。
     // UI 订阅它做"临近上限"预警——提示与计数同源,在完成 +1 之后弹出而非入队时。
     private val _quotaLeft = MutableStateFlow(Int.MAX_VALUE)
@@ -78,15 +83,18 @@ object LicenseManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** 在 MainActivity.onCreate 调用一次:恢复本地状态并触发静默续签。 */
+    /** 在 MainActivity.onCreate 调用一次:恢复本地状态,并静默续签 + 刷新定价。 */
     fun init(context: Context) {
         if (::prefs.isInitialized) return
         val app = context.applicationContext
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         fingerprint = computeFingerprint(app)
         _isPro.value = verifyToken(prefs.getString("token", null)) != null
+        _subExpired.value = prefs.getBoolean("sub_expired", false)
         _quotaLeft.value = quotaRemaining()
+        loadCachedPricing()
         scope.launch { renewIfDue() }
+        scope.launch { fetchPricing(PRICE_REFRESH_MS) }
     }
 
     // ---------------------------------------------------------------- 指纹
@@ -147,6 +155,14 @@ object LicenseManager {
         return obj
     }
 
+    /**
+     * 通行证里的订阅到期时刻(Unix 秒);0 = 永久有效(手动发的码)或本地无有效通行证。
+     * 读 sub 不读 exp:exp 是 7 天滚动的通行证寿命,每次续签都往后挪,跟订阅到期日无关。
+     * 用 verifySig 而非 verifyToken——到期当天通行证自身也过期了,仍要能把日期说给用户听。
+     */
+    fun subExpiresAtSec(): Long =
+        verifySig(prefs.getString("token", null))?.optLong("sub", 0L) ?: 0L
+
     private fun saveToken(token: String, code: String) {
         val iat = verifySig(token)?.optLong("iat", 0L) ?: 0L
         prefs.edit()
@@ -154,18 +170,31 @@ object LicenseManager {
             .putString("code", code)
             .putLong("last_renew", System.currentTimeMillis())
             .putLong("seen_time", maxOf(prefs.getLong("seen_time", 0L), iat))  // 单调递增,防回拨
+            .remove("sub_expired")
             .apply()
         _isPro.value = true
         _renewalNeeded.value = false
+        _subExpired.value = false
         _quotaLeft.value = quotaRemaining()
     }
 
     /** 清除本地授权(测试按钮/被吊销)。不动服务器绑定,重新输入激活码即可恢复。 */
     fun revertToFree() {
-        prefs.edit().remove("token").remove("code").remove("last_renew").apply()
+        prefs.edit().remove("token").remove("code").remove("last_renew")
+            .remove("pending_order")   // 上一轮购买的残留单号,降级后已无意义
+            .remove("sub_expired")
+            .apply()
         _isPro.value = false
         _renewalNeeded.value = false
+        _subExpired.value = false
         _quotaLeft.value = quotaRemaining()
+    }
+
+    /** 订阅到期降级:清本地授权,但留一位标记,好让首页提示续费而不是当他没买过。 */
+    private fun markSubExpired() {
+        revertToFree()
+        prefs.edit().putBoolean("sub_expired", true).apply()
+        _subExpired.value = true
     }
 
     // ---------------------------------------------------------------- 免费额度
@@ -222,7 +251,7 @@ object LicenseManager {
         object Success : ActivationResult()
         /** 所有服务器地址都联不上:提示检查网络/更新新版本。 */
         object Unreachable : ActivationResult()
-        /** 服务器明确拒绝,code 为协议错误码(CODE_NOT_FOUND / SLOTS_FULL / ...)。 */
+        /** 服务器明确拒绝,code 为协议错误码(CODE_NOT_FOUND / CODE_REVOKED / RATE_LIMITED / ...)。 */
         data class Rejected(val code: String) : ActivationResult()
     }
 
@@ -276,6 +305,7 @@ object LicenseManager {
             saveToken(token, code)                        // 内部置 _isPro=true、清 renewalNeeded、滚动 7 天有效期
         } else when (resp.optString("err")) {
             "CODE_REVOKED", "NOT_BOUND" -> revertToFree()  // 被吊销/顶替:降级并清 flag
+            "CODE_EXPIRED" -> markSubExpired()             // 订阅到期:降级,并记住他是"过期"而非"没买过"
             else -> Unit   // 未知错误按网络异常处理,不降级
         }
     }
@@ -309,6 +339,78 @@ object LicenseManager {
     /** 当前高级版用户的激活码(供设置页"查看我的激活码"与自助换机);非 PRO 返回 null。 */
     fun purchasedCode(): String? = if (_isPro.value) prefs.getString("code", null) else null
 
+    // ---------------------------------------------------------------- 定价
+    // 定价由服务端说了算(改价 = 改服务器的 pricing.json,不用发版)。两个拉取时机:
+    //   · App 启动:每天最多一次,让常态下弹窗一打开价格就已经是新的,不必等网络
+    //   · 打开高级版弹窗:短节流再拉一次——启动那次多半没赶上(用户开 App 时可能已经
+    //     连着相机热点,没外网),而这一刻他正要花钱,值得为准确性再打一次
+    // 拉到就写进 prefs 长期留着,不设过期:相机热点没外网是本 App 的常态,
+    // 缓存一过期就没价可显示了。从没拉到过(全新安装且一直无外网)才回落到编译时兜底值。
+    //
+    // 先用缓存渲染、拉到再静默更新:不阻塞弹窗。价格真变了才会当着用户的面跳一下,
+    // 而那正是该跳的时候——显示一个假价比跳一下糟得多。
+    //
+    // ★ 展示价允许过时,收钱不允许:真正要收多少由 /v1/order/create 的响应带回来
+    //   (见 [OrderResult.Pending.priceFen]),付款页显示的一定是那个数。
+    private const val FALLBACK_PRICE_FEN = 1990
+    private const val FALLBACK_ORIGINAL_FEN = 3990
+    private const val FALLBACK_PERIOD_DAYS = 365
+    private const val PRICE_REFRESH_MS = 24 * 3600_000L
+    // 弹窗反复开关时别每次都打服务器;60 秒足够挡住误触,又不至于让人看到隔夜的价。
+    private const val PRICE_REFRESH_OPEN_MS = 60_000L
+
+    /** [originalFen] 为 0 表示不划线;[priceFen] 恒 > 0。 */
+    data class Pricing(val priceFen: Int, val originalFen: Int, val periodDays: Int)
+
+    private val _pricing = MutableStateFlow(
+        Pricing(FALLBACK_PRICE_FEN, FALLBACK_ORIGINAL_FEN, FALLBACK_PERIOD_DAYS)
+    )
+    val pricing: StateFlow<Pricing> get() = _pricing
+
+    private fun loadCachedPricing() {
+        val p = prefs.getInt("price_fen", 0)
+        if (p > 0) {
+            _pricing.value = Pricing(
+                p,
+                prefs.getInt("price_original_fen", 0),
+                prefs.getInt("price_period_days", FALLBACK_PERIOD_DAYS),
+            )
+        }
+    }
+
+    /** 距上次成功拉价不足 [minAgeMs] 就跳过。拉不到就继续用缓存,不清不改。 */
+    private suspend fun fetchPricing(minAgeMs: Long) {
+        if (System.currentTimeMillis() - prefs.getLong("price_at", 0L) < minAgeMs) return
+        val resp = get("/v1/pricing") ?: return
+        val p = resp.optInt("price_fen", 0)
+        if (!resp.optBoolean("ok") || p <= 0) return
+        val original = resp.optInt("original_fen", 0)
+        val days = resp.optInt("period_days", FALLBACK_PERIOD_DAYS).coerceAtLeast(1)
+        prefs.edit()
+            .putInt("price_fen", p)
+            .putInt("price_original_fen", original)
+            .putInt("price_period_days", days)
+            .putLong("price_at", System.currentTimeMillis())
+            .apply()
+        _pricing.value = Pricing(p, original, days)
+    }
+
+    /** 高级版弹窗打开时调:他正要花钱,别让他看着隔夜的价。挂在 IO 上,不阻塞开窗。 */
+    fun refreshPricingOnOpen() {
+        scope.launch { fetchPricing(PRICE_REFRESH_OPEN_MS) }
+    }
+
+    /** 分 → 展示价:1990→"¥19.9",2000→"¥20",1999→"¥19.99"(尾随 0 不显示)。 */
+    fun formatPrice(fen: Int): String = "¥" + when {
+        fen % 100 == 0 -> (fen / 100).toString()
+        fen % 10 == 0 -> String.format(Locale.US, "%.1f", fen / 100.0)
+        else -> String.format(Locale.US, "%.2f", fen / 100.0)
+    }
+
+    /** 年费摊到每天(分),四舍五入;不足 1 分返回 0,由 UI 决定整行不显示。 */
+    fun perDayFen(p: Pricing): Int =
+        Math.round(p.priceFen.toDouble() / p.periodDays).toInt()
+
     // ---------------------------------------------------------------- 购买(自动售码)
 
     sealed class OrderResult {
@@ -316,10 +418,18 @@ object LicenseManager {
          * 有待支付订单。
          * [payQr] 为虎皮椒返回的现成二维码图片地址(微信个人支付主用:展示给用户扫码);
          * [payUrl] 为手机端支付链接(自动判断微信/支付宝环境,作降级)。
+         * [renew] 由服务器判定:真 = 这是现有码的续费单(成功页据此说"续费成功"而非"购买成功")。
          */
-        data class Pending(val order: String, val payUrl: String?, val payQr: String?) : OrderResult()
+        data class Pending(
+            val order: String,
+            val payUrl: String?,
+            val payQr: String?,
+            val renew: Boolean = false,
+            /** 本单锁定的实收价(分,0 = 服务器没给)。付款页显示它,不显示缓存的展示价。 */
+            val priceFen: Int = 0
+        ) : OrderResult()
         /** 已支付;code 为服务器发放的激活码(尚未绑定本机,走 [activate])。 */
-        data class Paid(val order: String, val code: String) : OrderResult()
+        data class Paid(val order: String, val code: String, val renew: Boolean = false) : OrderResult()
         object Unreachable : OrderResult()
         data class Failed(val err: String) : OrderResult()
     }
@@ -332,9 +442,15 @@ object LicenseManager {
         prefs.edit().remove("pending_order").apply()
     }
 
-    suspend fun createOrder(): OrderResult = withContext(Dispatchers.IO) {
-        val resp = post("/v1/order/create", JSONObject().put("fp", fingerprint))
-            ?: return@withContext OrderResult.Unreachable
+    /**
+     * [renew] 为真 = 给现有码续期(服务器按 max(now, 原到期日) + 1 年计,提前续不吃掉剩余时间),
+     * 否则是新购。到期后重新购买也走 renew:真——服务器给他续原来那个码,而不是再发一个。
+     */
+    suspend fun createOrder(renew: Boolean = false): OrderResult = withContext(Dispatchers.IO) {
+        val resp = post("/v1/order/create", JSONObject().apply {
+            put("fp", fingerprint)
+            if (renew) put("renew", true)
+        }) ?: return@withContext OrderResult.Unreachable
         // 防重复购买:服务器认出本机已是某码的绑定设备 → 直接返码免费恢复,不再收钱。
         if (resp.optBoolean("already_pro")) {
             val owned = resp.optString("code")
@@ -349,6 +465,8 @@ object LicenseManager {
             order,
             resp.optString("pay_url").takeIf { it.isNotEmpty() },
             resp.optString("pay_qr").takeIf { it.isNotEmpty() },
+            resp.optBoolean("renew"),
+            resp.optInt("price_fen", 0),
         )
     }
 
@@ -362,11 +480,14 @@ object LicenseManager {
             }) ?: return@withContext OrderResult.Unreachable
             if (!resp.optBoolean("ok"))
                 return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
-            if (resp.optString("status") == "paid") OrderResult.Paid(order, resp.optString("code"))
+            if (resp.optString("status") == "paid")
+                OrderResult.Paid(order, resp.optString("code"), resp.optBoolean("renew"))
             else OrderResult.Pending(
                 order,
                 resp.optString("pay_url").takeIf { it.isNotEmpty() },
                 resp.optString("pay_qr").takeIf { it.isNotEmpty() },
+                resp.optBoolean("renew"),
+                resp.optInt("price_fen", 0),
             )
         }
 

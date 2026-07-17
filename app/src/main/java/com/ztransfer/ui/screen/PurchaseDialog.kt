@@ -133,15 +133,17 @@ fun PurchaseDialog(
     onDismiss: () -> Unit,
     onCelebrate: () -> Unit = {},
     onHoldCameraWifi: (Boolean) -> Unit = {},
+    // 续费单(现有码延期)而非新购;成败文案以【服务器回的 renew】为准,本参数只负责下单时告知服务器。
+    renew: Boolean = false,
 ) {
     val colors = AppTheme.colors
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // 购买期间松开 App 对相机 Wi-Fi 的占用(CameraViewModel 的 requestNetwork):
-    // 相机热点没有外网,不松手则我们下单和微信付款都联不上网。松手后系统会切走没网的
-    // 热点、落回蜂窝;弹窗关闭时握回来,相机由既有的自动重连接管。
+    // 购买期间主动断开相机(CameraViewModel.holdCameraWifi):关闭 PTP 会话让相机
+    // 自行关掉 Wi-Fi 热点,并松开 requestNetwork 占用——相机热点没有外网,不断开则
+    // 我们下单和微信付款都联不上网。弹窗关闭时握回来,相机由既有的自动重连接管。
     DisposableEffect(Unit) {
         onHoldCameraWifi(false)
         onDispose { onHoldCameraWifi(true) }
@@ -151,18 +153,23 @@ fun PurchaseDialog(
     var payUrl by remember { mutableStateOf<String?>(null) }   // 手机端支付链接(虎皮椒 url)
     var qr by remember { mutableStateOf<Bitmap?>(null) }
     var saved by remember { mutableStateOf(false) }
+    // 存相册失败单独记,不能并进 error(见下方保存按钮处的注释)
+    var saveFailed by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf<String?>(null) }
     var activated by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Int?>(null) }
     var copied by remember { mutableStateOf(false) }
-    var showCode by remember { mutableStateOf(false) }   // 成功后默认收起激活码,点"查看"才展开
     var expired by remember { mutableStateOf(false) }    // 超 5 分钟未支付 → 提示重新发起
     var refreshKey by remember { mutableStateOf(0) }     // 递增触发重新建单
     var restored by remember { mutableStateOf(false) }   // 本机已拥有 → 免费恢复(而非新购买)
+    var paidRenew by remember { mutableStateOf(false) }  // 服务器判定的续费单 → 成功页说"续费成功"
+    // 本单锁定的实收价(分)。头部报的是它,不是缓存的展示价——展示价可能过时
+    // (App 常连着相机热点拉不到新价),而这个数是服务器建单时现读的,扫出来的码就是它。
+    var orderPriceFen by remember { mutableStateOf(0) }
 
     // 建单/续单:首次(refreshKey==0)先试本地旧单,拿不到再新建;刷新(>0)一律新建。
     LaunchedEffect(refreshKey) {
-        expired = false; saved = false; qr = null
+        expired = false; saved = false; saveFailed = false; qr = null
         // 付款全流程都要外网。刚松开相机 Wi-Fi 后系统切到蜂窝需要一两秒,
         // 故给一段等待再判定"没网",避免刚进来就误报。
         var online = hasInternet(context)
@@ -181,14 +188,19 @@ fun PurchaseDialog(
             r = if (resumed != null) LicenseManager.orderStatus(resumed, wantUrl = true) else null
             if (r == null || r is LicenseManager.OrderResult.Failed ||
                 (r is LicenseManager.OrderResult.Pending && r.payUrl == null)
-            ) r = LicenseManager.createOrder()
+            ) r = LicenseManager.createOrder(renew)
         } else {
-            r = LicenseManager.createOrder()
+            r = LicenseManager.createOrder(renew)
         }
         when (r) {
-            is LicenseManager.OrderResult.Pending -> { order = r.order; payUrl = r.payUrl }
+            is LicenseManager.OrderResult.Pending -> {
+                order = r.order; payUrl = r.payUrl; paidRenew = r.renew; orderPriceFen = r.priceFen
+            }
             // order 为空 = 服务器认出本机已拥有、免费恢复(见 createOrder 的 already_pro)
-            is LicenseManager.OrderResult.Paid -> { order = r.order; code = r.code; if (r.order.isEmpty()) restored = true }
+            is LicenseManager.OrderResult.Paid -> {
+                order = r.order; code = r.code; paidRenew = r.renew
+                if (r.order.isEmpty()) restored = true
+            }
             LicenseManager.OrderResult.Unreachable -> error = R.string.err_purchase_unreachable
             is LicenseManager.OrderResult.Failed -> error = R.string.err_purchase_failed
             null -> Unit
@@ -215,7 +227,7 @@ fun PurchaseDialog(
         while (code == null && !expired) {
             delay(2000)
             val r = LicenseManager.orderStatus(o)
-            if (r is LicenseManager.OrderResult.Paid) code = r.code
+            if (r is LicenseManager.OrderResult.Paid) { code = r.code; paidRenew = r.renew }
         }
         val c = code ?: return@LaunchedEffect
         when (LicenseManager.activate(c, BuildConfig.VERSION_NAME)) {
@@ -252,17 +264,21 @@ fun PurchaseDialog(
                 )
                 Column(Modifier.padding(20.dp)) {
                     // ---- 头部:左边说清"付什么、多少钱",右边叉号退出 ----
+                    // 钱已经付完就撤掉金额:那时这里是庆祝页,只该说"解锁了",再挂个价签是提醒他刚花了钱。
                     Row(verticalAlignment = Alignment.Top) {
                         Column(Modifier.weight(1f)) {
-                            if (qr != null) {
+                            if (qr != null && code == null) {
                                 Text(
                                     stringResource(R.string.purchase_wechat_title),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = colors.onSurfaceVariant
                                 )
-                                if (PRO_PRICE.isNotEmpty()) {
+                                if (orderPriceFen > 0) {
                                     Text(
-                                        PRO_PRICE,
+                                        stringResource(
+                                            R.string.price_per_year,
+                                            LicenseManager.formatPrice(orderPriceFen)
+                                        ),
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.Bold,
                                         // 与解锁弹窗的定价同一个金色:同一笔钱,视觉接得上
@@ -287,53 +303,31 @@ fun PurchaseDialog(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         when {
-                            // ---- 到账:自动激活成功 → 干净的"已解锁",激活码默认收起 ----
+                            // ---- 到账:自动激活成功 → 只报喜,别的什么都不说 ----
+                            // 激活码此刻对用户毫无用处(已自动激活),摆在这只会引出"这码干嘛用的"。
+                            // 真要它的时机只有换机,那时去设置里的「我要换机」拿(SwitchDeviceDialog)。
                             code != null -> {
                                 Spacer(Modifier.height(4.dp))
                                 if (activated) {
+                                    // 续费的人已经是高级版,再说一遍"已解锁"没意义——他要看的是新的到期日。
+                                    // 日期从续费后新通行证的 sub 读;万一读不到(永久码)就退回通用文案。
+                                    val newSubExp = remember(activated) { LicenseManager.subExpiresAtSec() }
                                     Text(
-                                        stringResource(
-                                            if (restored) R.string.purchase_restored else R.string.purchase_activated
-                                        ),
+                                        when {
+                                            restored -> stringResource(R.string.purchase_restored)
+                                            paidRenew && newSubExp > 0L ->
+                                                stringResource(R.string.purchase_renewed, formatSubDate(newSubExp))
+                                            else -> stringResource(R.string.purchase_activated)
+                                        },
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = colors.statusConnected,
                                         textAlign = TextAlign.Center
                                     )
-                                    Spacer(Modifier.height(12.dp))
-                                    if (showCode) {
-                                        TextButton(onClick = {
-                                            clipboard.setText(AnnotatedString(code!!))
-                                            copied = true
-                                        }) {
-                                            Text(
-                                                code!!,
-                                                style = MaterialTheme.typography.headlineSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = colors.onBackground
-                                            )
-                                        }
-                                        Text(
-                                            stringResource(
-                                                if (copied) R.string.purchase_code_copied
-                                                else R.string.purchase_keep_code
-                                            ),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = colors.onSurfaceVariant,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    } else {
-                                        TextButton(onClick = { showCode = true }) {
-                                            Text(
-                                                stringResource(R.string.purchase_view_code),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = colors.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                    Spacer(Modifier.height(4.dp))
+                                    Spacer(Modifier.height(16.dp))
                                     GlassButton(
                                         shape = RoundedCornerShape(14.dp),
+                                        panel = true,
                                         contentPadding = PaddingValues(horizontal = 26.dp, vertical = 12.dp),
                                         onClick = onCelebrate
                                     ) {
@@ -345,13 +339,8 @@ fun PurchaseDialog(
                                         )
                                     }
                                 } else {
-                                    // 已收款但自动激活未成功:亮出码 + 手动输入引导
-                                    Text(
-                                        stringResource(R.string.purchase_success),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = colors.statusConnected
-                                    )
-                                    Spacer(Modifier.height(12.dp))
+                                    // 已收款但自动激活未成功:亮出码 + 手动输入引导。
+                                    // 这里不再报"支付成功已激活"——它和下面那句"自动激活未成功"直接打架。
                                     TextButton(onClick = {
                                         clipboard.setText(AnnotatedString(code!!))
                                         copied = true
@@ -387,6 +376,7 @@ fun PurchaseDialog(
                                 Spacer(Modifier.height(12.dp))
                                 GlassButton(
                                     shape = RoundedCornerShape(14.dp),
+                                    panel = true,
                                     contentPadding = PaddingValues(horizontal = 26.dp, vertical = 12.dp),
                                     onClick = { error = null; refreshKey++ }
                                 ) {
@@ -410,6 +400,7 @@ fun PurchaseDialog(
                                 Spacer(Modifier.height(12.dp))
                                 GlassButton(
                                     shape = RoundedCornerShape(14.dp),
+                                    panel = true,
                                     contentPadding = PaddingValues(horizontal = 26.dp, vertical = 12.dp),
                                     onClick = { order = null; payUrl = null; refreshKey++ }
                                 ) {
@@ -447,6 +438,7 @@ fun PurchaseDialog(
                                 // 唯一动作
                                 GlassButton(
                                     shape = RoundedCornerShape(14.dp),
+                                    panel = true,
                                     contentPadding = PaddingValues(horizontal = 26.dp, vertical = 12.dp),
                                     onClick = {
                                         scope.launch {
@@ -455,7 +447,7 @@ fun PurchaseDialog(
                                                 saveToGallery(context, b, "ZTransfer-pay-${System.currentTimeMillis()}")
                                             }
                                             saved = ok
-                                            if (!ok) error = R.string.purchase_save_failed
+                                            saveFailed = !ok
                                         }
                                     }
                                 ) {
@@ -469,11 +461,17 @@ fun PurchaseDialog(
                                     )
                                 }
                                 Spacer(Modifier.height(12.dp))
-                                // 只说他离开本页后要做的那一件事;怎么用微信扫,用户自己会。
+                                // 存不进相册就让他截图——但码必须还在屏幕上,否则"请改用截图"是句空话。
+                                // 所以保存失败【绝不能】写进 error:那个分支排在码前面,会把码整个顶掉,
+                                // 只留一个"重试"按钮把正在付的单废掉重建(Android 8~9 上没有
+                                // WRITE_EXTERNAL_STORAGE,存相册必失败,那就成了永远付不了款的死循环)。
                                 Text(
-                                    stringResource(R.string.purchase_scan_hint),
+                                    stringResource(
+                                        if (saveFailed) R.string.purchase_save_failed
+                                        else R.string.purchase_scan_hint
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = colors.onSurfaceVariant,
+                                    color = if (saveFailed) colors.accentOrange else colors.onSurfaceVariant,
                                     textAlign = TextAlign.Center
                                 )
                             }

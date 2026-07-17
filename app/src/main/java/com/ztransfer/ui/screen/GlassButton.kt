@@ -19,7 +19,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
@@ -31,6 +33,11 @@ import com.ztransfer.ui.theme.Motion
  *
  * 按压微缩放：按下快速下沉到 0.95、松开弹性回弹——全 App 玻璃按钮统一的"手感"，
  * 一处定义处处生效。
+ *
+ * [panel]：面板内变体。默认样式的白描边 + 投影是为悬浮在照片/内容之上设计的，
+ * 放进平整的玻璃弹窗（如高级版/换机弹窗）里会像多画了一个框；panel 为真时改用
+ * 面板内卡片的同一玻璃语言——淡底、细 panelBorder 描边、顶部微高光、无投影，
+ * 浅色/深色主题各自取 onBackground 同族色，两套主题都贴着面板长。
  */
 @Composable
 fun GlassButton(
@@ -39,6 +46,7 @@ fun GlassButton(
     enabled: Boolean = true,
     shape: Shape = RoundedCornerShape(20.dp),
     contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+    panel: Boolean = false,
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = AppTheme.colors
@@ -54,8 +62,8 @@ fun GlassButton(
         onClick = onClick,
         enabled = enabled,
         shape = shape,
-        color = colors.glassSurface,
-        shadowElevation = 4.dp,
+        color = if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.glassSurface,
+        shadowElevation = if (panel) 0.dp else 4.dp,
         interactionSource = interactionSource,
         modifier = modifier.graphicsLayer {
             scaleX = pressScale
@@ -68,15 +76,21 @@ fun GlassButton(
         Row(
             modifier = Modifier
                 .background(
-                    brush = Brush.verticalGradient(
-                        listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
-                    )
+                    brush = if (panel)
+                        Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent))
+                    else
+                        Brush.verticalGradient(
+                            listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
+                        )
                 )
                 .border(
                     width = 1.dp,
-                    brush = Brush.verticalGradient(
-                        listOf(colors.glassBorderTop, colors.glassBorderBottom)
-                    ),
+                    brush = if (panel)
+                        SolidColor(colors.glassPanelBorder)
+                    else
+                        Brush.verticalGradient(
+                            listOf(colors.glassBorderTop, colors.glassBorderBottom)
+                        ),
                     shape = shape
                 )
                 .padding(contentPadding),

@@ -4,6 +4,39 @@ rem This script lives in dist\, but the Gradle build must run from the
 rem project root. %~dp0 = this script's dir (dist\), so %~dp0.. is the root.
 cd /d "%~dp0.."
 
+rem ---- Release signing guard -------------------------------------------------
+rem keystore.properties holds the signing password, so it is gitignored and the
+rem .jks lives outside the repo: a fresh clone (new machine) will NOT have them.
+rem When it is missing, build.gradle.kts SILENTLY falls back to the debug key --
+rem a debug-signed build cannot be installed over users' existing app, and
+rem shipping one is an accident you only notice after the fact. So stop here
+rem rather than hand back a bad artifact.
+if not exist "keystore.properties" (
+    echo.
+    echo ==========================================================
+    echo  ERROR: keystore.properties not found - refusing to build.
+    echo ==========================================================
+    echo.
+    echo  Without it this build would be signed with the DEBUG key.
+    echo  Existing users could NOT upgrade over such a build.
+    echo.
+    echo  Fix on a new machine:
+    echo    1. Restore ztransfer-release.jks from your backup
+    echo       ^(kept outside the repo, e.g. D:\code\ztransfer-keys\^).
+    echo    2. Create keystore.properties in the project root:
+    echo.
+    echo       storeFile=D:/code/ztransfer-keys/ztransfer-release.jks
+    echo       storePassword=^<the keystore password^>
+    echo       keyAlias=ztransfer
+    echo       keyPassword=^<same password^>
+    echo.
+    echo  Lost the .jks? Then this app can never be updated again -
+    echo  every user would have to uninstall and reinstall.
+    echo.
+    pause
+    exit /b 1
+)
+
 rem Default: release APK (for direct distribution, e.g. QQ group).
 rem "build.bat aab" builds the Android App Bundle required by Google Play.
 set "TASK=assembleRelease"

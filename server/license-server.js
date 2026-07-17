@@ -40,6 +40,68 @@ if (String(cfg.adminToken).length < 32) {
 
 const signingKey = crypto.createPrivateKey(fs.readFileSync(cfg.signingKeyPath, 'utf8'));
 
+// ---------------------------------------------------------------- 定价
+// 价格单独放 pricing.json(与 config.json 同目录),不塞进 config.json:
+// 改价就不必碰那个装着密钥的文件,也不用重启服务——每次现读,和 app-latest.json 同一套路。
+// 文件不存在则回落到 config.json 的 priceFen(不划线),老部署无缝。
+// ★ 展示价可以过时(App 缓存的),但下单一律现读这里,收的钱永远以服务端为准。
+const PRICING_PATH = path.join(path.dirname(CONFIG_PATH), 'pricing.json');
+const SUB_PERIOD_DAYS = 365;
+
+// 解析成功过的最后一份价。文件被改坏/写了一半时兜住它——没有这层就会静默回落到
+// config.json 里那个可能早就不用了的老价,按另一个价真收钱,还不留任何痕迹。
+let lastGoodPricing = null;
+let pricingBroken = false;   // 只在状态翻转时吼一次日志,别每个请求刷一屏
+
+/** 当前定价:{ priceFen 实收价, originalFen 划线原价(0 = 不划线) }。 */
+function pricing() {
+    let raw;
+    try {
+        raw = fs.readFileSync(PRICING_PATH, 'utf8');
+    } catch {
+        // 没有 pricing.json 是正常状态(还没设过价):用内存里上次成功的,否则 config.json 的价
+        return lastGoodPricing || { priceFen: cfg.priceFen, originalFen: 0 };
+    }
+    try {
+        const j = JSON.parse(raw);
+        if (!Number.isInteger(j.priceFen) || j.priceFen <= 0) throw new Error('priceFen 不是正整数');
+        // 划线价必须【高于】实收价,否则就是"原价更便宜"的反向促销。手改文件绕过了
+        // adminSetPricing 的校验,所以这里也得挡一道。
+        const originalFen =
+            (Number.isInteger(j.originalFen) && j.originalFen > j.priceFen) ? j.originalFen : 0;
+        lastGoodPricing = { priceFen: j.priceFen, originalFen };
+        pricingBroken = false;
+        return lastGoodPricing;
+    } catch (e) {
+        if (!pricingBroken) {
+            pricingBroken = true;
+            log(`PRICING_BAD ${PRICING_PATH}: ${e.message} —— 回落到`
+                + (lastGoodPricing ? `上次成功的价 ¥${lastGoodPricing.priceFen / 100}` : `config.json 的 ¥${cfg.priceFen / 100}`));
+        }
+        return lastGoodPricing || { priceFen: cfg.priceFen, originalFen: 0 };
+    }
+}
+
+function apiPricing() {
+    const p = pricing();
+    return { ok: true, price_fen: p.priceFen, original_fen: p.originalFen, period_days: SUB_PERIOD_DAYS };
+}
+
+function adminSetPricing(body) {
+    const priceFen = parseInt(body.price_fen, 10);
+    if (!Number.isInteger(priceFen) || priceFen <= 0) return { ok: false, err: 'BAD_PRICE' };
+    const originalFen = parseInt(body.original_fen, 10) || 0;
+    // 划线价低于实收价就成了"原价更便宜"的反向促销,一定是填反了
+    if (originalFen && originalFen < priceFen) return { ok: false, err: 'ORIGINAL_TOO_LOW' };
+    // 先写临时文件再 rename:rename 在同一文件系统上是原子的,写盘中途断电/被杀
+    // 也不会留下半截 JSON 让 pricing() 读到坏值。
+    const tmp = PRICING_PATH + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ priceFen, originalFen }, null, 2));
+    fs.renameSync(tmp, PRICING_PATH);
+    log(`SET_PRICING ¥${priceFen / 100}${originalFen ? ` 原价 ¥${originalFen / 100}` : ''}`);
+    return apiPricing();
+}
+
 // ---------------------------------------------------------------- 数据库
 
 const db = new DatabaseSync(cfg.dbPath);
@@ -47,9 +109,9 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS codes (
   code          TEXT PRIMARY KEY,
   status        TEXT NOT NULL DEFAULT 'active',
-  max_devices   INTEGER NOT NULL DEFAULT 2,
   note          TEXT,
   created_at    TEXT NOT NULL,
+  expires_at    TEXT,                             -- NULL = 永久授权;否则订阅到期时刻
   revoked_at    TEXT,
   revoke_reason TEXT
 );
@@ -79,6 +141,7 @@ CREATE TABLE IF NOT EXISTS orders (
   amount_fen   INTEGER NOT NULL,
   status       TEXT NOT NULL DEFAULT 'pending',  -- pending / paid
   code         TEXT,
+  renew_code   TEXT,                             -- NULL = 新购单;否则本单是给该码续费
   charge_id    TEXT,
   pay_url      TEXT,
   pay_qr       TEXT,
@@ -91,6 +154,12 @@ CREATE INDEX IF NOT EXISTS idx_orders_fp ON orders(device_fp);
 try { db.exec('ALTER TABLE orders ADD COLUMN pay_qr TEXT'); } catch { /* 列已存在 */ }
 try { db.exec('ALTER TABLE activations ADD COLUMN device_model TEXT'); } catch { /* 列已存在 */ }
 try { db.exec('ALTER TABLE activations ADD COLUMN app_ver TEXT'); } catch { /* 列已存在 */ }
+// 迁移:去掉 max_devices —— 授权模型早已改成"单设备浮动"(见 apiActivate 的顶替逻辑),
+// 这列从来没有任何代码读过,却让台账显示"设备 1/2",看着像一码能两机。删掉免得再误导。
+try { db.exec('ALTER TABLE codes DROP COLUMN max_devices'); } catch { /* 已删除 */ }
+// 迁移:买断制 → 年费订阅
+try { db.exec('ALTER TABLE codes ADD COLUMN expires_at TEXT'); } catch { /* 列已存在 */ }
+try { db.exec('ALTER TABLE orders ADD COLUMN renew_code TEXT'); } catch { /* 列已存在 */ }
 
 // ---------------------------------------------------------------- 工具
 
@@ -111,11 +180,22 @@ function newCode() {
 // ★ 改天数只动这一个常量。
 const HARD_GRACE_SEC = 7 * 24 * 3600;   // 7 天
 
+// 订阅周期:一次付费买这么久,续费也按这个量延长。★ 改周期只动这一个常量。
+const SUB_PERIOD_MS = SUB_PERIOD_DAYS * 24 * 3600_000;   // 365 天
+
+// 码是否仍可用:未吊销,且(永久 或 未到期)。expires_at 为 NULL 表示永久授权(手动发的码)。
+// ISO 8601 UTC 的字典序即时序,直接字符串比较即可。
+const codeLive = (row) => Boolean(row) && row.status === 'active' && (!row.expires_at || row.expires_at > now());
+
 // 通行证:base64url(payload JSON) + "." + base64url(ECDSA P-256 DER 签名)
-function issueToken(code, fp) {
+// expiresAt 为空即永久授权:payload 不带 sub,App 据此显示"永久"。
+function issueToken(code, fp, expiresAt) {
     const iat = Math.floor(Date.now() / 1000);
+    const sub = expiresAt ? Math.floor(Date.parse(expiresAt) / 1000) : 0;
+    // 离线硬有效期不得越过订阅到期,否则订阅结束后还能离线白用最多 HARD_GRACE_SEC。
+    const exp = sub ? Math.min(iat + HARD_GRACE_SEC, sub) : iat + HARD_GRACE_SEC;
     const payload = Buffer.from(JSON.stringify({
-        v: 1, code, fp, plan: 'pro', iat, exp: iat + HARD_GRACE_SEC,
+        v: 1, code, fp, plan: 'pro', iat, exp, ...(sub ? { sub } : {}),
     }));
     const sig = crypto.sign('sha256', payload, signingKey); // EC 密钥默认输出 DER,Android SHA256withECDSA 可直接验
     return `${payload.toString('base64url')}.${sig.toString('base64url')}`;
@@ -132,15 +212,60 @@ function constantTimeEq(a, b) {
     return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 }
 
-// /v1/activate 简单限速:每 IP 每分钟 10 次(防爆破加保险,码空间本身不可爆破)
-const rateBuckets = new Map();
-function rateLimited(ip) {
-    const t = Date.now(), windowMs = 60_000, max = 10;
-    const arr = (rateBuckets.get(ip) || []).filter((x) => t - x < windowMs);
-    arr.push(t);
-    rateBuckets.set(ip, arr);
-    if (rateBuckets.size > 10_000) rateBuckets.clear(); // 内存兜底,正常永远到不了
-    return arr.length > max;
+// ---------------------------------------------------------------- 限速
+// 每 IP 固定窗口计数,【每条路由都要过】,按代价给不同额度。
+//
+// 用计数器而不是时间戳数组:数组版每次请求都得 filter 一遍整个数组,请求越猛数组越长、
+// 每次越慢——攻击者反倒能用洪水把 CPU 拖死,等于自己给自己造了个放大器。计数是 O(1)。
+//
+// 说清楚这拦得住什么:它拦的是"一个人往死里打某个接口"(爆破码、刷发码、把 DB/CPU 打满)。
+// 真正的 DDoS(带宽/TLS 握手洪水)在进程里挡不住,那是阿里云基础防护和安全组的事。
+const RATE_WINDOW_MS = 60_000;
+
+// 每分钟额度,按【类别】分别计数。数字是按"这条路有多贵 × 真实用量有多大"定的:
+//
+//   write 发码/绑定/收钱,最贵也最该防爆破;正常人一次购买流程也就点几下
+//   renew 每次要签一张通行证(有 CPU 成本);正常一天才跑一次,30 已经极松
+//   poll  付款页每 2 秒查一次单 = 30/分钟。给到 4 倍余量:多个用户挤在同一个
+//         运营商 NAT 后面是常态,额度卡太死会把正在付款的人自己拦住
+//   read  只读小响应,但每次要读一次文件
+//   admin 你在菜单里手点,一分钟 60 次绰绰有余
+//
+// ★ 必须按类别分桶。若所有类别共用一个计数器,那么同一个 IP 打了 60 次 read 之后,
+//   计数是 60,再调 activate 时拿 60 去比 10 就被拒了——便宜接口的流量会把贵接口锁死。
+const LIMITS = { write: 10, renew: 30, poll: 120, read: 60, admin: 60 };
+
+// 桶数上限。到顶说明正被大范围打,新桶一律拒——宁可错杀也别让 Map 把内存撑爆。
+const RATE_MAX_BUCKETS = 20_000;
+
+const rateBuckets = new Map();   // "ip|类别" -> { n, resetAt }
+
+function sweepRateBuckets() {
+    const t = Date.now();
+    for (const [k, b] of rateBuckets) if (t >= b.resetAt) rateBuckets.delete(k);
+}
+// 定期清过期桶。从前是"满了就整个 clear",那意味着谁弄来一万个 IP 就能把所有人的
+// 计数一起抹掉,限速直接失效。只删过期的,别动还在计数的。
+setInterval(sweepRateBuckets, RATE_WINDOW_MS).unref();
+
+/** [cls] 见 LIMITS。超额返回 true。 */
+function rateLimited(ip, cls) {
+    const t = Date.now();
+    const key = `${ip}|${cls}`;
+    let b = rateBuckets.get(key);
+    if (!b || t >= b.resetAt) {
+        if (!b && rateBuckets.size >= RATE_MAX_BUCKETS) {
+            sweepRateBuckets();
+            if (rateBuckets.size >= RATE_MAX_BUCKETS) {
+                log(`RATE_TABLE_FULL ip=${ip} cls=${cls} —— 拒绝新桶`);
+                return true;
+            }
+        }
+        b = { n: 0, resetAt: t + RATE_WINDOW_MS };
+        rateBuckets.set(key, b);
+    }
+    b.n++;
+    return b.n > LIMITS[cls];
 }
 
 // ---------------------------------------------------------------- 业务
@@ -158,16 +283,17 @@ function apiActivate(body) {
     const code = normCode(body.code), fp = String(body.fp || '').toLowerCase();
     if (!CODE_RE.test(code) || !FP_RE.test(fp)) return { ok: false, err: 'CODE_NOT_FOUND' };
 
-    const row = db.prepare('SELECT status FROM codes WHERE code = ?').get(code);
+    const row = db.prepare('SELECT status, expires_at FROM codes WHERE code = ?').get(code);
     if (!row) return { ok: false, err: 'CODE_NOT_FOUND' };
     if (row.status !== 'active') return { ok: false, err: 'CODE_REVOKED' };
+    if (!codeLive(row)) return { ok: false, err: 'CODE_EXPIRED' };
 
     const bound = db.prepare('SELECT id FROM bindings WHERE code = ? AND device_fp = ?').get(code, fp);
     if (bound) {
         // 幂等:同一设备重复激活(卸载重装/再次点激活)直接重发通行证,不算换机、不计查重
         db.prepare('UPDATE bindings SET last_renew_at = ?, app_ver = ? WHERE id = ?')
             .run(now(), String(body.app_ver || ''), bound.id);
-        return { ok: true, token: issueToken(code, fp) };
+        return { ok: true, token: issueToken(code, fp, row.expires_at) };
     }
 
     // 新设备:记一次激活事件(含机型/版本,永久保留作历史与取证;查重只看近 30 天窗口)
@@ -189,52 +315,60 @@ function apiActivate(body) {
                 VALUES (?, ?, ?, ?, ?, ?)`)
         .run(code, fp, String(body.model || ''), String(body.app_ver || ''), now(), now());
     log(`ACTIVATE ${code} fp=${fp.slice(0, 8)} model=${body.model || '-'} kicked=${kicked}`);
-    return { ok: true, token: issueToken(code, fp) };
+    return { ok: true, token: issueToken(code, fp, row.expires_at) };
 }
 
 // 按设备指纹恢复(重装后无本地码时用户主动触发):仅当本机仍是该码当前绑定设备才成功。
 // 被顶替过的旧设备查不到绑定 → NOT_BOUND(符合单设备语义)。返回码供本地保存与"查看激活码"。
+// 订阅到期的码也当作没有:恢复出来也是个不能用的码,不如让 App 走购买/续费。
 function apiRestore(body) {
     const fp = String(body.fp || '').toLowerCase();
     if (!FP_RE.test(fp)) return { ok: false, err: 'NOT_BOUND' };
-    const b = db.prepare(`SELECT b.code AS code FROM bindings b JOIN codes c ON c.code = b.code
+    const b = db.prepare(`SELECT b.code AS code, c.expires_at AS expires_at
+                          FROM bindings b JOIN codes c ON c.code = b.code
                           WHERE b.device_fp = ? AND c.status = 'active'
-                          ORDER BY b.activated_at DESC`).get(fp);
+                            AND (c.expires_at IS NULL OR c.expires_at > ?)
+                          ORDER BY b.activated_at DESC`).get(fp, now());
     if (!b) return { ok: false, err: 'NOT_BOUND' };
     db.prepare('UPDATE bindings SET last_renew_at = ? WHERE code = ? AND device_fp = ?')
         .run(now(), b.code, fp);
     log(`RESTORE ${b.code} fp=${fp.slice(0, 8)}`);
-    return { ok: true, token: issueToken(b.code, fp), code: b.code };
+    return { ok: true, token: issueToken(b.code, fp, b.expires_at), code: b.code };
 }
 
 function apiRenew(body) {
     const code = normCode(body.code), fp = String(body.fp || '').toLowerCase();
     if (!CODE_RE.test(code) || !FP_RE.test(fp)) return { ok: false, err: 'NOT_BOUND' };
 
-    const row = db.prepare('SELECT status FROM codes WHERE code = ?').get(code);
+    const row = db.prepare('SELECT status, expires_at FROM codes WHERE code = ?').get(code);
     if (!row) return { ok: false, err: 'NOT_BOUND' };
     if (row.status !== 'active') return { ok: false, err: 'CODE_REVOKED' };
+    if (!codeLive(row)) return { ok: false, err: 'CODE_EXPIRED' };
 
     const bound = db.prepare('SELECT id FROM bindings WHERE code = ? AND device_fp = ?').get(code, fp);
     if (!bound) return { ok: false, err: 'NOT_BOUND' };
 
     db.prepare('UPDATE bindings SET last_renew_at = ?, app_ver = ? WHERE id = ?')
         .run(now(), String(body.app_ver || ''), bound.id);
-    return { ok: true, token: issueToken(code, fp) };
+    return { ok: true, token: issueToken(code, fp, row.expires_at) };
 }
 
 function adminNewCodes(body) {
     const count = Math.min(Math.max(parseInt(body.count, 10) || 1, 1), 100);
-    const maxDevices = Math.min(Math.max(parseInt(body.max_devices, 10) || 2, 1), 10);
     const note = String(body.note || '');
-    const ins = db.prepare('INSERT INTO codes (code, max_devices, note, created_at) VALUES (?, ?, ?, ?)');
+    // days 省略即永久码:自测、补偿、送人用的码不该跟着订阅到期。
+    // 封顶 MAX_DAYS:年份超过 9999 时 toISOString 会输出 "+029405-..." 这种扩展格式,
+    // '+' 的字典序小于 '2',而 codeLive 靠字典序比时间——那样的码一生下来就"已过期"。
+    const days = Math.min(Math.max(parseInt(body.days, 10) || 0, 0), MAX_DAYS);
+    const expiresAt = days ? new Date(Date.now() + days * 24 * 3600_000).toISOString() : null;
+    const ins = db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)');
     const codes = [];
     while (codes.length < count) {
         const c = newCode();
-        try { ins.run(c, maxDevices, note, now()); codes.push(c); }
+        try { ins.run(c, note, now(), expiresAt); codes.push(c); }
         catch (e) { if (!String(e.message).includes('UNIQUE')) throw e; } // 撞码重试(概率 ~0)
     }
-    log(`NEW_CODES x${count} note="${note}"`);
+    log(`NEW_CODES x${count} days=${days || '永久'} note="${note}"`);
     return { ok: true, codes };
 }
 
@@ -259,7 +393,7 @@ function adminListCodes() {
     return {
         ok: true,
         codes: codes.map((c) => ({
-            code: c.code, status: c.status, max_devices: c.max_devices, note: c.note,
+            code: c.code, status: c.status, note: c.note, expires_at: c.expires_at,
             created_at: c.created_at, revoked_at: c.revoked_at, revoke_reason: c.revoke_reason,
             bindings: byCode.get(c.code) || [],
             activations: actByCode.get(c.code) || [],
@@ -287,6 +421,55 @@ function adminRevoke(body) {
     if (r.changes === 0) return { ok: false, err: 'NOT_FOUND' };
     log(`REVOKE ${code} reason="${body.reason || ''}"`);
     return { ok: true };
+}
+
+// 手动指定有效期的上限(约 100 年)。见 adminNewCodes 里为什么不能让它无限大。
+const MAX_DAYS = 36500;
+
+/**
+ * 改一个码的有效期(送永久 / 补偿延期)。
+ * 送永久用不着发新码——直接把他手上那个码设成永久:用户零操作,重开 App 即生效,
+ * 手里的码不变,台账也不会多出一个和订单对不上的码。
+ * days = 0 → 永久;days > 0 → 在现有到期日基础上延长(不吃掉剩余时间)。
+ */
+function adminSetExpiry(body) {
+    const code = normCode(body.code);
+    const days = parseInt(body.days, 10);
+    if (!Number.isInteger(days) || days < 0 || days > MAX_DAYS) return { ok: false, err: 'BAD_DAYS' };
+
+    const row = db.prepare('SELECT status, expires_at FROM codes WHERE code = ?').get(code);
+    if (!row) return { ok: false, err: 'NOT_FOUND' };
+    // 吊销的码改有效期没意义——他现在是免费版,改完还是免费版。先解除吊销。
+    if (row.status !== 'active') return { ok: false, err: 'CODE_REVOKED' };
+
+    if (days === 0) {
+        db.prepare('UPDATE codes SET expires_at = NULL WHERE code = ?').run(code);
+        log(`SET_EXPIRY ${code} -> 永久`);
+        return { ok: true, expires_at: null };
+    }
+    // 永久码没有到期日可延,给它加天数只会把"永久"缩成 N 天,一定不是本意。
+    if (!row.expires_at) return { ok: false, err: 'ALREADY_PERMANENT' };
+    // 从 max(现在, 原到期) 起算,与续费同一套算法:没到期的不吃掉剩余时间,
+    // 过期很久的也不白送中间那段。
+    const base = Math.max(Date.now(), Date.parse(row.expires_at));
+    const next = new Date(base + days * 24 * 3600_000).toISOString();
+    db.prepare('UPDATE codes SET expires_at = ? WHERE code = ?').run(next, code);
+    log(`SET_EXPIRY ${code} +${days}d -> ${next}`);
+    return { ok: true, expires_at: next };
+}
+
+// 解除吊销:查重(CHURN_MAX)是自动且永久的,误伤正版用户时必须有一条不用登服务器
+// 改库的路。顺带清空该码近 30 天的激活历史——不清的话次数还在窗口里,他一激活就又被吊。
+// 历史清了就查不到证据,所以只在确认误伤时用。
+function adminUnrevoke(body) {
+    const code = normCode(body.code);
+    const r = db.prepare(`UPDATE codes SET status = 'active', revoked_at = NULL, revoke_reason = NULL
+                          WHERE code = ? AND status = 'revoked'`).run(code);
+    if (r.changes === 0) return { ok: false, err: 'NOT_FOUND' };
+    const cleared = db.prepare('DELETE FROM activations WHERE code = ? AND at > ?')
+        .run(code, new Date(Date.now() - CHURN_WINDOW_MS).toISOString()).changes;
+    log(`UNREVOKE ${code} cleared_activations=${cleared}`);
+    return { ok: true, cleared_activations: cleared };
 }
 
 // ---------------------------------------------------------------- 虎皮椒(自动售码)
@@ -335,6 +518,10 @@ function xhPost(apiPath, params) {
 // 保证复用到的码仍可扫;超过则新建(配合 App 端 5 分钟"过期刷新")。
 const PENDING_REUSE_MS = 4 * 60_000;
 
+// 下单前回查多少张该设备的未支付旧单(见 apiOrderCreate 闸三)。每张一次上游请求,
+// 所以要封顶;取最近的几张就够——用户不会去付一张几天前的码。
+const STALE_PROBE_MAX = 5;
+
 function newOrderId() {
     // ZT + 毫秒时间戳36进制 + 4位随机,全大写字母数字,唯一性由 PRIMARY KEY 兜底
     return 'ZT' + Date.now().toString(36).toUpperCase()
@@ -345,35 +532,101 @@ async function apiOrderCreate(body) {
     if (!PAY_ENABLED) return { ok: false, err: 'PAY_DISABLED' };
     const fp = String(body.fp || '').toLowerCase();
     if (!FP_RE.test(fp)) return { ok: false, err: 'BAD_REQUEST' };
+    // renew:用户在 App 里主动点的"续费"。他就是要付钱,前两道闸得让路(否则提前续费无门)。
+    const renewWanted = Boolean(body.renew);
 
-    // 防重复购买:本机已是某个有效码的绑定设备(如重装后没走"恢复"就又点了购买),
-    // 不建单不收钱,直接把已绑的码返回给 App 免费恢复。
+    // ---- 防重复收费(三道)----------------------------------------------------
+    // 任一命中都不建单、不收钱,直接把这台机已有的码还给 App(App 侧走 already_pro 免费恢复)。
+    // 三道都只认 status='active' 的码:被吊销的(退款/查重)不还给他,否则他会永远拿着一个
+    // 死码又没法重新购买。前两道还要求"仍在有效期内":订阅到期的码必须放行去建单,
+    // 否则到期用户点购买只会被告知"你已经买过了",永远付不了续费的钱。
+
+    // 一、本机已是某个有效码的绑定设备(重装后没走"恢复"就又点了购买)。
     const owned = db.prepare(`SELECT b.code AS code FROM bindings b JOIN codes c ON c.code = b.code
                               WHERE b.device_fp = ? AND c.status = 'active'
-                              ORDER BY b.activated_at DESC`).get(fp);
-    if (owned) {
+                                AND (c.expires_at IS NULL OR c.expires_at > ?)
+                              ORDER BY b.activated_at DESC`).get(fp, now());
+    if (owned && !renewWanted) {
         log(`ORDER_SKIP_OWNED fp=${fp.slice(0, 8)} code=${owned.code}`);
         return { ok: true, already_pro: true, code: owned.code };
     }
 
-    // 顺手清理超过 7 天仍未支付的死单
-    db.prepare("DELETE FROM orders WHERE status = 'pending' AND created_at < ?")
-        .run(new Date(Date.now() - 7 * 24 * 3600_000).toISOString());
+    // 二、本机付过款、码也发了,但从未激活成功(付完就卸载重装/清数据 → App 丢了 pending_order)。
+    //     此时既没有 binding,那张 paid 单也过不了下面复用查询的 status='pending' 过滤——
+    //     没有这道就会再收一次钱,而服务器早就为这台机发过码了。
+    const paid = db.prepare(`SELECT o.code AS code FROM orders o JOIN codes c ON c.code = o.code
+                             WHERE o.device_fp = ? AND o.status = 'paid' AND c.status = 'active'
+                               AND (c.expires_at IS NULL OR c.expires_at > ?)
+                             ORDER BY o.paid_at DESC`).get(fp, now());
+    if (paid && !renewWanted) {
+        log(`ORDER_SKIP_PAID fp=${fp.slice(0, 8)} code=${paid.code}`);
+        return { ok: true, already_pro: true, code: paid.code };
+    }
+
+    // 三、本机的未支付旧单 → 建新单前逐一向虎皮椒确认。
+    //     "钱付了但 notify 没送到、App 又丢了单号"时,这是唯一能发现钱其实已到账的地方;
+    //     不查就会二次收费。
+    //     ★ 必须查【多张】而不只是最新那张:购买页每 5 分钟过期刷新一次,同一设备会攒下
+    //       好几张 pending 单。用户手里打开的可能是上一张码(upstream 5 分钟内仍可付),
+    //       只查最新的就永远发现不了那笔钱。取最近 STALE_PROBE_MAX 张——再往前的
+    //       upstream 早就失效、不可能被付,查了也是白打上游。
+    const stale = db.prepare(`SELECT out_trade_no FROM orders WHERE device_fp = ? AND status = 'pending'
+                              ORDER BY created_at DESC LIMIT ?`).all(fp, STALE_PROBE_MAX);
+    for (const s of stale) {
+        const r = await confirmPaid(s.out_trade_no);
+        if (r && r.code) {
+            log(`ORDER_SKIP_LATE_PAID fp=${fp.slice(0, 8)} order=${s.out_trade_no} code=${r.code}`);
+            return { ok: true, already_pro: true, code: r.code };
+        }
+    }
+    // --------------------------------------------------------------------------
+
+    // 【不清理旧订单 —— 这是有意的】
+    // 这里曾经有一句"删掉 7 天前仍未支付的死单"。它有两个错:
+    //   1. 本地 status='pending' ≠ 用户没付钱。notify 会丢(闸三存在的唯一理由就是这个),
+    //      一张真金白银付过的单可能一直挂着 pending。删掉 = 订单号都不存在了,
+    //      查单返回 NOT_FOUND、闸三无从查起,用户只能被再收一次钱。
+    //   2. 它不限设备,是【全局】删。于是甲的钱,被素不相识的乙点一下购买就删没了。
+    // orders 是对账台账(code ↔ charge_id ↔ 微信流水),本来就该留着。一行几百字节,
+    // 攒到几万单也就几 MB,SQLite 毫无压力。
 
     // 同设备复用窗口(PENDING_REUSE_MS)内的未支付订单直接复用,反复点购买不会刷出一堆新单
-    const pending = db.prepare(`SELECT out_trade_no, pay_url, pay_qr FROM orders
+    const pending = db.prepare(`SELECT out_trade_no, pay_url, pay_qr, renew_code, amount_fen FROM orders
                                 WHERE device_fp = ? AND status = 'pending' AND created_at > ?
                                 ORDER BY created_at DESC`)
         .get(fp, new Date(Date.now() - PENDING_REUSE_MS).toISOString());
-    if (pending) return { ok: true, order: pending.out_trade_no, pay_url: pending.pay_url, pay_qr: pending.pay_qr };
+    if (pending) {
+        // 复用旧单就得报旧价:二维码是按下单当时的 amount_fen 生成的,中途改价也不能变。
+        return {
+            ok: true, order: pending.out_trade_no, pay_url: pending.pay_url, pay_qr: pending.pay_qr,
+            renew: Boolean(pending.renew_code), price_fen: pending.amount_fen,
+        };
+    }
+
+    // 续费目标:本机绑定的码,到期的也算——要续的正是它。找不到就是新购。
+    // 被吊销的不认:延长一个死码等于白收钱,当新购发新码。
+    const target = db.prepare(`SELECT b.code AS code, c.expires_at AS expires_at
+                               FROM bindings b JOIN codes c ON c.code = b.code
+                               WHERE b.device_fp = ? AND c.status = 'active'
+                               ORDER BY b.activated_at DESC`).get(fp);
+    // 永久码没有到期日可延,给它开续费单就是收了钱什么都不给。直接把码还他。
+    // (App 走不到这里——永久码用户看不到"续费"入口——但服务端不能靠客户端把门。)
+    if (target && !target.expires_at) {
+        log(`ORDER_SKIP_PERMANENT fp=${fp.slice(0, 8)} code=${target.code}`);
+        return { ok: true, already_pro: true, code: target.code };
+    }
+    const renewCode = target ? target.code : null;
 
     const order = newOrderId();
+    // 现读定价:App 缓存的展示价可能过时(它常连着相机热点没外网,拉不到新价),
+    // 但这里现读的才是真正要收的钱,并随响应回给 App —— 付款页显示的一定是这个数。
+    const priceFen = pricing().priceFen;
     let resp;
     try {
         resp = await xhPost('/payment/do.html', {
             version: '1.1',
             trade_order_id: order,
-            total_fee: (cfg.priceFen / 100).toFixed(2),   // 虎皮椒金额单位为元
+            total_fee: (priceFen / 100).toFixed(2),   // 虎皮椒金额单位为元
             title: 'ZTransfer Pro',
             notify_url: cfg.payNotifyUrl,
         });
@@ -387,18 +640,23 @@ async function apiOrderCreate(body) {
         log(`ORDER_CREATE_REJECTED ${resp.errmsg || JSON.stringify(resp).slice(0, 200)}`);
         return { ok: false, err: 'PAY_UPSTREAM' };
     }
-    db.prepare(`INSERT INTO orders (out_trade_no, device_fp, amount_fen, pay_url, pay_qr, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(order, fp, cfg.priceFen, resp.url || '', resp.url_qrcode || '', now());
-    log(`ORDER_NEW ${order} fp=${fp.slice(0, 8)} ¥${cfg.priceFen / 100}`);
-    return { ok: true, order, pay_url: resp.url || '', pay_qr: resp.url_qrcode || '' };
+    db.prepare(`INSERT INTO orders (out_trade_no, device_fp, amount_fen, renew_code, pay_url, pay_qr, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(order, fp, priceFen, renewCode, resp.url || '', resp.url_qrcode || '', now());
+    log(`ORDER_NEW ${order} fp=${fp.slice(0, 8)} ¥${priceFen / 100}${renewCode ? ` renew=${renewCode}` : ''}`);
+    return {
+        ok: true, order, pay_url: resp.url || '', pay_qr: resp.url_qrcode || '',
+        renew: Boolean(renewCode), price_fen: priceFen,
+    };
 }
 
 // 对上游查单限频:同一订单 4.5s 内只查一次。App 轮询 2s,叠加节流后实际上游
 // 频率约 6s 一次,落在虎皮椒官方建议的 5-10s 区间内;notify 到达时可再快一拍。
 const orderCheckAt = new Map();
 
-/** 向虎皮椒确认支付;确认到账则发码(幂等:一单永远只发同一个码)。返回最新订单行。 */
+/**
+ * 向虎皮椒确认支付;确认到账则发码或续期(幂等:一单永远只发同一个码)。返回最新订单行。
+ */
 async function confirmPaid(order) {
     let row = db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
     if (!row || row.code) return row;
@@ -421,17 +679,35 @@ async function confirmPaid(order) {
     // await 之后重读再发码;以下全部为同步语句,单线程下不会与并发确认交错出双码
     row = db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
     if (!row || row.code) return row;
-    const ins = db.prepare('INSERT INTO codes (code, max_devices, note, created_at) VALUES (?, 2, ?, ?)');
+
+    // 续费单延长原码,不发新码;目标在下单后被吊销的话当新购处理——钱已经收了,
+    // 必须让他拿到一个能用的东西。
+    const target = row.renew_code
+        ? db.prepare("SELECT code, expires_at FROM codes WHERE code = ? AND status = 'active'").get(row.renew_code)
+        : null;
     let code;
-    for (;;) {
-        code = newCode();
-        try { ins.run(code, `xh:${order}`, now()); break; }
-        catch (e) { if (!String(e.message).includes('UNIQUE')) throw e; } // 撞码重试(概率 ~0)
+    if (target) {
+        code = target.code;
+        // 永久码没有到期日可延,续费对它没有意义,原样奉还。
+        if (target.expires_at) {
+            // 从 max(现在, 原到期) 起算:提前续不吃掉剩余时间,过期很久才回来续也不白送中间那段。
+            const base = Math.max(Date.now(), Date.parse(target.expires_at));
+            db.prepare('UPDATE codes SET expires_at = ? WHERE code = ?')
+                .run(new Date(base + SUB_PERIOD_MS).toISOString(), code);
+        }
+    } else {
+        const ins = db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)');
+        const expiresAt = new Date(Date.now() + SUB_PERIOD_MS).toISOString();
+        for (;;) {
+            code = newCode();
+            try { ins.run(code, `xh:${order}`, now(), expiresAt); break; }
+            catch (e) { if (!String(e.message).includes('UNIQUE')) throw e; } // 撞码重试(概率 ~0)
+        }
     }
     db.prepare(`UPDATE orders SET status = 'paid', code = ?, charge_id = ?, paid_at = ?
                 WHERE out_trade_no = ?`)
         .run(code, String(q.data.open_order_id || ''), now(), order);
-    log(`ORDER_PAID ${order} code=${code} xh=${q.data.open_order_id || '-'}`);
+    log(`ORDER_PAID ${order} code=${code}${target ? ' (renew)' : ''} xh=${q.data.open_order_id || '-'}`);
     return db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
 }
 
@@ -445,13 +721,16 @@ async function apiOrderStatus(body) {
     if (!row) return { ok: false, err: 'NOT_FOUND' };
     if (!row.code) row = await confirmPaid(order) || row;
 
-    if (row.code) return { ok: true, status: 'paid', code: row.code };
+    if (row.code) return { ok: true, status: 'paid', code: row.code, renew: Boolean(row.renew_code) };
     // want_url:App 重进购买页续用旧单时才要支付链接,常规轮询不带。
     // 超过复用窗口的旧链接码可能已过期,不再给出——App 拿不到会自行新建订单。
-    const out = { ok: true, status: 'pending' };
+    // price_fen 给的是【下单当时】锁定的 amount_fen,不是现价:二维码是按那个价生成的,
+    // 中途改价也不能让付款页显示成新价。
+    const out = { ok: true, status: 'pending', renew: Boolean(row.renew_code) };
     if (body.want_url && row.created_at > new Date(Date.now() - PENDING_REUSE_MS).toISOString()) {
         out.pay_url = row.pay_url;
         out.pay_qr = row.pay_qr;
+        out.price_fen = row.amount_fen;
     }
     return out;
 }
@@ -535,11 +814,28 @@ const server = https.createServer(
             const url = new URL(req.url, 'https://x');
             const route = `${req.method} ${url.pathname}`;
 
-            if (route === 'GET /healthz') return send(res, 200, { ok: true });
-            // App 检查更新(只读公开信息,不限速:无写操作、响应极小)
-            if (route === 'GET /v1/app/latest') return send(res, 200, apiAppLatest());
+            // ★ 每条路由都要限速。别在这下面加"顺手不限速"的接口:哪怕只读,
+            //   裸奔的接口就是别人拿来打 DB/CPU/磁盘的入口。
+            const limit = (cls) => rateLimited(ip, cls);
+
+            if (route === 'GET /healthz') {
+                if (limit('read')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
+                return send(res, 200, { ok: true });
+            }
+            // App 检查更新 / 取当前定价:只读公开信息,但每次都要读一次文件,不能白给
+            if (route === 'GET /v1/app/latest') {
+                if (limit('read')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
+                return send(res, 200, apiAppLatest());
+            }
+            if (route === 'GET /v1/pricing') {
+                if (limit('read')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
+                return send(res, 200, apiPricing());
+            }
 
             if (url.pathname.startsWith('/admin/')) {
+                // 限速放在验令牌【之前】:顺带把令牌爆破也压住。管理操作是人在菜单里点,
+                // 一分钟 60 次绰绰有余。
+                if (limit('admin')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
                 if (!constantTimeEq(req.headers['x-admin-token'] || '', cfg.adminToken)) {
                     log(`ADMIN_DENIED ${route} ip=${ip}`);
                     return send(res, 401, { ok: false, err: 'UNAUTHORIZED' });
@@ -548,29 +844,46 @@ const server = https.createServer(
                 if (route === 'GET /admin/codes') return send(res, 200, adminListCodes());
                 if (route === 'POST /admin/unbind') return send(res, 200, adminUnbind(await readBody(req)));
                 if (route === 'POST /admin/revoke') return send(res, 200, adminRevoke(await readBody(req)));
+                if (route === 'POST /admin/unrevoke') return send(res, 200, adminUnrevoke(await readBody(req)));
+                if (route === 'POST /admin/pricing') return send(res, 200, adminSetPricing(await readBody(req)));
+                if (route === 'POST /admin/expiry') return send(res, 200, adminSetExpiry(await readBody(req)));
                 return send(res, 404, { ok: false, err: 'NOT_FOUND' });
             }
 
+            // 发码 / 绑定 / 收钱这三个共用最紧的一本账:最贵,也最该防爆破。
+            // 这里回 200 而不是 429 —— App 靠响应体里的 err 认状态,老版本认不得 429。
             if (route === 'POST /v1/activate') {
-                if (rateLimited(ip)) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
+                if (limit('write')) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
                 return send(res, 200, apiActivate(await readBody(req)));
             }
-            if (route === 'POST /v1/renew') return send(res, 200, apiRenew(await readBody(req)));
             if (route === 'POST /v1/restore') {
-                if (rateLimited(ip)) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
+                if (limit('write')) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
                 return send(res, 200, apiRestore(await readBody(req)));
             }
-
-            // 购买下单与限速共用一本账(下单也是敏感写操作);轮询查单不限速,
-            // 上游查询频率由 confirmPaid 内部的 4.5s 节流兜住。
             if (route === 'POST /v1/order/create') {
-                if (rateLimited(ip)) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
+                if (limit('write')) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
                 return send(res, 200, await apiOrderCreate(await readBody(req)));
             }
-            if (route === 'POST /v1/order/status') return send(res, 200, await apiOrderStatus(await readBody(req)));
+            // renew 每次要签一张通行证(有 CPU 成本),正常一天才一次
+            if (route === 'POST /v1/renew') {
+                if (limit('renew')) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
+                return send(res, 200, apiRenew(await readBody(req)));
+            }
+            // 查单是付款页每 2 秒一次的轮询,额度必须给足(见 LIMITS.poll);
+            // 真正贵的上游查询另有 confirmPaid 内部的 4.5s/单 节流兜着。
+            if (route === 'POST /v1/order/status') {
+                if (limit('poll')) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
+                return send(res, 200, await apiOrderStatus(await readBody(req)));
+            }
             if (route === 'POST /pay/notify') {
                 // 虎皮椒回调是表单编码;无论处理结果如何都回 "success" 停止重推,
                 // 万一漏单由 App 轮询查单兜底。
+                // 限速额度给得松:这是虎皮椒的服务器在推,它会重试最多 6 次,
+                // 挡掉一次只是少了个加速信号(闸三会兜住),但挡不住就是个免费的验签打靶场。
+                if (limit('read')) {
+                    res.writeHead(429, { 'Content-Type': 'text/plain' });
+                    return res.end('rate limited');
+                }
                 await apiPayNotify(Object.fromEntries(new URLSearchParams(await readRaw(req))));
                 res.writeHead(200, { 'Content-Type': 'text/plain' });
                 return res.end('success');
@@ -584,5 +897,14 @@ const server = https.createServer(
     },
 );
 
+// 慢连接兜底。Node 默认 requestTimeout 300 秒——一个人挂着半截请求就能白占一条连接 5 分钟,
+// 攒够几百条就把服务拖死(slowloris)。本服务所有接口都是几十毫秒级的小请求,收紧无损。
+server.requestTimeout = 30_000;
+server.headersTimeout = 15_000;
+server.keepAliveTimeout = 10_000;
+// 连接数上限:超了直接拒新连接。App 轮询每次也就占一条短连,512 远够用;
+// 没有这道,连接洪水能把内存撑爆。
+server.maxConnections = 512;
+
 server.listen(cfg.port, () => log(`license server listening on :${cfg.port}, db=${cfg.dbPath}, `
-    + (PAY_ENABLED ? `pay=xh ¥${cfg.priceFen / 100}` : 'pay=disabled')));
+    + (PAY_ENABLED ? `pay=xh ¥${pricing().priceFen / 100}` : 'pay=disabled')));

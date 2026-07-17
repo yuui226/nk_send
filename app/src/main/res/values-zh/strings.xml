@@ -73,7 +73,7 @@
     <string name="keep_screen_on">屏幕常亮</string>
     <string name="keep_screen_on_desc">应用在前台时不熄屏，防止连接中断</string>
     <string name="version_label">Z传 v%1$s</string>
-    <string name="qq_group_copied">已复制 QQ 号 %1$s\n加我购买获取激活码</string>
+    <string name="qq_group_copied">已复制客服 QQ：%1$s</string>
     <string name="feedback">反馈</string>
     <string name="feedback_qq_copied">已复制 QQ 号 %1$s\n请加 QQ 反馈</string>
 
@@ -149,7 +149,7 @@
     <string name="activation_success">激活成功，感谢支持！</string>
     <string name="err_code_not_found">激活码不存在</string>
     <string name="err_code_revoked">该激活码已被停用</string>
-    <string name="err_slots_full">该激活码已绑满设备，换机请联系客服解绑</string>
+    <string name="err_code_expired">订阅已到期，请续费后继续使用</string>
     <string name="err_rate_limited">尝试过于频繁，请一分钟后再试</string>
     <string name="err_server_unreachable">无法连接激活服务器，请检查网络；若网络正常，可能需要更新到新版本（QQ 群获取）。</string>
     <string name="err_generic">激活失败（%1$s）</string>
@@ -159,50 +159,62 @@
     <string name="pro_label">高级版</string>
     <string name="unlock">解锁</string>
     <string name="enter_code">输入激活码</string>
-    <string name="back">返回</string>
     <string name="tier_free">免费</string>
-    <string name="compare_transfer">每日传输</string>
-    <string name="compare_transfer_free">%1$d 个</string>
+    <string name="compare_transfer">传输</string>
+    <string name="compare_transfer_free">%1$d 个/天</string>
     <string name="compare_filesize">单文件大小</string>
     <string name="compare_filesize_free">%1$d MB</string>
     <string name="compare_remote">遥控 · 监看</string>
     <string name="compare_remote_free">%1$d 分钟/天</string>
     <string name="compare_unlimited">无限</string>
-    <string name="compare_no_limit">不限时</string>
     <string name="price_promo_tag">限时特惠</string>
-    <string name="pro_perks">一次买断 · 无订阅 · 免费更新</string>
+    <!-- 价格单位按语言拼，金额本身是常量（见 PRO_PRICE）。 -->
+    <string name="price_per_year">%1$s/年</string>
+    <string name="pro_price_per_day">≈%1$s/天</string>
+    <string name="pro_perks">一年有效 · 随时可续 · 免费更新</string>
     <string name="quota_left_hint">今日剩余额度 %1$d/%2$d</string>
     <string name="transfer_limit_reached">今日额度已用完，请解锁高级版</string>
     <string name="transfer_size_limit">超过 %1$d MB，请解锁高级版</string>
     <string name="remote_trial_left">今日剩余 %1$s</string>
     <string name="remote_trial_ended">今日监看时长已用完，解锁高级版不限时</string>
     <string name="buy_now">立即购买</string>
-    <string name="contact_support">购买或激活遇到问题？联系客服</string>
+    <string name="contact_support">客服</string>
     <string name="purchase_loading">正在创建订单…</string>
     <string name="purchase_qr_loading">正在生成支付二维码…</string>
     <string name="purchase_wechat_title">微信扫码支付</string>
     <string name="purchase_scan_hint">请到微信扫相册中的二维码付款</string>
     <string name="purchase_save_qr">保存到相册</string>
     <string name="purchase_saved">✓ 已保存到相册</string>
-    <string name="purchase_save_failed">保存失败，请改用截图</string>
+    <string name="purchase_save_failed">保存失败，请截图后到微信扫相册中的二维码付款</string>
     <string name="purchase_copy_link">复制支付链接（在电脑浏览器打开即显示二维码）</string>
     <string name="purchase_link_copied">已复制支付链接</string>
     <string name="purchase_open_link">打开支付页面</string>
     <string name="purchase_qr_expired">支付已超时</string>
     <string name="purchase_qr_refresh">重新发起支付</string>
     <string name="renewal_needed">高级版授权已过期，请连接网络后重开 App 自动续期。</string>
+    <!-- 订阅到期（连接页续费按钮/弹窗 + 首页提示条） -->
+    <string name="sub_expires_on">%1$s 到期</string>
+    <string name="renew_action">续费</string>
+    <string name="renew_carry_over">将在原到期时间追加 365 天</string>
+    <string name="sub_expired_renew">高级版已到期，续费继续使用</string>
+    <plurals name="sub_days_left">
+        <item quantity="other">剩 %1$d 天到期</item>
+    </plurals>
+    <plurals name="sub_expiring_soon">
+        <item quantity="other">高级版还有 %1$d 天到期</item>
+    </plurals>
+    <string name="purchase_renewed">🎉 续费成功 · 有效期延长至 %1$s</string>
     <string name="purchase_opening_alipay">正在打开支付宝…</string>
     <string name="purchase_waiting">在上方页面完成支付，到账后自动激活。</string>
-    <string name="purchase_success">支付成功，高级版已激活！</string>
     <string name="purchase_activated">🎉 购买成功 · 高级版已解锁</string>
     <string name="purchase_restored">🎉 本设备已购买过 · 已免费恢复,未重复扣款</string>
-    <string name="purchase_view_code">查看激活码（可用于第二台设备）</string>
     <string name="restore_action">恢复授权</string>
     <string name="restore_restoring">恢复中…</string>
     <string name="restore_none">未找到本机的授权（尚未购买，或已在新设备上使用）</string>
     <string name="settings_view_code">我要换机</string>
-    <string name="settings_code_hint">请妥善保管激活码，切勿外传。换新手机时在新机输入即可（旧机自动停用）；被多台设备滥用会导致此码失效、所有设备降级。</string>
-    <string name="purchase_keep_code">你的激活码（点击复制），请妥善保管、切勿外传：换新机时在新机输入激活（旧机自动停用），被多台设备滥用会导致此码失效。</string>
+    <string name="settings_code_hint">在新设备输入此激活码即可换机，本机会恢复成免费版。请勿滥用，滥用会导致激活码失效。</string>
+    <string name="copy_code">复制</string>
+    <string name="code_copied">已复制</string>
     <string name="purchase_paid_not_active">已收到付款但自动激活未成功，请复制上方激活码，用「输入激活码」完成激活。</string>
     <string name="purchase_code_copied">已复制激活码</string>
     <string name="purchase_done">完成</string>
@@ -210,12 +222,12 @@
     <string name="err_purchase_unreachable">无法连接服务器。若当前连着相机 Wi-Fi，请先断开，用有外网的网络重试。</string>
     <string name="err_purchase_failed">下单失败，请稍后重试或联系客服。</string>
 
-    <!-- 检查更新（连接页） -->
+    <!-- 检查更新（设置页脚） -->
     <string name="check_update">检查更新</string>
     <string name="checking_update">检查中…</string>
-    <string name="update_latest">已是最新版本</string>
+    <string name="update_latest">当前版本为最新</string>
     <string name="update_check_failed">检查更新失败，请确认当前网络可以上网</string>
-    <string name="update_found_title">发现新版本 %1$s</string>
-    <string name="update_download">去下载</string>
-    <string name="update_password_hint">提取码 %1$s 将在点击「去下载」时自动复制，在下载页粘贴即可。</string>
+    <string name="update_found_copied">有新版本，已复制下载链接和密码</string>
+    <!-- 复制进剪贴板的内容格式：链接 + 提取码 -->
+    <string name="update_link_clip">%1$s 密码：%2$s</string>
 </resources>

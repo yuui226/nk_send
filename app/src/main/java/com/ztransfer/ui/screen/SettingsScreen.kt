@@ -54,13 +54,12 @@ import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // 客服/购买 QQ 号（用户使用场景多为连着相机 Wi-Fi 无外网，只能靠复制号码离线联系）。
 internal const val QQ_NUMBER = "953000922"
-// 高级版展示定价（纯文案，改价只动这里）。PRO_PRICE 留空 = 弹窗不显示整个价格区。
-// 促销模式：现价 + 划线原价 + "限时特惠"角标（原价留空则退化为单一价格展示）。
-internal const val PRO_PRICE = "¥19.9"
-internal const val PRO_PRICE_ORIGINAL = "¥29.9"
+// 定价不在这里了:由服务端下发(LicenseManager.pricing),改价改服务器的 pricing.json 即可,
+// 不用发版。兜底常量见 LicenseManager.FALLBACK_PRICE_FEN。
 
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），从顶栏设置按钮变形弹出、关闭缩回按钮
@@ -102,6 +101,9 @@ fun SettingsOverlay(
 
     // 右上角"解锁高级版"徽标打开的介绍对话框（免费/高级版对比 + 解锁按钮复制 QQ 号）。
     var showPro by remember { mutableStateOf(false) }
+    // 页脚"我要换机"打开的对话框（取激活码 + 换机后果告知）。
+    var showSwitchDevice by remember { mutableStateOf(false) }
+    val subExpired by LicenseManager.subExpired.collectAsState()
 
     // 页脚底部玻璃提示（反馈复制确认 / 隐藏入口的恢复免费版确认共用）；
     // 文案与可见性分开存，消失动画期间仍有文字可渲染；nonce 保证连续触发重启计时。
@@ -198,48 +200,14 @@ fun SettingsOverlay(
                 ProDialog(
                     onDismiss = { showPro = false },
                     onCelebrate = onPlayFireworks,
-                    onHoldCameraWifi = onHoldCameraWifi
+                    onHoldCameraWifi = onHoldCameraWifi,
+                    // 到期的老用户从这里再买 = 续原来那个码,不发新码。
+                    renew = subExpired
                 )
             }
 
-            // 高级版专属:查看/复制我的激活码(换新手机时在新机输入此码,旧机自动顶替停用)。
-            if (isPro) {
-                var showMyCode by remember { mutableStateOf(false) }
-                var myCodeCopied by remember { mutableStateOf(false) }
-                Spacer(Modifier.height(6.dp))
-                if (!showMyCode) {
-                    TextButton(onClick = { showMyCode = true }) {
-                        Text(
-                            stringResource(R.string.settings_view_code),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.accentBlue
-                        )
-                    }
-                } else {
-                    val myCode = LicenseManager.purchasedCode()
-                    if (myCode != null) {
-                        TextButton(onClick = {
-                            clipboard.setText(AnnotatedString(myCode))
-                            myCodeCopied = true
-                        }) {
-                            Text(
-                                myCode,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.onBackground
-                            )
-                        }
-                        Text(
-                            stringResource(
-                                if (myCodeCopied) R.string.purchase_code_copied
-                                else R.string.settings_code_hint
-                            ),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant
-                        )
-                    }
-                }
-            }
+            // 到期日与续费入口不放这儿:裸在面板上显乱,已挪到连接页徽标左侧的"续费"
+            // 玻璃按钮(点开 RenewDialog);那里也是全 app 唯一确定有外网、付得了款的页面。
 
             Spacer(Modifier.height(14.dp))
 
@@ -447,6 +415,14 @@ fun SettingsOverlay(
             var lastVersionTapAt by remember { mutableStateOf(0L) }
             val revertedHint = stringResource(R.string.revert_free)
             val qqCopiedHint = stringResource(R.string.feedback_qq_copied, QQ_NUMBER)
+            // 检查更新:结果走页脚提示条;有新版则把下载链接(带提取码)复制进剪贴板,
+            // 用户自己去浏览器粘贴——蓝奏云无稳定直链,不做 App 内下载。
+            var checkingUpdate by remember { mutableStateOf(false) }
+            val updateScope = rememberCoroutineScope()
+            val context = LocalContext.current
+            val updateFoundHint = stringResource(R.string.update_found_copied)
+            val latestHint = stringResource(R.string.update_latest)
+            val checkFailedHint = stringResource(R.string.update_check_failed)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stringResource(R.string.version_label, BuildConfig.VERSION_NAME),
@@ -469,6 +445,59 @@ fun SettingsOverlay(
                 Spacer(Modifier.weight(1f))
                 GlassButton(
                     onClick = {
+                        if (!checkingUpdate) {
+                            checkingUpdate = true
+                            updateScope.launch {
+                                when (val r = LicenseManager.checkAppUpdate(BuildConfig.VERSION_CODE)) {
+                                    is LicenseManager.UpdateResult.Available -> {
+                                        val info = r.info
+                                        clipboard.setText(
+                                            AnnotatedString(
+                                                if (info.password.isEmpty()) info.url
+                                                else context.getString(
+                                                    R.string.update_link_clip, info.url, info.password
+                                                )
+                                            )
+                                        )
+                                        showFooterHint(updateFoundHint)
+                                    }
+                                    LicenseManager.UpdateResult.UpToDate -> showFooterHint(latestHint)
+                                    LicenseManager.UpdateResult.Unreachable -> showFooterHint(checkFailedHint)
+                                }
+                                checkingUpdate = false
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                    modifier = Modifier.height(28.dp)
+                ) {
+                    Text(
+                        stringResource(if (checkingUpdate) R.string.checking_update else R.string.check_update),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.onBackground
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                // 高级版专属"我要换机":与"反馈"并列在页脚——都是不常用的出口动作,
+                // 一年用一次的东西不该占正文位置。取码与换机后果都在弹窗里说。
+                if (isPro) {
+                    GlassButton(
+                        onClick = { showSwitchDevice = true },
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Text(
+                            stringResource(R.string.settings_view_code),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.onBackground
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+                GlassButton(
+                    onClick = {
                         clipboard.setText(AnnotatedString(QQ_NUMBER))
                         showFooterHint(qqCopiedHint)
                     },
@@ -482,6 +511,9 @@ fun SettingsOverlay(
                         color = colors.onBackground
                     )
                 }
+            }
+            if (showSwitchDevice) {
+                SwitchDeviceDialog(onDismiss = { showSwitchDevice = false })
             }
         }
     }
