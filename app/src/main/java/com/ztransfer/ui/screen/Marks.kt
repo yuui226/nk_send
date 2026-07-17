@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import com.ztransfer.ui.theme.AppTheme
@@ -44,7 +45,11 @@ fun FilterMark(
     }
 }
 
-/** 遥控标志：取景框四角 + 中心对焦点（监看/遥控拍摄的极简形）。 */
+/**
+ * 监看标志：取景框四角 + 中心镜头圆环（监看/遥控拍摄的极简形）。
+ * 四角 = 取景/监看；中心用【圆环而非实心点】表示镜头——既把语义拉回"相机"，
+ * 又避开与预览页 AF 对焦框（实心角框）撞形。
+ */
 @Composable
 fun RemoteMark(
     modifier: Modifier = Modifier,
@@ -76,7 +81,13 @@ fun RemoteMark(
         corner(1f - edge, edge, -1f, 1f)       // 右上
         corner(edge, 1f - edge, 1f, -1f)       // 左下
         corner(1f - edge, 1f - edge, -1f, -1f) // 右下
-        drawCircle(color = color, radius = 0.09f * s, center = Offset(0.5f * s, 0.5f * s))
+        // 中心镜头圆环：描边比杆件略细，半径留出与四角的呼吸间距。
+        drawCircle(
+            color = color,
+            radius = 0.12f * s,
+            center = Offset(0.5f * s, 0.5f * s),
+            style = Stroke(width = 0.10f * s)
+        )
     }
 }
 

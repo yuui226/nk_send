@@ -7,6 +7,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -312,7 +313,8 @@ fun TransferScreen(
                                             Icon(
                                                 Icons.Default.Refresh,
                                                 contentDescription = stringResource(R.string.retry),
-                                                tint = if (connected) colors.accentBlue else colors.onSurfaceVariant,
+                                                // 禁用态视觉由 GlassButton 统一压淡，不再手动切灰。
+                                                tint = colors.accentBlue,
                                                 modifier = Modifier.size(16.dp)
                                             )
                                         }
@@ -351,8 +353,14 @@ fun TransferScreen(
 
                             if (task.status == TransferStatus.TRANSFERING) {
                                 Spacer(modifier = Modifier.height(10.dp))
+                                // 平滑追值：进度跳变时进度条缓缓滑到新值，而非硬切一格。
+                                val animatedProgress = animateFloatAsState(
+                                    targetValue = task.progress,
+                                    animationSpec = Motion.progress,
+                                    label = "taskProgress"
+                                )
                                 LinearProgressIndicator(
-                                    progress = task.progress,
+                                    progress = animatedProgress.value,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(4.dp)
@@ -694,26 +702,17 @@ private fun QueueThumbnail(
     }
 }
 
-/** 队列任务状态图标（等待/传输/完成/失败/取消）。前导或尾部复用。 */
+/**
+ * 队列任务状态图标（等待/传输/完成/失败/取消）。字形与语义色取自共用的 [statusGlyph]
+ * （单一数据源，与列表页角标统一）；卡片在纯色卡面上，裸符号铺底、无圆片容器。
+ */
 @Composable
 private fun TaskStatusIcon(status: TransferStatus, size: Dp = 20.dp) {
-    val colors = AppTheme.colors
+    val (icon, tint) = statusGlyph(status)
     Icon(
-        imageVector = when (status) {
-            TransferStatus.WAITING -> Icons.Default.Schedule
-            TransferStatus.TRANSFERING -> Icons.Default.Downloading
-            TransferStatus.COMPLETED -> Icons.Default.CheckCircle
-            TransferStatus.FAILED -> Icons.Default.Error
-            TransferStatus.CANCELLED -> Icons.Default.Cancel
-        },
+        imageVector = icon,
         contentDescription = null,
-        tint = when (status) {
-            TransferStatus.WAITING -> colors.statusWaiting
-            TransferStatus.TRANSFERING -> colors.accentBlue
-            TransferStatus.COMPLETED -> colors.statusConnected
-            TransferStatus.FAILED -> colors.statusError
-            TransferStatus.CANCELLED -> colors.onSurfaceVariant
-        },
+        tint = tint,
         modifier = Modifier.size(size)
     )
 }

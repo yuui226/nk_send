@@ -12,7 +12,6 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -84,6 +83,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -129,7 +129,10 @@ private enum class PillMode { ICON, DONE, COUNTING }
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
 
 // 类型筛选下拉面板宽度（位置钳制计算需要显式宽度）。
-private val FILTER_PANEL_WIDTH = 148.dp
+private val FILTER_PANEL_WIDTH = 180.dp
+
+// 有彩色角标底（白字）的类型：其余走灰底灰字。提到顶层，避免每个格子每次重组都新建集合。
+private val TYPE_BADGE_COLORED_EXTS = setOf(".jpg", ".nef", ".mov", ".mp4")
 
 // 无拍摄日期文件的分组键（非显示文案，显示时映射到 R.string.unknown_date）。
 // 以 "zzz" 开头保证按键降序排序时排在所有 "yyyyMMdd" 日期之前，与原行为一致。
@@ -188,6 +191,8 @@ fun FileListScreen(
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
+    // 高级版烟花彩蛋：设置面板里的"高级版"徽标点击时在本页放烟花（与连接页共用实现）。
+    val fireworks = rememberFireworksState()
     // "整组吸入"动画：飞行中的卡片摞（可并发多摞）、队列胶囊容器区域（飞行终点）、
     // 胶囊"接住"弹跳（每摞到达 nonce+1，胶囊放大回弹一次）。
     val queueFlights = remember { mutableStateListOf<QueueFlight>() }
@@ -306,8 +311,7 @@ fun FileListScreen(
             showHint(exitHint)
         }
     }
-    // 筛选下拉打开时，返回键先收起下拉（后注册的 BackHandler 优先于上面的退出确认）。
-    BackHandler(enabled = showFilter) { showFilter = false }
+    // 筛选浮层的返回键收起由 FilterOverlay 内部（AnchorPopup 的 BackHandler）处理，此处不再拦截。
 
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -328,6 +332,16 @@ fun FileListScreen(
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterActive = filterExts != null || filterProtected || filterBurst
+    // 筛选确定后的级联入场（复用分组展开的入场动画）：tick 每次确定递增（重播存量格子）,
+    // window 开 600ms（窗口内组成的格子播入场,之后滚动进入的不播——与 recentlyExpanded 同构）。
+    var filterRevealTick by remember { mutableStateOf(0) }
+    var filterRevealWindow by remember { mutableStateOf(false) }
+    LaunchedEffect(filterRevealTick) {
+        if (filterRevealTick > 0) {
+            delay(600)
+            filterRevealWindow = false
+        }
+    }
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
     val availableExts = remember(state.files) {
         state.files.map { it.extension }.distinct().sorted()
@@ -348,7 +362,7 @@ fun FileListScreen(
     val transfersBusy = transferState.tasks.any {
         it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
     }
-    // 触感反馈（开关在设置里，默认关）。
+    // 触感反馈（开关在设置里，默认开）。
     val haptics = rememberHaptics(transferState.hapticsEnabled)
 
     // 长按预览：全屏翻页 + 从被长按格子的位置放大展开。
@@ -554,6 +568,8 @@ fun FileListScreen(
                 burstHandles = burstHandles,
                 contentPadding = listPadding,
                 gridState = gridState,
+                filterRevealTick = filterRevealTick,
+                filterRevealWindow = filterRevealWindow,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -755,44 +771,27 @@ fun FileListScreen(
             }
         }
 
-        // ---------- 类型筛选下拉：贴筛选按钮下缘向下展开；点面板外任意处收起 ----------
-        val filterTransition = remember { MutableTransitionState(false) }
-        filterTransition.targetState = showFilter
-        if (filterTransition.currentState || filterTransition.targetState) {
-            // 透明捕获层：点击面板外任意处（含顶栏其它按钮区域）只收起下拉，不穿透。
-            if (showFilter) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .pointerInput(Unit) { detectTapGestures { showFilter = false } }
-                )
-            }
-            val density = LocalDensity.current
-            val panelTop = filterAnchor?.let { with(density) { it.bottom.toDp() } + 8.dp } ?: 76.dp
-            // 左缘对齐按钮，但不许超出屏幕右缘（信号条展开把按钮推得很靠右/窄屏时，
-            // 面板整体向左钳制到贴边 12dp）。
-            val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-            val panelStart = (filterAnchor?.let { with(density) { it.left.toDp() } } ?: 12.dp)
-                .coerceAtMost(screenWidth - FILTER_PANEL_WIDTH - 12.dp)
-                .coerceAtLeast(12.dp)
-            Box(modifier = Modifier.padding(start = panelStart, top = panelTop)) {
-                AnimatedVisibility(
-                    visibleState = filterTransition,
-                    enter = fadeIn(tween(180)) + expandVertically(expandFrom = Alignment.Top),
-                    exit = fadeOut(tween(140)) + shrinkVertically(shrinkTowards = Alignment.Top)
-                ) {
-                    FilterDropdown(
-                        availableExts = availableExts,
-                        current = filterExts,
-                        currentProtected = filterProtected,
-                        currentBurst = filterBurst,
-                        onConfirm = { sel, prot, burst ->
-                            transferViewModel.setFilters(sel, prot, burst)
-                            showFilter = false
-                        }
-                    )
-                }
-            }
+        // ---------- 类型/标记筛选浮层：从筛选按钮变形弹出、关闭缩回按钮（见 FilterOverlay）----------
+        if (showFilter) {
+            FilterOverlay(
+                anchorBounds = filterAnchor,
+                availableExts = availableExts,
+                current = filterExts,
+                currentProtected = filterProtected,
+                currentBurst = filterBurst,
+                onConfirm = { sel, prot, burst ->
+                    // 筛选真的变了才开入场窗口：在事件回调里【同步】置起（与分组展开在
+                    // onClick 里设 recentlyExpanded 同理），下一帧组成的新列表才带动画;
+                    // 原样确定不重播,免得无变化也整屏闪一遍。
+                    if (sel != filterExts || prot != filterProtected || burst != filterBurst) {
+                        filterRevealTick++
+                        filterRevealWindow = true
+                    }
+                    transferViewModel.setFilters(sel, prot, burst)
+                    showFilter = false
+                },
+                onDismiss = { showFilter = false }
+            )
         }
 
         // 底部通用玻璃提示条（退出确认 / 相机未连接等）。
@@ -825,11 +824,12 @@ fun FileListScreen(
             SettingsOverlay(
                 viewModel = transferViewModel,
                 anchorBounds = zAnchor,
-                onDismiss = { showSettings = false }
+                onDismiss = { showSettings = false },
+                onPlayFireworks = { fireworks.launch() }
             )
         }
 
-        // 长按预览层（最上层）：全屏翻页，从被长按格子的位置放大展开/收回。
+        // 长按预览层：全屏翻页，从被长按格子的位置放大展开/收回。
         previewIndex?.let { idx ->
             if (idx in flatFiles.indices) {
                 PhotoPreviewOverlay(
@@ -843,6 +843,9 @@ fun FileListScreen(
                 )
             }
         }
+
+        // 高级版烟花彩蛋（最上层，含设置面板与预览层之上）：不拦截触摸，播完自行移除。
+        FireworksOverlay(fireworks)
     }
 }
 
@@ -873,6 +876,13 @@ fun QueuePill(
     }
     // 进度条 = 当前单文件进度（复用传输页语义）；全部传完时填满。
     val barFraction = if (allDone) 1f else transferState.currentFileProgress
+    // 平滑追值：填充宽度随 Motion.progress 弹簧缓动而非硬跳（与传输页进度条/列表进度环同一手感）。
+    // 用 State 在 drawBehind 里读 .value：每帧只重绘填充，不触发胶囊重组。
+    val animatedBar = animateFloatAsState(
+        targetValue = barFraction,
+        animationSpec = Motion.progress,
+        label = "pillProgress"
+    )
 
     // "done → 图标" 的转场只由"传输中 → 全部完成"触发。prevAllDone 初值取当前 allDone：
     // 若进入本页时已是完成态（例如从队列页返回），不再闪 done，直接显示图标（无转场动画）。
@@ -951,7 +961,7 @@ fun QueuePill(
                         .drawBehind {
                             drawRect(
                                 color = colors.accentBlue.copy(alpha = 0.35f),
-                                size = Size(size.width * barFraction, size.height)
+                                size = Size(size.width * animatedBar.value, size.height)
                             )
                         }
                 )
@@ -1016,7 +1026,9 @@ fun QueuePill(
                                 )
                             PillMode.DONE ->
                                 Text(
-                                    text = "done",
+                                    // 刻意不走字符串资源:所有语言统一显示 "Done"(短暂闪现的
+                                    // 状态徽记,当装饰性标识处理,不参与本地化)。
+                                    text = "Done",
                                     style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
                                     color = colors.statusConnected,
                                     fontWeight = FontWeight.Bold,
@@ -1067,7 +1079,8 @@ fun QueuePill(
 
 /**
  * Wi-Fi 信号毛玻璃按钮：相机已连接时显示 4 格信号条（点击展开具体 dBm）；
- * 连接断开（含不在相机 Wi-Fi）时显示红色断连图标——断开状态一眼可见。
+ * 连接断开（含不在相机 Wi-Fi）时显示红色断连图标——断开状态一眼可见，
+ * 此时点击直接跳系统 Wi-Fi 设置（与连接页的 Wi-Fi 按钮同款行为）。
  * [pulseTrigger] 递增时按钮轻微放大再弹性缩回（断开时点缩略图的"病因指向"反馈）。
  * "Z传"页与队列页顶栏共用。
  */
@@ -1100,17 +1113,36 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
             pulse.animateTo(1f, Motion.bouncy())
         }
     }
+    // 断开呼吸：整个按钮持续轻微放大缩小，把"该重连相机了"顶到眼前（点击即跳
+    // Wi-Fi 设置）。仅断开时组合 infinite transition，在线零开销；值在 graphicsLayer
+    // 里读，每帧只更新图层不重组。与 pulse 强调相乘叠加，互不打架。
+    val breath = if (!online) {
+        rememberInfiniteTransition(label = "signalBreath").animateFloat(
+            initialValue = 1f, targetValue = 1.09f,
+            animationSpec = infiniteRepeatable(tween(550, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "signalBreathScale"
+        )
+    } else null
 
+    val context = LocalContext.current
     GlassButton(
-        onClick = { expanded = !expanded },
+        onClick = {
+            if (online) expanded = !expanded
+            // 断开态：断连图标即"去连 Wi-Fi"的入口，跳系统 Wi-Fi 设置（与连接页
+            // 的 Wi-Fi 按钮同款行为）；离线时展开 dBm 本来就无意义。
+            else try {
+                context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            } catch (_: Exception) {}
+        },
         shape = RoundedCornerShape(22.dp),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
         // 顶栏按钮统一 36dp 高；信号条内容 15dp，在按钮内垂直居中。
         modifier = Modifier
             .height(36.dp)
             .graphicsLayer {
-                scaleX = pulse.value
-                scaleY = pulse.value
+                val s = pulse.value * (breath?.value ?: 1f)
+                scaleX = s
+                scaleY = s
             }
     ) {
         // dBm 文本用 AnimatedVisibility 逐帧驱动宽度+透明度，按钮宽度随内容自然过渡。
@@ -1278,6 +1310,11 @@ private fun ThumbnailGrid(
     burstHandles: Set<Int>,
     contentPadding: PaddingValues,
     gridState: LazyGridState,
+    // 筛选入场：确定筛选的瞬间 tick 递增、window 开启 600ms（都在事件回调里同步置起，
+    // 晚一帧格子就先以终态闪现穿帮）。窗口内组成的格子重播级联入场——复用分组展开的
+    // "瞬时重排 + 级联入场"方案；条目位移动画不可用的原因见下方手风琴注释。
+    filterRevealTick: Int = 0,
+    filterRevealWindow: Boolean = false,
     modifier: Modifier = Modifier
 ) {
 
@@ -1381,9 +1418,10 @@ private fun ThumbnailGrid(
                         onPreview = onPreview,
                         cellBoundsRegistry = cellBoundsRegistry,
                         inBurst = file.handle in burstHandles,
-                        reveal = group.date == recentlyExpanded,
+                        reveal = group.date == recentlyExpanded || filterRevealWindow,
                         // 级联错峰：组内前 18 格按 15ms 递增，其余同批（基本都在屏外）。
                         revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
+                        revealKey = filterRevealTick,
                         modifier = if (collapsingThis) {
                             Modifier.collapseHeight { collapseProgress.value }
                         } else Modifier
@@ -1411,13 +1449,15 @@ private fun ThumbnailCell(
     inBurst: Boolean = false,
     reveal: Boolean = false,
     revealDelayMs: Long = 0L,
+    // 变化即重播入场动画（筛选确定时存量格子也要重播）；平时保持不变。
+    revealKey: Any? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
-    // 展开入场：本组刚被展开时淡入+轻微放大、按 revealDelayMs 级联错峰；
+    // 展开/筛选入场：本组刚被展开或筛选刚确定时淡入+轻微放大、按 revealDelayMs 级联错峰；
     // 平时（滚动进入）revealProgress 初始即 1，直接全显、零开销。
-    val revealProgress = remember { Animatable(if (reveal) 0f else 1f) }
-    LaunchedEffect(Unit) {
+    val revealProgress = remember(revealKey) { Animatable(if (reveal) 0f else 1f) }
+    LaunchedEffect(revealKey) {
         if (revealProgress.value < 1f) {
             delay(revealDelayMs)
             revealProgress.animateTo(1f, tween(220))
@@ -1497,7 +1537,8 @@ private fun ThumbnailCell(
             color = when (file.extension) {
                 ".jpg" -> colors.accentBlue.copy(alpha = 0.85f)
                 ".nef" -> colors.accentPurple.copy(alpha = 0.85f)
-                ".mov" -> colors.accentOrange.copy(alpha = 0.85f)
+                // 视频统一橙色（MOV/MP4 同族）；MP4 原本落到灰底、灰字太不起眼。
+                ".mov", ".mp4" -> colors.accentOrange.copy(alpha = 0.85f)
                 else -> colors.surfaceVariant.copy(alpha = 0.85f)
             },
             modifier = Modifier.align(Alignment.TopStart)
@@ -1507,54 +1548,40 @@ private fun ThumbnailCell(
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
                 fontWeight = FontWeight.Medium,
-                color = if (file.extension in setOf(".jpg", ".nef", ".mov")) colors.onAccent else colors.onSurfaceVariant
+                color = if (file.extension in TYPE_BADGE_COLORED_EXTS) colors.onAccent else colors.onSurfaceVariant
             )
         }
 
         // 右上角连拍角标：与左上角类型标签同族的角贴(实色底 + 白色内容),
-        // 青绿是连拍的专属色(蓝/紫/橙已被类型占用,绿是传输状态色),
-        // 图标(叠帧) + "连拍"文字,一眼读出"这一串是按住快门扫出来的"。
-        // 算法见 computeBurstHandles;将来升级"连拍组折叠"后由组 UI 取代。
+        // 青绿是连拍的专属色(蓝/紫/橙已被类型占用,绿是传输状态色)。
+        // 叠帧图标 + 三条渐短的速度线("嗖"地扫过的拖尾),不用文字也一眼读出
+        // "这一串是按住快门快速扫出来的"。算法见 computeBurstHandles。
         if (inBurst) {
             Surface(
                 shape = RoundedCornerShape(bottomStart = 6.dp),
                 color = BurstBadgeColor.copy(alpha = 0.85f),
                 modifier = Modifier.align(Alignment.TopEnd)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                ) {
-                    Icon(
-                        Icons.Default.BurstMode,
-                        contentDescription = null,
-                        tint = colors.onAccent,
-                        modifier = Modifier.size(10.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.burst_label),
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
-                        fontWeight = FontWeight.Medium,
-                        color = colors.onAccent
-                    )
-                }
+                // 叠帧图标 + 三条渐短速度线；与筛选面板的连拍胶囊共用 BurstGlyph，保证一致。
+                BurstGlyph(
+                    tint = colors.onAccent,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                )
             }
         }
 
-        // 左下角保护角标（机内 🔑 选片标记）：黑底白钥匙,安静地标注状态,不与
-        // 彩色的类型/连拍角贴争抢注意力。四角分工:左上类型、右上连拍、
-        // 左下保护、右下传输状态。
+        // 左下角保护角标（机内 🔑 选片标记）：黄底深色钥匙,像一枚金钥匙,标注
+        // "这张被机内选中/保护"。四角分工:左上类型、右上连拍、左下保护、右下传输状态。
         if (file.isProtected) {
             Surface(
                 shape = RoundedCornerShape(topEnd = 6.dp),
-                color = Color.Black.copy(alpha = 0.45f),
+                color = ProtectBadgeColor.copy(alpha = 0.9f),
                 modifier = Modifier.align(Alignment.BottomStart)
             ) {
                 Icon(
                     Icons.Default.Key,
                     contentDescription = stringResource(R.string.filter_protected),
-                    tint = Color.White.copy(alpha = 0.9f),
+                    tint = Color.Black.copy(alpha = 0.75f),
                     modifier = Modifier
                         .padding(3.dp)
                         .size(11.dp)
@@ -1617,21 +1644,33 @@ private fun formatDateHeader(date: String): String {
 }
 
 /**
- * 筛选下拉面板：类型（自动列出设备上实际存在的，多选 + "全部"）+ 保护标记 + 连拍,
- * 点确定才一次性提交生效。
+ * 类型/标记筛选浮层：从筛选按钮变形弹出、关闭缩回按钮（复用 [AnchorPopup]，与设置面板同款观感）。
+ * 类型（自动列出设备上实际存在的，多选 + "全部"）与标记（保护/连拍）分两组紧凑胶囊，
+ * 细线分隔，底部玻璃"应用"按钮；点应用才一次性提交生效。
  * 类型语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
  * 全不选或凑齐全部现有类型时自动归位"全部"（不允许空集）。
+ * 工作副本确定前不生效；面板随开合重建，每次打开都从当前设置初始化。
  */
 @Composable
-private fun FilterDropdown(
+private fun FilterOverlay(
+    anchorBounds: Rect?,
     availableExts: List<String>,
     current: Set<String>?,
     currentProtected: Boolean,
     currentBurst: Boolean,
-    onConfirm: (Set<String>?, Boolean, Boolean) -> Unit
+    onConfirm: (Set<String>?, Boolean, Boolean) -> Unit,
+    onDismiss: () -> Unit
 ) {
     val colors = AppTheme.colors
-    // 工作副本：确定前不生效；面板随开合重建，每次打开都从当前设置初始化。
+    val density = LocalDensity.current
+    // 顶边贴按钮下缘 + 8dp；左缘对齐按钮，但不许超出屏幕右缘（信号条展开把按钮推得很靠右/
+    // 窄屏时，面板整体向左钳制到贴边 12dp）。
+    val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 8.dp } ?: 76.dp
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val panelStart = (anchorBounds?.let { with(density) { it.left.toDp() } } ?: 12.dp)
+        .coerceAtMost(screenWidth - FILTER_PANEL_WIDTH - 12.dp)
+        .coerceAtLeast(12.dp)
+
     var working by remember { mutableStateOf(current) }
     var workingProtected by remember { mutableStateOf(currentProtected) }
     var workingBurst by remember { mutableStateOf(currentBurst) }
@@ -1648,59 +1687,71 @@ private fun FilterDropdown(
         }
     }
 
-    Surface(
+    AnchorPopup(
+        anchorBounds = anchorBounds,
+        onDismiss = onDismiss,
+        panelModifier = Modifier
+            .padding(start = panelStart, top = panelTop)
+            .width(FILTER_PANEL_WIDTH),
         shape = RoundedCornerShape(16.dp),
-        color = colors.glassSurfaceHeavy,
-        border = BorderStroke(1.dp, colors.glassPanelBorder),
-        shadowElevation = 6.dp,
-        // 消费面板内点击，避免穿透到外部捕获层被误关闭。
-        modifier = Modifier
-            .width(FILTER_PANEL_WIDTH)
-            .pointerInput(Unit) { detectTapGestures { } }
-    ) {
+        dim = false   // 小下拉不压暗全屏（遮罩仍拦点击/滚动）
+    ) { _ ->
         Column(
-            modifier = Modifier.padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            FilterRow(label = stringResource(R.string.filter_all), selected = working == null, onClick = { working = null })
+            // ---- 类型：全部 + 各扩展名，两列胶囊 ----
+            val typeChips: List<Triple<String, Boolean, () -> Unit>> = buildList {
+                add(Triple(stringResource(R.string.filter_all), working == null) { working = null })
+                availableExts.forEach { ext ->
+                    add(Triple(extLabel(ext), working?.contains(ext) ?: true) { toggle(ext) })
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                typeChips.chunked(2).forEach { rowChips ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rowChips.forEach { (label, selected, onClick) ->
+                            FilterChip(label, selected, onClick, Modifier.weight(1f))
+                        }
+                        // 奇数个时补一个占位，保证末行左对齐、胶囊等宽。
+                        if (rowChips.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+
+            // 分隔线
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                    .padding(horizontal = 2.dp)
                     .height(1.dp)
                     .background(colors.glassPanelBorder)
             )
-            availableExts.forEach { ext ->
-                FilterRow(
-                    label = extLabel(ext),
-                    selected = working?.contains(ext) ?: true,
-                    onClick = { toggle(ext) }
+
+            // ---- 标记：保护 / 连拍（独立开关，与类型叠加生效）----
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    label = stringResource(R.string.filter_protected),
+                    selected = workingProtected,
+                    onClick = { workingProtected = !workingProtected },
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.Key   // 钥匙 + "保护"
+                )
+                FilterChip(
+                    label = stringResource(R.string.burst_label),
+                    selected = workingBurst,
+                    onClick = { workingBurst = !workingBurst },
+                    modifier = Modifier.weight(1f),
+                    // 叠帧 + 三条速度线（与缩略图角标同一 BurstGlyph）+ "连拍"
+                    leading = { tint -> BurstGlyph(tint = tint) }
                 )
             }
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 3.dp)
-                    .height(1.dp)
-                    .background(colors.glassPanelBorder)
-            )
-            // 标记类筛选(保护/连拍)：独立开关,与类型叠加生效。
-            FilterRow(
-                label = stringResource(R.string.filter_protected),
-                selected = workingProtected,
-                onClick = { workingProtected = !workingProtected }
-            )
-            FilterRow(
-                label = stringResource(R.string.burst_label),
-                selected = workingBurst,
-                onClick = { workingBurst = !workingBurst }
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            // 确认：毛玻璃对号按钮（与全局悬浮控件同语言，不再用实色大按钮）。
+
+            // ---- 应用：毛玻璃对号按钮（与全局悬浮控件同语言）----
             GlassButton(
                 onClick = { onConfirm(working, workingProtected, workingBurst) },
                 shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(vertical = 7.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Spacer(modifier = Modifier.weight(1f))
@@ -1717,25 +1768,83 @@ private fun FilterDropdown(
 }
 
 /**
- * 筛选面板的选项行：整行可点，选中态用高亮底色 + 主题蓝加粗文字表达（无勾选框）。
+ * 筛选面板的选中态胶囊：选中 = 主题蓝底 + 反色加粗字；未选 = surfaceVariant 底。
+ * 与设置面板的选择胶囊同族语言。
  */
 @Composable
-private fun FilterRow(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun FilterChip(
+    label: String? = null,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    // 自定义前导内容（如连拍的 BurstGlyph）；给定内容色，优先于 [icon]。
+    leading: (@Composable (Color) -> Unit)? = null
+) {
     val colors = AppTheme.colors
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(9.dp))
-            .background(if (selected) colors.accentBlue.copy(alpha = 0.18f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 9.dp)
+    val contentColor = if (selected) colors.onAccent else colors.onSurfaceVariant
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(9.dp),
+        color = if (selected) colors.accentBlue else colors.surfaceVariant,
+        modifier = modifier.height(38.dp)
     ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) colors.accentBlue else colors.onSurfaceVariant
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            when {
+                leading != null -> leading(contentColor)
+                icon != null -> Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(14.dp))
+            }
+            if (label != null) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    color = contentColor
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 连拍标志：叠帧图标 + 三条渐短速度线（缩略图右上角标与筛选面板连拍胶囊共用，一处定义两处一致）。
+ * [tint] 决定图标与速度线颜色（角标用白、胶囊用内容色）。
+ */
+@Composable
+private fun BurstGlyph(tint: Color, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Icon(
+            Icons.Default.BurstMode,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(11.dp)
         )
+        // 三条渐短的速度线（拖尾越短越靠下）：细、压低到与图标齐高。
+        Column(
+            verticalArrangement = Arrangement.spacedBy(1.25.dp),
+            horizontalAlignment = Alignment.Start
+        ) {
+            listOf(7.dp, 5.dp, 3.dp).forEach { w ->
+                Box(
+                    modifier = Modifier
+                        .width(w)
+                        .height(1.dp)
+                        .clip(RoundedCornerShape(0.5.dp))
+                        .background(tint)
+                )
+            }
+        }
     }
 }
 
@@ -1759,38 +1868,31 @@ private fun TransferStatusIndicator(task: TransferTask) {
     ) {
         Crossfade(targetState = task.status, animationSpec = tween(200), label = "cellStatus") { st ->
             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                when (st) {
-                    TransferStatus.TRANSFERING -> CircularProgressIndicator(
-                        progress = task.progress,
+                if (st == TransferStatus.TRANSFERING) {
+                    // 传输中在列表用确定型进度环（卡片那侧改用下载字形，见 statusGlyph 说明）。
+                    // 平滑追值：进度环随进度缓缓扫过，而非一段段硬跳。
+                    val animatedProgress by animateFloatAsState(
+                        targetValue = task.progress,
+                        animationSpec = Motion.progress,
+                        label = "cellProgress"
+                    )
+                    CircularProgressIndicator(
+                        progress = animatedProgress,
                         modifier = Modifier.size(15.dp),
                         color = colors.accentBlue,
                         trackColor = Color.White.copy(alpha = 0.25f),
                         strokeWidth = 2.dp,
                         strokeCap = StrokeCap.Round
                     )
-                    TransferStatus.WAITING -> Icon(
-                        imageVector = Icons.Default.Schedule,
-                        contentDescription = stringResource(R.string.cd_queued),
-                        tint = Color.White.copy(alpha = 0.85f),
-                        modifier = Modifier.size(13.dp)
-                    )
-                    TransferStatus.COMPLETED -> Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = stringResource(R.string.cd_transferred),
-                        tint = colors.statusConnected,
+                } else {
+                    // 其余状态：字形 + 语义色取自共用的 statusGlyph（与传输页卡片统一）。
+                    // 黑圆片提供恒定对比，裸符号直接落在片上、语义色照旧读得清。
+                    val (icon, tint) = statusGlyph(st)
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = tint,
                         modifier = Modifier.size(14.dp)
-                    )
-                    TransferStatus.FAILED -> Icon(
-                        imageVector = Icons.Default.PriorityHigh,
-                        contentDescription = stringResource(R.string.cd_failed),
-                        tint = colors.statusError,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    TransferStatus.CANCELLED -> Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = stringResource(R.string.cd_cancelled),
-                        tint = Color.White.copy(alpha = 0.6f),
-                        modifier = Modifier.size(13.dp)
                     )
                 }
             }
@@ -1825,6 +1927,10 @@ private const val MAX_PACK_GHOSTS = 8
 // 实色 0.85 底上配白色内容,深浅主题通用(与金徽标同为"单值双主题"的少数例外)。
 // internal:预览大图的左上角连拍角标(PhotoPreview)与此同色。
 internal val BurstBadgeColor = Color(0xFF26A69A)
+
+// 保护角标底色(琥珀黄):机内选片/保护标记,黄底配深色钥匙如一枚金钥匙,
+// 与彩色分类角贴分层。单值双主题(深浅通用)。
+internal val ProtectBadgeColor = Color(0xFFFFC107)
 
 // "吸入"节奏:前段缓(残影凝聚成形、离巢慢),后段陡(加速俯冲进胶囊)——
 // 到达时带着冲量,与胶囊的"接住"弹跳在动量上衔接。

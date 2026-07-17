@@ -11,6 +11,9 @@
     <string name="open_wifi_settings">開啟 Wi-Fi 設定</string>
     <string name="step_camera_wifi">相機開啟「與智慧裝置建立 Wi-Fi 連線」</string>
     <string name="step_phone_wifi">手機 Wi-Fi 連線到相機的熱點</string>
+    <string name="tip_title">更快的連線方式</string>
+    <string name="tip_body">把「Wi-Fi 連線」加進相機的 i 選單，以後按 i 鍵一鍵開啟，省去層層翻選單。設定路徑：</string>
+    <string name="tip_path">選單 → 自訂設定選單 → 控制 → 自訂 i 選單 → 選個順手的格子 → Wi-Fi 連線</string>
 
     <!-- 檔案清單 -->
     <string name="loading_file_list">正在取得檔案清單…</string>
@@ -22,7 +25,7 @@
     <string name="loading_more">正在載入更多…</string>
     <string name="unknown_date">未知日期</string>
     <string name="filter_all">全部</string>
-    <string name="filter_protected">已保護(🔑)</string>
+    <string name="filter_protected">保護</string>
     <string name="burst_label">連拍</string>
     <string name="filter_other">其他</string>
     <string name="cd_back_to_top">回到頂部</string>
@@ -33,10 +36,6 @@
     <string name="cd_all_queued">已全部加入佇列</string>
     <string name="cd_transfer_group">傳輸整組</string>
     <string name="cd_apply_filter">確認篩選</string>
-    <string name="cd_transferred">已傳輸</string>
-    <string name="cd_queued">排隊中</string>
-    <string name="cd_failed">傳輸失敗</string>
-    <string name="cd_cancelled">已取消</string>
 
     <!-- 傳輸佇列 -->
     <string name="no_transfer_tasks">暫無傳輸任務</string>
@@ -80,6 +79,7 @@
 
     <!-- 照片預覽 -->
     <string name="no_preview">無預覽</string>
+    <string name="video_no_preview">影片 · 暫不支援預覽</string>
 
     <!-- 傳輸錯誤 -->
     <string name="error_dir_invalid">傳輸目錄已失效，請重新選擇</string>
@@ -130,7 +130,6 @@
     <string name="cd_dev_panel">開發者工具</string>
     <string name="remote_blocked_transfer">傳輸進行中，完成後再進入監看</string>
     <string name="remote_title">遙控</string>
-    <string name="remote_locked_hint">遙控期間相機機身暫不可操作</string>
     <string name="remote_transfer_busy_hint">傳輸進行中，監看可能卡頓</string>
     <string name="remote_rec_start_failed">無法開始錄影，請檢查記憶卡與相機狀態</string>
     <string name="dev_panel_title">開發者</string>
@@ -146,7 +145,6 @@
     <string name="device_code_label">裝置碼 %1$s</string>
     <string name="activate">啟用</string>
     <string name="activating">啟用中…</string>
-    <string name="activation_title">啟用 ZTransfer</string>
     <string name="activation_privacy">啟用時會將裝置識別碼傳送至啟用伺服器，僅用於授權驗證。</string>
     <string name="activation_success">啟用成功，感謝支持！</string>
     <string name="err_code_not_found">啟用碼不存在</string>
@@ -155,11 +153,13 @@
     <string name="err_rate_limited">嘗試過於頻繁，請一分鐘後再試</string>
     <string name="err_server_unreachable">無法連接啟用伺服器，請檢查網路；若網路正常，可能需要更新到新版本（QQ 群取得）。</string>
     <string name="err_generic">啟用失敗（%1$s）</string>
-    <string name="revert_free">恢復為免費版（測試）</string>
+    <string name="revert_free">已恢復為免費版（測試）</string>
     <string name="pro_version">高級版</string>
     <string name="unlock_pro">解鎖高級版</string>
+    <string name="pro_label">高級版</string>
     <string name="unlock">解鎖</string>
     <string name="enter_code">輸入啟用碼</string>
+    <string name="back">返回</string>
     <string name="tier_free">免費</string>
     <string name="compare_transfer">每日傳輸</string>
     <string name="compare_transfer_free">%1$d 個</string>
@@ -169,11 +169,53 @@
     <string name="compare_remote_free">%1$d 分鐘/天</string>
     <string name="compare_unlimited">無限</string>
     <string name="compare_no_limit">不限時</string>
-    <string name="pro_price_line">一次性買斷 %1$s</string>
-    <string name="pro_perks">一次買斷 · 無訂閱 · 更新免費</string>
+    <string name="price_promo_tag">限時特惠</string>
+    <string name="pro_perks">一次買斷 · 無訂閱 · 免費更新</string>
     <string name="quota_left_hint">今日剩餘額度 %1$d/%2$d</string>
     <string name="transfer_limit_reached">今日額度已用完，請解鎖高級版</string>
     <string name="transfer_size_limit">超過 %1$d MB，請解鎖高級版</string>
     <string name="remote_trial_left">今日剩餘 %1$s</string>
     <string name="remote_trial_ended">今日監看時長已用完，解鎖高級版不限時</string>
+    <string name="buy_now">立即購買</string>
+    <string name="contact_support">購買或啟用遇到問題？聯絡客服</string>
+    <string name="purchase_loading">正在建立訂單…</string>
+    <string name="purchase_qr_loading">正在產生支付二維碼…</string>
+    <string name="purchase_wechat_title">微信掃碼付款</string>
+    <string name="purchase_scan_hint">請到微信掃相簿中的二維碼付款</string>
+    <string name="purchase_save_qr">儲存到相簿</string>
+    <string name="purchase_saved">✓ 已儲存到相簿</string>
+    <string name="purchase_save_failed">儲存失敗，請改用截圖</string>
+    <string name="purchase_copy_link">複製支付連結（在電腦瀏覽器開啟即顯示二維碼）</string>
+    <string name="purchase_link_copied">已複製支付連結</string>
+    <string name="purchase_open_link">開啟支付頁面</string>
+    <string name="purchase_qr_expired">付款已逾時</string>
+    <string name="purchase_qr_refresh">重新發起付款</string>
+    <string name="renewal_needed">高級版授權已過期，請連接網路後重開 App 自動續期。</string>
+    <string name="purchase_opening_alipay">正在開啟支付寶…</string>
+    <string name="purchase_waiting">在上方頁面完成付款，到帳後自動啟用。</string>
+    <string name="purchase_success">付款成功，高級版已啟用！</string>
+    <string name="purchase_activated">🎉 購買成功 · 高級版已解鎖</string>
+    <string name="purchase_restored">🎉 本裝置已購買過 · 已免費恢復,未重複扣款</string>
+    <string name="purchase_view_code">檢視啟用碼（可用於第二台裝置）</string>
+    <string name="restore_action">恢復授權</string>
+    <string name="restore_restoring">恢復中…</string>
+    <string name="restore_none">找不到本機的授權（尚未購買，或已在新裝置上使用）</string>
+    <string name="settings_view_code">我要換機</string>
+    <string name="settings_code_hint">請妥善保管啟用碼，切勿外傳。換新手機時在新機輸入即可（舊機自動停用）；被多台裝置濫用會導致此碼失效、所有裝置降級。</string>
+    <string name="purchase_keep_code">你的啟用碼（點擊複製），請妥善保管、切勿外傳：換新機時在新機輸入啟用（舊機自動停用），被多台裝置濫用會導致此碼失效。</string>
+    <string name="purchase_paid_not_active">已收到付款但自動啟用未成功，請複製上方啟用碼，用「輸入啟用碼」完成啟用。</string>
+    <string name="purchase_code_copied">已複製啟用碼</string>
+    <string name="purchase_done">完成</string>
+    <string name="err_purchase_no_network">需要連接網際網路</string>
+    <string name="err_purchase_unreachable">無法連接伺服器。若目前連著相機 Wi-Fi，請先斷開，改用有外網的網路重試。</string>
+    <string name="err_purchase_failed">下單失敗，請稍後重試或聯絡客服。</string>
+
+    <!-- 檢查更新（連接頁） -->
+    <string name="check_update">檢查更新</string>
+    <string name="checking_update">檢查中…</string>
+    <string name="update_latest">已是最新版本</string>
+    <string name="update_check_failed">檢查更新失敗，請確認目前網路可以上網</string>
+    <string name="update_found_title">發現新版本 %1$s</string>
+    <string name="update_download">去下載</string>
+    <string name="update_password_hint">提取碼 %1$s 將在點擊「去下載」時自動複製，在下載頁貼上即可。</string>
 </resources>

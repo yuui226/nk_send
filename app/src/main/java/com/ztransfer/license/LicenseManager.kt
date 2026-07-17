@@ -56,7 +56,9 @@ object LicenseManager {
     const val FREE_MAX_FILE_BYTES = 400L * 1024 * 1024
     const val FREE_REMOTE_DAILY_MS = 3 * 60_000L
 
-    private const val RENEW_INTERVAL_MS = 7 * 24 * 3600_000L
+    // 软续签周期:有网时每天尝试换一张新通行证(顺带把服务器的"顶替/吊销"同步下来)。
+    // 硬过期由服务器写进通行证的 exp(见 verifyToken);到期且续不上就降级。
+    private const val SOFT_RENEW_INTERVAL_MS = 24 * 3600_000L
     private const val PREFS = "license"
 
     private lateinit var prefs: SharedPreferences
@@ -64,6 +66,10 @@ object LicenseManager {
 
     private val _isPro = MutableStateFlow(false)
     val isPro: StateFlow<Boolean> get() = _isPro
+
+    // 曾是高级版、通行证已过期且续签时联不上网 → 提示用户"连网续期"(连上重开即自动恢复)。
+    private val _renewalNeeded = MutableStateFlow(false)
+    val renewalNeeded: StateFlow<Boolean> get() = _renewalNeeded
 
     // 今日剩余免费传输数,随 recordTransferDone 即时更新;PRO 恒 Int.MAX_VALUE。
     // UI 订阅它做"临近上限"预警——提示与计数同源,在完成 +1 之后弹出而非入队时。
@@ -103,8 +109,8 @@ object LicenseManager {
 
     // ---------------------------------------------------------------- 通行证
 
-    /** 验签 + 指纹核对,通过返回 payload,否则 null。任何异常一律视为无效(降级免费)。 */
-    private fun verifyToken(token: String?): JSONObject? {
+    /** 仅验签 + 指纹核对(不查过期),通过返回 payload。续签判定要读 exp,故单拆出来。 */
+    private fun verifySig(token: String?): JSONObject? {
         if (token.isNullOrBlank()) return null
         return try {
             val parts = token.split(".")
@@ -126,13 +132,31 @@ object LicenseManager {
         }
     }
 
+    /** 见过的最大服务器时间(秒);当作"现在"的下界,防本地时钟往回调续命。 */
+    private fun seenTimeSec(): Long =
+        maxOf(System.currentTimeMillis() / 1000, prefs.getLong("seen_time", 0L))
+
+    /**
+     * 验签 + 指纹 + 硬过期核对,通过返回 payload,否则 null(降级免费)。
+     * 过期判定用 max(系统时间, 见过的最大服务器时间),把时钟回拨挡在门外。
+     */
+    private fun verifyToken(token: String?): JSONObject? {
+        val obj = verifySig(token) ?: return null
+        val exp = obj.optLong("exp", 0L)
+        if (exp > 0L && seenTimeSec() >= exp) return null
+        return obj
+    }
+
     private fun saveToken(token: String, code: String) {
+        val iat = verifySig(token)?.optLong("iat", 0L) ?: 0L
         prefs.edit()
             .putString("token", token)
             .putString("code", code)
             .putLong("last_renew", System.currentTimeMillis())
+            .putLong("seen_time", maxOf(prefs.getLong("seen_time", 0L), iat))  // 单调递增,防回拨
             .apply()
         _isPro.value = true
+        _renewalNeeded.value = false
         _quotaLeft.value = quotaRemaining()
     }
 
@@ -140,6 +164,7 @@ object LicenseManager {
     fun revertToFree() {
         prefs.edit().remove("token").remove("code").remove("last_renew").apply()
         _isPro.value = false
+        _renewalNeeded.value = false
         _quotaLeft.value = quotaRemaining()
     }
 
@@ -221,45 +246,210 @@ object LicenseManager {
         }
 
     /**
-     * 静默续签:PRO 且距上次成功 ≥ 7 天且有网时换新通行证。
-     * 只有服务器明确吊销/解绑才降级;网络失败保持现状(离线不惩罚)。
+     * 静默续签:通行证已过期、或距上次成功 ≥ 1 天时,有网就换新证。
+     * 过期后即便本地已降级(_isPro=false)也照样尝试——只要还留着码,能续上就自动恢复 PRO。
+     * 只有服务器明确吊销/解绑(被顶替)才降级并清除;网络失败保持现状(离线不惩罚)。
      */
     private suspend fun renewIfDue() {
-        if (!_isPro.value) return
-        val last = prefs.getLong("last_renew", 0L)
-        if (System.currentTimeMillis() - last < RENEW_INTERVAL_MS) return
         val code = prefs.getString("code", null) ?: return
+        val obj = verifySig(prefs.getString("token", null))
+        val exp = obj?.optLong("exp", 0L) ?: 0L
+        val expired = exp in 1..seenTimeSec()
+        val softDue = System.currentTimeMillis() - prefs.getLong("last_renew", 0L) >= SOFT_RENEW_INTERVAL_MS
+        if (!expired && !softDue) return
 
         val resp = post("/v1/renew", JSONObject().apply {
             put("code", code)
             put("fp", fingerprint)
-        }) ?: return   // 联不上:保持现状
-
+        })
+        if (resp == null) {
+            // 联不上:未过期则继续用(离线不惩罚);已过期(满 7 天仍无网)则降级并提示连网续期
+            if (expired) {
+                _isPro.value = false
+                _quotaLeft.value = quotaRemaining()
+                _renewalNeeded.value = true
+            }
+            return
+        }
         val token = resp.optString("token")
         if (resp.optBoolean("ok") && verifyToken(token) != null) {
-            saveToken(token, code)
+            saveToken(token, code)                        // 内部置 _isPro=true、清 renewalNeeded、滚动 7 天有效期
         } else when (resp.optString("err")) {
-            "CODE_REVOKED", "NOT_BOUND" -> revertToFree()
+            "CODE_REVOKED", "NOT_BOUND" -> revertToFree()  // 被吊销/顶替:降级并清 flag
             else -> Unit   // 未知错误按网络异常处理,不降级
         }
     }
 
+    // ---------------------------------------------------------------- 恢复 / 查看码
+
+    sealed class RestoreResult {
+        object Success : RestoreResult()
+        /** 服务器上没有本机的有效授权(从未购买、或已被新设备顶替)。 */
+        object NotFound : RestoreResult()
+        object Unreachable : RestoreResult()
+    }
+
+    /**
+     * 按设备指纹恢复授权(重装后本地没码时,用户在解锁弹窗主动点"恢复")。
+     * 仅当本机仍是该码当前绑定设备才成功;被顶替过的旧设备会得到 NotFound。
+     */
+    suspend fun restorePurchase(): RestoreResult = withContext(Dispatchers.IO) {
+        val resp = post("/v1/restore", JSONObject().put("fp", fingerprint))
+            ?: return@withContext RestoreResult.Unreachable
+        val token = resp.optString("token")
+        val code = resp.optString("code")
+        if (resp.optBoolean("ok") && code.isNotEmpty() && verifyToken(token) != null) {
+            saveToken(token, code)
+            RestoreResult.Success
+        } else {
+            RestoreResult.NotFound
+        }
+    }
+
+    /** 当前高级版用户的激活码(供设置页"查看我的激活码"与自助换机);非 PRO 返回 null。 */
+    fun purchasedCode(): String? = if (_isPro.value) prefs.getString("code", null) else null
+
+    // ---------------------------------------------------------------- 购买(自动售码)
+
+    sealed class OrderResult {
+        /**
+         * 有待支付订单。
+         * [payQr] 为虎皮椒返回的现成二维码图片地址(微信个人支付主用:展示给用户扫码);
+         * [payUrl] 为手机端支付链接(自动判断微信/支付宝环境,作降级)。
+         */
+        data class Pending(val order: String, val payUrl: String?, val payQr: String?) : OrderResult()
+        /** 已支付;code 为服务器发放的激活码(尚未绑定本机,走 [activate])。 */
+        data class Paid(val order: String, val code: String) : OrderResult()
+        object Unreachable : OrderResult()
+        data class Failed(val err: String) : OrderResult()
+    }
+
+    /** 上次未走完的订单号:付款后 App 被杀等场景,重开购买页凭它续单不丢码。 */
+    fun pendingOrder(): String? = prefs.getString("pending_order", null)
+
+    /** 购买闭环走完(激活成功)后清除续单记录。 */
+    fun clearPendingOrder() {
+        prefs.edit().remove("pending_order").apply()
+    }
+
+    suspend fun createOrder(): OrderResult = withContext(Dispatchers.IO) {
+        val resp = post("/v1/order/create", JSONObject().put("fp", fingerprint))
+            ?: return@withContext OrderResult.Unreachable
+        // 防重复购买:服务器认出本机已是某码的绑定设备 → 直接返码免费恢复,不再收钱。
+        if (resp.optBoolean("already_pro")) {
+            val owned = resp.optString("code")
+            return@withContext if (owned.isNotEmpty()) OrderResult.Paid("", owned)
+            else OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
+        }
+        val order = resp.optString("order")
+        if (!resp.optBoolean("ok") || order.isEmpty())
+            return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
+        prefs.edit().putString("pending_order", order).apply()
+        OrderResult.Pending(
+            order,
+            resp.optString("pay_url").takeIf { it.isNotEmpty() },
+            resp.optString("pay_qr").takeIf { it.isNotEmpty() },
+        )
+    }
+
+    /** 查单;服务器在确认到账的瞬间发码并随响应返回。[wantUrl] 仅续单时置真。 */
+    suspend fun orderStatus(order: String, wantUrl: Boolean = false): OrderResult =
+        withContext(Dispatchers.IO) {
+            val resp = post("/v1/order/status", JSONObject().apply {
+                put("fp", fingerprint)
+                put("order", order)
+                if (wantUrl) put("want_url", true)
+            }) ?: return@withContext OrderResult.Unreachable
+            if (!resp.optBoolean("ok"))
+                return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
+            if (resp.optString("status") == "paid") OrderResult.Paid(order, resp.optString("code"))
+            else OrderResult.Pending(
+                order,
+                resp.optString("pay_url").takeIf { it.isNotEmpty() },
+                resp.optString("pay_qr").takeIf { it.isNotEmpty() },
+            )
+        }
+
+    /**
+     * 拉取二维码图片字节(虎皮椒域名,普通 TLS,用默认信任而非连本服务器的 pinned 工厂)。
+     * 失败返回 null,由调用方降级为显示链接文案。
+     */
+    suspend fun fetchBytes(url: String): ByteArray? = withContext(Dispatchers.IO) {
+        try {
+            val conn = URL(url).openConnection() as HttpsURLConnection
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            conn.instanceFollowRedirects = true   // 虎皮椒 qrcode 接口 302 跳转到最终 PNG,须跟随
+            if (conn.responseCode >= 400) return@withContext null
+            conn.inputStream.use { it.readBytes() }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // ---------------------------------------------------------------- 检查更新
+
+    /** 服务器 app-latest.json 描述的最新版本(下载走网盘分享页,[password] 为提取码,可空)。 */
+    data class UpdateInfo(
+        val versionCode: Int,
+        val versionName: String,
+        val url: String,
+        val password: String,
+        val notes: String
+    )
+
+    sealed class UpdateResult {
+        data class Available(val info: UpdateInfo) : UpdateResult()
+        object UpToDate : UpdateResult()
+        /** 联不上服务器,或服务器尚未配置版本信息。 */
+        object Unreachable : UpdateResult()
+    }
+
+    /** 拉取最新版本信息并与 [currentVersionCode] 比较(整数比,不解析版本名)。 */
+    suspend fun checkAppUpdate(currentVersionCode: Int): UpdateResult =
+        withContext(Dispatchers.IO) {
+            val resp = get("/v1/app/latest") ?: return@withContext UpdateResult.Unreachable
+            val vc = resp.optInt("versionCode", 0)
+            val url = resp.optString("url")
+            if (!resp.optBoolean("ok") || vc <= 0 || url.isEmpty())
+                return@withContext UpdateResult.Unreachable
+            if (vc <= currentVersionCode) UpdateResult.UpToDate
+            else UpdateResult.Available(
+                UpdateInfo(
+                    versionCode = vc,
+                    versionName = resp.optString("versionName"),
+                    url = url,
+                    password = resp.optString("password"),
+                    notes = resp.optString("notes")
+                )
+            )
+        }
+
     // ---------------------------------------------------------------- 网络
 
     /** 依次尝试所有服务器地址;全部失败返回 null。业务成败由响应 JSON 的 ok/err 表达。 */
-    private fun post(path: String, body: JSONObject): JSONObject? {
+    private fun post(path: String, body: JSONObject): JSONObject? = request(path, body)
+
+    private fun get(path: String): JSONObject? = request(path, null)
+
+    /** [body] 非空走 POST(JSON),为空走 GET;证书 pin 与超时两者共用。 */
+    private fun request(path: String, body: JSONObject?): JSONObject? {
         for (base in SERVERS) {
             try {
                 val conn = URL(base + path).openConnection() as HttpsURLConnection
                 conn.sslSocketFactory = pinnedSocketFactory
                 // 证书本身已由 pin 唯一确认,无需再校验主机名(自签证书对裸 IP 签发)
                 conn.hostnameVerifier = HostnameVerifier { _, _ -> true }
-                conn.requestMethod = "POST"
-                conn.doOutput = true
                 conn.connectTimeout = 8000
                 conn.readTimeout = 8000
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                if (body != null) {
+                    conn.requestMethod = "POST"
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                } else {
+                    conn.requestMethod = "GET"
+                }
                 val text = (if (conn.responseCode < 400) conn.inputStream else conn.errorStream)
                     .bufferedReader().use { it.readText() }
                 return JSONObject(text)

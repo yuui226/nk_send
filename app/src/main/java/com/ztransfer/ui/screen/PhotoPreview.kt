@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BurstMode
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -56,12 +58,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import kotlin.math.max
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -72,6 +73,10 @@ import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.PhotoExif
+
+// 视频扩展名：无高清封面，预览走"压暗缩略图 + 视频占位"分支。
+// 注意与 CameraViewModel.VIDEO_EXTENSIONS（封面黑边兜底）保持同步。
+private val VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 
 /**
  * 全屏照片预览层：显示缓存缩略图的**未裁切**（Fit）完整画面，可左右翻页浏览整份列表。
@@ -121,6 +126,9 @@ fun PhotoPreviewOverlay(
     val exifLoading = remember { mutableStateMapOf<Int, Boolean>() }
     // 对焦点显示开关：按住对焦按钮时置 true，松手恢复 false。
     var showAfPoint by remember { mutableStateOf(false) }
+    // 按住 AF 按钮期间翻页：按钮实例连同手势协程一起被移除，onPress 的松手复位不再执行，
+    // showAfPoint 会卡在 true（下一张的红框常亮）。翻页时强制复位兜底。
+    LaunchedEffect(pagerState.currentPage) { showAfPoint = false }
 
     val haptics = rememberHaptics(hapticsEnabled)
 
@@ -133,6 +141,8 @@ fun PhotoPreviewOverlay(
     // 加载单页 FHD；返回 true 表示"本次确实取到并解码成功"（用于当前页到位的触感反馈）。
     suspend fun loadFhdPage(page: Int): Boolean {
         val file = files.getOrNull(page) ?: return false
+        // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
+        if (file.extension in VIDEO_EXTENSIONS) return false
         val h = file.handle
         if (h in fhdBitmaps || fhdLoading.containsKey(h) || fhdFailed.containsKey(h)) return false
         fhdLoading[h] = true
@@ -298,19 +308,30 @@ fun PhotoPreviewOverlay(
                 }
                 if (current.isProtected) {
                     // 黑底胶囊在黑幕/暗部照片上需要细描边定界(列表页衬在照片上无此问题)。
+                    // 钥匙 + "保护"文字，与旁边的连拍角标（图标+字）一致。
                     Surface(
                         shape = RoundedCornerShape(7.dp),
                         color = Color.Black.copy(alpha = 0.45f),
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
                     ) {
-                        Icon(
-                            Icons.Default.Key,
-                            contentDescription = stringResource(R.string.filter_protected),
-                            tint = Color.White.copy(alpha = 0.9f),
-                            modifier = Modifier
-                                .padding(4.dp)
-                                .size(12.dp)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Key,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.9f),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.filter_protected),
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, lineHeight = 11.sp),
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -333,33 +354,47 @@ fun PhotoPreviewOverlay(
         }
 
         // ---- 底部栏：EXIF 参数 + 对焦点按钮，同一水平线 ----
+        // 跟手淡入淡出：alpha 由翻页滚动进度实时驱动——离开当前页时随手指滑动淡出、
+        // 新页吸附到位时淡入，不等翻完。内容在滑过半（currentPage 翻转、此刻 alpha≈0
+        // 看不见）时切换，因此看不到硬切；Crossfade 再兜住"落定页 EXIF 异步到达"的淡入。
+        // alpha 计算写在 graphicsLayer 内读滚动值：每帧只重绘图层，不触发子树重组。
         val curExif = files.getOrNull(pagerState.currentPage)?.let { exifData[it.handle] }
-        val hasExif = curExif != null && (curExif.aperture != null || curExif.shutterSpeed != null
-            || curExif.iso != null || curExif.focalLength != null)
-        val hasAf = curExif?.afX != null
-        if (hasExif || hasAf) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 24.dp)
-                    .graphicsLayer { alpha = progress.value },
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (hasExif) {
-                    ExifMetadataBar(
-                        exif = curExif!!,
-                        alpha = 1f,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
+        Crossfade(
+            targetState = curExif,
+            animationSpec = tween(220),
+            label = "exifBar",
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val swipe = (1f - abs(pagerState.currentPageOffsetFraction) * 2f).coerceIn(0f, 1f)
+                    alpha = progress.value * swipe
                 }
-                if (hasAf) {
-                    Spacer(modifier = Modifier.width(12.dp))
-                    FocusPointButton(
-                        pressed = showAfPoint,
-                        onPressChange = { showAfPoint = it }
-                    )
+        ) { exif ->
+            val hasExif = exif != null && (exif.aperture != null || exif.shutterSpeed != null
+                || exif.iso != null || exif.focalLength != null)
+            val hasAf = exif?.afX != null
+            if (hasExif || hasAf) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (hasExif) {
+                        ExifMetadataBar(
+                            exif = exif!!,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    }
+                    if (hasAf) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        FocusPointButton(
+                            pressed = showAfPoint,
+                            onPressChange = { showAfPoint = it }
+                        )
+                    }
                 }
             }
         }
@@ -367,13 +402,12 @@ fun PhotoPreviewOverlay(
 }
 
 /**
- * 底部毛玻璃参数条：光圈 / 快门 / ISO / 焦距，间距 18dp。
- * [alpha] 跟随 overlay 展开动画的 [progress] 值。
+ * 底部毛玻璃参数条：光圈 / 快门 / ISO / 焦距。
+ * 淡入淡出由外层（overlay 展开进度 × 翻页跟手 × Crossfade）统一驱动，本身不管透明度。
  */
 @Composable
 private fun ExifMetadataBar(
     exif: PhotoExif,
-    alpha: Float,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
@@ -475,9 +509,6 @@ private fun PreviewPage(
         }
     }
 
-    // 容器 pixel 尺寸，用于 AF 点叠加的 Fit 坐标映射。
-    var containerSize by remember { mutableStateOf<IntSize?>(null) }
-
     // ---- 缩放/平移状态（按 handle 记忆；离开本页复位，与主流相册一致）----
     var scale by remember(file.handle) { mutableStateOf(1f) }
     var offset by remember(file.handle) { mutableStateOf(Offset.Zero) }
@@ -491,6 +522,7 @@ private fun PreviewPage(
 
     val displayBitmap = fhdBitmap ?: thumbnail
     val imgAspect = displayBitmap?.let { it.width.toFloat() / it.height.toFloat() }
+    val isVideo = file.extension in VIDEO_EXTENSIONS
 
     // 把 offset 钳制在"图片边缘不越过容器边缘"的范围内（防止拖出黑边）。
     fun clampOffset(s: Float, o: Offset, dispW: Float, dispH: Float, cw: Float, ch: Float): Offset {
@@ -502,11 +534,11 @@ private fun PreviewPage(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .onGloballyPositioned { containerSize = it.size }
             // 捏合缩放 + 放大后单指平移。关键：单指且未放大时【不消费】事件，
             // 把手势让给 HorizontalPager 翻页 / 单击关闭；双指或已放大才接管并消费。
             .pointerInput(imgAspect) {
-                if (imgAspect == null) return@pointerInput
+                // 视频占位页没有可缩放的内容：捏合/平移手势直接不启动，不再空转消费事件。
+                if (isVideo || imgAspect == null) return@pointerInput
                 val cw = size.width.toFloat(); val ch = size.height.toFloat()
                 val containerAspect = cw / ch
                 val dispW = if (imgAspect > containerAspect) cw else ch * imgAspect
@@ -539,6 +571,8 @@ private fun PreviewPage(
                 detectTapGestures(
                     onTap = { if (scale <= 1.01f) onTap() },
                     onDoubleTap = { tap ->
+                        // 视频占位页不缩放（单击关闭保留在 onTap）。
+                        if (isVideo) return@detectTapGestures
                         val a = imgAspect ?: return@detectTapGestures
                         val containerAspect = cw / ch
                         val dispW = if (a > containerAspect) cw else ch * a
@@ -563,6 +597,49 @@ private fun PreviewPage(
         val thumb = thumbnail  // 本地变量，delegate 属性无法被编译器 smart cast
         val anyLoading = isLoadingFhd || (!noThumb && thumbnail == null)
         when {
+            isVideo -> {
+                // 视频无高清封面：缩略图压暗当背景 + 居中毛玻璃占位，明确"这是视频、暂不支持预览"，
+                // 而非把糊掉的小缩略图硬撑满屏当"预览"。
+                if (thumb != null) {
+                    Image(
+                        bitmap = thumb,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
+                    ) {
+                        Icon(
+                            Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.9f),
+                            modifier = Modifier
+                                .padding(18.dp)
+                                .size(34.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = Color.Black.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
+                    ) {
+                        Text(
+                            stringResource(R.string.video_no_preview),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
             displayBitmap != null -> {
                 // 图像栈（缩略图淡出 + FHD 淡入）统一套用缩放/平移变换。
                 Box(
@@ -589,38 +666,34 @@ private fun PreviewPage(
                         modifier = Modifier.fillMaxSize(),
                         alpha = if (fhdBitmap != null) fhdAlpha.value else 1f
                     )
-                }
 
-                // 对焦点红框叠加（按住 AF 按钮时绘制；不随缩放变换，与放大同用是罕见组合）。
-                val exifNonNull = exif
-                if (showAfPoint && exifNonNull != null && exifNonNull.afX != null && containerSize != null) {
-                    val density = LocalDensity.current
-                    val cw = containerSize!!.width.toFloat()
-                    val ch = containerSize!!.height.toFloat()
-                    val imgW = exifNonNull.imageWidth?.toFloat() ?: displayBitmap.width.toFloat()
-                    val imgH = exifNonNull.imageHeight?.toFloat() ?: displayBitmap.height.toFloat()
-                    val imgAsp = imgW / imgH
-                    val containerAspect = cw / ch
-                    val (dispW, dispH) = if (imgAsp > containerAspect) {
-                        cw to (cw / imgAsp)
-                    } else {
-                        (ch * imgAsp) to ch
-                    }
-                    val offX = (cw - dispW) / 2f
-                    val offY = (ch - dispH) / 2f
-                    val strokePx = with(density) { 2.dp.toPx() }
-
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val afLeft = offX + exifNonNull.afX * dispW
-                        val afTop = offY + exifNonNull.afY!! * dispH
-                        val afW = (exifNonNull.afWidth ?: 0.05f) * dispW
-                        val afH = (exifNonNull.afHeight ?: 0.05f) * dispH
-                        drawRect(
-                            color = Color.Red,
-                            topLeft = Offset(afLeft, afTop),
-                            size = Size(afW, afH),
-                            style = Stroke(width = strokePx)
-                        )
+                    // 对焦点红框叠加（按住 AF 按钮时绘制）。放在同一变换层内,随缩放/平移跟着图走。
+                    // afX/afY 是 AF 区【中心】（Nikon AFInfo2 语义,解析端即按中心归一化）,矩形以其为中心;
+                    // 线宽除以 scale,放大后红框变大但线保持 1dp 视觉粗细（draw 块读 scale,变焦时自动重绘）。
+                    val exifNonNull = exif
+                    if (showAfPoint && exifNonNull != null && exifNonNull.afX != null) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            // Fit 矩形必须按【实际渲染位图】的宽高比算,与 Image 的 ContentScale.Fit
+                            // 严格一致;EXIF 原图尺寸与预览位图比例可能有出入(缩略图黑边裁切后
+                            // 已非精确 3:2、FHD 直出比例也未必等于原图),按 EXIF 算红框会贴不住画面。
+                            val imgAsp = displayBitmap.width.toFloat() / displayBitmap.height.toFloat()
+                            val containerAspect = size.width / size.height
+                            val (dispW, dispH) = if (imgAsp > containerAspect) {
+                                size.width to (size.width / imgAsp)
+                            } else {
+                                (size.height * imgAsp) to size.height
+                            }
+                            val afCx = (size.width - dispW) / 2f + exifNonNull.afX * dispW
+                            val afCy = (size.height - dispH) / 2f + exifNonNull.afY!! * dispH
+                            val afW = (exifNonNull.afWidth ?: 0.05f) * dispW
+                            val afH = (exifNonNull.afHeight ?: 0.05f) * dispH
+                            drawRect(
+                                color = Color.Red,
+                                topLeft = Offset(afCx - afW / 2f, afCy - afH / 2f),
+                                size = Size(afW, afH),
+                                style = Stroke(width = 1.dp.toPx() / scale)
+                            )
+                        }
                     }
                 }
             }

@@ -288,7 +288,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private var wifiHeld = false
+
     private fun registerNetworkCallback() {
+        if (wifiHeld) return
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .build()
@@ -299,6 +302,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             connectivityManager.requestNetwork(request, networkCallback)
         } catch (_: Exception) {
             connectivityManager.registerNetworkCallback(request, networkCallback)
+        }
+        wifiHeld = true
+    }
+
+    /**
+     * 购买期间临时松开对相机 Wi-Fi 的占用([hold]=false),买完再握回来([hold]=true)。
+     *
+     * 上面那个 requestNetwork 正是把手机摁在"没有外网的相机热点"上的原因——付款要联网
+     * (我们下单、以及微信付款都走默认网络),不松手就都没网。松手后系统会自行切走没网的
+     * 热点、落回蜂窝;买完重新握住,相机 Wi-Fi 回来,onWifiChanged 会触发既有的自动重连。
+     */
+    fun holdCameraWifi(hold: Boolean) {
+        if (hold) {
+            registerNetworkCallback()
+        } else if (wifiHeld) {
+            runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
+            wifiHeld = false
         }
     }
 
@@ -639,6 +659,42 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return Bitmap.createBitmap(src, left, top, w - left - right, h - top - bottom)
     }
 
+    /**
+     * 视频封面黑边兜底：[cropLetterbox] 的逐行严判（97% 近黑、两侧对称、15% 上限）对视频
+     * 缩略图容易失手——16:9 塞 4:3 的黑边本就贴着 12.5%/侧的上限，画面暗部与黑边粘连或
+     * 噪声稍大就整体放弃。视频画面固定 16:9：若裁后仍明显高于 16:9，量一下"裁到 16:9 会
+     * 去掉的上下带"的**平均亮度**，确实近黑才居中裁掉——刚好裁到内容边缘，不多裁（多裁
+     * 内容放大就糊）。均值判据比逐行判据宽容（几个噪点拉不动均值），又不会误裁真实暗景
+     * （画面均值远高于黑条）。每侧多裁 1px 吃掉交界灰线，与 [cropLetterbox] 同规。
+     */
+    private fun cropVideoBars(src: Bitmap): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w < 16 || h < 16) return src
+        val cut = (h - w * 9 / 16) / 2
+        if (cut < 2 || h - (cut + 1) * 2 < 8) return src   // 已接近 16:9 或图太小，无带可裁
+        val buf = IntArray(w)
+        fun bandIsDark(y0: Int, y1: Int): Boolean {
+            var sum = 0L
+            var cnt = 0
+            var y = y0
+            while (y < y1) {
+                src.getPixels(buf, 0, w, 0, y, w, 1)
+                var x = 0
+                while (x < w) {
+                    val p = buf[x]
+                    sum += maxOf(p ushr 16 and 0xFF, p ushr 8 and 0xFF, p and 0xFF)
+                    cnt++
+                    x += 2
+                }
+                y += 2
+            }
+            return cnt > 0 && sum < cnt.toLong() * BAR_AVG_MAX
+        }
+        if (!bandIsDark(0, cut) || !bandIsDark(h - cut, h)) return src
+        return Bitmap.createBitmap(src, 0, cut + 1, w, h - (cut + 1) * 2)
+    }
+
     private suspend fun fetchAndDecodeThumb(file: NikonCamera.FileInfo): ImageBitmap? {
         val handle = file.handle
         return try {
@@ -669,6 +725,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // UI 层不再需要"放大遮边"的近似 hack。
                 BitmapFactory.decodeByteArray(data, 0, data.size)
                     ?.let { cropLetterbox(it) }
+                    ?.let { if (file.extension in VIDEO_EXTENSIONS) cropVideoBars(it) else it }
                     ?.asImageBitmap()
             }
             if (image == null) {
@@ -959,6 +1016,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 参考: exiftool Nikon.pm / exiv2 nikonmn_int.cpp
      */
     private fun parseAfInfo2(data: ByteArray, off: Int, le: Boolean, imgW: Int, imgH: Int, len: Int? = null): AfCoords? {
+        // off/len 来自文件字节(IFD 偏移可损坏、u32 转 Int 可溢出为负)：越界直接放弃,
+        // 否则下面 downTo/until 的循环区间会被撑到几十亿次空转(u16 越界只返回 -1 不中断)。
+        if (off < 0 || off >= data.size) return null
         fun ByteArray.u16(o: Int): Int {
             if (o < 0 || o + 1 >= this.size) return -1
             val a = this[o].toInt() and 0xFF; val b = this[o + 1].toInt() and 0xFF
@@ -967,7 +1027,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         // ---- 路径 A: 已知长度 → 从数据块末端回扫 ----
         if (len != null && len >= 16) {
-            val blockEnd = off + len
+            val blockEnd = minOf(off + len, data.size)
             // 从后往前扫（步进 2 字节），AF 区 6 字段是连续 12 字节。
             // 注意 AFInfo2 内 AF 区字段之后可能还有少量扩展字段，不能只假定在最后 12 字节。
             // 因此扫描范围覆盖整个块（跳过前 4 字节版本号），从末尾逐对 uint16 向前匹配。
@@ -1076,6 +1136,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 黑边占边长的上限——3:2 塞 4:3 为 5.6%、16:9 为 12.5%，超过 15% 视为画面本身偏暗。
         const val BAR_BLACK_MAX = 32
         const val BAR_MAX_FRACTION = 0.15f
+        // 视频封面黑边兜底（cropVideoBars）：待裁带平均亮度上限。比 BAR_BLACK_MAX 略宽
+        //（均值统计天然抗噪），但仍远低于正常画面暗部的均值。
+        const val BAR_AVG_MAX = 40
+        // 视频扩展名：封面黑边兜底裁切按 16:9 画面处理。
+        // 注意与 PhotoPreview.kt 顶部的 VIDEO_EXTENSIONS（预览占位分支）保持同步。
+        val VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
         // 缩略图磁盘缓存容量上限（原始 JPEG 每张几 KB，64MB 足够上万张）。
         const val THUMB_DISK_MAX_BYTES = 64L * 1024 * 1024
         // EXIF 解析支持的图片扩展名——视频/音频等格式不会有 EXIF 头。

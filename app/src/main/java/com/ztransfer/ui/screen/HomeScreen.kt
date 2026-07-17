@@ -1,15 +1,22 @@
 package com.ztransfer.ui.screen
 
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -24,6 +31,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -37,16 +45,23 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -66,9 +81,14 @@ fun HomeScreen(
     val context = LocalContext.current
     // 右上角"解锁高级版"入口的显隐 + 成功爆发的金色粒子彩蛋都依赖它。
     val isPro by LicenseManager.isPro.collectAsState()
+    // 曾购买、通行证过期且续签联不上网 → 顶部提示连网续期(连上重开自动恢复)。
+    val renewalNeeded by LicenseManager.renewalNeeded.collectAsState()
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
+    // 连接页「小技巧」气泡：从 tips 按钮变形弹出（复用 AnchorPopup 的全局毛玻璃）。
+    var showTips by remember { mutableStateOf(false) }
+    var tipsAnchor by remember { mutableStateOf<Rect?>(null) }
 
     val colors = AppTheme.colors
     val connected = state.isConnectedToCamera
@@ -117,6 +137,23 @@ fun HomeScreen(
                 pulsing = pulsing, success = celebrate, goldBurst = isPro
             )
 
+            // 高级版过期且离线:提示连网续期(不惩罚正版——连上重开即自动恢复)。
+            if (renewalNeeded) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = stringResource(R.string.renewal_needed),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.accentOrange,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .background(
+                            colors.accentOrange.copy(alpha = 0.12f),
+                            RoundedCornerShape(10.dp)
+                        )
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
+
             Box(modifier = Modifier.weight(2f).fillMaxWidth()) {
                 Crossfade(
                     targetState = when {
@@ -133,10 +170,11 @@ fun HomeScreen(
                         // 已连接：全交给成功爆发动画——绿色对号 = 马上进入照片列表
                         //（MainScreen 在动画播完后直接跳转），无需任何文字。
                         HomeHint.NONE -> Box(modifier = Modifier.fillMaxSize())
+                        // top padding 与 OFF_WIFI 态一致（4dp）：两态 Crossfade 切换时内容不上下跳。
                         HomeHint.CONNECTING -> Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 28.dp),
+                                .padding(top = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
@@ -146,19 +184,14 @@ fun HomeScreen(
                                 color = colors.accentBlue
                             )
                         }
+                        // 去掉「请连接相机 Wi-Fi」标题——它与下方步骤重复；步骤本身放大加重、
+                        // 整体上移，作为本页主引导，页面更紧凑和谐。
                         HomeHint.OFF_WIFI -> Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 28.dp),
+                                .padding(top = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Text(
-                                text = stringResource(R.string.connect_camera_wifi),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.accentOrange
-                            )
-                            Spacer(modifier = Modifier.height(24.dp))
                             // 一键去系统 Wi-Fi 设置 + 两步引导。
                             GlassButton(
                                 onClick = {
@@ -176,12 +209,30 @@ fun HomeScreen(
                                 )
                             }
                             Spacer(modifier = Modifier.height(24.dp))
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                                horizontalAlignment = Alignment.Start
-                            ) {
-                                StepRow(1, stringResource(R.string.step_camera_wifi))
-                                StepRow(2, stringResource(R.string.step_phone_wifi))
+                            // 步骤区：左侧纯灯泡圆钮 = "小技巧"入口（点击弹毛玻璃气泡）。
+                            // 圆钮固定 22dp（与 StepRow 序号圆钮同尺寸），顶对齐后与"步骤 1"
+                            // 整行并排、行心一致。size 必须显式给：M3 可点击 Surface 内置
+                            // 48dp 最小交互尺寸，无约束时节点被撑大——圆钮四周多出一圈
+                            // 不可见留白，既顶歪行心又把它推得离序号很远；固定约束可压制它。
+                            Row(verticalAlignment = Alignment.Top) {
+                                GlassButton(
+                                    onClick = { showTips = true },
+                                    shape = CircleShape,
+                                    contentPadding = PaddingValues(4.dp),
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .onGloballyPositioned { tipsAnchor = it.boundsInRoot() }
+                                ) {
+                                    Icon(Icons.Default.Lightbulb, contentDescription = null, tint = colors.accentOrange, modifier = Modifier.size(14.dp))
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                                    horizontalAlignment = Alignment.Start
+                                ) {
+                                    StepRow(1, stringResource(R.string.step_camera_wifi))
+                                    StepRow(2, stringResource(R.string.step_phone_wifi))
+                                }
                             }
                         }
                     }
@@ -193,6 +244,9 @@ fun HomeScreen(
         // 右上角：免费版显示"解锁高级版"金徽标。本页尚未连相机热点、多半还有外网，
         // 因此是全 app 唯一放"输入激活码"入口的弹窗（其余页面连着相机 Wi-Fi 无外网）----------
         var showPro by remember { mutableStateOf(false) }
+        // 已解锁：金徽标改显"高级版"，点击不弹窗，每点一次放一发独立烟花（可连点并发）。
+        // 设置面板里的同款徽标也共用这一实例（见 SettingsOverlay 的 onPlayFireworks）。
+        val fireworks = rememberFireworksState()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -213,15 +267,27 @@ fun HomeScreen(
                 ZMark(modifier = Modifier.height(20.dp))
             }
             Spacer(modifier = Modifier.weight(1f))
+            // 免费版：金徽标"解锁高级版"，点击开介绍弹窗（全 app 唯一激活码入口）。
+            // 已解锁：金徽标"高级版"，点击不弹窗，放烟花彩蛋。
             if (!isPro) {
                 ProBadgeButton(
                     label = stringResource(R.string.unlock_pro),
                     onClick = { showPro = true }
                 )
+            } else {
+                ProBadgeButton(
+                    label = stringResource(R.string.pro_label),
+                    onClick = { fireworks.launch() }
+                )
             }
         }
         if (showPro) {
-            ProDialog(onDismiss = { showPro = false }, showEnterCode = true)
+            ProDialog(
+                onDismiss = { showPro = false },
+                showEnterCode = true,
+                onCelebrate = { fireworks.launch() },
+                onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
+            )
         }
 
         // ---------- 设置面板：从 "Z传" 按钮位置变形展开 ----------
@@ -229,11 +295,110 @@ fun HomeScreen(
             SettingsOverlay(
                 viewModel = transferViewModel,
                 anchorBounds = zAnchor,
-                onDismiss = { showSettings = false }
+                onDismiss = { showSettings = false },
+                onPlayFireworks = { fireworks.launch() },
+                onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
             )
         }
+
+        // ---------- 小技巧气泡：从 tips 按钮变形弹出的毛玻璃内容框 ----------
+        if (showTips) {
+            TipsBubble(anchorBounds = tipsAnchor, onDismiss = { showTips = false })
+        }
+
+        // ---------- 检查更新：底部居中的低调小入口。放本页与激活码入口同一逻辑——
+        // 这是全 app 唯一确定有外网的页面(其余页面连着相机 Wi-Fi)。
+        // 结果轻反馈走底部玻璃提示条(已最新/检查失败);有新版弹对话框跳网盘下载 ----------
+        if (SHOW_UPDATE_CHECK) {
+            var checkingUpdate by remember { mutableStateOf(false) }
+            var updateInfo by remember { mutableStateOf<LicenseManager.UpdateInfo?>(null) }
+            // 提示条文案与可见性分开存,消失动画期间仍有文字可渲染;nonce 重启计时(全局同款模式)。
+            var updateHintText by remember { mutableStateOf("") }
+            var updateHintVisible by remember { mutableStateOf(false) }
+            var updateHintNonce by remember { mutableStateOf(0) }
+            LaunchedEffect(updateHintNonce) {
+                if (updateHintVisible) {
+                    delay(1800)
+                    updateHintVisible = false
+                }
+            }
+            val updateScope = rememberCoroutineScope()
+            val latestHint = stringResource(R.string.update_latest)
+            val checkFailedHint = stringResource(R.string.update_check_failed)
+            GlassButton(
+                onClick = {
+                    if (!checkingUpdate) {
+                        checkingUpdate = true
+                        updateScope.launch {
+                            when (val r = LicenseManager.checkAppUpdate(BuildConfig.VERSION_CODE)) {
+                                is LicenseManager.UpdateResult.Available -> updateInfo = r.info
+                                LicenseManager.UpdateResult.UpToDate -> {
+                                    updateHintText = latestHint
+                                    updateHintVisible = true
+                                    updateHintNonce++
+                                }
+                                LicenseManager.UpdateResult.Unreachable -> {
+                                    updateHintText = checkFailedHint
+                                    updateHintVisible = true
+                                    updateHintNonce++
+                                }
+                            }
+                            checkingUpdate = false
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(14.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                // 与设置页脚"反馈"按钮同规格(28dp 高小胶囊);次要文字色保持低调,不与主引导抢视线。
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp)
+                    .height(28.dp)
+            ) {
+                Text(
+                    stringResource(if (checkingUpdate) R.string.checking_update else R.string.check_update),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.onSurfaceVariant
+                )
+            }
+            // 结果提示条(与列表页底部玻璃提示同款),浮在入口按钮上方。
+            AnimatedVisibility(
+                visible = updateHintVisible,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut() + slideOutVertically { it / 2 },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 56.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = colors.glassSurfaceHeavy,
+                    shadowElevation = 6.dp,
+                    border = BorderStroke(1.dp, colors.glassPanelBorder)
+                ) {
+                    Text(
+                        updateHintText,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.onBackground,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                    )
+                }
+            }
+            updateInfo?.let { info ->
+                UpdateDialog(info = info, onDismiss = { updateInfo = null })
+            }
+        }
+
+        // ---------- 高级版烟花彩蛋：放在最上层（含设置面板之上），不拦截触摸，播完自行移除 ----------
+        FireworksOverlay(fireworks)
     }
 }
+
+// 检查更新入口的显隐开关:功能已接好(服务器接口/对话框/提示条齐备),但版本尚未稳定,
+// 先不对用户暴露。稳定后置 true 即恢复显示,勿删相关代码。
+private const val SHOW_UPDATE_CHECK = false
 
 // 连接成功后的入场节奏：先保持"连接中"脉冲 [CONNECT_CELEBRATE_DELAY_MS]（此间列表与
 // 缩略图已在后台全速加载），再播约 [CONNECT_SUCCESS_ANIM_MS] 的爆发收尾——播完由
@@ -396,7 +561,7 @@ private fun StatusHero(
     }
 }
 
-/** 引导步骤行：序号圆点 + 说明文字。 */
+/** 引导步骤行：序号蓝底圆点 + 说明文字（去掉标题后步骤是本页主引导，故放大加重更显眼）。 */
 @Composable
 private fun StepRow(index: Int, text: String) {
     val colors = AppTheme.colors
@@ -405,12 +570,12 @@ private fun StepRow(index: Int, text: String) {
             modifier = Modifier
                 .size(22.dp)
                 .clip(CircleShape)
-                .background(colors.surfaceVariant),
+                .background(colors.accentBlue.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 "$index",
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
                 color = colors.accentBlue
             )
@@ -419,7 +584,136 @@ private fun StepRow(index: Int, text: String) {
         Text(
             text,
             style = MaterialTheme.typography.bodyMedium,
-            color = colors.onSurfaceVariant
+            fontWeight = FontWeight.SemiBold,
+            color = colors.onBackground
         )
+    }
+}
+
+/**
+ * 发现新版本对话框:版本号 + 更新说明 + "去下载"跳浏览器打开网盘分享页。
+ * 分享链接带提取码时,点"去下载"先把提取码写进剪贴板再跳转(对话框内先行明示)。
+ * 不做 App 内下载:网盘无稳定直链,浏览器下载 + 手动点安装是最小成本路径。
+ */
+@Composable
+private fun UpdateDialog(info: LicenseManager.UpdateInfo, onDismiss: () -> Unit) {
+    val colors = AppTheme.colors
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(22.dp),
+            color = colors.glassSurfaceHeavy,
+            border = BorderStroke(1.dp, colors.glassPanelBorder)
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Text(
+                    stringResource(R.string.update_found_title, info.versionName),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onBackground
+                )
+                if (info.notes.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        info.notes,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant
+                    )
+                }
+                if (info.password.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        stringResource(R.string.update_password_hint, info.password),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.accentOrange
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.align(Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.cancel), color = colors.onSurfaceVariant)
+                    }
+                    Button(
+                        onClick = {
+                            // 先复制提取码再跳转:落到网盘页时码已在剪贴板,粘贴即可。
+                            if (info.password.isNotEmpty()) {
+                                clipboard.setText(AnnotatedString(info.password))
+                            }
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(info.url))
+                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                            }
+                            onDismiss()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.accentBlue),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(stringResource(R.string.update_download))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 连接页「小技巧」气泡：从 tips 按钮变形弹出的毛玻璃内容框（复用全局 [AnchorPopup]）。
+ * 介绍把「Wi-Fi 连接」加进相机 i 菜单以省去层层翻菜单，并给出设置路径；内容全部走多语言资源。
+ */
+@Composable
+private fun TipsBubble(anchorBounds: Rect?, onDismiss: () -> Unit) {
+    val colors = AppTheme.colors
+    val density = LocalDensity.current
+    val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 8.dp } ?: 140.dp
+    AnchorPopup(
+        anchorBounds = anchorBounds,
+        onDismiss = onDismiss,
+        panelModifier = Modifier
+            .padding(start = 20.dp, end = 20.dp, top = panelTop)
+            .navigationBarsPadding()
+            .fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp)
+    ) { _ ->
+        Column(modifier = Modifier.padding(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Lightbulb, contentDescription = null, tint = colors.accentOrange, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.tip_title),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onBackground
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                stringResource(R.string.tip_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            // 设置路径：内嵌浅底卡片承载，箭头分隔的菜单路径，蓝色加重以便照着相机菜单一步步走。
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(colors.onBackground.copy(alpha = 0.05f))
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                Text(
+                    stringResource(R.string.tip_path),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.accentBlue
+                )
+            }
+        }
     }
 }
