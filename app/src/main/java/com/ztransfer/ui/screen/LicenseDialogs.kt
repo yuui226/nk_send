@@ -1,14 +1,8 @@
 package com.ztransfer.ui.screen
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -62,23 +56,33 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // 高级版列/定价的金色文字(与 ProBadgeButton 的金渐变同族,压深一档保证浅色玻璃上可读)。
-private val ProGold = Color(0xFFE09B2D)
+// 购买弹窗的金额也用它——同一笔钱在两屏用同一个金色,视觉上接得上。
+internal val ProGold = Color(0xFFE09B2D)
 // 对比表的免费/高级版两个值列的定宽(功能名占弹性剩余宽度)。
 private val CompareColWidth = 64.dp
 
 /**
  * 高级版介绍对话框("解锁高级版"徽标打开,连接页与设置面板共用):
- * 自定义毛玻璃面板(与设置/筛选面板同一玻璃语言,不用 M3 AlertDialog 原生样式)——
- * 金徽章头部(标题 + 卖点副标语 + 右上关闭) → 玻璃内卡对比表 → 定价行 →
- * 全宽金色"立即购买"大按钮(拉起支付购买流程) → 底部"输入激活码/联系客服"同规格对齐。
- * [showEnterCode] 控制"输入激活码"入口(点击在面板内向下展开内联激活区,不叠第二层弹窗):
- * 仅连接页开——彼时尚未连相机热点,多半还有外网;其余入口(设置面板)关,
- * 连着相机 Wi-Fi 无外网,在线激活必失败。购买同理需要外网,但入口不藏:
- * 下单失败的报错文案会引导先断开相机 Wi-Fi。
- * 触限处只弹轻量提示引导到这里,不直接打断弹窗。
+ * 自定义毛玻璃面板(与设置/筛选面板同一玻璃语言,不用 M3 AlertDialog 原生样式)。
+ *
+ * 面板固定金徽章头部,主体在【购买页】与【激活页】之间**整块互斥切换**(而非向下展开):
+ * Compose 的 Dialog 是独立窗口,内容做高度动画会让 WindowManager 逐帧重排窗口——又卡又晃,
+ * 且把周围按钮一起顶动。换页只有一次性尺寸变化,干脆利落。
+ *   购买页:对比表 → 定价 → 全宽金色"立即购买" → [输入激活码 | 恢复授权] → 联系客服
+ *   激活页:设备码 → 输入框 + 激活 → 状态行 → 返回
+ *
+ * [showEnterCode] 控制"输入激活码 / 恢复授权"两个入口:仅连接页开——彼时尚未连相机热点,
+ * 多半还有外网;其余入口(设置面板)关,连着相机 Wi-Fi 无外网,在线激活/恢复必失败。
+ * 购买同理需要外网,但入口不藏:下单失败的报错文案会引导先断开相机 Wi-Fi。
  */
 @Composable
-fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false, onCelebrate: () -> Unit = {}) {
+fun ProDialog(
+    onDismiss: () -> Unit,
+    showEnterCode: Boolean = false,
+    onCelebrate: () -> Unit = {},
+    // 购买期间需临时松开对相机 Wi-Fi 的占用(相机热点没外网,付款联不上);由承载页接到 CameraViewModel。
+    onHoldCameraWifi: (Boolean) -> Unit = {},
+) {
     val colors = AppTheme.colors
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
@@ -89,10 +93,11 @@ fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false, onCelebrate
         PurchaseDialog(
             onDismiss = { showPurchase = false },
             // 购买+激活成功:关掉购买弹窗与本弹窗,再放烟花(烟花在页面顶层,须先关弹窗才可见)。
-            onCelebrate = { showPurchase = false; onDismiss(); onCelebrate() }
+            onCelebrate = { showPurchase = false; onDismiss(); onCelebrate() },
+            onHoldCameraWifi = onHoldCameraWifi
         )
     }
-    // 内联激活区状态:点"输入激活码"展开;成功后短暂显示成功文案、自动关闭整个弹窗。
+    // 激活页状态:codeMode 为真时主体换成激活页;成功后短暂显示成功文案、自动关闭整个弹窗。
     var codeMode by remember { mutableStateOf(false) }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -102,7 +107,7 @@ fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false, onCelebrate
     // 恢复已购授权(重装后本地无码时按指纹找回)
     var restoring by remember { mutableStateOf(false) }
     var restoreMsg by remember { mutableStateOf<Int?>(null) }
-    // 内联激活成功 / 恢复授权成功:短暂显示成功后关闭本弹窗并放烟花庆祝。
+    // 激活成功 / 恢复成功:短暂显示成功后关闭本弹窗并放烟花庆祝。
     if (success) {
         LaunchedEffect(Unit) { delay(1200); onDismiss(); onCelebrate() }
     }
@@ -122,7 +127,7 @@ fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false, onCelebrate
                         .background(Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent)))
                 )
                 Column(Modifier.padding(20.dp)) {
-                    // ---- 头部：金徽章 + 标题/卖点副标语 + 右上关闭 ----
+                    // ---- 头部（两页共用）：金徽章 + 标题/卖点副标语 + 右上关闭 ----
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
@@ -159,262 +164,269 @@ fun ProDialog(onDismiss: () -> Unit, showEnterCode: Boolean = false, onCelebrate
 
                     Spacer(Modifier.height(16.dp))
 
-                    // ---- 对比表：玻璃内卡承载（与设置分区卡片同族），表头 + 三行 ----
-                    val cardShape = RoundedCornerShape(14.dp)
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(cardShape)
-                            .background(colors.onBackground.copy(alpha = 0.04f))
-                            .border(1.dp, colors.glassPanelBorder, cardShape)
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
-                    ) {
-                        // 表头:功能列留白,免费/高级版两列与行内值列同宽对齐。
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                stringResource(R.string.tier_free),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = colors.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.width(CompareColWidth)
-                            )
-                            Text(
-                                stringResource(R.string.pro_version),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = ProGold,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.width(CompareColWidth)
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        Box(
+                    if (!codeMode) {
+                        // ================= 购买页 =================
+                        // ---- 对比表：玻璃内卡承载（与设置分区卡片同族），表头 + 三行 ----
+                        val cardShape = RoundedCornerShape(14.dp)
+                        Column(
                             Modifier
                                 .fillMaxWidth()
-                                .height(1.dp)
-                                .background(colors.glassPanelBorder)
-                        )
-                        CompareRow(
-                            stringResource(R.string.compare_transfer),
-                            stringResource(R.string.compare_transfer_free, LicenseManager.FREE_DAILY_TRANSFER_LIMIT),
-                            stringResource(R.string.compare_unlimited)
-                        )
-                        CompareRow(
-                            stringResource(R.string.compare_filesize),
-                            stringResource(
-                                R.string.compare_filesize_free,
-                                LicenseManager.FREE_MAX_FILE_BYTES / (1024 * 1024)
-                            ),
-                            stringResource(R.string.compare_unlimited)
-                        )
-                        CompareRow(
-                            stringResource(R.string.compare_remote),
-                            stringResource(
-                                R.string.compare_remote_free,
-                                (LicenseManager.FREE_REMOTE_DAILY_MS / 60_000L).toInt()
-                            ),
-                            stringResource(R.string.compare_no_limit)
-                        )
-                    }
-
-                    // 定价促销区:红色"限时特惠"角标 + 大号金色现价 + 划线原价——
-                    // "现在买最便宜"的经典促销排布。PRO_PRICE 留空整区不显示;
-                    // PRO_PRICE_ORIGINAL 留空则退化为单一价格(无角标无划线)。
-                    if (PRO_PRICE.isNotEmpty()) {
-                        Spacer(Modifier.height(14.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxWidth()
+                                .clip(cardShape)
+                                .background(colors.onBackground.copy(alpha = 0.04f))
+                                .border(1.dp, colors.glassPanelBorder, cardShape)
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
                         ) {
-                            if (PRO_PRICE_ORIGINAL.isNotEmpty()) {
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = Color(0xFFE53935)
-                                ) {
+                            // 表头:功能列留白,免费/高级版两列与行内值列同宽对齐。
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Spacer(Modifier.weight(1f))
+                                Text(
+                                    stringResource(R.string.tier_free),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.width(CompareColWidth)
+                                )
+                                Text(
+                                    stringResource(R.string.pro_version),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ProGold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.width(CompareColWidth)
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(colors.glassPanelBorder)
+                            )
+                            CompareRow(
+                                stringResource(R.string.compare_transfer),
+                                stringResource(R.string.compare_transfer_free, LicenseManager.FREE_DAILY_TRANSFER_LIMIT),
+                                stringResource(R.string.compare_unlimited)
+                            )
+                            CompareRow(
+                                stringResource(R.string.compare_filesize),
+                                stringResource(
+                                    R.string.compare_filesize_free,
+                                    LicenseManager.FREE_MAX_FILE_BYTES / (1024 * 1024)
+                                ),
+                                stringResource(R.string.compare_unlimited)
+                            )
+                            CompareRow(
+                                stringResource(R.string.compare_remote),
+                                stringResource(
+                                    R.string.compare_remote_free,
+                                    (LicenseManager.FREE_REMOTE_DAILY_MS / 60_000L).toInt()
+                                ),
+                                stringResource(R.string.compare_no_limit)
+                            )
+                        }
+
+                        // 定价促销区:红色"限时特惠"角标 + 大号金色现价 + 划线原价——
+                        // "现在买最便宜"的经典促销排布。PRO_PRICE 留空整区不显示;
+                        // PRO_PRICE_ORIGINAL 留空则退化为单一价格(无角标无划线)。
+                        if (PRO_PRICE.isNotEmpty()) {
+                            Spacer(Modifier.height(14.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (PRO_PRICE_ORIGINAL.isNotEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFFE53935)
+                                    ) {
+                                        Text(
+                                            stringResource(R.string.price_promo_tag),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                }
+                                Text(
+                                    PRO_PRICE,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ProGold
+                                )
+                                if (PRO_PRICE_ORIGINAL.isNotEmpty()) {
+                                    Spacer(Modifier.width(8.dp))
                                     Text(
-                                        stringResource(R.string.price_promo_tag),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                        PRO_PRICE_ORIGINAL,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        textDecoration = TextDecoration.LineThrough,
+                                        color = colors.onSurfaceVariant
                                     )
                                 }
-                                Spacer(Modifier.width(10.dp))
-                            }
-                            Text(
-                                PRO_PRICE,
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = ProGold
-                            )
-                            if (PRO_PRICE_ORIGINAL.isNotEmpty()) {
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    PRO_PRICE_ORIGINAL,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    textDecoration = TextDecoration.LineThrough,
-                                    color = colors.onSurfaceVariant
-                                )
                             }
                         }
-                    }
 
-                    Spacer(Modifier.height(18.dp))
+                        Spacer(Modifier.height(18.dp))
 
-                    // ---- 主行动：全宽金色"立即购买"（与入口徽标同款扫光），拉起支付流程 ----
-                    ProBadgeButton(
-                        label = stringResource(R.string.buy_now),
-                        onClick = { showPurchase = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        big = true
-                    )
+                        // ---- 主行动：全宽金色"立即购买"（与入口徽标同款扫光），拉起支付流程 ----
+                        ProBadgeButton(
+                            label = stringResource(R.string.buy_now),
+                            onClick = { showPurchase = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            big = true
+                        )
 
-                    Spacer(Modifier.height(6.dp))
-
-                    // ---- 次级行动：输入激活码（仅连接页）居左 / 联系客服居右，同规格 TextButton 对齐 ----
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                        // ---- 次级：已购用户的两个入口左右分列（都要外网,故仅连接页给）----
                         if (showEnterCode) {
-                            // 已购码用户的入口:在面板内向下展开内联激活区(再点收起)。
-                            TextButton(onClick = { codeMode = !codeMode }) {
-                                Text(
-                                    stringResource(R.string.enter_code),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = colors.accentBlue
-                                )
-                            }
-                        }
-                        Spacer(Modifier.weight(1f))
-                        // 人工兜底入口:复制客服 QQ(支付异常/换绑等场景)。
-                        TextButton(onClick = {
-                            clipboard.setText(AnnotatedString(QQ_NUMBER))
-                            copied = true
-                        }) {
-                            Text(
-                                if (copied) stringResource(R.string.qq_group_copied, QQ_NUMBER)
-                                else stringResource(R.string.contact_support),
-                                style = MaterialTheme.typography.labelMedium,
-                                textAlign = TextAlign.End,
-                                color = if (copied) colors.statusConnected else colors.accentBlue
-                            )
-                        }
-                    }
-
-                    // ---- 恢复已购授权:重装/清数据后本地没码时,按设备指纹找回(需外网,仅连接页显示)----
-                    if (showEnterCode) {
-                        TextButton(
-                            enabled = !restoring && !success,
-                            onClick = {
-                                restoring = true; restoreMsg = null
-                                scope.launch {
-                                    when (LicenseManager.restorePurchase()) {
-                                        LicenseManager.RestoreResult.Success -> success = true
-                                        LicenseManager.RestoreResult.NotFound ->
-                                            restoreMsg = R.string.restore_none
-                                        LicenseManager.RestoreResult.Unreachable ->
-                                            restoreMsg = R.string.err_server_unreachable
-                                    }
-                                    restoring = false
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                TextButton(onClick = { codeMode = true; error = null }) {
+                                    Text(
+                                        stringResource(R.string.enter_code),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = colors.accentBlue
+                                    )
                                 }
-                            }
-                        ) {
-                            Text(
-                                stringResource(if (restoring) R.string.restore_restoring else R.string.restore_action),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = colors.onSurfaceVariant
-                            )
-                        }
-                        if (restoreMsg != null) {
-                            Text(
-                                stringResource(restoreMsg!!),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.accentOrange,
-                                modifier = Modifier.padding(start = 12.dp, bottom = 4.dp)
-                            )
-                        }
-                    }
-
-                    // ---- 内联激活区：面板向下增高展开（设备码 + 输入框 + 激活按钮 + 状态行）----
-                    AnimatedVisibility(
-                        visible = codeMode,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
-                    ) {
-                        Column(Modifier.padding(top = 4.dp)) {
-                            Text(
-                                stringResource(R.string.device_code_label, LicenseManager.displayCode()),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                OutlinedTextField(
-                                    value = input,
-                                    // 6 位大写字母(排除 I O);自动转大写、过滤非字母,让用户不必纠结大小写。
-                                    onValueChange = { raw ->
-                                        input = raw.uppercase().filter { it in 'A'..'Z' }.take(6)
-                                        error = null
-                                    },
-                                    enabled = !busy && !success,
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                GlassButton(
-                                    enabled = !busy && !success && input.length == 6,
-                                    shape = RoundedCornerShape(14.dp),
-                                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+                                TextButton(
+                                    enabled = !restoring && !success,
                                     onClick = {
-                                        busy = true; error = null
+                                        restoring = true; restoreMsg = null
                                         scope.launch {
-                                            when (val r = LicenseManager.activate(input, BuildConfig.VERSION_NAME)) {
-                                                LicenseManager.ActivationResult.Success -> success = true
-                                                LicenseManager.ActivationResult.Unreachable ->
-                                                    error = R.string.err_server_unreachable
-                                                is LicenseManager.ActivationResult.Rejected -> when (r.code) {
-                                                    "CODE_NOT_FOUND" -> error = R.string.err_code_not_found
-                                                    "CODE_REVOKED" -> error = R.string.err_code_revoked
-                                                    "SLOTS_FULL" -> error = R.string.err_slots_full
-                                                    "RATE_LIMITED" -> error = R.string.err_rate_limited
-                                                    else -> { error = R.string.err_generic; errorArg = r.code }
-                                                }
+                                            when (LicenseManager.restorePurchase()) {
+                                                LicenseManager.RestoreResult.Success -> success = true
+                                                LicenseManager.RestoreResult.NotFound ->
+                                                    restoreMsg = R.string.restore_none
+                                                LicenseManager.RestoreResult.Unreachable ->
+                                                    restoreMsg = R.string.err_server_unreachable
                                             }
-                                            busy = false
+                                            restoring = false
                                         }
                                     }
                                 ) {
                                     Text(
-                                        stringResource(if (busy) R.string.activating else R.string.activate),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold,
+                                        stringResource(
+                                            if (restoring) R.string.restore_restoring else R.string.restore_action
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium,
                                         color = colors.accentBlue
                                     )
                                 }
                             }
-                            Spacer(Modifier.height(8.dp))
-                            when {
-                                success -> Text(
-                                    stringResource(R.string.activation_success),
+                            if (restoreMsg != null) {
+                                Text(
+                                    stringResource(restoreMsg!!),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = colors.statusConnected
-                                )
-                                error != null -> Text(
-                                    if (error == R.string.err_generic) stringResource(R.string.err_generic, errorArg)
-                                    else stringResource(error!!),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.accentOrange
-                                )
-                                else -> Text(
-                                    stringResource(R.string.activation_privacy),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.onSurfaceVariant.copy(alpha = 0.7f)
+                                    color = colors.accentOrange,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
+                        }
+
+                        // ---- 最弱一级：人工兜底,复制客服 QQ(支付异常/换绑等场景)----
+                        TextButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(QQ_NUMBER))
+                                copied = true
+                            },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        ) {
+                            Text(
+                                if (copied) stringResource(R.string.qq_group_copied, QQ_NUMBER)
+                                else stringResource(R.string.contact_support),
+                                style = MaterialTheme.typography.labelMedium,
+                                textAlign = TextAlign.Center,
+                                color = if (copied) colors.statusConnected else colors.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        // ================= 激活页（顶掉购买内容，弹窗不增高）=================
+                        Text(
+                            stringResource(R.string.device_code_label, LicenseManager.displayCode()),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = input,
+                                // 6 位大写字母(排除 I O);自动转大写、过滤非字母,让用户不必纠结大小写。
+                                onValueChange = { raw ->
+                                    input = raw.uppercase().filter { it in 'A'..'Z' }.take(6)
+                                    error = null
+                                },
+                                enabled = !busy && !success,
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            GlassButton(
+                                enabled = !busy && !success && input.length == 6,
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+                                onClick = {
+                                    busy = true; error = null
+                                    scope.launch {
+                                        when (val r = LicenseManager.activate(input, BuildConfig.VERSION_NAME)) {
+                                            LicenseManager.ActivationResult.Success -> success = true
+                                            LicenseManager.ActivationResult.Unreachable ->
+                                                error = R.string.err_server_unreachable
+                                            is LicenseManager.ActivationResult.Rejected -> when (r.code) {
+                                                "CODE_NOT_FOUND" -> error = R.string.err_code_not_found
+                                                "CODE_REVOKED" -> error = R.string.err_code_revoked
+                                                "SLOTS_FULL" -> error = R.string.err_slots_full
+                                                "RATE_LIMITED" -> error = R.string.err_rate_limited
+                                                else -> { error = R.string.err_generic; errorArg = r.code }
+                                            }
+                                        }
+                                        busy = false
+                                    }
+                                }
+                            ) {
+                                Text(
+                                    stringResource(if (busy) R.string.activating else R.string.activate),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.accentBlue
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        when {
+                            success -> Text(
+                                stringResource(R.string.activation_success),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.statusConnected
+                            )
+                            error != null -> Text(
+                                if (error == R.string.err_generic) stringResource(R.string.err_generic, errorArg)
+                                else stringResource(error!!),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.accentOrange
+                            )
+                            else -> Text(
+                                stringResource(R.string.activation_privacy),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
+                        // ---- 返回购买页 ----
+                        TextButton(
+                            enabled = !busy && !success,
+                            onClick = { codeMode = false; input = ""; error = null },
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        ) {
+                            Text(
+                                stringResource(R.string.back),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.accentBlue
+                            )
                         }
                     }
                 }

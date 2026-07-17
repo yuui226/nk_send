@@ -73,7 +73,9 @@ fun SettingsOverlay(
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
     // 已解锁时右上角徽标点击的回调（放烟花彩蛋）；由承载页提供其页面级 FireworksState。
-    onPlayFireworks: () -> Unit = {}
+    onPlayFireworks: () -> Unit = {},
+    // 购买期间临时松开对相机 Wi-Fi 的占用（相机热点没外网，付款联不上）；由承载页接到 CameraViewModel。
+    onHoldCameraWifi: (Boolean) -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
     val colors = AppTheme.colors
@@ -193,7 +195,11 @@ fun SettingsOverlay(
                 }
             }
             if (showPro) {
-                ProDialog(onDismiss = { showPro = false }, onCelebrate = onPlayFireworks)
+                ProDialog(
+                    onDismiss = { showPro = false },
+                    onCelebrate = onPlayFireworks,
+                    onHoldCameraWifi = onHoldCameraWifi
+                )
             }
 
             // 高级版专属:查看/复制我的激活码(换新手机时在新机输入此码,旧机自动顶替停用)。

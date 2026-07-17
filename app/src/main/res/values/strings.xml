@@ -159,6 +159,7 @@
     <string name="pro_label">Pro</string>
     <string name="unlock">Unlock</string>
     <string name="enter_code">Enter activation code</string>
+    <string name="back">Back</string>
     <string name="tier_free">Free</string>
     <string name="compare_transfer">Daily transfers</string>
     <string name="compare_transfer_free">%1$d</string>
@@ -179,15 +180,19 @@
     <string name="contact_support">Purchase or activation issues? Contact support</string>
     <string name="purchase_loading">Creating order…</string>
     <string name="purchase_qr_loading">Generating payment QR…</string>
-    <string name="purchase_scan_hint">WeChat can\'t scan a code on the same phone. Show this QR on another screen (computer / tablet / another phone) and scan it with WeChat to pay. This device activates automatically after payment.</string>
+    <string name="purchase_wechat_title">Pay with WeChat</string>
+    <string name="purchase_scan_hint">Please scan the QR code from your album in WeChat to pay</string>
+    <string name="purchase_save_qr">Save to album</string>
+    <string name="purchase_saved">✓ Saved to album</string>
+    <string name="purchase_save_failed">Save failed — take a screenshot instead</string>
     <string name="purchase_copy_link">Copy payment link (open on a computer to show the QR)</string>
     <string name="purchase_link_copied">Payment link copied</string>
     <string name="purchase_open_link">Open payment page</string>
-    <string name="purchase_qr_expired">QR code expired</string>
-    <string name="purchase_qr_refresh">Refresh QR code</string>
+    <string name="purchase_qr_expired">Payment timed out</string>
+    <string name="purchase_qr_refresh">Start payment again</string>
     <string name="renewal_needed">Pro license expired — connect to the internet and reopen to renew automatically.</string>
     <string name="purchase_opening_alipay">Opening Alipay…</string>
-    <string name="purchase_waiting">Complete the payment in Alipay — activation is automatic once confirmed.</string>
+    <string name="purchase_waiting">Complete the payment above — activation is automatic once confirmed.</string>
     <string name="purchase_success">Payment received — Pro activated!</string>
     <string name="purchase_activated">🎉 Purchased · Pro unlocked</string>
     <string name="purchase_restored">🎉 This device already owns Pro — restored, no charge</string>
@@ -201,6 +206,7 @@
     <string name="purchase_paid_not_active">Payment received but auto-activation failed — copy the code above and use "Enter activation code".</string>
     <string name="purchase_code_copied">Activation code copied</string>
     <string name="purchase_done">Done</string>
+    <string name="err_purchase_no_network">Internet connection required</string>
     <string name="err_purchase_unreachable">Couldn\'t reach the server. If you\'re on the camera\'s Wi-Fi, disconnect first and retry on a network with internet access.</string>
     <string name="err_purchase_failed">Couldn\'t create the order — try again later or contact support.</string>
 

@@ -51,8 +51,8 @@ data class TransferState(
     val currentSpeed: Long = 0,
     val transferDirUri: String? = null,
     val thumbnailColumns: Int = 3,
-    // 触感反馈开关：默认关闭，用户开启后持久化，下次启动保持。
-    val hapticsEnabled: Boolean = false,
+    // 触感反馈开关：默认开启，用户关闭后持久化，下次启动保持。
+    val hapticsEnabled: Boolean = true,
     // 屏幕常亮（默认开启）：应用在前台时不熄屏——熄屏后系统会冻结进程/让 Wi-Fi 打盹，
     // 相机连接容易断；代价是手机一直亮屏。
     val keepScreenOn: Boolean = true,
@@ -144,7 +144,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 transferDirUri = dir,
                 thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4),
-                hapticsEnabled = prefs.getBoolean("haptics_enabled", false),
+                hapticsEnabled = prefs.getBoolean("haptics_enabled", true),
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }

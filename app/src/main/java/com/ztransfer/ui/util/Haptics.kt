@@ -9,7 +9,7 @@ import androidx.compose.ui.platform.LocalView
 
 /**
  * 语义化触感反馈：调用点只表达"发生了什么"，由此处映射到系统震动常量。
- * [enabled] 为 false（设置开关默认关闭）时所有调用零开销 no-op；
+ * [enabled] 为 false（设置开关默认开启，用户可关）时所有调用零开销 no-op；
  * 系统全局"触摸震动"设置关闭时由 performHapticFeedback 自行忽略，双重尊重用户意愿。
  */
 class Haptics(private val view: View, private val enabled: Boolean) {

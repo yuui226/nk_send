@@ -285,7 +285,8 @@ fun HomeScreen(
             ProDialog(
                 onDismiss = { showPro = false },
                 showEnterCode = true,
-                onCelebrate = { fireworks.launch() }
+                onCelebrate = { fireworks.launch() },
+                onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
             )
         }
 
@@ -295,7 +296,8 @@ fun HomeScreen(
                 viewModel = transferViewModel,
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },
-                onPlayFireworks = { fireworks.launch() }
+                onPlayFireworks = { fireworks.launch() },
+                onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
             )
         }
 

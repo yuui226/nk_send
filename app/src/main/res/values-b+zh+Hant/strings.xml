@@ -159,6 +159,7 @@
     <string name="pro_label">高級版</string>
     <string name="unlock">解鎖</string>
     <string name="enter_code">輸入啟用碼</string>
+    <string name="back">返回</string>
     <string name="tier_free">免費</string>
     <string name="compare_transfer">每日傳輸</string>
     <string name="compare_transfer_free">%1$d 個</string>
@@ -179,15 +180,19 @@
     <string name="contact_support">購買或啟用遇到問題？聯絡客服</string>
     <string name="purchase_loading">正在建立訂單…</string>
     <string name="purchase_qr_loading">正在產生支付二維碼…</string>
-    <string name="purchase_scan_hint">微信不支援在同一部手機上掃碼。請在另一塊螢幕（電腦 / 平板 / 另一支手機）顯示此二維碼，用微信「掃一掃」掃碼支付。付款後本機自動啟用。</string>
+    <string name="purchase_wechat_title">微信掃碼付款</string>
+    <string name="purchase_scan_hint">請到微信掃相簿中的二維碼付款</string>
+    <string name="purchase_save_qr">儲存到相簿</string>
+    <string name="purchase_saved">✓ 已儲存到相簿</string>
+    <string name="purchase_save_failed">儲存失敗，請改用截圖</string>
     <string name="purchase_copy_link">複製支付連結（在電腦瀏覽器開啟即顯示二維碼）</string>
     <string name="purchase_link_copied">已複製支付連結</string>
     <string name="purchase_open_link">開啟支付頁面</string>
-    <string name="purchase_qr_expired">二維碼已過期</string>
-    <string name="purchase_qr_refresh">重新整理二維碼</string>
+    <string name="purchase_qr_expired">付款已逾時</string>
+    <string name="purchase_qr_refresh">重新發起付款</string>
     <string name="renewal_needed">高級版授權已過期，請連接網路後重開 App 自動續期。</string>
     <string name="purchase_opening_alipay">正在開啟支付寶…</string>
-    <string name="purchase_waiting">請在支付寶完成付款，到帳後自動啟用。</string>
+    <string name="purchase_waiting">在上方頁面完成付款，到帳後自動啟用。</string>
     <string name="purchase_success">付款成功，高級版已啟用！</string>
     <string name="purchase_activated">🎉 購買成功 · 高級版已解鎖</string>
     <string name="purchase_restored">🎉 本裝置已購買過 · 已免費恢復,未重複扣款</string>
@@ -201,6 +206,7 @@
     <string name="purchase_paid_not_active">已收到付款但自動啟用未成功，請複製上方啟用碼，用「輸入啟用碼」完成啟用。</string>
     <string name="purchase_code_copied">已複製啟用碼</string>
     <string name="purchase_done">完成</string>
+    <string name="err_purchase_no_network">需要連接網際網路</string>
     <string name="err_purchase_unreachable">無法連接伺服器。若目前連著相機 Wi-Fi，請先斷開，改用有外網的網路重試。</string>
     <string name="err_purchase_failed">下單失敗，請稍後重試或聯絡客服。</string>
 

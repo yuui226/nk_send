@@ -159,6 +159,7 @@
     <string name="pro_label">高级版</string>
     <string name="unlock">解锁</string>
     <string name="enter_code">输入激活码</string>
+    <string name="back">返回</string>
     <string name="tier_free">免费</string>
     <string name="compare_transfer">每日传输</string>
     <string name="compare_transfer_free">%1$d 个</string>
@@ -179,15 +180,19 @@
     <string name="contact_support">购买或激活遇到问题？联系客服</string>
     <string name="purchase_loading">正在创建订单…</string>
     <string name="purchase_qr_loading">正在生成支付二维码…</string>
-    <string name="purchase_scan_hint">微信不支持在同一部手机上扫码。请在另一块屏幕（电脑 / 平板 / 另一部手机）显示此二维码，用微信「扫一扫」扫码支付。支付后本机自动激活。</string>
+    <string name="purchase_wechat_title">微信扫码支付</string>
+    <string name="purchase_scan_hint">请到微信扫相册中的二维码付款</string>
+    <string name="purchase_save_qr">保存到相册</string>
+    <string name="purchase_saved">✓ 已保存到相册</string>
+    <string name="purchase_save_failed">保存失败，请改用截图</string>
     <string name="purchase_copy_link">复制支付链接（在电脑浏览器打开即显示二维码）</string>
     <string name="purchase_link_copied">已复制支付链接</string>
     <string name="purchase_open_link">打开支付页面</string>
-    <string name="purchase_qr_expired">二维码已过期</string>
-    <string name="purchase_qr_refresh">刷新二维码</string>
+    <string name="purchase_qr_expired">支付已超时</string>
+    <string name="purchase_qr_refresh">重新发起支付</string>
     <string name="renewal_needed">高级版授权已过期，请连接网络后重开 App 自动续期。</string>
     <string name="purchase_opening_alipay">正在打开支付宝…</string>
-    <string name="purchase_waiting">请在支付宝完成支付，到账后自动激活。</string>
+    <string name="purchase_waiting">在上方页面完成支付，到账后自动激活。</string>
     <string name="purchase_success">支付成功，高级版已激活！</string>
     <string name="purchase_activated">🎉 购买成功 · 高级版已解锁</string>
     <string name="purchase_restored">🎉 本设备已购买过 · 已免费恢复,未重复扣款</string>
@@ -201,6 +206,7 @@
     <string name="purchase_paid_not_active">已收到付款但自动激活未成功，请复制上方激活码，用「输入激活码」完成激活。</string>
     <string name="purchase_code_copied">已复制激活码</string>
     <string name="purchase_done">完成</string>
+    <string name="err_purchase_no_network">需要连接互联网</string>
     <string name="err_purchase_unreachable">无法连接服务器。若当前连着相机 Wi-Fi，请先断开，用有外网的网络重试。</string>
     <string name="err_purchase_failed">下单失败，请稍后重试或联系客服。</string>
 

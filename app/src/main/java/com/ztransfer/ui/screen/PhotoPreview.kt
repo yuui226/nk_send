@@ -58,11 +58,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlin.math.max
@@ -77,6 +75,7 @@ import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.PhotoExif
 
 // 视频扩展名：无高清封面，预览走"压暗缩略图 + 视频占位"分支。
+// 注意与 CameraViewModel.VIDEO_EXTENSIONS（封面黑边兜底）保持同步。
 private val VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 
 /**
@@ -510,9 +509,6 @@ private fun PreviewPage(
         }
     }
 
-    // 容器 pixel 尺寸，用于 AF 点叠加的 Fit 坐标映射。
-    var containerSize by remember { mutableStateOf<IntSize?>(null) }
-
     // ---- 缩放/平移状态（按 handle 记忆；离开本页复位，与主流相册一致）----
     var scale by remember(file.handle) { mutableStateOf(1f) }
     var offset by remember(file.handle) { mutableStateOf(Offset.Zero) }
@@ -538,7 +534,6 @@ private fun PreviewPage(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .onGloballyPositioned { containerSize = it.size }
             // 捏合缩放 + 放大后单指平移。关键：单指且未放大时【不消费】事件，
             // 把手势让给 HorizontalPager 翻页 / 单击关闭；双指或已放大才接管并消费。
             .pointerInput(imgAspect) {
@@ -671,38 +666,34 @@ private fun PreviewPage(
                         modifier = Modifier.fillMaxSize(),
                         alpha = if (fhdBitmap != null) fhdAlpha.value else 1f
                     )
-                }
 
-                // 对焦点红框叠加（按住 AF 按钮时绘制；不随缩放变换，与放大同用是罕见组合）。
-                val exifNonNull = exif
-                if (showAfPoint && exifNonNull != null && exifNonNull.afX != null && containerSize != null) {
-                    val density = LocalDensity.current
-                    val cw = containerSize!!.width.toFloat()
-                    val ch = containerSize!!.height.toFloat()
-                    val imgW = exifNonNull.imageWidth?.toFloat() ?: displayBitmap.width.toFloat()
-                    val imgH = exifNonNull.imageHeight?.toFloat() ?: displayBitmap.height.toFloat()
-                    val imgAsp = imgW / imgH
-                    val containerAspect = cw / ch
-                    val (dispW, dispH) = if (imgAsp > containerAspect) {
-                        cw to (cw / imgAsp)
-                    } else {
-                        (ch * imgAsp) to ch
-                    }
-                    val offX = (cw - dispW) / 2f
-                    val offY = (ch - dispH) / 2f
-                    val strokePx = with(density) { 1.dp.toPx() }
-
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val afLeft = offX + exifNonNull.afX * dispW
-                        val afTop = offY + exifNonNull.afY!! * dispH
-                        val afW = (exifNonNull.afWidth ?: 0.05f) * dispW
-                        val afH = (exifNonNull.afHeight ?: 0.05f) * dispH
-                        drawRect(
-                            color = Color.Red,
-                            topLeft = Offset(afLeft, afTop),
-                            size = Size(afW, afH),
-                            style = Stroke(width = strokePx)
-                        )
+                    // 对焦点红框叠加（按住 AF 按钮时绘制）。放在同一变换层内,随缩放/平移跟着图走。
+                    // afX/afY 是 AF 区【中心】（Nikon AFInfo2 语义,解析端即按中心归一化）,矩形以其为中心;
+                    // 线宽除以 scale,放大后红框变大但线保持 1dp 视觉粗细（draw 块读 scale,变焦时自动重绘）。
+                    val exifNonNull = exif
+                    if (showAfPoint && exifNonNull != null && exifNonNull.afX != null) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            // Fit 矩形必须按【实际渲染位图】的宽高比算,与 Image 的 ContentScale.Fit
+                            // 严格一致;EXIF 原图尺寸与预览位图比例可能有出入(缩略图黑边裁切后
+                            // 已非精确 3:2、FHD 直出比例也未必等于原图),按 EXIF 算红框会贴不住画面。
+                            val imgAsp = displayBitmap.width.toFloat() / displayBitmap.height.toFloat()
+                            val containerAspect = size.width / size.height
+                            val (dispW, dispH) = if (imgAsp > containerAspect) {
+                                size.width to (size.width / imgAsp)
+                            } else {
+                                (size.height * imgAsp) to size.height
+                            }
+                            val afCx = (size.width - dispW) / 2f + exifNonNull.afX * dispW
+                            val afCy = (size.height - dispH) / 2f + exifNonNull.afY!! * dispH
+                            val afW = (exifNonNull.afWidth ?: 0.05f) * dispW
+                            val afH = (exifNonNull.afHeight ?: 0.05f) * dispH
+                            drawRect(
+                                color = Color.Red,
+                                topLeft = Offset(afCx - afW / 2f, afCy - afH / 2f),
+                                size = Size(afW, afH),
+                                style = Stroke(width = 1.dp.toPx() / scale)
+                            )
+                        }
                     }
                 }
             }

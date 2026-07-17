@@ -332,6 +332,16 @@ fun FileListScreen(
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterActive = filterExts != null || filterProtected || filterBurst
+    // 筛选确定后的级联入场（复用分组展开的入场动画）：tick 每次确定递增（重播存量格子）,
+    // window 开 600ms（窗口内组成的格子播入场,之后滚动进入的不播——与 recentlyExpanded 同构）。
+    var filterRevealTick by remember { mutableStateOf(0) }
+    var filterRevealWindow by remember { mutableStateOf(false) }
+    LaunchedEffect(filterRevealTick) {
+        if (filterRevealTick > 0) {
+            delay(600)
+            filterRevealWindow = false
+        }
+    }
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
     val availableExts = remember(state.files) {
         state.files.map { it.extension }.distinct().sorted()
@@ -352,7 +362,7 @@ fun FileListScreen(
     val transfersBusy = transferState.tasks.any {
         it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
     }
-    // 触感反馈（开关在设置里，默认关）。
+    // 触感反馈（开关在设置里，默认开）。
     val haptics = rememberHaptics(transferState.hapticsEnabled)
 
     // 长按预览：全屏翻页 + 从被长按格子的位置放大展开。
@@ -558,6 +568,8 @@ fun FileListScreen(
                 burstHandles = burstHandles,
                 contentPadding = listPadding,
                 gridState = gridState,
+                filterRevealTick = filterRevealTick,
+                filterRevealWindow = filterRevealWindow,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -768,6 +780,13 @@ fun FileListScreen(
                 currentProtected = filterProtected,
                 currentBurst = filterBurst,
                 onConfirm = { sel, prot, burst ->
+                    // 筛选真的变了才开入场窗口：在事件回调里【同步】置起（与分组展开在
+                    // onClick 里设 recentlyExpanded 同理），下一帧组成的新列表才带动画;
+                    // 原样确定不重播,免得无变化也整屏闪一遍。
+                    if (sel != filterExts || prot != filterProtected || burst != filterBurst) {
+                        filterRevealTick++
+                        filterRevealWindow = true
+                    }
                     transferViewModel.setFilters(sel, prot, burst)
                     showFilter = false
                 },
@@ -1007,7 +1026,9 @@ fun QueuePill(
                                 )
                             PillMode.DONE ->
                                 Text(
-                                    text = "done",
+                                    // 刻意不走字符串资源:所有语言统一显示 "Done"(短暂闪现的
+                                    // 状态徽记,当装饰性标识处理,不参与本地化)。
+                                    text = "Done",
                                     style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
                                     color = colors.statusConnected,
                                     fontWeight = FontWeight.Bold,
@@ -1058,7 +1079,8 @@ fun QueuePill(
 
 /**
  * Wi-Fi 信号毛玻璃按钮：相机已连接时显示 4 格信号条（点击展开具体 dBm）；
- * 连接断开（含不在相机 Wi-Fi）时显示红色断连图标——断开状态一眼可见。
+ * 连接断开（含不在相机 Wi-Fi）时显示红色断连图标——断开状态一眼可见，
+ * 此时点击直接跳系统 Wi-Fi 设置（与连接页的 Wi-Fi 按钮同款行为）。
  * [pulseTrigger] 递增时按钮轻微放大再弹性缩回（断开时点缩略图的"病因指向"反馈）。
  * "Z传"页与队列页顶栏共用。
  */
@@ -1091,17 +1113,36 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
             pulse.animateTo(1f, Motion.bouncy())
         }
     }
+    // 断开呼吸：整个按钮持续轻微放大缩小，把"该重连相机了"顶到眼前（点击即跳
+    // Wi-Fi 设置）。仅断开时组合 infinite transition，在线零开销；值在 graphicsLayer
+    // 里读，每帧只更新图层不重组。与 pulse 强调相乘叠加，互不打架。
+    val breath = if (!online) {
+        rememberInfiniteTransition(label = "signalBreath").animateFloat(
+            initialValue = 1f, targetValue = 1.09f,
+            animationSpec = infiniteRepeatable(tween(550, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "signalBreathScale"
+        )
+    } else null
 
+    val context = LocalContext.current
     GlassButton(
-        onClick = { expanded = !expanded },
+        onClick = {
+            if (online) expanded = !expanded
+            // 断开态：断连图标即"去连 Wi-Fi"的入口，跳系统 Wi-Fi 设置（与连接页
+            // 的 Wi-Fi 按钮同款行为）；离线时展开 dBm 本来就无意义。
+            else try {
+                context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            } catch (_: Exception) {}
+        },
         shape = RoundedCornerShape(22.dp),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
         // 顶栏按钮统一 36dp 高；信号条内容 15dp，在按钮内垂直居中。
         modifier = Modifier
             .height(36.dp)
             .graphicsLayer {
-                scaleX = pulse.value
-                scaleY = pulse.value
+                val s = pulse.value * (breath?.value ?: 1f)
+                scaleX = s
+                scaleY = s
             }
     ) {
         // dBm 文本用 AnimatedVisibility 逐帧驱动宽度+透明度，按钮宽度随内容自然过渡。
@@ -1269,6 +1310,11 @@ private fun ThumbnailGrid(
     burstHandles: Set<Int>,
     contentPadding: PaddingValues,
     gridState: LazyGridState,
+    // 筛选入场：确定筛选的瞬间 tick 递增、window 开启 600ms（都在事件回调里同步置起，
+    // 晚一帧格子就先以终态闪现穿帮）。窗口内组成的格子重播级联入场——复用分组展开的
+    // "瞬时重排 + 级联入场"方案；条目位移动画不可用的原因见下方手风琴注释。
+    filterRevealTick: Int = 0,
+    filterRevealWindow: Boolean = false,
     modifier: Modifier = Modifier
 ) {
 
@@ -1372,9 +1418,10 @@ private fun ThumbnailGrid(
                         onPreview = onPreview,
                         cellBoundsRegistry = cellBoundsRegistry,
                         inBurst = file.handle in burstHandles,
-                        reveal = group.date == recentlyExpanded,
+                        reveal = group.date == recentlyExpanded || filterRevealWindow,
                         // 级联错峰：组内前 18 格按 15ms 递增，其余同批（基本都在屏外）。
                         revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
+                        revealKey = filterRevealTick,
                         modifier = if (collapsingThis) {
                             Modifier.collapseHeight { collapseProgress.value }
                         } else Modifier
@@ -1402,13 +1449,15 @@ private fun ThumbnailCell(
     inBurst: Boolean = false,
     reveal: Boolean = false,
     revealDelayMs: Long = 0L,
+    // 变化即重播入场动画（筛选确定时存量格子也要重播）；平时保持不变。
+    revealKey: Any? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
-    // 展开入场：本组刚被展开时淡入+轻微放大、按 revealDelayMs 级联错峰；
+    // 展开/筛选入场：本组刚被展开或筛选刚确定时淡入+轻微放大、按 revealDelayMs 级联错峰；
     // 平时（滚动进入）revealProgress 初始即 1，直接全显、零开销。
-    val revealProgress = remember { Animatable(if (reveal) 0f else 1f) }
-    LaunchedEffect(Unit) {
+    val revealProgress = remember(revealKey) { Animatable(if (reveal) 0f else 1f) }
+    LaunchedEffect(revealKey) {
         if (revealProgress.value < 1f) {
             delay(revealDelayMs)
             revealProgress.animateTo(1f, tween(220))

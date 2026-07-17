@@ -90,6 +90,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.2")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
 
+    // 二维码生成:把虎皮椒手机端支付链接画成码,自己排版 + 存相册,不塞它的页面。
+    // 只用 core（纯 Java 编码器,约 500KB,不含安卓摄像头扫码那套）。
+    implementation("com.google.zxing:core:3.5.3")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
