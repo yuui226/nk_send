@@ -377,6 +377,40 @@ fun FileListScreen(
         }
     }
 
+    // 队列 handle → 任务：列表角标与预览页"已入队"态共用。
+    val queuedByHandle = remember(transferState.tasks) {
+        transferState.tasks.associateBy { it.file.handle }
+    }
+    // 单文件入队：列表轻触 + 预览页传输按钮共用。gating 与整组传输一致。
+    val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
+        if (transferState.transferDirUri == null) {
+            // 预览层盖在设置面板之上，先关掉预览再弹设置，否则用户看不见。
+            previewIndex = null
+            showSettings = true; return@onTapFile
+        }
+        if (!state.isConnectedToCamera) {
+            signalPulse++
+            showHint(notConnectedHint)
+        } else {
+            haptics.tick()
+            transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
+            // 单张"吸入":缩略图从格子位置起飞(count=1 → 单卡无叠影),
+            // 同一条弧线进胶囊。预览中格子若仍在注册表则照常飞；滚出屏幕则只入队无动画。
+            val fromCell = cellBoundsRegistry[file.handle]
+            // 同源去重:同帧双击防重复残影。
+            if (file.handle !in queuedByHandle && fromCell != null &&
+                queueFlights.none { it.from == fromCell }
+            ) {
+                queueFlights += QueueFlight(
+                    id = nextFlightId++, from = fromCell,
+                    packs = emptyList(), count = 1,
+                    topThumb = cameraViewModel.cachedThumbnail(file.handle)
+                )
+                heldFiles += 1
+            }
+        }
+    }
+
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
     // 用全局背景渐变刷（而非纯 background 色），与 Scaffold 底的纵深一致。
     // 遥控页入口是左下角圆钮（曾试过横滑手势进入，误触率高已去掉）。
@@ -449,15 +483,13 @@ fun FileListScreen(
         }
 
         if (state.files.isNotEmpty()) {
-            val queuedByHandle = remember(transferState.tasks) {
-                transferState.tasks.associateBy { it.file.handle }
-            }
             // 各日期分组的收起状态（key=日期）。收起的组不渲染其条目/缩略图，
             // 因而缩略图不会加载；展开后条目重新 emit 才恢复加载。跨渐进加载持久保留。
             val collapsedDates = remember { mutableStateMapOf<String, Boolean>() }
 
-            // 分组批量传输 / 单文件点击。gating 用响应式的 isConnectedToCamera；
+            // 分组批量传输。gating 用响应式的 isConnectedToCamera；
             // 队列内部经 provider 现取当前相机实例，中途重连后续传任务自动用新连接。
+            // 单文件入队见外层 onTapFile（列表点击与预览页按钮共用）。
             val onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit = onTransferGroup@{ remaining, fromBounds ->
                 if (transferState.transferDirUri == null) {
                     showSettings = true; return@onTransferGroup
@@ -502,32 +534,6 @@ fun FileListScreen(
                             topThumb = cameraViewModel.cachedThumbnail(remaining.first().handle)
                         )
                         heldFiles += remaining.size
-                    }
-                }
-            }
-            val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
-                if (transferState.transferDirUri == null) {
-                    showSettings = true; return@onTapFile
-                }
-                if (!state.isConnectedToCamera) {
-                    signalPulse++
-                    showHint(notConnectedHint)
-                } else {
-                    haptics.tick()
-                    transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
-                    // 单张同款"吸入":这张照片的缩略图从格子位置起飞(count=1 → 单卡无叠影,
-                    // 无打包幕),同一条弧线进胶囊,落袋数字 +1。押扣与整组同一套。
-                    val fromCell = cellBoundsRegistry[file.handle]
-                    // 同源去重理由同整组(同帧双击防重复残影)。
-                    if (file.handle !in queuedByHandle && fromCell != null &&
-                        queueFlights.none { it.from == fromCell }
-                    ) {
-                        queueFlights += QueueFlight(
-                            id = nextFlightId++, from = fromCell,
-                            packs = emptyList(), count = 1,
-                            topThumb = cameraViewModel.cachedThumbnail(file.handle)
-                        )
-                        heldFiles += 1
                     }
                 }
             }
@@ -794,31 +800,6 @@ fun FileListScreen(
             )
         }
 
-        // 底部通用玻璃提示条（退出确认 / 相机未连接等）。
-        AnimatedVisibility(
-            visible = hintVisible,
-            enter = fadeIn() + slideInVertically { it / 2 },
-            exit = fadeOut() + slideOutVertically { it / 2 },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 28.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = colors.glassSurfaceHeavy,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, colors.glassPanelBorder)
-            ) {
-                Text(
-                    hintText,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.onBackground
-                )
-            }
-        }
-
         // 设置面板（点击 "Z传" 或未设目录时弹出），从 "Z传" 按钮位置变形展开。
         if (showSettings) {
             SettingsOverlay(
@@ -842,7 +823,35 @@ fun FileListScreen(
                     cameraViewModel = cameraViewModel,
                     hapticsEnabled = transferState.hapticsEnabled,
                     burstHandles = burstHandles,
+                    queuedHandles = queuedByHandle.keys,
+                    onTransfer = onTapFile,
                     onDismiss = { previewIndex = null }
+                )
+            }
+        }
+
+        // 底部通用玻璃提示条（退出确认 / 相机未连接等）。
+        // 放在预览层之上：预览中点传输但未连接时，提示仍能看见。
+        AnimatedVisibility(
+            visible = hintVisible,
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 28.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = colors.glassSurfaceHeavy,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, colors.glassPanelBorder)
+            ) {
+                Text(
+                    hintText,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.onBackground
                 )
             }
         }

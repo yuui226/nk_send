@@ -31,6 +31,7 @@
     <string name="cd_back_to_top">回到頂部</string>
     <string name="cd_filter_type">篩選類型</string>
     <string name="cd_transfer">傳輸</string>
+    <string name="cd_queued">已加入佇列</string>
     <string name="cd_expand">展開</string>
     <string name="cd_collapse">收起</string>
     <string name="cd_all_queued">已全部加入佇列</string>

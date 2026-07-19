@@ -31,6 +31,7 @@
     <string name="cd_back_to_top">回到顶部</string>
     <string name="cd_filter_type">筛选类型</string>
     <string name="cd_transfer">传输</string>
+    <string name="cd_queued">已加入队列</string>
     <string name="cd_expand">展开</string>
     <string name="cd_collapse">收起</string>
     <string name="cd_all_queued">已全部加入队列</string>

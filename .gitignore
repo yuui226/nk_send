@@ -32,3 +32,7 @@ server/alipay-*.txt
 
 # 打包附带产出的混淆映射文件
 dist/*.mapping.txt
+
+# 本地构建工具链 / 环境脚本
+.build-tools/
+env_build/

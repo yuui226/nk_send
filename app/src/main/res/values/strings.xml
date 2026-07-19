@@ -31,6 +31,7 @@
     <string name="cd_back_to_top">Back to top</string>
     <string name="cd_filter_type">Filter by type</string>
     <string name="cd_transfer">Transfer</string>
+    <string name="cd_queued">Already in queue</string>
     <string name="cd_expand">Expand</string>
     <string name="cd_collapse">Collapse</string>
     <string name="cd_all_queued">All added to queue</string>

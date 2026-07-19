@@ -23,7 +23,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BurstMode
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Movie
@@ -95,6 +97,10 @@ fun PhotoPreviewOverlay(
     hapticsEnabled: Boolean,
     // 连拍成员 handle 集(列表页的检测结果):预览左上角展示连拍角标用;空集即不展示。
     burstHandles: Set<Int> = emptySet(),
+    // 已在传输队列中的 handle（任意状态）：当前页据此切换"加入 / 已入队"按钮。
+    queuedHandles: Set<Int> = emptySet(),
+    // 把当前预览文件加入传输队列（父层负责目录校验、连接状态、入队与吸入动画）。
+    onTransfer: (NikonCamera.FileInfo) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val pagerState = rememberPagerState(initialPage = initialIndex) { files.size }
@@ -182,7 +188,9 @@ fun PhotoPreviewOverlay(
     // 优先级加载：当前页 FHD（到位轻震一下）→ 当前页 EXIF → ±1 邻居 FHD 预取。
     // 换页即取消本协程，未完成的慢加载自动中止（getFhdPicture 会抛 Cancellation 释放锁），
     // 通道立刻让给新的当前页。首次打开也走这里（currentPage 初值即 initialIndex）。
-    LaunchedEffect(pagerState.currentPage) {
+    // key 额外依赖 fhdBitmaps[currentPage]：淘汰 effect 移除缓存后即使 currentPage 不变
+    // 也能重新触发加载，避免用户翻回来时 FHD 不显示。
+    LaunchedEffect(pagerState.currentPage, fhdBitmaps[files.getOrNull(pagerState.currentPage)?.handle]) {
         val cp = pagerState.currentPage
         if (loadFhdPage(cp)) haptics.tick()   // 仅"当前页真正取到高清"这一刻反馈
         loadExifPage(cp)
@@ -203,7 +211,7 @@ fun PhotoPreviewOverlay(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = progress.value }
-                .background(Color.Black.copy(alpha = 0.94f))
+                .background(Color.Black.copy(alpha = 0.85f))
         )
 
         // 当前页是否已放大——放大时禁用翻页，横向平移才不会误翻到下一张。
@@ -358,9 +366,13 @@ fun PhotoPreviewOverlay(
         // 新页吸附到位时淡入，不等翻完。内容在滑过半（currentPage 翻转、此刻 alpha≈0
         // 看不见）时切换，因此看不到硬切；Crossfade 再兜住"落定页 EXIF 异步到达"的淡入。
         // alpha 计算写在 graphicsLayer 内读滚动值：每帧只重绘图层，不触发子树重组。
-        val curExif = files.getOrNull(pagerState.currentPage)?.let { exifData[it.handle] }
+        // lastExif：翻页时保留上一页的 EXIF 直到新页 EXIF 加载完成，避免 Crossfade
+        // 经历 旧→null→新 三次状态导致闪烁。
+        var lastExif by remember { mutableStateOf<PhotoExif?>(null) }
+        val curExif = current?.let { exifData[it.handle] }
+        if (curExif != null) lastExif = curExif
         Crossfade(
-            targetState = curExif,
+            targetState = lastExif,
             animationSpec = tween(220),
             label = "exifBar",
             modifier = Modifier
@@ -373,28 +385,46 @@ fun PhotoPreviewOverlay(
         ) { exif ->
             val hasExif = exif != null && (exif.aperture != null || exif.shutterSpeed != null
                 || exif.iso != null || exif.focalLength != null)
-            val hasAf = exif?.afX != null
-            if (hasExif || hasAf) {
+            if (hasExif) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 16.dp)
+                        .heightIn(min = 44.dp)
+                        .padding(vertical = 24.dp),
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    if (hasExif) {
-                        ExifMetadataBar(
-                            exif = exif!!,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                    }
-                    if (hasAf) {
-                        Spacer(modifier = Modifier.width(12.dp))
-                        FocusPointButton(
-                            pressed = showAfPoint,
-                            onPressChange = { showAfPoint = it }
-                        )
-                    }
+                    ExifMetadataBar(
+                        exif = exif!!,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                }
+            }
+        }
+
+        // 右下角：对焦点按钮（有 AF 数据时显示）+ 传输队列按钮，纵向排列。
+        if (current != null) {
+            val curHasAf = lastExif?.afX != null
+            val curQueued = current.handle in queuedHandles
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 20.dp, bottom = 80.dp)
+                    .graphicsLayer { alpha = progress.value },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                TransferQueueButton(
+                    queued = curQueued,
+                    onClick = { onTransfer(current) }
+                )
+                if (curHasAf) {
+                    FocusPointButton(
+                        pressed = showAfPoint,
+                        onPressChange = { showAfPoint = it }
+                    )
                 }
             }
         }
@@ -467,6 +497,48 @@ private fun FocusPointButton(
                 contentDescription = stringResource(R.string.cd_focus_point),
                 tint = if (pressed) colors.accentBlue else colors.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+/**
+ * 预览页"加入传输队列"按钮：与 [FocusPointButton] 同款玻璃圆钮。
+ * 未入队显示 +（蓝），点击把当前页加入队列；已入队显示 ✓（绿）且不可再点——
+ * 与列表页格子"已入队不可重复点"语义一致。
+ */
+@Composable
+private fun TransferQueueButton(
+    queued: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = AppTheme.colors
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(colors.glassSurface)
+            // 已入队也要消费点击，否则事件穿透到下层 PreviewPage 的 onTap 会关掉预览。
+            .pointerInput(queued) {
+                detectTapGestures(onTap = { if (!queued) onClick() })
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Brush.verticalGradient(listOf(colors.glassHighlightTop, colors.glassHighlightBottom)))
+                .border(1.dp, Brush.verticalGradient(listOf(colors.glassBorderTop, colors.glassBorderBottom)), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (queued) Icons.Default.Check else Icons.Default.Add,
+                contentDescription = stringResource(
+                    if (queued) R.string.cd_queued else R.string.cd_transfer
+                ),
+                tint = if (queued) colors.statusConnected else colors.accentBlue,
+                modifier = Modifier.size(22.dp)
             )
         }
     }
