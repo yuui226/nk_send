@@ -36,6 +36,7 @@ import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.ZTransferTheme
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.ConnectionMode
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashReporter.install(applicationContext)
         // 恢复授权状态（本地验签，毫秒级）并在后台触发静默续签（≥7 天且有网时）。
         com.ztransfer.license.LicenseManager.init(applicationContext)
         enableEdgeToEdge()   // 内容延伸到系统栏后面，各屏自行处理 inset
@@ -117,13 +119,23 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 相机连接成功后：连接页先保持"连接中"脉冲一小会（列表与缩略图此间已在全速加载），
     // 再播成功爆发收尾，播完直接进照片列表——绿色对号 = 马上进入。
     // 时长与 HomeScreen 的庆祝延迟严格对齐（同一对常量）。
-    LaunchedEffect(cameraState.isConnectedToCamera) {
+    LaunchedEffect(cameraState.isConnectedToCamera, cameraState.connectionMode, currentRoute) {
         if (cameraState.isConnectedToCamera && currentRoute == Screen.Home.route) {
             delay(CONNECT_CELEBRATE_DELAY_MS + CONNECT_SUCCESS_ANIM_MS)
             navController.navigate(Screen.Files.route) {
                 popUpTo(Screen.Home.route) { saveState = true }
                 launchSingleTop = true
                 restoreState = true
+            }
+        } else if (!cameraState.isConnectedToCamera &&
+            cameraState.connectionMode == ConnectionMode.PHONE_HOTSPOT &&
+            currentRoute != Screen.Home.route
+        ) {
+            // 手机热点模式的 IP 可能在重连后变化；回到连接页展示快速重试/重新发现，
+            // 避免困在仅适用于原相机热点的“打开 Wi-Fi 设置”断线页。
+            navController.navigate(Screen.Home.route) {
+                popUpTo(Screen.Home.route) { inclusive = false }
+                launchSingleTop = true
             }
         }
     }

@@ -65,6 +65,7 @@ import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.ConnectionMode
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
@@ -418,7 +419,8 @@ fun TransferScreen(
             Spacer(modifier = Modifier.width(8.dp))
             SignalPill(
                 rssi = cameraState.wifiRssi,
-                connected = cameraState.isConnectedToCamera
+                connected = cameraState.isConnectedToCamera,
+                forceFullSignal = cameraState.connectionMode == ConnectionMode.PHONE_HOTSPOT
             )
 
             // 右：胶囊（传输中显速度/数量，完成后 done→图标）；队列被清空后随之淡出，

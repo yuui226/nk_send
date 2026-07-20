@@ -7,6 +7,7 @@
 
     <!-- 連線頁 -->
     <string name="connecting_camera">正在連線至相機…</string>
+    <string name="discovering_camera">正在尋找相機…</string>
     <string name="connect_camera_wifi">請連線至相機 Wi-Fi</string>
     <string name="open_wifi_settings">開啟 Wi-Fi 設定</string>
     <string name="step_camera_wifi">相機開啟「與智慧裝置建立 Wi-Fi 連線」</string>
@@ -14,12 +15,22 @@
     <string name="tip_title">更快的連線方式</string>
     <string name="tip_body">把「Wi-Fi 連線」加進相機的 i 選單，以後按 i 鍵一鍵開啟，省去層層翻選單。設定路徑：</string>
     <string name="tip_path">選單 → 自訂設定選單 → 控制 → 自訂 i 選單 → 選個順手的格子 → Wi-Fi 連線</string>
+    <string name="mode_camera_hotspot">相機熱點</string>
+    <string name="mode_phone_hotspot">手機熱點</string>
+    <string name="phone_hotspot_test_hint">相機加入手機熱點後，點擊下方按鈕即可自動連線。</string>
+    <string name="discover_camera_action">自動尋找並連線</string>
+    <string name="camera_discovery_failed">未找到相機，請確認相機已加入手機熱點後重試</string>
+    <string name="camera_reconnect_failed">相機連線已中斷，請重新自動尋找</string>
+    <string name="cancel_connection_action">取消連線</string>
+    <string name="step_enable_phone_hotspot">開啟手機熱點</string>
+    <string name="step_camera_join_phone_hotspot">相機選擇「連線至電腦」→「搜尋 Wi-Fi 網路」，加入該熱點</string>
 
     <!-- 檔案清單 -->
     <string name="loading_file_list">正在取得檔案清單…</string>
     <string name="connection_lost">連線已中斷</string>
     <string name="no_photos_on_camera">相機中沒有照片</string>
     <string name="camera_not_connected">相機未連線</string>
+    <string name="camera_link_connected">已連線</string>
     <string name="press_back_to_exit">再按一次離開</string>
     <string name="no_photos_match_filter">沒有符合篩選的照片</string>
     <string name="loading_more">正在載入更多…</string>

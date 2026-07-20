@@ -49,6 +49,11 @@ if /i "%~1"=="aab" (
 )
 
 echo Building %EXT% (%TASK%)...
+rem Stop daemons left by Android Studio/Codex/previous Gradle runs. On Windows,
+rem an old R8 process can retain classes.dex briefly and make this build fail
+rem with "another program is using this file". This is safe and does not
+rem delete any build outputs.
+call "%~dp0..\gradlew.bat" --stop >nul 2>&1
 rem Use the explicit path to gradlew.bat: cmd does not search the current
 rem directory for `call` targets in some environments.
 call "%~dp0..\gradlew.bat" %TASK% --no-daemon

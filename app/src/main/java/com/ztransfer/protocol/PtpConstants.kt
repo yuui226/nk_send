@@ -21,6 +21,7 @@ object PtpConstants {
     const val PONG = 14
 
     // PTP 命令码
+    const val GET_DEVICE_INFO = 0x1001
     const val OPEN_SESSION = 0x1002
     const val CLOSE_SESSION = 0x1003
     const val GET_STORAGE_IDS = 0x1004
@@ -40,6 +41,13 @@ object PtpConstants {
     // 参数: handle，返回 1920×1080 JPEG。比 GetThumb (160×120) 清晰得多，
     // 用于长按预览提高清晰度；固件不支持时静默回退到缩略图。
     const val NK_GET_FHD_PICTURE = 0x920F
+    // Z30 首次“连接到计算机”配对状态下声明的两个 Nikon 私有操作。
+    // 语义来自实机抓包，公开 SDK/libgphoto2 尚无正式名称。
+    const val NK_PAIRING_QUERY = 0x952B
+    const val NK_PAIRING_RESULT = 0x935A
+
+    const val EVENT = 8
+    const val EVENT_DEVICE_INFO_CHANGED = 0x4008
 
     // 响应码
     const val RESPONSE_OK = 0x2001

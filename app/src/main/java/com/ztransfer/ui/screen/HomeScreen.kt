@@ -14,6 +14,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,6 +52,7 @@ import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.ConnectionMode
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 import kotlin.math.cos
@@ -63,6 +66,7 @@ import kotlin.math.sin
  * 本页尚未连相机热点，多半还有外网；进入 app 深处后连着相机 Wi-Fi 无法在线激活。
  */
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun HomeScreen(
     viewModel: CameraViewModel,
     transferViewModel: TransferViewModel
@@ -89,6 +93,7 @@ fun HomeScreen(
     val colors = AppTheme.colors
     val connected = state.isConnectedToCamera
     val onCameraWifi = state.isWifiConnected
+    val attempting = state.isConnecting || state.isDiscovering
     // 成功庆祝刻意延后：连接后先保持"连接中"的脉冲一小会——此时文件列表与缩略图
     // 已在后台全速加载（连接成功瞬间就启动，与本页停留无关）——再播爆发收尾，
     // 否则动画一闪而过根本看不清。跳转时机在 MainScreen 与此对齐。
@@ -103,15 +108,15 @@ fun HomeScreen(
     }
     val heroColor = when {
         celebrate -> colors.statusConnected
-        onCameraWifi || connected -> colors.accentBlue
+        onCameraWifi || connected || attempting -> colors.accentBlue
         else -> colors.accentOrange
     }
     val heroIcon = when {
         celebrate -> Icons.Default.CheckCircle
-        onCameraWifi || connected -> Icons.Default.Wifi
+        onCameraWifi || connected || attempting -> Icons.Default.Wifi
         else -> Icons.Default.WifiOff
     }
-    val pulsing = (onCameraWifi || connected) && !celebrate
+    val pulsing = (onCameraWifi || connected || attempting) && !celebrate
 
     Box(modifier = Modifier.fillMaxSize()) {
         // ---------- 中央 Hero：上下弹性区按 1:2 定位——Hero 中心落在屏幕约 35~38% 高度
@@ -132,6 +137,24 @@ fun HomeScreen(
                 color = heroColor, icon = heroIcon,
                 pulsing = pulsing, success = celebrate, goldBurst = isPro
             )
+
+            if (!connected) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = state.connectionMode == ConnectionMode.CAMERA_HOTSPOT,
+                        onClick = { viewModel.setConnectionMode(ConnectionMode.CAMERA_HOTSPOT) },
+                        label = { Text(stringResource(R.string.mode_camera_hotspot)) },
+                        leadingIcon = { Icon(Icons.Default.CameraAlt, null, Modifier.size(16.dp)) }
+                    )
+                    FilterChip(
+                        selected = state.connectionMode == ConnectionMode.PHONE_HOTSPOT,
+                        onClick = { viewModel.setConnectionMode(ConnectionMode.PHONE_HOTSPOT) },
+                        label = { Text(stringResource(R.string.mode_phone_hotspot)) },
+                        leadingIcon = { Icon(Icons.Default.WifiTethering, null, Modifier.size(16.dp)) }
+                    )
+                }
+            }
 
             // 一条橙色提示条,三种互斥的到期状况共用(优先级从急到缓):
             //   renewalNeeded → 通行证过期但没网:不用花钱,连上网重开即恢复,故【不可点】
@@ -176,7 +199,7 @@ fun HomeScreen(
                     targetState = when {
                         celebrate -> HomeHint.NONE
                         // 已连接但还没到庆祝时刻：视觉上仍是"正在连接"的延续，无缝衔接。
-                        onCameraWifi || connected -> HomeHint.CONNECTING
+                        onCameraWifi || connected || attempting -> HomeHint.CONNECTING
                         else -> HomeHint.OFF_WIFI
                     },
                     animationSpec = tween(300),
@@ -195,22 +218,57 @@ fun HomeScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = stringResource(R.string.connecting_camera),
+                                text = stringResource(
+                                    if (state.isDiscovering) R.string.discovering_camera else R.string.connecting_camera
+                                ),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.accentBlue
                             )
+                            if (state.connectionMode == ConnectionMode.PHONE_HOTSPOT) {
+                                state.discoveryProgress?.let {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(it, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                                }
+                                Spacer(Modifier.height(12.dp))
+                                TextButton(onClick = viewModel::cancelPhoneHotspotConnection) {
+                                    Text(stringResource(R.string.cancel_connection_action))
+                                }
+                            }
                         }
                         // 去掉「请连接相机 Wi-Fi」标题——它与下方步骤重复；步骤本身放大加重、
                         // 整体上移，作为本页主引导，页面更紧凑和谐。
                         HomeHint.OFF_WIFI -> Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 4.dp),
+                                .imePadding()
+                                .verticalScroll(rememberScrollState())
+                                .padding(top = 4.dp, bottom = 16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            // 一键去系统 Wi-Fi 设置 + 两步引导。
-                            GlassButton(
+                            if (state.connectionMode == ConnectionMode.PHONE_HOTSPOT) {
+                                Text(
+                                    stringResource(R.string.phone_hotspot_test_hint),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = viewModel::discoverPhoneHotspotCamera,
+                                    enabled = !state.isConnecting && !state.isDiscovering
+                                ) {
+                                    Icon(Icons.Default.Search, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.discover_camera_action))
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                StepRow(1, stringResource(R.string.step_enable_phone_hotspot))
+                                Spacer(modifier = Modifier.height(8.dp))
+                                StepRow(2, stringResource(R.string.step_camera_join_phone_hotspot))
+                            } else {
+                                // 一键去系统 Wi-Fi 设置 + 两步引导。
+                                GlassButton(
                                 onClick = {
                                     try {
                                         context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
@@ -225,13 +283,13 @@ fun HomeScreen(
                                     color = colors.onBackground
                                 )
                             }
-                            Spacer(modifier = Modifier.height(24.dp))
+                                Spacer(modifier = Modifier.height(24.dp))
                             // 步骤区：左侧纯灯泡圆钮 = "小技巧"入口（点击弹毛玻璃气泡）。
                             // 圆钮固定 22dp（与 StepRow 序号圆钮同尺寸），顶对齐后与"步骤 1"
                             // 整行并排、行心一致。size 必须显式给：M3 可点击 Surface 内置
                             // 48dp 最小交互尺寸，无约束时节点被撑大——圆钮四周多出一圈
                             // 不可见留白，既顶歪行心又把它推得离序号很远；固定约束可压制它。
-                            Row(verticalAlignment = Alignment.Top) {
+                                Row(verticalAlignment = Alignment.Top) {
                                 GlassButton(
                                     onClick = { showTips = true },
                                     shape = CircleShape,
@@ -249,6 +307,7 @@ fun HomeScreen(
                                 ) {
                                     StepRow(1, stringResource(R.string.step_camera_wifi))
                                     StepRow(2, stringResource(R.string.step_phone_wifi))
+                                }
                                 }
                             }
                         }

@@ -98,6 +98,7 @@ import com.ztransfer.ui.theme.LocalAppColors
 import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.ConnectionMode
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -719,7 +720,11 @@ private fun RemoteContent(
             // 右＝开发者 / HD / FPS 三个小按钮 + 返回。返回用【右】箭头——本页位于
             // 照片列表左侧，回去的方向向右。
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SignalPill(rssi = camState.wifiRssi, connected = connected)
+                SignalPill(
+                    rssi = camState.wifiRssi,
+                    connected = connected,
+                    forceFullSignal = camState.connectionMode == ConnectionMode.PHONE_HOTSPOT
+                )
                 Spacer(Modifier.weight(1f))
                 // 开发者工具入口（放在 HD/FPS 左侧）。顶栏控件统一 22dp 圆角 + 36dp 高
                 //（与照片列表页顶栏一致）。默认隐藏，连按 4 次 FPS 解锁（见 devUnlocked）。
