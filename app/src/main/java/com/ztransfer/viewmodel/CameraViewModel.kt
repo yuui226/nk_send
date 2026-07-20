@@ -742,12 +742,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 行为不变。PTP StorageID 低 16 位为逻辑存储号，0 表示卡槽无卡，跳过；
                 // handle 全机唯一、与卡无关，下载/缩略图等后续链路零改动。
                 val storageIds = cam.getStorageIds().filter { it and 0xFFFF != 0 }
+                Log.i(LOG_TAG, "FILE_LIST storageCount=${storageIds.size} ids=${storageIds.joinToString { "0x${it.toUInt().toString(16)}" }}")
                 if (storageIds.isEmpty()) {
                     _state.update { it.copy(isLoadingFiles = false) }
                     return@launch
                 }
 
                 val handles = storageIds.flatMap { cam.getObjectHandles(it) }.distinct()
+                Log.i(LOG_TAG, "FILE_LIST handleCount=${handles.size}")
                 if (handles.isEmpty()) {
                     _state.update { it.copy(isLoadingFiles = false) }
                     return@launch
@@ -771,8 +773,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 _state.update { it.copy(isLoadingFiles = false) }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // 扫描中断（掉线/读超时）：保留已加载的部分，掉线由心跳发现并触发重连。
+                Log.e(LOG_TAG, "FILE_LIST failed type=${e.javaClass.simpleName} message=${e.message}", e)
                 _state.update { it.copy(isLoadingFiles = false) }
             }
         }

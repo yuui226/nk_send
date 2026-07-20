@@ -56,6 +56,9 @@ class NikonCamera(private val context: Context) {
     // 每次 connect 新建 NikonCamera 实例，故换相机自动重新探测。仅 ioMutex 内访问。
     @Volatile private var fhdSupported: Boolean? = null
     private var fhdFailCount = 0
+    // 手机热点模式连接阶段用 GetStorageIDs 区分正常/首次配对状态；成功响应留给
+    // loadFiles 消费，避免正常会话紧接着重复发送同一命令。
+    private var prefetchedStorageIds: List<Int>? = null
 
     companion object {
         const val TAG = "ZTransfer"
@@ -175,29 +178,36 @@ class NikonCamera(private val context: Context) {
                 val (compatRc, compatData) = recvRespWithPayload()
                 android.util.Log.i(TAG, "PTP_NIKON_COMPAT_INIT response=0x${compatRc.toString(16)} data=${compatData?.size ?: 0}")
 
-                // 首次“连接到计算机”时 DeviceInfo 只公布配对操作，常规存储枚举尚不可用。
-                // 必须在启动事件消费线程之前同步完成配对，否则 DeviceInfoChanged 会被线程吞掉。
-                sendCmd(PtpConstants.GET_DEVICE_INFO)
-                val (deviceRc, deviceInfo) = recvRespWithPayload()
-                val operations = if (deviceRc == PtpConstants.RESPONSE_OK && deviceInfo != null) {
-                    parseDeviceInfoOperations(deviceInfo)
-                } else emptySet()
-                android.util.Log.i(TAG, "PTP_DEVICE_INFO response=0x${deviceRc.toString(16)} bytes=${deviceInfo?.size ?: 0} operations=${operations.joinToString { "0x${it.toString(16)}" }}")
-                // 不能只看两个私有操作是否“存在”：正常模式的完整能力集也可能保留它们。
-                // 抓包中的首次配对状态是严格受限的 5 项能力集；只有完全匹配才提交配对结果，
-                // 否则必须继续正常文件枚举，避免重连后再次配对形成死循环。
-                val pairingOnlyOperations = setOf(
-                    PtpConstants.GET_DEVICE_INFO,
-                    PtpConstants.OPEN_SESSION,
-                    PtpConstants.CLOSE_SESSION,
-                    PtpConstants.NK_PAIRING_QUERY,
-                    PtpConstants.NK_PAIRING_RESULT
-                )
-                val isInitialPairing = operations == pairingOnlyOperations
-                android.util.Log.i(TAG, "PTP_PAIRING_CHECK initial=$isInitialPairing operationCount=${operations.size} storageSupported=${PtpConstants.GET_STORAGE_IDS in operations}")
-                if (isInitialPairing) {
-                    completeInitialPairing()
-                    throw PairingCompletedException()
+                // 保持已验证可工作的正常热路径：OpenSession → 0x941C → GetStorageIDs。
+                // 只有存储命令被拒绝时，才额外读取受限 DeviceInfo 判断首次配对；不能在
+                // 每个正常会话里无条件插入 GetDeviceInfo，否则部分固件不会进入浏览状态。
+                sendCmd(PtpConstants.GET_STORAGE_IDS)
+                val (storageProbeRc, storageProbeData) = recvRespWithPayload()
+                android.util.Log.i(TAG, "PTP_STORAGE_PROBE response=0x${storageProbeRc.toString(16)} bytes=${storageProbeData?.size ?: 0}")
+                if (storageProbeRc == PtpConstants.RESPONSE_OK) {
+                    prefetchedStorageIds = parseUInt32Array(storageProbeData)
+                    android.util.Log.i(TAG, "PTP_STORAGE_PROBE ids=${prefetchedStorageIds?.joinToString { "0x${it.toUInt().toString(16)}" }}")
+                } else {
+                    sendCmd(PtpConstants.GET_DEVICE_INFO)
+                    val (deviceRc, deviceInfo) = recvRespWithPayload()
+                    val operations = if (deviceRc == PtpConstants.RESPONSE_OK && deviceInfo != null) {
+                        parseDeviceInfoOperations(deviceInfo)
+                    } else emptySet()
+                    android.util.Log.i(TAG, "PTP_DEVICE_INFO response=0x${deviceRc.toString(16)} bytes=${deviceInfo?.size ?: 0} operations=${operations.joinToString { "0x${it.toString(16)}" }}")
+                    val pairingOnlyOperations = setOf(
+                        PtpConstants.GET_DEVICE_INFO,
+                        PtpConstants.OPEN_SESSION,
+                        PtpConstants.CLOSE_SESSION,
+                        PtpConstants.NK_PAIRING_QUERY,
+                        PtpConstants.NK_PAIRING_RESULT
+                    )
+                    val isInitialPairing = operations == pairingOnlyOperations
+                    android.util.Log.i(TAG, "PTP_PAIRING_CHECK initial=$isInitialPairing operationCount=${operations.size}")
+                    if (isInitialPairing) {
+                        completeInitialPairing()
+                        throw PairingCompletedException()
+                    }
+                    throw java.io.IOException("GetStorageIDs failed: 0x${storageProbeRc.toString(16)}")
                 }
             }
 
@@ -256,13 +266,18 @@ class NikonCamera(private val context: Context) {
     suspend fun getStorageIds(): List<Int> = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             try {
+                prefetchedStorageIds?.let { ids ->
+                    prefetchedStorageIds = null
+                    android.util.Log.i(TAG, "PTP_GET_STORAGE_IDS usingPrefetch=true count=${ids.size}")
+                    return@withContext ids
+                }
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
                 val (respCode, data) = recvRespWithPayload()
+                android.util.Log.i(TAG, "PTP_GET_STORAGE_IDS response=0x${respCode.toString(16)} bytes=${data?.size ?: 0}")
                 if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
                     return@withContext emptyList()
                 }
-                val count = data.getIntLE(0)
-                (0 until count).map { data.getIntLE(4 + it * 4) }
+                parseUInt32Array(data)
             } catch (_: Exception) {
                 emptyList()
             }
@@ -289,6 +304,7 @@ class NikonCamera(private val context: Context) {
             try {
                 sendCmd(PtpConstants.GET_OBJECT_HANDLES, storageId, -1, 0)
                 val (respCode, data) = recvRespWithPayload()
+                android.util.Log.i(TAG, "PTP_GET_OBJECT_HANDLES storage=0x${storageId.toUInt().toString(16)} response=0x${respCode.toString(16)} bytes=${data?.size ?: 0}")
                 if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
                     return@withContext emptyList()
                 }
@@ -967,5 +983,13 @@ class NikonCamera(private val context: Context) {
 
     private fun ByteArray.getLongLE(offset: Int): Long {
         return (getIntLE(offset).toLong() and 0xFFFFFFFFL) or (getIntLE(offset + 4).toLong() shl 32)
+    }
+
+    /** PTP AUINT32；畸形长度按空数组处理，不允许 count 导致越界或巨量分配。 */
+    private fun parseUInt32Array(data: ByteArray?): List<Int> {
+        if (data == null || data.size < 4) return emptyList()
+        val count = data.getIntLE(0)
+        if (count < 0 || count > (data.size - 4) / 4) return emptyList()
+        return List(count) { index -> data.getIntLE(4 + index * 4) }
     }
 }
