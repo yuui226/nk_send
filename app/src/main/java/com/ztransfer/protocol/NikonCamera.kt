@@ -27,9 +27,6 @@ class OutputWriteException(message: String, cause: Throwable) : Exception(messag
  */
 class ResumeUnavailableException : Exception()
 
-/** 首次配对已提交成功；相机需要结束受限会话并重新连接后才会公布正常能力集。 */
-class PairingCompletedException : Exception("Nikon pairing completed; reconnect required")
-
 class NikonCamera(private val context: Context) {
     private var cmdSocket: Socket? = null
     private var evtSocket: Socket? = null
@@ -59,7 +56,6 @@ class NikonCamera(private val context: Context) {
 
     companion object {
         const val TAG = "ZTransfer"
-        const val NIKON_COMPATIBILITY_INIT = 0x941C
         // 命令/事件通道的常规读超时。
         const val SO_TIMEOUT_MS = 60_000
         // TCP 连接超时：本地热点正常握手 <300ms；缩短它让"相机侧 PTP 服务还没就绪"的
@@ -95,15 +91,9 @@ class NikonCamera(private val context: Context) {
 
     suspend fun connect(
         ip: String = PtpConstants.CAMERA_IP,
-        network: Network? = null,
-        handshakeTimeoutMs: Int = SO_TIMEOUT_MS,
-        standardPersistentInitiator: Boolean = false,
-        nikonCompatibilityInit: Boolean = false
-    ): Result<Unit> {
-        var ready = false
-        return try {
-            val result = withContext(Dispatchers.IO) {
-            android.util.Log.i(TAG, "PTP_CONNECT begin ip=$ip port=${PtpConstants.PTP_PORT} boundNetwork=${network != null}")
+        network: Network? = null
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
             // 经 Wi-Fi Network 的 socketFactory 建 socket：相机热点没有互联网，系统验证失败后
             // 常把【默认网络】切回蜂窝数据——普通 Socket() 走默认路由，连 192.168.1.1 的包进蜂窝
             // 黑洞，每次尝试烧满连接超时，直到系统把默认网切回 Wi-Fi 才能成功（用户感知
@@ -111,7 +101,7 @@ class NikonCamera(private val context: Context) {
             fun newSocket(): Socket = network?.socketFactory?.createSocket() ?: Socket()
             cmdSocket = newSocket().apply {
                 tcpNoDelay = true
-                soTimeout = handshakeTimeoutMs
+                soTimeout = SO_TIMEOUT_MS
                 // 显式加大接收缓冲，撑起 TCP 接收窗口（4MB 远大于本地 Wi-Fi 所需，不会成为瓶颈；
                 // 在延迟稍高时也能避免小窗口拖慢吞吐）。必须在 connect 前设置才对窗口缩放生效。
                 receiveBufferSize = 4 * 1024 * 1024
@@ -122,11 +112,10 @@ class NikonCamera(private val context: Context) {
             cmdInput = java.io.BufferedInputStream(cmdSocket!!.getInputStream(), 64 * 1024)
             cmdOutput = cmdSocket!!.getOutputStream()
 
-            cmdOutput!!.write(makeInitReq(standardPersistentInitiator))
+            cmdOutput!!.write(makeInitReq())
             cmdOutput!!.flush()
 
             val ack = cmdReader.readPacket(cmdInput!!)
-            android.util.Log.i(TAG, "PTP_INIT_COMMAND received type=${ack.type} payload=${ack.payload?.size ?: 0}")
             if (ack.type != PtpConstants.INIT_CMD_ACK) {
                 // INIT_FAIL = 相机主动拒绝（如未配对/连接数已满），与协议错乱区分开提示。
                 return@withContext Result.failure(
@@ -137,10 +126,9 @@ class NikonCamera(private val context: Context) {
 
             val payload = ack.payload ?: return@withContext Result.failure(Exception(context.getString(R.string.error_handshake_empty)))
             val sessionId = payload.getIntLE(0)
-            android.util.Log.i(TAG, "PTP_INIT_COMMAND_ACK connectionNumber=$sessionId")
 
             evtSocket = newSocket().apply {
-                soTimeout = handshakeTimeoutMs
+                soTimeout = SO_TIMEOUT_MS
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             }
             evtInput = evtSocket!!.getInputStream()
@@ -154,75 +142,25 @@ class NikonCamera(private val context: Context) {
             evtSocket!!.getOutputStream().flush()
 
             val evtAck = evtReader.readPacket(evtInput!!)
-            android.util.Log.i(TAG, "PTP_INIT_EVENT received type=${evtAck.type}")
             if (evtAck.type != PtpConstants.INIT_EVT_ACK) {
                 return@withContext Result.failure(Exception(context.getString(R.string.error_event_handshake)))
             }
 
             sendCmd(PtpConstants.OPEN_SESSION, sessionId)
             val resp = recvResp()
-            android.util.Log.i(TAG, "PTP_OPEN_SESSION response=0x${resp.toString(16)}")
             // 0x201E Session Already Open：App 异常退出后相机侧旧会话可能未清，
             // 视为会话已就绪继续使用，否则会陷入"反复重连直到相机自己超时"的循环。
             if (resp != PtpConstants.RESPONSE_OK && resp != PtpConstants.SESSION_ALREADY_OPEN) {
                 return@withContext Result.failure(Exception(context.getString(R.string.error_open_session, PtpConstants.translateResponse(context, resp))))
             }
             sessionOpen = true
-            cmdSocket?.soTimeout = SO_TIMEOUT_MS
-
-            if (nikonCompatibilityInit) {
-                sendCmd(NIKON_COMPATIBILITY_INIT)
-                val (compatRc, compatData) = recvRespWithPayload()
-                android.util.Log.i(TAG, "PTP_NIKON_COMPAT_INIT response=0x${compatRc.toString(16)} data=${compatData?.size ?: 0}")
-
-                // 首次“连接到计算机”时 DeviceInfo 只公布配对操作，常规存储枚举尚不可用。
-                // 必须在启动事件消费线程之前同步完成配对，否则 DeviceInfoChanged 会被线程吞掉。
-                sendCmd(PtpConstants.GET_DEVICE_INFO)
-                val (deviceRc, deviceInfo) = recvRespWithPayload()
-                val operations = if (deviceRc == PtpConstants.RESPONSE_OK && deviceInfo != null) {
-                    parseDeviceInfoOperations(deviceInfo)
-                } else emptySet()
-                android.util.Log.i(TAG, "PTP_DEVICE_INFO response=0x${deviceRc.toString(16)} bytes=${deviceInfo?.size ?: 0} operations=${operations.joinToString { "0x${it.toString(16)}" }}")
-                // 不能只看两个私有操作是否“存在”：正常模式的完整能力集也可能保留它们。
-                // 抓包中的首次配对状态是严格受限的 5 项能力集；只有完全匹配才提交配对结果，
-                // 否则必须继续正常文件枚举，避免重连后再次配对形成死循环。
-                val pairingOnlyOperations = setOf(
-                    PtpConstants.GET_DEVICE_INFO,
-                    PtpConstants.OPEN_SESSION,
-                    PtpConstants.CLOSE_SESSION,
-                    PtpConstants.NK_PAIRING_QUERY,
-                    PtpConstants.NK_PAIRING_RESULT
-                )
-                val isInitialPairing = operations == pairingOnlyOperations
-                android.util.Log.i(TAG, "PTP_PAIRING_CHECK initial=$isInitialPairing operationCount=${operations.size} storageSupported=${PtpConstants.GET_STORAGE_IDS in operations}")
-                if (isInitialPairing) {
-                    completeInitialPairing()
-                    throw PairingCompletedException()
-                }
-            }
 
             startEvtThread()
 
-            android.util.Log.i(TAG, "PTP_CONNECT ready ip=$ip")
             Result.success(Unit)
-            }
-            // 只在 withContext 成功交还结果后才移交 socket 所有权；若协程恰在调度器
-            // 出口被取消，这一行不会执行，finally 会关闭已经握手成功但无人接管的 socket。
-            ready = result.isSuccess
-            result
-        } catch (e: CancellationException) {
-            throw e
         } catch (e: Exception) {
-            if (e is PairingCompletedException) {
-                android.util.Log.i(TAG, "PTP_CONNECT pairing session completed ip=$ip; reconnect required")
-            } else {
-                android.util.Log.e(TAG, "PTP_CONNECT exception ip=$ip type=${e.javaClass.simpleName} message=${e.message}", e)
-            }
+            close()
             Result.failure(e)
-        } finally {
-            // Socket.connect/read 是阻塞 API，不会主动响应协程取消。把清理放在 withContext
-            // 外层 finally，确保出口的 CancellationException 也能关闭 socket、唤醒阻塞 IO。
-            if (!ready) withContext(NonCancellable + Dispatchers.IO) { closeQuietly() }
         }
     }
 
@@ -719,108 +657,19 @@ class NikonCamera(private val context: Context) {
         evtThread = null
     }
 
-    private fun makeInitReq(standardPersistentInitiator: Boolean): ByteArray {
-        val hostname = if (standardPersistentInitiator) "ZTransfer" else "NikonPTP"
+    private fun makeInitReq(): ByteArray {
+        val hostname = "NikonPTP"
         val nameBytes = hostname.toByteArray(Charsets.UTF_16LE) + byteArrayOf(0, 0)
-        val guid = if (standardPersistentInitiator) persistentInitiatorId() else ByteArray(16).also {
-            java.security.SecureRandom().nextBytes(it)
-        }
-        val length = 8 + 16 + nameBytes.size + if (standardPersistentInitiator) 4 else 2
+        val guid = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
+        val length = 8 + 16 + nameBytes.size + 2
         val pkt = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).apply {
             putInt(length)
             putInt(PtpConstants.INIT_CMD_REQ)
             put(guid)
             put(nameBytes)
-            if (standardPersistentInitiator) putInt(0x00010000) else putShort(1)
+            putShort(1)
         }.array()
         return pkt
-    }
-
-    /** 按首次配对抓包原样提交结果，并等待相机切换能力集。 */
-    private fun completeInitialPairing() {
-        android.util.Log.i(TAG, "PTP_PAIRING detected; query begin")
-        sendCmd(PtpConstants.NK_PAIRING_QUERY)
-        val (queryRc, queryData) = recvRespWithPayload()
-        android.util.Log.i(TAG, "PTP_PAIRING_QUERY response=0x${queryRc.toString(16)} data=${queryData?.joinToString { "%02X".format(it.toInt() and 0xFF) } ?: "null"}")
-        if (queryRc != PtpConstants.RESPONSE_OK) {
-            throw java.io.IOException("Nikon pairing query failed: 0x${queryRc.toString(16)}")
-        }
-
-        sendCmd(PtpConstants.NK_PAIRING_RESULT, PtpConstants.RESPONSE_OK)
-        val resultRc = recvResp()
-        android.util.Log.i(TAG, "PTP_PAIRING_RESULT param=0x2001 response=0x${resultRc.toString(16)}")
-        if (resultRc != PtpConstants.RESPONSE_OK) {
-            throw java.io.IOException("Nikon pairing result failed: 0x${resultRc.toString(16)}")
-        }
-
-        // 抓包中成功响应后紧跟 0x4008；事件缺失不撤销已经收到的 OK，只记录并重连。
-        val oldTimeout = evtSocket?.soTimeout ?: SO_TIMEOUT_MS
-        val deadlineNanos = System.nanoTime() + 8_000_000_000L
-        try {
-            while (true) {
-                if (System.nanoTime() >= deadlineNanos) throw java.net.SocketTimeoutException("pairing event timeout")
-                val remainingMs = ((deadlineNanos - System.nanoTime()) / 1_000_000L).coerceAtLeast(1L)
-                evtSocket?.soTimeout = remainingMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-                val event = evtReader.readPacket(evtInput!!)
-                if (event.type == PtpConstants.PING) {
-                    sendPong(evtSocket?.getOutputStream())
-                    continue
-                }
-                val code = if (event.type == PtpConstants.EVENT && (event.payload?.size ?: 0) >= 2) {
-                    event.payload!!.getUShortLE(0)
-                } else 0
-                android.util.Log.i(TAG, "PTP_PAIRING_EVENT packetType=${event.type} eventCode=0x${code.toString(16)} expected=${code == PtpConstants.EVENT_DEVICE_INFO_CHANGED}")
-                if (code == PtpConstants.EVENT_DEVICE_INFO_CHANGED) break
-            }
-        } catch (e: Exception) {
-            android.util.Log.w(TAG, "PTP_PAIRING_EVENT wait failed ${e.javaClass.simpleName}: ${e.message}")
-        } finally {
-            evtSocket?.soTimeout = oldTimeout
-        }
-
-        // 不复用配对会话。尽力礼貌 CloseSession；失败时 finally 仍会硬关闭双通道。
-        runCatching {
-            sendCmd(PtpConstants.CLOSE_SESSION)
-            val closeRc = recvResp()
-            android.util.Log.i(TAG, "PTP_PAIRING_CLOSE response=0x${closeRc.toString(16)}")
-            sessionOpen = false
-        }.onFailure { android.util.Log.w(TAG, "PTP_PAIRING_CLOSE failed: ${it.message}") }
-    }
-
-    /** 只解析 DeviceInfo 前半段的 OperationsSupported，越界时返回空集合。 */
-    private fun parseDeviceInfoOperations(data: ByteArray): Set<Int> = runCatching {
-        var offset = 0
-        fun u8(): Int = (data[offset++].toInt() and 0xFF)
-        fun u16(): Int {
-            val value = data.getUShortLE(offset)
-            offset += 2
-            return value
-        }
-        fun skip(n: Int) {
-            require(n >= 0 && offset + n <= data.size)
-            offset += n
-        }
-        skip(2 + 4 + 2) // StandardVersion, VendorExtensionID, VendorExtensionVersion
-        val chars = u8()
-        skip(chars * 2) // PTP string 的长度包含结尾 NUL
-        skip(2)         // FunctionalMode
-        val count = data.getIntLE(offset)
-        offset += 4
-        require(count in 0..4096 && offset + count * 2 <= data.size)
-        buildSet(count) { repeat(count) { add(u16()) } }
-    }.onFailure {
-        android.util.Log.w(TAG, "PTP_DEVICE_INFO parse operations failed: ${it.message}")
-    }.getOrDefault(emptySet())
-
-    private fun persistentInitiatorId(): ByteArray {
-        val prefs = context.applicationContext.getSharedPreferences("ptpip_identity", Context.MODE_PRIVATE)
-        var id = prefs.getString("initiator_id", null)
-        if (id == null || !id.matches(Regex("[0-9a-f]{16}"))) {
-            val random = ByteArray(8).also { java.security.SecureRandom().nextBytes(it) }
-            id = random.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-            prefs.edit().putString("initiator_id", id).commit()
-        }
-        return id.toByteArray(Charsets.US_ASCII)
     }
 
     internal fun sendCmd(code: Int, vararg params: Int) {

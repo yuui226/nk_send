@@ -12,7 +12,6 @@ import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.LruCache
-import android.util.Log
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
@@ -20,9 +19,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.NikonCamera
-import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PtpConstants
-import com.ztransfer.protocol.PtpIpDiscovery
 import com.ztransfer.protocol.rcPollEvents
 import java.io.ByteArrayInputStream
 import kotlinx.coroutines.CoroutineScope
@@ -45,8 +42,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class ConnectionMode { CAMERA_HOTSPOT, PHONE_HOTSPOT }
-
 data class CameraState(
     val isWifiConnected: Boolean = false,
     val isConnectedToCamera: Boolean = false,
@@ -54,11 +49,7 @@ data class CameraState(
     val files: List<NikonCamera.FileInfo> = emptyList(),
     val isLoadingFiles: Boolean = false,
     // 当前相机 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；未在相机 Wi-Fi 上时为 null。
-    val wifiRssi: Int? = null,
-    val connectionMode: ConnectionMode = ConnectionMode.CAMERA_HOTSPOT,
-    val connectionError: String? = null,
-    val isDiscovering: Boolean = false,
-    val discoveryProgress: String? = null
+    val wifiRssi: Int? = null
 )
 
 /**
@@ -82,22 +73,13 @@ data class PhotoExif(
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
-    private val connectionPrefs = application.getSharedPreferences("connection", Context.MODE_PRIVATE)
-    private val initialMode = runCatching {
-        ConnectionMode.valueOf(connectionPrefs.getString("mode", null) ?: "")
-    }.getOrDefault(ConnectionMode.CAMERA_HOTSPOT)
-    private val _state = MutableStateFlow(
-        CameraState(connectionMode = initialMode)
-    )
+    private val _state = MutableStateFlow(CameraState())
     val state: StateFlow<CameraState> = _state.asStateFlow()
 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
     private var watcherJob: Job? = null
     private var eventPollJob: Job? = null
-    private var connectionJob: Job? = null
-    @Volatile private var connectingCamera: NikonCamera? = null
-    private var connectionGeneration = 0L
 
     // 缩略图内存缓存：按位图字节数限容（约 1/8 可用内存），超限自动淘汰。
     private val thumbnailCache = object : LruCache<Int, ImageBitmap>(
@@ -139,7 +121,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return diskIndex ?: names.also { diskIndex = it }
     }
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-    private val ptpIpDiscovery = PtpIpDiscovery(application.applicationContext)
     @Suppress("DEPRECATION")
     private val wifiManager = application.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
@@ -240,110 +221,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         startThumbnailFill()
     }
 
-    fun setConnectionMode(mode: ConnectionMode) {
-        if (_state.value.connectionMode == mode) return
-        Log.i(LOG_TAG, "CONNECTION_MODE from=${_state.value.connectionMode} to=$mode")
-        connectionPrefs.edit().putString("mode", mode.name).apply()
-        connectionGeneration++
-        connectionJob?.cancel()
-        disconnectCurrentCamera()
-        _state.update {
-            it.copy(
-                connectionMode = mode,
-                isWifiConnected = false,
-                isConnecting = false,
-                wifiRssi = null,
-                connectionError = null,
-                isDiscovering = false,
-                discoveryProgress = null
-            )
-        }
-        if (mode == ConnectionMode.CAMERA_HOTSPOT) onWifiChanged()
-    }
-
-    fun discoverPhoneHotspotCamera() {
-        if (_state.value.connectionMode != ConnectionMode.PHONE_HOTSPOT || _state.value.isConnectedToCamera) return
-        connectionGeneration++
-        val generation = connectionGeneration
-        connectionJob?.cancel()
-        connectingCamera?.let { stale -> cleanupScope.launch { stale.close() } }
-        _state.update {
-            it.copy(isDiscovering = true, isConnecting = false, connectionError = null, discoveryProgress = null)
-        }
-        connectionJob = viewModelScope.launch {
-            val lastIp = connectionPrefs.getString("last_hotspot_camera_ip", null)
-            Log.i(LOG_TAG, "DISCOVERY_BEGIN lastIp=$lastIp")
-            val found = ptpIpDiscovery.discover(
-                lastIp = lastIp,
-                onProgress = { progress ->
-                    if (generation == connectionGeneration) _state.update { it.copy(discoveryProgress = progress) }
-                },
-                tryCandidate = { ip ->
-                    if (generation != connectionGeneration) false
-                    else connectToCameraWithRetry(ip, null, requireCameraWifi = false, generation = generation)
-                }
-            )
-            if (generation == connectionGeneration) {
-                if (found != null) {
-                    connectionPrefs.edit()
-                        .putString("last_hotspot_camera_ip", found)
-                        .apply()
-                    _state.update { it.copy(isDiscovering = false, discoveryProgress = null) }
-                    Log.i(LOG_TAG, "DISCOVERY_SUCCESS ip=$found")
-                } else {
-                    _state.update {
-                        it.copy(
-                            isDiscovering = false,
-                            discoveryProgress = null,
-                            connectionError = getApplication<Application>().getString(com.ztransfer.R.string.camera_discovery_failed)
-                        )
-                    }
-                    Log.w(LOG_TAG, "DISCOVERY_FINISHED no_camera=true")
-                }
-            }
-        }
-    }
-
-    fun cancelPhoneHotspotConnection() {
-        if (_state.value.connectionMode != ConnectionMode.PHONE_HOTSPOT) return
-        Log.i(LOG_TAG, "HOTSPOT_CONNECT cancel")
-        connectionGeneration++
-        connectionJob?.cancel()
-        connectionJob = null
-        connectingCamera?.let { active -> cleanupScope.launch { active.close() } }
-        _state.update { it.copy(isConnecting = false, isDiscovering = false, discoveryProgress = null, connectionError = null) }
-    }
-
-    private fun logNetworkSnapshot(targetIp: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                val defaultNetwork = connectivityManager.activeNetwork
-                val summary = connectivityManager.allNetworks.joinToString(" | ") { network ->
-                    val lp = connectivityManager.getLinkProperties(network)
-                    val caps = connectivityManager.getNetworkCapabilities(network)
-                    "network=$network default=${network == defaultNetwork} iface=${lp?.interfaceName} " +
-                            "addresses=${lp?.linkAddresses?.joinToString()} routes=${lp?.routes?.joinToString()} " +
-                            "wifi=${caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)} " +
-                            "cell=${caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)} vpn=${caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN)}"
-                }
-                Log.i(LOG_TAG, "NETWORK_SNAPSHOT target=$targetIp $summary")
-            }.onFailure { Log.w(LOG_TAG, "NETWORK_SNAPSHOT failed: ${it.message}") }
-        }
-    }
-
-    private fun disconnectCurrentCamera() {
-        keepaliveJob?.cancel()
-        eventPollJob?.cancel()
-        releaseSessionWifiLock()
-        val old = camera
-        val connecting = connectingCamera
-        connectingCamera = null
-        camera = null
-        _state.update { it.copy(isConnectedToCamera = false) }
-        old?.let { cleanupScope.launch { it.close() } }
-        connecting?.let { cleanupScope.launch { it.close() } }
-    }
-
     /**
      * 后台缩略图填充：与连接同生共死，【不依赖任何页面】——用户停在队列页/设置里
      * 照常推进。只有两种状态：未传输=按拍摄时间从新到旧全量填充（prefetchThumbnail
@@ -393,10 +270,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         watcherJob?.cancel()
         watcherJob = viewModelScope.launch {
             while (isActive) {
-                if (_state.value.connectionMode != ConnectionMode.CAMERA_HOTSPOT) {
-                    delay(WATCH_INTERVAL_MS)
-                    continue
-                }
                 // dhcpInfo/connectionInfo 是 Binder IPC，放 IO 线程，不在主线程高频抖动。
                 val (onNikonWifi, rssi) = withContext(Dispatchers.IO) {
                     val on = linkSaysCameraWifi || isNikonWifi()
@@ -409,7 +282,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 同 onWifiChanged：只负责"在相机 Wi-Fi 上就连上"，绝不主动断开，避免误断打断传输。
                 // 购买挂起期间(purchaseHold)不重连:此时是我们自己主动断的，接回去热点就关不掉了。
                 if (onNikonWifi && !purchaseHold && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
-                    connectToCameraWithRetry(PtpConstants.CAMERA_IP, wifiNetwork, requireCameraWifi = true, generation = connectionGeneration)
+                    connectToCameraWithRetry()
                 }
                 delay(WATCH_INTERVAL_MS)
             }
@@ -478,7 +351,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun onWifiChanged() {
         viewModelScope.launch {
-            if (_state.value.connectionMode != ConnectionMode.CAMERA_HOTSPOT) return@launch
             val onNikonWifi = linkSaysCameraWifi || checkNikonWifi()
             _state.update { it.copy(isWifiConnected = onNikonWifi) }
 
@@ -487,7 +359,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // 一旦在传输途中误断会不断打断并重传文件，速度暴跌。真正掉线由下载失败/心跳自然发现。
             // 购买挂起期间(purchaseHold)不重连,理由见 startConnectionWatcher。
             if (onNikonWifi && !purchaseHold && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
-                connectToCameraWithRetry(PtpConstants.CAMERA_IP, wifiNetwork, requireCameraWifi = true, generation = connectionGeneration)
+                connectToCameraWithRetry()
             }
         }
     }
@@ -524,13 +396,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 用户流程本就是"必须连上相机 Wi-Fi 才能用"，所以保持探测更符合预期。
      * 一旦离开相机网段则退出循环，由网络回调在重新连上 Wi-Fi 后再次触发。
      */
-    private suspend fun connectToCameraWithRetry(
-        ip: String,
-        network: Network?,
-        requireCameraWifi: Boolean,
-        generation: Long
-    ): Boolean {
-        if (purchaseHold || _state.value.isConnecting || _state.value.isConnectedToCamera) return false
+    private suspend fun connectToCameraWithRetry() {
+        if (purchaseHold || _state.value.isConnecting || _state.value.isConnectedToCamera) return
         _state.update { it.copy(isConnecting = true) }
 
         // 经 AppLocale.wrap：协议层错误文案（会显示在失败卡片上）与应用内语言一致。
@@ -538,37 +405,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 不必每轮重试都重建配置上下文。
         val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
         // purchaseHold 也随轮检查:重试循环可能在购买挂起前就已在跑,得让它当轮退出。
-        var attempt = 0
-        val expectedMode = if (requireCameraWifi) ConnectionMode.CAMERA_HOTSPOT else ConnectionMode.PHONE_HOTSPOT
-        fun mayRetry(): Boolean = !requireCameraWifi || linkSaysCameraWifi || isNikonWifi()
-        while (!purchaseHold && generation == connectionGeneration &&
-            _state.value.connectionMode == expectedMode && mayRetry() && !_state.value.isConnectedToCamera) {
-            attempt++
-            Log.i(LOG_TAG, "CONNECT_ATTEMPT mode=${_state.value.connectionMode} ip=$ip attempt=$attempt boundNetwork=${network != null}")
+        while (!purchaseHold && (linkSaysCameraWifi || checkNikonWifi()) && !_state.value.isConnectedToCamera) {
             val cam = NikonCamera(localizedContext)
-            connectingCamera = cam
             var connected = false
-            var pairingCompleted = false
-            cam.connect(
-                ip = ip,
-                network = network,
-                handshakeTimeoutMs = if (requireCameraWifi) NikonCamera.SO_TIMEOUT_MS else HOTSPOT_HANDSHAKE_TIMEOUT_MS,
-                standardPersistentInitiator = !requireCameraWifi,
-                nikonCompatibilityInit = !requireCameraWifi
-            ).fold(
+            cam.connect(network = wifiNetwork).fold(
                 onSuccess = {
-                    if (generation != connectionGeneration || _state.value.connectionMode != expectedMode) {
-                        Log.i(LOG_TAG, "CONNECT_STALE discard ip=$ip generation=$generation current=$connectionGeneration mode=${_state.value.connectionMode}")
-                        cam.close()
-                        return@fold
-                    }
-                    connectingCamera = null
                     camera = cam
-                    if (expectedMode == ConnectionMode.PHONE_HOTSPOT) {
-                        connectionPrefs.edit()
-                            .putString("last_hotspot_camera_ip", ip)
-                            .apply()
-                    }
                     acquireSessionWifiLock()   // 会话保活：连着就不让 Wi-Fi 打盹
                     _state.update {
                         it.copy(
@@ -580,19 +422,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     loadFiles()
                     startEventPolling()
                     connected = true
-                    Log.i(LOG_TAG, "CONNECT_SUCCESS mode=${_state.value.connectionMode} ip=$ip attempt=$attempt")
                 },
-                onFailure = { error ->
-                    if (connectingCamera === cam) connectingCamera = null
-                    pairingCompleted = error is PairingCompletedException
-                    if (pairingCompleted) {
-                        Log.i(LOG_TAG, "PAIRING_COMPLETED ip=$ip attempt=$attempt reconnectDelayMs=6600")
-                    } else {
-                        Log.e(LOG_TAG, "CONNECT_FAILED mode=${_state.value.connectionMode} ip=$ip attempt=$attempt type=${error.javaClass.simpleName} message=${error.message}", error)
-                    }
-                    if (!requireCameraWifi && error !is PairingCompletedException && generation == connectionGeneration) {
-                        _state.update { it.copy(connectionError = error.message ?: error.javaClass.simpleName) }
-                    }
+                onFailure = {
                     cam.close()
                 }
             )
@@ -600,24 +431,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 握手期间购买挂起被置起(connect 要几秒,窗口真实存在):
                 // 立即拆掉刚建立的会话,不给相机热点续命。
                 if (purchaseHold) holdCameraWifi(false)
-                return true
-            }
-            if (!requireCameraWifi) {
-                // 首次配对成功后相机会切换服务状态；抓包约 6.6 秒后才重新建立正常会话。
-                // 普通失败仍只尝试一次，避免输错 IP 后永久扫描/耗电。
-                if (!pairingCompleted) break
-                _state.update { it.copy(connectionError = null) }
-                delay(6_600)
-                continue // 已按抓包等待完毕，不再叠加普通失败的 1 秒重试间隔。
+                return
             }
             delay(RETRY_INTERVAL_MS)   // 未连上，稍后再试，不显示错误
         }
 
         // 已离开相机 Wi-Fi（或已连上）；清除"连接中"状态，等待下次网络变化再触发。
-        if (generation == connectionGeneration) {
-            _state.update { it.copy(isConnecting = false) }
-        }
-        return false
+        _state.update { it.copy(isConnecting = false) }
     }
 
     /**
@@ -641,31 +461,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _state.update {
                         it.copy(isConnectedToCamera = false)
                     }
-                    if (_state.value.connectionMode == ConnectionMode.CAMERA_HOTSPOT) {
-                        viewModelScope.launch { connectToCameraWithRetry(PtpConstants.CAMERA_IP, wifiNetwork, true, connectionGeneration) }
-                    } else {
-                        // 手机热点模式只快速重试已验证过的 IP，不在后台反复扫描整个子网。
-                        val lastIp = connectionPrefs.getString("last_hotspot_camera_ip", null)
-                        if (lastIp != null) {
-                            connectionGeneration++
-                            val generation = connectionGeneration
-                            connectionJob = viewModelScope.launch reconnect@{
-                                repeat(HOTSPOT_RECONNECT_ATTEMPTS) { index ->
-                                    if (generation != connectionGeneration || _state.value.connectionMode != ConnectionMode.PHONE_HOTSPOT) {
-                                        return@reconnect
-                                    }
-                                    Log.i(LOG_TAG, "HOTSPOT_RECONNECT ip=$lastIp attempt=${index + 1}/$HOTSPOT_RECONNECT_ATTEMPTS")
-                                    if (connectToCameraWithRetry(lastIp, null, false, generation)) return@reconnect
-                                    if (index < HOTSPOT_RECONNECT_ATTEMPTS - 1) delay(HOTSPOT_RECONNECT_DELAY_MS)
-                                }
-                                if (generation == connectionGeneration) {
-                                    _state.update {
-                                        it.copy(connectionError = getApplication<Application>().getString(com.ztransfer.R.string.camera_reconnect_failed))
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    viewModelScope.launch { connectToCameraWithRetry() }
                     break
                 }
             }
@@ -1362,10 +1158,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private companion object {
-        const val LOG_TAG = "ZTransfer.Connection"
-        const val HOTSPOT_HANDSHAKE_TIMEOUT_MS = 5_000
-        const val HOTSPOT_RECONNECT_ATTEMPTS = 3
-        const val HOTSPOT_RECONNECT_DELAY_MS = 2_000L
         const val KEEPALIVE_INTERVAL_MS = 10_000L
         // 事件轮询间隔:机身快门新照片出现在列表的最大延迟。单条小命令,
         // 相对 10s 心跳的通道占用可忽略;再快意义不大(拍完掏出手机也要几秒)。

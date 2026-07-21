@@ -7,7 +7,6 @@
 
     <!-- Home / connection -->
     <string name="connecting_camera">Connecting to camera…</string>
-    <string name="discovering_camera">Discovering camera…</string>
     <string name="connect_camera_wifi">Connect to the camera\'s Wi-Fi</string>
     <string name="open_wifi_settings">Open Wi-Fi Settings</string>
     <string name="step_camera_wifi">On the camera, enable “Connect to smart device (Wi-Fi)”</string>
@@ -15,22 +14,12 @@
     <string name="tip_title">A faster way to connect</string>
     <string name="tip_body">Add “Wi-Fi connection” to your camera\'s i menu, then just press the i button to turn it on in one tap — no menu digging. Path:</string>
     <string name="tip_path">MENU → Custom Settings Menu → Controls → Customize i menu → pick a slot → Wi-Fi connection</string>
-    <string name="mode_camera_hotspot">Camera hotspot</string>
-    <string name="mode_phone_hotspot">Phone hotspot</string>
-    <string name="phone_hotspot_test_hint">After the camera joins your phone hotspot, tap below to connect automatically.</string>
-    <string name="discover_camera_action">Discover and connect</string>
-    <string name="camera_discovery_failed">No camera found. Make sure it has joined the phone hotspot and try again.</string>
-    <string name="camera_reconnect_failed">Camera disconnected. Run automatic discovery again.</string>
-    <string name="cancel_connection_action">Cancel</string>
-    <string name="step_enable_phone_hotspot">Enable your phone hotspot</string>
-    <string name="step_camera_join_phone_hotspot">On the camera, choose “Connect to computer” → search Wi-Fi networks, then join this hotspot</string>
 
     <!-- File list -->
     <string name="loading_file_list">Loading file list…</string>
     <string name="connection_lost">Connection lost</string>
     <string name="no_photos_on_camera">No photos on the camera</string>
     <string name="camera_not_connected">Camera not connected</string>
-    <string name="camera_link_connected">Connected</string>
     <string name="press_back_to_exit">Press back again to exit</string>
     <string name="no_photos_match_filter">No photos match the filter</string>
     <string name="loading_more">Loading more…</string>

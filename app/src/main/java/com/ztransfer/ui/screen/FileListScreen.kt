@@ -106,7 +106,6 @@ import com.ztransfer.ui.util.Haptics
 import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
-import com.ztransfer.viewmodel.ConnectionMode
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
@@ -703,7 +702,6 @@ fun FileListScreen(
             SignalPill(
                 rssi = state.wifiRssi,
                 connected = state.isConnectedToCamera,
-                forceFullSignal = state.connectionMode == ConnectionMode.PHONE_HOTSPOT,
                 pulseTrigger = signalPulse
             )
 
@@ -1099,19 +1097,14 @@ fun QueuePill(
  * "Z传"页与队列页顶栏共用。
  */
 @Composable
-fun SignalPill(rssi: Int?, connected: Boolean, forceFullSignal: Boolean = false, pulseTrigger: Int = 0) {
+fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
     val colors = AppTheme.colors
     var expanded by remember { mutableStateOf(false) }
-    // 手机作为热点 AP 时，Android 公共 API 不提供单个热点客户端的 RSSI；PTP 会话
-    // 已连接但 rssi=null 仍然是在线，不能误画成红色断网。只有 STA（原相机热点）
-    // 能取得真实 dBm 时才按强弱着色。
-    val online = connected
-    val hasSignalReading = rssi != null
+    val online = connected && rssi != null
     val r = rssi ?: -999
     // dBm 越接近 0 越强。判定从严：满格只给极好信号，稍差立刻掉格。
     //  -30↑ 满格 / -45↑ 三格 / -55↑ 两格 / -65↑ 一格 / 更弱 0 格。
     val level = when {
-        forceFullSignal && online -> 4 // 仅手机热点 AP 模式按产品约定固定满格。
         r >= -30 -> 4
         r >= -45 -> 3
         r >= -55 -> 2
@@ -1119,8 +1112,6 @@ fun SignalPill(rssi: Int?, connected: Boolean, forceFullSignal: Boolean = false,
         else -> 0
     }
     val color = when {
-        forceFullSignal && online -> colors.statusConnected
-        !hasSignalReading -> colors.accentBlue
         level == 4 -> colors.statusConnected
         level >= 2 -> colors.accentOrange
         else -> colors.statusError
@@ -1185,7 +1176,7 @@ fun SignalPill(rssi: Int?, connected: Boolean, forceFullSignal: Boolean = false,
                         horizontalArrangement = Arrangement.spacedBy(2.5.dp)
                     ) {
                         repeat(4) { i ->
-                            val lit = if (forceFullSignal) true else if (hasSignalReading) i < level.coerceAtLeast(1) else i == 0
+                            val lit = i < level.coerceAtLeast(1)   // 至少亮一格，表示"在连接中"
                             Box(
                                 modifier = Modifier
                                     .width(4.dp)
@@ -1221,7 +1212,7 @@ fun SignalPill(rssi: Int?, connected: Boolean, forceFullSignal: Boolean = false,
                 ) + fadeOut(tween(160))
             ) {
                 Text(
-                    text = if (hasSignalReading) "$r dBm" else stringResource(R.string.camera_link_connected),
+                    text = "$r dBm",
                     style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                     fontWeight = FontWeight.Medium,
                     color = color,
