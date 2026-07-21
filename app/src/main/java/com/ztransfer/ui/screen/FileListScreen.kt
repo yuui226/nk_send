@@ -10,6 +10,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
@@ -101,6 +102,7 @@ import androidx.compose.ui.unit.sp
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.Haptics
 import com.ztransfer.ui.util.formatSpeed
@@ -323,7 +325,7 @@ fun FileListScreen(
         bottom = bottomInset + 12.dp
     )
 
-    // 筛选（类型/保护标记）：纯前端过滤——原始 state.files 不动、不触发任何重新读取；
+    // 筛选（类型/保护/连拍/未传输）：纯前端过滤——原始 state.files 不动、不触发重新读取；
     // 预览翻页/分组/网格全部基于过滤后的数据，自然一致。
     //（曾有"横竖构图"筛选,已摘除:ObjectInfo 的宽高是传感器原生方向,竖拍的方向
     // 只在 EXIF Orientation 里且依赖机内"自动旋转图像"设置——ObjectInfo 这条路
@@ -331,7 +333,8 @@ fun FileListScreen(
     val filterExts = transferState.filterExtensions
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
-    val filterActive = filterExts != null || filterProtected || filterBurst
+    val filterUntransferred = transferState.filterUntransferredOnly
+    val filterActive = filterExts != null || filterProtected || filterBurst || filterUntransferred
     // 筛选确定后的级联入场（复用分组展开的入场动画）：tick 每次确定递增（重播存量格子）,
     // window 开 600ms（窗口内组成的格子播入场,之后滚动进入的不播——与 recentlyExpanded 同构）。
     var filterRevealTick by remember { mutableStateOf(0) }
@@ -349,12 +352,78 @@ fun FileListScreen(
     // 连拍检测:基于原始列表计算,只在文件列表变化时重算。
     // 驱动缩略图右上角的连拍角标 + "连拍"筛选(同一数据源,标记与筛选天然一致)。
     val burstHandles = remember(state.files) { computeBurstHandles(state.files) }
+    // 已传对号与“未传输”筛选必须共用这一个判定，避免界面同时出现
+    // “带对号却仍在未传输列表”的自相矛盾。
+    val exportedHandles: Set<Int> = remember(state.files, transferState.existingExportFiles) {
+        state.files.asSequence().filter { file ->
+            val sizes = transferState.existingExportFiles[file.fileName] ?: return@filter false
+            sizes.any { it < 0L || it == file.size } || file.size == PtpConstants.SIZE_UNKNOWN
+        }.mapTo(HashSet()) { it.handle }
+    }
+    // “未传输”筛选下，本次队列刚完成的照片先留在网格中播放单格退场，再真正加入过滤集合。
+    // 导出目录扫描发现的历史文件不需要动画，仍然同步过滤，避免列表初次加载时闪现旧照片。
+    val animatedExportCandidates = remember(transferState.tasks) {
+        transferState.tasks.asSequence()
+            .filter {
+                it.status == TransferStatus.WAITING ||
+                    it.status == TransferStatus.TRANSFERING ||
+                    it.status == TransferStatus.COMPLETED
+            }
+            .mapTo(HashSet()) { it.file.handle }
+    }
+    var finishedExportExitHandles by remember {
+        mutableStateOf(exportedHandles.intersect(animatedExportCandidates))
+    }
+    val exitingExportHandles = remember { mutableStateMapOf<Int, Unit>() }
+    var exportReflowActive by remember { mutableStateOf(false) }
+    var exportReflowTick by remember { mutableStateOf(0) }
+    val filteredExportHandles = remember(
+        exportedHandles,
+        animatedExportCandidates,
+        finishedExportExitHandles
+    ) {
+        (exportedHandles - animatedExportCandidates) + finishedExportExitHandles
+    }
+
+    LaunchedEffect(exportedHandles, animatedExportCandidates, filterUntransferred) {
+        finishedExportExitHandles = finishedExportExitHandles.intersect(exportedHandles)
+        exitingExportHandles.keys
+            .filterNot { it in exportedHandles }
+            .forEach(exitingExportHandles::remove)
+
+        if (!filterUntransferred) {
+            // 筛选未开启时没有退场语义；先同步基线，防止下次开启时重播历史完成项。
+            exitingExportHandles.clear()
+            finishedExportExitHandles = exportedHandles.intersect(animatedExportCandidates)
+            exportReflowActive = false
+        } else {
+            val newlyExported = exportedHandles
+                .intersect(animatedExportCandidates)
+                .minus(finishedExportExitHandles)
+                .minus(exitingExportHandles.keys)
+            if (newlyExported.isNotEmpty()) {
+                newlyExported.forEach { exitingExportHandles[it] = Unit }
+                // 在条目真正移除前启用 placement modifier，让 LazyGrid 已经持有旧位置。
+                exportReflowActive = true
+            }
+        }
+    }
+    LaunchedEffect(exportReflowTick) {
+        if (exportReflowTick > 0) {
+            delay(320)
+            if (exitingExportHandles.isEmpty()) exportReflowActive = false
+        }
+    }
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
-    val groups = remember(state.files, filterExts, filterProtected, filterBurst) {
+    val groups = remember(
+        state.files, filterExts, filterProtected, filterBurst, filterUntransferred,
+        burstHandles, filteredExportHandles
+    ) {
         val files = state.files.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
+            .filter { !filterUntransferred || it.handle !in filteredExportHandles }
             .toList()
         groupFilesByDate(files)
     }
@@ -368,10 +437,17 @@ fun FileListScreen(
     // 长按预览：全屏翻页 + 从被长按格子的位置放大展开。
     var previewIndex by remember { mutableStateOf<Int?>(null) }
     var previewAnchor by remember { mutableStateOf<Rect?>(null) }
+    // 预览会话固定为打开瞬间的筛选列表。“未传输”激活时，当前照片在
+    // 后台传完会从网格派生列表移除；若预览仍直接引用 flatFiles，固定下标会
+    // 突然指向下一张，末尾项还会直接让 overlay 消失。快照保证当次浏览稳定，
+    // 关闭后底下列表已是最新筛选结果。
+    var previewFiles by remember { mutableStateOf<List<NikonCamera.FileInfo>>(emptyList()) }
     val onPreview: (NikonCamera.FileInfo, Rect) -> Unit = { file, rect ->
-        val idx = flatFiles.indexOfFirst { it.handle == file.handle }
+        val snapshot = flatFiles
+        val idx = snapshot.indexOfFirst { it.handle == file.handle }
         if (idx >= 0) {
             haptics.longPress()
+            previewFiles = snapshot
             previewIndex = idx
             previewAnchor = rect
         }
@@ -386,6 +462,7 @@ fun FileListScreen(
         if (transferState.transferDirUri == null) {
             // 预览层盖在设置面板之上，先关掉预览再弹设置，否则用户看不见。
             previewIndex = null
+            previewFiles = emptyList()
             showSettings = true; return@onTapFile
         }
         if (!state.isConnectedToCamera) {
@@ -562,6 +639,7 @@ fun FileListScreen(
             ThumbnailGrid(
                 groups = groups,
                 queuedByHandle = queuedByHandle,
+                exportedHandles = exportedHandles,
                 columns = transferState.thumbnailColumns,
                 isLoading = state.isLoadingFiles,
                 transfersBusy = transfersBusy,
@@ -576,6 +654,15 @@ fun FileListScreen(
                 gridState = gridState,
                 filterRevealTick = filterRevealTick,
                 filterRevealWindow = filterRevealWindow,
+                exitingExportHandles = exitingExportHandles.keys,
+                exportReflowActive = exportReflowActive,
+                onExportExitFinished = { handle ->
+                    if (handle in exitingExportHandles) {
+                        finishedExportExitHandles = finishedExportExitHandles + handle
+                        exitingExportHandles.remove(handle)
+                        exportReflowTick++
+                    }
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -708,10 +795,17 @@ fun FileListScreen(
             // 信号按钮右侧：类型筛选按钮。信号条展开/收起的宽度动画是逐帧真实布局，
             // 本按钮随 Row 重排平滑让位，位置天然跟随动画。已设筛选时图标高亮。
             Spacer(modifier = Modifier.width(8.dp))
+            val filterMarkColor by animateColorAsState(
+                targetValue = if (filterActive) colors.accentYellow else colors.onBackground,
+                animationSpec = tween(180),
+                label = "filterMarkActive"
+            )
             GlassButton(
                 onClick = { showFilter = !showFilter },
                 shape = RoundedCornerShape(22.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                active = filterActive,
+                activeColor = colors.accentYellow,
                 modifier = Modifier
                     .height(36.dp)
                     .onGloballyPositioned { filterAnchor = it.boundsInRoot() }
@@ -719,7 +813,7 @@ fun FileListScreen(
                 // 自绘筛选标志（与信号条同族的圆头杆件语言）；已设筛选时高亮。
                 FilterMark(
                     modifier = Modifier.size(19.dp),
-                    color = if (filterActive) colors.accentBlue else colors.onBackground,
+                    color = filterMarkColor,
                     contentDescription = stringResource(R.string.cd_filter_type)
                 )
             }
@@ -785,16 +879,14 @@ fun FileListScreen(
                 current = filterExts,
                 currentProtected = filterProtected,
                 currentBurst = filterBurst,
-                onConfirm = { sel, prot, burst ->
-                    // 筛选真的变了才开入场窗口：在事件回调里【同步】置起（与分组展开在
-                    // onClick 里设 recentlyExpanded 同理），下一帧组成的新列表才带动画;
-                    // 原样确定不重播,免得无变化也整屏闪一遍。
-                    if (sel != filterExts || prot != filterProtected || burst != filterBurst) {
-                        filterRevealTick++
-                        filterRevealWindow = true
-                    }
-                    transferViewModel.setFilters(sel, prot, burst)
-                    showFilter = false
+                currentUntransferred = filterUntransferred,
+                onChange = { sel, prot, burst, untransferred ->
+                    // FilterOverlay 只在工作状态确实变化时回调；这里每次都提交。
+                    // 不能用父层上一帧的 filter* 闭包拦截：快速双击同一项时，第二次
+                    // 取消可能在重组前到达，会被误判为“未变化”而无法持久化。
+                    filterRevealTick++
+                    filterRevealWindow = true
+                    transferViewModel.setFilters(sel, prot, burst, untransferred)
                 },
                 onDismiss = { showFilter = false }
             )
@@ -815,17 +907,25 @@ fun FileListScreen(
 
         // 长按预览层：全屏翻页，从被长按格子的位置放大展开/收回。
         previewIndex?.let { idx ->
-            if (idx in flatFiles.indices) {
+            if (idx in previewFiles.indices) {
                 PhotoPreviewOverlay(
-                    files = flatFiles,
+                    files = previewFiles,
                     initialIndex = idx,
-                    anchorRect = previewAnchor,
+                    // 只有底层列表仍是打开瞬间的同一实例时，原格子坐标才可信。
+                    // 传输完成/文件增量加载导致 flatFiles 更换后，收起改为原地淡出，
+                    // 避免飞向已被其他照片占据的旧位置。引用比较是 O(1)，不扫描大列表。
+                    anchorRect = previewAnchor.takeIf { previewFiles === flatFiles },
                     cameraViewModel = cameraViewModel,
                     hapticsEnabled = transferState.hapticsEnabled,
+                    initialRotationQuarterTurns = transferState.previewRotationQuarterTurns,
                     burstHandles = burstHandles,
                     queuedHandles = queuedByHandle.keys,
                     onTransfer = onTapFile,
-                    onDismiss = { previewIndex = null }
+                    onRotationChanged = transferViewModel::setPreviewRotationQuarterTurns,
+                    onDismiss = {
+                        previewIndex = null
+                        previewFiles = emptyList()
+                    }
                 )
             }
         }
@@ -1306,10 +1406,12 @@ private fun GroupHeader(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ThumbnailGrid(
     groups: List<FileGroup>,
     queuedByHandle: Map<Int, TransferTask>,
+    exportedHandles: Set<Int>,
     columns: Int,
     isLoading: Boolean,
     transfersBusy: Boolean,
@@ -1327,6 +1429,9 @@ private fun ThumbnailGrid(
     // "瞬时重排 + 级联入场"方案；条目位移动画不可用的原因见下方手风琴注释。
     filterRevealTick: Int = 0,
     filterRevealWindow: Boolean = false,
+    exitingExportHandles: Set<Int> = emptySet(),
+    exportReflowActive: Boolean = false,
+    onExportExitFinished: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
 
@@ -1369,7 +1474,15 @@ private fun ThumbnailGrid(
                 key = "header_${group.date}",
                 contentType = "header"
             ) {
-                Column {
+                Column(
+                    modifier = if (exportReflowActive) {
+                        Modifier.animateItemPlacement(
+                            animationSpec = tween(260, easing = FastOutSlowInEasing)
+                        )
+                    } else {
+                        Modifier
+                    }
+                ) {
                     Spacer(modifier = Modifier.height(4.dp))
                     GroupHeader(
                         group = group,
@@ -1424,6 +1537,7 @@ private fun ThumbnailGrid(
                     ThumbnailCell(
                         file = file,
                         task = queuedByHandle[file.handle],
+                        alreadyExported = file.handle in exportedHandles,
                         transfersBusy = transfersBusy,
                         cameraViewModel = cameraViewModel,
                         onTapFile = onTapFile,
@@ -1434,9 +1548,25 @@ private fun ThumbnailGrid(
                         // 级联错峰：组内前 18 格按 15ms 递增，其余同批（基本都在屏外）。
                         revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
                         revealKey = filterRevealTick,
-                        modifier = if (collapsingThis) {
-                            Modifier.collapseHeight { collapseProgress.value }
-                        } else Modifier
+                        exiting = file.handle in exitingExportHandles,
+                        onExitFinished = onExportExitFinished,
+                        modifier = Modifier
+                            .then(
+                                if (exportReflowActive && !collapsingThis) {
+                                    Modifier.animateItemPlacement(
+                                        animationSpec = tween(260, easing = FastOutSlowInEasing)
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .then(
+                                if (collapsingThis) {
+                                    Modifier.collapseHeight { collapseProgress.value }
+                                } else {
+                                    Modifier
+                                }
+                            )
                     )
                 }
             }
@@ -1453,6 +1583,7 @@ private fun ThumbnailGrid(
 private fun ThumbnailCell(
     file: NikonCamera.FileInfo,
     task: TransferTask?,
+    alreadyExported: Boolean,
     transfersBusy: Boolean,
     cameraViewModel: CameraViewModel,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
@@ -1463,6 +1594,8 @@ private fun ThumbnailCell(
     revealDelayMs: Long = 0L,
     // 变化即重播入场动画（筛选确定时存量格子也要重播）；平时保持不变。
     revealKey: Any? = null,
+    exiting: Boolean = false,
+    onExitFinished: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
@@ -1473,6 +1606,19 @@ private fun ThumbnailCell(
         if (revealProgress.value < 1f) {
             delay(revealDelayMs)
             revealProgress.animateTo(1f, tween(220))
+        }
+    }
+    // 仅当前完成传输的格子缩小淡出。动画结束后父层才把它加入过滤集合，
+    // 因而 LazyGrid 有完整的旧、 新位置可用于其余条目的补位动画。
+    val exitProgress = remember(file.handle) { Animatable(1f) }
+    val latestOnExitFinished by rememberUpdatedState(onExitFinished)
+    LaunchedEffect(exiting) {
+        if (exiting) {
+            exitProgress.snapTo(1f)
+            exitProgress.animateTo(0f, tween(200, easing = FastOutSlowInEasing))
+            latestOnExitFinished(file.handle)
+        } else if (exitProgress.value != 1f) {
+            exitProgress.snapTo(1f)
         }
     }
     // 已加载的缩略图按 handle 记住，transfersBusy 变化不会让它闪回占位。
@@ -1493,9 +1639,12 @@ private fun ThumbnailCell(
             .padding(bottom = 6.dp)
             .aspectRatio(1f)
             .graphicsLayer {
-                val p = revealProgress.value
-                alpha = p
-                val s = 0.94f + 0.06f * p
+                val revealP = revealProgress.value
+                val exitP = exitProgress.value
+                alpha = revealP * exitP
+                val revealScale = 0.94f + 0.06f * revealP
+                val exitScale = 0.82f + 0.18f * exitP
+                val s = revealScale * exitScale
                 scaleX = s
                 scaleY = s
             }
@@ -1514,6 +1663,7 @@ private fun ThumbnailCell(
             }
             // 轻触加入队列（已入队则无操作），长按预览大图（任何状态都可预览）。
             .combinedClickable(
+                enabled = !exiting,
                 onClick = { if (task == null) onTapFile(file) },
                 onLongClick = { cellBounds?.let { onPreview(file, it) } }
             )
@@ -1627,6 +1777,24 @@ private fun ThumbnailCell(
                 }
             }
         }
+        if (alreadyExported && task == null) {
+            Box(modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
+                AlreadyExportedIndicator()
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlreadyExportedIndicator() {
+    val colors = AppTheme.colors
+    Box(
+        modifier = Modifier.size(22.dp).clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.45f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(Icons.Default.Check, contentDescription = null,
+            tint = colors.statusConnected, modifier = Modifier.size(14.dp))
     }
 }
 
@@ -1657,11 +1825,11 @@ private fun formatDateHeader(date: String): String {
 
 /**
  * 类型/标记筛选浮层：从筛选按钮变形弹出、关闭缩回按钮（复用 [AnchorPopup]，与设置面板同款观感）。
- * 类型（自动列出设备上实际存在的，多选 + "全部"）与标记（保护/连拍）分两组紧凑胶囊，
- * 细线分隔，底部玻璃"应用"按钮；点应用才一次性提交生效。
+ * 类型（自动列出设备上实际存在的，多选 + "全部"）与标记（保护/连拍/未传输）
+ * 分两组紧凑胶囊，细线分隔；任意选项点击后立即提交生效。
  * 类型语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
  * 全不选或凑齐全部现有类型时自动归位"全部"（不允许空集）。
- * 工作副本确定前不生效；面板随开合重建，每次打开都从当前设置初始化。
+ * 面板随开合重建，每次打开都从当前设置初始化。
  */
 @Composable
 private fun FilterOverlay(
@@ -1670,7 +1838,8 @@ private fun FilterOverlay(
     current: Set<String>?,
     currentProtected: Boolean,
     currentBurst: Boolean,
-    onConfirm: (Set<String>?, Boolean, Boolean) -> Unit,
+    currentUntransferred: Boolean,
+    onChange: (Set<String>?, Boolean, Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -1686,17 +1855,21 @@ private fun FilterOverlay(
     var working by remember { mutableStateOf(current) }
     var workingProtected by remember { mutableStateOf(currentProtected) }
     var workingBurst by remember { mutableStateOf(currentBurst) }
+    var workingUntransferred by remember { mutableStateOf(currentUntransferred) }
 
     val otherLabel = stringResource(R.string.filter_other)
     fun extLabel(ext: String) = ext.removePrefix(".").uppercase().ifEmpty { otherLabel }
     fun toggle(ext: String) {
         val cur = working ?: availableExts.toSet()
         val next = if (ext in cur) cur - ext else cur + ext
-        working = when {
+        val normalized = when {
             next.isEmpty() -> null                       // 全不选无意义，归位"全部"
             next.containsAll(availableExts) -> null      // 凑齐全部现有类型 = 全部
             else -> next
         }
+        if (normalized == working) return
+        working = normalized
+        onChange(normalized, workingProtected, workingBurst, workingUntransferred)
     }
 
     AnchorPopup(
@@ -1714,7 +1887,12 @@ private fun FilterOverlay(
         ) {
             // ---- 类型：全部 + 各扩展名，两列胶囊 ----
             val typeChips: List<Triple<String, Boolean, () -> Unit>> = buildList {
-                add(Triple(stringResource(R.string.filter_all), working == null) { working = null })
+                add(Triple(stringResource(R.string.filter_all), working == null) {
+                    if (working != null) {
+                        working = null
+                        onChange(null, workingProtected, workingBurst, workingUntransferred)
+                    }
+                })
                 availableExts.forEach { ext ->
                     add(Triple(extLabel(ext), working?.contains(ext) ?: true) { toggle(ext) })
                 }
@@ -1745,36 +1923,41 @@ private fun FilterOverlay(
                 FilterChip(
                     label = stringResource(R.string.filter_protected),
                     selected = workingProtected,
-                    onClick = { workingProtected = !workingProtected },
+                    onClick = {
+                        val next = !workingProtected
+                        workingProtected = next
+                        onChange(working, next, workingBurst, workingUntransferred)
+                    },
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.Key   // 钥匙 + "保护"
                 )
                 FilterChip(
                     label = stringResource(R.string.burst_label),
                     selected = workingBurst,
-                    onClick = { workingBurst = !workingBurst },
+                    onClick = {
+                        val next = !workingBurst
+                        workingBurst = next
+                        onChange(working, workingProtected, next, workingUntransferred)
+                    },
                     modifier = Modifier.weight(1f),
                     // 叠帧 + 三条速度线（与缩略图角标同一 BurstGlyph）+ "连拍"
                     leading = { tint -> BurstGlyph(tint = tint) }
                 )
             }
-
-            // ---- 应用：毛玻璃对号按钮（与全局悬浮控件同语言）----
-            GlassButton(
-                onClick = { onConfirm(working, workingProtected, workingBurst) },
-                shape = RoundedCornerShape(10.dp),
-                contentPadding = PaddingValues(vertical = 8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Spacer(modifier = Modifier.weight(1f))
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = stringResource(R.string.cd_apply_filter),
-                    tint = colors.statusConnected,
-                    modifier = Modifier.size(20.dp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    label = stringResource(R.string.filter_untransferred),
+                    selected = workingUntransferred,
+                    onClick = {
+                        val next = !workingUntransferred
+                        workingUntransferred = next
+                        onChange(working, workingProtected, workingBurst, next)
+                    },
+                    modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.weight(1f))
+                Spacer(Modifier.weight(1f))
             }
+
         }
     }
 }

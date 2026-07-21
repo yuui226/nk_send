@@ -281,6 +281,7 @@ class NikonCamera(private val context: Context) {
      */
     suspend fun getFhdPicture(handle: Int): ByteArray? = ioMutex.withLock {
         withContext(Dispatchers.IO) {
+            val startedAt = android.os.SystemClock.elapsedRealtime()
             // 已判定不支持：直接返回，免去每页一次注定失败的往返（预览秒回退缩略图）。
             if (fhdSupported == false) return@withContext null
             try {
@@ -289,6 +290,10 @@ class NikonCamera(private val context: Context) {
                 if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) {
                     fhdSupported = true      // 一次成功即永久支持，关闭熔断计数
                     fhdFailCount = 0
+                    log {
+                        "GetFhdPicture handle=$handle bytes=${data.size} " +
+                            "network=${android.os.SystemClock.elapsedRealtime() - startedAt}ms"
+                    }
                     return@withContext data
                 }
                 // 相机明确回了响应但非 OK：判定是否熔断。
@@ -655,6 +660,30 @@ class NikonCamera(private val context: Context) {
         try { evtSocket?.close() } catch (_: Exception) {}
         evtThread?.interrupt()
         evtThread = null
+    }
+
+    /**
+     * 临时修改命令通道读超时，返回原值。只允许已持有 [ioMutex] 的
+     * 协议序列使用，避免其它事务观察到临时超时值。
+     */
+    internal fun setCommandReadTimeout(timeoutMs: Int): Int {
+        val socket = cmdSocket ?: throw java.io.EOFException(context.getString(R.string.connection_lost))
+        val previous = socket.soTimeout
+        socket.soTimeout = timeoutMs.coerceAtLeast(1)
+        return previous
+    }
+
+    /** 恢复 [setCommandReadTimeout] 保存的超时；连接已关闭时由调用方忽略异常。 */
+    internal fun restoreCommandReadTimeout(timeoutMs: Int) {
+        cmdSocket?.soTimeout = timeoutMs
+    }
+
+    /**
+     * 命令包读取超时后不得继续复用该 PTP/IP 流：PacketReader 可能已读了
+     * 半个包，迟到响应也会被下一事务误认。调用方必须已持有 [ioMutex]。
+     */
+    internal fun abortProtocolTransport() {
+        closeQuietly()
     }
 
     private fun makeInitReq(): ByteArray {

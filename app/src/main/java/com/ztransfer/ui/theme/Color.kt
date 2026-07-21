@@ -19,6 +19,7 @@ val DarkOnSurfaceVariant = Color(0xFFB0B0B0)
 // 强调色（深色主题用亮色系，黑底上通透）
 val AccentBlue = Color(0xFF4FC3F7)
 val AccentOrange = Color(0xFFFFB74D)
+val AccentYellow = Color(0xFFFFD54F)
 val AccentPurple = Color(0xFFAB47BC)
 
 // 状态色。全 App 唯一的"成功绿"与"错误红"——不再另设肉眼难辨的
@@ -38,6 +39,7 @@ val LightOnSurfaceVariant = Color(0xFF6E6E73)
 // 浅色强调（深色主题的亮色系强调在白底上对比不足，同色系整体加深一档）
 val LightAccentBlue = Color(0xFF0277BD)
 val LightAccentOrange = Color(0xFFEF6C00)
+val LightAccentYellow = Color(0xFFB77900)
 val LightAccentPurple = Color(0xFF7B1FA2)
 val LightStatusConnected = Color(0xFF2E7D32)
 val LightStatusError = Color(0xFFD32F2F)
@@ -61,6 +63,7 @@ data class AppColors(
     val onSurfaceVariant: Color,
     val accentBlue: Color,
     val accentOrange: Color,
+    val accentYellow: Color,
     val accentPurple: Color,
     val statusConnected: Color,
     val statusError: Color,
@@ -99,6 +102,7 @@ val DarkAppColors = AppColors(
     onSurfaceVariant = DarkOnSurfaceVariant,
     accentBlue = AccentBlue,
     accentOrange = AccentOrange,
+    accentYellow = AccentYellow,
     accentPurple = AccentPurple,
     statusConnected = StatusConnected,
     statusError = StatusError,
@@ -127,6 +131,7 @@ val LightAppColors = AppColors(
     onSurfaceVariant = LightOnSurfaceVariant,
     accentBlue = LightAccentBlue,
     accentOrange = LightAccentOrange,
+    accentYellow = LightAccentYellow,
     accentPurple = LightAccentPurple,
     statusConnected = LightStatusConnected,
     statusError = LightStatusError,

@@ -6,7 +6,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -22,7 +24,11 @@ private fun Modifier.markSemantics(contentDescription: String?): Modifier =
         semantics { this.contentDescription = contentDescription }
     } else this
 
-/** 筛选标志：三条递减的圆头横杠（漏斗的极简形）。 */
+/**
+ * 筛选标志：直观的漏斗轮廓。
+ * 与信号条、监看标志保持同一套单色圆头线条，收窄后的短尾明确表达
+ * “内容经条件筛选后输出”，避免旧的三条横杠被误认为排序或列表密度。
+ */
 @Composable
 fun FilterMark(
     modifier: Modifier = Modifier,
@@ -31,17 +37,25 @@ fun FilterMark(
 ) {
     Canvas(modifier = modifier.markSemantics(contentDescription).aspectRatio(1f)) {
         val s = size.minDimension
-        val stroke = 0.13f * s
-        fun bar(y: Float, halfWidth: Float) = drawLine(
+        val funnel = Path().apply {
+            // 宽口→斜肩→收窄通道→短尾：封闭轮廓在小尺寸下仍能一眼认成漏斗。
+            moveTo(0.16f * s, 0.20f * s)
+            lineTo(0.84f * s, 0.20f * s)
+            lineTo(0.59f * s, 0.50f * s)
+            lineTo(0.59f * s, 0.76f * s)
+            lineTo(0.41f * s, 0.86f * s)
+            lineTo(0.41f * s, 0.50f * s)
+            close()
+        }
+        drawPath(
+            path = funnel,
             color = color,
-            start = Offset((0.5f - halfWidth) * s, y * s),
-            end = Offset((0.5f + halfWidth) * s, y * s),
-            strokeWidth = stroke,
-            cap = StrokeCap.Round
+            style = Stroke(
+                width = 0.075f * s,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
         )
-        bar(0.24f, 0.40f)
-        bar(0.50f, 0.25f)
-        bar(0.76f, 0.10f)
     }
 }
 

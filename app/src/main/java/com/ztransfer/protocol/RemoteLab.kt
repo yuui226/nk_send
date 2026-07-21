@@ -1,5 +1,7 @@
 package com.ztransfer.protocol
 
+import android.os.SystemClock
+import java.net.SocketTimeoutException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withLock
@@ -57,6 +59,7 @@ object Lab {
     // ---- 关注的属性 ----
     const val PROP_WHITE_BALANCE = 0x5005
     const val PROP_F_NUMBER = 0x5007
+    const val PROP_FOCUS_MODE = 0x500A
     const val PROP_EXPOSURE_TIME_STD = 0x500D
     const val PROP_EXPOSURE_PROGRAM = 0x500E
     const val PROP_ISO = 0x500F
@@ -67,6 +70,7 @@ object Lab {
     const val PROP_NK_LV_PROHIBIT = 0xD1A4
     const val PROP_NK_LV_IMAGE_SIZE = 0xD1AC
     const val PROP_NK_ISO_EX = 0xD0B4
+    const val PROP_NK_AF_MODE = 0xD161
     const val PROP_NK_MOV_PROHIBIT = 0xD0A4      // 录像禁止条件 bitmask，0=可录
     const val PROP_NK_LV_SELECTOR = 0xD1A6       // 照片/录像实体拨杆：0=照片 1=录像
     const val PROP_NK_APPLICATION_MODE = 0xD1F0  // Z 系远程录像放行开关（Z 30 实测需要）
@@ -113,6 +117,8 @@ object Lab {
         PROP_EXP_COMPENSATION to "ExpCompensation",
         PROP_EXPOSURE_PROGRAM to "ExposureProgram",
         PROP_WHITE_BALANCE to "WhiteBalance",
+        PROP_FOCUS_MODE to "FocusMode",
+        PROP_NK_AF_MODE to "NikonAutofocusMode",
         PROP_NK_RECORDING_MEDIA to "RecordingMedia",
         PROP_NK_LV_STATUS to "LiveViewStatus",
         PROP_NK_LV_PROHIBIT to "LiveViewProhibit",
@@ -270,6 +276,24 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
     Lab.PROP_EXPOSURE_PROGRAM -> when (raw) {
         1L -> "M"; 2L -> "P"; 3L -> "A"; 4L -> "S"; else -> "0x${raw.toString(16)}"
     }
+    Lab.PROP_FOCUS_MODE -> when (raw) {
+        1L -> "MF"
+        2L -> "AF"
+        3L -> "AF Macro"
+        0x8010L -> "AF-S"
+        0x8011L -> "AF-C"
+        0x8012L -> "AF-A"
+        0x8013L -> "AF-F"
+        else -> "0x${raw.toString(16)}"
+    }
+    Lab.PROP_NK_AF_MODE -> when (raw) {
+        0L -> "AF-S"
+        1L -> "AF-C"
+        2L -> "AF-A"
+        // 3/4 会在部分机型 AF 失败后出现，并不代表用户切到了 MF。
+        // 语义未确认前保留为未知值，由上层隐藏标签。
+        else -> "0x${raw.toString(16)}"
+    }
     else -> "$raw"
 }
 
@@ -362,6 +386,15 @@ data class RcParam(
     val values: List<Long>
 )
 
+/** 当前镜头伺服方式。现代 Z 机优先走标准 FocusMode(0x500A)，旧 Nikon
+ *  机身回退到厂商属性 0xD161；未知枚举保留原始值供日志定位，不伪造名称。 */
+data class RcFocusMode(
+    val label: String,
+    val manual: Boolean,
+    val prop: Int,
+    val raw: Long
+)
+
 /** 按属性语义格式化原始值（1/250s、f/2.8、ISO500、+0.3EV…）。 */
 fun rcFormat(prop: Int, raw: Long): String = fmtVal(prop, raw)
 
@@ -372,16 +405,160 @@ suspend fun NikonCamera.rcGetParam(prop: Int): RcParam? {
     return RcParam(prop, desc.dataType, desc.writable, desc.current, desc.enumValues)
 }
 
+suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
+    val candidates = intArrayOf(Lab.PROP_FOCUS_MODE, Lab.PROP_NK_AF_MODE)
+    for (prop in candidates) {
+        // 对焦模式标签宁缺毋滥：只接受 GetDevicePropValue 成功直读到的当前值。
+        // PropDesc 兼容回退在部分机型的失败响应里会带无效默认值 1，曾被误显示成 MF。
+        val (valueRc, valueData) = labCommand(Lab.GET_DEVICE_PROP_VALUE, prop)
+        val raw = if (valueRc == Lab.OK && valueData != null &&
+            (valueData.size == 1 || valueData.size == 2 ||
+                valueData.size == 4 || valueData.size == 8)
+        ) {
+            valueData.indices.fold(0L) { acc, i ->
+                acc or ((valueData[i].toLong() and 0xFF) shl (8 * i))
+            }
+        } else continue
+        val label = fmtVal(prop, raw)
+        // 未确认的厂商枚举不把十六进制原值当成面向用户的模式标签。
+        if (label.startsWith("0x")) continue
+        val result = RcFocusMode(
+            label = label,
+            manual = when (prop) {
+                Lab.PROP_FOCUS_MODE -> raw == 1L
+                Lab.PROP_NK_AF_MODE -> false
+                else -> false
+            },
+            prop = prop,
+            raw = raw
+        )
+        return result
+    }
+    return null
+}
+
 suspend fun NikonCamera.rcSetValue(param: RcParam, value: Long): Int =
     labSetProp(param.prop, encodeScalar(param.dataType, value))
 
-/** 触摸对焦：坐标为 Live View 图像坐标系（取帧 JPEG 的像素坐标）。 */
-suspend fun NikonCamera.rcChangeAfArea(x: Int, y: Int): Int =
-    labCommand(Lab.NK_CHANGE_AF_AREA, x, y).first
+/** AF 驱动后的最终结果，[polls] 是 DeviceReady 查询次数。 */
+data class RcAfResult(
+    val responseCode: Int,
+    val polls: Int,
+    val elapsedMs: Long,
+    val timedOut: Boolean
+)
 
-/** 驱动 AF（在当前对焦点合焦）。阻塞到合焦/失败；失败返回 0xA002 OutOfFocus。 */
-suspend fun NikonCamera.rcAfDrive(): Int =
-    labCommand(Lab.NK_AF_DRIVE).first
+data class RcTapFocusResult(
+    val moveResponseCode: Int,
+    val afResult: RcAfResult?
+)
+
+private fun NikonCamera.recvFocusResponse(deadlineMs: Long): Pair<Int, ByteArray?> {
+    val remaining = deadlineMs - SystemClock.elapsedRealtime()
+    if (remaining <= 0L) {
+        // 调用方在进入本函数前已发出命令；即使还没有开始读，其响应也
+        // 必然会迟到并污染下一事务，因此同样必须废弃连接。
+        abortProtocolTransport()
+        throw SocketTimeoutException("Focus response deadline exceeded")
+    }
+    val previousTimeout = setCommandReadTimeout(
+        remaining.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    )
+    return try {
+        recvRespWithPayload()
+    } catch (e: SocketTimeoutException) {
+        // 超时时 PacketReader 可能已消费半个包，不能继续复用该流。
+        abortProtocolTransport()
+        throw e
+    } finally {
+        runCatching { restoreCommandReadTimeout(previousTimeout) }
+    }
+}
+
+private suspend fun NikonCamera.afDriveAndWaitLocked(
+    startedAt: Long,
+    deadlineMs: Long
+): RcAfResult {
+    if (SystemClock.elapsedRealtime() >= deadlineMs) {
+        return RcAfResult(Lab.DEVICE_BUSY, 0, SystemClock.elapsedRealtime() - startedAt, true)
+    }
+    sendCmd(Lab.NK_AF_DRIVE)
+    val startRc = recvFocusResponse(deadlineMs).first
+    if (startRc != Lab.OK) {
+        return RcAfResult(startRc, 0, SystemClock.elapsedRealtime() - startedAt, false)
+    }
+
+    var polls = 0
+    while (true) {
+        if (SystemClock.elapsedRealtime() >= deadlineMs) {
+            return RcAfResult(
+                responseCode = Lab.DEVICE_BUSY,
+                polls = polls,
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                timedOut = true
+            )
+        }
+        sendCmd(Lab.NK_DEVICE_READY)
+        val readyRc = recvFocusResponse(deadlineMs).first
+        polls++
+        if (readyRc != Lab.DEVICE_BUSY) {
+            return RcAfResult(
+                responseCode = readyRc,
+                polls = polls,
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                timedOut = false
+            )
+        }
+        if (SystemClock.elapsedRealtime() >= deadlineMs) {
+            return RcAfResult(
+                responseCode = Lab.DEVICE_BUSY,
+                polls = polls,
+                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                timedOut = true
+            )
+        }
+        delay(150)
+    }
+}
+
+/**
+ * 按 Nikon 实机抓包时序执行一次完整自动对焦：
+ *
+ * 1. 只发一次 AfDrive(0x90C1)；
+ * 2. 轮询 DeviceReady(0x90C8)；
+ * 3. 0x2019 继续等待，0x2001 为合焦成功，0xA002 为未合焦。
+ *
+ * 整个序列持有 [NikonCamera.ioMutex]，防止 Live View 取帧或事件轮询插入 AF
+ * 事务中间。这与抓包中对焦期间暂停取帧的行为一致。
+ */
+suspend fun NikonCamera.rcAfDriveAndWait(timeoutMs: Long = 6_000L): RcAfResult =
+    ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            val startedAt = SystemClock.elapsedRealtime()
+            afDriveAndWaitLocked(startedAt, startedAt + timeoutMs)
+        }
+    }
+
+/** 移动 AF 区域并立即执行一次完整 AF，整套命令不被取帧打断。 */
+suspend fun NikonCamera.rcFocusAt(
+    x: Int,
+    y: Int,
+    timeoutMs: Long = 6_000L
+): RcTapFocusResult = ioMutex.withLock {
+    withContext(Dispatchers.IO) {
+        val startedAt = SystemClock.elapsedRealtime()
+        val deadlineMs = startedAt + timeoutMs
+        sendCmd(Lab.NK_CHANGE_AF_AREA, x, y)
+        val moveRc = recvFocusResponse(deadlineMs).first
+        if (moveRc != Lab.OK) RcTapFocusResult(moveRc, null)
+        else {
+            // 实抓三次均为 ChangeAfArea OK 后 80–84ms 再发 AfDrive；给相机时间
+            // 把新坐标应用到 AF 区域，避免驱动仍落在上一个点位。
+            delay(80)
+            RcTapFocusResult(moveRc, afDriveAndWaitLocked(startedAt, deadlineMs))
+        }
+    }
+}
 
 suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
     val (rc, d) = labCommand(Lab.NK_GET_EVENT)

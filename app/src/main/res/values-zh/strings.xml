@@ -27,6 +27,7 @@
     <string name="filter_all">全部</string>
     <string name="filter_protected">保护</string>
     <string name="burst_label">连拍</string>
+    <string name="filter_untransferred">未传输</string>
     <string name="filter_other">其他</string>
     <string name="cd_back_to_top">回到顶部</string>
     <string name="cd_filter_type">筛选类型</string>
@@ -36,7 +37,6 @@
     <string name="cd_collapse">收起</string>
     <string name="cd_all_queued">已全部加入队列</string>
     <string name="cd_transfer_group">传输整组</string>
-    <string name="cd_apply_filter">确认筛选</string>
 
     <!-- 传输队列 -->
     <string name="no_transfer_tasks">暂无传输任务</string>
@@ -127,14 +127,19 @@
 
     <!-- 遥控页 -->
     <string name="cd_remote_entry">遥控</string>
-    <string name="cd_focus_point">对焦点</string>
+    <string name="cd_rotate_photo">旋转照片</string>
     <string name="cd_dev_panel">开发者工具</string>
     <string name="remote_blocked_transfer">传输进行中，完成后再进入监看</string>
     <string name="remote_title">遥控</string>
     <string name="remote_transfer_busy_hint">传输进行中，监看可能卡顿</string>
     <string name="remote_rec_start_failed">无法开始录像，请检查存储卡与相机状态</string>
+    <string name="remote_tap_focus_manual">请将相机切换到自动对焦后使用点按对焦</string>
     <string name="dev_panel_title">开发者</string>
     <string name="dev_hd_liveview">高清监看 (XGA)</string>
+    <string name="cd_remote_histogram">监看直方图</string>
+    <string name="cd_remote_grid">构图参考线</string>
+    <string name="cd_remote_enter_fullscreen">进入全屏</string>
+    <string name="cd_remote_exit_fullscreen">退出全屏</string>
     <string name="dev_fps_overlay">帧率显示</string>
     <string name="lab_run_probe">完整探测</string>
     <string name="lab_copy_log">复制日志</string>

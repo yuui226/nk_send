@@ -1,8 +1,11 @@
 package com.ztransfer.ui.screen
 
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.graphics.BitmapFactory
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
@@ -17,6 +20,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -44,6 +48,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -66,6 +71,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -79,11 +86,13 @@ import com.ztransfer.protocol.RcParam
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
-import com.ztransfer.protocol.rcAfDrive
+import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcCapture
+import com.ztransfer.protocol.rcFocusAt
 import com.ztransfer.protocol.rcChangeApplicationMode
 import com.ztransfer.protocol.rcEndMovie
 import com.ztransfer.protocol.rcFormat
+import com.ztransfer.protocol.rcGetFocusMode
 import com.ztransfer.protocol.rcGetMovieMode
 import com.ztransfer.protocol.rcGetParam
 import com.ztransfer.protocol.rcPollEvents
@@ -93,9 +102,8 @@ import com.ztransfer.protocol.rcSetValue
 import com.ztransfer.protocol.rcStartMovie
 import com.ztransfer.protocol.runLabProbe
 import com.ztransfer.ui.theme.AppTheme
-import com.ztransfer.ui.theme.DarkAppColors
-import com.ztransfer.ui.theme.LocalAppColors
 import com.ztransfer.ui.theme.Motion
+import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferViewModel
@@ -116,6 +124,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.net.SocketTimeoutException
 import kotlin.math.hypot
 
 // 直控胶囊覆盖的四个曝光参数，2×2 网格顺序：
@@ -132,11 +141,31 @@ private val MOVIE_EXPOSURE_PROPS = listOf(
 // 事件刷新的匹配范围（两套都听：拨杆随时可能切换）
 private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
 
+private data class RemoteLiveFrame(
+    val image: ImageBitmap,
+    val histogram: LuminanceHistogram?
+)
+
+private class HistogramThrottle {
+    var lastCalculatedAtMs: Long = 0L
+    var cached: LuminanceHistogram? = null
+}
+
+private data class ViewfinderTap(
+    val imageX: Int,
+    val imageY: Int,
+    val imageWidth: Int,
+    val imageHeight: Int,
+    val normalized: Offset
+)
+
+private enum class TapFocusFeedback { IDLE, FOCUSING, LOCKED, FAILED }
+
 /**
- * 无线遥控页（正式功能）：取景器隐喻，恒黑底不随主题——通过覆盖 [LocalAppColors]
- * 让页内所有玻璃组件走深色 token（与 PhotoPreview 恒黑同理，但组件无需特判）。
+ * 无线遥控页（正式功能）：页面外壳跟随全局深浅主题，取景器内部保持相机监看所需的深色覆盖。
  *
- * 布局：顶栏（信号/开发者/HD/FPS/返回）→ 监看画面 → 2×2 参数拖拽微调 tile
+ * 布局：竖屏顶栏 / 横屏工具轨 → 监看画面（直方图、构图线、模式徽标）→
+ * 2×2 参数拖拽微调 tile
  * （值域来自相机枚举，只读压暗+锁；点数值弹全表直跳）→ 大圆快门键
  * （按住=半按对焦、松开在键内=拍摄）。进页自动开监看、退页自动关；
  * 拍摄结果仅确认不入队（下载走照片列表）。开发者面板：顶栏虫子按钮呼出（探测/日志），
@@ -148,54 +177,129 @@ fun RemoteScreen(
     transferViewModel: TransferViewModel,
     onNavigateBack: () -> Unit
 ) {
-    CompositionLocalProvider(LocalAppColors provides DarkAppColors) {
-        // 免费版监看限时:每天累计 FREE_REMOTE_DAILY_MS(无单次概念),自然日重置。
-        // 计时从"参数加载完 + 监看首帧已显示"（onReady）才开始——进页加载不占时长;
-        // 退出本页协程随组合销毁而取消,计时自动暂停,再进来接着剩余走。
-        // 每秒经 LicenseManager 落一次账,进程被杀最多丢 1 秒。PRO 无任何额外开销。
-        val isPro by LicenseManager.isPro.collectAsState()
-        var trialLeftMs by remember { mutableStateOf(LicenseManager.remoteTimeLeftMs()) }
-        var trialArmed by remember { mutableStateOf(false) }
-        if (!isPro) {
-            LaunchedEffect(trialArmed) {
-                if (!trialArmed) return@LaunchedEffect
-                while (trialLeftMs > 0) {
-                    delay(1000)
-                    trialLeftMs -= 1000
-                    LicenseManager.consumeRemoteTime(1000)
-                }
-                // 归零:自动"按返回"退出。提示气泡显示在退回后的照片列表页——
-                // 本页即刻消失,页内气泡没人看得见(跨页标记由列表页读取并清除)。
-                RemoteTrialNotice.pending = true
-                onNavigateBack()
+    val colors = AppTheme.colors
+    val backgroundBrush = rememberAppBackgroundBrush()
+    val transferState by transferViewModel.state.collectAsState()
+    val context = LocalContext.current
+    val activity = context.findActivity()
+    val originalOrientation = remember(activity) {
+        activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+    val screenScope = rememberCoroutineScope()
+    val fullscreen = transferState.remoteFullscreen
+    var switchingFullscreen by remember { mutableStateOf(false) }
+    val fullscreenTransition = remember { Animatable(1f) }
+    // Activity 始终保持竖屏。内部顺时针旋转后，系统顶部/底部 inset 分别映射为
+    // 横屏内容的左/右安全边；背景不避让，继续铺到系统控制条后面。
+    val fullscreenLeftInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val fullscreenRightInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    DisposableEffect(activity) {
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        onDispose { activity?.requestedOrientation = originalOrientation }
+    }
+    val fullscreenMorphProgress by animateFloatAsState(
+        targetValue = if (fullscreen) 1f else 0f,
+        animationSpec = tween(260),
+        label = "remoteFullscreenIcon"
+    )
+    fun toggleFullscreen() {
+        if (switchingFullscreen) return
+        screenScope.launch {
+            switchingFullscreen = true
+            try {
+                fullscreenTransition.animateTo(0f, tween(110))
+                transferViewModel.setRemoteFullscreen(!fullscreen)
+                fullscreenTransition.animateTo(1f, tween(190))
+            } finally {
+                switchingFullscreen = false
             }
         }
+    }
+    // 免费版监看限时:每天累计 FREE_REMOTE_DAILY_MS(无单次概念),自然日重置。
+    // 计时从"参数加载完 + 监看首帧已显示"（onReady）才开始——进页加载不占时长;
+    // 退出本页协程随组合销毁而取消,计时自动暂停,再进来接着剩余走。
+    // 每秒经 LicenseManager 落一次账,进程被杀最多丢 1 秒。PRO 无任何额外开销。
+    val isPro by LicenseManager.isPro.collectAsState()
+    var trialLeftMs by remember { mutableLongStateOf(LicenseManager.remoteTimeLeftMs()) }
+    var trialArmed by remember { mutableStateOf(false) }
+    if (!isPro) {
+        LaunchedEffect(trialArmed) {
+            if (!trialArmed) return@LaunchedEffect
+            while (trialLeftMs > 0) {
+                delay(1000)
+                trialLeftMs -= 1000
+                LicenseManager.consumeRemoteTime(1000)
+            }
+            // 归零:自动"按返回"退出。提示气泡显示在退回后的照片列表页——
+            // 本页即刻消失,页内气泡没人看得见(跨页标记由列表页读取并清除)。
+            RemoteTrialNotice.pending = true
+            onNavigateBack()
+        }
+    }
 
-        Box {
-            RemoteContent(
-                cameraViewModel, transferViewModel, onNavigateBack,
-                onReady = { trialArmed = true }
-            )
-            if (!isPro) {
-                val sec = (trialLeftMs / 1000).coerceAtLeast(0)
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color.Black.copy(alpha = 0.55f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+    Box(Modifier.fillMaxSize().background(backgroundBrush)) {
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            val hostModifier = if (fullscreen) {
+                Modifier
+                    .requiredSize(width = maxHeight, height = maxWidth)
+                    .graphicsLayer {
+                        rotationZ = 90f
+                        alpha = fullscreenTransition.value
+                        scaleX = 0.96f + 0.04f * fullscreenTransition.value
+                        scaleY = scaleX
+                    }
+            } else {
+                Modifier.fillMaxSize().graphicsLayer {
+                    alpha = fullscreenTransition.value
+                    scaleX = 0.96f + 0.04f * fullscreenTransition.value
+                    scaleY = scaleX
+                }
+            }
+            Box(hostModifier.background(backgroundBrush)) {
+                Box(
                     modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .navigationBarsPadding()
-                        .padding(start = 10.dp, bottom = 10.dp)
+                        .fillMaxSize()
+                        .then(
+                            if (fullscreen) Modifier.absolutePadding(
+                                left = fullscreenLeftInset,
+                                right = fullscreenRightInset
+                            ) else Modifier
+                        )
                 ) {
-                    Text(
-                        stringResource(
-                            R.string.remote_trial_left,
-                            "%d:%02d".format(sec / 60, sec % 60)
-                        ),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.85f),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    RemoteContent(
+                        cameraViewModel = cameraViewModel,
+                        transferViewModel = transferViewModel,
+                        onNavigateBack = onNavigateBack,
+                        fullscreen = fullscreen,
+                        fullscreenMorphProgress = fullscreenMorphProgress,
+                        onToggleFullscreen = ::toggleFullscreen,
+                        onReady = { trialArmed = true }
                     )
+                    if (!isPro) {
+                        val sec = (trialLeftMs / 1000).coerceAtLeast(0)
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = colors.glassSurfaceHeavy,
+                            border = BorderStroke(1.dp, colors.glassPanelBorder),
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .then(if (fullscreen) Modifier else Modifier.navigationBarsPadding())
+                                .padding(start = 10.dp, bottom = 10.dp)
+                        ) {
+                            Text(
+                                stringResource(
+                                    R.string.remote_trial_left,
+                                    "%d:%02d".format(sec / 60, sec % 60)
+                                ),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.onBackground,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -216,10 +320,12 @@ private fun RemoteContent(
     cameraViewModel: CameraViewModel,
     transferViewModel: TransferViewModel,
     onNavigateBack: () -> Unit,
+    fullscreen: Boolean,
+    fullscreenMorphProgress: Float,
+    onToggleFullscreen: () -> Unit,
     onReady: () -> Unit = {}
 ) {
     val colors = AppTheme.colors
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
     val camState by cameraViewModel.state.collectAsState()
@@ -228,15 +334,19 @@ private fun RemoteContent(
     val connected = camState.isConnectedToCamera
 
     // ---------- 会话状态 ----------
-    var frame by remember { mutableStateOf<ImageBitmap?>(null) }
-    var fps by remember { mutableStateOf(0f) }
+    var frame by remember { mutableStateOf<RemoteLiveFrame?>(null) }
+    var fps by remember { mutableFloatStateOf(0f) }
     var capturing by remember { mutableStateOf(false) }
     var modeText by remember { mutableStateOf<String?>(null) }
+    var focusModeText by remember { mutableStateOf<String?>(null) }
+    var focusModeProp by remember { mutableStateOf<Int?>(null) }
+    var focusModeManual by remember { mutableStateOf(false) }
+    var focusModeQueried by remember { mutableStateOf(false) }
     val params = remember { mutableStateMapOf<Int, RcParam>() }
     // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
     val pendingSets = remember { mutableMapOf<Int, Job>() }
     // 初始参数是否已加载完：用于把事件轮询推迟到之后开始，避免进页时 GetEvent 与
-    // 5 条参数读取抢 ioMutex、拖慢参数首次显示。
+    // 曝光参数与模式读取抢 ioMutex、拖慢参数首次显示。
     var initialLoaded by remember { mutableStateOf(false) }
     // 参数加载完且监看首帧已显示 → 通知外层（免费版试用计时以此为起点）。
     // 键取 frame 是否为空而非 frame 本身，避免每帧重启 effect。
@@ -252,10 +362,12 @@ private fun RemoteContent(
     // 开发者入口默认隐藏：1.5s 内连按 4 次 FPS 键才现身（FPS 连按 4 次开关状态
     // 恰好复原，不留副作用）。仅本次进页有效，退页复位——这是诊断后门不是常驻功能。
     var devUnlocked by remember { mutableStateOf(false) }
-    var fpsTaps by remember { mutableStateOf(0) }
-    var lastFpsTapAt by remember { mutableStateOf(0L) }
+    var fpsTaps by remember { mutableIntStateOf(0) }
+    var lastFpsTapAt by remember { mutableLongStateOf(0L) }
     var showFps by remember { mutableStateOf(true) }    // 帧率覆盖默认显示（右下角）
     var hdLiveView by remember { mutableStateOf(false) } // 高清监看(XGA)开关
+    var showHistogram by remember { mutableStateOf(false) }
+    var framingGrid by remember { mutableStateOf(ViewfinderGrid.OFF) }
     var probing by remember { mutableStateOf(false) }
     fun devLog(line: String) {
         logLines.add(line)
@@ -266,9 +378,29 @@ private fun RemoteContent(
     // 拍摄流程从这里等 ObjectAdded。
     val eventFlow = remember { MutableSharedFlow<Pair<Int, Long>>(extraBufferCapacity = 32) }
 
-    suspend fun decode(bytes: ByteArray, offset: Int = 0): ImageBitmap? =
+    val currentHistogramEnabled = rememberUpdatedState(showHistogram)
+    val histogramThrottle = remember { HistogramThrottle() }
+    suspend fun decode(bytes: ByteArray, offset: Int = 0): RemoteLiveFrame? =
         withContext(Dispatchers.Default) {
-            BitmapFactory.decodeByteArray(bytes, offset, bytes.size - offset)?.asImageBitmap()
+            BitmapFactory.decodeByteArray(bytes, offset, bytes.size - offset)?.let { bitmap ->
+                val histogram = if (currentHistogramEnabled.value) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (histogramThrottle.cached == null ||
+                        now - histogramThrottle.lastCalculatedAtMs >= 250L
+                    ) {
+                        histogramThrottle.cached = calculateLuminanceHistogram(bitmap)
+                        histogramThrottle.lastCalculatedAtMs = now
+                    }
+                    histogramThrottle.cached
+                } else {
+                    histogramThrottle.cached = null
+                    null
+                }
+                RemoteLiveFrame(
+                    image = bitmap.asImageBitmap(),
+                    histogram = histogram
+                )
+            }
         }
 
     suspend fun refreshParam(prop: Int) {
@@ -283,6 +415,22 @@ private fun RemoteContent(
         }
     }
 
+    suspend fun refreshFocusMode() {
+        val cam = cameraViewModel.getCamera() ?: return
+        val focus = runCatching { cam.rcGetFocusMode() }.getOrNull()
+        val changed = !focusModeQueried ||
+            focusModeText != focus?.label || focusModeProp != focus?.prop
+        focusModeQueried = true
+        focusModeText = focus?.label
+        focusModeProp = focus?.prop
+        focusModeManual = focus?.manual == true
+        if (focus != null && changed) {
+            devLog("focus mode ${focus.label} prop=0x%04X raw=0x%X".format(focus.prop, focus.raw))
+        } else if (focus == null && changed) {
+            devLog("!! focus mode unavailable (0x500A/0xD161)")
+        }
+    }
+
     // ---------- 照片/录像模式 ----------
     // movieMode 跟随相机的实体照片/录像拨杆（0xD1A6 LiveViewSelector）：录像位时
     // 快门键变成开始/停止录像。读不到该属性的机型永远按照片模式（优雅降级）。
@@ -290,7 +438,7 @@ private fun RemoteContent(
     // 乐观置位让 UI 立即响应；lastStopCmdAt 用于滤掉停止后才轮询到的迟到"已开始"回声。
     var movieMode by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
-    var lastStopCmdAt by remember { mutableStateOf(0L) }
+    var lastStopCmdAt by remember { mutableLongStateOf(0L) }
     // 远程开录放行（Z 30 实测直发 0x920A 被拒）：两条路线——属性 0xD1F0=1 或操作码
     // 0x9435 ChangeApplicationMode(1)，开录失败时逐级尝试并分别记账；录像一停/拨杆
     // 离开录像位就按账恢复，成对使用不让相机滞留在应用模式。
@@ -409,7 +557,7 @@ private fun RemoteContent(
         onDispose { cameraViewModel.setRemoteActive(false) }
     }
 
-    // 进页/重连：先拉参数（5 条快速往返，胶囊立刻点亮）再启动监看——LV 首帧
+    // 进页/重连：先拉参数与模式（快速往返，胶囊和徽标立刻点亮）再启动监看——LV 首帧
     // 反正要等相机预热（DeviceReady 常见 1s+），参数若排在取帧流后面才真叫慢；
     // 型号是装饰信息，最后后台拉。
     LaunchedEffect(connected) {
@@ -423,6 +571,7 @@ private fun RemoteContent(
         // 再放开事件轮询并启动监看。
         EXPOSURE_PROPS.forEach { refreshParam(it) }
         refreshMode()
+        refreshFocusMode()
         initialLoaded = true
         startSession(hdLiveView)
         // 拨杆位置放监看启动之后：只影响快门键形态，不值得让首帧多等一个往返
@@ -470,6 +619,11 @@ private fun RemoteContent(
                             active.forEach {
                                 if (pendingSets[it]?.isActive != true) refreshParam(it)
                             }
+                        }
+                        if (prop == Lab.PROP_FOCUS_MODE || prop == Lab.PROP_NK_AF_MODE ||
+                            prop == focusModeProp
+                        ) {
+                            refreshFocusMode()
                         }
                         if (prop == Lab.PROP_NK_LV_SELECTOR) refreshMovieMode()
                     }
@@ -523,13 +677,21 @@ private fun RemoteContent(
 
     // 拍摄：capturing 从触发一直保持到收到 ObjectAdded（相机确认新照片已生成）——
     // 快门键转圈即"正在等待拍摄确认"，收到确认/超时/失败即停。不读取也不展示缩略图。
-    fun shoot() {
-        if (capturing) return
-        val cam = cameraViewModel.getCamera() ?: return
+    fun shoot(waitForFocus: Job? = null) {
+        if (capturing || probing) return
+        val expectedCamera = cameraViewModel.getCamera() ?: return
+        // 在 launch 前同步置位，消除两次快速点按同时通过 capturing=false
+        // 而启动两个拍摄事务的小窗口。
+        capturing = true
         scope.launch {
-            capturing = true
-            haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
             try {
+                // 快速松手时 AF 可能仍在轮询 DeviceReady。先收完对焦事务，
+                // 再开始 ObjectAdded 的 12s 倒计，避免把 AF 等待时间错算进拍摄超时。
+                waitForFocus?.join()
+                // 等待期间若发生了断线/重连，绝不把旧手势意外发给新会话。
+                if (cameraViewModel.getCamera() !== expectedCamera) return@launch
+                val cam = expectedCamera
+                haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
                 // 先挂事件等待、再触发拍摄：ObjectAdded 是取走即消费的，
                 // 订阅晚于轮询取走就永远等不到了。
                 val pending = async {
@@ -554,54 +716,81 @@ private fun RemoteContent(
         }
     }
 
-    // 模拟半按对焦：按住快门键 = 持续半按（循环 AfDrive 在【当前对焦点】合焦），
+    // 模拟半按对焦：按住快门键时在当前对焦点执行一次完整 AF，
     // 松开手指在按钮内 = 拍摄，手指移出按钮 = 取消不拍。对焦框在按住期间显示。
-    //（用 AfDrive 半按而非 ChangeAfArea 移点：后者响应 0x2001 但落点语义与机身对不上、
-    // 连发还会把相机踢出 LV(0xA00B)；半按模式行为可预期。）
+    // 抓包已证实 AfDrive 的立即 OK 只是“已开始”，需轮询 DeviceReady 才能
+    // 区分合焦 OK 与 OutOfFocus；也不能循环重发 AfDrive。
     var afHeld by remember { mutableStateOf(false) }
     var afLocked by remember { mutableStateOf(false) }   // 当前是否已合焦（对焦框变绿）
     var afJob by remember { mutableStateOf<Job?>(null) }
+    var tapFocusFeedback by remember { mutableStateOf(TapFocusFeedback.IDLE) }
+    var tapFocusPoint by remember { mutableStateOf(Offset(0.5f, 0.5f)) }
+    var tapFocusNonce by remember { mutableIntStateOf(0) }
+    var tapFocusBusy by remember { mutableStateOf(false) }
+    var tapFocusJob by remember { mutableStateOf<Job?>(null) }
+    var tapFocusHideJob by remember { mutableStateOf<Job?>(null) }
     fun startFocus() {
-        if (afHeld) return
+        if (afHeld || tapFocusBusy || probing || focusModeManual || afJob?.isActive == true) return
+        tapFocusHideJob?.cancel()
+        tapFocusFeedback = TapFocusFeedback.IDLE
         afHeld = true
         afLocked = false
         haptics.tick()   // 开始半按的轻反馈
         afJob?.cancel()
         afJob = scope.launch {
             val cam = cameraViewModel.getCamera() ?: return@launch
-            // 循环驱动 AF 模拟"持续半按"：每次 AfDrive 阻塞至合焦/失败，短歇再来。
-            // AfDrive 返回码即合焦结果：0x2001=合上，0xA002=对不上焦。
-            // 合焦震动【边沿触发】：仅在"未合焦→刚合上"那一下震一次，避免每轮嗡嗡震；
-            // 失焦后再合上会再震。震动本身经全局设置门控（haptics 内部判 enabled）。
-            // 日志同为边沿触发（响应码变化才记）：120ms 一轮的循环逐轮打印会刷掉
-            // 面板里其它关键日志。
-            var lastDrive: Int? = null
-            while (isActive) {
-                val drive = runCatching { cam.rcAfDrive() }.getOrDefault(-1)
-                val locked = drive == Lab.OK
-                if (drive != lastDrive) {
-                    lastDrive = drive
-                    if (locked) devLog("AF locked")
-                    else devLog("!! AF drive resp=0x%04X".format(drive and 0xFFFF))
+            val result = try {
+                cam.rcAfDriveAndWait()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (e is SocketTimeoutException) cameraViewModel.onCameraTransportLost(cam)
+                devLog("!! AF exception: ${e.message}")
+                return@launch
+            }
+            val stillHeld = afHeld
+            afLocked = stillHeld && result.responseCode == Lab.OK
+            val suffix = "polls=${result.polls} elapsed=${result.elapsedMs}ms"
+            when {
+                result.responseCode == Lab.OK -> {
+                    devLog("AF locked ($suffix)")
+                    // 用户已松手/滑出时仍把协议终态收完，但不再给迟到的
+                    // 合焦震动，避免“取消后手机又震一下”。
+                    if (stillHeld) haptics.tick()
                 }
-                if (locked && !afLocked) haptics.tick()   // 合焦成功那一刻
-                afLocked = locked
-                delay(120)
+                result.responseCode == Lab.NK_OUT_OF_FOCUS ->
+                    devLog("!! AF out of focus ($suffix)")
+                result.timedOut -> devLog("!! AF timeout ($suffix)")
+                else -> devLog(
+                    "!! AF result=0x%04X ($suffix)".format(result.responseCode and 0xFFFF)
+                )
             }
         }
     }
-    fun endFocus() {
+    fun endFocus(cancelPending: Boolean = false): Job? {
+        val pending = afJob
         afHeld = false
         afLocked = false
-        afJob?.cancel()
-        afJob = null
+        // 普通松手不取消协议等待：相机端 AF 已经开始，只取消本地协程
+        // 会留下“UI 已结束、相机仍在对焦”的分裂状态。拍摄/录像命令会
+        // 经同一 ioMutex 自然排在 AF 终态之后。只在断连时取消等待。
+        if (cancelPending) {
+            pending?.cancel()
+            afJob = null
+        }
+        return pending
     }
     // 断连兜底：若在按住对焦期间相机掉线，快门键手势节点会被卸载、onRelease 不再执行，
     // 导致 afHeld/afJob 卡住（对焦框不消失、对空相机空转刷日志）。这里主动复位。
     // 录制状态一并复位（相机侧断线会自行停录）。
     LaunchedEffect(connected) {
         if (!connected) {
-            endFocus()
+            endFocus(cancelPending = true)
+            tapFocusJob?.cancel()
+            tapFocusHideJob?.cancel()
+            tapFocusBusy = false
+            tapFocusFeedback = TapFocusFeedback.IDLE
+            focusModeQueried = false
             recording = false
         }
     }
@@ -629,8 +818,8 @@ private fun RemoteContent(
     // 后一条重新计满时长，不会被前一条的旧计时器提前掐掉。
     var hintText by remember { mutableStateOf("") }
     var hintVisible by remember { mutableStateOf(false) }
-    var hintNonce by remember { mutableStateOf(0) }
-    var hintDurationMs by remember { mutableStateOf(2500L) }
+    var hintNonce by remember { mutableIntStateOf(0) }
+    var hintDurationMs by remember { mutableLongStateOf(2500L) }
     fun showHint(text: String, durationMs: Long = 2500L) {
         hintText = text
         hintDurationMs = durationMs
@@ -648,14 +837,98 @@ private fun RemoteContent(
     //（常见原因：无卡/禁止条件）。停止：本地先置停——EndMovieRec 失败多半是相机已自行
     // 停录（卡满/过热），事件会再纠正。recBusy 防抖：命令往返期间忽略连点。
     var recBusy by remember { mutableStateOf(false) }
-    var recSeconds by remember { mutableStateOf(0) }
+    var recSeconds by remember { mutableIntStateOf(0) }
     val recFailHint = stringResource(R.string.remote_rec_start_failed)
-    fun toggleRecord() {
-        if (recBusy) return
+    val manualFocusHint = stringResource(R.string.remote_tap_focus_manual)
+
+    fun focusAt(tap: ViewfinderTap) {
+        if (!connected || capturing || tapFocusBusy || afHeld || probing || afJob?.isActive == true) return
+        if (focusModeManual) {
+            devLog("!! tap AF ignored: camera focus mode is MF")
+            showHint(manualFocusHint)
+            return
+        }
         val cam = cameraViewModel.getCamera() ?: return
-        scope.launch {
-            recBusy = true
+        tapFocusHideJob?.cancel()
+        tapFocusPoint = tap.normalized
+        tapFocusFeedback = TapFocusFeedback.FOCUSING
+        tapFocusNonce++
+        tapFocusBusy = true
+        haptics.tick()
+        devLog(
+            "tap AF point=(${tap.imageX},${tap.imageY}) frame=${tap.imageWidth}x${tap.imageHeight}"
+        )
+        tapFocusJob = scope.launch {
             try {
+                val result = cam.rcFocusAt(tap.imageX, tap.imageY)
+                val af = result.afResult
+                tapFocusFeedback = if (result.moveResponseCode != Lab.OK || af == null) {
+                    devLog(
+                        "!! ChangeAfArea resp=0x%04X".format(result.moveResponseCode and 0xFFFF)
+                    )
+                    TapFocusFeedback.FAILED
+                } else {
+                    val suffix = "polls=${af.polls} elapsed=${af.elapsedMs}ms"
+                    when {
+                        af.responseCode == Lab.OK -> {
+                            devLog("tap AF locked ($suffix)")
+                            haptics.tick()
+                            TapFocusFeedback.LOCKED
+                        }
+                        af.responseCode == Lab.NK_OUT_OF_FOCUS -> {
+                            devLog("!! tap AF out of focus ($suffix)")
+                            TapFocusFeedback.FAILED
+                        }
+                        af.timedOut -> {
+                            devLog("!! tap AF timeout ($suffix)")
+                            TapFocusFeedback.FAILED
+                        }
+                        else -> {
+                            devLog(
+                                "!! tap AF result=0x%04X ($suffix)".format(
+                                    af.responseCode and 0xFFFF
+                                )
+                            )
+                            TapFocusFeedback.FAILED
+                        }
+                    }
+                }
+                val completedNonce = tapFocusNonce
+                tapFocusHideJob = scope.launch {
+                    delay(if (tapFocusFeedback == TapFocusFeedback.LOCKED) 900 else 1_300)
+                    if (tapFocusNonce == completedNonce) {
+                        tapFocusFeedback = TapFocusFeedback.IDLE
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (e is SocketTimeoutException) cameraViewModel.onCameraTransportLost(cam)
+                tapFocusFeedback = TapFocusFeedback.FAILED
+                devLog("!! tap AF exception: ${e.message}")
+                val completedNonce = tapFocusNonce
+                tapFocusHideJob = scope.launch {
+                    delay(1_300)
+                    if (tapFocusNonce == completedNonce) {
+                        tapFocusFeedback = TapFocusFeedback.IDLE
+                    }
+                }
+            } finally {
+                tapFocusBusy = false
+                tapFocusJob = null
+            }
+        }
+    }
+
+    fun toggleRecord(waitForFocus: Job? = null) {
+        if (recBusy || probing) return
+        val expectedCamera = cameraViewModel.getCamera() ?: return
+        recBusy = true
+        scope.launch {
+            try {
+                waitForFocus?.join()
+                if (cameraViewModel.getCamera() !== expectedCamera) return@launch
+                val cam = expectedCamera
                 haptics.longPress()   // 与拍照同级的触发反馈（经全局震动设置门控）
                 if (!recording) {
                     var rc = runCatching { cam.rcStartMovie { devLog(it) } }.getOrDefault(-1)
@@ -698,6 +971,15 @@ private fun RemoteContent(
             }
         }
     }
+
+    fun finishShutterGesture(fire: Boolean) {
+        val shutterFocus = endFocus()
+        if (!fire) return
+        val pendingFocus = shutterFocus?.takeIf { it.isActive }
+            ?: tapFocusJob?.takeIf { it.isActive }
+        if (movieMode) toggleRecord(pendingFocus) else shoot(pendingFocus)
+    }
+
     // 录制计时（REC 徽标显示）：以本地 recording 状态起停，秒级精度足够。
     LaunchedEffect(recording) {
         recSeconds = 0
@@ -707,52 +989,47 @@ private fun RemoteContent(
         }
     }
 
+    fun toggleFpsControl() {
+        showFps = !showFps
+        val now = System.currentTimeMillis()
+        fpsTaps = if (now - lastFpsTapAt < 1500) fpsTaps + 1 else 1
+        lastFpsTapAt = now
+        if (fpsTaps >= 4) devUnlocked = true
+    }
+
     // ---------- 布局 ----------
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
+        AnimatedContent(
+            targetState = fullscreen,
+            transitionSpec = {
+                (fadeIn(tween(durationMillis = 190, delayMillis = 50)) +
+                    scaleIn(initialScale = 0.97f, animationSpec = tween(240)))
+                    .togetherWith(
+                        fadeOut(tween(130)) +
+                            scaleOut(targetScale = 1.02f, animationSpec = tween(160))
+                    )
+            },
+            contentAlignment = Alignment.Center,
+            label = "remoteLayoutOrientation",
+            modifier = Modifier.fillMaxSize()
+        ) { landscape ->
+        if (!landscape) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            // 顶栏：左＝复用照片列表的信号按钮（连接/信号状态，取代原来的小圆点）；
-            // 右＝开发者 / HD / FPS 三个小按钮 + 返回。返回用【右】箭头——本页位于
-            // 照片列表左侧，回去的方向向右。
+            // 顶栏只保留信号与返回；监看工具统一放到取景器下方。
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SignalPill(rssi = camState.wifiRssi, connected = connected)
                 Spacer(Modifier.weight(1f))
-                // 开发者工具入口（放在 HD/FPS 左侧）。顶栏控件统一 22dp 圆角 + 36dp 高
-                //（与照片列表页顶栏一致）。默认隐藏，连按 4 次 FPS 解锁（见 devUnlocked）。
-                if (devUnlocked) {
-                    GlassButton(
-                        onClick = { devPanel = true },
-                        shape = RoundedCornerShape(22.dp),
-                        contentPadding = PaddingValues(9.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.BugReport,
-                            contentDescription = stringResource(R.string.cd_dev_panel),
-                            tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(6.dp))
-                }
-                TopToggle("HD", hdLiveView) { hdLiveView = !hdLiveView; startSession(hdLiveView) }
-                Spacer(Modifier.width(6.dp))
-                TopToggle("FPS", showFps) {
-                    showFps = !showFps
-                    // 隐藏入口计数：间隔超 1.5s 视为重新开始（"连续"按 4 次）
-                    val now = System.currentTimeMillis()
-                    fpsTaps = if (now - lastFpsTapAt < 1500) fpsTaps + 1 else 1
-                    lastFpsTapAt = now
-                    if (fpsTaps >= 4) devUnlocked = true
-                }
-                Spacer(Modifier.width(6.dp))
                 GlassButton(
                     onClick = onNavigateBack,
                     shape = RoundedCornerShape(22.dp),
-                    contentPadding = PaddingValues(9.dp),
+                    showBorder = false,
+                    showSheen = false,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     modifier = Modifier.height(36.dp)
                 ) {
                     Icon(
@@ -762,130 +1039,77 @@ private fun RemoteContent(
                     )
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
 
-            // 监看画面（取景器：不再点击对焦——对焦改由按住快门键触发，见底部）
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(3f / 2f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF0D0D0D))
+            RemoteViewfinderPanel(
+                frameProvider = { frame },
+                grid = framingGrid,
+                showHistogram = showHistogram,
+                modeText = modeText,
+                focusModeText = focusModeText,
+                recording = recording,
+                recSeconds = recSeconds,
+                afHeld = afHeld,
+                afLocked = afLocked,
+                tapFocusFeedback = tapFocusFeedback,
+                tapFocusPoint = tapFocusPoint,
+                tapFocusNonce = tapFocusNonce,
+                onTapFocus = { focusAt(it) },
+                showFps = showFps,
+                fps = fps,
+                connected = connected,
+                modifier = Modifier.fillMaxWidth().aspectRatio(3f / 2f)
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().height(36.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // 帧的 state 读取推迟到子组件内部：让 15-30fps 的换帧只重组那一张
-                // Image，而不是整页（tile/快门/顶栏全部跟着每帧重跑一遍）。
-                ViewfinderImage { frame }
-                // 曝光模式徽标（只读；带物理拨盘的机身无法远程切换）——取景器左上角，
-                // 相机副屏的自然位置。
-                modeText?.let {
-                    Text(
-                        it,
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                    )
-                }
-                // 录制中指示：脉动红点 + 已录时长，取景器右上角（左上是模式徽标、
-                // 右下是 FPS）。本页固定 DarkAppColors，statusError 即恒定红。
-                if (recording) {
-                    val recPulse = rememberInfiniteTransition(label = "recPulse")
-                    val dotAlpha by recPulse.animateFloat(
-                        initialValue = 1f, targetValue = 0.3f,
-                        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
-                        label = "recDot"
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                if (devUnlocked) {
+                    TopIconToggle(
+                        active = false,
+                        contentDescription = stringResource(R.string.cd_dev_panel),
+                        onClick = { devPanel = true }
                     ) {
-                        Box(
-                            Modifier
-                                .size(7.dp)
-                                .graphicsLayer { alpha = dotAlpha }
-                                .background(colors.statusError, CircleShape)
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text(
-                            "%d:%02d".format(recSeconds / 60, recSeconds % 60),
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
+                        Icon(
+                            Icons.Default.BugReport,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
-                // 半按对焦指示：按住期间显示中央对焦框（相机取景器语言的四角 L 形括号），
-                // 收缩入场；合焦成功转绿并轻微收拢一下（与合焦触感同步的视觉确认）。
-                if (afHeld) {
-                    val reticleScale = remember { Animatable(1.4f) }
-                    LaunchedEffect(Unit) { reticleScale.animateTo(1f, tween(180)) }
-                    val lockScale by animateFloatAsState(
-                        targetValue = if (afLocked) 0.9f else 1f,
-                        animationSpec = Motion.bouncy(),
-                        label = "afLock"
-                    )
-                    val reticleColor =
-                        (if (afLocked) colors.statusConnected else colors.accentBlue)
-                            .copy(alpha = 0.95f)
-                    Canvas(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(64.dp)
-                            .graphicsLayer {
-                                val s = reticleScale.value * lockScale
-                                scaleX = s
-                                scaleY = s
-                            }
-                    ) {
-                        val len = 12.dp.toPx()
-                        val sw = 2.dp.toPx()
-                        val inset = sw / 2
-                        val w = size.width - inset
-                        val h = size.height - inset
-                        // 四角 L 形括号（圆头短杆）
-                        drawLine(reticleColor, Offset(inset, inset + len), Offset(inset, inset), sw, StrokeCap.Round)
-                        drawLine(reticleColor, Offset(inset, inset), Offset(inset + len, inset), sw, StrokeCap.Round)
-                        drawLine(reticleColor, Offset(w - len, inset), Offset(w, inset), sw, StrokeCap.Round)
-                        drawLine(reticleColor, Offset(w, inset), Offset(w, inset + len), sw, StrokeCap.Round)
-                        drawLine(reticleColor, Offset(inset, h - len), Offset(inset, h), sw, StrokeCap.Round)
-                        drawLine(reticleColor, Offset(inset, h), Offset(inset + len, h), sw, StrokeCap.Round)
-                        drawLine(reticleColor, Offset(w, h - len), Offset(w, h), sw, StrokeCap.Round)
-                        drawLine(reticleColor, Offset(w - len, h), Offset(w, h), sw, StrokeCap.Round)
+                TopIconToggle(
+                    active = hdLiveView,
+                    contentDescription = stringResource(R.string.dev_hd_liveview),
+                    onClick = {
+                        hdLiveView = !hdLiveView
+                        startSession(hdLiveView)
                     }
+                ) { HdMark(Modifier.size(20.dp)) }
+                TopIconToggle(
+                    active = showFps,
+                    contentDescription = stringResource(R.string.dev_fps_overlay),
+                    onClick = { toggleFpsControl() }
+                ) { FpsMark(Modifier.size(20.dp)) }
+                TopIconToggle(
+                    active = showHistogram,
+                    contentDescription = stringResource(R.string.cd_remote_histogram),
+                    onClick = { showHistogram = !showHistogram }
+                ) { HistogramMark(Modifier.size(19.dp)) }
+                TopIconToggle(
+                    active = framingGrid != ViewfinderGrid.OFF,
+                    contentDescription = stringResource(R.string.cd_remote_grid),
+                    onClick = { framingGrid = framingGrid.next() }
+                ) {
+                    GridMark(Modifier.size(18.dp))
                 }
-                if (showFps && fps > 0f) {
-                    Text(
-                        "%.1f fps".format(fps),
-                        color = Color.White,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-                if (!connected) {
-                    Text(
-                        stringResource(R.string.camera_not_connected),
-                        color = colors.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
+                Spacer(Modifier.weight(1f))
+                TopIconToggle(
+                    active = false,
+                    contentDescription = stringResource(R.string.cd_remote_enter_fullscreen),
+                    onClick = onToggleFullscreen
+                ) { FullscreenMark(fullscreenMorphProgress, Modifier.size(20.dp)) }
             }
             Spacer(Modifier.height(12.dp))
 
@@ -925,19 +1149,183 @@ private fun RemoteContent(
                 ShutterButton(
                     capturing = capturing,
                     focusing = afHeld,
-                    enabled = connected,
+                    enabled = connected && !probing,
                     movie = movieMode,
                     recording = recording,
                     onFocusStart = { startFocus() },
-                    onRelease = { fire ->
-                        endFocus()
-                        if (fire) {
-                            if (movieMode) toggleRecord() else shoot()
-                        }
-                    }
+                    onRelease = ::finishShutterGesture
                 )
             }
             Spacer(Modifier.weight(1f))
+        }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BoxWithConstraints(
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val toolRailWidth = 44.dp
+                    val toolGap = 8.dp
+                    val availableViewfinderWidth =
+                        (maxWidth - toolRailWidth - toolGap).coerceAtLeast(0.dp)
+                    val viewfinderWidth = minOf(availableViewfinderWidth, maxHeight * 1.5f)
+                    val viewfinderHeight = viewfinderWidth / 1.5f
+                    Row(
+                        modifier = Modifier
+                            .width(viewfinderWidth + toolGap + toolRailWidth)
+                            .height(viewfinderHeight),
+                        horizontalArrangement = Arrangement.spacedBy(toolGap)
+                    ) {
+                        RemoteViewfinderPanel(
+                            frameProvider = { frame },
+                            grid = framingGrid,
+                            showHistogram = showHistogram,
+                            modeText = modeText,
+                            focusModeText = focusModeText,
+                            recording = recording,
+                            recSeconds = recSeconds,
+                            afHeld = afHeld,
+                            afLocked = afLocked,
+                            tapFocusFeedback = tapFocusFeedback,
+                            tapFocusPoint = tapFocusPoint,
+                            tapFocusNonce = tapFocusNonce,
+                            onTapFocus = { focusAt(it) },
+                            showFps = showFps,
+                            fps = fps,
+                            connected = connected,
+                            modifier = Modifier.width(viewfinderWidth).fillMaxHeight()
+                        )
+                        Box(Modifier.width(toolRailWidth).fillMaxHeight()) {
+                            TopIconToggle(
+                                active = false,
+                                contentDescription = stringResource(R.string.cd_remote_exit_fullscreen),
+                                onClick = onToggleFullscreen
+                            ) {
+                                FullscreenMark(
+                                    fullscreenMorphProgress,
+                                    Modifier.size(20.dp)
+                                )
+                            }
+                            Column(
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                if (devUnlocked) {
+                                    TopIconToggle(
+                                        active = false,
+                                        contentDescription = stringResource(R.string.cd_dev_panel),
+                                        onClick = { devPanel = true }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.BugReport,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                TopIconToggle(
+                                    active = framingGrid != ViewfinderGrid.OFF,
+                                    contentDescription = stringResource(R.string.cd_remote_grid),
+                                    onClick = { framingGrid = framingGrid.next() }
+                                ) {
+                                    GridMark(Modifier.size(18.dp))
+                                }
+                                TopIconToggle(
+                                    active = showHistogram,
+                                    contentDescription = stringResource(R.string.cd_remote_histogram),
+                                    onClick = { showHistogram = !showHistogram }
+                                ) { HistogramMark(Modifier.size(19.dp)) }
+                                TopIconToggle(
+                                    active = hdLiveView,
+                                    contentDescription = stringResource(R.string.dev_hd_liveview),
+                                    onClick = {
+                                        hdLiveView = !hdLiveView
+                                        startSession(hdLiveView)
+                                    }
+                                ) { HdMark(Modifier.size(20.dp)) }
+                                TopIconToggle(
+                                    active = showFps,
+                                    contentDescription = stringResource(R.string.dev_fps_overlay),
+                                    onClick = { toggleFpsControl() }
+                                ) { FpsMark(Modifier.size(20.dp)) }
+                            }
+                        }
+                    }
+                }
+
+                Column(
+                    modifier = Modifier
+                        .width(238.dp)
+                        .fillMaxHeight()
+                        .padding(top = 28.dp),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        activeProps.chunked(2).forEach { rowProps ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                rowProps.forEach { prop ->
+                                    ParamTile(
+                                        label = paramLabel(prop),
+                                        param = params[prop],
+                                        modifier = Modifier.weight(1f),
+                                        onStep = { delta -> stepParam(prop, delta) },
+                                        onOpenList = {
+                                            if (params[prop]?.values?.isNotEmpty() == true) listProp = prop
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        ShutterButton(
+                            capturing = capturing,
+                            focusing = afHeld,
+                            enabled = connected && !probing,
+                            movie = movieMode,
+                            recording = recording,
+                            onFocusStart = { startFocus() },
+                            onRelease = ::finishShutterGesture
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.align(Alignment.TopEnd),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                SignalPill(rssi = camState.wifiRssi, connected = connected)
+                GlassButton(
+                    onClick = onNavigateBack,
+                    shape = RoundedCornerShape(22.dp),
+                    showBorder = false,
+                    showSheen = false,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Icon(
+                        Icons.Default.ArrowForward,
+                        contentDescription = stringResource(R.string.cd_back),
+                        tint = colors.onBackground,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            }
+        }
         }
 
         // 顶部提示条：视觉与照片列表页的底部玻璃提示条同款（22dp 玻璃 Surface + 投影 +
@@ -1157,7 +1545,7 @@ private fun RemoteContent(
                                 fontSize = 10.sp,
                                 lineHeight = 14.sp,
                                 color = if (line.startsWith("!!")) colors.accentOrange
-                                else colors.onSurfaceVariant
+                                else Color.White.copy(alpha = 0.76f)
                             )
                         }
                     }
@@ -1167,21 +1555,224 @@ private fun RemoteContent(
     }
 }
 
+@Composable
+private fun ViewfinderStatusBadge(text: String, weight: FontWeight) {
+    Text(
+        text = text,
+        color = Color.White,
+        fontSize = 11.sp,
+        fontWeight = weight,
+        modifier = Modifier
+            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 7.dp, vertical = 2.dp)
+    )
+}
+
+/** 包含模式徽标、录制/FPS/对焦反馈的完整取景器；帧更新仍只落在其内部。 */
+@Composable
+private fun RemoteViewfinderPanel(
+    frameProvider: () -> RemoteLiveFrame?,
+    grid: ViewfinderGrid,
+    showHistogram: Boolean,
+    modeText: String?,
+    focusModeText: String?,
+    recording: Boolean,
+    recSeconds: Int,
+    afHeld: Boolean,
+    afLocked: Boolean,
+    tapFocusFeedback: TapFocusFeedback,
+    tapFocusPoint: Offset,
+    tapFocusNonce: Int,
+    onTapFocus: (ViewfinderTap) -> Unit,
+    showFps: Boolean,
+    fps: Float,
+    connected: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val colors = AppTheme.colors
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF0D0D0D))
+    ) {
+        ViewfinderImage(
+            frameProvider = frameProvider,
+            grid = grid,
+            showHistogram = showHistogram,
+            tapFocusFeedback = tapFocusFeedback,
+            tapFocusPoint = tapFocusPoint,
+            tapFocusNonce = tapFocusNonce,
+            onTapFocus = onTapFocus
+        )
+
+        if (modeText != null || focusModeText != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                modeText?.let {
+                    ViewfinderStatusBadge(it, FontWeight.Bold)
+                }
+                focusModeText?.let {
+                    ViewfinderStatusBadge(it, FontWeight.SemiBold)
+                }
+            }
+        }
+
+        if (recording) {
+            val recPulse = rememberInfiniteTransition(label = "recPulse")
+            val dotAlpha by recPulse.animateFloat(
+                initialValue = 1f,
+                targetValue = 0.3f,
+                animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
+                label = "recDot"
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 7.dp, vertical = 2.dp)
+            ) {
+                Box(
+                    Modifier
+                        .size(7.dp)
+                        .graphicsLayer { alpha = dotAlpha }
+                        .background(colors.statusError, CircleShape)
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    "%d:%02d".format(recSeconds / 60, recSeconds % 60),
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+
+        if (afHeld) {
+            val reticleScale = remember { Animatable(1.4f) }
+            LaunchedEffect(Unit) { reticleScale.animateTo(1f, tween(180)) }
+            val lockScale by animateFloatAsState(
+                targetValue = if (afLocked) 0.9f else 1f,
+                animationSpec = Motion.bouncy(),
+                label = "afLock"
+            )
+            val reticleColor =
+                (if (afLocked) colors.statusConnected else colors.accentBlue).copy(alpha = 0.95f)
+            Canvas(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(64.dp)
+                    .graphicsLayer {
+                        val scale = reticleScale.value * lockScale
+                        scaleX = scale
+                        scaleY = scale
+                    }
+            ) {
+                val len = 12.dp.toPx()
+                val stroke = 2.dp.toPx()
+                val inset = stroke / 2
+                drawFocusCornerReticle(
+                    center = size.center,
+                    halfSize = size.width / 2f - inset,
+                    cornerLength = len,
+                    color = reticleColor,
+                    strokeWidth = stroke
+                )
+            }
+        }
+
+        if (showFps && fps > 0f) {
+            Text(
+                "%.1f fps".format(fps),
+                color = Color.White,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
+        if (!connected) {
+            Text(
+                stringResource(R.string.camera_not_connected),
+                // 固定深色的取景器遮罩内始终使用亮字，不跟随页面浅色主题变暗。
+                color = Color.White.copy(alpha = 0.78f),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+    }
+}
+
 /**
  * 监看画面本体。[frameProvider] 延迟到此处才读 frame state——换帧重组被限制在
  * 这个小组件内，页面其余部分（tile/快门/顶栏）不随帧率重跑。
  */
 @Composable
-private fun ViewfinderImage(frameProvider: () -> ImageBitmap?) {
+private fun ViewfinderImage(
+    frameProvider: () -> RemoteLiveFrame?,
+    grid: ViewfinderGrid,
+    showHistogram: Boolean,
+    tapFocusFeedback: TapFocusFeedback,
+    tapFocusPoint: Offset,
+    tapFocusNonce: Int,
+    onTapFocus: (ViewfinderTap) -> Unit
+) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val bmp = frameProvider()
-        if (bmp != null) {
-            Image(
-                bitmap = bmp,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize()
-            )
+        val liveFrame = frameProvider()
+        if (liveFrame != null) {
+            val imageWidth = liveFrame.image.width
+            val imageHeight = liveFrame.image.height
+            val currentTapHandler by rememberUpdatedState(onTapFocus)
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .pointerInput(imageWidth, imageHeight) {
+                        detectTapGestures { tap ->
+                            val imageRect = fitCenterRect(
+                                size.width.toFloat(),
+                                size.height.toFloat(),
+                                imageWidth.toFloat() / imageHeight
+                            )
+                            if (tap.x in imageRect.left..imageRect.right &&
+                                tap.y in imageRect.top..imageRect.bottom
+                            ) {
+                                val normalizedX =
+                                    ((tap.x - imageRect.left) / imageRect.width).coerceIn(0f, 1f)
+                                val normalizedY =
+                                    ((tap.y - imageRect.top) / imageRect.height).coerceIn(0f, 1f)
+                                currentTapHandler(
+                                    ViewfinderTap(
+                                        imageX = (normalizedX * (imageWidth - 1)).roundToInt(),
+                                        imageY = (normalizedY * (imageHeight - 1)).roundToInt(),
+                                        imageWidth = imageWidth,
+                                        imageHeight = imageHeight,
+                                        normalized = Offset(normalizedX, normalizedY)
+                                    )
+                                )
+                            }
+                        }
+                    }
+            ) {
+                Image(
+                    bitmap = liveFrame.image,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
             // 暗角：四周极淡压暗，画面"坐进"边框（相机目镜语言），角标叠其上不受影响。
             // 半径必须取【半对角线】——默认的"短边一半"在 3:2 宽幅上圆罩不住左右两侧，
             // 半径之外会被涂成均匀实色（两条黑带而非渐晕）。drawWithCache 只在尺寸
@@ -1199,6 +1790,28 @@ private fun ViewfinderImage(frameProvider: () -> ImageBitmap?) {
                         onDrawBehind { drawRect(brush) }
                     }
             )
+            FramingGridOverlay(
+                grid = grid,
+                imageAspectRatio = liveFrame.image.width.toFloat() / liveFrame.image.height,
+                modifier = Modifier.matchParentSize()
+            )
+            if (tapFocusFeedback != TapFocusFeedback.IDLE) {
+                TapFocusReticleOverlay(
+                    feedback = tapFocusFeedback,
+                    point = tapFocusPoint,
+                    nonce = tapFocusNonce,
+                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    modifier = Modifier.matchParentSize()
+                )
+            }
+            if (showHistogram) {
+                liveFrame.histogram?.let {
+                    HistogramOverlay(
+                        histogram = it,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
+                    )
+                }
+            }
         } else {
             Icon(
                 Icons.Default.Videocam, contentDescription = null,
@@ -1501,6 +2114,7 @@ private fun ShutterButton(
     onFocusStart: () -> Unit,
     onRelease: (fire: Boolean) -> Unit
 ) {
+    val colors = AppTheme.colors
     val innerScale by animateFloatAsState(
         targetValue = if (focusing) 0.8f else 1f,
         animationSpec = tween(120),
@@ -1513,14 +2127,13 @@ private fun ShutterButton(
         label = "shutterPress"
     )
     val ringColor = when {
-        !enabled -> Color.White.copy(alpha = 0.3f)
-        focusing -> AppTheme.colors.accentBlue
-        else -> Color.White.copy(alpha = 0.9f)
+        !enabled -> colors.onBackground.copy(alpha = 0.3f)
+        focusing -> colors.accentBlue
+        else -> colors.onBackground.copy(alpha = 0.9f)
     }
     // 内芯形态：照片=白色大圆；录像待机=红色大圆；录制中=红色小圆角方块（通用停止
-    // 语义），尺寸与圆角同步动画做圆→方块的连续变形。本页固定 DarkAppColors，
-    // statusError 即恒定红。
-    val innerColor = if (movie) AppTheme.colors.statusError else Color.White
+    // 语义），尺寸与圆角同步动画做圆→方块的连续变形。
+    val innerColor = if (movie) colors.statusError else Color.White
     val innerSize by animateDpAsState(
         targetValue = if (recording) 28.dp else 60.dp,
         animationSpec = tween(160), label = "recInnerSize"
@@ -1562,7 +2175,7 @@ private fun ShutterButton(
         if (capturing) {
             CircularProgressIndicator(
                 modifier = Modifier.size(52.dp),
-                color = Color.White,
+                color = colors.onBackground,
                 strokeWidth = 3.dp
             )
         } else {
@@ -1582,22 +2195,83 @@ private fun ShutterButton(
     }
 }
 
-/** 顶栏小切换按钮（HD / FPS）：激活时蓝字高亮，未激活时低调玻璃底。
- *  规格与顶栏其它控件一致（22dp 圆角 + 36dp 高）。 */
 @Composable
-private fun TopToggle(label: String, active: Boolean, onClick: () -> Unit) {
+private fun TapFocusReticleOverlay(
+    feedback: TapFocusFeedback,
+    point: Offset,
+    nonce: Int,
+    imageAspectRatio: Float,
+    modifier: Modifier = Modifier
+) {
+    val colors = AppTheme.colors
+    val appearScale = remember { Animatable(1.45f) }
+    LaunchedEffect(nonce) {
+        appearScale.snapTo(1.45f)
+        appearScale.animateTo(1f, tween(180))
+    }
+    val resultScale by animateFloatAsState(
+        targetValue = if (feedback == TapFocusFeedback.FOCUSING) 1f else 0.9f,
+        animationSpec = Motion.bouncy(),
+        label = "tapAfResult"
+    )
+    val reticleColor = when (feedback) {
+        TapFocusFeedback.LOCKED -> colors.statusConnected
+        TapFocusFeedback.FAILED -> colors.statusError
+        else -> colors.accentBlue
+    }.copy(alpha = 0.95f)
+
+    Canvas(modifier) {
+        val imageRect = fitCenterRect(size.width, size.height, imageAspectRatio)
+        val scale = appearScale.value * resultScale
+        val half = 32.dp.toPx() * scale
+        val len = 12.dp.toPx() * scale
+        val stroke = 2.dp.toPx()
+        val requestedCenter = Offset(
+            imageRect.left + imageRect.width * point.x.coerceIn(0f, 1f),
+            imageRect.top + imageRect.height * point.y.coerceIn(0f, 1f)
+        )
+        // 只约束反馈框的绘制位置，发给相机的坐标仍是用户真实点位。
+        // 这样点画面边缘时框不会被圆角取景器裁掉一半。
+        val center = Offset(
+            if (imageRect.width >= half * 2f) {
+                requestedCenter.x.coerceIn(imageRect.left + half, imageRect.right - half)
+            } else imageRect.center.x,
+            if (imageRect.height >= half * 2f) {
+                requestedCenter.y.coerceIn(imageRect.top + half, imageRect.bottom - half)
+            } else imageRect.center.y
+        )
+        drawFocusCornerReticle(
+            center = center,
+            halfSize = half,
+            cornerLength = len,
+            color = reticleColor,
+            strokeWidth = stroke
+        )
+    }
+}
+
+/** 顶栏紧凑切换按钮：尺寸、玻璃激活态和按压效果保持统一。 */
+@Composable
+private fun TopIconToggle(
+    active: Boolean,
+    contentDescription: String,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit
+) {
     val colors = AppTheme.colors
     GlassButton(
         onClick = onClick,
+        active = active,
         shape = RoundedCornerShape(22.dp),
+        showBorder = false,
+        showSheen = false,
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        modifier = Modifier.height(36.dp)
+        modifier = Modifier.height(36.dp).semantics { this.contentDescription = contentDescription }
     ) {
-        Text(
-            label,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (active) colors.accentBlue else colors.onSurfaceVariant
-        )
+        CompositionLocalProvider(
+            LocalContentColor provides if (active) colors.accentBlue else colors.onSurfaceVariant
+        ) {
+            content()
+        }
     }
 }

@@ -27,6 +27,7 @@
     <string name="filter_all">All</string>
     <string name="filter_protected">Protected</string>
     <string name="burst_label">Burst</string>
+    <string name="filter_untransferred">Not transferred</string>
     <string name="filter_other">Other</string>
     <string name="cd_back_to_top">Back to top</string>
     <string name="cd_filter_type">Filter by type</string>
@@ -36,7 +37,6 @@
     <string name="cd_collapse">Collapse</string>
     <string name="cd_all_queued">All added to queue</string>
     <string name="cd_transfer_group">Transfer this group</string>
-    <string name="cd_apply_filter">Apply filter</string>
 
     <!-- Transfer queue -->
     <string name="no_transfer_tasks">No transfer tasks</string>
@@ -127,14 +127,19 @@
 
     <!-- Remote control page -->
     <string name="cd_remote_entry">Remote control</string>
-    <string name="cd_focus_point">Focus point</string>
+    <string name="cd_rotate_photo">Rotate photo</string>
     <string name="cd_dev_panel">Developer tools</string>
     <string name="remote_blocked_transfer">Transfer in progress — enter live view after it finishes</string>
     <string name="remote_title">Remote</string>
     <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>
     <string name="remote_rec_start_failed">Couldn\'t start recording — check the memory card and camera status</string>
+    <string name="remote_tap_focus_manual">Switch the camera to autofocus to use tap focus</string>
     <string name="dev_panel_title">Developer</string>
     <string name="dev_hd_liveview">XGA live view</string>
+    <string name="cd_remote_histogram">Live view histogram</string>
+    <string name="cd_remote_grid">Framing grid</string>
+    <string name="cd_remote_enter_fullscreen">Enter full screen</string>
+    <string name="cd_remote_exit_fullscreen">Exit full screen</string>
     <string name="dev_fps_overlay">FPS overlay</string>
     <string name="lab_run_probe">Probe</string>
     <string name="lab_copy_log">Copy log</string>

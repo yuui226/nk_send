@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZTransfer 监看工具栏布局示意</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #080a0e;
+      --panel: #10141b;
+      --phone: #05070a;
+      --glass: rgba(32, 38, 48, .78);
+      --glass-strong: rgba(39, 47, 59, .94);
+      --stroke: rgba(255, 255, 255, .14);
+      --text: #f4f6f9;
+      --muted: #8e98a8;
+      --blue: #56a8ff;
+      --blue-bg: rgba(47, 137, 238, .19);
+      --green: #73e2a7;
+      --radius: 22px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 18% 0%, rgba(52, 104, 171, .14), transparent 31rem),
+        var(--page);
+      font-family: Inter, "Noto Sans SC", system-ui, sans-serif;
+    }
+
+    .page { max-width: 1340px; margin: 0 auto; padding: 34px 28px 48px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+    h1 { margin: 0 0 7px; font-size: 25px; letter-spacing: -.02em; }
+    .subtitle { margin: 0; color: var(--muted); font-size: 14px; }
+    .rule {
+      flex: 0 0 auto;
+      padding: 9px 13px;
+      border: 1px solid rgba(86, 168, 255, .28);
+      border-radius: 999px;
+      color: #aad2ff;
+      background: rgba(86, 168, 255, .08);
+      font-size: 12px;
+    }
+
+    .board { display: grid; grid-template-columns: 390px minmax(720px, 1fr); gap: 24px; align-items: start; }
+    .case {
+      min-width: 0;
+      padding: 18px;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 26px;
+      background: linear-gradient(145deg, rgba(19,24,32,.92), rgba(12,15,20,.88));
+      box-shadow: 0 22px 60px rgba(0,0,0,.32);
+    }
+    .case-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 2px 13px; }
+    .case h2 { margin: 0; font-size: 15px; }
+    .case-note { color: var(--muted); font-size: 11px; }
+
+    .phone {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.12);
+      background: var(--phone);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.8), 0 18px 50px rgba(0,0,0,.35);
+    }
+    .portrait { width: 354px; height: 704px; padding: 13px 12px 16px; border-radius: 34px; }
+    .landscape {
+      --cutout-safe-left: 30px;
+      width: 100%; height: 414px;
+      padding: 12px 13px 12px calc(13px + var(--cutout-safe-left));
+      border-radius: 28px;
+    }
+    .landscape > .back { position: absolute; z-index: 5; top: 12px; right: 13px; }
+    .landscape > .signal { position: absolute; z-index: 5; top: 12px; right: 57px; }
+    .display-cutout {
+      position: absolute; z-index: 6; left: 10px; top: 50%;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: #000; box-shadow: 0 0 0 1px rgba(255,255,255,.08);
+      transform: translateY(-50%);
+    }
+
+    .topbar { height: 48px; display: flex; align-items: flex-start; justify-content: space-between; }
+    /* 信号按钮不参与本轮重绘：保持 App 现有的玻璃胶囊和四格信号柱。 */
+    .signal {
+      display: inline-flex; align-items: center;
+      height: 36px; padding: 0 14px;
+      border: 1px solid var(--stroke); border-radius: 22px;
+      background: linear-gradient(145deg, rgba(45,53,65,.88), rgba(25,30,39,.92));
+      box-shadow: 0 5px 14px rgba(0,0,0,.24), inset 0 1px rgba(255,255,255,.06);
+      color: #cbd3de; overflow: hidden; white-space: nowrap; cursor: pointer;
+    }
+    .signal-bars { height: 15px; display: flex; align-items: end; gap: 2.5px; }
+    .signal-bars i { width: 4px; border-radius: 1.5px; background: var(--green); }
+    .signal-bars i:nth-child(1) { height: 6px; }
+    .signal-bars i:nth-child(2) { height: 9px; }
+    .signal-bars i:nth-child(3) { height: 12px; }
+    .signal-bars i:nth-child(4) { height: 15px; }
+    .signal-reading {
+      display: inline-block; max-width: 0; margin-left: 0; overflow: hidden;
+      opacity: 0; color: #cbd3de; font: 600 10px/1 ui-monospace, monospace;
+      transition: max-width 220ms ease, margin-left 220ms ease, opacity 150ms ease;
+    }
+    .signal.expanded .signal-reading { max-width: 42px; margin-left: 8px; opacity: 1; }
+
+    button { font: inherit; }
+    .tool {
+      position: relative;
+      display: grid; place-items: center;
+      width: 40px; height: 40px;
+      padding: 0;
+      color: #c5ccd6;
+      border: 1px solid var(--stroke);
+      border-radius: 50%;
+      background: linear-gradient(145deg, rgba(45,53,65,.88), rgba(25,30,39,.92));
+      box-shadow: 0 5px 14px rgba(0,0,0,.24), inset 0 1px rgba(255,255,255,.06);
+      cursor: pointer;
+      transition: transform 110ms ease, color 150ms ease, border-color 150ms ease, background 150ms ease;
+    }
+    .tool:hover { border-color: rgba(255,255,255,.27); color: #fff; }
+    .tool:active { transform: scale(.90); }
+    .tool.active { color: var(--blue); border-color: rgba(86,168,255,.58); background: var(--blue-bg); }
+    .tool svg { width: 21px; height: 21px; overflow: visible; }
+    .back { width: 36px; height: 36px; }
+    .back svg { width: 18px; height: 18px; }
+    .fullscreen { color: #fff; border-color: rgba(255,255,255,.25); background: var(--glass-strong); }
+    .fullscreen::after {
+      content: ""; position: absolute; inset: -5px; border: 1px solid rgba(86,168,255,.12); border-radius: 50%; pointer-events: none;
+    }
+
+    .viewfinder {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 15px;
+      background:
+        linear-gradient(180deg, transparent 47%, rgba(5,10,14,.28) 48%),
+        linear-gradient(135deg, #61717c 0 22%, #29333a 22% 34%, #8b7764 34% 58%, #33444a 58% 76%, #172126 76%);
+      box-shadow: inset 0 0 40px rgba(0,0,0,.22);
+    }
+    .viewfinder::before {
+      content: "";
+      position: absolute; left: 39%; top: 19%; width: 23%; height: 55%;
+      border-radius: 48% 48% 36% 36%;
+      background: linear-gradient(90deg, #20282d, #807266 48%, #252e32);
+      filter: blur(.4px);
+      box-shadow: 55px 20px 0 -18px rgba(25,32,35,.7), -76px 36px 0 -23px rgba(52,60,61,.8);
+    }
+    .camera-badges {
+      position: absolute; left: 10px; top: 9px; z-index: 2;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .mode-badge, .focus-mode-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 21px; padding: 0 7px;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 7px; background: rgba(0,0,0,.58); color: white;
+      font: 700 10px/1 ui-monospace, monospace;
+    }
+    .focus-box {
+      position: absolute; z-index: 2; left: 53%; top: 44%; width: 36px; height: 28px;
+      border: 1.5px solid rgba(86,168,255,.95);
+    }
+    .grid-lines { position: absolute; inset: 0; opacity: .34; pointer-events: none; }
+    .grid-lines i { position: absolute; background: white; }
+    .grid-lines i:nth-child(1), .grid-lines i:nth-child(2) { width: 1px; height: 100%; top: 0; }
+    .grid-lines i:nth-child(1) { left: 33.333%; } .grid-lines i:nth-child(2) { left: 66.666%; }
+    .grid-lines i:nth-child(3), .grid-lines i:nth-child(4) { height: 1px; width: 100%; left: 0; }
+    .grid-lines i:nth-child(3) { top: 33.333%; } .grid-lines i:nth-child(4) { top: 66.666%; }
+
+    .portrait .viewfinder { width: 330px; height: 220px; }
+    .portrait-tools {
+      position: relative;
+      width: 330px; height: 50px;
+      display: flex; align-items: center; gap: 8px;
+      margin-top: 9px;
+      padding-right: 48px;
+    }
+    .portrait-tools .fullscreen { position: absolute; right: 0; top: 5px; }
+
+    .params { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .portrait .params { margin-top: 11px; }
+    .param {
+      height: 61px; padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,.08); border-radius: 13px;
+      background: linear-gradient(145deg, rgba(27,32,41,.94), rgba(16,20,26,.94));
+    }
+    .param span { display: block; color: #7f8997; font-size: 9px; letter-spacing: .08em; }
+    .param strong { display: block; margin-top: 6px; color: #f0f3f7; font: 600 15px/1 ui-monospace, monospace; }
+    .shutter-wrap { display: grid; place-items: center; }
+    .portrait .shutter-wrap { height: 147px; }
+    .shutter {
+      width: 70px; height: 70px; border: 4px solid #d8dde4; border-radius: 50%; padding: 5px;
+      background: transparent;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.9);
+    }
+    .shutter::before { content: ""; display: block; width: 100%; height: 100%; border-radius: 50%; background: #edf0f4; }
+
+    .landscape-body { display: grid; grid-template-columns: minmax(350px, 1fr) 205px; gap: 10px; height: 100%; }
+    .landscape-stage {
+      min-width: 0; align-self: center;
+      display: grid; grid-template-columns: minmax(0, 1fr) 48px; gap: 10px;
+    }
+    .landscape-left { min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+    .landscape .viewfinder { width: 100%; aspect-ratio: 3 / 2; max-height: 100%; }
+    .landscape-tools {
+      position: relative;
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px;
+      padding-top: 52px;
+    }
+    .landscape-tools .fullscreen { position: absolute; top: 0; left: 4px; }
+    .landscape-right { display: flex; flex-direction: column; justify-content: center; gap: 12px; padding-top: 30px; }
+    .landscape-right .param { height: 55px; padding: 8px 10px; }
+    .landscape-right .shutter-wrap { height: 80px; }
+    .landscape-right .shutter { width: 64px; height: 64px; }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 14px; color: var(--muted); font-size: 11px; }
+    .legend span { display: inline-flex; align-items: center; gap: 5px; }
+    .legend b { width: 6px; height: 6px; border-radius: 50%; background: #667180; }
+    .legend .blue { background: var(--blue); }
+
+    .decision {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+      margin-top: 24px; padding: 18px 20px;
+      border: 1px solid rgba(255,255,255,.08); border-radius: 20px; background: rgba(16,20,27,.72);
+    }
+    .decision h3 { margin: 0 0 8px; font-size: 13px; }
+    .decision p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+
+    @media (max-width: 1180px) {
+      .board { grid-template-columns: 1fr; }
+      .case:first-child { width: 390px; max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <defs>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M5 12h14M14 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-quality" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 14.5V9.5m0 2.4h3V9.5m0 5V12M13 9.5h1.8c1.8 0 3 1 3 2.5s-1.2 2.5-3 2.5H13z" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-fps" viewBox="0 0 24 24"><path d="M4.2 16a8.3 8.3 0 1 1 15.6 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M12 12l4.3-3.1M7 17h10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/></symbol>
+      <symbol id="i-hist" viewBox="0 0 24 24"><path d="M4 18.5h16M5.3 17V7.5" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"/><path d="M6.5 16l2.6-4.4 2.1 2.1 3.1-6.2 3.3 5.8 1.3-2.1" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.35 4v16M14.65 4v16M4 9.35h16M4 14.65h16" fill="none" stroke="currentColor" stroke-width="1.25"/></symbol>
+      <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M4 9h5V4M20 9h-5V4M15 20v-5h5M9 20v-5H4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    </defs>
+  </svg>
+
+  <main class="page">
+    <header>
+      <div>
+        <h1>监看页小工具重排 · 方案 A</h1>
+        <p class="subtitle">图标统一为 1.5–2px 线性风格；实机界面不显示文字标签。</p>
+      </div>
+      <div class="rule">全屏键固定锚点，不参与普通按钮流</div>
+    </header>
+
+    <section class="board">
+      <article class="case">
+        <div class="case-head"><h2>竖屏</h2><span class="case-note">工具栏位于画面正下方</span></div>
+        <div class="phone portrait">
+          <div class="topbar">
+            <button class="signal" aria-label="显示信号强度" aria-expanded="false" title="点击展开信号强度"><span class="signal-bars"><i></i><i></i><i></i><i></i></span><span class="signal-reading">-42 dBm</span></button>
+            <button class="tool back" aria-label="返回"><svg><use href="#i-back"/></svg></button>
+          </div>
+          <div class="viewfinder">
+            <span class="camera-badges"><span class="mode-badge">M</span><span class="focus-mode-badge">AF-S</span></span><span class="focus-box"></span>
+            <span class="grid-lines"><i></i><i></i><i></i><i></i></span>
+          </div>
+          <div class="portrait-tools">
+            <button class="tool active" aria-label="高清监看" title="高清监看"><svg><use href="#i-quality"/></svg></button>
+            <button class="tool" aria-label="帧率" title="帧率"><svg><use href="#i-fps"/></svg></button>
+            <button class="tool" aria-label="直方图" title="直方图"><svg><use href="#i-hist"/></svg></button>
+            <button class="tool active" aria-label="参考线" title="参考线"><svg><use href="#i-grid"/></svg></button>
+            <button class="tool fullscreen" aria-label="进入全屏" title="进入全屏"><svg><use href="#i-expand"/></svg></button>
+          </div>
+          <div class="params">
+            <div class="param"><span>EXP. COMP.</span><strong>+0.0</strong></div>
+            <div class="param"><span>ISO</span><strong>100</strong></div>
+            <div class="param"><span>APERTURE</span><strong>F2.8</strong></div>
+            <div class="param"><span>SHUTTER</span><strong>1/125</strong></div>
+          </div>
+          <div class="shutter-wrap"><button class="shutter" aria-label="快门"></button></div>
+        </div>
+        <div class="legend"><span><b class="blue"></b>激活</span><span><b></b>未激活</span><span>HD · FPS · 直方图 · 参考线 ｜ 全屏</span></div>
+      </article>
+
+      <article class="case">
+        <div class="case-head"><h2>横屏</h2><span class="case-note">工具栏沿画面右侧由上到下</span></div>
+        <div class="phone landscape">
+          <span class="display-cutout" aria-hidden="true"></span>
+          <button class="signal" aria-label="显示信号强度" aria-expanded="false" title="右边固定，向左展开"><span class="signal-bars"><i></i><i></i><i></i><i></i></span><span class="signal-reading">-42 dBm</span></button>
+          <button class="tool back" aria-label="返回"><svg><use href="#i-back"/></svg></button>
+          <div class="landscape-body">
+            <div class="landscape-stage">
+              <div class="landscape-left">
+                <div class="viewfinder">
+                  <span class="camera-badges"><span class="mode-badge">M</span><span class="focus-mode-badge">AF-S</span></span><span class="focus-box"></span>
+                  <span class="grid-lines"><i></i><i></i><i></i><i></i></span>
+                </div>
+              </div>
+              <div class="landscape-tools">
+                <button class="tool fullscreen" aria-label="退出全屏" title="退出全屏"><svg><use href="#i-collapse"/></svg></button>
+                <button class="tool active" aria-label="参考线" title="参考线"><svg><use href="#i-grid"/></svg></button>
+                <button class="tool" aria-label="直方图" title="直方图"><svg><use href="#i-hist"/></svg></button>
+                <button class="tool active" aria-label="高清监看" title="高清监看"><svg><use href="#i-quality"/></svg></button>
+                <button class="tool" aria-label="帧率" title="帧率"><svg><use href="#i-fps"/></svg></button>
+              </div>
+            </div>
+            <div class="landscape-right">
+              <div class="params">
+                <div class="param"><span>EXP.</span><strong>+0.0</strong></div>
+                <div class="param"><span>ISO</span><strong>100</strong></div>
+                <div class="param"><span>APERTURE</span><strong>F2.8</strong></div>
+                <div class="param"><span>SHUTTER</span><strong>1/125</strong></div>
+              </div>
+              <div class="shutter-wrap"><button class="shutter" aria-label="快门"></button></div>
+            </div>
+          </div>
+        </div>
+        <div class="legend"><span>最上固定：退出全屏</span><span>其余从上到下：参考线 · 直方图 · HD · FPS</span></div>
+      </article>
+    </section>
+
+    <section class="decision">
+      <div><h3>固定位置的含义</h3><p>竖屏全屏键绝对锚定在画面下方工具栏最右；横屏绝对锚定在画面右侧工具栏最上。以后增加或隐藏其他按钮，都不会让它移动。</p></div>
+      <div><h3>方向语义</h3><p>竖屏使用四角向外的“进入全屏”；横屏使用四角向内的“退出全屏”。按钮外观、尺寸和按压反馈保持一致，只切换图形语义。</p></div>
+    </section>
+  </main>
+
+  <script>
+    document.querySelectorAll('.tool:not(.back):not(.fullscreen)').forEach((button) => {
+      button.addEventListener('click', () => button.classList.toggle('active'));
+    });
+    document.querySelectorAll('.signal').forEach((button) => {
+      button.addEventListener('click', () => {
+        const expanded = button.classList.toggle('expanded');
+        button.setAttribute('aria-expanded', String(expanded));
+      });
+    });
+  </script>
+</body>
+</html>

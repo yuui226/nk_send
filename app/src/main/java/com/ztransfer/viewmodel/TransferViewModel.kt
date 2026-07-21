@@ -50,6 +50,8 @@ data class TransferState(
     val isTransferring: Boolean = false,
     val currentSpeed: Long = 0,
     val transferDirUri: String? = null,
+    /** 导出目录内完整文件：归一化文件名 -> 已有大小集合，用于相机列表直接标记已传照片。 */
+    val existingExportFiles: Map<String, Set<Long>> = emptyMap(),
     val thumbnailColumns: Int = 3,
     // 触感反馈开关：默认开启，用户关闭后持久化，下次启动保持。
     val hapticsEnabled: Boolean = true,
@@ -65,6 +67,12 @@ data class TransferState(
     val filterProtectedOnly: Boolean = false,
     // 只看连拍照片（检测算法见 FileListScreen.computeBurstHandles）。持久化。
     val filterBurstOnly: Boolean = false,
+    // 只看导出目录中尚未存在的照片。与缩略图已传对号共用同一份索引。持久化。
+    val filterUntransferredOnly: Boolean = false,
+    // 预览大图的全局逆时针旋转方向（0..3 个 90°）。跨照片、跨会话持久化。
+    val previewRotationQuarterTurns: Int = 0,
+    // 监看页是否使用应用内横屏全屏布局。跨进页、跨应用重启持久化。
+    val remoteFullscreen: Boolean = false,
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
     // 切换后由设置面板触发 Activity.recreate() 生效。
     val appLanguage: String = AppLocale.SYSTEM
@@ -153,13 +161,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet(),
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
                 filterBurstOnly = prefs.getBoolean("filter_burst", false),
+                filterUntransferredOnly = prefs.getBoolean("filter_untransferred", false),
+                previewRotationQuarterTurns = Math.floorMod(
+                    prefs.getInt("preview_rotation_quarter_turns", 0), 4
+                ),
+                remoteFullscreen = prefs.getBoolean("remote_fullscreen", false),
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
         }
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
         if (dir != null) {
             viewModelScope.launch(Dispatchers.IO) {
-                try { sweepAndListExisting(Uri.parse(dir), deleteParts = true) } catch (_: Exception) {}
+                refreshExistingExportFiles(Uri.parse(dir), deleteParts = true)
             }
         }
     }
@@ -185,24 +198,44 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(keepScreenOn = enabled) }
     }
 
+    /** 保存预览大图的全局旋转方向；任何照片和下次启动都复用。 */
+    fun setPreviewRotationQuarterTurns(turns: Int) {
+        val normalized = Math.floorMod(turns, 4)
+        prefs.edit().putInt("preview_rotation_quarter_turns", normalized).apply()
+        _state.update { it.copy(previewRotationQuarterTurns = normalized) }
+    }
+
+    /** 保存监看页的应用内横屏状态；不改变 Android Activity 的系统方向。 */
+    fun setRemoteFullscreen(enabled: Boolean) {
+        prefs.edit().putBoolean("remote_fullscreen", enabled).apply()
+        _state.update { it.copy(remoteFullscreen = enabled) }
+    }
+
     /** 应用内语言；写入后需 Activity.recreate() 才对界面生效（attachBaseContext 重读偏好）。 */
     fun setAppLanguage(tag: String) {
         prefs.edit().putString(AppLocale.PREF_KEY, tag).apply()
         _state.update { it.copy(appLanguage = tag) }
     }
 
-    /** 应用筛选（类型/保护标记/连拍，面板点确定一次性提交）。持久化，跨会话与跨设备连接生效。 */
-    fun setFilters(exts: Set<String>?, protectedOnly: Boolean, burstOnly: Boolean) {
+    /** 应用筛选（类型/保护/连拍/未传输，面板点击后即时提交）。持久化。 */
+    fun setFilters(
+        exts: Set<String>?,
+        protectedOnly: Boolean,
+        burstOnly: Boolean,
+        untransferredOnly: Boolean
+    ) {
         prefs.edit().apply {
             if (exts == null) remove("filter_exts") else putStringSet("filter_exts", exts)
             if (protectedOnly) putBoolean("filter_protected", true) else remove("filter_protected")
             if (burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")
+            if (untransferredOnly) putBoolean("filter_untransferred", true) else remove("filter_untransferred")
         }.apply()
         _state.update {
             it.copy(
                 filterExtensions = exts,
                 filterProtectedOnly = protectedOnly,
-                filterBurstOnly = burstOnly
+                filterBurstOnly = burstOnly,
+                filterUntransferredOnly = untransferredOnly
             )
         }
     }
@@ -214,7 +247,40 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         )
         prefs.edit().putString("transfer_dir", uri.toString()).apply()
-        _state.update { it.copy(transferDirUri = uri.toString()) }
+        _state.update { it.copy(transferDirUri = uri.toString(), existingExportFiles = emptyMap()) }
+        viewModelScope.launch(Dispatchers.IO) { refreshExistingExportFiles(uri, deleteParts = false) }
+    }
+
+    private fun refreshExistingExportFiles(uri: Uri, deleteParts: Boolean) {
+        try {
+            val (existing, _) = sweepAndListExisting(uri, deleteParts)
+            val normalized = HashMap<String, MutableSet<Long>>()
+            existing.forEach { (name, size) ->
+                normalized.getOrPut(baseName(name)) { HashSet() }.add(size)
+            }
+            _state.update { state ->
+                if (state.transferDirUri == uri.toString()) {
+                    // 扫描期间可能已有新传输完成并写入索引；合并而不是覆盖，避免慢扫描
+                    // 用启动时的旧目录快照抹掉刚完成文件的绿勾。
+                    state.existingExportFiles.forEach { (name, sizes) ->
+                        normalized.getOrPut(name) { HashSet() }.addAll(sizes)
+                    }
+                    state.copy(existingExportFiles = normalized.mapValues { it.value.toSet() })
+                } else state
+            }
+        } catch (_: Exception) {
+            // 保留扫描期间由已完成传输写入的索引；新目录初始本来就是空映射。
+        }
+    }
+
+    private fun recordExistingExport(uri: Uri, name: String, size: Long) {
+        val normalizedName = baseName(name)
+        _state.update { state ->
+            // 目录选择器在传输期间仍可能被打开；旧目录任务完成后绝不能污染新目录索引。
+            if (state.transferDirUri != uri.toString()) return@update state
+            val sizes = state.existingExportFiles[normalizedName].orEmpty() + size
+            state.copy(existingExportFiles = state.existingExportFiles + (normalizedName to sizes))
+        }
     }
 
     fun addToQueue(files: List<NikonCamera.FileInfo>, cameraProvider: () -> NikonCamera?) {
@@ -310,6 +376,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         existingSizes[task.file.fileName]?.contains(task.file.size) == true
                     ) {
                         log { "DL_SKIP existing: ${task.file.fileName}" }
+                        // 队列启动时的目录扫描可能比页面初始扫描更早发现已有文件；
+                        // 立即回填共用索引，让对号与“未传输”筛选在本次跳过后同步更新。
+                        recordExistingExport(uri, task.file.fileName, task.file.size)
                         updateTask(handle) {
                             it.copy(
                                 status = TransferStatus.COMPLETED,
@@ -400,6 +469,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             if (renamed != null) {
                                 existing[finalName] = partSize
                                 existingSizes.getOrPut(baseName(finalName)) { HashSet() }.add(partSize)
+                                recordExistingExport(uri, finalName, partSize)
                                 updateTask(handle) {
                                     it.copy(status = TransferStatus.COMPLETED, skipped = true,
                                         progress = 1f, downloaded = partSize, speed = 0)
@@ -534,6 +604,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 if (renamedUri != null) {
                                     existing[savedName] = stats.bytes
                                     existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(stats.bytes)
+                                    recordExistingExport(uri, savedName, stats.bytes)
                                     val elapsed = System.currentTimeMillis() - transferStart
                                     // 免费额度按"真正传输完成"计数(此处是唯一完成点;
                                     // 跳过/续传改名捷径都不经过这里,不计)。

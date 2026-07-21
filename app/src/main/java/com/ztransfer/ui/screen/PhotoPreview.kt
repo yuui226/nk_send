@@ -3,9 +3,9 @@ package com.ztransfer.ui.screen
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -26,9 +26,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BurstMode
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.FilterCenterFocus
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -36,9 +36,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,24 +51,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntSize
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
@@ -95,15 +102,21 @@ fun PhotoPreviewOverlay(
     anchorRect: Rect?,
     cameraViewModel: CameraViewModel,
     hapticsEnabled: Boolean,
+    // 全局持久化方向：0..3 个逆时针 90°。只用作本次 overlay 初始值；
+    // overlay 内部保留不取模的连续角度，保证 270°→0° 时仍是向左短转 90°。
+    initialRotationQuarterTurns: Int = 0,
     // 连拍成员 handle 集(列表页的检测结果):预览左上角展示连拍角标用;空集即不展示。
     burstHandles: Set<Int> = emptySet(),
     // 已在传输队列中的 handle（任意状态）：当前页据此切换"加入 / 已入队"按钮。
     queuedHandles: Set<Int> = emptySet(),
     // 把当前预览文件加入传输队列（父层负责目录校验、连接状态、入队与吸入动画）。
     onTransfer: (NikonCamera.FileInfo) -> Unit = {},
+    // 每次旋转后回传归一化方向，父层写入全局偏好。
+    onRotationChanged: (Int) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val pagerState = rememberPagerState(initialPage = initialIndex) { files.size }
+    val cameraState by cameraViewModel.state.collectAsState()
     var overlayBounds by remember { mutableStateOf<Rect?>(null) }
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
@@ -123,18 +136,17 @@ fun PhotoPreviewOverlay(
     BackHandler(enabled = !closing) { startClose() }
 
     // ---- FHD 预览：优先级加载 + 即时淘汰 + RGB_565 解码 ----
-    // 三个状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放），
-    // 无跨会话复用问题。fhdFailed=已试且失败（不再重试，直到被淘汰后重新进入才重试）。
+    // 状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放）。
     val fhdBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
     val fhdLoading = remember { mutableStateMapOf<Int, Boolean>() }
-    val fhdFailed = remember { mutableStateMapOf<Int, Boolean>() }
     val exifData = remember { mutableStateMapOf<Int, PhotoExif?>() }
     val exifLoading = remember { mutableStateMapOf<Int, Boolean>() }
-    // 对焦点显示开关：按住对焦按钮时置 true，松手恢复 false。
-    var showAfPoint by remember { mutableStateOf(false) }
-    // 按住 AF 按钮期间翻页：按钮实例连同手势协程一起被移除，onPress 的松手复位不再执行，
-    // showAfPoint 会卡在 true（下一张的红框常亮）。翻页时强制复位兜底。
-    LaunchedEffect(pagerState.currentPage) { showAfPoint = false }
+    // 初始方向来自全局偏好；本 overlay 内不取模，每次继续减 90°，
+    // 动画始终沿逆时针最短方向旋转。翻页不重置，所有照片共用。
+    var rotationDegrees by remember {
+        mutableFloatStateOf(-90f * Math.floorMod(initialRotationQuarterTurns, 4))
+    }
+    val currentHandle = files.getOrNull(pagerState.currentPage)?.handle
 
     val haptics = rememberHaptics(hapticsEnabled)
 
@@ -145,15 +157,22 @@ fun PhotoPreviewOverlay(
     }
 
     // 加载单页 FHD；返回 true 表示"本次确实取到并解码成功"（用于当前页到位的触感反馈）。
-    suspend fun loadFhdPage(page: Int): Boolean {
+    suspend fun loadFhdPage(page: Int, awaitExisting: Boolean = false): Boolean {
         val file = files.getOrNull(page) ?: return false
         // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
         if (file.extension in VIDEO_EXTENSIONS) return false
         val h = file.handle
-        if (h in fhdBitmaps || fhdLoading.containsKey(h) || fhdFailed.containsKey(h)) return false
+        if (h in fhdBitmaps) return false
+        if (fhdLoading.containsKey(h)) {
+            if (!awaitExisting) return false
+            // 当前页可能正由上一页的预取任务加载。等待它完成；若它因翻页被取消，
+            // loading 会在 finally 中释放，随后由当前页重新发起，绝不漏载。
+            while (fhdLoading.containsKey(h) && h !in fhdBitmaps) delay(16)
+            if (h in fhdBitmaps) return false
+        }
         fhdLoading[h] = true
         try {
-            val res = cameraViewModel.loadFhdPreview(file) ?: run { fhdFailed[h] = true; return false }
+            val res = cameraViewModel.loadFhdPreview(file) ?: return false
             fhdBitmaps[h] = res
             return true
         } finally {
@@ -176,23 +195,21 @@ fun PhotoPreviewOverlay(
 
     // 即时淘汰（独立 effect，翻页瞬间就跑，不排在 1–3s 的慢加载后面）：保留窗口 ±2。
     // 与加载解耦是关键——否则快速翻页时淘汰永远排在慢加载之后、来不及执行，内存会一路涨。
-    LaunchedEffect(pagerState.currentPage) {
+    LaunchedEffect(pagerState.currentPage, currentHandle) {
         val cp = pagerState.currentPage
         val keep = (cp - 2).coerceAtLeast(0)..(cp + 2).coerceAtMost(files.lastIndex)
         val keepH = keep.mapNotNull { files.getOrNull(it)?.handle }.toSet()
         fhdBitmaps.keys.filter { it !in keepH }.forEach { fhdBitmaps.remove(it) }
-        fhdFailed.keys.filter { it !in keepH }.forEach { fhdFailed.remove(it) }
         exifData.keys.filter { it !in keepH }.forEach { exifData.remove(it) }
     }
 
-    // 优先级加载：当前页 FHD（到位轻震一下）→ 当前页 EXIF → ±1 邻居 FHD 预取。
-    // 换页即取消本协程，未完成的慢加载自动中止（getFhdPicture 会抛 Cancellation 释放锁），
-    // 通道立刻让给新的当前页。首次打开也走这里（currentPage 初值即 initialIndex）。
-    // key 额外依赖 fhdBitmaps[currentPage]：淘汰 effect 移除缓存后即使 currentPage 不变
-    // 也能重新触发加载，避免用户翻回来时 FHD 不显示。
-    LaunchedEffect(pagerState.currentPage, fhdBitmaps[files.getOrNull(pagerState.currentPage)?.handle]) {
+    // 当前页拥有最高优先级。连接状态纳入 key：停留在预览页断线后原地重连，
+    // 即使页码没变也会重新请求 FHD，而不是一直停留在缩略图。
+    // 当前页与邻页由同一协程严格串行，避免首次失败时两个 effect 重复请求并触发熔断。
+    LaunchedEffect(currentHandle, cameraState.isConnectedToCamera) {
+        if (!cameraState.isConnectedToCamera) return@LaunchedEffect
         val cp = pagerState.currentPage
-        if (loadFhdPage(cp)) haptics.tick()   // 仅"当前页真正取到高清"这一刻反馈
+        if (loadFhdPage(cp, awaitExisting = true)) haptics.tick()
         loadExifPage(cp)
         if (cp > 0) loadFhdPage(cp - 1)
         if (cp < files.lastIndex) loadFhdPage(cp + 1)
@@ -211,7 +228,7 @@ fun PhotoPreviewOverlay(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = progress.value }
-                .background(Color.Black.copy(alpha = 0.85f))
+                .background(Color.Black.copy(alpha = 0.74f))
         )
 
         // 当前页是否已放大——放大时禁用翻页，横向平移才不会误翻到下一张。
@@ -253,8 +270,7 @@ fun PhotoPreviewOverlay(
                 cameraViewModel = cameraViewModel,
                 fhdBitmap = fhdBitmaps[file.handle],
                 isLoadingFhd = fhdLoading.containsKey(file.handle),
-                exif = exifData[file.handle],
-                showAfPoint = showAfPoint,
+                rotationDegrees = rotationDegrees,
                 isCurrent = page == pagerState.currentPage,
                 onZoomedChange = { currentZoomed = it },
                 onTap = startClose
@@ -361,18 +377,14 @@ fun PhotoPreviewOverlay(
             )
         }
 
-        // ---- 底部栏：EXIF 参数 + 对焦点按钮，同一水平线 ----
+        // ---- 底部栏：当前照片的 EXIF 参数 ----
         // 跟手淡入淡出：alpha 由翻页滚动进度实时驱动——离开当前页时随手指滑动淡出、
         // 新页吸附到位时淡入，不等翻完。内容在滑过半（currentPage 翻转、此刻 alpha≈0
         // 看不见）时切换，因此看不到硬切；Crossfade 再兜住"落定页 EXIF 异步到达"的淡入。
         // alpha 计算写在 graphicsLayer 内读滚动值：每帧只重绘图层，不触发子树重组。
-        // lastExif：翻页时保留上一页的 EXIF 直到新页 EXIF 加载完成，避免 Crossfade
-        // 经历 旧→null→新 三次状态导致闪烁。
-        var lastExif by remember { mutableStateOf<PhotoExif?>(null) }
         val curExif = current?.let { exifData[it.handle] }
-        if (curExif != null) lastExif = curExif
         Crossfade(
-            targetState = lastExif,
+            targetState = curExif,
             animationSpec = tween(220),
             label = "exifBar",
             modifier = Modifier
@@ -403,9 +415,8 @@ fun PhotoPreviewOverlay(
             }
         }
 
-        // 右下角：对焦点按钮（有 AF 数据时显示）+ 传输队列按钮，纵向排列。
+        // 右下角：全局旋转与传输队列按钮，纵向排列。
         if (current != null) {
-            val curHasAf = lastExif?.afX != null
             val curQueued = current.handle in queuedHandles
             Column(
                 modifier = Modifier
@@ -416,18 +427,35 @@ fun PhotoPreviewOverlay(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                if (current.extension !in VIDEO_EXTENSIONS) {
+                    RotationButton(onClick = {
+                        val nextDegrees = rotationDegrees - 90f
+                        rotationDegrees = nextDegrees
+                        // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
+                        val nextTurns = Math.floorMod((-nextDegrees / 90f).toInt(), 4)
+                        onRotationChanged(nextTurns)
+                    })
+                }
                 TransferQueueButton(
                     queued = curQueued,
                     onClick = { onTransfer(current) }
                 )
-                if (curHasAf) {
-                    FocusPointButton(
-                        pressed = showAfPoint,
-                        onPressChange = { showAfPoint = it }
-                    )
-                }
             }
         }
+    }
+}
+
+@Composable
+private fun RotationButton(onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    GlassButton(
+        onClick = onClick,
+        modifier = Modifier.size(44.dp),
+        shape = CircleShape,
+        contentPadding = PaddingValues(11.dp)
+    ) {
+        Icon(Icons.Default.RotateLeft, stringResource(R.string.cd_rotate_photo),
+            tint = colors.accentBlue, modifier = Modifier.size(22.dp))
     }
 }
 
@@ -461,49 +489,7 @@ private fun ExifMetadataBar(
 }
 
 /**
- * 对焦点查看按钮：玻璃圆形，按住期间 [pressed]=true（视觉高亮 + 对焦点红框叠加）。
- * 手势处理与 RemoteScreen 参数加减按钮一致：detectTapGestures(onPress = ...) + tryAwaitRelease。
- */
-@Composable
-private fun FocusPointButton(
-    pressed: Boolean,
-    onPressChange: (Boolean) -> Unit
-) {
-    val colors = AppTheme.colors
-    Box(
-        modifier = Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(if (pressed) colors.accentBlue.copy(alpha = 0.35f) else colors.glassSurface)
-            .pointerInput(Unit) {
-                detectTapGestures(onPress = {
-                    onPressChange(true)
-                    tryAwaitRelease()
-                    onPressChange(false)
-                })
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        // 毛玻璃高光 + 描边
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(colors.glassHighlightTop, colors.glassHighlightBottom)))
-                .border(1.dp, Brush.verticalGradient(listOf(colors.glassBorderTop, colors.glassBorderBottom)), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.FilterCenterFocus,
-                contentDescription = stringResource(R.string.cd_focus_point),
-                tint = if (pressed) colors.accentBlue else colors.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-/**
- * 预览页"加入传输队列"按钮：与 [FocusPointButton] 同款玻璃圆钮。
+ * 预览页"加入传输队列"按钮：使用全局统一的玻璃圆钮。
  * 未入队显示 +（蓝），点击把当前页加入队列；已入队显示 ✓（绿）且不可再点——
  * 与列表页格子"已入队不可重复点"语义一致。
  */
@@ -514,33 +500,20 @@ private fun TransferQueueButton(
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
-    Box(
-        modifier = modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(colors.glassSurface)
-            // 已入队也要消费点击，否则事件穿透到下层 PreviewPage 的 onTap 会关掉预览。
-            .pointerInput(queued) {
-                detectTapGestures(onTap = { if (!queued) onClick() })
-            },
-        contentAlignment = Alignment.Center
+    GlassButton(
+        onClick = { if (!queued) onClick() },
+        modifier = modifier.size(44.dp),
+        shape = CircleShape,
+        contentPadding = PaddingValues(11.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(colors.glassHighlightTop, colors.glassHighlightBottom)))
-                .border(1.dp, Brush.verticalGradient(listOf(colors.glassBorderTop, colors.glassBorderBottom)), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = if (queued) Icons.Default.Check else Icons.Default.Add,
-                contentDescription = stringResource(
-                    if (queued) R.string.cd_queued else R.string.cd_transfer
-                ),
-                tint = if (queued) colors.statusConnected else colors.accentBlue,
-                modifier = Modifier.size(22.dp)
-            )
-        }
+        Icon(
+            imageVector = if (queued) Icons.Default.Check else Icons.Default.Add,
+            contentDescription = stringResource(
+                if (queued) R.string.cd_queued else R.string.cd_transfer
+            ),
+            tint = if (queued) colors.statusConnected else colors.accentBlue,
+            modifier = Modifier.size(22.dp)
+        )
     }
 }
 
@@ -554,12 +527,16 @@ private fun PreviewPage(
     cameraViewModel: CameraViewModel,
     fhdBitmap: ImageBitmap?,
     isLoadingFhd: Boolean,
-    exif: PhotoExif?,
-    showAfPoint: Boolean,
+    rotationDegrees: Float,
     isCurrent: Boolean,
     onZoomedChange: (Boolean) -> Unit,
     onTap: () -> Unit
 ) {
+    val animatedRotation by animateFloatAsState(
+        targetValue = rotationDegrees,
+        animationSpec = tween(220),
+        label = "previewRotation"
+    )
     var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
     // 取过仍为 null → 该文件确实没有缩略图（如部分视频）。
     var noThumb by remember(file.handle) { mutableStateOf(false) }
@@ -593,8 +570,34 @@ private fun PreviewPage(
     LaunchedEffect(isCurrent, zoomed) { if (isCurrent) onZoomedChange(zoomed) }
 
     val displayBitmap = fhdBitmap ?: thumbnail
-    val imgAspect = displayBitmap?.let { it.width.toFloat() / it.height.toFloat() }
+    val quarterTurn = ((rotationDegrees / 90f).roundToInt() % 2) != 0
+    val rawAspect = displayBitmap?.let { it.width.toFloat() / it.height.toFloat() }
+    val imgAspect = displayBitmap?.let {
+        if (quarterTurn) 1f / rawAspect!! else rawAspect!!
+    }
+    // Image(Fit) 先按未旋转方向排版；动画期间根据每一帧角度的外接矩形动态缩放，
+    // 避免角度与缩放各自线性插值造成中途裁切、忽大忽小。
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+    val viewportW = viewportSize.width.toFloat()
+    val viewportH = viewportSize.height.toFloat()
+    val baseImageW: Float
+    val baseImageH: Float
+    if (rawAspect != null && viewportW > 0f && viewportH > 0f) {
+        val viewportAspect = viewportW / viewportH
+        baseImageW = if (rawAspect > viewportAspect) viewportW else viewportH * rawAspect
+        baseImageH = if (rawAspect > viewportAspect) viewportW / rawAspect else viewportH
+    } else {
+        baseImageW = 0f
+        baseImageH = 0f
+    }
     val isVideo = file.extension in VIDEO_EXTENSIONS
+
+    // 旋转会改变基础 Fit 尺寸；清掉此前的用户缩放/偏移，避免旧坐标把旋转后的图推离屏幕。
+    LaunchedEffect(rotationDegrees) {
+        zoomAnimJob?.cancel()
+        scale = 1f
+        offset = Offset.Zero
+    }
 
     // 把 offset 钳制在"图片边缘不越过容器边缘"的范围内（防止拖出黑边）。
     fun clampOffset(s: Float, o: Offset, dispW: Float, dispH: Float, cw: Float, ch: Float): Offset {
@@ -606,6 +609,7 @@ private fun PreviewPage(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onSizeChanged { viewportSize = it }
             // 捏合缩放 + 放大后单指平移。关键：单指且未放大时【不消费】事件，
             // 把手势让给 HorizontalPager 翻页 / 单击关闭；双指或已放大才接管并消费。
             .pointerInput(imgAspect) {
@@ -718,8 +722,23 @@ private fun PreviewPage(
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            scaleX = scale; scaleY = scale
+                            val angle = Math.toRadians(animatedRotation.toDouble())
+                            val absCos = abs(cos(angle)).toFloat()
+                            val absSin = abs(sin(angle)).toFloat()
+                            val boundsW = baseImageW * absCos + baseImageH * absSin
+                            val boundsH = baseImageW * absSin + baseImageH * absCos
+                            val rotationFit = if (boundsW > 0f && boundsH > 0f) {
+                                min(viewportW / boundsW, viewportH / boundsH)
+                            } else 1f
+                            // 常见横图旋成竖向时保留约 4%/侧的呼吸空间；随角度连续变化，
+                            // 回到横向时自然恢复满幅，不在 90° 端点突然缩一下。
+                            val portraitBreathingRoom = if ((rawAspect ?: 0f) > 1f) {
+                                1f - 0.08f * absSin
+                            } else 1f
+                            scaleX = scale * rotationFit * portraitBreathingRoom
+                            scaleY = scale * rotationFit * portraitBreathingRoom
                             translationX = offset.x; translationY = offset.y
+                            rotationZ = animatedRotation
                         }
                 ) {
                     if (fhdBitmap != null && thumb != null && fhdAlpha.value < 1f) {
@@ -739,34 +758,6 @@ private fun PreviewPage(
                         alpha = if (fhdBitmap != null) fhdAlpha.value else 1f
                     )
 
-                    // 对焦点红框叠加（按住 AF 按钮时绘制）。放在同一变换层内,随缩放/平移跟着图走。
-                    // afX/afY 是 AF 区【中心】（Nikon AFInfo2 语义,解析端即按中心归一化）,矩形以其为中心;
-                    // 线宽除以 scale,放大后红框变大但线保持 1dp 视觉粗细（draw 块读 scale,变焦时自动重绘）。
-                    val exifNonNull = exif
-                    if (showAfPoint && exifNonNull != null && exifNonNull.afX != null) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            // Fit 矩形必须按【实际渲染位图】的宽高比算,与 Image 的 ContentScale.Fit
-                            // 严格一致;EXIF 原图尺寸与预览位图比例可能有出入(缩略图黑边裁切后
-                            // 已非精确 3:2、FHD 直出比例也未必等于原图),按 EXIF 算红框会贴不住画面。
-                            val imgAsp = displayBitmap.width.toFloat() / displayBitmap.height.toFloat()
-                            val containerAspect = size.width / size.height
-                            val (dispW, dispH) = if (imgAsp > containerAspect) {
-                                size.width to (size.width / imgAsp)
-                            } else {
-                                (size.height * imgAsp) to size.height
-                            }
-                            val afCx = (size.width - dispW) / 2f + exifNonNull.afX * dispW
-                            val afCy = (size.height - dispH) / 2f + exifNonNull.afY!! * dispH
-                            val afW = (exifNonNull.afWidth ?: 0.05f) * dispW
-                            val afH = (exifNonNull.afHeight ?: 0.05f) * dispH
-                            drawRect(
-                                color = Color.Red,
-                                topLeft = Offset(afCx - afW / 2f, afCy - afH / 2f),
-                                size = Size(afW, afH),
-                                style = Stroke(width = 1.dp.toPx() / scale)
-                            )
-                        }
-                    }
                 }
             }
             anyLoading -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))

@@ -98,6 +98,13 @@
 | 0x9425 | **EndTracking** | — | 结束主体追踪 | 🔥 |
 | 0x941F | ActiveSelectionControl | — | 活动选择控制 | |
 
+> **Z 30 抓包确认（2026-07-21）**：点按对焦的完整时序是
+> `ChangeAfArea(x,y) → 等待约 80ms → AfDrive → DeviceReady...`。三次实抓中
+> ChangeAfArea 成功响应到 AfDrive 命令的间隔均为 80–84ms。`AfDrive` 的立即
+> `0x2001` 只表示已接受对焦请求，不是合焦成功；`DeviceReady` 的
+> `0x2019` 表示仍在对焦，最终 `0x2001` 才是合焦成功，`0xA002`
+> 是未合焦。不要在等待期间重复发送 `AfDrive`。
+
 ### 2.5 拍摄
 
 | 操作码 | 名称 | 参数 | 功能 | 状态 |
