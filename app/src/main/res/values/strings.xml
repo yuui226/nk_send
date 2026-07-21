@@ -17,6 +17,10 @@
     <string name="tip_path">MENU → Custom Settings Menu → Controls → Customize i menu → pick a slot → Wi-Fi connection</string>
     <string name="mode_camera_hotspot">Camera hotspot</string>
     <string name="mode_phone_hotspot">Phone hotspot</string>
+    <string name="phone_purpose_album">Photos</string>
+    <string name="phone_purpose_monitor">Monitor</string>
+    <string name="phone_hotspot_album_hint">Browse and transfer photos directly. This mode does not save the hotspot profile on the camera.</string>
+    <string name="phone_hotspot_monitor_hint">The first connection pairs and saves the hotspot profile, then opens remote monitoring directly.</string>
     <string name="phone_hotspot_test_hint">After the camera joins your phone hotspot, tap below to connect automatically.</string>
     <string name="discover_camera_action">Discover and connect</string>
     <string name="camera_discovery_failed">No camera found. Make sure it has joined the phone hotspot and try again.</string>
@@ -27,6 +31,8 @@
 
     <!-- File list -->
     <string name="loading_file_list">Loading file list…</string>
+    <string name="protocol_log_title">Camera protocol log</string>
+    <string name="view_protocol_log">View log</string>
     <string name="connection_lost">Connection lost</string>
     <string name="no_photos_on_camera">No photos on the camera</string>
     <string name="camera_not_connected">Camera not connected</string>

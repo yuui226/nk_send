@@ -29,6 +29,7 @@ class ResumeUnavailableException : Exception()
 
 /** 首次配对已提交成功；相机需要结束受限会话并重新连接后才会公布正常能力集。 */
 class PairingCompletedException : Exception("Nikon pairing completed; reconnect required")
+/** 能力探测确认相机已配对；丢弃探测会话，用全新会话进入正常浏览。 */
 
 class NikonCamera(private val context: Context) {
     private var cmdSocket: Socket? = null
@@ -56,9 +57,6 @@ class NikonCamera(private val context: Context) {
     // 每次 connect 新建 NikonCamera 实例，故换相机自动重新探测。仅 ioMutex 内访问。
     @Volatile private var fhdSupported: Boolean? = null
     private var fhdFailCount = 0
-    // 手机热点模式连接阶段用 GetStorageIDs 区分正常/首次配对状态；成功响应留给
-    // loadFiles 消费，避免正常会话紧接着重复发送同一命令。
-    private var prefetchedStorageIds: List<Int>? = null
 
     companion object {
         const val TAG = "ZTransfer"
@@ -91,6 +89,11 @@ class NikonCamera(private val context: Context) {
         if (BuildConfig.DEBUG) android.util.Log.d(TAG, message())
     }
 
+    private fun trace(message: String) {
+        android.util.Log.i(TAG, message)
+        ProtocolDebugLog.add(message)
+    }
+
     private fun nextTid(): Int {
         tid++
         return tid
@@ -101,12 +104,13 @@ class NikonCamera(private val context: Context) {
         network: Network? = null,
         handshakeTimeoutMs: Int = SO_TIMEOUT_MS,
         standardPersistentInitiator: Boolean = false,
-        nikonCompatibilityInit: Boolean = false
+        nikonCompatibilityInit: Boolean = false,
+        checkPairingState: Boolean = false
     ): Result<Unit> {
         var ready = false
         return try {
             val result = withContext(Dispatchers.IO) {
-            android.util.Log.i(TAG, "PTP_CONNECT begin ip=$ip port=${PtpConstants.PTP_PORT} boundNetwork=${network != null}")
+            trace("PTP_CONNECT begin ip=$ip phoneMode=$nikonCompatibilityInit pairingCheck=$checkPairingState")
             // 经 Wi-Fi Network 的 socketFactory 建 socket：相机热点没有互联网，系统验证失败后
             // 常把【默认网络】切回蜂窝数据——普通 Socket() 走默认路由，连 192.168.1.1 的包进蜂窝
             // 黑洞，每次尝试烧满连接超时，直到系统把默认网切回 Wi-Fi 才能成功（用户感知
@@ -140,7 +144,7 @@ class NikonCamera(private val context: Context) {
 
             val payload = ack.payload ?: return@withContext Result.failure(Exception(context.getString(R.string.error_handshake_empty)))
             val sessionId = payload.getIntLE(0)
-            android.util.Log.i(TAG, "PTP_INIT_COMMAND_ACK connectionNumber=$sessionId")
+            trace("INIT_ACK connectionNumber=$sessionId")
 
             evtSocket = newSocket().apply {
                 soTimeout = handshakeTimeoutMs
@@ -162,9 +166,14 @@ class NikonCamera(private val context: Context) {
                 return@withContext Result.failure(Exception(context.getString(R.string.error_event_handshake)))
             }
 
-            sendCmd(PtpConstants.OPEN_SESSION, sessionId)
+            // InitCommandAck 的 connectionNumber 只用于绑定 Event Socket，不是 PTP sessionId。
+            // 手机热点抓包的正式与配对会话都从 OpenSession(1), tx=0 开始；正式浏览随后
+            // 直接 0x941C → GetStorageIDs。GetDeviceInfo 只存在于独立配对探测会话。
+            val ptpSessionId = if (nikonCompatibilityInit) 1 else sessionId
+            if (nikonCompatibilityInit) tid = -1 // OpenSession 必须从 tx=0 开始
+            sendCmd(PtpConstants.OPEN_SESSION, ptpSessionId)
             val resp = recvResp()
-            android.util.Log.i(TAG, "PTP_OPEN_SESSION response=0x${resp.toString(16)}")
+            trace("OPEN_SESSION sid=$ptpSessionId tx=$tid rc=0x${resp.toString(16)}")
             // 0x201E Session Already Open：App 异常退出后相机侧旧会话可能未清，
             // 视为会话已就绪继续使用，否则会陷入"反复重连直到相机自己超时"的循环。
             if (resp != PtpConstants.RESPONSE_OK && resp != PtpConstants.SESSION_ALREADY_OPEN) {
@@ -176,24 +185,17 @@ class NikonCamera(private val context: Context) {
             if (nikonCompatibilityInit) {
                 sendCmd(NIKON_COMPATIBILITY_INIT)
                 val (compatRc, compatData) = recvRespWithPayload()
-                android.util.Log.i(TAG, "PTP_NIKON_COMPAT_INIT response=0x${compatRc.toString(16)} data=${compatData?.size ?: 0}")
+                trace("0x941C tx=$tid rc=0x${compatRc.toString(16)} data=${compatData?.size ?: 0}B")
 
-                // 保持已验证可工作的正常热路径：OpenSession → 0x941C → GetStorageIDs。
-                // 只有存储命令被拒绝时，才额外读取受限 DeviceInfo 判断首次配对；不能在
-                // 每个正常会话里无条件插入 GetDeviceInfo，否则部分固件不会进入浏览状态。
-                sendCmd(PtpConstants.GET_STORAGE_IDS)
-                val (storageProbeRc, storageProbeData) = recvRespWithPayload()
-                android.util.Log.i(TAG, "PTP_STORAGE_PROBE response=0x${storageProbeRc.toString(16)} bytes=${storageProbeData?.size ?: 0}")
-                if (storageProbeRc == PtpConstants.RESPONSE_OK) {
-                    prefetchedStorageIds = parseUInt32Array(storageProbeData)
-                    android.util.Log.i(TAG, "PTP_STORAGE_PROBE ids=${prefetchedStorageIds?.joinToString { "0x${it.toUInt().toString(16)}" }}")
-                } else {
+                if (checkPairingState) {
+                    // 探测会话只负责判断/完成配对，绝不继续用于文件浏览。这样正常浏览会话
+                    // 可以严格恢复为已验证过的 OpenSession → 0x941C → GetStorageIDs。
                     sendCmd(PtpConstants.GET_DEVICE_INFO)
                     val (deviceRc, deviceInfo) = recvRespWithPayload()
                     val operations = if (deviceRc == PtpConstants.RESPONSE_OK && deviceInfo != null) {
                         parseDeviceInfoOperations(deviceInfo)
                     } else emptySet()
-                    android.util.Log.i(TAG, "PTP_DEVICE_INFO response=0x${deviceRc.toString(16)} bytes=${deviceInfo?.size ?: 0} operations=${operations.joinToString { "0x${it.toString(16)}" }}")
+                    trace("DEVICE_INFO rc=0x${deviceRc.toString(16)} bytes=${deviceInfo?.size ?: 0} ops=${operations.joinToString { "0x${it.toString(16)}" }}")
                     val pairingOnlyOperations = setOf(
                         PtpConstants.GET_DEVICE_INFO,
                         PtpConstants.OPEN_SESSION,
@@ -202,12 +204,12 @@ class NikonCamera(private val context: Context) {
                         PtpConstants.NK_PAIRING_RESULT
                     )
                     val isInitialPairing = operations == pairingOnlyOperations
-                    android.util.Log.i(TAG, "PTP_PAIRING_CHECK initial=$isInitialPairing operationCount=${operations.size}")
+                    trace("PAIRING_CHECK initial=$isInitialPairing operationCount=${operations.size}")
                     if (isInitialPairing) {
                         completeInitialPairing()
                         throw PairingCompletedException()
                     }
-                    throw java.io.IOException("GetStorageIDs failed: 0x${storageProbeRc.toString(16)}")
+                    trace("PAIRING_CHECK alreadyPaired=true; continuing monitor session")
                 }
             }
 
@@ -266,20 +268,17 @@ class NikonCamera(private val context: Context) {
     suspend fun getStorageIds(): List<Int> = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             try {
-                prefetchedStorageIds?.let { ids ->
-                    prefetchedStorageIds = null
-                    android.util.Log.i(TAG, "PTP_GET_STORAGE_IDS usingPrefetch=true count=${ids.size}")
-                    return@withContext ids
-                }
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
                 val (respCode, data) = recvRespWithPayload()
-                android.util.Log.i(TAG, "PTP_GET_STORAGE_IDS response=0x${respCode.toString(16)} bytes=${data?.size ?: 0}")
-                if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
-                    return@withContext emptyList()
-                }
+                trace("GET_STORAGE_IDS tx=$tid rc=0x${respCode.toString(16)} bytes=${data?.size ?: 0}")
+                if (respCode != PtpConstants.RESPONSE_OK) throw java.io.IOException(
+                    "GetStorageIDs response=0x${respCode.toString(16)}")
+                if (data == null || data.size < 4) throw java.io.IOException(
+                    "GetStorageIDs missing data (${data?.size ?: 0} bytes)")
                 parseUInt32Array(data)
-            } catch (_: Exception) {
-                emptyList()
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "PTP_GET_STORAGE_IDS failed: ${e.message}", e)
+                throw e
             }
         }
     }
@@ -302,16 +301,18 @@ class NikonCamera(private val context: Context) {
     suspend fun getObjectHandles(storageId: Int = -1): List<Int> = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             try {
+                // 保持原有、已在照片浏览模式验证过的请求：0xFFFFFFFF 表示所有图像格式。
                 sendCmd(PtpConstants.GET_OBJECT_HANDLES, storageId, -1, 0)
                 val (respCode, data) = recvRespWithPayload()
-                android.util.Log.i(TAG, "PTP_GET_OBJECT_HANDLES storage=0x${storageId.toUInt().toString(16)} response=0x${respCode.toString(16)} bytes=${data?.size ?: 0}")
-                if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
-                    return@withContext emptyList()
-                }
-                val count = data.getIntLE(0)
-                (0 until count).map { data.getIntLE(4 + it * 4) }
-            } catch (_: Exception) {
-                emptyList()
+                trace("GET_OBJECT_HANDLES storage=0x${storageId.toUInt().toString(16)} tx=$tid rc=0x${respCode.toString(16)} bytes=${data?.size ?: 0}")
+                if (respCode != PtpConstants.RESPONSE_OK) throw java.io.IOException(
+                    "GetObjectHandles response=0x${respCode.toString(16)}")
+                if (data == null || data.size < 4) throw java.io.IOException(
+                    "GetObjectHandles missing data (${data?.size ?: 0} bytes)")
+                parseUInt32Array(data)
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "PTP_GET_OBJECT_HANDLES failed storage=0x${storageId.toUInt().toString(16)}: ${e.message}", e)
+                throw e
             }
         }
     }
@@ -427,7 +428,9 @@ class NikonCamera(private val context: Context) {
             val files = ioMutex.withLock {
                 batch.mapNotNull { handle -> getObjectInfoInternal(handle) }
             }
-            loaded += files.size
+            // 进度按已检查 handle 推进；文件夹会被过滤，但也已经完成检查。按 files.size
+            // 会导致存在目录时永远 loaded < total，列表持续显示“正在加载”。
+            loaded += batch.size
             if (files.isNotEmpty()) {
                 onBatch(files, loaded, total)
             }
@@ -437,6 +440,7 @@ class NikonCamera(private val context: Context) {
     internal fun getObjectInfoInternal(handle: Int): FileInfo? {
         sendCmd(PtpConstants.GET_OBJECT_INFO, handle)
         val (respCode, data) = recvRespWithPayload()
+        ProtocolDebugLog.add("GET_OBJECT_INFO handle=0x${handle.toUInt().toString(16)} tx=$tid rc=0x${respCode.toString(16)} bytes=${data?.size ?: 0}")
         if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 53) {
             return null
         }

@@ -23,6 +23,7 @@ import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.PtpIpDiscovery
+import com.ztransfer.protocol.ProtocolDebugLog
 import com.ztransfer.protocol.rcPollEvents
 import java.io.ByteArrayInputStream
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +47,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 enum class ConnectionMode { CAMERA_HOTSPOT, PHONE_HOTSPOT }
+enum class PhoneHotspotPurpose { ALBUM, MONITOR }
 
 data class CameraState(
     val isWifiConnected: Boolean = false,
@@ -53,9 +55,11 @@ data class CameraState(
     val isConnecting: Boolean = false,
     val files: List<NikonCamera.FileInfo> = emptyList(),
     val isLoadingFiles: Boolean = false,
+    val fileListError: String? = null,
     // 当前相机 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；未在相机 Wi-Fi 上时为 null。
     val wifiRssi: Int? = null,
     val connectionMode: ConnectionMode = ConnectionMode.CAMERA_HOTSPOT,
+    val phoneHotspotPurpose: PhoneHotspotPurpose = PhoneHotspotPurpose.ALBUM,
     val connectionError: String? = null,
     val isDiscovering: Boolean = false,
     val discoveryProgress: String? = null
@@ -86,8 +90,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val initialMode = runCatching {
         ConnectionMode.valueOf(connectionPrefs.getString("mode", null) ?: "")
     }.getOrDefault(ConnectionMode.CAMERA_HOTSPOT)
+    private val initialPhonePurpose = runCatching {
+        PhoneHotspotPurpose.valueOf(connectionPrefs.getString("phone_hotspot_purpose", null) ?: "")
+    }.getOrDefault(PhoneHotspotPurpose.ALBUM)
     private val _state = MutableStateFlow(
-        CameraState(connectionMode = initialMode)
+        CameraState(connectionMode = initialMode, phoneHotspotPurpose = initialPhonePurpose)
     )
     val state: StateFlow<CameraState> = _state.asStateFlow()
 
@@ -98,6 +105,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var connectionJob: Job? = null
     @Volatile private var connectingCamera: NikonCamera? = null
     private var connectionGeneration = 0L
+    // 配对是相机端持久状态；App 更新/重启后也不应每次都先开一个探测 Session 去扰动它。
 
     // 缩略图内存缓存：按位图字节数限容（约 1/8 可用内存），超限自动淘汰。
     private val thumbnailCache = object : LruCache<Int, ImageBitmap>(
@@ -261,9 +269,34 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (mode == ConnectionMode.CAMERA_HOTSPOT) onWifiChanged()
     }
 
+    fun setPhoneHotspotPurpose(purpose: PhoneHotspotPurpose) {
+        if (_state.value.phoneHotspotPurpose == purpose) return
+        Log.i(LOG_TAG, "PHONE_HOTSPOT_PURPOSE from=${_state.value.phoneHotspotPurpose} to=$purpose")
+        connectionPrefs.edit().putString("phone_hotspot_purpose", purpose.name).apply()
+        connectionGeneration++
+        connectionJob?.cancel()
+        disconnectCurrentCamera()
+        ProtocolDebugLog.clear()
+        _state.update {
+            it.copy(
+                phoneHotspotPurpose = purpose,
+                isWifiConnected = false,
+                isConnecting = false,
+                isDiscovering = false,
+                discoveryProgress = null,
+                connectionError = null,
+                files = emptyList(),
+                isLoadingFiles = false,
+                fileListError = null
+            )
+        }
+    }
+
     fun discoverPhoneHotspotCamera() {
         if (_state.value.connectionMode != ConnectionMode.PHONE_HOTSPOT || _state.value.isConnectedToCamera) return
         connectionGeneration++
+        ProtocolDebugLog.clear()
+        ProtocolDebugLog.add("DISCOVERY_BEGIN purpose=${_state.value.phoneHotspotPurpose}")
         val generation = connectionGeneration
         connectionJob?.cancel()
         connectingCamera?.let { stale -> cleanupScope.launch { stale.close() } }
@@ -540,6 +573,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // purchaseHold 也随轮检查:重试循环可能在购买挂起前就已在跑,得让它当轮退出。
         var attempt = 0
         val expectedMode = if (requireCameraWifi) ConnectionMode.CAMERA_HOTSPOT else ConnectionMode.PHONE_HOTSPOT
+        val expectedPhonePurpose = _state.value.phoneHotspotPurpose
         fun mayRetry(): Boolean = !requireCameraWifi || linkSaysCameraWifi || isNikonWifi()
         while (!purchaseHold && generation == connectionGeneration &&
             _state.value.connectionMode == expectedMode && mayRetry() && !_state.value.isConnectedToCamera) {
@@ -554,10 +588,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 network = network,
                 handshakeTimeoutMs = if (requireCameraWifi) NikonCamera.SO_TIMEOUT_MS else HOTSPOT_HANDSHAKE_TIMEOUT_MS,
                 standardPersistentInitiator = !requireCameraWifi,
-                nikonCompatibilityInit = !requireCameraWifi
+                nikonCompatibilityInit = !requireCameraWifi,
+                checkPairingState = !requireCameraWifi &&
+                    expectedPhonePurpose == PhoneHotspotPurpose.MONITOR
             ).fold(
                 onSuccess = {
-                    if (generation != connectionGeneration || _state.value.connectionMode != expectedMode) {
+                    if (generation != connectionGeneration || _state.value.connectionMode != expectedMode ||
+                        (!requireCameraWifi && _state.value.phoneHotspotPurpose != expectedPhonePurpose)) {
                         Log.i(LOG_TAG, "CONNECT_STALE discard ip=$ip generation=$generation current=$connectionGeneration mode=${_state.value.connectionMode}")
                         cam.close()
                         return@fold
@@ -577,8 +614,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                     startKeepalive()
-                    loadFiles()
-                    startEventPolling()
+                    if (expectedMode == ConnectionMode.CAMERA_HOTSPOT ||
+                        expectedPhonePurpose == PhoneHotspotPurpose.ALBUM) {
+                        ProtocolDebugLog.add("SESSION_READY purpose=ALBUM; starting file enumeration")
+                        loadFiles()
+                        startEventPolling()
+                    } else {
+                        ProtocolDebugLog.add("SESSION_READY purpose=MONITOR; file enumeration intentionally skipped")
+                        _state.update { it.copy(files = emptyList(), isLoadingFiles = false, fileListError = null) }
+                    }
                     connected = true
                     Log.i(LOG_TAG, "CONNECT_SUCCESS mode=${_state.value.connectionMode} ip=$ip attempt=$attempt")
                 },
@@ -586,11 +630,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (connectingCamera === cam) connectingCamera = null
                     pairingCompleted = error is PairingCompletedException
                     if (pairingCompleted) {
+                        ProtocolDebugLog.add("PAIRING_COMPLETED reconnect in 6600ms")
                         Log.i(LOG_TAG, "PAIRING_COMPLETED ip=$ip attempt=$attempt reconnectDelayMs=6600")
                     } else {
                         Log.e(LOG_TAG, "CONNECT_FAILED mode=${_state.value.connectionMode} ip=$ip attempt=$attempt type=${error.javaClass.simpleName} message=${error.message}", error)
                     }
-                    if (!requireCameraWifi && error !is PairingCompletedException && generation == connectionGeneration) {
+                    if (!requireCameraWifi && !pairingCompleted && generation == connectionGeneration) {
                         _state.update { it.copy(connectionError = error.message ?: error.javaClass.simpleName) }
                     }
                     cam.close()
@@ -607,6 +652,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 普通失败仍只尝试一次，避免输错 IP 后永久扫描/耗电。
                 if (!pairingCompleted) break
                 _state.update { it.copy(connectionError = null) }
+                // 两种探测都完整开关过 PTP Session；相机服务恢复时间按抓包约 6.6 秒。
+                // 之后同一安装直接跳过探测，不再为每次连接付出这段等待。
                 delay(6_600)
                 continue // 已按抓包等待完毕，不再叠加普通失败的 1 秒重试间隔。
             }
@@ -734,24 +781,28 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val cam = camera ?: return
         thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
         noThumbHandles.clear()      // handle 跨会话可能复用，负缓存一并作废
-        _state.update { it.copy(isLoadingFiles = true, files = emptyList()) }
+        _state.update { it.copy(isLoadingFiles = true, files = emptyList(), fileListError = null) }
 
         viewModelScope.launch {
             try {
                 // 双卡机型（Z5 II / Z6 III 等）：枚举【所有】存储卡的对象并合并，单卡机型
                 // 行为不变。PTP StorageID 低 16 位为逻辑存储号，0 表示卡槽无卡，跳过；
                 // handle 全机唯一、与卡无关，下载/缩略图等后续链路零改动。
+                // 配对/探测会话刚切换为正式浏览时，相机可能先返回合法空数组，再公布存储。
+                // 有界轮询只用于手机热点 PC 模式；原相机热点路径行为不变。
                 val storageIds = cam.getStorageIds().filter { it and 0xFFFF != 0 }
                 Log.i(LOG_TAG, "FILE_LIST storageCount=${storageIds.size} ids=${storageIds.joinToString { "0x${it.toUInt().toString(16)}" }}")
+                ProtocolDebugLog.add("FILE_LIST storageCount=${storageIds.size} ids=${storageIds.joinToString { "0x${it.toUInt().toString(16)}" }}")
                 if (storageIds.isEmpty()) {
-                    _state.update { it.copy(isLoadingFiles = false) }
+                    _state.update { it.copy(isLoadingFiles = false, fileListError = "GetStorageIDs returned no usable storage") }
                     return@launch
                 }
 
                 val handles = storageIds.flatMap { cam.getObjectHandles(it) }.distinct()
                 Log.i(LOG_TAG, "FILE_LIST handleCount=${handles.size}")
+                ProtocolDebugLog.add("FILE_LIST handleCount=${handles.size}")
                 if (handles.isEmpty()) {
-                    _state.update { it.copy(isLoadingFiles = false) }
+                    _state.update { it.copy(isLoadingFiles = false, fileListError = "GetObjectHandles returned 0 images") }
                     return@launch
                 }
 
@@ -772,13 +823,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
                 }
 
-                _state.update { it.copy(isLoadingFiles = false) }
+                _state.update {
+                    it.copy(
+                        isLoadingFiles = false,
+                        fileListError = if (allFiles.isEmpty())
+                            "Camera returned ${handles.size} object handles, but no readable photo metadata"
+                        else null
+                    )
+                }
+                ProtocolDebugLog.add("FILE_LIST readableFiles=${allFiles.size}/${handles.size}")
             } catch (e: Exception) {
                 // 扫描中断（掉线/读超时）：保留已加载的部分，掉线由心跳发现并触发重连。
                 Log.e(LOG_TAG, "FILE_LIST failed type=${e.javaClass.simpleName} message=${e.message}", e)
-                _state.update { it.copy(isLoadingFiles = false) }
+                ProtocolDebugLog.add("FILE_LIST ERROR ${e.javaClass.simpleName}: ${e.message}")
+                _state.update { it.copy(isLoadingFiles = false, fileListError = e.message ?: e.javaClass.simpleName) }
             }
         }
+    }
+
+    fun retryFileList() {
+        if (camera != null && _state.value.isConnectedToCamera && !_state.value.isLoadingFiles) loadFiles()
     }
 
     fun getCamera(): NikonCamera? = camera

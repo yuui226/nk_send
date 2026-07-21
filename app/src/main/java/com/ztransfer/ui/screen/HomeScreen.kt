@@ -53,6 +53,7 @@ import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.ConnectionMode
+import com.ztransfer.viewmodel.PhoneHotspotPurpose
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
 import kotlin.math.cos
@@ -154,6 +155,21 @@ fun HomeScreen(
                         leadingIcon = { Icon(Icons.Default.WifiTethering, null, Modifier.size(16.dp)) }
                     )
                 }
+                if (state.connectionMode == ConnectionMode.PHONE_HOTSPOT) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = state.phoneHotspotPurpose == PhoneHotspotPurpose.ALBUM,
+                            onClick = { viewModel.setPhoneHotspotPurpose(PhoneHotspotPurpose.ALBUM) },
+                            label = { Text(stringResource(R.string.phone_purpose_album)) }
+                        )
+                        FilterChip(
+                            selected = state.phoneHotspotPurpose == PhoneHotspotPurpose.MONITOR,
+                            onClick = { viewModel.setPhoneHotspotPurpose(PhoneHotspotPurpose.MONITOR) },
+                            label = { Text(stringResource(R.string.phone_purpose_monitor)) }
+                        )
+                    }
+                }
             }
 
             // 一条橙色提示条,三种互斥的到期状况共用(优先级从急到缓):
@@ -248,7 +264,11 @@ fun HomeScreen(
                         ) {
                             if (state.connectionMode == ConnectionMode.PHONE_HOTSPOT) {
                                 Text(
-                                    stringResource(R.string.phone_hotspot_test_hint),
+                                    stringResource(
+                                        if (state.phoneHotspotPurpose == PhoneHotspotPurpose.ALBUM)
+                                            R.string.phone_hotspot_album_hint
+                                        else R.string.phone_hotspot_monitor_hint
+                                    ),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = colors.onSurfaceVariant,
                                     textAlign = TextAlign.Center

@@ -42,6 +42,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -92,15 +95,18 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.ProtocolDebugLog
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.Haptics
 import com.ztransfer.ui.util.formatSpeed
@@ -188,6 +194,17 @@ fun FileListScreen(
     val state by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
     val colors = AppTheme.colors
+    val protocolLog by ProtocolDebugLog.text.collectAsState()
+    val clipboard = LocalClipboardManager.current
+    var showProtocolLog by remember { mutableStateOf(false) }
+    var autoShownError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.fileListError) {
+        val error = state.fileListError
+        if (state.connectionMode == ConnectionMode.PHONE_HOTSPOT && error != null && error != autoShownError) {
+            autoShownError = error
+            showProtocolLog = true
+        }
+    }
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
@@ -415,6 +432,36 @@ fun FileListScreen(
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
     // 用全局背景渐变刷（而非纯 background 色），与 Scaffold 底的纵深一致。
     // 遥控页入口是左下角圆钮（曾试过横滑手势进入，误触率高已去掉）。
+    if (showProtocolLog) {
+        AlertDialog(
+            onDismissRequest = { showProtocolLog = false },
+            title = { Text(stringResource(R.string.protocol_log_title)) },
+            text = {
+                SelectionContainer {
+                    Text(
+                        protocolLog.ifEmpty { "(empty)" },
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, lineHeight = 13.sp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 180.dp, max = 480.dp)
+                            .verticalScroll(rememberScrollState())
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { clipboard.setText(AnnotatedString(protocolLog)) }) {
+                    Text(stringResource(R.string.lab_copy_log))
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = ProtocolDebugLog::clear) { Text(stringResource(R.string.clear)) }
+                    TextButton(onClick = { showProtocolLog = false }) { Text(stringResource(R.string.cancel)) }
+                }
+            }
+        )
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (state.isLoadingFiles && state.files.isEmpty()) {
@@ -477,7 +524,22 @@ fun FileListScreen(
                             tint = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(stringResource(R.string.no_photos_on_camera), color = colors.onSurfaceVariant)
+                        Text(
+                            state.fileListError ?: stringResource(R.string.no_photos_on_camera),
+                            color = if (state.fileListError != null) colors.statusError else colors.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        if (state.fileListError != null) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                GlassButton(onClick = { showProtocolLog = true }) {
+                                    Text(stringResource(R.string.view_protocol_log), color = colors.onBackground)
+                                }
+                                GlassButton(onClick = cameraViewModel::retryFileList) {
+                                    Text(stringResource(R.string.retry), color = colors.onBackground)
+                                }
+                            }
+                        }
                     }
                 }
             }

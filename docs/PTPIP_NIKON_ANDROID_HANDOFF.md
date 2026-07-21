@@ -409,10 +409,10 @@ uint32 count
 uint32 handles[count]
 ```
 
-抓包中也使用了按 JPEG format 筛选：
+抓包中也使用了 Association（目录）format 筛选：
 
 ```text
-objectFormat = 0x3001  // Association/目录相关查询上下文需按实际命令参数解释
+objectFormat = 0x3001  // Association/目录，不是 JPEG；JPEG/EXIF 是 0x3801
 ```
 
 建议首版采用稳妥的树遍历：获取 storage 根对象，识别 Association 目录，再进入 DCIM 子目录；不要硬编码 `DCIM` handle 或 `101NZ_30` 名称。

@@ -37,6 +37,7 @@ import com.ztransfer.ui.theme.ZTransferTheme
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.ConnectionMode
+import com.ztransfer.viewmodel.PhoneHotspotPurpose
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
@@ -119,10 +120,13 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 相机连接成功后：连接页先保持"连接中"脉冲一小会（列表与缩略图此间已在全速加载），
     // 再播成功爆发收尾，播完直接进照片列表——绿色对号 = 马上进入。
     // 时长与 HomeScreen 的庆祝延迟严格对齐（同一对常量）。
-    LaunchedEffect(cameraState.isConnectedToCamera, cameraState.connectionMode, currentRoute) {
+    LaunchedEffect(cameraState.isConnectedToCamera, cameraState.connectionMode, cameraState.phoneHotspotPurpose, currentRoute) {
         if (cameraState.isConnectedToCamera && currentRoute == Screen.Home.route) {
             delay(CONNECT_CELEBRATE_DELAY_MS + CONNECT_SUCCESS_ANIM_MS)
-            navController.navigate(Screen.Files.route) {
+            val target = if (cameraState.connectionMode == ConnectionMode.PHONE_HOTSPOT &&
+                cameraState.phoneHotspotPurpose == PhoneHotspotPurpose.MONITOR
+            ) Screen.Remote.route else Screen.Files.route
+            navController.navigate(target) {
                 popUpTo(Screen.Home.route) { saveState = true }
                 launchSingleTop = true
                 restoreState = true
