@@ -36,6 +36,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -77,11 +78,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -95,12 +98,15 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
@@ -694,6 +700,8 @@ fun FileListScreen(
                     else onNavigateToRemote()
                 },
                 shape = CircleShape,
+                showBorder = false,
+                showSheen = false,
                 contentPadding = PaddingValues(14.dp)
             ) {
                 RemoteMark(
@@ -789,7 +797,8 @@ fun FileListScreen(
             SignalPill(
                 rssi = state.wifiRssi,
                 connected = state.isConnectedToCamera,
-                pulseTrigger = signalPulse
+                pulseTrigger = signalPulse,
+                connectionType = state.connectionType
             )
 
             // 信号按钮右侧：类型筛选按钮。信号条展开/收起的宽度动画是逐帧真实布局，
@@ -1190,17 +1199,22 @@ fun QueuePill(
 }
 
 /**
- * Wi-Fi 信号毛玻璃按钮：相机已连接时显示 4 格信号条（点击展开具体 dBm）；
- * 连接断开（含不在相机 Wi-Fi）时显示红色断连图标——断开状态一眼可见，
- * 此时点击直接跳系统 Wi-Fi 设置（与连接页的 Wi-Fi 按钮同款行为）。
+ * 连接状态毛玻璃按钮：Wi-Fi 显示信号格与 dBm，USB 显示经典三叉标；
+ * Wi-Fi 断开时点击进入系统设置，USB 断开则等待重新插线。
  * [pulseTrigger] 递增时按钮轻微放大再弹性缩回（断开时点缩略图的"病因指向"反馈）。
  * "Z传"页与队列页顶栏共用。
  */
 @Composable
-fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
+fun SignalPill(
+    rssi: Int?,
+    connected: Boolean,
+    pulseTrigger: Int = 0,
+    connectionType: CameraConnectionType? = null
+) {
     val colors = AppTheme.colors
     var expanded by remember { mutableStateOf(false) }
-    val online = connected && rssi != null
+    val usbMode = connectionType == CameraConnectionType.USB
+    val online = connected && (usbMode || rssi != null)
     val r = rssi ?: -999
     // dBm 越接近 0 越强。判定从严：满格只给极好信号，稍差立刻掉格。
     //  -30↑ 满格 / -45↑ 三格 / -55↑ 两格 / -65↑ 一格 / 更弱 0 格。
@@ -1212,6 +1226,8 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
         else -> 0
     }
     val color = when {
+        usbMode && connected -> colors.accentBlue
+        usbMode -> colors.statusError
         level == 4 -> colors.statusConnected
         level >= 2 -> colors.accentOrange
         else -> colors.statusError
@@ -1242,7 +1258,7 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
             if (online) expanded = !expanded
             // 断开态：断连图标即"去连 Wi-Fi"的入口，跳系统 Wi-Fi 设置（与连接页
             // 的 Wi-Fi 按钮同款行为）；离线时展开 dBm 本来就无意义。
-            else try {
+            else if (!usbMode) try {
                 context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
             } catch (_: Exception) {}
         },
@@ -1268,8 +1284,23 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 在线：4 格信号条；断开：红色断连图标。两态交叉淡化切换。
-            Crossfade(targetState = online, animationSpec = tween(220), label = "signalMode") { on ->
-                if (on) {
+            Crossfade(
+                targetState = when {
+                    usbMode -> 2
+                    online -> 1
+                    else -> 0
+                },
+                animationSpec = tween(220),
+                label = "signalMode"
+            ) { mode ->
+                if (mode == 2) {
+                    ClassicUsbIcon(
+                        tint = color,
+                        modifier = Modifier
+                            .wrapContentHeight(unbounded = true)
+                            .size(18.dp)
+                    )
+                } else if (mode == 1) {
                     Row(
                         modifier = Modifier.fillMaxHeight(),
                         verticalAlignment = Alignment.Bottom,
@@ -1312,7 +1343,7 @@ fun SignalPill(rssi: Int?, connected: Boolean, pulseTrigger: Int = 0) {
                 ) + fadeOut(tween(160))
             ) {
                 Text(
-                    text = "$r dBm",
+                    text = if (usbMode) stringResource(R.string.connection_usb) else "$r dBm",
                     style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                     fontWeight = FontWeight.Medium,
                     color = color,
@@ -1795,6 +1826,68 @@ private fun AlreadyExportedIndicator() {
     ) {
         Icon(Icons.Default.Check, contentDescription = null,
             tint = colors.statusConnected, modifier = Modifier.size(14.dp))
+    }
+}
+
+/** 经典 USB 三叉标：箭头、圆点和方形分别作为三条分支端点。 */
+@Composable
+private fun ClassicUsbIcon(
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    val description = stringResource(R.string.connection_usb)
+    Canvas(modifier = modifier.semantics { contentDescription = description }) {
+        val unit = size.minDimension
+        val stroke = unit * 0.11f
+        val centerX = size.width * 0.5f
+        val junctionY = size.height * 0.62f
+
+        drawLine(
+            color = tint,
+            start = Offset(centerX, size.height * 0.84f),
+            end = Offset(centerX, size.height * 0.22f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = tint,
+            start = Offset(centerX, junctionY),
+            end = Offset(size.width * 0.25f, size.height * 0.48f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = tint,
+            start = Offset(centerX, size.height * 0.52f),
+            end = Offset(size.width * 0.76f, size.height * 0.38f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = tint,
+            start = Offset(size.width * 0.76f, size.height * 0.38f),
+            end = Offset(size.width * 0.76f, size.height * 0.25f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round
+        )
+
+        val arrow = Path().apply {
+            moveTo(centerX, size.height * 0.08f)
+            lineTo(size.width * 0.36f, size.height * 0.27f)
+            lineTo(size.width * 0.64f, size.height * 0.27f)
+            close()
+        }
+        drawPath(arrow, tint)
+        drawCircle(
+            color = tint,
+            radius = unit * 0.09f,
+            center = Offset(size.width * 0.22f, size.height * 0.46f)
+        )
+        drawRect(
+            color = tint,
+            topLeft = Offset(size.width * 0.68f, size.height * 0.10f),
+            size = androidx.compose.ui.geometry.Size(unit * 0.16f, unit * 0.16f)
+        )
     }
 }
 

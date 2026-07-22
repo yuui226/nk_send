@@ -64,12 +64,15 @@ object Lab {
     const val PROP_EXPOSURE_PROGRAM = 0x500E
     const val PROP_ISO = 0x500F
     const val PROP_EXP_COMPENSATION = 0x5010
+    const val PROP_NK_AUTO_ISO = 0xD054
     const val PROP_NK_SHUTTER = 0xD100
     const val PROP_NK_RECORDING_MEDIA = 0xD10B
     const val PROP_NK_LV_STATUS = 0xD1A2
     const val PROP_NK_LV_PROHIBIT = 0xD1A4
     const val PROP_NK_LV_IMAGE_SIZE = 0xD1AC
     const val PROP_NK_ISO_EX = 0xD0B4
+    const val PROP_NK_ISO_CONTROL_SENSITIVITY = 0xD0B5
+    const val PROP_NK_AUTO_ISO_ALT = 0xD16A
     const val PROP_NK_AF_MODE = 0xD161
     const val PROP_NK_MOV_PROHIBIT = 0xD0A4      // 录像禁止条件 bitmask，0=可录
     const val PROP_NK_LV_SELECTOR = 0xD1A6       // 照片/录像实体拨杆：0=照片 1=录像
@@ -113,7 +116,10 @@ object Lab {
         PROP_NK_SHUTTER to "NikonShutterSpeed",
         PROP_EXPOSURE_TIME_STD to "ExposureTime(std)",
         PROP_ISO to "ISO",
+        PROP_NK_AUTO_ISO to "AutoISO",
         PROP_NK_ISO_EX to "ISOEx",
+        PROP_NK_ISO_CONTROL_SENSITIVITY to "ISOControlSensitivity",
+        PROP_NK_AUTO_ISO_ALT to "AutoISOAlt",
         PROP_EXP_COMPENSATION to "ExpCompensation",
         PROP_EXPOSURE_PROGRAM to "ExposureProgram",
         PROP_WHITE_BALANCE to "WhiteBalance",
@@ -272,7 +278,9 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
     }
     Lab.PROP_EXPOSURE_TIME_STD -> "%.4fs".format(raw / 10000.0)
     Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP -> "%+.1fEV".format(raw / 1000.0)
-    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_MOVIE_ISO -> "ISO$raw"
+    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_ISO_CONTROL_SENSITIVITY,
+    Lab.PROP_NK_MOVIE_ISO -> "ISO$raw"
+    Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT -> if (raw == 0L) "Off" else "On"
     Lab.PROP_EXPOSURE_PROGRAM -> when (raw) {
         1L -> "M"; 2L -> "P"; 3L -> "A"; 4L -> "S"; else -> "0x${raw.toString(16)}"
     }
@@ -395,14 +403,29 @@ data class RcFocusMode(
     val raw: Long
 )
 
-/** 按属性语义格式化原始值（1/250s、f/2.8、ISO500、+0.3EV…）。 */
-fun rcFormat(prop: Int, raw: Long): String = fmtVal(prop, raw)
+/** 遥控参数 UI 的紧凑读数；tile 已标明 ISO/EV，因此数值中不重复单位。 */
+fun rcFormat(prop: Int, raw: Long): String = when (prop) {
+    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_ISO_CONTROL_SENSITIVITY,
+    Lab.PROP_NK_MOVIE_ISO -> raw.toString()
+    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP ->
+        "%+.1f".format(raw / 1000.0)
+    else -> fmtVal(prop, raw)
+}
 
 suspend fun NikonCamera.rcGetParam(prop: Int): RcParam? {
     val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
     if (rc != Lab.OK || d == null) return null
     val desc = runCatching { parsePropDescData(d) }.getOrNull() ?: return null
     return RcParam(prop, desc.dataType, desc.writable, desc.current, desc.enumValues)
+}
+
+/** 只刷新标量属性的当前值，复用已取得的数据类型与值域，避免实时状态轮询重复拉描述。 */
+suspend fun NikonCamera.rcRefreshParam(param: RcParam): RcParam? {
+    val (rc, data) = labCommand(Lab.GET_DEVICE_PROP_VALUE, param.prop)
+    if (rc != Lab.OK || data == null) return null
+    val (current, scalar) = runCatching { Cur(data).typed(param.dataType) }.getOrNull()
+        ?: return null
+    return if (scalar) param.copy(current = current) else null
 }
 
 suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {

@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="connection_usb">USB</string>
+    <string name="connection_wifi_hotspot">Camera hotspot</string>
+    <string name="usb_step_power">Keep the camera powered on</string>
+    <string name="usb_step_cable">Connect the camera and phone with a USB-C to USB-C cable</string>
+    <string name="connection_failed_short">Connection failed</string>
+    <string name="auto_iso">Auto ISO</string>
     <string name="app_name">ZTransfer</string>
     <string name="transfer_channel_name">File transfer</string>
     <string name="transfer_notification_title">ZTransfer</string>
     <string name="transfer_notification_text">Transferring files…</string>
 
     <!-- Home / connection -->
-    <string name="connecting_camera">Connecting to camera…</string>
+    <string name="usb_unknown_error">Unknown USB error</string>
+    <string name="usb_permission_required">USB permission was not granted. Reconnect the cable and allow access.</string>
+    <string name="error_read_device_info">Could not read camera information: %1$s</string>
     <string name="connect_camera_wifi">Connect to the camera\'s Wi-Fi</string>
-    <string name="open_wifi_settings">Open Wi-Fi Settings</string>
+    <string name="open_wifi_settings">Wi-Fi Settings</string>
     <string name="step_camera_wifi">On the camera, enable “Connect to smart device (Wi-Fi)”</string>
     <string name="step_phone_wifi">Connect your phone\'s Wi-Fi to the camera\'s hotspot</string>
     <string name="tip_title">A faster way to connect</string>

@@ -1,7 +1,13 @@
 package com.ztransfer.viewmodel
 
 import android.app.Application
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
@@ -18,8 +24,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.protocol.Lab
+import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
+import com.ztransfer.protocol.UsbPtpConnection
 import com.ztransfer.protocol.rcPollEvents
 import java.io.ByteArrayInputStream
 import kotlinx.coroutines.CoroutineScope
@@ -48,6 +56,8 @@ data class CameraState(
     val isWifiConnected: Boolean = false,
     val isConnectedToCamera: Boolean = false,
     val isConnecting: Boolean = false,
+    val connectionType: CameraConnectionType? = null,
+    val usbConnectionError: String? = null,
     val files: List<NikonCamera.FileInfo> = emptyList(),
     val isLoadingFiles: Boolean = false,
     // 当前相机 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；未在相机 Wi-Fi 上时为 null。
@@ -72,6 +82,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var keepaliveJob: Job? = null
     private var watcherJob: Job? = null
     private var eventPollJob: Job? = null
+    private var usbPermissionJob: Job? = null
+    private var usbConnectJob: Job? = null
+    private var pendingUsbPermissionDeviceId: Int? = null
+    private var usbConnectFailures = 0
+    private var usbRetryPaused = false
+    private val usbManager = application.getSystemService(Context.USB_SERVICE) as UsbManager
+    private var attachedUsbDevice: UsbDevice? = null
+    private var activeUsbDeviceId: Int? = null
 
     // 缩略图内存缓存：按位图字节数限容（约 1/8 可用内存），超限自动淘汰。
     private val thumbnailCache = object : LruCache<Int, ImageBitmap>(
@@ -183,6 +201,345 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private val usbPermissionIntent: PendingIntent by lazy {
+        PendingIntent.getBroadcast(
+            getApplication(),
+            0,
+            Intent(ACTION_USB_PERMISSION).setPackage(getApplication<Application>().packageName),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private val usbReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            when (intent.action) {
+                ACTION_USB_PERMISSION -> {
+                    // hasPermission() is the source of truth. Some ROMs omit one of the result
+                    // extras, so fall back to the attached PTP device instead of leaving the UI
+                    // indefinitely in the attached/connecting presentation.
+                    val device = intent.usbDeviceExtra()
+                        ?: usbManager.deviceList.values.firstOrNull {
+                            UsbPtpConnection.findPtpInterface(it) != null
+                        }
+                        ?: return
+                    if (usbManager.hasPermission(device)) {
+                        usbPermissionJob?.cancel()
+                        usbPermissionJob = null
+                        onUsbDeviceAvailable(device)
+                    } else if (intent.hasExtra(UsbManager.EXTRA_PERMISSION_GRANTED) &&
+                        !intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
+                    ) {
+                        usbPermissionJob?.cancel()
+                        usbPermissionJob = null
+                        onUsbPermissionUnavailable(device)
+                    }
+                }
+                UsbManager.ACTION_USB_DEVICE_ATTACHED ->
+                    intent.usbDeviceExtra()?.let(::onUsbDeviceAvailable)
+                UsbManager.ACTION_USB_DEVICE_DETACHED ->
+                    intent.usbDeviceExtra()?.let(::onUsbDeviceDetached)
+            }
+        }
+    }
+    private var usbReceiverRegistered = false
+
+    @Suppress("DEPRECATION")
+    private fun Intent.usbDeviceExtra(): UsbDevice? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        } else {
+            getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        }
+
+    private fun registerUsbReceiver() {
+        if (usbReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(ACTION_USB_PERMISSION)
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getApplication<Application>().registerReceiver(
+                usbReceiver,
+                filter,
+                // USB attach/detach and permission completion originate outside this process.
+                // The receiver still validates the device class and hasPermission() before use.
+                Context.RECEIVER_EXPORTED
+            )
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            getApplication<Application>().registerReceiver(usbReceiver, filter)
+        }
+        usbReceiverRegistered = true
+    }
+
+    private fun scanAttachedUsbCamera() {
+        usbManager.deviceList.values
+            .firstOrNull { UsbPtpConnection.findPtpInterface(it) != null }
+            ?.let(::onUsbDeviceAvailable)
+    }
+
+    private fun onUsbDeviceAvailable(device: UsbDevice) {
+        // Wi-Fi 会话期间忽略 USB 插拔；连接页识别到 PTP 设备后，本次会话锁定为 USB。
+        if (_state.value.connectionType == CameraConnectionType.WIFI) return
+        if (UsbPtpConnection.findPtpInterface(device) == null) return
+        val isNewAttachment = attachedUsbDevice?.deviceId != device.deviceId
+        if (isNewAttachment) {
+            usbConnectFailures = 0
+            usbRetryPaused = false
+        }
+        attachedUsbDevice = device
+        _state.update {
+            it.copy(
+                connectionType = CameraConnectionType.USB,
+                usbConnectionError = null
+            )
+        }
+        // 模式选定即释放 Wi-Fi 请求；授权等待和失败状态也不能继续占用手机网络。
+        releaseWifiNetworkRequest()
+        if (usbRetryPaused) return
+        if (!usbManager.hasPermission(device)) {
+            requestUsbPermission(device)
+            return
+        }
+        usbPermissionJob?.cancel()
+        usbPermissionJob = null
+        if (pendingUsbPermissionDeviceId == device.deviceId) {
+            pendingUsbPermissionDeviceId = null
+        }
+        connectUsbDevice(device)
+    }
+
+    private fun requestUsbPermission(device: UsbDevice) {
+        if (pendingUsbPermissionDeviceId == device.deviceId) return
+        pendingUsbPermissionDeviceId = device.deviceId
+        _state.update {
+            it.copy(
+                isConnecting = true,
+                usbConnectionError = null
+            )
+        }
+        log { "USB_PERMISSION request device=${device.deviceName}" }
+        val requested = runCatching {
+            usbManager.requestPermission(device, usbPermissionIntent)
+        }.onFailure {
+            onUsbPermissionUnavailable(device)
+        }.isSuccess
+        if (!requested) return
+
+        usbPermissionJob?.cancel()
+        usbPermissionJob = viewModelScope.launch {
+            // 部分 ROM 不可靠地回送授权广播；轮询系统权限状态仅作兜底。
+            repeat((USB_PERMISSION_TIMEOUT_MS / USB_PERMISSION_POLL_MS).toInt()) {
+                delay(USB_PERMISSION_POLL_MS)
+                if (attachedUsbDevice?.deviceId != device.deviceId) return@launch
+                if (usbManager.hasPermission(device)) {
+                    pendingUsbPermissionDeviceId = null
+                    usbPermissionJob = null
+                    connectUsbDevice(device)
+                    return@launch
+                }
+            }
+            if (attachedUsbDevice?.deviceId == device.deviceId) {
+                log { "USB_PERMISSION timeout device=${device.deviceName}" }
+                onUsbPermissionUnavailable(device)
+            }
+        }
+    }
+
+    private fun connectUsbDevice(device: UsbDevice) {
+        if (_state.value.connectionType == CameraConnectionType.WIFI) return
+        if (!usbManager.hasPermission(device)) return
+        if (usbRetryPaused) return
+        if (_state.value.connectionType == CameraConnectionType.USB &&
+            _state.value.isConnectedToCamera && activeUsbDeviceId == device.deviceId
+        ) return
+        if (usbConnectJob?.isActive == true) return
+
+        usbConnectJob = viewModelScope.launch {
+            try {
+                _state.update {
+                    it.copy(
+                        isConnecting = true,
+                        usbConnectionError = null
+                    )
+                }
+                keepaliveJob?.cancel()
+                eventPollJob?.cancel()
+                val previous = camera
+                camera = null
+                previous?.close()
+                releaseSessionWifiLock()
+
+                val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
+                val cam = NikonCamera(localizedContext)
+                log { "USB_CONNECT begin device=${device.deviceName}" }
+                cam.connectUsb(usbManager, device).fold(
+                    onSuccess = {
+                        if (attachedUsbDevice?.deviceId != device.deviceId) {
+                            // OpenSession 完成前设备已变化，旧结果不可再发布。
+                            cam.close()
+                            val replacementAttached = attachedUsbDevice != null
+                            _state.update {
+                                it.copy(
+                                    isConnectedToCamera = false,
+                                    isConnecting = replacementAttached
+                                )
+                            }
+                            if (replacementAttached) scheduleUsbReconnect()
+                        } else {
+                            usbConnectFailures = 0
+                            camera = cam
+                            activeUsbDeviceId = device.deviceId
+                            _state.update {
+                                it.copy(
+                                    isConnectedToCamera = true,
+                                    isConnecting = false,
+                                    connectionType = CameraConnectionType.USB,
+                                    usbConnectionError = null,
+                                    wifiRssi = null
+                                )
+                            }
+                            startKeepalive()
+                            loadFiles()
+                            startEventPolling()
+                        }
+                    },
+                    onFailure = { error -> handleUsbConnectFailure(device, error) }
+                )
+            } finally {
+                usbConnectJob = null
+            }
+        }
+    }
+
+    private fun handleUsbConnectFailure(device: UsbDevice, error: Throwable) {
+        log { "USB_CONNECT retry: ${error.javaClass.simpleName}: ${error.message}" }
+        activeUsbDeviceId = null
+
+        // 拔线导致的 I/O 失败不计入重试，也不能把断开态重新覆盖成“连接中”。
+        if (attachedUsbDevice?.deviceId != device.deviceId) {
+            val replacementAttached = attachedUsbDevice != null
+            _state.update {
+                it.copy(
+                    isConnectedToCamera = false,
+                    isConnecting = replacementAttached,
+                    usbConnectionError = null
+                )
+            }
+            if (replacementAttached) scheduleUsbReconnect()
+            return
+        }
+
+        usbConnectFailures++
+        if (usbConnectFailures < USB_CONNECT_MAX_ATTEMPTS) {
+            _state.update {
+                it.copy(
+                    isConnectedToCamera = false,
+                    isConnecting = true,
+                    usbConnectionError = null
+                )
+            }
+            scheduleUsbReconnect()
+            return
+        }
+
+        log { "USB_CONNECT paused; waiting for cable reattach" }
+        usbRetryPaused = true
+        val localized = com.ztransfer.AppLocale.wrap(getApplication())
+        _state.update {
+            it.copy(
+                isConnecting = false,
+                usbConnectionError = error.message
+                    ?: localized.getString(com.ztransfer.R.string.usb_unknown_error)
+            )
+        }
+        // 线仍物理连接时无法再次获得 attach 事件；暂停并等待实际重新插线，不回退 Wi-Fi。
+    }
+
+    private fun scheduleUsbReconnect() {
+        viewModelScope.launch {
+            delay(RETRY_INTERVAL_MS)
+            attachedUsbDevice?.let(::connectUsbDevice)
+        }
+    }
+
+    private fun onUsbPermissionUnavailable(device: UsbDevice) {
+        usbPermissionJob?.cancel()
+        usbPermissionJob = null
+        if (pendingUsbPermissionDeviceId == device.deviceId) {
+            pendingUsbPermissionDeviceId = null
+        }
+        usbRetryPaused = true
+        _state.update {
+            it.copy(
+                isConnecting = false,
+                usbConnectionError = com.ztransfer.AppLocale.wrap(getApplication()).getString(
+                    com.ztransfer.R.string.usb_permission_required
+                )
+            )
+        }
+    }
+
+    private fun onUsbDeviceDetached(device: UsbDevice) {
+        if (_state.value.connectionType == CameraConnectionType.WIFI) return
+        val wasPending = pendingUsbPermissionDeviceId == device.deviceId
+        val wasAttached = attachedUsbDevice?.deviceId == device.deviceId
+        val wasActive = activeUsbDeviceId == device.deviceId
+        if (!wasPending && !wasAttached && !wasActive) return
+
+        if (wasPending) {
+            usbPermissionJob?.cancel()
+            usbPermissionJob = null
+            pendingUsbPermissionDeviceId = null
+        }
+        if (wasAttached) attachedUsbDevice = null
+        usbRetryPaused = false
+        usbConnectFailures = 0
+        _state.update {
+            it.copy(
+                isConnecting = false,
+                usbConnectionError = null
+            )
+        }
+        if (!wasActive) {
+            // Also covers a cable removed while USB OpenSession is still in flight.
+            return
+        }
+
+        activeUsbDeviceId = null
+        keepaliveJob?.cancel()
+        eventPollJob?.cancel()
+        val cam = camera
+        camera = null
+        _state.update {
+            it.copy(
+                isConnectedToCamera = false,
+                isConnecting = false,
+                connectionType = CameraConnectionType.USB
+            )
+        }
+        cleanupScope.launch { cam?.close() }
+    }
+
+    private suspend fun reconnectSelectedTransport() {
+        when (_state.value.connectionType) {
+            CameraConnectionType.USB -> {
+                val usb = attachedUsbDevice
+                if (usb != null && usbManager.hasPermission(usb)) connectUsbDevice(usb)
+            }
+            CameraConnectionType.WIFI -> connectToCameraWithRetry()
+            null -> {
+                val usb = attachedUsbDevice
+                if (usb != null && usbManager.hasPermission(usb)) {
+                    connectUsbDevice(usb)
+                } else {
+                    connectToCameraWithRetry()
+                }
+            }
+        }
+    }
+
     // "是否有任务在传输"（含等待中）——后台缩略图填充的开关之一，由 UI 层喂入
     //（TransferViewModel 与本 VM 相互独立，经 MainScreen 桥接）。
     private val transfersBusyFlow = MutableStateFlow(false)
@@ -210,7 +567,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     init {
-        registerNetworkCallback()
+        registerUsbReceiver()
+        scanAttachedUsbCamera()
+        if (_state.value.connectionType != CameraConnectionType.USB) registerNetworkCallback()
         startConnectionWatcher()
         // 磁盘缓存超容淘汰（后台一次，不阻塞启动）。
         viewModelScope.launch(Dispatchers.IO) { pruneThumbDisk() }
@@ -266,6 +625,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         watcherJob?.cancel()
         watcherJob = viewModelScope.launch {
             while (isActive) {
+                if (_state.value.connectionType == CameraConnectionType.USB) {
+                    delay(WATCH_INTERVAL_MS)
+                    continue
+                }
                 // dhcpInfo/connectionInfo 是 Binder IPC，放 IO 线程，不在主线程高频抖动。
                 val (onNikonWifi, rssi) = withContext(Dispatchers.IO) {
                     val on = linkSaysCameraWifi || isNikonWifi()
@@ -288,6 +651,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var wifiHeld = false
 
     private fun registerNetworkCallback() {
+        if (_state.value.connectionType == CameraConnectionType.USB) return
         if (wifiHeld) return
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
@@ -301,6 +665,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             connectivityManager.registerNetworkCallback(request, networkCallback)
         }
         wifiHeld = true
+    }
+
+    private fun releaseWifiNetworkRequest() {
+        if (!wifiHeld) return
+        runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
+        wifiHeld = false
+        wifiNetwork = null
+        linkSaysCameraWifi = false
+        _state.update { it.copy(isWifiConnected = false, wifiRssi = null) }
     }
 
     // 购买挂起:为 true 期间禁止一切自动重连(watcher / onWifiChanged / 重试循环)。
@@ -320,6 +693,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 买完重新握住:恢复占用、放开重连,watcher/onWifiChanged 沿既有路径自动接管。
      */
     fun holdCameraWifi(hold: Boolean) {
+        if (_state.value.connectionType == CameraConnectionType.USB) {
+            // USB/PTP does not occupy the phone's default network; keep it connected while paying.
+            purchaseHold = false
+            return
+        }
         purchaseHold = !hold
         if (hold) {
             registerNetworkCallback()
@@ -346,6 +724,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun onWifiChanged() {
+        if (_state.value.connectionType == CameraConnectionType.USB) return
         viewModelScope.launch {
             val onNikonWifi = linkSaysCameraWifi || checkNikonWifi()
             _state.update { it.copy(isWifiConnected = onNikonWifi) }
@@ -393,7 +772,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 一旦离开相机网段则退出循环，由网络回调在重新连上 Wi-Fi 后再次触发。
      */
     private suspend fun connectToCameraWithRetry() {
-        if (purchaseHold || _state.value.isConnecting || _state.value.isConnectedToCamera) return
+        if (purchaseHold || _state.value.connectionType == CameraConnectionType.USB ||
+            _state.value.isConnecting || _state.value.isConnectedToCamera
+        ) return
         _state.update { it.copy(isConnecting = true) }
 
         // 经 AppLocale.wrap：协议层错误文案（会显示在失败卡片上）与应用内语言一致。
@@ -401,23 +782,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 不必每轮重试都重建配置上下文。
         val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
         // purchaseHold 也随轮检查:重试循环可能在购买挂起前就已在跑,得让它当轮退出。
-        while (!purchaseHold && (linkSaysCameraWifi || checkNikonWifi()) && !_state.value.isConnectedToCamera) {
+        while (!purchaseHold && _state.value.connectionType != CameraConnectionType.USB &&
+            (linkSaysCameraWifi || checkNikonWifi()) && !_state.value.isConnectedToCamera
+        ) {
             val cam = NikonCamera(localizedContext)
             var connected = false
             cam.connect(network = wifiNetwork).fold(
                 onSuccess = {
-                    camera = cam
-                    acquireSessionWifiLock()   // 会话保活：连着就不让 Wi-Fi 打盹
-                    _state.update {
-                        it.copy(
-                            isConnectedToCamera = true,
-                            isConnecting = false
-                        )
+                    // USB 可能在 Wi-Fi 握手期间接入；此时不发布短暂的 Wi-Fi 成功态，
+                    // 先释放刚建立的会话，再由循环出口切换到 USB。
+                    if (_state.value.connectionType == CameraConnectionType.USB) {
+                        cam.close()
+                    } else {
+                        camera = cam
+                        acquireSessionWifiLock()   // 会话保活：连着就不让 Wi-Fi 打盹
+                        _state.update {
+                            it.copy(
+                                isConnectedToCamera = true,
+                                isConnecting = false,
+                                connectionType = CameraConnectionType.WIFI
+                            )
+                        }
+                        startKeepalive()
+                        loadFiles()
+                        startEventPolling()
+                        connected = true
                     }
-                    startKeepalive()
-                    loadFiles()
-                    startEventPolling()
-                    connected = true
                 },
                 onFailure = {
                     cam.close()
@@ -432,8 +822,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             delay(RETRY_INTERVAL_MS)   // 未连上，稍后再试，不显示错误
         }
 
-        // 已离开相机 Wi-Fi（或已连上）；清除"连接中"状态，等待下次网络变化再触发。
+        // 已离开相机 Wi-Fi（或已连上）；清除“连接中”状态，等待下次网络变化再触发。
         _state.update { it.copy(isConnecting = false) }
+        if (_state.value.connectionType == CameraConnectionType.USB) {
+            attachedUsbDevice?.let(::connectUsbDevice)
+        }
     }
 
     /**
@@ -448,7 +841,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val cam = camera ?: break
                 if (!cam.keepalive()) {
                     camera = null
-                    releaseSessionWifiLock()   // 会话结束，允许 Wi-Fi 恢复省电
+                    if (cam.connectionType == CameraConnectionType.WIFI) releaseSessionWifiLock()
                     cam.close()
                     // 掉线不报错，直接进入重连（新协程，避免与当前心跳协程的取消纠缠）。
                     // 不清空文件列表：网格保留（缩略图走缓存），断开状态由顶栏信号按钮
@@ -457,7 +850,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _state.update {
                         it.copy(isConnectedToCamera = false)
                     }
-                    viewModelScope.launch { connectToCameraWithRetry() }
+                    viewModelScope.launch { reconnectSelectedTransport() }
                     break
                 }
             }
@@ -581,11 +974,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         camera = null
         keepaliveJob?.cancel()
         eventPollJob?.cancel()
-        releaseSessionWifiLock()
-        _state.update { it.copy(isConnectedToCamera = false, isConnecting = false) }
+        if (failedCamera.connectionType == CameraConnectionType.WIFI) releaseSessionWifiLock()
+        _state.update {
+            it.copy(isConnectedToCamera = false, isConnecting = false)
+        }
         viewModelScope.launch {
             failedCamera.close()
-            connectToCameraWithRetry()
+            reconnectSelectedTransport()
         }
     }
 
@@ -999,9 +1394,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         releaseSessionWifiLock()
         keepaliveJob?.cancel()
         watcherJob?.cancel()
-        try {
-            connectivityManager.unregisterNetworkCallback(networkCallback)
-        } catch (_: Exception) {}
+        usbPermissionJob?.cancel()
+        if (wifiHeld) releaseWifiNetworkRequest()
+        if (usbReceiverRegistered) {
+            runCatching { getApplication<Application>().unregisterReceiver(usbReceiver) }
+            usbReceiverRegistered = false
+        }
         val cam = camera
         camera = null
         // onCleared 时 viewModelScope 已取消，用独立作用域完成 socket 清理（close 内部为 NonCancellable）。
@@ -1009,6 +1407,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private companion object {
+        const val ACTION_USB_PERMISSION = "com.ztransfer.USB_PERMISSION"
+        const val USB_PERMISSION_TIMEOUT_MS = 20_000L
+        const val USB_PERMISSION_POLL_MS = 100L
+        const val USB_CONNECT_MAX_ATTEMPTS = 3
         const val KEEPALIVE_INTERVAL_MS = 10_000L
         // 事件轮询间隔:机身快门新照片出现在列表的最大延迟。单条小命令,
         // 相对 10s 心跳的通道占用可忽略;再快意义不大(拍完掏出手机也要几秒)。

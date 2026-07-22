@@ -418,7 +418,8 @@ fun TransferScreen(
             Spacer(modifier = Modifier.width(8.dp))
             SignalPill(
                 rssi = cameraState.wifiRssi,
-                connected = cameraState.isConnectedToCamera
+                connected = cameraState.isConnectedToCamera,
+                connectionType = cameraState.connectionType
             )
 
             // 右：胶囊（传输中显速度/数量，完成后 done→图标）；队列被清空后随之淡出，
