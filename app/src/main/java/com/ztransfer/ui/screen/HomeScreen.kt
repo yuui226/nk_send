@@ -401,6 +401,7 @@ fun HomeScreen(
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },
                 onPlayFireworks = { fireworks.launch() },
+                cameraUsesWifi = state.connectionType == CameraConnectionType.WIFI,
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
             )
         }

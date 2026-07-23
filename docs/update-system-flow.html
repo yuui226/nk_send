@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZTransfer 更新流程</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07111b;
+      --panel: #101f2d;
+      --panel2: #142737;
+      --line: rgba(183, 211, 230, .17);
+      --text: #f2f8fc;
+      --muted: #9db0bf;
+      --blue: #53d6ff;
+      --green: #55e09c;
+      --yellow: #ffc85c;
+      --red: #ff7488;
+      --purple: #c291ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--text);
+      font: 15px/1.6 Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 8% 0, rgba(83,214,255,.13), transparent 30%),
+        radial-gradient(circle at 95% 5%, rgba(194,145,255,.1), transparent 26%),
+        var(--bg);
+    }
+    .page { width: min(1280px, calc(100% - 32px)); margin: auto; padding: 38px 0 60px; }
+    header { margin-bottom: 22px; }
+    .eyebrow { color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+    h1 { margin: 6px 0; font-size: clamp(30px, 4vw, 48px); line-height: 1.16; }
+    h2, h3, p { margin-top: 0; }
+    h2 { margin-bottom: 5px; font-size: 22px; }
+    h3 { margin-bottom: 5px; font-size: 16px; }
+    p { margin-bottom: 0; color: var(--muted); }
+    code { color: #a9eaff; }
+
+    .tabs {
+      position: sticky;
+      top: 10px;
+      z-index: 10;
+      display: flex;
+      gap: 7px;
+      overflow-x: auto;
+      padding: 7px;
+      margin-bottom: 18px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: rgba(7,17,27,.88);
+      backdrop-filter: blur(15px);
+    }
+    .tab {
+      flex: 1 0 135px;
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: var(--muted);
+      background: transparent;
+      font: inherit;
+      cursor: pointer;
+    }
+    .tab.active { color: #04131b; background: var(--blue); font-weight: 800; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .section {
+      margin-bottom: 16px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: linear-gradient(145deg, rgba(16,31,45,.96), rgba(10,23,34,.92));
+    }
+    .section-head { margin-bottom: 17px; }
+    .section-head p { max-width: 850px; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(155px, 1fr));
+      gap: 25px;
+      overflow-x: auto;
+      padding: 3px 2px 10px;
+    }
+    .card, .decision {
+      position: relative;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: var(--panel2);
+    }
+    .flow .card:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -20px;
+      top: 50%;
+      color: var(--muted);
+      font-size: 19px;
+      transform: translateY(-50%);
+    }
+    .card p, .decision p { font-size: 13px; }
+    .admin { border-top: 3px solid var(--purple); }
+    .server { border-top: 3px solid var(--blue); }
+    .client { border-top: 3px solid #7d9fff; }
+    .ok { border-top: 3px solid var(--green); }
+    .warn { border-top: 3px solid var(--yellow); }
+    .fail { border-top: 3px solid var(--red); }
+    .label {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(255,255,255,.055);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .steps { counter-reset: step; display: grid; gap: 9px; }
+    .step {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 12px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255,255,255,.025);
+    }
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+      color: #04131b;
+      background: var(--blue);
+      font-weight: 900;
+    }
+    .step b { display: block; }
+    .step span { color: var(--muted); font-size: 13px; }
+
+    .tree { display: grid; gap: 10px; }
+    .row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 10px; }
+    .s4 { grid-column: span 4; }
+    .s6 { grid-column: span 6; }
+    .s8 { grid-column: span 8; }
+    .s12 { grid-column: span 12; }
+    .down { color: var(--muted); text-align: center; font-size: 20px; line-height: .7; }
+    .choice {
+      display: inline-block;
+      margin-bottom: 6px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .choice.yes { color: #91efbf; background: rgba(85,224,156,.1); }
+    .choice.no { color: #ffabb7; background: rgba(255,116,136,.1); }
+
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+    th { color: var(--muted); font-size: 12px; }
+    tr:last-child td { border-bottom: 0; }
+    .note {
+      padding: 13px 15px;
+      border-left: 3px solid var(--green);
+      border-radius: 9px;
+      color: #c8f2dd;
+      background: rgba(85,224,156,.07);
+    }
+    footer { margin-top: 22px; color: #708594; text-align: center; font-size: 12px; }
+
+    @media (max-width: 850px) {
+      .row, .grid { grid-template-columns: 1fr; }
+      [class^="s"], [class*=" s"] { grid-column: span 1; }
+    }
+  </style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <div class="eyebrow">ZTRANSFER UPDATE</div>
+    <h1>更新流程</h1>
+    <p>目标：发布少填、用户少点、服务端少状态。</p>
+  </header>
+
+  <nav class="tabs" aria-label="流程视图">
+    <button class="tab active" data-tab="all" data-testid="tab-all">总流程</button>
+    <button class="tab" data-tab="admin" data-testid="tab-admin">我的操作</button>
+    <button class="tab" data-tab="user" data-testid="tab-user">用户操作</button>
+    <button class="tab" data-tab="server" data-testid="tab-server">服务端</button>
+  </nav>
+
+  <section id="all" class="panel active" data-testid="panel-all">
+    <article class="section">
+      <div class="section-head"><h2>完整主流程</h2><p>正常情况只有这一条路径。</p></div>
+      <div class="flow">
+        <div class="card admin"><span class="label">你</span><h3>上传并复制</h3><p>上传 APK，复制蓝奏云分享文本。</p></div>
+        <div class="card admin"><span class="label">管理工具</span><h3>发布</h3><p>填写说明，选择软/硬，确认。</p></div>
+        <div class="card server"><span class="label">服务端</span><h3>保存版本</h3><p>自动读取版本、大小和 SHA-256。</p></div>
+        <div class="card client"><span class="label">App</span><h3>提示更新</h3><p>自动检查或手动检查。</p></div>
+        <div class="card ok"><span class="label">用户</span><h3>安装</h3><p>点立即更新，最后确认系统安装。</p></div>
+      </div>
+    </article>
+
+    <article class="section">
+      <div class="section-head"><h2>只保留两个分支</h2></div>
+      <div class="grid">
+        <div class="card ok"><h3>软更新</h3><p>立即更新 / 稍后 / 忽略此版本。</p></div>
+        <div class="card fail"><h3>硬更新</h3><p>只能更新；弹窗不可关闭。</p></div>
+        <div class="card server"><h3>正常下载</h3><p>App 内下载、校验、打开系统安装器。</p></div>
+        <div class="card warn"><h3>自动更新失败</h3><p>复制链接和密码，提示手动更新。</p></div>
+      </div>
+    </article>
+  </section>
+
+  <section id="admin" class="panel" data-testid="panel-admin">
+    <article class="section">
+      <div class="section-head"><h2>我发布一次更新</h2><p>只粘贴蓝奏云复制文本；版本自动读取。</p></div>
+      <div class="steps">
+        <div class="step"><div><b>准备 APK</b><span>提高 versionCode，签名并上传蓝奏云。</span></div></div>
+        <div class="step"><div><b>复制分享文本</b><span>例如：链接 + “密码:zzzz”。</span></div></div>
+        <div class="step"><div><b>选择“发布新版本”</b><span>工具自动读取剪贴板中的链接和密码。</span></div></div>
+        <div class="step"><div><b>填写更新说明，选择软更新或硬更新</b><span>软更新默认。</span></div></div>
+        <div class="step"><div><b>确认发布</b><span>工具已自动解析、下载并校验 APK。</span></div></div>
+      </div>
+    </article>
+
+    <article class="section">
+      <div class="section-head"><h2>工具自动完成</h2></div>
+      <div class="flow">
+        <div class="card server"><h3>解析直链</h3></div>
+        <div class="card server"><h3>下载 APK</h3></div>
+        <div class="card server"><h3>读取版本</h3></div>
+        <div class="card server"><h3>计算大小与 SHA-256</h3></div>
+        <div class="card ok"><h3>原子发布</h3></div>
+      </div>
+    </article>
+
+    <article class="section">
+      <div class="section-head"><h2>非日常操作</h2></div>
+      <div class="grid">
+        <div class="card"><h3>切换软 / 硬更新</h3><p>不需要重新发布 APK。</p></div>
+        <div class="card"><h3>查看更新统计</h3><p>每个版本的检查次数和安装触发次数。</p></div>
+      </div>
+    </article>
+  </section>
+
+  <section id="user" class="panel" data-testid="panel-user">
+    <article class="section">
+      <div class="section-head"><h2>检查更新</h2></div>
+      <div class="tree">
+        <div class="row">
+          <div class="card client s6"><h3>自动检查</h3><p>每 6 小时最多一次。</p></div>
+          <div class="card client s6"><h3>手动检查</h3><p>相机 Wi-Fi 下只提示“需要连接互联网”。</p></div>
+        </div>
+        <div class="down">↓</div>
+        <div class="row"><div class="decision server s12"><h3>服务器版本是否更高？</h3></div></div>
+        <div class="row">
+          <div class="card ok s4"><span class="choice no">否</span><h3>已是最新版本</h3></div>
+          <div class="card ok s4"><span class="choice yes">软更新</span><h3>可以稍后或忽略</h3></div>
+          <div class="card fail s4"><span class="choice yes">硬更新</span><h3>必须更新</h3></div>
+        </div>
+      </div>
+    </article>
+
+    <article class="section">
+      <div class="section-head"><h2>用户点击“立即更新”</h2></div>
+      <div class="tree">
+        <div class="row"><div class="decision warn s12"><h3>仍连接相机 Wi-Fi？</h3><p>是：提示“请断开相机 Wi-Fi”，不自动断开。用户断开后再点一次。</p></div></div>
+        <div class="down">↓ 否</div>
+        <div class="row"><div class="card server s12"><h3>获取临时直链并下载</h3></div></div>
+        <div class="down">↓</div>
+        <div class="row">
+          <div class="card fail s4"><span class="choice no">失败</span><h3>手动更新</h3><p>自动复制蓝奏云链接和密码。</p></div>
+          <div class="decision server s8"><span class="choice yes">成功</span><h3>校验 APK</h3><p>大小、SHA-256、包名、版本号、签名。</p></div>
+        </div>
+        <div class="down">↓ 通过</div>
+        <div class="row"><div class="card ok s12"><h3>自动打开系统安装器 → 用户确认安装</h3></div></div>
+      </div>
+    </article>
+
+    <article class="section">
+      <div class="section-head"><h2>用户看到的提示</h2></div>
+      <table>
+        <thead><tr><th>场景</th><th>提示</th></tr></thead>
+        <tbody>
+          <tr><td>相机 Wi-Fi 下检查</td><td>需要连接互联网</td></tr>
+          <tr><td>相机 Wi-Fi 下更新</td><td>请断开相机 Wi-Fi</td></tr>
+          <tr><td>检查失败</td><td>检查失败，请检查网络</td></tr>
+          <tr><td>自动更新失败</td><td>请手动更新，已复制到剪贴板</td></tr>
+        </tbody>
+      </table>
+    </article>
+  </section>
+
+  <section id="server" class="panel" data-testid="panel-server">
+    <article class="section">
+      <div class="section-head"><h2>服务端只做三件事</h2></div>
+      <div class="grid">
+        <div class="card server"><h3>1. 返回当前版本</h3><p><code>GET /v1/app/latest</code></p></div>
+        <div class="card server"><h3>2. 解析当前版本直链</h3><p><code>POST /v1/app/download-url</code></p></div>
+        <div class="card server"><h3>3. 管理与统计</h3><p>发布、软/硬切换、聚合计数。</p></div>
+        <div class="card ok"><h3>只有当前版本</h3><p>没有额外状态。</p></div>
+      </div>
+    </article>
+
+    <article class="section">
+      <div class="section-head"><h2>更新统计</h2><p>不保存用户或设备信息。</p></div>
+      <div class="grid">
+        <div class="card client"><h3>检查成功</h3><p>对应版本的检查次数 +1。</p></div>
+        <div class="card ok"><h3>打开系统安装器</h3><p>对应版本的安装触发次数 +1。</p></div>
+      </div>
+    </article>
+
+    <article class="section">
+      <div class="section-head"><h2>必要判断</h2></div>
+      <div class="tree">
+        <div class="row"><div class="decision server s12"><h3>检查更新</h3><p>配置有效 → 返回；无效 → NO_VERSION_INFO。</p></div></div>
+        <div class="row"><div class="decision server s12"><h3>请求下载</h3><p>versionCode 必须等于当前发布版本，防止接口变成公共解析器。</p></div></div>
+        <div class="row"><div class="decision server s12"><h3>解析结果</h3><p>只接受 <code>success=true</code> 且 <code>data.directLink</code> 为 HTTPS。</p></div></div>
+      </div>
+    </article>
+
+    <article class="section">
+      <div class="note"><b>自动更新失败：</b>复制蓝奏云链接和密码，用户打开下载页。</div>
+    </article>
+  </section>
+
+  <footer>当前实现 · 精简版</footer>
+</main>
+
+<script>
+  const tabs = [...document.querySelectorAll(".tab")];
+  const panels = [...document.querySelectorAll(".panel")];
+  function openPanel(id, writeHash = true) {
+    const target = panels.some(panel => panel.id === id) ? id : "all";
+    tabs.forEach(tab => tab.classList.toggle("active", tab.dataset.tab === target));
+    panels.forEach(panel => panel.classList.toggle("active", panel.id === target));
+    if (writeHash) history.replaceState(null, "", `#${target}`);
+    scrollTo(0, 0);
+  }
+  tabs.forEach(tab => tab.addEventListener("click", () => openPanel(tab.dataset.tab)));
+  openPanel(location.hash.slice(1), false);
+</script>
+</body>
+</html>

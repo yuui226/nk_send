@@ -241,9 +241,26 @@
     <!-- Check for updates (settings footer) -->
     <string name="check_update">Check for updates</string>
     <string name="checking_update">Checking…</string>
-    <string name="update_latest">You\'re on the latest version</string>
-    <string name="update_check_failed">Couldn\'t check for updates — make sure you\'re on a network with internet access</string>
-    <string name="update_found_copied">Update available — link and password copied</string>
-    <!-- Clipboard format: link + access code -->
-    <string name="update_link_clip">%1$s password: %2$s</string>
+    <string name="update_latest">Up to date</string>
+    <string name="update_check_failed">Check failed. Check your network.</string>
+    <string name="update_available_title">Update available</string>
+    <string name="update_required_title">Update required</string>
+    <string name="update_version">Version %1$s</string>
+    <string name="update_size">Download: %1$s</string>
+    <string name="update_disconnect_camera_wifi">Disconnect the camera Wi-Fi first</string>
+    <string name="update_ignore_version">Ignore this version</string>
+    <string name="update_resolving">Getting download link…</string>
+    <string name="update_downloading">Downloading…</string>
+    <string name="update_downloading_percent">Downloading… %1$d%%</string>
+    <string name="update_verifying">Verifying…</string>
+    <string name="update_ready">Ready to install</string>
+    <string name="update_now">Update now</string>
+    <string name="update_install">Install</string>
+    <string name="update_later">Later</string>
+    <string name="update_error_resolve">Couldn\'t get download link</string>
+    <string name="update_error_download">Download failed</string>
+    <string name="update_error_invalid_apk">Update verification failed. File deleted.</string>
+    <string name="update_error_installer">Couldn\'t open installer</string>
+    <string name="update_manual_copied">Update manually. Copied to clipboard</string>
+    <string name="update_open_download_page">Open download page</string>
 </resources>

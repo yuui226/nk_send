@@ -239,9 +239,26 @@
     <!-- 檢查更新（設定頁腳） -->
     <string name="check_update">檢查更新</string>
     <string name="checking_update">檢查中…</string>
-    <string name="update_latest">目前版本為最新</string>
-    <string name="update_check_failed">檢查更新失敗，請確認目前網路可以上網</string>
-    <string name="update_found_copied">有新版本，已複製下載連結和密碼</string>
-    <!-- 複製進剪貼簿的內容格式：連結 + 提取碼 -->
-    <string name="update_link_clip">%1$s 密碼：%2$s</string>
+    <string name="update_latest">已是最新版本</string>
+    <string name="update_check_failed">檢查失敗，請檢查網路</string>
+    <string name="update_available_title">發現新版本</string>
+    <string name="update_required_title">必須更新</string>
+    <string name="update_version">版本 %1$s</string>
+    <string name="update_size">下載大小：%1$s</string>
+    <string name="update_disconnect_camera_wifi">請中斷相機 Wi-Fi</string>
+    <string name="update_ignore_version">忽略此版本</string>
+    <string name="update_resolving">正在取得下載連結…</string>
+    <string name="update_downloading">正在下載…</string>
+    <string name="update_downloading_percent">正在下載… %1$d%%</string>
+    <string name="update_verifying">正在驗證…</string>
+    <string name="update_ready">可以安裝</string>
+    <string name="update_now">立即更新</string>
+    <string name="update_install">安裝</string>
+    <string name="update_later">稍後</string>
+    <string name="update_error_resolve">取得下載連結失敗</string>
+    <string name="update_error_download">下載失敗</string>
+    <string name="update_error_invalid_apk">安裝套件驗證失敗，已刪除</string>
+    <string name="update_error_installer">無法開啟安裝程式</string>
+    <string name="update_manual_copied">請手動更新，已複製到剪貼簿</string>
+    <string name="update_open_download_page">開啟下載頁</string>
 </resources>

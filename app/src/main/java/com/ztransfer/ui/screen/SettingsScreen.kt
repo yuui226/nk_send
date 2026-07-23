@@ -51,6 +51,7 @@ import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
@@ -73,6 +74,8 @@ fun SettingsOverlay(
     onDismiss: () -> Unit,
     // 已解锁时右上角徽标点击的回调（放烟花彩蛋）；由承载页提供其页面级 FireworksState。
     onPlayFireworks: () -> Unit = {},
+    // 手动检查更新时只做本地判断：连着相机热点就提示需要互联网，不发无意义请求。
+    cameraUsesWifi: Boolean = false,
     // 购买期间临时松开对相机 Wi-Fi 的占用（相机热点没外网，付款联不上）；由承载页接到 CameraViewModel。
     onHoldCameraWifi: (Boolean) -> Unit = {}
 ) {
@@ -415,14 +418,13 @@ fun SettingsOverlay(
             var lastVersionTapAt by remember { mutableStateOf(0L) }
             val revertedHint = stringResource(R.string.revert_free)
             val qqCopiedHint = stringResource(R.string.feedback_qq_copied, QQ_NUMBER)
-            // 检查更新:结果走页脚提示条;有新版则把下载链接(带提取码)复制进剪贴板,
-            // 用户自己去浏览器粘贴——蓝奏云无稳定直链,不做 App 内下载。
+            // 手动检查会绕过自动检查间隔和“忽略此版本”。有新版直接显示更新弹窗；
+            // 无新版或检查失败才在页脚显示短提示。
             var checkingUpdate by remember { mutableStateOf(false) }
             val updateScope = rememberCoroutineScope()
-            val context = LocalContext.current
-            val updateFoundHint = stringResource(R.string.update_found_copied)
             val latestHint = stringResource(R.string.update_latest)
             val checkFailedHint = stringResource(R.string.update_check_failed)
+            val internetRequiredHint = stringResource(R.string.err_purchase_no_network)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stringResource(R.string.version_label, BuildConfig.VERSION_NAME),
@@ -445,22 +447,13 @@ fun SettingsOverlay(
                 Spacer(Modifier.weight(1f))
                 GlassButton(
                     onClick = {
-                        if (!checkingUpdate) {
+                        if (cameraUsesWifi) {
+                            showFooterHint(internetRequiredHint)
+                        } else if (!checkingUpdate) {
                             checkingUpdate = true
                             updateScope.launch {
-                                when (val r = LicenseManager.checkAppUpdate(BuildConfig.VERSION_CODE)) {
-                                    is LicenseManager.UpdateResult.Available -> {
-                                        val info = r.info
-                                        clipboard.setText(
-                                            AnnotatedString(
-                                                if (info.password.isEmpty()) info.url
-                                                else context.getString(
-                                                    R.string.update_link_clip, info.url, info.password
-                                                )
-                                            )
-                                        )
-                                        showFooterHint(updateFoundHint)
-                                    }
+                                when (AppUpdateManager.check(force = true)) {
+                                    is LicenseManager.UpdateResult.Available -> Unit
                                     LicenseManager.UpdateResult.UpToDate -> showFooterHint(latestHint)
                                     LicenseManager.UpdateResult.Unreachable -> showFooterHint(checkFailedHint)
                                 }

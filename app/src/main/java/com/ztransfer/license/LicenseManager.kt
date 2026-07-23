@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.provider.Settings
 import android.util.Base64
+import com.ztransfer.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.net.URL
 import java.security.KeyFactory
 import java.security.MessageDigest
@@ -510,14 +512,20 @@ object LicenseManager {
 
     // ---------------------------------------------------------------- 检查更新
 
-    /** 服务器 app-latest.json 描述的最新版本(下载走网盘分享页,[password] 为提取码,可空)。 */
+    /** 服务器描述的最新版本；分享链接/密码仅作为解析服务故障时的浏览器灾备。 */
     data class UpdateInfo(
         val versionCode: Int,
         val versionName: String,
-        val url: String,
-        val password: String,
-        val notes: String
-    )
+        val minSupportedVersionCode: Int,
+        val notes: String,
+        val sha256: String,
+        val sizeBytes: Long,
+        val fallbackUrl: String,
+        val fallbackPassword: String
+    ) {
+        fun isRequired(currentVersionCode: Int): Boolean =
+            currentVersionCode < minSupportedVersionCode
+    }
 
     sealed class UpdateResult {
         data class Available(val info: UpdateInfo) : UpdateResult()
@@ -529,22 +537,51 @@ object LicenseManager {
     /** 拉取最新版本信息并与 [currentVersionCode] 比较(整数比,不解析版本名)。 */
     suspend fun checkAppUpdate(currentVersionCode: Int): UpdateResult =
         withContext(Dispatchers.IO) {
-            val resp = get("/v1/app/latest") ?: return@withContext UpdateResult.Unreachable
+            val versionName = URLEncoder.encode(BuildConfig.VERSION_NAME, "UTF-8")
+            val resp = get(
+                "/v1/app/latest?currentVersionCode=$currentVersionCode&currentVersionName=$versionName"
+            ) ?: return@withContext UpdateResult.Unreachable
+            if (!resp.optBoolean("ok")) return@withContext UpdateResult.Unreachable
             val vc = resp.optInt("versionCode", 0)
-            val url = resp.optString("url")
-            if (!resp.optBoolean("ok") || vc <= 0 || url.isEmpty())
-                return@withContext UpdateResult.Unreachable
+            if (vc <= 0) return@withContext UpdateResult.Unreachable
             if (vc <= currentVersionCode) UpdateResult.UpToDate
             else UpdateResult.Available(
                 UpdateInfo(
                     versionCode = vc,
                     versionName = resp.optString("versionName"),
-                    url = url,
-                    password = resp.optString("password"),
-                    notes = resp.optString("notes")
+                    minSupportedVersionCode = resp.optInt("minSupportedVersionCode", 1),
+                    notes = resp.optString("notes"),
+                    sha256 = resp.optString("sha256").lowercase(Locale.ROOT),
+                    sizeBytes = resp.optLong("sizeBytes", 0L),
+                    fallbackUrl = resp.optString("url"),
+                    fallbackPassword = resp.optString("password")
                 )
             )
         }
+
+    /** 为当前已发布版本换取一次短期下载直链。服务端会拒绝任意/过期 versionCode。 */
+    suspend fun resolveAppDownload(versionCode: Int): String? =
+        withContext(Dispatchers.IO) {
+            val resp = post("/v1/app/download-url", JSONObject().put("versionCode", versionCode))
+                ?: return@withContext null
+            if (!resp.optBoolean("ok") || resp.optInt("versionCode") != versionCode) {
+                return@withContext null
+            }
+            val url = resp.optString("url")
+            if (!url.startsWith("https://")) return@withContext null
+            url
+        }
+
+    /** 仅统计系统安装器已成功拉起；上报结果不影响安装流程。 */
+    suspend fun reportAppInstallTrigger(info: UpdateInfo) = withContext(Dispatchers.IO) {
+        post(
+            "/v1/app/install-trigger",
+            JSONObject()
+                .put("sourceVersionCode", BuildConfig.VERSION_CODE)
+                .put("sourceVersionName", BuildConfig.VERSION_NAME)
+                .put("targetVersionCode", info.versionCode)
+        )
+    }
 
     // ---------------------------------------------------------------- 网络
 
@@ -562,7 +599,8 @@ object LicenseManager {
                 // 证书本身已由 pin 唯一确认,无需再校验主机名(自签证书对裸 IP 签发)
                 conn.hostnameVerifier = HostnameVerifier { _, _ -> true }
                 conn.connectTimeout = 8000
-                conn.readTimeout = 8000
+                // 直链解析还包含一次第三方请求,给它更完整的响应窗口;其它小接口保持 8 秒。
+                conn.readTimeout = if (path == "/v1/app/download-url") 20_000 else 8000
                 if (body != null) {
                     conn.requestMethod = "POST"
                     conn.doOutput = true

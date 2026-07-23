@@ -49,7 +49,7 @@ function Call($method, $path, $bodyObj) {
     $curlArgs = @("-k", "-s", "-X", $method, "-H", "X-Admin-Token: $script:Token", "$Server$path")
     $tmp = $null
     if ($bodyObj) {
-        $json = $bodyObj | ConvertTo-Json -Compress
+        $json = $bodyObj | ConvertTo-Json -Compress -Depth 8
         $tmp = [IO.Path]::GetTempFileName()
         [IO.File]::WriteAllText($tmp, $json, (New-Object System.Text.UTF8Encoding($false)))
         $curlArgs += @("-H", "Content-Type: application/json", "--data-binary", "@$tmp")
@@ -269,6 +269,278 @@ function Invoke-Pricing {
     else { Show-Error $resp }
 }
 
+# ---------------------------------------------------------------- App 更新管理
+
+function Get-UpdateInfo {
+    $resp = Call "GET" "/admin/update" $null
+    if (-not $resp) { return $null }
+    if (-not $resp.ok) { Show-Error $resp; return $null }
+    return $resp.release
+}
+
+function Show-UpdateInfo($release) {
+    if (-not $release) { return }
+    $mode = if ($release.minSupportedVersionCode -ge $release.versionCode) { "硬更新" } else { "软更新" }
+    Write-Host ""
+    Write-Host ("当前发布: {0} (versionCode {1})" -f $release.versionName, $release.versionCode) -ForegroundColor Cyan
+    Write-Host ("更新策略: {0}" -f $mode)
+    Write-Host ("蓝奏云:   {0}" -f $release.url)
+    Write-Host ("提取码:   {0}" -f $(if ($release.password) { $release.password } else { "(无)" }))
+    Write-Host ("文件大小: {0:N2} MiB" -f ($release.sizeBytes / 1MB))
+    Write-Host ("SHA-256:  {0}" -f $(if ($release.sha256) { $release.sha256 } else { "(旧版本未记录)" }))
+    Write-Host ("发布时间: {0}" -f $(Format-Time $release.publishedAt))
+    if ($release.notes) { Write-Host ("更新说明: {0}" -f $release.notes) }
+    Write-Host ""
+}
+
+function Invoke-UpdateStatus {
+    Show-UpdateInfo (Get-UpdateInfo)
+}
+
+function Invoke-UpdateStats {
+    $resp = Call "GET" "/admin/update/stats" $null
+    if (-not $resp) { return }
+    if (-not $resp.ok) { Show-Error $resp; return }
+    $rows = @($resp.rows)
+    if ($rows.Count -eq 0) {
+        Write-Host "暂无更新统计" -ForegroundColor DarkGray
+        return
+    }
+    $table = foreach ($row in $rows) {
+        $source = if ($row.sourceVersionName) {
+            "{0} ({1})" -f $row.sourceVersionName, $row.sourceVersionCode
+        } else {
+            "versionCode {0}" -f $row.sourceVersionCode
+        }
+        $target = if ($row.targetVersionName) {
+            "{0} ({1})" -f $row.targetVersionName, $row.targetVersionCode
+        } else {
+            "versionCode {0}" -f $row.targetVersionCode
+        }
+        [PSCustomObject]@{
+            "用户版本" = $source
+            "目标版本" = $target
+            "检查次数" = [long]$row.checkCount
+            "安装触发" = [long]$row.installTriggerCount
+            "最近检查" = Format-Time $row.lastCheckAt
+            "最近安装" = Format-Time $row.lastInstallAt
+        }
+    }
+    Write-Host ""
+    $table | Format-Table -AutoSize
+}
+
+function Invoke-UpdateValidate {
+    $release = Get-UpdateInfo
+    if (-not $release) { return }
+    Write-Host "正在通过解析服务验证当前蓝奏云分享链接..." -ForegroundColor DarkGray
+    $resp = Call "POST" "/admin/update/validate" @{}
+    if ($resp -and $resp.ok) {
+        Write-Host "链接有效" -ForegroundColor Green
+    } else { Show-Error $resp }
+}
+
+function Find-AndroidTool($fileNames, $relativePatterns) {
+    foreach ($name in $fileNames) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($cmd) { return $cmd.Source }
+    }
+    $roots = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, (Join-Path $env:LOCALAPPDATA "Android\Sdk")) |
+        Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+    foreach ($root in $roots) {
+        foreach ($pattern in $relativePatterns) {
+            $found = Get-ChildItem -Path (Join-Path $root $pattern) -File -ErrorAction SilentlyContinue |
+                Sort-Object FullName -Descending | Select-Object -First 1
+            if ($found) { return $found.FullName }
+        }
+    }
+    return $null
+}
+
+function Read-ApkVersionInfo($apkPath) {
+    $aapt = Find-AndroidTool @("aapt2.exe", "aapt.exe") @("build-tools\*\aapt2.exe", "build-tools\*\aapt.exe")
+    if ($aapt) {
+        $badging = (& $aapt dump badging $apkPath 2>$null) -join "`n"
+        $line = $badging -split "`n" | Where-Object { $_ -match '^package:' } | Select-Object -First 1
+        if ($line) {
+            $package = [regex]::Match($line, "name='([^']+)'").Groups[1].Value
+            $code = [regex]::Match($line, "versionCode='(\d+)'").Groups[1].Value
+            $name = [regex]::Match($line, "versionName='([^']*)'").Groups[1].Value
+            if ($package -and $code -and $name) {
+                return @{ PackageName = $package; VersionCode = [int]$code; VersionName = $name }
+            }
+        }
+    }
+
+    $apkanalyzer = Find-AndroidTool @("apkanalyzer.bat", "apkanalyzer.exe") @(
+        "cmdline-tools\*\bin\apkanalyzer.bat", "tools\bin\apkanalyzer.bat"
+    )
+    if ($apkanalyzer) {
+        $package = ((& $apkanalyzer manifest application-id $apkPath 2>$null) -join "").Trim()
+        $code = ((& $apkanalyzer manifest version-code $apkPath 2>$null) -join "").Trim()
+        $name = ((& $apkanalyzer manifest version-name $apkPath 2>$null) -join "").Trim()
+        if ($package -and $code -match '^\d+$' -and $name) {
+            return @{ PackageName = $package; VersionCode = [int]$code; VersionName = $name }
+        }
+    }
+    return $null
+}
+
+function Save-DirectApkMetadata($directUrl) {
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ztransfer-update-{0}.apk" -f [guid]::NewGuid().ToString("N"))
+    try {
+        Write-Host "正在下载一次 APK 以计算大小和 SHA-256..." -ForegroundColor DarkGray
+        & curl.exe -f -sS -L --max-time 300 -o $tmp -- $directUrl
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tmp)) { return $null }
+        $file = Get-Item $tmp
+        if ($file.Length -le 0) { return $null }
+        $version = Read-ApkVersionInfo $tmp
+        if (-not $version) {
+            Write-Host "无法从 APK 读取版本信息。请先安装 Android SDK Build Tools；未发布。" -ForegroundColor Red
+            return $null
+        }
+        if ($version.PackageName -ne "com.ztransfer") {
+            Write-Host ("包名不正确: {0}；期望 com.ztransfer。未发布。" -f $version.PackageName) -ForegroundColor Red
+            return $null
+        }
+        return @{
+            SizeBytes = [long]$file.Length
+            Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()
+            VersionCode = [int]$version.VersionCode
+            VersionName = [string]$version.VersionName
+            PackageName = [string]$version.PackageName
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Parse-LanzouShareText($text) {
+    if (-not $text) { return $null }
+    $urlMatch = [regex]::Match([string]$text, 'https://[^\s，。；;）)\]】]+', 'IgnoreCase')
+    if (-not $urlMatch.Success) { return $null }
+    $passwordMatch = [regex]::Match(
+        [string]$text,
+        '(?:密码|提取码|访问密码)\s*[:：]?\s*([A-Za-z0-9]+)',
+        'IgnoreCase'
+    )
+    return @{
+        Url = $urlMatch.Value
+        Password = if ($passwordMatch.Success) { $passwordMatch.Groups[1].Value } else { "" }
+    }
+}
+
+function Get-LanzouShareFromClipboard {
+    while ($true) {
+        $text = try { Get-Clipboard -Raw -Format Text } catch { $null }
+        $share = Parse-LanzouShareText $text
+        if ($share) {
+            Write-Host ""
+            Write-Host ("已识别: {0}" -f $share.Url) -ForegroundColor Cyan
+            Write-Host ("提取码: {0}" -f $(if ($share.Password) { $share.Password } else { "(无)" }))
+            return $share
+        } else {
+            $pick = (Read-Host "请复制蓝奏云分享文本后回车；输入 0 取消").Trim()
+            if ($pick -eq "0") { return $null }
+        }
+    }
+}
+
+function Invoke-UpdatePublish {
+    $current = Get-UpdateInfo
+    if ($current) { Show-UpdateInfo $current }
+
+    $share = Get-LanzouShareFromClipboard
+    if (-not $share) { Write-Host "已取消"; return }
+    $shareUrl = $share.Url
+    $password = $share.Password
+    $notes = Read-Host "更新说明(可留空)"
+
+    Write-Host "正在解析并验证分享链接..." -ForegroundColor DarkGray
+    $valid = Call "POST" "/admin/update/validate" @{ url = $shareUrl; password = $password }
+    if (-not $valid -or -not $valid.ok) { Show-Error $valid; return }
+    $meta = Save-DirectApkMetadata $valid.url
+    if (-not $meta) { Write-Host "APK 下载或版本读取失败；未发布。" -ForegroundColor Red; return }
+    $versionCode = [int]$meta.VersionCode
+    $versionName = [string]$meta.VersionName
+    if ($current -and $versionCode -le [int]$current.versionCode) {
+        Write-Host ("APK versionCode={0}，必须高于当前发布的 {1}；未发布。" -f $versionCode, $current.versionCode) -ForegroundColor Red
+        return
+    }
+
+    Write-Host ("已从 APK 读取版本: {0} (versionCode {1})" -f $versionName, $versionCode) -ForegroundColor Green
+    Write-Host ""
+    Write-Host "更新策略:" -ForegroundColor Cyan
+    Write-Host "  [1] 软更新：用户可以稍后或忽略(推荐)"
+    Write-Host "  [2] 硬更新：所有旧版本必须安装才能继续"
+    $policy = (Read-Host "选择(回车 = 1)").Trim()
+    $minSupported = if ($policy -eq "2") { $versionCode } else { 1 }
+
+    $draft = @{
+        versionCode = $versionCode
+        versionName = $versionName
+        minSupportedVersionCode = $minSupported
+        url = $shareUrl
+        password = $password
+        notes = $notes
+        sha256 = $meta.Sha256
+        sizeBytes = $meta.SizeBytes
+        publishedAt = ""
+    }
+
+    Write-Host ""
+    Write-Host ("待发布: {0} (versionCode {1}), {2:N2} MiB" -f $versionName, $versionCode, ($meta.SizeBytes / 1MB)) -ForegroundColor Cyan
+    Write-Host ("策略: {0}" -f $(if ($minSupported -eq $versionCode) { "硬更新" } else { "软更新" }))
+    Write-Host ("SHA-256: {0}" -f $meta.Sha256) -ForegroundColor DarkGray
+    $confirm = Read-Host "确认发布?输入 y"
+    if ($confirm -ne "y") { Write-Host "已取消"; return }
+    $resp = Call "POST" "/admin/update/publish" $draft
+    if ($resp -and $resp.ok) {
+        Write-Host "发布成功，App 下次检查更新时生效；无需重启服务。" -ForegroundColor Green
+    } else { Show-Error $resp }
+}
+
+function Invoke-UpdatePolicy {
+    $current = Get-UpdateInfo
+    if (-not $current) { return }
+    Show-UpdateInfo $current
+    Write-Host "  [1] 软更新"
+    Write-Host "  [2] 硬更新(所有低于当前发布 versionCode 的版本必须升级)"
+    $pick = (Read-Host "选择(回车取消)").Trim()
+    $body = switch ($pick) {
+        "1" { @{ minSupportedVersionCode = 1 } }
+        "2" { @{ minSupportedVersionCode = [int]$current.versionCode } }
+        default { $null }
+    }
+    if (-not $body) { Write-Host "已取消"; return }
+    $resp = Call "POST" "/admin/update/policy" $body
+    if ($resp -and $resp.ok) { Write-Host "更新策略已修改，立即生效。" -ForegroundColor Green }
+    else { Show-Error $resp }
+}
+
+function Invoke-UpdateMenu {
+    while ($true) {
+        Write-Host ""
+        Write-Host "=============== App 更新管理 ===============" -ForegroundColor Cyan
+        Write-Host "  [1] 查看当前发布"
+        Write-Host "  [2] 验证当前蓝奏云链接"
+        Write-Host "  [3] 发布新版本"
+        Write-Host "  [4] 修改软/硬更新策略"
+        Write-Host "  [5] 查看更新统计"
+        Write-Host "  [0] 返回"
+        $choice = Read-Host "选择"
+        switch ($choice.Trim()) {
+            "1" { Invoke-UpdateStatus }
+            "2" { Invoke-UpdateValidate }
+            "3" { Invoke-UpdatePublish }
+            "4" { Invoke-UpdatePolicy }
+            "5" { Invoke-UpdateStats }
+            "0" { return }
+            default { Write-Host "输入 0-5" -ForegroundColor Yellow }
+        }
+    }
+}
+
 function Test-Server {
     $resp = Call "GET" "/healthz" $null
     if ($resp -and $resp.ok) { Write-Host "服务器正常: $Server" -ForegroundColor Green }
@@ -299,7 +571,10 @@ if ($Cmd) {
             if ($A1) { Call "POST" "/admin/pricing" @{ price_fen = [int][math]::Round([double]$A1 * 100); original_fen = if ($A2) { [int][math]::Round([double]$A2 * 100) } else { 0 } } }
             else { Call "GET" "/v1/pricing" $null }
         }
-        default { Write-Error "未知命令: $Cmd(可用: new / list / unbind / revoke / unrevoke / pricing)"; exit 1 }
+        "update" { Call "GET" "/admin/update" $null }
+        "update-validate" { Call "POST" "/admin/update/validate" @{} }
+        "update-stats" { Call "GET" "/admin/update/stats" $null }
+        default { Write-Error "未知命令: $Cmd(可用: new / list / unbind / revoke / unrevoke / pricing / update / update-validate / update-stats)"; exit 1 }
     }
     if ($resp) { $resp | ConvertTo-Json -Depth 6 }
     exit 0
@@ -323,7 +598,8 @@ while ($true) {
     Write-Host "  [5] 解除吊销(查重误伤了正版用户)"
     Write-Host "  [6] 修改定价(售价 / 划线原价)"
     Write-Host "  [7] 修改有效期(送永久 / 补偿延期)"
-    Write-Host "  [8] 测试服务器连接"
+    Write-Host "  [8] App 更新管理"
+    Write-Host "  [9] 测试服务器连接"
     Write-Host "  [0] 退出"
     Write-Host ""
     $choice = Read-Host "选择"
@@ -335,8 +611,9 @@ while ($true) {
         "5" { Invoke-Unrevoke }
         "6" { Invoke-Pricing }
         "7" { Invoke-Expiry }
-        "8" { Test-Server }
+        "8" { Invoke-UpdateMenu }
+        "9" { Test-Server }
         "0" { exit 0 }
-        default { Write-Host "输入 0-8" -ForegroundColor Yellow }
+        default { Write-Host "输入 0-9" -ForegroundColor Yellow }
     }
 }

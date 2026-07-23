@@ -149,6 +149,17 @@ CREATE TABLE IF NOT EXISTS orders (
   paid_at      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_orders_fp ON orders(device_fp);
+CREATE TABLE IF NOT EXISTS update_stats (
+  source_version_code   INTEGER NOT NULL,
+  source_version_name   TEXT NOT NULL DEFAULT '',
+  target_version_code   INTEGER NOT NULL,
+  target_version_name   TEXT NOT NULL DEFAULT '',
+  check_count           INTEGER NOT NULL DEFAULT 0,
+  install_trigger_count INTEGER NOT NULL DEFAULT 0,
+  last_check_at         TEXT,
+  last_install_at       TEXT,
+  PRIMARY KEY (source_version_code, target_version_code)
+);
 `);
 // 迁移:老库缺列时补上(已存在则抛错,忽略即可)
 try { db.exec('ALTER TABLE orders ADD COLUMN pay_qr TEXT'); } catch { /* 列已存在 */ }
@@ -228,12 +239,14 @@ const RATE_WINDOW_MS = 60_000;
 //   renew 每次要签一张通行证(有 CPU 成本);正常一天才跑一次,30 已经极松
 //   poll  付款页每 2 秒查一次单 = 30/分钟。给到 4 倍余量:多个用户挤在同一个
 //         运营商 NAT 后面是常态,额度卡太死会把正在付款的人自己拦住
-//   read  只读小响应,但每次要读一次文件
+//   read  检查更新/定价的小响应;检查更新会多做一次聚合 UPSERT
+//   download 用户确认更新时解析一次临时直链;独立分桶,避免检查更新耗尽解析额度
+//   stats 安装器触发上报,只做一次聚合 UPSERT
 //   admin 你在菜单里手点,一分钟 60 次绰绰有余
 //
 // ★ 必须按类别分桶。若所有类别共用一个计数器,那么同一个 IP 打了 60 次 read 之后,
 //   计数是 60,再调 activate 时拿 60 去比 10 就被拒了——便宜接口的流量会把贵接口锁死。
-const LIMITS = { write: 10, renew: 30, poll: 120, read: 60, admin: 60 };
+const LIMITS = { write: 10, renew: 30, poll: 120, read: 60, download: 30, stats: 120, admin: 60 };
 
 // 桶数上限。到顶说明正被大范围打,新桶一律拒——宁可错杀也别让 Map 把内存撑爆。
 const RATE_MAX_BUCKETS = 20_000;
@@ -782,27 +795,258 @@ function send(res, status, obj) {
     res.end(body);
 }
 
-// ---------------------------------------------------------------- App 检查更新
-// 版本信息放 config.json 同目录的 app-latest.json,发新版 = 上传 APK 到网盘后改这个
-// 文件(versionCode/versionName/url/password/notes),无需重启服务。每次请求现读,
-// 文件缺失/损坏返回 NO_VERSION_INFO,App 侧按"检查失败"提示。
+// ---------------------------------------------------------------- App 检查更新 / 下载
+// 版本信息放 config.json 同目录的 app-latest.json,由 admin.ps1 远程管理,无需登录服务器
+// 或重启服务。App 真正开始下载时,服务端才向解析服务换取一次短期直链。原始分享链接
+// 同时作为灾备下发,仅在解析服务故障时让用户走浏览器。以后更换解析方无需再升级 App。
 const APP_LATEST_PATH = path.join(path.dirname(CONFIG_PATH), 'app-latest.json');
-function apiAppLatest() {
+const LANZOU_PARSER_URL = String(cfg.lanzouParserUrl || 'https://lz.qaiu.top/json/parser');
+
+function normalizeRelease(j) {
+    if (!j || !Number.isInteger(j.versionCode) || j.versionCode <= 0 || !j.url) {
+        throw new Error('versionCode/url 无效');
+    }
+    const minSupportedVersionCode = Number.isInteger(j.minSupportedVersionCode)
+        ? j.minSupportedVersionCode : 1;
+    if (minSupportedVersionCode < 1 || minSupportedVersionCode > j.versionCode) {
+        throw new Error('minSupportedVersionCode 必须在 1..versionCode 之间');
+    }
+    const shareUrl = new URL(String(j.url));
+    if (shareUrl.protocol !== 'https:') throw new Error('url 必须是 HTTPS');
+    const sha256 = String(j.sha256 || '').trim().toLowerCase();
+    if (sha256 && !/^[0-9a-f]{64}$/.test(sha256)) throw new Error('sha256 格式无效');
+    const sizeBytes = Number(j.sizeBytes || 0);
+    if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) throw new Error('sizeBytes 格式无效');
+    return {
+        versionCode: j.versionCode,
+        versionName: String(j.versionName || ''),
+        minSupportedVersionCode,
+        url: shareUrl.toString(),
+        password: String(j.password || ''),
+        notes: String(j.notes || ''),
+        sha256,
+        sizeBytes,
+        publishedAt: String(j.publishedAt || ''),
+    };
+}
+
+function releaseInfo() {
     try {
-        const j = JSON.parse(fs.readFileSync(APP_LATEST_PATH, 'utf8'));
-        if (!Number.isInteger(j.versionCode) || j.versionCode <= 0 || !j.url) {
-            return { ok: false, err: 'NO_VERSION_INFO' };
-        }
+        return normalizeRelease(JSON.parse(fs.readFileSync(APP_LATEST_PATH, 'utf8')));
+    } catch {
+        return null;
+    }
+}
+
+const updateCheckStmt = db.prepare(`
+INSERT INTO update_stats (
+  source_version_code, source_version_name, target_version_code, target_version_name,
+  check_count, last_check_at
+) VALUES (?, ?, ?, ?, 1, ?)
+ON CONFLICT(source_version_code, target_version_code) DO UPDATE SET
+  source_version_name = excluded.source_version_name,
+  target_version_name = excluded.target_version_name,
+  check_count = update_stats.check_count + 1,
+  last_check_at = excluded.last_check_at
+`);
+
+const updateInstallStmt = db.prepare(`
+INSERT INTO update_stats (
+  source_version_code, source_version_name, target_version_code, target_version_name,
+  install_trigger_count, last_install_at
+) VALUES (?, ?, ?, ?, 1, ?)
+ON CONFLICT(source_version_code, target_version_code) DO UPDATE SET
+  source_version_name = excluded.source_version_name,
+  target_version_name = excluded.target_version_name,
+  install_trigger_count = update_stats.install_trigger_count + 1,
+  last_install_at = excluded.last_install_at
+`);
+
+function versionLabel(value) {
+    return String(value || '').trim().slice(0, 64);
+}
+
+function recordUpdateCheck(params, release) {
+    const sourceCode = Number(params.get('currentVersionCode'));
+    if (!Number.isInteger(sourceCode) || sourceCode <= 0 || sourceCode > release.versionCode) return;
+    updateCheckStmt.run(
+        sourceCode,
+        versionLabel(params.get('currentVersionName')),
+        release.versionCode,
+        versionLabel(release.versionName),
+        now()
+    );
+}
+
+function apiAppLatest(params) {
+    const j = releaseInfo();
+    if (!j) return { ok: false, err: 'NO_VERSION_INFO' };
+    try {
+        recordUpdateCheck(params, j);
+    } catch (e) {
+        log(`APP_UPDATE_STATS_CHECK_FAILED err=${e.message}`);
+    }
+    return {
+        ok: true,
+        versionCode: j.versionCode,
+        versionName: j.versionName,
+        minSupportedVersionCode: j.minSupportedVersionCode,
+        notes: j.notes,
+        sha256: j.sha256,
+        sizeBytes: j.sizeBytes,
+        publishedAt: j.publishedAt,
+        // 既兼容旧 App,也是新版在解析服务故障时的浏览器灾备入口。
+        url: j.url,
+        password: j.password,
+    };
+}
+
+function apiAppInstallTrigger(body) {
+    const release = releaseInfo();
+    if (!release) return { ok: false, err: 'NO_VERSION_INFO' };
+    const sourceCode = Number(body.sourceVersionCode);
+    const targetCode = Number(body.targetVersionCode);
+    if (!Number.isInteger(sourceCode) || sourceCode <= 0 ||
+        !Number.isInteger(targetCode) || targetCode !== release.versionCode ||
+        targetCode <= sourceCode) {
+        return { ok: false, err: 'BAD_UPDATE_STATS' };
+    }
+    try {
+        updateInstallStmt.run(
+            sourceCode,
+            versionLabel(body.sourceVersionName),
+            targetCode,
+            versionLabel(release.versionName),
+            now()
+        );
+        return { ok: true };
+    } catch (e) {
+        log(`APP_UPDATE_STATS_INSTALL_FAILED err=${e.message}`);
+        return { ok: false, err: 'UPDATE_STATS_UNAVAILABLE' };
+    }
+}
+
+async function resolveLanzou(release) {
+    const parserUrl = new URL(LANZOU_PARSER_URL);
+    if (parserUrl.protocol !== 'https:') throw new Error('PARSER_URL_NOT_HTTPS');
+    parserUrl.searchParams.set('url', release.url);
+    parserUrl.searchParams.set('pwd', release.password);
+
+    const response = await fetch(parserUrl, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(`PARSER_HTTP_${response.status}`);
+    const parsed = await response.json();
+    if (parsed?.code !== 200 || parsed?.success !== true || !parsed?.data?.directLink) {
+        throw new Error(`PARSER_REJECTED_${String(parsed?.code || 'UNKNOWN')}`);
+    }
+    const direct = new URL(String(parsed.data.directLink));
+    if (direct.protocol !== 'https:') throw new Error('DIRECT_URL_NOT_HTTPS');
+    return { url: direct.toString() };
+}
+
+async function apiAppDownload(body) {
+    const release = releaseInfo();
+    if (!release) return { ok: false, err: 'NO_VERSION_INFO' };
+    const requestedVersion = Number(body.versionCode);
+    if (!Number.isInteger(requestedVersion) || requestedVersion !== release.versionCode) {
+        // 防止本接口被当成任意蓝奏云解析代理,同时避免用旧弹窗下载已经撤回的包。
+        return { ok: false, err: 'VERSION_CHANGED', latestVersionCode: release.versionCode };
+    }
+    try {
+        const direct = await resolveLanzou(release);
+        log(`APP_DOWNLOAD_RESOLVED version=${release.versionCode}`);
         return {
             ok: true,
-            versionCode: j.versionCode,
-            versionName: String(j.versionName || ''),
-            url: String(j.url),
-            password: String(j.password || ''),
-            notes: String(j.notes || ''),
+            versionCode: release.versionCode,
+            url: direct.url,
         };
-    } catch {
-        return { ok: false, err: 'NO_VERSION_INFO' };
+    } catch (e) {
+        log(`APP_DOWNLOAD_PARSE_FAILED version=${release.versionCode} err=${e.message}`);
+        return { ok: false, err: 'DOWNLOAD_URL_UNAVAILABLE' };
+    }
+}
+
+function writeJsonAtomic(target, value) {
+    const tmp = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tmp, target);
+}
+
+function adminGetUpdate() {
+    const release = releaseInfo();
+    return release ? { ok: true, release } : { ok: false, err: 'NO_VERSION_INFO' };
+}
+
+function adminGetUpdateStats() {
+    const rows = db.prepare(`
+SELECT
+  source_version_code AS sourceVersionCode,
+  source_version_name AS sourceVersionName,
+  target_version_code AS targetVersionCode,
+  target_version_name AS targetVersionName,
+  check_count AS checkCount,
+  install_trigger_count AS installTriggerCount,
+  last_check_at AS lastCheckAt,
+  last_install_at AS lastInstallAt
+FROM update_stats
+ORDER BY target_version_code DESC, source_version_code DESC
+`).all();
+    return { ok: true, rows };
+}
+
+async function adminValidateUpdate(body) {
+    try {
+        let release;
+        if (Object.keys(body || {}).length) {
+            if (!body.url) throw new Error('url 不能为空');
+            const shareUrl = new URL(String(body.url));
+            if (shareUrl.protocol !== 'https:') throw new Error('url 必须是 HTTPS');
+            // 此时还没下载 APK,版本号稍后从真实安装包读取,不让管理员手填。
+            release = { url: shareUrl.toString(), password: String(body.password || '') };
+        } else {
+            release = releaseInfo();
+        }
+        if (!release) return { ok: false, err: 'NO_VERSION_INFO' };
+        const direct = await resolveLanzou(release);
+        return { ok: true, versionCode: release.versionCode || 0, ...direct };
+    } catch (e) {
+        return { ok: false, err: 'UPDATE_VALIDATION_FAILED', detail: e.message };
+    }
+}
+
+function adminPublishUpdate(body) {
+    try {
+        const next = normalizeRelease(body);
+        const current = releaseInfo();
+        if (current && next.versionCode <= current.versionCode) {
+            return { ok: false, err: 'VERSION_NOT_NEWER' };
+        }
+        if (!next.publishedAt) next.publishedAt = now();
+        writeJsonAtomic(APP_LATEST_PATH, next);
+        log(`APP_UPDATE_PUBLISHED version=${next.versionCode} min=${next.minSupportedVersionCode}`);
+        return { ok: true, release: next };
+    } catch (e) {
+        return { ok: false, err: 'BAD_UPDATE_INFO', detail: e.message };
+    }
+}
+
+function adminSetUpdatePolicy(body) {
+    const current = releaseInfo();
+    if (!current) return { ok: false, err: 'NO_VERSION_INFO' };
+    try {
+        const next = normalizeRelease({
+            ...current,
+            minSupportedVersionCode: body.minSupportedVersionCode === undefined
+                ? current.minSupportedVersionCode : Number(body.minSupportedVersionCode),
+        });
+        writeJsonAtomic(APP_LATEST_PATH, next);
+        log(`APP_UPDATE_POLICY min=${next.minSupportedVersionCode}`);
+        return { ok: true, release: next };
+    } catch (e) {
+        return { ok: false, err: 'BAD_UPDATE_POLICY', detail: e.message };
     }
 }
 
@@ -822,10 +1066,18 @@ const server = https.createServer(
                 if (limit('read')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
                 return send(res, 200, { ok: true });
             }
-            // App 检查更新 / 取当前定价:只读公开信息,但每次都要读一次文件,不能白给
+            // App 检查更新 / 取当前定价:公开小接口,仍需限速。
             if (route === 'GET /v1/app/latest') {
                 if (limit('read')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
-                return send(res, 200, apiAppLatest());
+                return send(res, 200, apiAppLatest(url.searchParams));
+            }
+            if (route === 'POST /v1/app/download-url') {
+                if (limit('download')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
+                return send(res, 200, await apiAppDownload(await readBody(req)));
+            }
+            if (route === 'POST /v1/app/install-trigger') {
+                if (limit('stats')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
+                return send(res, 200, apiAppInstallTrigger(await readBody(req)));
             }
             if (route === 'GET /v1/pricing') {
                 if (limit('read')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
@@ -847,6 +1099,11 @@ const server = https.createServer(
                 if (route === 'POST /admin/unrevoke') return send(res, 200, adminUnrevoke(await readBody(req)));
                 if (route === 'POST /admin/pricing') return send(res, 200, adminSetPricing(await readBody(req)));
                 if (route === 'POST /admin/expiry') return send(res, 200, adminSetExpiry(await readBody(req)));
+                if (route === 'GET /admin/update') return send(res, 200, adminGetUpdate());
+                if (route === 'GET /admin/update/stats') return send(res, 200, adminGetUpdateStats());
+                if (route === 'POST /admin/update/validate') return send(res, 200, await adminValidateUpdate(await readBody(req)));
+                if (route === 'POST /admin/update/publish') return send(res, 200, adminPublishUpdate(await readBody(req)));
+                if (route === 'POST /admin/update/policy') return send(res, 200, adminSetUpdatePolicy(await readBody(req)));
                 return send(res, 404, { ok: false, err: 'NOT_FOUND' });
             }
 

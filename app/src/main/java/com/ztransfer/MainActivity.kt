@@ -35,6 +35,9 @@ import com.ztransfer.ui.screen.*
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.ZTransferTheme
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
+import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.update.AppUpdateHost
+import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
@@ -53,6 +56,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // 恢复授权状态（本地验签，毫秒级）并在后台触发静默续签（≥7 天且有网时）。
         com.ztransfer.license.LicenseManager.init(applicationContext)
+        // 每 6 小时至多检查一次；软更新每日最多提示一次，硬更新始终阻止继续使用。
+        AppUpdateManager.init(applicationContext)
         enableEdgeToEdge()   // 内容延伸到系统栏后面，各屏自行处理 inset
         requestNotificationPermissionIfNeeded()
         setContent {
@@ -131,81 +136,86 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 页面底色：纵向微渐变（顶部略亮→底部略暗）替代纯平色，各页共用这一处，
     // 换一处全局生效。恒黑页（遥控/预览）自绘黑底不受影响。
     val backgroundBrush = rememberAppBackgroundBrush()
-    Scaffold(
-        containerColor = Color.Transparent,
-        modifier = Modifier.background(backgroundBrush),
-        // 不消费系统栏 inset，交由各屏自行处理（文件列表 edge-to-edge，其余用 systemBarsPadding）
-        contentWindowInsets = WindowInsets(0, 0, 0, 0)
-    ) { paddingValues ->
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Home.route,
-            modifier = Modifier.padding(paddingValues),
-            // 活泼转场：进入的页面缩放+淡入，退出的页面淡出；返回时反向。
-            enterTransition = { scaleIn(initialScale = 0.90f, animationSpec = tween(Motion.NAV_ENTER_MS)) + fadeIn(tween(Motion.NAV_ENTER_MS)) },
-            exitTransition = { fadeOut(tween(Motion.NAV_EXIT_MS)) },
-            popEnterTransition = { fadeIn(tween(Motion.NAV_EXIT_MS)) },
-            popExitTransition = { scaleOut(targetScale = 0.90f, animationSpec = tween(Motion.NAV_EXIT_MS)) + fadeOut(tween(Motion.NAV_EXIT_MS)) }
-        ) {
-            composable(Screen.Home.route) {
-                HomeScreen(
-                    viewModel = cameraViewModel,
-                    transferViewModel = transferViewModel
-                )
-            }
-            composable(
-                Screen.Files.route,
-                // 空间隐喻：队列页位于本页右侧，遥控页位于本页左侧。去队列页时本页作为
-                // 底层向左 1/3 视差退场并轻微压暗（营造被上层卡片盖住的纵深），返回时反向
-                // 浮现回来；去遥控页方向相反（向右 1/3）。
-                // enter/popEnter（自连接页）不设，仍走 NavHost 默认的缩放淡入转场。
-                exitTransition = {
-                    val toRemote = targetState.destination.route == Screen.Remote.route
-                    slideOutHorizontally(Motion.pageSlide) { if (toRemote) it / 3 else -it / 3 } +
-                            fadeOut(tween(Motion.PAGE_FADE_MS), targetAlpha = 0.5f)
-                },
-                popEnterTransition = {
-                    val fromRemote = initialState.destination.route == Screen.Remote.route
-                    slideInHorizontally(Motion.pageSlide) { if (fromRemote) it / 3 else -it / 3 } +
-                            fadeIn(tween(Motion.PAGE_FADE_MS), initialAlpha = 0.5f)
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = Color.Transparent,
+            modifier = Modifier.background(backgroundBrush),
+            // 不消费系统栏 inset，交由各屏自行处理（文件列表 edge-to-edge，其余用 systemBarsPadding）
+            contentWindowInsets = WindowInsets(0, 0, 0, 0)
+        ) { paddingValues ->
+            NavHost(
+                navController = navController,
+                startDestination = Screen.Home.route,
+                modifier = Modifier.padding(paddingValues),
+                // 活泼转场：进入的页面缩放+淡入，退出的页面淡出；返回时反向。
+                enterTransition = { scaleIn(initialScale = 0.90f, animationSpec = tween(Motion.NAV_ENTER_MS)) + fadeIn(tween(Motion.NAV_ENTER_MS)) },
+                exitTransition = { fadeOut(tween(Motion.NAV_EXIT_MS)) },
+                popEnterTransition = { fadeIn(tween(Motion.NAV_EXIT_MS)) },
+                popExitTransition = { scaleOut(targetScale = 0.90f, animationSpec = tween(Motion.NAV_EXIT_MS)) + fadeOut(tween(Motion.NAV_EXIT_MS)) }
+            ) {
+                composable(Screen.Home.route) {
+                    HomeScreen(
+                        viewModel = cameraViewModel,
+                        transferViewModel = transferViewModel
+                    )
                 }
-            ) {
-                FileListScreen(
-                    cameraViewModel = cameraViewModel,
-                    transferViewModel = transferViewModel,
-                    onNavigateToTransfer = {
-                        navController.navigate(Screen.Transfer.route)
+                composable(
+                    Screen.Files.route,
+                    // 空间隐喻：队列页位于本页右侧，遥控页位于本页左侧。去队列页时本页作为
+                    // 底层向左 1/3 视差退场并轻微压暗（营造被上层卡片盖住的纵深），返回时反向
+                    // 浮现回来；去遥控页方向相反（向右 1/3）。
+                    // enter/popEnter（自连接页）不设，仍走 NavHost 默认的缩放淡入转场。
+                    exitTransition = {
+                        val toRemote = targetState.destination.route == Screen.Remote.route
+                        slideOutHorizontally(Motion.pageSlide) { if (toRemote) it / 3 else -it / 3 } +
+                                fadeOut(tween(Motion.PAGE_FADE_MS), targetAlpha = 0.5f)
                     },
-                    onNavigateToRemote = {
-                        navController.navigate(Screen.Remote.route) { launchSingleTop = true }
+                    popEnterTransition = {
+                        val fromRemote = initialState.destination.route == Screen.Remote.route
+                        slideInHorizontally(Motion.pageSlide) { if (fromRemote) it / 3 else -it / 3 } +
+                                fadeIn(tween(Motion.PAGE_FADE_MS), initialAlpha = 0.5f)
                     }
-                )
-            }
-            composable(
-                Screen.Remote.route,
-                // 遥控页作为上层卡片从左侧滑入，返回时向左滑出。
-                enterTransition = { slideInHorizontally(Motion.pageSlide) { -it } },
-                popExitTransition = { slideOutHorizontally(Motion.pageSlide) { -it } }
-            ) {
-                RemoteScreen(
-                    cameraViewModel = cameraViewModel,
-                    transferViewModel = transferViewModel,
-                    onNavigateBack = { navController.popBackStack() }
-                )
-            }
-            composable(
-                Screen.Transfer.route,
-                // 队列页作为上层卡片：前进时整页从右滑入盖住"Z传"页，
-                // 返回（含系统返回键）时向右滑出、露出底层视差归位的"Z传"页。
-                enterTransition = { slideInHorizontally(Motion.pageSlide) { it } },
-                popExitTransition = { slideOutHorizontally(Motion.pageSlide) { it } }
-            ) {
-                TransferScreen(
-                    transferViewModel = transferViewModel,
-                    cameraViewModel = cameraViewModel,
-                    onNavigateBack = { navController.popBackStack() }
-                )
+                ) {
+                    FileListScreen(
+                        cameraViewModel = cameraViewModel,
+                        transferViewModel = transferViewModel,
+                        onNavigateToTransfer = {
+                            navController.navigate(Screen.Transfer.route)
+                        },
+                        onNavigateToRemote = {
+                            navController.navigate(Screen.Remote.route) { launchSingleTop = true }
+                        }
+                    )
+                }
+                composable(
+                    Screen.Remote.route,
+                    // 遥控页作为上层卡片从左侧滑入，返回时向左滑出。
+                    enterTransition = { slideInHorizontally(Motion.pageSlide) { -it } },
+                    popExitTransition = { slideOutHorizontally(Motion.pageSlide) { -it } }
+                ) {
+                    RemoteScreen(
+                        cameraViewModel = cameraViewModel,
+                        transferViewModel = transferViewModel,
+                        onNavigateBack = { navController.popBackStack() }
+                    )
+                }
+                composable(
+                    Screen.Transfer.route,
+                    // 队列页作为上层卡片：前进时整页从右滑入盖住"Z传"页，
+                    // 返回（含系统返回键）时向右滑出、露出底层视差归位的"Z传"页。
+                    enterTransition = { slideInHorizontally(Motion.pageSlide) { it } },
+                    popExitTransition = { slideOutHorizontally(Motion.pageSlide) { it } }
+                ) {
+                    TransferScreen(
+                        transferViewModel = transferViewModel,
+                        cameraViewModel = cameraViewModel,
+                        onNavigateBack = { navController.popBackStack() }
+                    )
+                }
             }
         }
+        AppUpdateHost(
+            cameraUsesWifi = cameraState.connectionType == CameraConnectionType.WIFI
+        )
     }
 }
