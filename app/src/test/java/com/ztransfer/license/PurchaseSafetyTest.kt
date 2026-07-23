@@ -28,6 +28,31 @@ class PurchaseSafetyTest {
     }
 
     @Test
+    fun recoveredOrderOnlyResumesTheCurrentlySelectedProduct() {
+        assertFalse(
+            shouldCreateSelectedOrder(
+                LicenseManager.ProductId.ANNUAL,
+                LicenseManager.ProductId.ANNUAL,
+                hasPaymentSource = true,
+            )
+        )
+        assertTrue(
+            shouldCreateSelectedOrder(
+                LicenseManager.ProductId.ANNUAL,
+                LicenseManager.ProductId.LIFETIME,
+                hasPaymentSource = true,
+            )
+        )
+        assertTrue(
+            shouldCreateSelectedOrder(
+                LicenseManager.ProductId.LIFETIME,
+                LicenseManager.ProductId.LIFETIME,
+                hasPaymentSource = false,
+            )
+        )
+    }
+
+    @Test
     fun orderErrorsAreClassifiedConservatively() {
         assertEquals(
             OrderFailureAction.PRODUCT_MISMATCH,

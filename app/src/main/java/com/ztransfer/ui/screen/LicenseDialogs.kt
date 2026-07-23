@@ -111,7 +111,7 @@ fun ProDialog(
     onCelebrate: () -> Unit = {},
     // 购买期间需临时松开对相机 Wi-Fi 的占用(相机热点没外网,付款联不上);由承载页接到 CameraViewModel。
     onHoldCameraWifi: (Boolean) -> Unit = {},
-    // 订阅到期的老用户从本弹窗再买 = 给原来那个码续期,不该另发新码(见 LicenseManager.createOrder)。
+    // 订阅用户买年费时续原码；改选永久版时另发永久码，原年费码保持有效。
     renew: Boolean = false,
 ) {
     val colors = AppTheme.colors
@@ -484,7 +484,7 @@ fun ProDialog(
  * 续费弹窗(连接页徽标左侧"续费"玻璃按钮打开):与高级版介绍弹窗同一玻璃面板语言。
  * 老用户已经买过,不再放对比表——只说三件事:还剩多少天、续一年多少钱、提前续不吃亏
  * (服务器按 max(now, 原到期日) + 1 年算续期,见 LicenseManager.createOrder)。
- * 点"立即续费"叠开付款弹窗(renew = true:给原来那个码续期,不发新码)。
+ * 年费方案给原年费码续期；永久方案另发永久码，原年费码保持有效。
  * 只有订阅用户能走到这儿(永久码没有到期日,连接页不给续费按钮)。
  */
 @Composable

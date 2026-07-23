@@ -72,6 +72,7 @@ import com.ztransfer.license.hasUsableLockedPrice
 import com.ztransfer.license.nextOrderRetryDelay
 import com.ztransfer.license.orderFailureAction
 import com.ztransfer.license.paymentQrSource
+import com.ztransfer.license.shouldCreateSelectedOrder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -145,7 +146,8 @@ fun PurchaseDialog(
     onCelebrate: () -> Unit = {},
     onHoldCameraWifi: (Boolean) -> Unit = {},
     product: LicenseManager.ProductId,
-    // 续费单(现有码延期)而非新购;成败文案以【服务器回的 renew】为准,本参数只负责下单时告知服务器。
+    // 年费续费时请求现有码延期；选择永久版时服务端仍按独立商品另发永久码。
+    // 成败文案以【服务器回的 renew】为准。
     renew: Boolean = false,
 ) {
     val colors = AppTheme.colors
@@ -219,8 +221,11 @@ fun PurchaseDialog(
             if (recovered == null ||
                 (recovered is LicenseManager.OrderResult.Failed && recovered.err == "NOT_FOUND") ||
                 (recovered is LicenseManager.OrderResult.Pending &&
-                    recovered.product == product &&
-                    recovered.payUrl == null && recovered.payQr == null)
+                    shouldCreateSelectedOrder(
+                        selectedProduct = product,
+                        recoveredProduct = recovered.product,
+                        hasPaymentSource = recovered.payUrl != null || recovered.payQr != null,
+                    ))
             ) {
                 LicenseManager.createOrder(product, renew)
             } else {

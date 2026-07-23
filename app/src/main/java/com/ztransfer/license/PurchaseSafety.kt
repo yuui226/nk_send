@@ -14,6 +14,12 @@ internal enum class PaymentQrSource {
 
 internal fun hasUsableLockedPrice(priceFen: Int): Boolean = priceFen > 0
 
+internal fun shouldCreateSelectedOrder(
+    selectedProduct: LicenseManager.ProductId,
+    recoveredProduct: LicenseManager.ProductId,
+    hasPaymentSource: Boolean,
+): Boolean = recoveredProduct != selectedProduct || !hasPaymentSource
+
 internal fun paymentQrSource(payUrl: String?, payQr: String?): PaymentQrSource =
     when {
         !payUrl.isNullOrBlank() -> PaymentQrSource.ENCODE_PAY_URL

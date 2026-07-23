@@ -179,8 +179,8 @@ test('payment regression suite', async (suite) => {
         assert.equal((await firstPromise).ok, true);
     });
 
-    await suite.test('4-6 分钟同意图等待，跨意图拒绝，不返回临期二维码', async () => {
-        installUpstream();
+    await suite.test('同商品临期订单等待，不同商品立即创建独立订单', async () => {
+        const upstream = installUpstream();
         const fp = '33333333333333333333333333333333';
         const createdAt = new Date(Date.now() - 4.5 * 60_000).toISOString();
         db.prepare(`INSERT INTO orders
@@ -192,7 +192,9 @@ test('payment regression suite', async (suite) => {
         assert.ok(same.retry_after_ms > 0);
         assert.equal(same.pay_url, undefined);
         const other = await api.apiOrderCreate({ fp, product: 'lifetime' });
-        assert.equal(other.err, 'PENDING_OTHER_PRODUCT');
+        assert.equal(other.ok, true);
+        assert.equal(other.product, 'lifetime');
+        assert.equal(upstream.createCalls, 1);
     });
 
     await suite.test('验签通知绕过 WP 轮询节流，并在事务中只履约一次', async () => {
@@ -274,23 +276,46 @@ test('payment regression suite', async (suite) => {
             'PAY_UPSTREAM');
     });
 
-    await suite.test('年费码原地升级永久', async () => {
+    await suite.test('年费后购买永久另发新码，原年费码保持有效', async () => {
         const fp = '99999999999999999999999999999999';
         const code = 'BCDEFG';
+        const annualExpiry = new Date(Date.now() + 86_400_000).toISOString();
         db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)')
-            .run(code, 'test-lifetime-upgrade', new Date().toISOString(),
-                new Date(Date.now() + 86_400_000).toISOString());
+            .run(code, 'test-separate-lifetime', new Date().toISOString(), annualExpiry);
         db.prepare('INSERT INTO bindings (code, device_fp, activated_at) VALUES (?, ?, ?)')
             .run(code, fp, new Date().toISOString());
         const statuses = new Map();
         installUpstream(statuses);
         const lifetime = await api.apiOrderCreate({ fp, product: 'lifetime', renew: true });
-        assert.equal(lifetime.renew, true);
+        assert.equal(lifetime.renew, false);
         statuses.set(lifetime.order, 'OD');
         const fulfilled = await api.confirmPaid(lifetime.order, { force: true });
-        assert.equal(fulfilled.code, code);
+        assert.notEqual(fulfilled.code, code);
         assert.equal(db.prepare('SELECT expires_at FROM codes WHERE code = ?').get(code).expires_at,
-            null);
+            annualExpiry);
+        assert.equal(db.prepare('SELECT expires_at FROM codes WHERE code = ?')
+            .get(fulfilled.code).expires_at, null);
+    });
+
+    await suite.test('年费与永久二维码分别付款时各自自然发码', async () => {
+        const fp = '36363636363636363636363636363636';
+        const statuses = new Map();
+        installUpstream(statuses);
+        const annual = await api.apiOrderCreate({ fp, product: 'annual' });
+        const lifetime = await api.apiOrderCreate({ fp, product: 'lifetime' });
+        assert.equal(annual.ok, true);
+        assert.equal(lifetime.ok, true);
+        statuses.set(annual.order, 'OD');
+        statuses.set(lifetime.order, 'OD');
+        const annualPaid = await api.confirmPaid(annual.order, { force: true });
+        const lifetimePaid = await api.confirmPaid(lifetime.order, { force: true });
+        assert.notEqual(annualPaid.code, lifetimePaid.code);
+        assert.equal(annualPaid.status, 'paid');
+        assert.equal(lifetimePaid.status, 'paid');
+        assert.ok(db.prepare('SELECT expires_at FROM codes WHERE code = ?')
+            .get(annualPaid.code).expires_at);
+        assert.equal(db.prepare('SELECT expires_at FROM codes WHERE code = ?')
+            .get(lifetimePaid.code).expires_at, null);
     });
 
     await suite.test('旧年费单在权益变永久后付款，持久标记退款', async () => {

@@ -545,8 +545,8 @@ object LicenseManager {
     }
 
     /**
-     * [renew] 为真 = 给现有码续期(服务器按 max(now, 原到期日) + 1 年计,提前续不吃掉剩余时间),
-     * 否则是新购。到期后重新购买也走 renew:真——服务器给他续原来那个码,而不是再发一个。
+     * [renew] 为真且购买年费 = 给现有年费码续期(按 max(now, 原到期日) + 1 年计)。
+     * 永久版始终是独立商品并另发永久码，不会改写或删除原年费码。
      */
     suspend fun createOrder(
         product: ProductId,
