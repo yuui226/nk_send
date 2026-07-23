@@ -226,6 +226,7 @@
     <string name="sub_expires_on">%1$s 到期</string>
     <string name="renew_action">續費</string>
     <string name="renew_or_upgrade">續費或升級</string>
+    <string name="sub_expired">高級版已到期</string>
     <string name="sub_expired_renew">高級版已到期，續費繼續使用</string>
     <plurals name="sub_days_left">
         <item quantity="other">剩 %1$d 天到期</item>
@@ -252,6 +253,8 @@
     <string name="err_purchase_no_network">需要連接網際網路</string>
     <string name="err_purchase_unreachable">無法連接伺服器。若目前連著相機 Wi-Fi，請先斷開，改用有外網的網路重試。</string>
     <string name="err_purchase_failed">下單失敗，請稍後重試或聯絡客服。</string>
+    <string name="err_purchase_price_missing">無法確認本單金額，已停止付款。請重試。</string>
+    <string name="err_purchase_qr_failed">付款二維碼載入失敗，請重試，不要重複付款。</string>
     <string name="err_purchase_product_mismatch">訂單商品與所選方案不一致，已停止付款。請返回後重新選擇。</string>
     <string name="purchase_back_to_plans">返回選擇方案</string>
 

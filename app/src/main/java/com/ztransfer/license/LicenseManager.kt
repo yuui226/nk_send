@@ -632,7 +632,7 @@ object LicenseManager {
 
     /**
      * 拉取二维码图片字节(虎皮椒域名,普通 TLS,用默认信任而非连本服务器的 pinned 工厂)。
-     * 失败返回 null,由调用方降级为显示链接文案。
+     * 失败返回 null，由调用方显示可重试错误；服务端已创建的待支付订单不会因此作废。
      */
     suspend fun fetchBytes(url: String): ByteArray? = withContext(Dispatchers.IO) {
         try {
@@ -641,7 +641,25 @@ object LicenseManager {
             conn.readTimeout = 8000
             conn.instanceFollowRedirects = true   // 虎皮椒 qrcode 接口 302 跳转到最终 PNG,须跟随
             if (conn.responseCode >= 400) return@withContext null
-            conn.inputStream.use { it.readBytes() }
+            // 二维码通常只有几十 KiB。限制响应大小，避免异常上游或错误重定向让支付弹窗
+            // 一次性读入超大文件并挤爆 App 内存；无 Content-Length 时也按实际读取量截断。
+            val maxBytes = 2 * 1024 * 1024
+            if (conn.contentLengthLong > maxBytes) return@withContext null
+            conn.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream(
+                    conn.contentLength.coerceIn(0, maxBytes)
+                )
+                val buffer = ByteArray(8192)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > maxBytes) return@withContext null
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            }
         } catch (_: Exception) {
             null
         }

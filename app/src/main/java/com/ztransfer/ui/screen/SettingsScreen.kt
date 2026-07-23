@@ -104,6 +104,7 @@ fun SettingsOverlay(
 
     // 右上角"解锁高级版"徽标打开的介绍对话框（免费/高级版对比 + 解锁按钮复制 QQ 号）。
     var showPro by remember { mutableStateOf(false) }
+    var showRenewInfo by remember { mutableStateOf(false) }
     // 页脚"我要换机"打开的对话框（取激活码 + 换机后果告知）。
     var showSwitchDevice by remember { mutableStateOf(false) }
     val subExpired by LicenseManager.subExpired.collectAsState()
@@ -191,7 +192,9 @@ fun SettingsOverlay(
                 } else {
                     ProBadgeButton(
                         label = stringResource(R.string.unlock_pro),
-                        onClick = { showPro = true }
+                        onClick = {
+                            if (subExpired) showRenewInfo = true else showPro = true
+                        }
                     )
                 }
                 Spacer(Modifier.width(8.dp))
@@ -204,13 +207,18 @@ fun SettingsOverlay(
                     onDismiss = { showPro = false },
                     onCelebrate = onPlayFireworks,
                     onHoldCameraWifi = onHoldCameraWifi,
-                    // 到期的老用户从这里再买 = 续原来那个码,不发新码。
-                    renew = subExpired
+                    renew = false
+                )
+            }
+            if (showRenewInfo) {
+                RenewDialog(
+                    onDismiss = { showRenewInfo = false },
+                    onCelebrate = onPlayFireworks,
+                    onHoldCameraWifi = onHoldCameraWifi,
                 )
             }
 
-            // 到期日与续费入口不放这儿:裸在面板上显乱,已挪到连接页徽标左侧的"续费"
-            // 玻璃按钮(点开 RenewDialog);那里也是全 app 唯一确定有外网、付得了款的页面。
+            // 过期用户在此也进入统一的 RenewDialog，避免绕过套餐与价格确认。
 
             Spacer(Modifier.height(14.dp))
 
@@ -579,7 +587,8 @@ internal fun ProBadgeButton(
         color = Color.Transparent,
         shadowElevation = 4.dp,
         modifier = modifier
-            .height(if (big) 46.dp else 28.dp)
+            .then(if (big) Modifier.heightIn(min = 48.dp) else Modifier.height(28.dp))
+            .clip(RoundedCornerShape(if (big) 16.dp else 14.dp))
             .graphicsLayer { alpha = if (enabled) 1f else 0.5f }
     ) {
         Box(
@@ -595,7 +604,11 @@ internal fun ProBadgeButton(
                     .graphicsLayer { translationX = size.width * sheenX }
                     .background(
                         Brush.horizontalGradient(
-                            listOf(Color.Transparent, Color.White.copy(alpha = 0.55f), Color.Transparent)
+                            listOf(
+                                Color.Transparent,
+                                Color(0xFFFFE5A0).copy(alpha = 0.65f),
+                                Color.Transparent,
+                            )
                         )
                     )
             )
@@ -603,8 +616,8 @@ internal fun ProBadgeButton(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(if (big) 6.dp else 4.dp),
                 modifier = Modifier
-                    .fillMaxHeight()
-                    .padding(horizontal = 12.dp)
+                    .then(if (big) Modifier else Modifier.fillMaxHeight())
+                    .padding(horizontal = 12.dp, vertical = if (big) 10.dp else 0.dp)
             ) {
                 Icon(
                     Icons.Default.WorkspacePremium,
@@ -616,7 +629,9 @@ internal fun ProBadgeButton(
                     label,
                     style = if (big) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF4A3216)
+                    color = Color(0xFF4A3216),
+                    textAlign = TextAlign.Center,
+                    maxLines = if (big) 2 else 1,
                 )
             }
         }

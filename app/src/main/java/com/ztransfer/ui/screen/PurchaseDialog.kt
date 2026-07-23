@@ -3,6 +3,7 @@ package com.ztransfer.ui.screen
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color as AndroidColor
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -12,6 +13,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -20,7 +22,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +66,12 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.license.OrderFailureAction
+import com.ztransfer.license.PaymentQrSource
+import com.ztransfer.license.hasUsableLockedPrice
+import com.ztransfer.license.nextOrderRetryDelay
+import com.ztransfer.license.orderFailureAction
+import com.ztransfer.license.paymentQrSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -154,6 +164,7 @@ fun PurchaseDialog(
 
     var order by remember { mutableStateOf<String?>(null) }
     var payUrl by remember { mutableStateOf<String?>(null) }   // 手机端支付链接(虎皮椒 url)
+    var payQr by remember { mutableStateOf<String?>(null) }     // 支付平台生成的二维码图片地址
     var qr by remember { mutableStateOf<Bitmap?>(null) }
     var saved by remember { mutableStateOf(false) }
     // 存相册失败单独记,不能并进 error(见下方保存按钮处的注释)
@@ -180,6 +191,7 @@ fun PurchaseDialog(
             productMismatch = false
             order = null
             payUrl = null
+            payQr = null
             orderPriceFen = 0
             paidProduct = product
             paidRenew = false
@@ -207,7 +219,8 @@ fun PurchaseDialog(
             if (recovered == null ||
                 (recovered is LicenseManager.OrderResult.Failed && recovered.err == "NOT_FOUND") ||
                 (recovered is LicenseManager.OrderResult.Pending &&
-                    recovered.product == product && recovered.payUrl == null)
+                    recovered.product == product &&
+                    recovered.payUrl == null && recovered.payQr == null)
             ) {
                 LicenseManager.createOrder(product, renew)
             } else {
@@ -223,8 +236,13 @@ fun PurchaseDialog(
         }
         when (r) {
             is LicenseManager.OrderResult.Pending -> {
+                if (!hasUsableLockedPrice(r.priceFen)) {
+                    error = R.string.err_purchase_price_missing
+                    return@LaunchedEffect
+                }
                 order = r.order
                 payUrl = r.payUrl
+                payQr = r.payQr
                 paidRenew = r.renew
                 paidProduct = r.product
                 orderPriceFen = r.priceFen
@@ -252,9 +270,27 @@ fun PurchaseDialog(
     }
 
     // 画码(编码在后台线程,别卡住动画)
-    LaunchedEffect(payUrl) {
-        val u = payUrl ?: return@LaunchedEffect
-        qr = withContext(Dispatchers.Default) { encodeQr(u, 720) }
+    LaunchedEffect(payUrl, payQr) {
+        val rendered = when (paymentQrSource(payUrl, payQr)) {
+            PaymentQrSource.ENCODE_PAY_URL -> {
+                val u = payUrl ?: return@LaunchedEffect
+                withContext(Dispatchers.Default) { encodeQr(u, 720) }
+            }
+            PaymentQrSource.DOWNLOAD_PAY_QR -> {
+                val u = payQr ?: return@LaunchedEffect
+                LicenseManager.fetchBytes(u)?.let { bytes ->
+                    withContext(Dispatchers.Default) {
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    }
+                }
+            }
+            PaymentQrSource.NONE -> return@LaunchedEffect
+        }
+        if (rendered == null) {
+            error = R.string.err_purchase_qr_failed
+        } else {
+            qr = rendered
+        }
     }
 
     // 支付链接 5 分钟有效期:到点未支付就标记过期,引导重新发起。
@@ -268,8 +304,9 @@ fun PurchaseDialog(
     // 轮询到账 → 自动激活。过期即停止轮询,不再空打死单。
     LaunchedEffect(order) {
         val o = order ?: return@LaunchedEffect
+        var retryDelayMs = 2_000L
         while (code == null && !expired && error == null) {
-            delay(2000)
+            delay(retryDelayMs)
             val r = LicenseManager.orderStatus(o)
             when {
                 r is LicenseManager.OrderResult.Pending && r.product != product -> {
@@ -281,17 +318,29 @@ fun PurchaseDialog(
                     paidRenew = r.renew
                     paidProduct = r.product
                     orderPriceFen = r.priceFen
+                    retryDelayMs = 2_000L
                 }
                 r is LicenseManager.OrderResult.Failed -> {
-                    if (r.err == "PENDING_OTHER_PRODUCT" || r.err == "BAD_PRODUCT") {
-                        productMismatch = true
-                        error = R.string.err_purchase_product_mismatch
-                    } else {
-                        error = R.string.err_purchase_failed
+                    when (orderFailureAction(r.err)) {
+                        OrderFailureAction.PRODUCT_MISMATCH -> {
+                            productMismatch = true
+                            error = R.string.err_purchase_product_mismatch
+                        }
+                        OrderFailureAction.TERMINAL -> error = R.string.err_purchase_failed
+                        OrderFailureAction.RETRY -> {
+                            // Keep an already displayed QR visible across temporary server failures.
+                            retryDelayMs = nextOrderRetryDelay(retryDelayMs)
+                        }
                     }
                 }
                 r is LicenseManager.OrderResult.Unreachable -> {
-                    error = R.string.err_purchase_unreachable
+                    // Mobile networks often switch just after leaving the camera hotspot.
+                    // A transient miss must not replace a valid payment QR with an error page.
+                    retryDelayMs = nextOrderRetryDelay(retryDelayMs)
+                }
+                r is LicenseManager.OrderResult.Pending -> {
+                    if (r.priceFen > 0) orderPriceFen = r.priceFen
+                    retryDelayMs = 2_000L
                 }
             }
         }
@@ -328,7 +377,11 @@ fun PurchaseDialog(
                         .matchParentSize()
                         .background(Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent)))
                 )
-                Column(Modifier.padding(20.dp)) {
+                Column(
+                    Modifier
+                        .verticalScroll(rememberScrollState())
+                        .padding(20.dp)
+                ) {
                     // ---- 头部:左边说清"付什么、多少钱",右边叉号退出 ----
                     // 钱已经付完就撤掉金额:那时这里是庆祝页,只该说"解锁了",再挂个价签是提醒他刚花了钱。
                     Row(verticalAlignment = Alignment.Top) {
@@ -362,7 +415,7 @@ fun PurchaseDialog(
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.Bold,
                                         // 与解锁弹窗的定价同一个金色:同一笔钱,视觉接得上
-                                        color = ProGold
+                                        color = colors.accentYellow
                                     )
                                 }
                             }
@@ -493,7 +546,12 @@ fun PurchaseDialog(
                                     shape = RoundedCornerShape(14.dp),
                                     panel = true,
                                     contentPadding = PaddingValues(horizontal = 26.dp, vertical = 12.dp),
-                                    onClick = { order = null; payUrl = null; refreshKey++ }
+                                    onClick = {
+                                        order = null
+                                        payUrl = null
+                                        payQr = null
+                                        refreshKey++
+                                    }
                                 ) {
                                     Text(
                                         stringResource(R.string.purchase_qr_refresh),
@@ -510,20 +568,26 @@ fun PurchaseDialog(
                                 // 码底必须是纯白(扫得出优先,不随主题变)。但浅色主题下白卡会糊在
                                 // 浅玻璃面板上,故补一圈与对比表同族的描边把边界界定出来;深色下它很淡,不碍事。
                                 val qrShape = RoundedCornerShape(16.dp)
-                                Box(
-                                    Modifier
-                                        .clip(qrShape)
-                                        .background(Color.White)
-                                        .border(1.dp, colors.glassPanelBorder, qrShape)
-                                        .padding(12.dp)
+                                BoxWithConstraints(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    Image(
-                                        bitmap = qr!!.asImageBitmap(),
-                                        contentDescription = null,
-                                        // 码是位图,放大用最近邻保持模块边缘锐利,保证扫得出
-                                        filterQuality = FilterQuality.None,
-                                        modifier = Modifier.size(232.dp)
-                                    )
+                                    val qrSize = (maxWidth - 24.dp).coerceIn(180.dp, 232.dp)
+                                    Box(
+                                        Modifier
+                                            .clip(qrShape)
+                                            .background(Color.White)
+                                            .border(1.dp, colors.glassPanelBorder, qrShape)
+                                            .padding(12.dp)
+                                    ) {
+                                        Image(
+                                            bitmap = qr!!.asImageBitmap(),
+                                            contentDescription = null,
+                                            // 码是位图，放大用最近邻保持模块边缘锐利。
+                                            filterQuality = FilterQuality.None,
+                                            modifier = Modifier.size(qrSize)
+                                        )
+                                    }
                                 }
                                 Spacer(Modifier.height(18.dp))
                                 // 唯一动作

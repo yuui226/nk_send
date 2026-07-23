@@ -586,12 +586,10 @@
                 </button>
 
                 <button class="plan" data-plan="lifetime" aria-pressed="false">
-                  <span class="tag">一次买断</span>
                   <span class="plan-top"><span class="plan-name">永久版</span><span class="radio"></span></span>
                   <span class="price-line">
                     <span class="price lifetime-price">¥59.9</span><span class="period">/ 永久</span><span class="original lifetime-original">¥99.9</span>
                   </span>
-                  <span class="plan-note">一次购买 · 永久使用</span>
                 </button>
               </section>
 
@@ -681,7 +679,7 @@
       if (state.plan === "yearly") {
         cta.innerHTML = `购买年费高级版 · ${money(state.yearly)} <small>365 天</small>`;
       } else {
-        cta.innerHTML = `购买永久版 · ${money(state.lifetime)} <small>一次买断</small>`;
+        cta.innerHTML = `购买永久版 · ${money(state.lifetime)} <small>永久</small>`;
       }
     }
 

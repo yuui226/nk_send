@@ -3,9 +3,11 @@ package com.ztransfer.ui.screen
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,6 +25,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +57,8 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.BuildConfig
@@ -69,9 +75,7 @@ import kotlin.math.ceil
 
 // 高级版列/定价的金色文字(与 ProBadgeButton 的金渐变同族,压深一档保证浅色玻璃上可读)。
 // 购买弹窗的金额也用它——同一笔钱在两屏用同一个金色,视觉上接得上。
-internal val ProGold = Color(0xFFE09B2D)
 // 对比表的免费/高级版两个值列的定宽(功能名占弹性剩余宽度)。
-private val CompareColWidth = 62.dp
 
 // 到期预警的两道门槛:设置页进 30 天转橙提醒,首页进 7 天才值得占一条提示条。
 internal const val SUB_WARN_DAYS = 30
@@ -191,13 +195,13 @@ fun ProDialog(
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
-                                    .background(ProGold.copy(alpha = 0.16f)),
+                                    .background(colors.accentYellow.copy(alpha = 0.16f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     Icons.Default.WorkspacePremium,
                                     contentDescription = null,
-                                    tint = ProGold,
+                                    tint = colors.accentYellow,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -212,7 +216,11 @@ fun ProDialog(
                             )
                         }
                         IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = null, tint = colors.onSurfaceVariant)
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.cd_close),
+                                tint = colors.onSurfaceVariant
+                            )
                         }
                     }
 
@@ -222,55 +230,73 @@ fun ProDialog(
                         // ================= 购买页 =================
                         // ---- 对比表：玻璃内卡承载（与设置分区卡片同族），表头 + 三行 ----
                         val cardShape = RoundedCornerShape(14.dp)
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(cardShape)
-                                .background(colors.onBackground.copy(alpha = 0.04f))
-                                .border(1.dp, colors.glassPanelBorder, cardShape)
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            // 表头:功能列留白,免费/高级版两列与行内值列同宽对齐。
-                            CompareHeader()
-                            Spacer(Modifier.height(6.dp))
-                            Box(
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val compactTable = maxWidth < 300.dp
+                            val horizontalPadding = if (compactTable) 8.dp else 14.dp
+                            val valueColumnWidth =
+                                ((maxWidth - horizontalPadding * 2) * 0.24f)
+                                    .coerceIn(46.dp, 64.dp)
+                            Column(
                                 Modifier
                                     .fillMaxWidth()
-                                    .height(1.dp)
-                                    .background(colors.glassPanelBorder)
-                            )
-                            CompareRow(
-                                stringResource(R.string.compare_transfer),
-                                stringResource(R.string.compare_transfer_free, LicenseManager.FREE_DAILY_TRANSFER_LIMIT),
-                                stringResource(R.string.compare_unlimited),
-                                stringResource(R.string.compare_unlimited),
-                            )
-                            CompareRow(
-                                stringResource(R.string.compare_filesize),
-                                stringResource(
-                                    R.string.compare_filesize_free,
-                                    LicenseManager.FREE_MAX_FILE_BYTES / (1024 * 1024)
-                                ),
-                                stringResource(R.string.compare_unlimited),
-                                stringResource(R.string.compare_unlimited),
-                            )
-                            CompareRow(
-                                stringResource(R.string.compare_remote),
-                                stringResource(
-                                    R.string.compare_remote_free,
-                                    (LicenseManager.FREE_REMOTE_DAILY_MS / 60_000L).toInt()
-                                ),
-                                stringResource(R.string.compare_unlimited),
-                                stringResource(R.string.compare_unlimited),
-                            )
-                            CompareRow(
-                                stringResource(R.string.compare_duration),
-                                stringResource(R.string.duration_free),
-                                stringResource(R.string.duration_days, price.annual.periodDays),
-                                stringResource(R.string.duration_lifetime),
-                                annualUnlimited = false,
-                                lifetimePermanent = true,
-                            )
+                                    .clip(cardShape)
+                                    .background(colors.onBackground.copy(alpha = 0.04f))
+                                    .border(1.dp, colors.glassPanelBorder, cardShape)
+                                    .padding(horizontal = horizontalPadding, vertical = 10.dp)
+                            ) {
+                                // 表头与每一行共用同一组动态列宽。
+                                CompareHeader(valueColumnWidth, compactTable)
+                                Spacer(Modifier.height(6.dp))
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(colors.glassPanelBorder)
+                                )
+                                CompareRow(
+                                    stringResource(R.string.compare_transfer),
+                                    stringResource(
+                                        R.string.compare_transfer_free,
+                                        LicenseManager.FREE_DAILY_TRANSFER_LIMIT,
+                                    ),
+                                    stringResource(R.string.compare_unlimited),
+                                    stringResource(R.string.compare_unlimited),
+                                    valueColumnWidth = valueColumnWidth,
+                                    compact = compactTable,
+                                )
+                                CompareRow(
+                                    stringResource(R.string.compare_filesize),
+                                    stringResource(
+                                        R.string.compare_filesize_free,
+                                        LicenseManager.FREE_MAX_FILE_BYTES / (1024 * 1024)
+                                    ),
+                                    stringResource(R.string.compare_unlimited),
+                                    stringResource(R.string.compare_unlimited),
+                                    valueColumnWidth = valueColumnWidth,
+                                    compact = compactTable,
+                                )
+                                CompareRow(
+                                    stringResource(R.string.compare_remote),
+                                    stringResource(
+                                        R.string.compare_remote_free,
+                                        (LicenseManager.FREE_REMOTE_DAILY_MS / 60_000L).toInt()
+                                    ),
+                                    stringResource(R.string.compare_unlimited),
+                                    stringResource(R.string.compare_unlimited),
+                                    valueColumnWidth = valueColumnWidth,
+                                    compact = compactTable,
+                                )
+                                CompareRow(
+                                    stringResource(R.string.compare_duration),
+                                    stringResource(R.string.duration_free),
+                                    stringResource(R.string.duration_days, price.annual.periodDays),
+                                    stringResource(R.string.duration_lifetime),
+                                    annualUnlimited = false,
+                                    lifetimePermanent = true,
+                                    valueColumnWidth = valueColumnWidth,
+                                    compact = compactTable,
+                                )
+                            }
                         }
 
                         // 定价促销区:红色"限时特惠"角标 + 大号金色现价 + 划线原价,底下压一行
@@ -484,7 +510,8 @@ fun RenewDialog(
     }
     val subExp = LicenseManager.subExpiresAtSec()
     val daysLeft = subDaysLeft(subExp)
-    val urgent = daysLeft <= SUB_WARN_DAYS
+    val subscriptionExpired = subExp <= System.currentTimeMillis() / 1000
+    val urgent = subscriptionExpired || daysLeft <= SUB_WARN_DAYS
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -511,13 +538,13 @@ fun RenewDialog(
                             modifier = Modifier
                                 .size(42.dp)
                                 .clip(CircleShape)
-                                .background(ProGold.copy(alpha = 0.16f)),
+                                .background(colors.accentYellow.copy(alpha = 0.16f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.WorkspacePremium,
                                 contentDescription = null,
-                                tint = ProGold,
+                                tint = colors.accentYellow,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
@@ -530,13 +557,21 @@ fun RenewDialog(
                                 color = colors.onBackground
                             )
                             Text(
-                                stringResource(R.string.sub_expires_on, formatSubDate(subExp)),
+                                if (subscriptionExpired) {
+                                    stringResource(R.string.sub_expired)
+                                } else {
+                                    stringResource(R.string.sub_expires_on, formatSubDate(subExp))
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.onSurfaceVariant
                             )
                         }
                         IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = null, tint = colors.onSurfaceVariant)
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.cd_close),
+                                tint = colors.onSurfaceVariant
+                            )
                         }
                     }
 
@@ -554,7 +589,11 @@ fun RenewDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            pluralStringResource(R.plurals.sub_days_left, daysLeft, daysLeft),
+                            if (subscriptionExpired) {
+                                stringResource(R.string.sub_expired)
+                            } else {
+                                pluralStringResource(R.plurals.sub_days_left, daysLeft, daysLeft)
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = if (urgent) colors.accentOrange else colors.onBackground
@@ -705,38 +744,40 @@ private fun SubActionLabel(text: String) {
 
 /** 对比表行:功能名弹性列 + 免费/高级版两个定宽值列(高级版列金色加粗)。 */
 @Composable
-private fun CompareHeader() {
+private fun CompareHeader(valueColumnWidth: Dp, compact: Boolean) {
     val colors = AppTheme.colors
+    val textStyle =
+        if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             stringResource(R.string.tier_feature),
-            style = MaterialTheme.typography.labelMedium,
+            style = textStyle,
             fontWeight = FontWeight.SemiBold,
             color = colors.onBackground,
             modifier = Modifier.weight(1f),
         )
         Text(
             stringResource(R.string.tier_free),
-            style = MaterialTheme.typography.labelMedium,
+            style = textStyle,
             color = colors.onSurfaceVariant,
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(CompareColWidth),
+            modifier = Modifier.width(valueColumnWidth),
         )
         Text(
             stringResource(R.string.tier_annual),
-            style = MaterialTheme.typography.labelMedium,
+            style = textStyle,
             fontWeight = FontWeight.Bold,
-            color = ProGold,
+            color = colors.accentYellow,
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(CompareColWidth),
+            modifier = Modifier.width(valueColumnWidth),
         )
         Text(
             stringResource(R.string.tier_lifetime),
-            style = MaterialTheme.typography.labelMedium,
+            style = textStyle,
             fontWeight = FontWeight.Bold,
-            color = ProGold,
+            color = colors.accentYellow,
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(CompareColWidth),
+            modifier = Modifier.width(valueColumnWidth),
         )
     }
 }
@@ -749,41 +790,44 @@ private fun CompareRow(
     lifetime: String,
     annualUnlimited: Boolean = true,
     lifetimePermanent: Boolean = false,
+    valueColumnWidth: Dp,
+    compact: Boolean,
 ) {
     val colors = AppTheme.colors
-    val unlimitedGreen = Color(0xFF20A86B)
+    val textStyle =
+        if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(vertical = 7.dp)
+        modifier = Modifier.padding(vertical = if (compact) 5.dp else 7.dp)
     ) {
         Text(
             name,
-            style = MaterialTheme.typography.bodyMedium,
+            style = textStyle,
             color = colors.onBackground,
             modifier = Modifier.weight(1f)
         )
         Text(
             free,
-            style = MaterialTheme.typography.bodyMedium,
+            style = textStyle,
             color = colors.onSurfaceVariant,
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(CompareColWidth)
+            modifier = Modifier.width(valueColumnWidth)
         )
         Text(
             annual,
-            style = MaterialTheme.typography.bodyMedium,
+            style = textStyle,
             fontWeight = if (annualUnlimited) FontWeight.ExtraBold else FontWeight.SemiBold,
-            color = if (annualUnlimited) unlimitedGreen else colors.onBackground,
+            color = if (annualUnlimited) colors.statusConnected else colors.onBackground,
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(CompareColWidth)
+            modifier = Modifier.width(valueColumnWidth)
         )
         Text(
             lifetime,
-            style = MaterialTheme.typography.bodyMedium,
+            style = textStyle,
             fontWeight = FontWeight.ExtraBold,
-            color = if (lifetimePermanent) ProGold else unlimitedGreen,
+            color = if (lifetimePermanent) colors.accentYellow else colors.statusConnected,
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(CompareColWidth),
+            modifier = Modifier.width(valueColumnWidth),
         )
     }
 }
@@ -794,7 +838,10 @@ private fun ProductPlans(
     selected: LicenseManager.ProductId,
     onSelect: (LicenseManager.ProductId) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.selectableGroup(),
+    ) {
         ProductPlanCard(
             product = LicenseManager.ProductId.ANNUAL,
             price = pricing.annual,
@@ -825,18 +872,32 @@ private fun ProductPlanCard(
             .fillMaxWidth()
             .clip(shape)
             .background(
-                if (selected && enabled) ProGold.copy(alpha = 0.12f)
+                if (selected && enabled) colors.accentYellow.copy(alpha = 0.12f)
                 else colors.onBackground.copy(alpha = 0.035f)
             )
             .border(
                 if (selected && enabled) 2.dp else 1.dp,
-                if (selected && enabled) ProGold else colors.glassPanelBorder,
+                if (selected && enabled) colors.accentYellow else colors.glassPanelBorder,
                 shape,
             )
-            .clickable(enabled = enabled) { onSelect(product) }
+            .selectable(
+                selected = selected,
+                enabled = enabled,
+                role = Role.RadioButton,
+                onClick = { onSelect(product) },
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Icon(
+            imageVector =
+                if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+            contentDescription = null,
+            tint =
+                if (selected && enabled) colors.accentYellow else colors.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 stringResource(
@@ -851,16 +912,16 @@ private fun ProductPlanCard(
                 color = if (enabled) colors.onBackground else colors.onSurfaceVariant,
             )
             Text(
-                if (product == LicenseManager.ProductId.ANNUAL) {
-                    stringResource(R.string.duration_days, price.periodDays)
-                } else if (enabled) {
-                    stringResource(R.string.duration_lifetime)
-                } else {
+                if (!enabled) {
                     stringResource(R.string.plan_unavailable)
+                } else if (product == LicenseManager.ProductId.ANNUAL) {
+                    stringResource(R.string.duration_days, price.periodDays)
+                } else {
+                    stringResource(R.string.duration_lifetime)
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (product == LicenseManager.ProductId.LIFETIME && enabled) {
-                    ProGold
+                    colors.accentYellow
                 } else {
                     colors.onSurfaceVariant
                 },
@@ -890,7 +951,7 @@ private fun ProductPlanCard(
                     LicenseManager.formatPrice(price.priceFen),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = ProGold,
+                    color = colors.accentYellow,
                 )
                 if (price.originalFen > 0) {
                     Text(
@@ -901,12 +962,6 @@ private fun ProductPlanCard(
                     )
                 }
             }
-        } else {
-            Text(
-                stringResource(R.string.plan_unavailable),
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.onSurfaceVariant,
-            )
         }
     }
 }

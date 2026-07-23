@@ -226,6 +226,7 @@
     <string name="sub_expires_on">%1$s 到期</string>
     <string name="renew_action">续费</string>
     <string name="renew_or_upgrade">续费或升级</string>
+    <string name="sub_expired">高级版已到期</string>
     <string name="sub_expired_renew">高级版已到期，续费继续使用</string>
     <plurals name="sub_days_left">
         <item quantity="other">剩 %1$d 天到期</item>
@@ -252,6 +253,8 @@
     <string name="err_purchase_no_network">需要连接互联网</string>
     <string name="err_purchase_unreachable">无法连接服务器。若当前连着相机 Wi-Fi，请先断开，用有外网的网络重试。</string>
     <string name="err_purchase_failed">下单失败，请稍后重试或联系客服。</string>
+    <string name="err_purchase_price_missing">无法确认本单金额，已停止支付。请重试。</string>
+    <string name="err_purchase_qr_failed">支付二维码加载失败，请重试，不要重复付款。</string>
     <string name="err_purchase_product_mismatch">订单商品与所选方案不一致，已停止支付。请返回后重新选择。</string>
     <string name="purchase_back_to_plans">返回选择方案</string>
 

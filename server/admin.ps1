@@ -27,6 +27,19 @@ $ErrorActionPreference = 'Stop'
 
 $Server = if ($env:ZT_SERVER) { $env:ZT_SERVER } else { "https://106.15.239.203:8443" }
 $TokenFile = Join-Path $PSScriptRoot "admin-token.txt"
+$MaxPriceFen = 10000000
+
+# 与 Android App 的 CERT_PIN_B64 相同：curl -k 仅跳过自签名证书链/主机名校验，
+# --pinnedpubkey 仍会核对服务端 SPKI SHA-256，不能把管理员令牌交给冒充服务器的人。
+# ZT_SERVER_PIN 可在证书轮换或测试环境覆盖；接受 base64 摘要或 curl 的 sha256//... 形式。
+$DefaultServerPin = "sha256//9SNNH7dEGfIVJ0bMGIKxEYTjHUAMDy3+t/+dVZzJfzA="
+function Normalize-ServerPin($value) {
+    $pin = ([string]$value).Trim()
+    if ($pin -match '^sha256//[A-Za-z0-9+/]{43}=$') { return $pin }
+    if ($pin -match '^[A-Za-z0-9+/]{43}=$') { return "sha256//$pin" }
+    throw "ZT_SERVER_PIN 格式无效：应为 44 位 base64 SPKI SHA-256，或 sha256//<base64>"
+}
+$ServerPin = Normalize-ServerPin $(if ($env:ZT_SERVER_PIN) { $env:ZT_SERVER_PIN } else { $DefaultServerPin })
 
 function Get-SavedToken {
     if ($env:ZT_ADMIN_TOKEN) { return $env:ZT_ADMIN_TOKEN }
@@ -47,10 +60,23 @@ function Request-Token {
     return $t
 }
 
-# 自签名证书,用 curl.exe -k 跳过系统证书校验(身份由 admin token 保证)。
+# 自签名证书用 -k 跳过系统证书链/主机名校验，但必须由 --pinnedpubkey 验明服务端身份。
+# 仅 /admin/* 请求携带管理员令牌；公开查询绝不发送令牌。
 # 请求体走临时文件,避免 PowerShell 5.1 按 GBK 传中文参数导致乱码。
 function Call($method, $path, $bodyObj) {
-    $curlArgs = @("-k", "-s", "-X", $method, "-H", "X-Admin-Token: $script:Token", "$Server$path")
+    $isAdmin = $path.StartsWith("/admin/")
+    if ($isAdmin -and -not $script:Token) {
+        Write-Host "缺少管理员令牌，已拒绝管理请求" -ForegroundColor Red
+        return $null
+    }
+    $curlArgs = @(
+        "-k", "--pinnedpubkey", $ServerPin,
+        "-sS", "-X", $method
+    )
+    if ($isAdmin) {
+        $curlArgs += @("-H", "X-Admin-Token: $script:Token")
+    }
+    $curlArgs += "$Server$path"
     $tmp = $null
     if ($bodyObj) {
         $json = $bodyObj | ConvertTo-Json -Compress -Depth 8
@@ -58,8 +84,20 @@ function Call($method, $path, $bodyObj) {
         [IO.File]::WriteAllText($tmp, $json, (New-Object System.Text.UTF8Encoding($false)))
         $curlArgs += @("-H", "Content-Type: application/json", "--data-binary", "@$tmp")
     }
-    try { $out = & curl.exe @curlArgs }
+    $curlExit = 0
+    try {
+        $out = & curl.exe @curlArgs
+        $curlExit = $LASTEXITCODE
+    }
     finally { if ($tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue } }
+    if ($curlExit -eq 90) {
+        Write-Host "服务器证书公钥与固定指纹不一致，已拒绝连接（检查 ZT_SERVER / ZT_SERVER_PIN）" -ForegroundColor Red
+        return $null
+    }
+    if ($curlExit -ne 0) {
+        Write-Host "请求失败: curl 退出码 $curlExit" -ForegroundColor Red
+        return $null
+    }
     if (-not $out) {
         Write-Host "服务器无响应: $Server(检查网络 / 服务是否在跑)" -ForegroundColor Red
         return $null
@@ -100,7 +138,7 @@ function Convert-YuanToFen($text, $allowEmpty) {
         return [PSCustomObject]@{ Ok = $false; Empty = $false; Fen = 0 }
     }
     $fen = $amount * [decimal]100
-    if ($fen -gt [int]::MaxValue) {
+    if ($fen -gt $MaxPriceFen) {
         return [PSCustomObject]@{ Ok = $false; Empty = $false; Fen = 0 }
     }
     return [PSCustomObject]@{ Ok = $true; Empty = $false; Fen = [int]$fen }
@@ -167,6 +205,23 @@ function Get-Ledger {
 
 function Show-Ledger($resp) {
     $codes = @($resp.codes)
+    $refunds = @($resp.refund_required)
+    if ($refunds.Count -gt 0) {
+        Write-Host ""
+        Write-Host ("!!! 有 {0} 笔已收款订单需要人工核对并退款 !!!" -f $refunds.Count) -ForegroundColor Red
+        foreach ($r in $refunds) {
+            Write-Host (
+                "  订单 {0}  {1}  {2}  商品 {3}  金额 {4}  支付流水 {5}" -f
+                $r.out_trade_no,
+                (Format-Time $r.paid_at),
+                $r.refund_reason,
+                $r.product,
+                (Format-PriceFen $r.amount_fen),
+                $(if ($r.charge_id) { $r.charge_id } else { "-" })
+            ) -ForegroundColor Yellow
+        }
+        Write-Host "请在支付平台完成退款并保留核对记录；不要吊销用户现有的永久会员。" -ForegroundColor Red
+    }
     if ($codes.Count -eq 0) { Write-Host "(还没有生成过激活码)" -ForegroundColor DarkGray; return }
     Write-Host ""
     Write-Host ("共 {0} 个激活码:" -f $codes.Count)
@@ -323,12 +378,15 @@ function Invoke-Pricing {
     Write-Host ""
     Write-Host "改价立即对新订单生效,不用重启服务;已生成的二维码仍按下单时的价收款。" -ForegroundColor DarkGray
     $pick = (Read-Host "修改哪一种?(1 = 年费会员,2 = 永久会员;回车取消)").Trim()
+    if (-not $pick) { Write-Host "已取消"; return }
     $product = switch ($pick) {
         "1" { "annual" }
         "2" { "lifetime" }
-        default { $null }
+        default {
+            Write-Host "输入无效：请输入 1（年费会员）或 2（永久会员）" -ForegroundColor Yellow
+            return
+        }
     }
-    if (-not $product) { Write-Host "已取消"; return }
     if ($product -eq "lifetime" -and -not (Test-LifetimePricingProtocol $resp)) {
         Write-Host "当前服务端不支持永久会员定价,已拒绝提交。请先升级服务端,以免误改年费价格。" -ForegroundColor Red
         return
@@ -341,13 +399,27 @@ function Invoke-Pricing {
     if (-not ([string]$priceIn).Trim()) { Write-Host "已取消"; return }
     $price = Convert-YuanToFen $priceIn $false
     if (-not $price.Ok -or $price.Fen -le 0) {
-        Write-Host "售价格式不正确:只能输入大于 0 的金额,最多两位小数(例如 19.9)" -ForegroundColor Red
+        Write-Host "售价格式不正确:请输入 0.01 至 100000.00 元,最多两位小数" -ForegroundColor Red
         return
     }
-    $originalIn = Read-Host "划线原价(元,比如 39.9;输入 0 或回车 = 不划线)"
-    $original = Convert-YuanToFen $originalIn $true
+    $oldOriginalFen = if ($oldEntry -and $null -ne $oldEntry.original_fen) {
+        [int]$oldEntry.original_fen
+    } else {
+        0
+    }
+    $oldOriginalText = if ($oldOriginalFen -gt 0) {
+        Format-PriceFen $oldOriginalFen
+    } else {
+        "不划线"
+    }
+    $originalIn = Read-Host "划线原价(元；回车保持 $oldOriginalText；输入 0 = 不划线)"
+    $original = if ([string]::IsNullOrWhiteSpace([string]$originalIn)) {
+        [PSCustomObject]@{ Ok = $true; Empty = $true; Fen = $oldOriginalFen }
+    } else {
+        Convert-YuanToFen $originalIn $false
+    }
     if (-not $original.Ok) {
-        Write-Host "划线原价格式不正确:只能输入非负金额,最多两位小数" -ForegroundColor Red
+        Write-Host "划线原价格式不正确:请输入 0 至 100000.00 元,最多两位小数" -ForegroundColor Red
         return
     }
     if ($original.Fen -gt 0 -and $original.Fen -le $price.Fen) {
@@ -360,8 +432,8 @@ function Invoke-Pricing {
     Write-Host ("商品: {0}" -f $productName) -ForegroundColor Cyan
     Write-Host ("旧价格: {0}" -f $oldSummary)
     Write-Host ("新价格: 售价 {0}；划线原价 {1}" -f (Format-PriceFen $price.Fen), $newOriginal) -ForegroundColor Yellow
-    $confirm = (Read-Host "确认提交?输入 y").Trim()
-    if ($confirm -ne "y") { Write-Host "已取消"; return }
+    $confirm = (Read-Host "确认提交?输入 y 或 Y").Trim()
+    if ($confirm -notmatch '^[Yy]$') { Write-Host "已取消"; return }
 
     $resp = Call "POST" "/admin/pricing" @{
         product = $product
@@ -408,12 +480,12 @@ function Invoke-PricingCli($arg1, $arg2, $arg3) {
     $price = Convert-YuanToFen $priceText $false
     $original = Convert-YuanToFen $originalText $true
     if (-not $price.Ok -or $price.Fen -le 0) {
-        Write-Host "错误:售价必须是大于 0、最多两位小数的金额" -ForegroundColor Red
+        Write-Host "错误:售价必须是 0.01 至 100000.00 元、最多两位小数的金额" -ForegroundColor Red
         $script:PricingCliInvalid = $true
         return $null
     }
     if (-not $original.Ok) {
-        Write-Host "错误:划线原价必须是非负、最多两位小数的金额" -ForegroundColor Red
+        Write-Host "错误:划线原价必须是 0 至 100000.00 元、最多两位小数的金额" -ForegroundColor Red
         $script:PricingCliInvalid = $true
         return $null
     }
@@ -760,7 +832,12 @@ $script:Token = Get-SavedToken
 
 if ($Cmd) {
     # 命令行模式(兼容旧用法)
-    if (-not $script:Token) { Write-Error "请先设置 `$env:ZT_ADMIN_TOKEN 或在同目录放 admin-token.txt"; exit 1 }
+    # `pricing` 无参只访问公开 /v1/pricing，不应强迫用户配置或泄露管理员令牌。
+    $publicPricingQuery = ($Cmd -eq "pricing" -and -not $A1)
+    if (-not $publicPricingQuery -and -not $script:Token) {
+        Write-Error "请先设置 `$env:ZT_ADMIN_TOKEN 或在同目录放 admin-token.txt"
+        exit 1
+    }
     $resp = switch ($Cmd) {
         "new" {
             $count = if ($A1) { [int]$A1 } else { 1 }
