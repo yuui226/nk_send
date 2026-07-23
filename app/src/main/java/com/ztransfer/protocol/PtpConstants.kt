@@ -21,6 +21,7 @@ object PtpConstants {
     const val PONG = 14
 
     // PTP 命令码
+    const val GET_DEVICE_INFO = 0x1001
     const val OPEN_SESSION = 0x1002
     const val CLOSE_SESSION = 0x1003
     const val GET_STORAGE_IDS = 0x1004

@@ -7,6 +7,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -27,6 +29,64 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.Motion
+
+/**
+ * 全局毛玻璃容器。按钮、卡片等浮层只负责传入形状和状态色，玻璃底、高光、描边与投影
+ * 始终由这里统一绘制，避免各页面复制一套近似实现。
+ */
+@Composable
+fun GlassSurface(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(20.dp),
+    panel: Boolean = false,
+    active: Boolean = false,
+    activeColor: Color? = null,
+    showBorder: Boolean = true,
+    showSheen: Boolean = true,
+    tint: Color = Color.Transparent,
+    borderColor: Color? = null,
+    content: @Composable BoxScope.() -> Unit
+) {
+    val colors = AppTheme.colors
+    val resolvedActiveColor = activeColor ?: colors.accentBlue
+    val activeProgress by animateFloatAsState(
+        targetValue = if (active && !panel) 1f else 0f,
+        animationSpec = tween(180),
+        label = "glassActive"
+    )
+    val normalHighlightTop = if (!showSheen) Color.Transparent
+        else if (panel) colors.glassSheen else colors.glassHighlightTop
+    val normalHighlightBottom = if (!showSheen || panel) Color.Transparent
+        else colors.glassHighlightBottom
+    val normalBorderTop = if (panel) colors.glassPanelBorder else colors.glassBorderTop
+    val normalBorderBottom = if (panel) colors.glassPanelBorder else colors.glassBorderBottom
+    val highlightTop = lerp(normalHighlightTop, resolvedActiveColor.copy(alpha = 0.30f), activeProgress)
+    val highlightBottom = lerp(normalHighlightBottom, resolvedActiveColor.copy(alpha = 0.12f), activeProgress)
+    val borderTop = lerp(normalBorderTop, resolvedActiveColor.copy(alpha = 0.95f), activeProgress)
+    val borderBottom = lerp(normalBorderBottom, resolvedActiveColor.copy(alpha = 0.52f), activeProgress)
+    val decoration = modifier
+        .graphicsLayer {
+            this.shape = shape
+            clip = true
+        }
+        .background(if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.glassSurface)
+        .background(Brush.verticalGradient(listOf(highlightTop, highlightBottom)))
+        .background(tint)
+        .then(
+            if (showBorder) {
+                Modifier.border(
+                    width = 1.dp,
+                    brush = borderColor?.let(::SolidColor)
+                        ?: if (panel) SolidColor(borderTop)
+                        else Brush.verticalGradient(listOf(borderTop, borderBottom)),
+                    shape = shape
+                )
+            } else {
+                Modifier
+            }
+        )
+    Box(modifier = decoration, content = content)
+}
 
 /**
  * 统一的"毛玻璃"悬浮按钮：半透明底 + 自上而下白色高光渐变 + 上亮下暗细描边，
@@ -73,10 +133,7 @@ fun GlassButton(
         animationSpec = if (pressed) tween(80) else Motion.bouncy(),
         label = "glassPress"
     )
-    // 激活态不换成一块突兀的实色胶囊，而是在原毛玻璃上叠蓝色淡光；
-    // 与普通态平滑过渡，用户能一眼看出状态，又不会破坏顶栏的整体质感。
-    // 一个进度同时驱动高光、描边和投影；避免每个 GlassButton 创建多个
-    // 独立颜色动画状态（日期分组多时会带来不必要的组合开销）。
+    // 保持原有 Surface → Row 测量层级；照片列表、续费等既有按钮依赖这套布局。
     val activeProgress by animateFloatAsState(
         targetValue = if (active && !panel) 1f else 0f,
         animationSpec = tween(180),

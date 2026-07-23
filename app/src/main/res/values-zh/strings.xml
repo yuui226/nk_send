@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="connection_usb">USB</string>
+    <string name="connection_wifi_hotspot">相机热点</string>
+    <string name="usb_step_power">相机电源开启</string>
+    <string name="usb_step_cable">使用 C to C 数据线连接相机与手机</string>
+    <string name="connection_failed_short">连接失败</string>
+    <string name="auto_iso">自动 ISO</string>
     <string name="app_name">Z传</string>
     <string name="transfer_channel_name">文件传输</string>
     <string name="transfer_notification_title">Z传</string>
     <string name="transfer_notification_text">正在传输文件…</string>
 
     <!-- 连接页 -->
-    <string name="connecting_camera">正在连接相机…</string>
+    <string name="usb_unknown_error">未知 USB 错误</string>
+    <string name="usb_permission_required">未获得 USB 权限，请重新插线并允许访问</string>
+    <string name="error_read_device_info">读取相机信息失败：%1$s</string>
     <string name="connect_camera_wifi">请连接相机 Wi-Fi</string>
-    <string name="open_wifi_settings">打开 Wi-Fi 设置</string>
+    <string name="open_wifi_settings">Wi-Fi 设置</string>
     <string name="step_camera_wifi">相机开启「与智能设备建立 Wi-Fi 连接」</string>
     <string name="step_phone_wifi">手机 Wi-Fi 连接到相机的热点</string>
     <string name="tip_title">更快的连接方式</string>

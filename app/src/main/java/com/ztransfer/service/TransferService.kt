@@ -33,7 +33,12 @@ class TransferService : Service() {
         try {
             startForeground(NOTIFICATION_ID, buildNotification())
             acquireWakeLock()
-            acquireWifiLock()
+            val useWifi = intent?.getBooleanExtra(EXTRA_USE_WIFI, true) ?: true
+            if (useWifi) {
+                acquireWifiLock()
+            } else {
+                releaseWifiLock()
+            }
             if (com.ztransfer.BuildConfig.DEBUG) {
                 android.util.Log.d("ZTransfer", "TransferService foreground started, notification posted")
             }
@@ -139,10 +144,12 @@ class TransferService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val WAKELOCK_TAG = "ZTransfer:transfer"
         private const val WIFILOCK_TAG = "ZTransfer:wifi"
+        private const val EXTRA_USE_WIFI = "use_wifi"
         private const val MAX_WAKELOCK_MS = 60L * 60L * 1000L // 兜底超时，防止异常时唤醒锁泄露
 
-        fun start(context: Context) {
+        fun start(context: Context, useWifi: Boolean = true) {
             val intent = Intent(context, TransferService::class.java)
+                .putExtra(EXTRA_USE_WIFI, useWifi)
             try {
                 // minSdk 26 = O，直接走前台服务启动路径。
                 context.startForegroundService(intent)

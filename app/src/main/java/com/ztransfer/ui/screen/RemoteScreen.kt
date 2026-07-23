@@ -34,6 +34,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -72,6 +73,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -90,15 +92,18 @@ import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
 import com.ztransfer.protocol.rcChangeApplicationMode
+import com.ztransfer.protocol.rcCanonicalExposureProp
 import com.ztransfer.protocol.rcEndMovie
 import com.ztransfer.protocol.rcFormat
+import com.ztransfer.protocol.rcGetCompatibleParam
 import com.ztransfer.protocol.rcGetFocusMode
 import com.ztransfer.protocol.rcGetMovieMode
 import com.ztransfer.protocol.rcGetParam
 import com.ztransfer.protocol.rcPollEvents
+import com.ztransfer.protocol.rcRefreshParam
 import com.ztransfer.protocol.rcSetApplicationMode
 import com.ztransfer.protocol.rcSetLvSize
-import com.ztransfer.protocol.rcSetValue
+import com.ztransfer.protocol.rcSetValueVerified
 import com.ztransfer.protocol.rcStartMovie
 import com.ztransfer.protocol.runLabProbe
 import com.ztransfer.ui.theme.AppTheme
@@ -140,6 +145,7 @@ private val MOVIE_EXPOSURE_PROPS = listOf(
 )
 // 事件刷新的匹配范围（两套都听：拨杆随时可能切换）
 private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
+private val PHOTO_AUTO_ISO_PROPS = listOf(Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT)
 
 private data class RemoteLiveFrame(
     val image: ImageBitmap,
@@ -345,6 +351,8 @@ private fun RemoteContent(
     val params = remember { mutableStateMapOf<Int, RcParam>() }
     // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
     val pendingSets = remember { mutableMapOf<Int, Job>() }
+    var autoIsoProp by remember { mutableStateOf<Int?>(null) }
+    var autoIsoBusy by remember { mutableStateOf(false) }
     // 初始参数是否已加载完：用于把事件轮询推迟到之后开始，避免进页时 GetEvent 与
     // 曝光参数与模式读取抢 ioMutex、拖慢参数首次显示。
     var initialLoaded by remember { mutableStateOf(false) }
@@ -405,7 +413,31 @@ private fun RemoteContent(
 
     suspend fun refreshParam(prop: Int) {
         val cam = cameraViewModel.getCamera() ?: return
-        runCatching { cam.rcGetParam(prop) }.getOrNull()?.let { params[prop] = it }
+        runCatching { cam.rcGetCompatibleParam(prop) }.getOrNull()?.let { params[prop] = it }
+    }
+
+    suspend fun refreshAutoIso() {
+        val cam = cameraViewModel.getCamera() ?: return
+        val candidates = buildList {
+            autoIsoProp?.let(::add)
+            addAll(PHOTO_AUTO_ISO_PROPS)
+        }.distinct()
+        val found = candidates.firstNotNullOfOrNull { prop ->
+            runCatching { cam.rcGetParam(prop) }.getOrNull()
+        }
+        autoIsoProp = found?.prop
+        if (found == null) {
+            params.remove(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY)
+            return
+        }
+        params[found.prop] = found
+        if (found.current != 0L) {
+            runCatching { cam.rcGetParam(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY) }.getOrNull()?.let {
+                params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY] = it
+            }
+        } else {
+            params.remove(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY)
+        }
     }
 
     suspend fun refreshMode() {
@@ -475,7 +507,10 @@ private fun RemoteContent(
             recording = false   // 拨杆离开录像位，录制状态必然已结束
             clearAppMode()
             // 切回照片位：照片侧值域/可写性可能在录像期间变过，重新拉一遍
-            if (was) EXPOSURE_PROPS.forEach { refreshParam(it) }
+            if (was) {
+                EXPOSURE_PROPS.forEach { refreshParam(it) }
+                refreshAutoIso()
+            }
         }
     }
 
@@ -570,12 +605,37 @@ private fun RemoteContent(
         // 先把通道让给参数读取（此时事件轮询尚未开始、缩略图填充已停），参数最快点亮，
         // 再放开事件轮询并启动监看。
         EXPOSURE_PROPS.forEach { refreshParam(it) }
+        refreshAutoIso()
         refreshMode()
         refreshFocusMode()
         initialLoaded = true
         startSession(hdLiveView)
         // 拨杆位置放监看启动之后：只影响快门键形态，不值得让首帧多等一个往返
         refreshMovieMode()
+    }
+
+    val autoIsoParam = autoIsoProp?.let { params[it] }
+    val autoIsoEnabled = autoIsoParam?.current?.let { it != 0L }
+    val autoIsoAvailable = autoIsoParam?.writable == true && autoIsoEnabled != null
+    val effectiveAutoIsoValue = params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY]?.current
+
+    // AUTO 开启时刷新相机当前实际采用的 ISO。D0B5 是只读的 ISOControlSensitivity；
+    // D0B4/500F 是用户设定的基础 ISO，不能用于显示自动测光结果。这里只轮询标量值，
+    // 500ms 一次足够跟随测光变化，也不会持续挤占 Live View 取帧通道。
+    LaunchedEffect(connected, movieMode, autoIsoProp, autoIsoEnabled) {
+        if (!connected || movieMode || autoIsoEnabled != true) return@LaunchedEffect
+        val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
+        var effective = params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY]
+            ?: runCatching { cam.rcGetParam(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY) }.getOrNull()
+            ?: return@LaunchedEffect
+        params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY] = effective
+        while (isActive) {
+            runCatching { cam.rcRefreshParam(effective) }.getOrNull()?.let {
+                effective = it
+                params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY] = it
+            }
+            delay(500)
+        }
     }
 
     // 事件轮询：唯一的 GetEvent 消费者。参数被机身侧改动（0x4006）时刷新对应值域。
@@ -605,7 +665,18 @@ private fun RemoteContent(
                     Lab.EVT_NK_MOVIE_REC_COMPLETE, Lab.EVT_NK_MOVIE_REC_INTERRUPTED ->
                         recording = false
                     Lab.EVT_DEVICE_PROP_CHANGED -> {
-                        val prop = e.second.toInt()
+                        val reportedProp = e.second.toInt()
+                        val prop = rcCanonicalExposureProp(reportedProp)
+                        if (reportedProp in PHOTO_AUTO_ISO_PROPS) refreshAutoIso()
+                        if (reportedProp == Lab.PROP_NK_ISO_CONTROL_SENSITIVITY &&
+                            autoIsoProp?.let { params[it]?.current != 0L } == true
+                        ) {
+                            params[reportedProp]?.let { current ->
+                                runCatching { cam.rcRefreshParam(current) }.getOrNull()?.let {
+                                    params[reportedProp] = it
+                                }
+                            }
+                        }
                         // 本地还有未发出的乐观值时不刷新——自己刚设的值触发的事件
                         // 会把正在连调的显示值拽回去。照片/录像两套参数都听。
                         if (prop in ALL_EXPOSURE_PROPS && pendingSets[prop]?.isActive != true) {
@@ -619,6 +690,7 @@ private fun RemoteContent(
                             active.forEach {
                                 if (pendingSets[it]?.isActive != true) refreshParam(it)
                             }
+                            if (!movieMode) refreshAutoIso()
                         }
                         if (prop == Lab.PROP_FOCUS_MODE || prop == Lab.PROP_NK_AF_MODE ||
                             prop == focusModeProp
@@ -650,16 +722,23 @@ private fun RemoteContent(
         pendingSets[prop] = scope.launch {
             if (!immediate) delay(160)
             val cam = cameraViewModel.getCamera() ?: return@launch
-            val rc = try {
-                cam.rcSetValue(p, value)
+            val result = try {
+                cam.rcSetValueVerified(p, value)
             } catch (e: CancellationException) {
                 throw e   // 被更新一步的 sendValue 顶掉，不是写失败：别记日志、别回读
             } catch (e: Exception) {
-                -1
+                null
             }
-            if (rc != Lab.OK) {
-                devLog("!! set 0x%04X resp=0x%04X".format(prop, rc and 0xFFFF))
-                refreshParam(prop)   // 写失败刷回真实值
+            result?.actual?.let { params[prop] = it }
+            if (result?.confirmed != true) {
+                val rc = result?.responseCode ?: -1
+                val actual = result?.actual?.current?.toString() ?: "unreadable"
+                devLog(
+                    "!! set logical=0x%04X actual=0x%04X target=%d read=%s resp=0x%04X"
+                        .format(prop, p.prop, value, actual, rc and 0xFFFF)
+                )
+                // 包括返回 OK 但机身没有采用的情况：重新读取描述和值域，显示真实状态。
+                refreshParam(prop)
             }
         }
     }
@@ -920,6 +999,40 @@ private fun RemoteContent(
         }
     }
 
+    fun setAutoIso(enabled: Boolean) {
+        val p = autoIsoProp?.let { params[it] } ?: return
+        if (!p.writable || autoIsoBusy || movieMode) return
+        val target = if (enabled) {
+            p.values.firstOrNull { it != 0L } ?: 1L
+        } else {
+            p.values.firstOrNull { it == 0L } ?: 0L
+        }
+        if ((p.current != 0L) == enabled) return
+
+        autoIsoBusy = true
+        params[p.prop] = p.copy(current = target)
+        params.remove(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY)
+        haptics.tick()
+        scope.launch {
+            try {
+                val cam = cameraViewModel.getCamera()
+                if (cam == null) {
+                    params[p.prop] = p
+                    return@launch
+                }
+                val result = runCatching { cam.rcSetValueVerified(p, target) }.getOrNull()
+                result?.actual?.let { params[p.prop] = it }
+                if (result?.confirmed != true) {
+                    val rc = result?.responseCode ?: -1
+                    devLog("!! Auto ISO set/readback resp=0x%04X".format(rc and 0xFFFF))
+                }
+                refreshAutoIso()
+            } finally {
+                autoIsoBusy = false
+            }
+        }
+    }
+
     fun toggleRecord(waitForFocus: Job? = null) {
         if (recBusy || probing) return
         val expectedCamera = cameraViewModel.getCamera() ?: return
@@ -1022,7 +1135,11 @@ private fun RemoteContent(
         ) {
             // 顶栏只保留信号与返回；监看工具统一放到取景器下方。
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SignalPill(rssi = camState.wifiRssi, connected = connected)
+                SignalPill(
+                    rssi = camState.wifiRssi,
+                    connected = connected,
+                    connectionType = camState.connectionType
+                )
                 Spacer(Modifier.weight(1f))
                 GlassButton(
                     onClick = onNavigateBack,
@@ -1122,9 +1239,14 @@ private fun RemoteContent(
                 activeProps.chunked(2).forEach { rowProps ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         rowProps.forEach { prop ->
+                            val hasAutoIso = prop == Lab.PROP_ISO && autoIsoAvailable
                             ParamTile(
                                 label = paramLabel(prop),
                                 param = params[prop],
+                                autoIsoEnabled = if (hasAutoIso) autoIsoEnabled else null,
+                                autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
+                                autoIsoBusy = hasAutoIso && autoIsoBusy,
+                                onAutoIsoToggle = if (hasAutoIso) ::setAutoIso else null,
                                 modifier = Modifier.weight(1f),
                                 onStep = { delta -> stepParam(prop, delta) },
                                 onOpenList = {
@@ -1275,9 +1397,14 @@ private fun RemoteContent(
                         activeProps.chunked(2).forEach { rowProps ->
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 rowProps.forEach { prop ->
+                                    val hasAutoIso = prop == Lab.PROP_ISO && autoIsoAvailable
                                     ParamTile(
                                         label = paramLabel(prop),
                                         param = params[prop],
+                                        autoIsoEnabled = if (hasAutoIso) autoIsoEnabled else null,
+                                        autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
+                                        autoIsoBusy = hasAutoIso && autoIsoBusy,
+                                        onAutoIsoToggle = if (hasAutoIso) ::setAutoIso else null,
                                         modifier = Modifier.weight(1f),
                                         onStep = { delta -> stepParam(prop, delta) },
                                         onOpenList = {
@@ -1307,7 +1434,11 @@ private fun RemoteContent(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                SignalPill(rssi = camState.wifiRssi, connected = connected)
+                SignalPill(
+                    rssi = camState.wifiRssi,
+                    connected = connected,
+                    connectionType = camState.connectionType
+                )
                 GlassButton(
                     onClick = onNavigateBack,
                     shape = RoundedCornerShape(22.dp),
@@ -1890,13 +2021,20 @@ private fun paramAnchorIdx(prop: Int, values: List<Long>, current: Long): Int {
 private fun ParamTile(
     label: String,
     param: RcParam?,
+    autoIsoEnabled: Boolean?,
+    autoIsoValue: Long?,
+    autoIsoBusy: Boolean,
+    onAutoIsoToggle: ((Boolean) -> Unit)?,
     modifier: Modifier = Modifier,
     onStep: (Int) -> Unit,
     onOpenList: () -> Unit
 ) {
     val colors = AppTheme.colors
     val density = LocalDensity.current
-    val writable = param != null && param.values.isNotEmpty() && param.writable
+    val hasAutoIsoControl = autoIsoEnabled != null && onAutoIsoToggle != null
+    val valueWritable = param != null && param.values.isNotEmpty() && param.writable
+    val autoIsoOn = autoIsoEnabled == true
+    val writable = valueWritable && !autoIsoOn
     var dragging by remember { mutableStateOf(false) }
     val rowPx = with(density) { PARAM_WHEEL_ROW_DP.toPx() }
     val scope = rememberCoroutineScope()
@@ -1931,7 +2069,7 @@ private fun ParamTile(
     // 与 GlassButton 同族的玻璃质感：半透明底 + 自上而下高光渐变 + 上亮下暗渐变描边；
     // 拖动中描边整体换成主题蓝示意"正在调"。
     val tileShape = RoundedCornerShape(14.dp)
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .height(54.dp)
             .clip(tileShape)
@@ -1955,13 +2093,20 @@ private fun ParamTile(
             // 端点橡皮筋。无惯性（有意），大跳靠点全表。松手吸附不在这里做——只把
             // dragging 置回 false，由上面的同步 LaunchedEffect 统一滚到 curIdx
             //（正常松手 = 吸附最近档；拖动期间发生过外部变化 = 顺带对齐真值）。
-            .pointerInput(writable, downSign) {
+            .pointerInput(writable, downSign, hasAutoIsoControl) {
                 if (!writable) return@pointerInput
                 var raw = 0f        // 未加阻尼的手指位置（索引空间），越界阻尼只作用于显示
                 var lastDetent = 0
+                var startedOnAuto = false
+                val autoTouchLeft = size.width - 44.dp.toPx()
+                val autoTouchBottom = 30.dp.toPx()
                 try {
                     detectVerticalDragGestures(
-                        onDragStart = {
+                        onDragStart = { start ->
+                            // AUTO 有独立触控区。从按钮附近起手的纵向移动不得顺带调整 ISO。
+                            startedOnAuto = hasAutoIsoControl &&
+                                start.x >= autoTouchLeft && start.y <= autoTouchBottom
+                            if (startedOnAuto) return@detectVerticalDragGestures
                             dragging = true
                             // 锚定到当前真值索引而非 pos：半路抓住滚动中的拨轮时，
                             // 步进基点与 stepParam 的 current 起点保持一致，不会错档。
@@ -1973,6 +2118,7 @@ private fun ParamTile(
                         onDragEnd = { dragging = false },
                         onDragCancel = { dragging = false }
                     ) { _, dy ->
+                        if (startedOnAuto) return@detectVerticalDragGestures
                         val last = valueCount.value - 1
                         if (last < 0) return@detectVerticalDragGestures   // 值域中途清空
                         // 值域中途收窄（模式切换）：把游标拉回新范围，不发巨幅补差步进
@@ -2005,38 +2151,115 @@ private fun ParamTile(
                 }
             }
             // 单击打开完整值表（仅可写参数；只读已由锁图标表明不可调）。
-            .pointerInput(writable) {
-                detectTapGestures { if (writable) onOpenList() }
+            .pointerInput(writable, hasAutoIsoControl) {
+                val autoTouchLeft = size.width - 44.dp.toPx()
+                val autoTouchBottom = 30.dp.toPx()
+                detectTapGestures { tap ->
+                    val onAuto = hasAutoIsoControl &&
+                        tap.x >= autoTouchLeft && tap.y <= autoTouchBottom
+                    if (writable && !onAuto) onOpenList()
+                }
             }
     ) {
+        // AUTO 角标按参数卡实际宽度缩放：横屏右侧控制栏较窄时不再占掉近半张卡，
+        // 竖屏空间充足时仍保持原来的上限尺寸。透明触控区继续保留 44×30dp。
+        val autoBadgeWidth = (maxWidth * 0.32f).coerceIn(32.dp, 44.dp)
+        val autoBadgeHeight = (autoBadgeWidth * 0.5f).coerceIn(17.dp, 22.dp)
+        val autoBadgeFontSize = (
+            7f + ((autoBadgeWidth.value - 32f) / 12f).coerceIn(0f, 1f) * 2f
+        ).sp
         // 左上短标
         if (label.isNotEmpty()) {
             Text(
                 label,
-                color = colors.onSurfaceVariant.copy(alpha = if (writable) 0.85f else 0.4f),
+                color = colors.onSurfaceVariant.copy(
+                    alpha = if (valueWritable || hasAutoIsoControl) 0.85f else 0.4f
+                ),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = 6.dp)
             )
         }
+        if (hasAutoIsoControl) {
+            // 与照片缩略图右上角标同形：贴住右上角，只保留左下圆角。
+            val badgeShape = RoundedCornerShape(bottomStart = 6.dp)
+            val description = stringResource(R.string.auto_iso)
+            val interactionSource = remember { MutableInteractionSource() }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    // 视觉保持小角标，透明触控区仍为 44×30dp；关闭 indication，
+                    // 点击时不会在角标外画出矩形水波纹或阴影。
+                    .width(44.dp)
+                    .height(30.dp)
+                    .semantics { contentDescription = description }
+                    .toggleable(
+                        value = autoIsoOn,
+                        enabled = !autoIsoBusy,
+                        role = Role.Switch,
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onValueChange = { enabled -> onAutoIsoToggle?.invoke(enabled) }
+                    ),
+                contentAlignment = Alignment.TopEnd
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(autoBadgeWidth)
+                        .height(autoBadgeHeight)
+                        .graphicsLayer { alpha = if (autoIsoBusy) 0.5f else 1f }
+                        .clip(badgeShape)
+                        .background(
+                            if (autoIsoOn) ProtectBadgeColor.copy(alpha = 0.90f)
+                            else colors.surfaceVariant.copy(alpha = 0.85f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "AUTO",
+                        color = if (autoIsoOn) Color.Black.copy(alpha = 0.75f)
+                        else colors.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = autoBadgeFontSize,
+                            lineHeight = (autoBadgeFontSize.value + 1f).sp
+                        ),
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
         // 只读锁（右上）
-        if (param != null && !writable) {
+        if (param != null && !valueWritable && autoIsoEnabled == null) {
             Icon(
                 Icons.Default.Lock, contentDescription = null,
                 tint = colors.onSurfaceVariant.copy(alpha = 0.55f),
                 modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 6.dp).size(11.dp)
             )
         }
-        // 拖拽提示（可写且未拖动时，右侧极淡上下箭头，暗示"可上下拖"）
-        if (writable && !dragging) {
+        // 每个参数项右下角固定保留小型上下调节提示；不可调或 AUTO 接管时压暗。
+        if (param != null) {
             Text(
-                "⇅",
-                color = colors.onSurfaceVariant.copy(alpha = 0.35f),
-                fontSize = 12.sp,
-                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 9.dp)
+                "↕",
+                color = colors.onSurfaceVariant.copy(alpha = if (writable) 0.35f else 0.16f),
+                fontSize = 10.sp,
+                lineHeight = 10.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 8.dp, bottom = 5.dp)
             )
         }
-        if (writable && param != null) {
+        if (autoIsoOn) {
+            Text(
+                autoIsoValue?.let { rcFormat(Lab.PROP_ISO, it) } ?: "—",
+                color = colors.onBackground,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        } else if (writable && param != null) {
             // 数值拨轮：中心 ±2 行作为一列真实滚动。每帧位移/淡显在 graphicsLayer 里读
             // pos（绘制期读，页面不逐帧重组），跨档才经 derivedStateOf 重组换行。
             // 静止时只见中心行，拖动/吸附中相邻行淡入，离中心越远越淡越小（拨筒纵深感）。

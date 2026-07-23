@@ -1,6 +1,8 @@
 package com.ztransfer.protocol
 
 import android.content.Context
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
 import android.net.Network
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
@@ -33,6 +35,7 @@ class NikonCamera(private val context: Context) {
     private var cmdInput: java.io.InputStream? = null
     private var evtInput: java.io.InputStream? = null
     private var cmdOutput: OutputStream? = null
+    private var usbPtp: UsbPtpConnection? = null
     private var tid = 0
     private val cmdReader = PacketReader(context)
     private val evtReader = PacketReader(context)
@@ -54,10 +57,14 @@ class NikonCamera(private val context: Context) {
     @Volatile private var fhdSupported: Boolean? = null
     private var fhdFailCount = 0
 
+    val connectionType: CameraConnectionType
+        get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
+
     companion object {
         const val TAG = "ZTransfer"
         // 命令/事件通道的常规读超时。
         const val SO_TIMEOUT_MS = 60_000
+        private const val USB_CONNECT_TIMEOUT_MS = 5_000
         // TCP 连接超时：本地热点正常握手 <300ms；缩短它让"相机侧 PTP 服务还没就绪"的
         // 失败尝试更快结束、更快进入下一轮重试。
         const val CONNECT_TIMEOUT_MS = 3_000
@@ -159,6 +166,57 @@ class NikonCamera(private val context: Context) {
 
             Result.success(Unit)
         } catch (e: Exception) {
+            close()
+            Result.failure(e)
+        }
+    }
+
+    /** Opens a raw PTP session over an Android USB Host connection. */
+    suspend fun connectUsb(
+        manager: UsbManager,
+        device: UsbDevice
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            log { "USB_CONNECT open device=${device.deviceName}" }
+            tid = -1
+            val transport = UsbPtpConnection.open(manager, device).getOrThrow()
+            usbPtp = transport
+            transport.readTimeoutMs = USB_CONNECT_TIMEOUT_MS
+
+            // Android 原生 MTP host 会先以 transaction 0 打开会话，
+            // 再从 transaction 1 开始读取 DeviceInfo 并执行后续操作。
+            log { "USB_CONNECT open-session" }
+            sendCmd(PtpConstants.OPEN_SESSION, 1)
+            val resp = recvResp()
+            log { "USB_CONNECT open-session response=0x${resp.toString(16)}" }
+            if (resp != PtpConstants.RESPONSE_OK && resp != PtpConstants.SESSION_ALREADY_OPEN) {
+                throw Exception(
+                    context.getString(
+                        R.string.error_open_session,
+                        PtpConstants.translateResponse(context, resp)
+                    )
+                )
+            }
+            sessionOpen = true
+
+            log { "USB_CONNECT device-info" }
+            sendCmd(PtpConstants.GET_DEVICE_INFO)
+            val (deviceInfoResp, _) = recvRespWithPayload()
+            log { "USB_CONNECT device-info response=0x${deviceInfoResp.toString(16)}" }
+            if (deviceInfoResp != PtpConstants.RESPONSE_OK) {
+                throw Exception(
+                    context.getString(
+                        R.string.error_read_device_info,
+                        PtpConstants.translateResponse(context, deviceInfoResp)
+                    )
+                )
+            }
+
+            transport.readTimeoutMs = SO_TIMEOUT_MS
+            log { "USB_CONNECT ready" }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            log { "USB_CONNECT failed: ${e.javaClass.simpleName}: ${e.message}" }
             close()
             Result.failure(e)
         }
@@ -491,6 +549,28 @@ class NikonCamera(private val context: Context) {
             // 循环到 CMD_RESPONSE 为止——END_DATA 只当作最后一个 data 包，响应包必被读走，
             // 不再遗留污染下一事务。本地写盘失败抛 OutputWriteException（由外层归为单文件失败）。
             fun pump(progressTotalHint: Long): Triple<Int, Long, Long> {
+                usbPtp?.let { usb ->
+                    val result = usb.receiveDataTo(tid) { bytes, offset, count ->
+                        scope.ensureActive()
+                        try {
+                            output.write(bytes, offset, count)
+                        } catch (e: java.io.IOException) {
+                            throw OutputWriteException(context.getString(R.string.error_write_file, e.message), e)
+                        }
+                        totalDownloaded += count
+                        val now = System.currentTimeMillis()
+                        if (now - lastProgressTime >= 200) {
+                            val total = if (progressTotalHint > 0) progressTotalHint else 0L
+                            onProgress?.invoke(
+                                DownloadProgress(totalDownloaded, total, (now - startTime) / 1000f)
+                            )
+                            lastProgressTime = now
+                        }
+                    }
+                    readNanos += result.readNanos
+                    return Triple(result.responseCode, result.written, result.expected)
+                }
+
                 var expected = -1L
                 var written = 0L
                 while (true) {
@@ -534,6 +614,13 @@ class NikonCamera(private val context: Context) {
 
             // 取消路径共用：发 Cancel 请求相机停发 → 收紧超时排空在途数据 → 保住连接或兜底断开。
             suspend fun drainOnCancel() {
+                if (usbPtp != null) {
+                    // A cancelled coroutine may stop in the middle of a single USB data container.
+                    // The next 12 bytes are therefore not guaranteed to be a container header;
+                    // closing is the only safe way to avoid reusing a desynchronised PTP stream.
+                    closeQuietly()
+                    return
+                }
                 try {
                     withContext(NonCancellable) {
                         sendCancel()
@@ -654,6 +741,8 @@ class NikonCamera(private val context: Context) {
 
     private fun closeQuietly() {
         sessionOpen = false
+        try { usbPtp?.close() } catch (_: Exception) {}
+        usbPtp = null
         try { cmdInput?.close() } catch (_: Exception) {}
         try { cmdSocket?.close() } catch (_: Exception) {}
         try { evtInput?.close() } catch (_: Exception) {}
@@ -667,6 +756,11 @@ class NikonCamera(private val context: Context) {
      * 协议序列使用，避免其它事务观察到临时超时值。
      */
     internal fun setCommandReadTimeout(timeoutMs: Int): Int {
+        usbPtp?.let {
+            val previous = it.readTimeoutMs
+            it.readTimeoutMs = timeoutMs.coerceAtLeast(1)
+            return previous
+        }
         val socket = cmdSocket ?: throw java.io.EOFException(context.getString(R.string.connection_lost))
         val previous = socket.soTimeout
         socket.soTimeout = timeoutMs.coerceAtLeast(1)
@@ -675,6 +769,10 @@ class NikonCamera(private val context: Context) {
 
     /** 恢复 [setCommandReadTimeout] 保存的超时；连接已关闭时由调用方忽略异常。 */
     internal fun restoreCommandReadTimeout(timeoutMs: Int) {
+        usbPtp?.let {
+            it.readTimeoutMs = timeoutMs.coerceAtLeast(1)
+            return
+        }
         cmdSocket?.soTimeout = timeoutMs
     }
 
@@ -702,6 +800,10 @@ class NikonCamera(private val context: Context) {
     }
 
     internal fun sendCmd(code: Int, vararg params: Int) {
+        usbPtp?.let { usb ->
+            usb.sendCommand(code, nextTid(), params)
+            return
+        }
         val paramCount = params.size.coerceAtMost(5)
         val pkt = ByteBuffer.allocate(18 + paramCount * 4).order(ByteOrder.LITTLE_ENDIAN).apply {
             putInt(18 + paramCount * 4)
@@ -723,8 +825,13 @@ class NikonCamera(private val context: Context) {
      * 正式传输路径没有 data-out 场景。
      */
     internal fun sendCmdWithData(code: Int, data: ByteArray, vararg params: Int) {
-        val paramCount = params.size.coerceAtMost(5)
         val t = nextTid()
+        usbPtp?.let { usb ->
+            usb.sendCommand(code, t, params)
+            usb.sendData(code, t, data)
+            return
+        }
+        val paramCount = params.size.coerceAtMost(5)
         val pkt = ByteBuffer.allocate(18 + paramCount * 4 + 20 + 12 + data.size)
             .order(ByteOrder.LITTLE_ENDIAN).apply {
                 // CMD_REQUEST，dataPhaseInfo=2（本事务带 data-out 阶段）
@@ -761,6 +868,7 @@ class NikonCamera(private val context: Context) {
 
     /** 等待并返回响应码。中途丢弃的数据包（如 keepalive 的 GetStorageIds 数据段）用 raw 读，不逐包分配。 */
     private fun recvResp(): Int {
+        usbPtp?.let { return it.receiveResponse(tid) }
         while (true) {
             val packet = cmdReader.readPacketRaw(cmdInput!!)
             when (packet.type) {
@@ -772,6 +880,7 @@ class NikonCamera(private val context: Context) {
     }
 
     internal fun recvRespWithPayload(): Pair<Int, ByteArray?> {
+        usbPtp?.let { return it.receiveResponseWithPayload(tid) }
         // 用 ByteArrayOutputStream 累积多包数据，避免 responseData + data 的 O(n²) 复制。
         var buffer: java.io.ByteArrayOutputStream? = null
         while (true) {

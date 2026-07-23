@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="connection_usb">USB</string>
+    <string name="connection_wifi_hotspot">相機熱點</string>
+    <string name="usb_step_power">相機電源開啟</string>
+    <string name="usb_step_cable">使用 C to C 資料線連接相機與手機</string>
+    <string name="connection_failed_short">連接失敗</string>
+    <string name="auto_iso">自動 ISO</string>
     <string name="app_name">Z傳</string>
     <string name="transfer_channel_name">檔案傳輸</string>
     <string name="transfer_notification_title">Z傳</string>
     <string name="transfer_notification_text">正在傳輸檔案…</string>
 
     <!-- 連線頁 -->
-    <string name="connecting_camera">正在連線至相機…</string>
+    <string name="usb_unknown_error">未知 USB 錯誤</string>
+    <string name="usb_permission_required">未取得 USB 權限，請重新插線並允許存取</string>
+    <string name="error_read_device_info">讀取相機資訊失敗：%1$s</string>
     <string name="connect_camera_wifi">請連線至相機 Wi-Fi</string>
-    <string name="open_wifi_settings">開啟 Wi-Fi 設定</string>
+    <string name="open_wifi_settings">Wi-Fi 設定</string>
     <string name="step_camera_wifi">相機開啟「與智慧裝置建立 Wi-Fi 連線」</string>
     <string name="step_phone_wifi">手機 Wi-Fi 連線到相機的熱點</string>
     <string name="tip_title">更快的連線方式</string>

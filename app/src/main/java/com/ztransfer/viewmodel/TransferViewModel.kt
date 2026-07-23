@@ -11,6 +11,7 @@ import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.ResumeUnavailableException
@@ -438,7 +439,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                     // 首个真正要下载的文件才拉起前台服务（全部命中"已存在"时不必启动，避免通知闪一下）。
                     if (!serviceStarted) {
-                        TransferService.start(getApplication())
+                        TransferService.start(
+                            getApplication(),
+                            useWifi = camera.connectionType == CameraConnectionType.WIFI
+                        )
                         serviceStarted = true
                     }
 

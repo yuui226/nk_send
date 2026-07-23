@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Z传 · 连接页动效稿</title>
+  <style>
+    :root {
+      --bg: #0b0e13;
+      --panel: rgba(255,255,255,.065);
+      --panel-strong: rgba(255,255,255,.105);
+      --line: rgba(255,255,255,.13);
+      --text: #f5f7fb;
+      --muted: #8f99a8;
+      --blue: #58a8ff;
+      --orange: #f0a34a;
+      --green: #65d89a;
+      --red: #ff6b76;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 28% 12%, rgba(61,115,180,.18), transparent 30%),
+        radial-gradient(circle at 78% 88%, rgba(240,163,74,.09), transparent 28%),
+        #07090d;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    }
+    .workspace { display: grid; gap: 18px; justify-items: center; }
+    .phone {
+      position: relative;
+      width: min(390px, calc(100vw - 30px));
+      height: min(820px, calc(100vh - 120px));
+      min-height: 660px;
+      overflow: hidden;
+      border-radius: 34px;
+      border: 1px solid rgba(255,255,255,.16);
+      background:
+        radial-gradient(circle at 50% 32%, rgba(52,104,166,.16), transparent 34%),
+        linear-gradient(160deg, #11161f 0%, #0b0e14 72%);
+      box-shadow: 0 34px 100px rgba(0,0,0,.58), inset 0 1px 0 rgba(255,255,255,.08);
+    }
+    .topbar {
+      position: relative;
+      z-index: 5;
+      height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 18px 0;
+    }
+    .glass-button, .mini-button {
+      border: 1px solid rgba(255,255,255,.14);
+      color: var(--text);
+      background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.055));
+      box-shadow: 0 6px 18px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.12);
+      cursor: pointer;
+      transition: transform .16s ease, border-color .2s ease, background .2s ease;
+    }
+    .glass-button:active, .mini-button:active { transform: scale(.95); }
+    .brand { height: 36px; min-width: 58px; border-radius: 20px; font-weight: 850; letter-spacing: -2px; }
+    .pro { height: 29px; padding: 0 13px; border-radius: 15px; color: #f4b65d; font-size: 12px; font-weight: 700; }
+
+    .connect-page {
+      position: absolute;
+      inset: 70px 0 0;
+      padding: 54px 20px 26px;
+      transition: opacity .38s ease, transform .55s cubic-bezier(.2,.8,.2,1), filter .45s ease;
+    }
+    .intro { text-align: center; transition: opacity .3s ease, transform .35s ease; }
+    .intro h1 { margin: 0; font-size: 28px; letter-spacing: -.04em; }
+
+    .cards {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 42px;
+    }
+    .choice-card {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      height: 286px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 16px 14px 14px;
+      background:
+        linear-gradient(160deg, rgba(255,255,255,.105), rgba(255,255,255,.038) 62%),
+        rgba(16,21,29,.74);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 15px 35px rgba(0,0,0,.18);
+      transition:
+        transform .55s cubic-bezier(.2,.86,.2,1), opacity .38s ease,
+        border-color .4s ease, box-shadow .4s ease, filter .4s ease;
+    }
+    .choice-card::before {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      z-index: -1;
+      border-radius: inherit;
+      opacity: 0;
+      box-shadow: 0 0 0 1px var(--card-accent), 0 0 30px color-mix(in srgb, var(--card-accent) 28%, transparent);
+      transition: opacity .35s ease;
+    }
+    .choice-card.usb { --card-accent: var(--orange); animation: cardAttention 4.4s ease-in-out infinite; }
+    .choice-card.wifi { --card-accent: var(--blue); animation: cardAttention 4.4s 2.2s ease-in-out infinite; }
+    @keyframes cardAttention {
+      0%, 46%, 100% { transform: translateY(0) scale(1); border-color: var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 15px 35px rgba(0,0,0,.18); }
+      13%, 28% { transform: translateY(-3px) scale(1.018); border-color: color-mix(in srgb, var(--card-accent) 48%, var(--line)); box-shadow: inset 0 1px 0 rgba(255,255,255,.11), 0 16px 38px color-mix(in srgb, var(--card-accent) 14%, rgba(0,0,0,.2)); }
+    }
+    .card-heading { display: flex; align-items: center; gap: 11px; min-height: 44px; }
+    .icon-wrap {
+      flex: 0 0 auto;
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      color: var(--card-accent);
+      background: color-mix(in srgb, var(--card-accent) 13%, transparent);
+      border: 1px solid color-mix(in srgb, var(--card-accent) 26%, transparent);
+      transition: transform .5s cubic-bezier(.2,.86,.2,1), box-shadow .4s ease;
+    }
+    .icon-wrap svg { width: 23px; height: 23px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .choice-card h2 { min-width: 0; margin: 0; font-size: 17px; line-height: 1.15; letter-spacing: -.03em; }
+    .card-heading, .steps, .card-actions, .error-copy {
+      transition: opacity .28s ease, transform .38s cubic-bezier(.2,.8,.2,1);
+    }
+    .steps { display: grid; gap: 12px; margin-top: 20px; }
+    .step { display: flex; align-items: flex-start; gap: 8px; color: #aeb7c4; font-size: 11px; line-height: 1.52; }
+    .step-index {
+      flex: 0 0 auto;
+      width: 20px;
+      height: 20px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: var(--card-accent);
+      background: color-mix(in srgb, var(--card-accent) 13%, transparent);
+      font-size: 10.5px;
+      font-weight: 750;
+    }
+    .card-actions { display: flex; gap: 7px; margin-top: auto; }
+    .mini-button {
+      height: 34px;
+      border-radius: 12px;
+      padding: 0 10px;
+      font-size: 11px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .mini-button.primary { flex: 1; color: var(--blue); }
+    .mini-button.icon { width: 36px; padding: 0; color: var(--orange); font-size: 16px; }
+    .error-copy {
+      max-height: 0;
+      margin-top: 0;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(6px);
+      color: var(--red);
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.45;
+      transition: max-height .3s ease, margin .3s ease, opacity .3s ease, transform .3s ease;
+    }
+
+    /* 已识别：停止轮流呼吸，未选卡片退后，选中卡片成为唯一视觉焦点。 */
+    .phone.detecting .choice-card { animation: none; }
+    .phone.detecting .choice-card:not(.selected) { opacity: .2; filter: saturate(.35); transform: scale(.94); }
+    .phone.detecting .choice-card.selected {
+      transform: translateY(-8px) scale(1.045);
+      border-color: color-mix(in srgb, var(--card-accent) 70%, white 5%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 20px 54px color-mix(in srgb, var(--card-accent) 22%, transparent);
+    }
+    .phone.detecting .choice-card.selected::before { opacity: 1; }
+    .phone.detecting .choice-card.selected .icon-wrap { transform: scale(1.08); box-shadow: 0 0 28px color-mix(in srgb, var(--card-accent) 25%, transparent); }
+    .phone.detecting .choice-card.selected .card-actions { opacity: 0; pointer-events: none; }
+    .phone.failed .choice-card.selected {
+      border-color: rgba(255,107,118,.68);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 18px 50px rgba(255,107,118,.16);
+    }
+    .phone.failed .choice-card.selected .icon-wrap {
+      color: var(--red);
+      border-color: rgba(255,107,118,.3);
+      background: rgba(255,107,118,.1);
+      box-shadow: 0 0 26px rgba(255,107,118,.16);
+    }
+    .phone.failed .choice-card.selected .error-copy {
+      max-height: 38px;
+      margin-top: 15px;
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .phone.failed .choice-card.selected .card-actions { opacity: 1; pointer-events: auto; }
+    /* 会话成功：原卡片自己完成变色、对号弹出和环形扩散，不另造页面中央 Hero。 */
+    .card-success {
+      position: absolute;
+      z-index: 4;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      opacity: 0;
+      transform: scale(.84);
+      color: var(--green);
+      pointer-events: none;
+      transition: opacity .28s ease, transform .52s cubic-bezier(.18,.88,.2,1);
+    }
+    .card-success-core {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: rgba(101,216,154,.12);
+      border: 1px solid rgba(101,216,154,.55);
+      box-shadow: 0 0 32px rgba(101,216,154,.16);
+    }
+    .card-success-core::before, .card-success-core::after {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      border: 1px solid var(--green);
+      border-radius: 50%;
+      opacity: 0;
+    }
+    .card-success svg { width: 34px; height: 34px; stroke: currentColor; fill: none; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+    .phone.confirmed .intro { opacity: .12; transform: translateY(-6px); }
+    .phone.confirmed .choice-card:not(.selected) { opacity: .06; transform: scale(.91); }
+    .phone.confirmed .choice-card.selected {
+      transform: translateY(-8px) scale(1.055);
+      border-color: rgba(101,216,154,.72);
+      background: linear-gradient(160deg, rgba(101,216,154,.13), rgba(255,255,255,.035) 66%), rgba(16,25,25,.82);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.13), 0 22px 62px rgba(101,216,154,.2);
+    }
+    .phone.confirmed .choice-card.selected > .card-heading,
+    .phone.confirmed .choice-card.selected > .steps,
+    .phone.confirmed .choice-card.selected > .card-actions,
+    .phone.confirmed .choice-card.selected > .error-copy {
+      opacity: 0;
+      transform: scale(.95);
+      pointer-events: none;
+    }
+    .phone.confirmed .choice-card.selected .card-success { opacity: 1; transform: scale(1); }
+    .phone.confirmed .choice-card.selected .card-success-core { animation: cardSuccessPop .72s cubic-bezier(.18,.88,.2,1) both; }
+    .phone.confirmed .choice-card.selected .card-success-core::before { animation: cardRing .9s .06s ease-out forwards; }
+    .phone.confirmed .choice-card.selected .card-success-core::after { animation: cardRing .9s .2s ease-out forwards; }
+    @keyframes cardSuccessPop { 0% { transform: scale(.56); opacity: 0; } 52% { transform: scale(1.14); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+    @keyframes cardRing { 0% { opacity: .72; transform: scale(.72); } 100% { opacity: 0; transform: scale(2.6); } }
+
+    .gallery {
+      position: absolute;
+      z-index: 12;
+      inset: 0;
+      opacity: 0;
+      transform: translateY(12%) scale(.985);
+      pointer-events: none;
+      background: linear-gradient(180deg, #11161e, #090c11);
+      transition: opacity .52s ease, transform .62s cubic-bezier(.2,.82,.2,1);
+    }
+    .phone.gallery-visible .gallery { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+    .gallery-head { height: 82px; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 18px 14px; }
+    .gallery-head strong { font-size: 20px; }
+    .signal { color: var(--green); font-size: 11px; }
+    .photo-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 3px; padding: 0 3px; }
+    .photo { aspect-ratio: 1; border-radius: 3px; background: linear-gradient(140deg, hsl(var(--h) 34% 42%), hsl(calc(var(--h) + 36) 30% 17%)); opacity: .92; }
+
+    .tip-pop {
+      position: absolute;
+      z-index: 20;
+      left: 22px;
+      right: 22px;
+      bottom: 24px;
+      padding: 16px;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 18px;
+      background: rgba(23,29,39,.94);
+      box-shadow: 0 20px 60px rgba(0,0,0,.45);
+      opacity: 0;
+      transform: translateY(18px) scale(.96);
+      pointer-events: none;
+      transition: .25s ease;
+    }
+    .tip-pop.show { opacity: 1; transform: none; pointer-events: auto; }
+    .tip-pop b { color: var(--orange); font-size: 13px; }
+    .tip-pop p { margin: 8px 0 0; color: #b5bdc8; font-size: 11px; line-height: 1.65; }
+    .toast { position: absolute; z-index: 25; left: 50%; bottom: 24px; padding: 9px 13px; border-radius: 13px; background: rgba(30,36,46,.94); color: #dce2eb; font-size: 11px; opacity: 0; transform: translate(-50%,10px); transition: .22s ease; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translate(-50%,0); }
+
+    .controls { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+    .controls button { border: 1px solid rgba(255,255,255,.12); border-radius: 12px; padding: 9px 13px; color: #cbd3dd; background: rgba(255,255,255,.06); cursor: pointer; }
+    .controls button:hover { border-color: rgba(88,168,255,.45); color: white; }
+    .caption { color: #747e8c; font-size: 11px; text-align: center; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="workspace">
+    <section class="phone" id="phone" aria-label="连接页原型">
+      <header class="topbar">
+        <button class="glass-button brand">ZZ</button>
+        <button class="glass-button pro">高级版</button>
+      </header>
+
+      <section class="connect-page">
+        <div class="intro">
+          <h1>连接相机</h1>
+        </div>
+
+        <div class="cards">
+          <article class="choice-card usb" data-mode="usb">
+            <div class="card-heading">
+              <div class="icon-wrap" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 20V5m0 0-2.4 2.4M12 5l2.4 2.4M12 13l-4-2.2m0 0v-2m0 2v2.3m4 3 4-2.1m0 0v-2m0 2 1.8 1"/><circle cx="7.8" cy="7.5" r="1"/><rect x="15" y="9" width="2" height="2" rx=".3"/></svg>
+              </div>
+              <h2>USB</h2>
+            </div>
+            <div class="steps">
+              <div class="step"><span class="step-index">1</span><span>相机电源开启</span></div>
+              <div class="step"><span class="step-index">2</span><span>使用 C to C 线连接相机</span></div>
+            </div>
+            <div class="error-copy">连接失败，请重新插线</div>
+            <div class="card-success"><div class="card-success-core"><svg viewBox="0 0 24 24"><path d="m6 12.5 4 4L18.5 8"/></svg></div></div>
+          </article>
+
+          <article class="choice-card wifi" data-mode="wifi">
+            <div class="card-heading">
+              <div class="icon-wrap" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M3.5 9.4a13 13 0 0 1 17 0M6.6 12.7a8.2 8.2 0 0 1 10.8 0M9.7 16a3.5 3.5 0 0 1 4.6 0M12 19h.01"/></svg>
+              </div>
+              <h2>相机热点</h2>
+            </div>
+            <div class="steps">
+              <div class="step"><span class="step-index">1</span><span>相机开启「与智能设备建立 Wi‑Fi 连接」</span></div>
+              <div class="step"><span class="step-index">2</span><span>手机连接该热点</span></div>
+            </div>
+            <div class="error-copy">连接失败，请检查热点</div>
+            <div class="card-actions">
+              <button class="mini-button icon" id="tips" aria-label="小技巧">💡</button>
+              <button class="mini-button primary" id="wifiSettings">Wi‑Fi 设置</button>
+            </div>
+            <div class="card-success"><div class="card-success-core"><svg viewBox="0 0 24 24"><path d="m6 12.5 4 4L18.5 8"/></svg></div></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="gallery" aria-label="照片列表预览">
+        <div class="gallery-head"><strong>照片</strong><span class="signal" id="gallerySignal">● USB</span></div>
+        <div class="photo-grid">
+          <div class="photo" style="--h:205"></div><div class="photo" style="--h:28"></div><div class="photo" style="--h:146"></div>
+          <div class="photo" style="--h:345"></div><div class="photo" style="--h:62"></div><div class="photo" style="--h:190"></div>
+          <div class="photo" style="--h:260"></div><div class="photo" style="--h:18"></div><div class="photo" style="--h:112"></div>
+          <div class="photo" style="--h:210"></div><div class="photo" style="--h:332"></div><div class="photo" style="--h:78"></div>
+        </div>
+      </section>
+
+      <aside class="tip-pop" id="tipPop">
+        <b>更快开启相机热点</b>
+        <p>把“Wi‑Fi 连接”加入相机 i 菜单，以后按 i 键即可开启。</p>
+      </aside>
+      <div class="toast" id="toast">这里会打开系统 Wi‑Fi 设置</div>
+    </section>
+
+    <div class="controls" aria-label="原型控制">
+      <button data-action="reset">待连接</button>
+      <button data-action="wifi">模拟识别 Wi‑Fi</button>
+      <button data-action="usb">模拟识别 USB</button>
+      <button data-action="usb-error">模拟 USB 失败</button>
+    </div>
+    <div class="caption">可分别查看正常转场与连接失败状态</div>
+  </main>
+
+  <script>
+    const phone = document.getElementById('phone');
+    const cards = [...document.querySelectorAll('.choice-card')];
+    const signal = document.getElementById('gallerySignal');
+    let timers = [];
+
+    function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+    function reset() {
+      clearTimers();
+      phone.classList.remove('detecting', 'confirmed', 'gallery-visible', 'failed');
+      cards.forEach(card => card.classList.remove('selected'));
+    }
+    function simulate(mode) {
+      reset();
+      const selected = document.querySelector(`[data-mode="${mode}"]`);
+      selected.classList.add('selected');
+      phone.classList.add('detecting');
+      signal.textContent = mode === 'usb' ? '● USB' : '▥ Wi‑Fi';
+      timers.push(setTimeout(() => phone.classList.add('confirmed'), 1050));
+      timers.push(setTimeout(() => phone.classList.add('gallery-visible'), 1850));
+    }
+    function simulateFailure(mode) {
+      reset();
+      document.querySelector(`[data-mode="${mode}"]`).classList.add('selected');
+      phone.classList.add('detecting');
+      timers.push(setTimeout(() => phone.classList.add('failed'), 700));
+    }
+    document.querySelector('.controls').addEventListener('click', event => {
+      const action = event.target.dataset.action;
+      if (action === 'reset') reset();
+      if (action === 'wifi' || action === 'usb') simulate(action);
+      if (action === 'usb-error') simulateFailure('usb');
+    });
+    document.getElementById('tips').addEventListener('click', () => {
+      document.getElementById('tipPop').classList.toggle('show');
+    });
+    document.getElementById('wifiSettings').addEventListener('click', () => {
+      const toast = document.getElementById('toast');
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1400);
+    });
+  </script>
+</body>
+</html>
