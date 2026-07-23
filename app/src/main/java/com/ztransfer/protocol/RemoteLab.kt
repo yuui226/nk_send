@@ -64,6 +64,7 @@ object Lab {
     const val PROP_EXPOSURE_PROGRAM = 0x500E
     const val PROP_ISO = 0x500F
     const val PROP_EXP_COMPENSATION = 0x5010
+    const val PROP_NK_EXP_COMPENSATION = 0xD058
     const val PROP_NK_AUTO_ISO = 0xD054
     const val PROP_NK_SHUTTER = 0xD100
     const val PROP_NK_RECORDING_MEDIA = 0xD10B
@@ -121,6 +122,7 @@ object Lab {
         PROP_NK_ISO_CONTROL_SENSITIVITY to "ISOControlSensitivity",
         PROP_NK_AUTO_ISO_ALT to "AutoISOAlt",
         PROP_EXP_COMPENSATION to "ExpCompensation",
+        PROP_NK_EXP_COMPENSATION to "NikonExpCompensation",
         PROP_EXPOSURE_PROGRAM to "ExposureProgram",
         PROP_WHITE_BALANCE to "WhiteBalance",
         PROP_FOCUS_MODE to "FocusMode",
@@ -277,7 +279,8 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
         }
     }
     Lab.PROP_EXPOSURE_TIME_STD -> "%.4fs".format(raw / 10000.0)
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP -> "%+.1fEV".format(raw / 1000.0)
+    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_EXP_COMPENSATION,
+    Lab.PROP_NK_MOVIE_EXP_COMP -> "%+.1fEV".format(raw / 1000.0)
     Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_ISO_CONTROL_SENSITIVITY,
     Lab.PROP_NK_MOVIE_ISO -> "ISO$raw"
     Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT -> if (raw == 0L) "Off" else "On"
@@ -407,7 +410,8 @@ data class RcFocusMode(
 fun rcFormat(prop: Int, raw: Long): String = when (prop) {
     Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_ISO_CONTROL_SENSITIVITY,
     Lab.PROP_NK_MOVIE_ISO -> raw.toString()
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP ->
+    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_EXP_COMPENSATION,
+    Lab.PROP_NK_MOVIE_EXP_COMP ->
         "%+.1f".format(raw / 1000.0)
     else -> fmtVal(prop, raw)
 }
@@ -417,6 +421,39 @@ suspend fun NikonCamera.rcGetParam(prop: Int): RcParam? {
     if (rc != Lab.OK || d == null) return null
     val desc = runCatching { parsePropDescData(d) }.getOrNull() ?: return null
     return RcParam(prop, desc.dataType, desc.writable, desc.current, desc.enumValues)
+}
+
+/**
+ * 把不同 Nikon 世代对同一曝光参数使用的属性码归一到 UI 的逻辑属性。
+ * UI 始终用逻辑属性作 key，[RcParam.prop] 则保留机身实际支持、实际写入的属性码。
+ */
+fun rcCanonicalExposureProp(prop: Int): Int = when (prop) {
+    Lab.PROP_NK_EXP_COMPENSATION -> Lab.PROP_EXP_COMPENSATION
+    Lab.PROP_NK_ISO_EX -> Lab.PROP_ISO
+    Lab.PROP_EXPOSURE_TIME_STD -> Lab.PROP_NK_SHUTTER
+    else -> prop
+}
+
+private fun compatibleExposureProps(logicalProp: Int): IntArray = when (logicalProp) {
+    Lab.PROP_EXP_COMPENSATION ->
+        intArrayOf(Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_EXP_COMPENSATION)
+    Lab.PROP_ISO -> intArrayOf(Lab.PROP_ISO, Lab.PROP_NK_ISO_EX)
+    Lab.PROP_NK_SHUTTER -> intArrayOf(Lab.PROP_NK_SHUTTER, Lab.PROP_EXPOSURE_TIME_STD)
+    else -> intArrayOf(logicalProp)
+}
+
+/**
+ * 按机身实际 DevicePropDesc 选择可写曝光属性。优先使用有枚举值的可写属性，
+ * 兼容仅暴露标准 PTP 属性或仅暴露 Nikon 厂商属性的机型。
+ */
+suspend fun NikonCamera.rcGetCompatibleParam(logicalProp: Int): RcParam? {
+    var readableFallback: RcParam? = null
+    for (actualProp in compatibleExposureProps(logicalProp)) {
+        val param = rcGetParam(actualProp) ?: continue
+        if (param.writable && param.values.isNotEmpty()) return param
+        if (readableFallback == null) readableFallback = param
+    }
+    return readableFallback
 }
 
 /** 只刷新标量属性的当前值，复用已取得的数据类型与值域，避免实时状态轮询重复拉描述。 */
@@ -462,6 +499,55 @@ suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
 
 suspend fun NikonCamera.rcSetValue(param: RcParam, value: Long): Int =
     labSetProp(param.prop, encodeScalar(param.dataType, value))
+
+/** 写入后由机身回读得到的结果，避免把 0x2001 误当成“参数已经采用”。 */
+data class RcSetResult(
+    val responseCode: Int,
+    val actual: RcParam?,
+    val confirmed: Boolean
+)
+
+/**
+ * Nikon 某些机型会在当前曝光模式或 Live View 状态下接受 SetDevicePropValue，
+ * 却延迟采用甚至保持原值。写后短暂回读，并只在相机报告目标值时确认成功；
+ * DeviceBusy 和“成功但未采用”各做有限重试，绝不让 UI 长期停在乐观假值上。
+ */
+suspend fun NikonCamera.rcSetValueVerified(param: RcParam, value: Long): RcSetResult {
+    var rc = rcSetValue(param, value)
+    var busyRetries = 0
+    while (rc == Lab.DEVICE_BUSY && busyRetries < 2) {
+        delay(120L * (busyRetries + 1))
+        rc = rcSetValue(param, value)
+        busyRetries++
+    }
+    if (rc != Lab.OK) return RcSetResult(rc, null, false)
+
+    var actual: RcParam? = null
+    suspend fun readBack(waits: LongArray): Boolean {
+        for (waitMs in waits) {
+            delay(waitMs)
+            rcRefreshParam(param)?.let { refreshed ->
+                actual = refreshed
+                if (refreshed.current == value) return true
+            }
+        }
+        return false
+    }
+
+    if (readBack(longArrayOf(40L, 90L, 160L))) {
+        return RcSetResult(rc, actual, true)
+    }
+
+    // 已经能回读且仍是旧值时，给会延迟开放写入窗口的机身一次安全重发机会。
+    if (actual != null) {
+        delay(100)
+        rc = rcSetValue(param, value)
+        if (rc == Lab.OK && readBack(longArrayOf(70L, 150L))) {
+            return RcSetResult(rc, actual, true)
+        }
+    }
+    return RcSetResult(rc, actual, false)
+}
 
 /** AF 驱动后的最终结果，[polls] 是 DeviceReady 查询次数。 */
 data class RcAfResult(

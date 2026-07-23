@@ -99,6 +99,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -692,8 +693,25 @@ fun FileListScreen(
                 .navigationBarsPadding()
                 .padding(start = 20.dp, bottom = 24.dp)
         ) {
-            GlassButton(
-                onClick = {
+            val remoteInteraction = remember { MutableInteractionSource() }
+            val remotePressed by remoteInteraction.collectIsPressedAsState()
+            val remotePressScale by animateFloatAsState(
+                targetValue = if (remotePressed) 0.95f else 1f,
+                animationSpec = if (remotePressed) tween(80) else Motion.bouncy(),
+                label = "remoteEntryPress"
+            )
+            GlassSurface(
+                modifier = Modifier
+                    .size(52.dp)
+                    .graphicsLayer {
+                        scaleX = remotePressScale
+                        scaleY = remotePressScale
+                    }
+                    .clickable(
+                        interactionSource = remoteInteraction,
+                        indication = null,
+                        role = Role.Button
+                    ) {
                     if (transfersBusy) showHint(remoteBlockedHint)
                     // 免费版当日监看时长已用完:入口处直接提示,不进页再弹回。
                     else if (LicenseManager.remoteTimeLeftMs() <= 0L) showHint(remoteEndedHint)
@@ -702,10 +720,14 @@ fun FileListScreen(
                 shape = CircleShape,
                 showBorder = false,
                 showSheen = false,
-                contentPadding = PaddingValues(14.dp)
+                // 使用重玻璃底保证叠在照片上也清晰；GlassSurface 的圆形硬裁剪确保
+                // 内部没有 Surface/Row 形成的矩形底或矩形点击状态层。
+                tint = colors.glassSurfaceHeavy
             ) {
                 RemoteMark(
-                    modifier = Modifier.size(24.dp),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .size(24.dp),
                     color = if (transfersBusy) colors.onSurfaceVariant.copy(alpha = 0.5f) else colors.accentBlue,
                     contentDescription = stringResource(R.string.cd_remote_entry)
                 )
@@ -1819,19 +1841,30 @@ private fun ThumbnailCell(
 @Composable
 private fun AlreadyExportedIndicator() {
     val colors = AppTheme.colors
-    Box(
-        modifier = Modifier.size(22.dp).clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.45f)),
-        contentAlignment = Alignment.Center
+    // 已传输是状态徽标而不是可点击按钮：复用全局玻璃材质，但不挂点击、投影或按压反馈。
+    // heavy 实底保证叠在任何明暗照片上都清楚，绿色细边与对号共同表达“已完成”。
+    GlassSurface(
+        modifier = Modifier.size(24.dp),
+        shape = CircleShape,
+        active = true,
+        activeColor = colors.statusConnected,
+        tint = colors.glassSurfaceHeavy,
+        borderColor = colors.statusConnected.copy(alpha = 0.72f)
     ) {
-        Icon(Icons.Default.Check, contentDescription = null,
-            tint = colors.statusConnected, modifier = Modifier.size(14.dp))
+        Icon(
+            Icons.Default.Check,
+            contentDescription = null,
+            tint = colors.statusConnected,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(15.dp)
+        )
     }
 }
 
 /** 经典 USB 三叉标：箭头、圆点和方形分别作为三条分支端点。 */
 @Composable
-private fun ClassicUsbIcon(
+internal fun ClassicUsbIcon(
     tint: Color,
     modifier: Modifier = Modifier
 ) {

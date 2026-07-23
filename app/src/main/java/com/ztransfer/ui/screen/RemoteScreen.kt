@@ -92,8 +92,10 @@ import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
 import com.ztransfer.protocol.rcChangeApplicationMode
+import com.ztransfer.protocol.rcCanonicalExposureProp
 import com.ztransfer.protocol.rcEndMovie
 import com.ztransfer.protocol.rcFormat
+import com.ztransfer.protocol.rcGetCompatibleParam
 import com.ztransfer.protocol.rcGetFocusMode
 import com.ztransfer.protocol.rcGetMovieMode
 import com.ztransfer.protocol.rcGetParam
@@ -101,7 +103,7 @@ import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.protocol.rcRefreshParam
 import com.ztransfer.protocol.rcSetApplicationMode
 import com.ztransfer.protocol.rcSetLvSize
-import com.ztransfer.protocol.rcSetValue
+import com.ztransfer.protocol.rcSetValueVerified
 import com.ztransfer.protocol.rcStartMovie
 import com.ztransfer.protocol.runLabProbe
 import com.ztransfer.ui.theme.AppTheme
@@ -411,7 +413,7 @@ private fun RemoteContent(
 
     suspend fun refreshParam(prop: Int) {
         val cam = cameraViewModel.getCamera() ?: return
-        runCatching { cam.rcGetParam(prop) }.getOrNull()?.let { params[prop] = it }
+        runCatching { cam.rcGetCompatibleParam(prop) }.getOrNull()?.let { params[prop] = it }
     }
 
     suspend fun refreshAutoIso() {
@@ -663,14 +665,15 @@ private fun RemoteContent(
                     Lab.EVT_NK_MOVIE_REC_COMPLETE, Lab.EVT_NK_MOVIE_REC_INTERRUPTED ->
                         recording = false
                     Lab.EVT_DEVICE_PROP_CHANGED -> {
-                        val prop = e.second.toInt()
-                        if (prop in PHOTO_AUTO_ISO_PROPS) refreshAutoIso()
-                        if (prop == Lab.PROP_NK_ISO_CONTROL_SENSITIVITY &&
+                        val reportedProp = e.second.toInt()
+                        val prop = rcCanonicalExposureProp(reportedProp)
+                        if (reportedProp in PHOTO_AUTO_ISO_PROPS) refreshAutoIso()
+                        if (reportedProp == Lab.PROP_NK_ISO_CONTROL_SENSITIVITY &&
                             autoIsoProp?.let { params[it]?.current != 0L } == true
                         ) {
-                            params[prop]?.let { current ->
+                            params[reportedProp]?.let { current ->
                                 runCatching { cam.rcRefreshParam(current) }.getOrNull()?.let {
-                                    params[prop] = it
+                                    params[reportedProp] = it
                                 }
                             }
                         }
@@ -719,16 +722,23 @@ private fun RemoteContent(
         pendingSets[prop] = scope.launch {
             if (!immediate) delay(160)
             val cam = cameraViewModel.getCamera() ?: return@launch
-            val rc = try {
-                cam.rcSetValue(p, value)
+            val result = try {
+                cam.rcSetValueVerified(p, value)
             } catch (e: CancellationException) {
                 throw e   // 被更新一步的 sendValue 顶掉，不是写失败：别记日志、别回读
             } catch (e: Exception) {
-                -1
+                null
             }
-            if (rc != Lab.OK) {
-                devLog("!! set 0x%04X resp=0x%04X".format(prop, rc and 0xFFFF))
-                refreshParam(prop)   // 写失败刷回真实值
+            result?.actual?.let { params[prop] = it }
+            if (result?.confirmed != true) {
+                val rc = result?.responseCode ?: -1
+                val actual = result?.actual?.current?.toString() ?: "unreadable"
+                devLog(
+                    "!! set logical=0x%04X actual=0x%04X target=%d read=%s resp=0x%04X"
+                        .format(prop, p.prop, value, actual, rc and 0xFFFF)
+                )
+                // 包括返回 OK 但机身没有采用的情况：重新读取描述和值域，显示真实状态。
+                refreshParam(prop)
             }
         }
     }
@@ -1010,13 +1020,13 @@ private fun RemoteContent(
                     params[p.prop] = p
                     return@launch
                 }
-                val rc = runCatching { cam.rcSetValue(p, target) }.getOrDefault(-1)
-                if (rc != Lab.OK) {
-                    devLog("!! Auto ISO set resp=0x%04X".format(rc and 0xFFFF))
-                    params[p.prop] = p
-                } else {
-                    refreshAutoIso()
+                val result = runCatching { cam.rcSetValueVerified(p, target) }.getOrNull()
+                result?.actual?.let { params[p.prop] = it }
+                if (result?.confirmed != true) {
+                    val rc = result?.responseCode ?: -1
+                    devLog("!! Auto ISO set/readback resp=0x%04X".format(rc and 0xFFFF))
                 }
+                refreshAutoIso()
             } finally {
                 autoIsoBusy = false
             }
@@ -2059,7 +2069,7 @@ private fun ParamTile(
     // 与 GlassButton 同族的玻璃质感：半透明底 + 自上而下高光渐变 + 上亮下暗渐变描边；
     // 拖动中描边整体换成主题蓝示意"正在调"。
     val tileShape = RoundedCornerShape(14.dp)
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .height(54.dp)
             .clip(tileShape)
@@ -2151,6 +2161,13 @@ private fun ParamTile(
                 }
             }
     ) {
+        // AUTO 角标按参数卡实际宽度缩放：横屏右侧控制栏较窄时不再占掉近半张卡，
+        // 竖屏空间充足时仍保持原来的上限尺寸。透明触控区继续保留 44×30dp。
+        val autoBadgeWidth = (maxWidth * 0.32f).coerceIn(32.dp, 44.dp)
+        val autoBadgeHeight = (autoBadgeWidth * 0.5f).coerceIn(17.dp, 22.dp)
+        val autoBadgeFontSize = (
+            7f + ((autoBadgeWidth.value - 32f) / 12f).coerceIn(0f, 1f) * 2f
+        ).sp
         // 左上短标
         if (label.isNotEmpty()) {
             Text(
@@ -2188,8 +2205,8 @@ private fun ParamTile(
             ) {
                 Box(
                     modifier = Modifier
-                        .width(44.dp)
-                        .height(22.dp)
+                        .width(autoBadgeWidth)
+                        .height(autoBadgeHeight)
                         .graphicsLayer { alpha = if (autoIsoBusy) 0.5f else 1f }
                         .clip(badgeShape)
                         .background(
@@ -2203,8 +2220,8 @@ private fun ParamTile(
                         color = if (autoIsoOn) Color.Black.copy(alpha = 0.75f)
                         else colors.onSurfaceVariant,
                         style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 9.sp,
-                            lineHeight = 10.sp
+                            fontSize = autoBadgeFontSize,
+                            lineHeight = (autoBadgeFontSize.value + 1f).sp
                         ),
                         fontWeight = FontWeight.Medium,
                         maxLines = 1

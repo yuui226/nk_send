@@ -14,6 +14,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -33,22 +34,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.ztransfer.R
@@ -167,10 +171,6 @@ fun HomeScreen(
             val cardHeight = if (compact) 272.dp else 292.dp
             val horizontalPadding = if (maxWidth < 360.dp) 14.dp else 20.dp
             val cardSpacing = 12.dp
-            val cardWidth = (maxWidth - horizontalPadding * 2 - cardSpacing) / 2
-            val selectedCenterShift = (cardWidth + cardSpacing) / 2
-            // 图标最终停在屏幕上方中央，避开 Android USB 权限弹窗的主体区域。
-            val selectedLift = if (compact) (-48).dp else (-76).dp
 
             Column(
                 modifier = Modifier
@@ -190,7 +190,9 @@ fun HomeScreen(
                 ) {
                     ConnectionMethodCard(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Usb,
+                        modeIcon = { tint, iconModifier ->
+                            ClassicUsbIcon(tint = tint, modifier = iconModifier)
+                        },
                         title = stringResource(R.string.connection_usb),
                         accent = colors.accentOrange,
                         steps = listOf(
@@ -200,8 +202,6 @@ fun HomeScreen(
                         selected = selectedConnection == CameraConnectionType.USB,
                         success = celebrate && selectedConnection == CameraConnectionType.USB,
                         attention = usbAttention,
-                        selectionOffsetX = selectedCenterShift,
-                        selectionOffsetY = selectedLift,
                         selectionScene = selectionScene.value,
                         error = usbError?.takeIf {
                             selectedConnection == CameraConnectionType.USB
@@ -211,7 +211,14 @@ fun HomeScreen(
 
                     ConnectionMethodCard(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Wifi,
+                        modeIcon = { tint, iconModifier ->
+                            Icon(
+                                imageVector = Icons.Default.Wifi,
+                                contentDescription = null,
+                                tint = tint,
+                                modifier = iconModifier
+                            )
+                        },
                         title = stringResource(R.string.connection_wifi_hotspot),
                         accent = colors.accentBlue,
                         steps = listOf(
@@ -221,8 +228,6 @@ fun HomeScreen(
                         selected = selectedConnection == CameraConnectionType.WIFI,
                         success = celebrate && selectedConnection == CameraConnectionType.WIFI,
                         attention = wifiAttention,
-                        selectionOffsetX = -selectedCenterShift,
-                        selectionOffsetY = selectedLift,
                         selectionScene = selectionScene.value,
                         goldBurst = isPro,
                         footer = {
@@ -410,39 +415,34 @@ fun HomeScreen(
     }
 }
 
-private const val CONNECTION_ATTENTION_MS = 2_800
+private const val CONNECTION_ATTENTION_MS = 2_400
 
 /**
- * 半周期内完成一次整卡呼吸；另一张卡错开半周期。
- * 每轮只有一个峰值：较快放大，随后柔和收回，不做二次回弹。
+ * 每轮只有一个峰值：缓入吸气、柔和呼气、短暂停顿；另一张卡错开半拍。
+ * 五次平滑插值让起止速度都归零，避免线性缩放的机械感和峰值处的顿挫。
  */
 private fun connectionAttention(phase: Float): Float {
-    if (phase >= 0.5f) return 0f
-    val t = phase * 2f
-    fun segment(start: Float, end: Float, from: Float, to: Float): Float {
-        val x = ((t - start) / (end - start)).coerceIn(0f, 1f)
-        val eased = x * x * (3f - 2f * x)
-        return from + (to - from) * eased
+    fun smootherStep(value: Float): Float {
+        val x = value.coerceIn(0f, 1f)
+        return x * x * x * (x * (x * 6f - 15f) + 10f)
     }
-    return if (t < 0.32f) {
-        segment(0f, 0.32f, 0f, 1f)
-    } else {
-        segment(0.32f, 1f, 1f, 0f)
+    return when {
+        phase < 0.38f -> smootherStep(phase / 0.38f)
+        phase < 0.82f -> 1f - smootherStep((phase - 0.38f) / 0.44f)
+        else -> 0f
     }
 }
 
 @Composable
 private fun ConnectionMethodCard(
     modifier: Modifier,
-    icon: ImageVector,
+    modeIcon: @Composable (Color, Modifier) -> Unit,
     title: String,
     accent: Color,
     steps: List<String>,
     selected: Boolean,
     success: Boolean,
     attention: Float,
-    selectionOffsetX: Dp,
-    selectionOffsetY: Dp,
     selectionScene: Float,
     error: String? = null,
     goldBurst: Boolean = false,
@@ -450,6 +450,8 @@ private fun ConnectionMethodCard(
 ) {
     val colors = AppTheme.colors
     val shape = RoundedCornerShape(24.dp)
+    val view = LocalView.current
+    var iconCenterInRoot by remember { mutableStateOf<Offset?>(null) }
     var cardPressed by remember { mutableStateOf(false) }
     var pressDirection by remember { mutableStateOf(0f) }
     val pressDeformation by animateFloatAsState(
@@ -470,22 +472,32 @@ private fun ConnectionMethodCard(
     // 失败时让胜出卡恢复，继续承载错误信息；正常流程中两张卡一起退场。
     val cardExitProgress = if (selected && error != null) 0f else sceneProgress
     val heroProgress = if (selected && error == null) sceneProgress else 0f
+    // 用真实屏幕坐标定位飞出终点：横向严格居中，纵向落在屏幕上三分之一处。
+    val targetCenterX = view.width / 2f
+    val targetCenterY = view.height / 3f
+    val heroTravelX = iconCenterInRoot?.let { targetCenterX - it.x } ?: 0f
+    val heroTravelY = iconCenterInRoot?.let { targetCenterY - it.y } ?: 0f
 
     Box(
         modifier = modifier
             .zIndex(if (selected) 3f else 0f)
+            // 呼吸和按压放在共同父层：玻璃卡、文字、按钮、模式图标始终同步形变。
+            .graphicsLayer {
+                val breathingScale = 1f + attention * 0.032f
+                val deformation = pressDeformation
+                scaleX = breathingScale * (1f + deformation * 0.012f)
+                scaleY = breathingScale * (1f - deformation * 0.024f)
+                rotationZ = pressDirection * deformation * 1.15f
+                translationX = pressDirection * deformation * 1.5.dp.toPx()
+            }
     ) {
         GlassSurface(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val breathingScale = 1f + attention * 0.04f
-                    val deformation = pressDeformation
                     val exitScale = 1f - cardExitProgress * 0.045f
-                    scaleX = breathingScale * exitScale * (1f + deformation * 0.012f)
-                    scaleY = breathingScale * exitScale * (1f - deformation * 0.024f)
-                    rotationZ = pressDirection * deformation * 1.15f
-                    translationX = pressDirection * deformation * 1.5.dp.toPx()
+                    scaleX = exitScale
+                    scaleY = exitScale
                     translationY = cardExitProgress * 8.dp.toPx()
                     alpha = 1f - cardExitProgress
                 },
@@ -586,59 +598,62 @@ private fun ConnectionMethodCard(
             }
         }
 
-        // 模式图标独立于卡片裁剪层：胜出图标飞到屏幕上方，另一枚随卡片退场。
-        GlassSurface(
+        // 42dp 飞行容器保持原本卡片内的精确位置；成功效果用 requiredSize 从该中心
+        // 向外溢出，不让 220dp 动画画布及负偏移参与卡片布局。
+        Box(
             modifier = Modifier
                 .offset(x = 14.dp, y = 16.dp)
                 .size(42.dp)
-                .zIndex(3f)
-                .graphicsLayer {
-                    translationX = selectionOffsetX.toPx() * heroProgress
-                    translationY = selectionOffsetY.toPx() * heroProgress -
-                        kotlin.math.sin(heroProgress * Math.PI.toFloat()) * 10.dp.toPx()
-                    val heroScale = 1f + heroProgress * 1.12f
-                    scaleX = heroScale
-                    scaleY = heroScale
-                    alpha = if (selected) 1f else 1f - cardExitProgress
-                },
-            shape = RoundedCornerShape(13.dp),
-            panel = true,
-            tint = if (success) {
-                colors.statusConnected.copy(alpha = 0.12f)
-            } else {
-                accent.copy(alpha = 0.07f)
-            },
-            borderColor = if (success) {
-                colors.statusConnected.copy(alpha = 0.78f)
-            } else {
-                accent.copy(alpha = 0.24f)
-            }
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = accent,
-                modifier = Modifier
-                    .size(21.dp)
-                    .align(Alignment.Center)
-            )
-        }
-
-        // 成功效果与飞出的模式图标共用位置，可越过卡片边界绘制。
-        ConnectionSuccessOverlay(
-            success = success,
-            goldBurst = goldBurst,
-            modifier = Modifier
-                // 220dp 画布的中心与 42dp 模式图标的中心完全重合。
-                .offset(x = (-75).dp, y = (-73).dp)
-                .size(220.dp)
                 .zIndex(4f)
+                .onGloballyPositioned { coordinates ->
+                    if (selectionScene <= 0.001f || iconCenterInRoot == null) {
+                        iconCenterInRoot = coordinates.boundsInRoot().center
+                    }
+                }
                 .graphicsLayer {
-                    translationX = selectionOffsetX.toPx() * heroProgress
-                    translationY = selectionOffsetY.toPx() * heroProgress -
+                    translationX = heroTravelX * heroProgress
+                    translationY = heroTravelY * heroProgress -
                         kotlin.math.sin(heroProgress * Math.PI.toFloat()) * 10.dp.toPx()
                 }
-        )
+        ) {
+            GlassSurface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val heroScale = 1f + heroProgress * 1.12f
+                        scaleX = heroScale
+                        scaleY = heroScale
+                        alpha = if (selected) 1f else 1f - cardExitProgress
+                    },
+                shape = RoundedCornerShape(13.dp),
+                panel = true,
+                tint = if (success) {
+                    colors.statusConnected.copy(alpha = 0.12f)
+                } else {
+                    accent.copy(alpha = 0.07f)
+                },
+                borderColor = if (success) {
+                    colors.statusConnected.copy(alpha = 0.78f)
+                } else {
+                    accent.copy(alpha = 0.24f)
+                }
+            ) {
+                modeIcon(
+                    accent,
+                    Modifier
+                        .size(22.dp)
+                        .align(Alignment.Center)
+                )
+            }
+
+            ConnectionSuccessOverlay(
+                success = success,
+                goldBurst = goldBurst,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .requiredSize(220.dp)
+            )
+        }
     }
 }
 
@@ -703,6 +718,13 @@ private fun ConnectionSuccessOverlay(
             .graphicsLayer { alpha = (p * 5f).coerceAtMost(1f) },
         contentAlignment = Alignment.Center
     ) {
+        if (goldBurst) {
+            PremiumSuccessEffect(
+                progress = p,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
         repeat(2) { index ->
             val ringProgress = ((p - index * 0.14f) / 0.72f).coerceIn(0f, 1f)
             Box(
@@ -751,6 +773,90 @@ private fun ConnectionSuccessOverlay(
                 .background(colors.statusConnected.copy(alpha = 0.08f))
                 .border(1.5.dp, colors.statusConnected.copy(alpha = 0.70f), CircleShape)
         )
+    }
+}
+
+/**
+ * 高级版专属成功层：暖金能量晕、旋转断续光环和星芒从同一模式图标中心展开。
+ * 免费版不进入该分支，原有绿色双脉冲的外观和节奏保持不变。
+ */
+@Composable
+private fun PremiumSuccessEffect(
+    progress: Float,
+    modifier: Modifier = Modifier
+) {
+    val gold = Color(0xFFFFD66B)
+    val warmGold = Color(0xFFF0A93B)
+    Canvas(modifier = modifier) {
+        val p = progress.coerceIn(0f, 1f)
+        val appear = (p / 0.16f).coerceIn(0f, 1f)
+        val fade = ((1f - p) / 0.30f).coerceIn(0f, 1f)
+        val visibility = appear * fade
+        val center = this.center
+
+        // 短促的暖金光晕先托起图标，不形成持续的大色块。
+        val haloPulse = sin((p.coerceAtMost(0.72f) / 0.72f) * Math.PI.toFloat())
+            .coerceAtLeast(0f)
+        drawCircle(
+            color = gold.copy(alpha = 0.12f * haloPulse),
+            radius = size.minDimension * (0.16f + p * 0.16f),
+            center = center
+        )
+        drawCircle(
+            color = warmGold.copy(alpha = 0.07f * haloPulse),
+            radius = size.minDimension * (0.24f + p * 0.12f),
+            center = center
+        )
+
+        // 三段旋转断续光环，比免费版完整绿色圆环更精致，也不会抢模式图标。
+        rotate(degrees = -32f + p * 118f, pivot = center) {
+            val orbitRadius = size.minDimension * (0.22f + p * 0.10f)
+            val orbitTopLeft = Offset(center.x - orbitRadius, center.y - orbitRadius)
+            val orbitSize = androidx.compose.ui.geometry.Size(orbitRadius * 2f, orbitRadius * 2f)
+            repeat(3) { index ->
+                drawArc(
+                    color = if (index == 1) gold.copy(alpha = 0.92f * visibility)
+                    else warmGold.copy(alpha = 0.72f * visibility),
+                    startAngle = index * 120f + 8f,
+                    sweepAngle = 54f,
+                    useCenter = false,
+                    topLeft = orbitTopLeft,
+                    size = orbitSize,
+                    style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round)
+                )
+            }
+        }
+
+        // 六枚星芒沿轻微旋转的轨迹展开；长短交错，让高级版具有可辨识的“签名”。
+        repeat(6) { index ->
+            val phase = ((p - index * 0.025f) / 0.78f).coerceIn(0f, 1f)
+            val angle = index * 60f * (Math.PI.toFloat() / 180f) + phase * 0.28f
+            val distance = size.minDimension * (0.19f + phase * 0.25f)
+            val sparkleCenter = Offset(
+                center.x + cos(angle) * distance,
+                center.y + sin(angle) * distance
+            )
+            val sparkleFade = (phase * 5f).coerceAtMost(1f) * (1f - phase)
+            val longArm = (if (index % 2 == 0) 7.dp else 5.dp).toPx() *
+                (0.7f + sparkleFade * 0.6f)
+            val shortArm = longArm * 0.42f
+            val sparkleColor = if (index % 2 == 0) gold else Color.White
+            val alpha = sparkleFade * 0.95f
+            drawLine(
+                sparkleColor.copy(alpha = alpha),
+                Offset(sparkleCenter.x, sparkleCenter.y - longArm),
+                Offset(sparkleCenter.x, sparkleCenter.y + longArm),
+                strokeWidth = 1.5.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                sparkleColor.copy(alpha = alpha),
+                Offset(sparkleCenter.x - shortArm, sparkleCenter.y),
+                Offset(sparkleCenter.x + shortArm, sparkleCenter.y),
+                strokeWidth = 1.5.dp.toPx(),
+                cap = StrokeCap.Round
+            )
+        }
     }
 }
 
