@@ -662,15 +662,17 @@ function xhHash(params) {
     const str = Object.keys(params)
         .filter((k) => k !== 'hash' && params[k] !== undefined && params[k] !== null && params[k] !== '')
         .sort()
-        // 查询响应的 data 是嵌套对象；用收到的 JSON 字段顺序序列化，确保签名覆盖支付状态、
-        // 商户订单号和金额，而不是退化成没有保护作用的 "[object Object]"。
-        .map((k) => `${k}=${typeof params[k] === 'object' ? JSON.stringify(params[k]) : params[k]}`)
+        .map((k) => `${k}=${params[k]}`)
         .join('&') + cfg.xhAppSecret;
     return crypto.createHash('md5').update(str, 'utf8').digest('hex');
 }
 
 function xhSignatureValid(params) {
-    return Boolean(params && typeof params === 'object' && params.hash)
+    // 官方签名算法只定义平坦的键值对；不猜测嵌套对象的序列化方式。
+    const hasNestedValue = params && typeof params === 'object'
+        && Object.keys(params).some((k) => k !== 'hash' && params[k] !== null
+            && typeof params[k] === 'object');
+    return !hasNestedValue && Boolean(params && typeof params === 'object' && params.hash)
         && constantTimeEq(xhHash(params), String(params.hash).toLowerCase());
 }
 
@@ -678,6 +680,13 @@ function xhResponseSignatureValid(response) {
     return xhSignatureValid(response)
         || Boolean(response?.data && typeof response.data === 'object'
             && xhSignatureValid(response.data));
+}
+
+function xhResponseHasSignature(response) {
+    return Boolean(response && typeof response === 'object'
+        && (Object.prototype.hasOwnProperty.call(response, 'hash')
+            || (response.data && typeof response.data === 'object'
+                && Object.prototype.hasOwnProperty.call(response.data, 'hash'))));
 }
 
 function parseFeeFen(value) {
@@ -698,7 +707,7 @@ function httpsPaymentUrl(value) {
     }
 }
 
-function xhPost(apiPath, params) {
+function xhPost(apiPath, params, { allowUnsignedResponse = false } = {}) {
     params.appid = cfg.xhAppId;
     params.time = Math.floor(Date.now() / 1000);
     params.nonce_str = crypto.randomBytes(8).toString('hex');
@@ -730,7 +739,15 @@ function xhPost(apiPath, params) {
                 }
                 try {
                     const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-                    if (!xhResponseSignatureValid(parsed)) throw new Error('xh bad response signature');
+                    const hasSignature = xhResponseHasSignature(parsed);
+                    // 虎皮椒生产环境的查单响应与文档示例不一致，可能完全不返回 hash。
+                    // 仅查单端点允许缺少签名；只要响应携带了签名就仍须严格验证。
+                    // 下单响应始终要求有效签名，查单是否可履约还会在 confirmPaid 中
+                    // 严格核对订单号、金额、应用 ID（若返回）和支付状态。
+                    if ((!hasSignature && !allowUnsignedResponse)
+                        || (hasSignature && !xhResponseSignatureValid(parsed))) {
+                        throw new Error('xh bad response signature');
+                    }
                     resolve(parsed);
                 }
                 catch (e) { reject(e instanceof SyntaxError ? new Error('xh bad json') : e); }
@@ -1052,13 +1069,25 @@ async function confirmPaid(order, { force = false } = {}) {
 
     let q;
     try {
-        q = await paymentPost('/payment/query.html', { out_trade_order: order });
+        q = await paymentPost('/payment/query.html', { out_trade_order: order },
+            { allowUnsignedResponse: true });
     } catch (e) {
         log(`ORDER_QUERY_FAIL ${order} product=${row.product} ${e.message}`);
         return row;
     }
-    if (!xhResponseSignatureValid(q)) {
+    // 生产查单响应目前不带文档示例中的 hash；缺失签名时依赖固定 HTTPS 上游和下面的
+    // 交易字段逐项核对。若上游返回了签名，则签名错误仍然 fail closed。
+    if (xhResponseHasSignature(q) && !xhResponseSignatureValid(q)) {
         log(`ORDER_QUERY_BAD_SIGNATURE ${order} product=${row.product}`);
+        return row;
+    }
+    if (!q || typeof q !== 'object' || Number(q.errcode) !== 0
+        || !q.data || typeof q.data !== 'object') {
+        return row;
+    }
+    const queryStatus = String(q.data.status || '');
+    if (!['WP', 'OD', 'CD'].includes(queryStatus)) {
+        log(`ORDER_QUERY_BAD_STATUS ${order} product=${row.product} status=${queryStatus || '-'}`);
         return row;
     }
     const queryOrder = String(q.data?.out_trade_order || q.data?.trade_order_id || '');
@@ -1071,7 +1100,12 @@ async function confirmPaid(order, { force = false } = {}) {
         return row;
     }
     // data.status: WP待支付 OD已支付 CD已取消;仅 OD 发码
-    if (Number(q.errcode) !== 0 || !q.data || q.data.status !== 'OD') return row;
+    if (queryStatus !== 'OD') return row;
+    const queryChargeId = String(q.data.open_order_id || '').trim();
+    if (!queryChargeId || queryChargeId.length > 128) {
+        log(`ORDER_QUERY_BAD_CHARGE_ID ${order} product=${row.product}`);
+        return row;
+    }
 
     // 上游 await 之后以写事务重读订单。履约与 paid 标记在同一事务中：
     // notify、App 轮询甚至另一个服务进程同时确认，也只会有一个事务真正发放权益。
@@ -1125,7 +1159,7 @@ async function confirmPaid(order, { force = false } = {}) {
         const marked = db.prepare(`UPDATE orders SET status = ?, code = ?, charge_id = ?, paid_at = ?,
                                                      refund_reason = ?
                                    WHERE out_trade_no = ? AND status = 'pending' AND code IS NULL`)
-            .run(finalStatus, code, String(q.data.open_order_id || ''), now(), refundReason, order);
+            .run(finalStatus, code, queryChargeId, now(), refundReason, order);
         if (marked.changes !== 1) throw new Error('ORDER_MARK_PAID_LOST_RACE');
         db.exec('COMMIT');
         paidRow = db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
@@ -1135,7 +1169,7 @@ async function confirmPaid(order, { force = false } = {}) {
         return db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order) || row;
     }
     log(`ORDER_PAID ${order} code=${code} product=${paidRow.product}`
-        + `${target ? ` target=${target.code}` : ''} xh=${q.data.open_order_id || '-'}`);
+        + `${target ? ` target=${target.code}` : ''} xh=${queryChargeId}`);
     if (redundantPermanent) {
         log(`ORDER_PAID_REDUNDANT_PERMANENT ${order} code=${code} amount_fen=${paidRow.amount_fen}`
             + ` xh=${q.data.open_order_id || '-'} MANUAL_REFUND_REQUIRED`);

@@ -76,7 +76,8 @@ function createResponse(order, overrides = {}) {
 
 function queryResponse(order, status = 'WP', overrides = {}) {
     const row = db.prepare('SELECT amount_fen FROM orders WHERE out_trade_no = ?').get(order);
-    return signed({
+    // 虎皮椒生产查单响应目前不带文档示例中的 hash。
+    return {
         errcode: 0,
         errmsg: 'success',
         data: {
@@ -87,7 +88,7 @@ function queryResponse(order, status = 'WP', overrides = {}) {
             appid: 'test-app-id',
             ...overrides,
         },
-    });
+    };
 }
 
 function installUpstream(statusByOrder = new Map()) {
@@ -255,6 +256,43 @@ test('payment regression suite', async (suite) => {
         assert.equal((await api.apiPayNotify(valid)).ack, false);
         assert.equal(db.prepare('SELECT status FROM orders WHERE out_trade_no = ?')
             .get(created.order).status, 'pending');
+    });
+
+    await suite.test('无签名查单只在订单字段全部匹配时履约，坏签名仍 fail closed', async () => {
+        const fp = '56565656565656565656565656565656';
+        installUpstream();
+        const created = await api.apiOrderCreate({ fp, product: 'annual' });
+
+        api.setPaymentPost(async () => ({
+            ...queryResponse(created.order, 'OD'),
+            hash: 'bad',
+        }));
+        assert.equal((await api.confirmPaid(created.order, { force: true })).status, 'pending');
+
+        api.setPaymentPost(async () => queryResponse(created.order, 'OD', {
+            total_amount: '0.01',
+        }));
+        assert.equal((await api.confirmPaid(created.order, { force: true })).status, 'pending');
+
+        api.setPaymentPost(async () => queryResponse(created.order, 'OD', {
+            out_trade_order: 'ZTWRONGORDER',
+        }));
+        assert.equal((await api.confirmPaid(created.order, { force: true })).status, 'pending');
+
+        api.setPaymentPost(async () => queryResponse(created.order, 'OD', {
+            appid: 'wrong-app-id',
+        }));
+        assert.equal((await api.confirmPaid(created.order, { force: true })).status, 'pending');
+
+        api.setPaymentPost(async () => queryResponse(created.order, 'OD', {
+            open_order_id: '',
+        }));
+        assert.equal((await api.confirmPaid(created.order, { force: true })).status, 'pending');
+
+        api.setPaymentPost(async () => queryResponse(created.order, 'OD'));
+        const paid = await api.confirmPaid(created.order, { force: true });
+        assert.equal(paid.status, 'paid');
+        assert.ok(paid.code);
     });
 
     await suite.test('无效上游签名或非 HTTPS 支付链接 fail closed', async () => {
