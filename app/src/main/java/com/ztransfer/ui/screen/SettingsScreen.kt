@@ -558,7 +558,8 @@ internal fun ProBadgeButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    big: Boolean = false
+    big: Boolean = false,
+    enabled: Boolean = true,
 ) {
     // 高光带相位：-1（完全在按钮左侧外）扫到 +2（完全出右侧），尾段停顿让闪光有呼吸感。
     val sheen = rememberInfiniteTransition(label = "proSheen")
@@ -573,10 +574,13 @@ internal fun ProBadgeButton(
     )
     Surface(
         onClick = onClick,
+        enabled = enabled,
         shape = RoundedCornerShape(if (big) 16.dp else 14.dp),
         color = Color.Transparent,
         shadowElevation = 4.dp,
-        modifier = modifier.height(if (big) 46.dp else 28.dp)
+        modifier = modifier
+            .height(if (big) 46.dp else 28.dp)
+            .graphicsLayer { alpha = if (enabled) 1f else 0.5f }
     ) {
         Box(
             // big（定宽定高）需铺满 Surface 让内容居中；小号保持包裹内容，别撑满屏宽。

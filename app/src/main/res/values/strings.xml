@@ -174,18 +174,30 @@
     <string name="unlock">Unlock</string>
     <string name="enter_code">Enter code</string>
     <string name="tier_free">Free</string>
+    <string name="tier_feature">Feature</string>
+    <string name="tier_annual">Annual</string>
+    <string name="tier_lifetime">Lifetime</string>
     <string name="compare_transfer">Transfers</string>
     <string name="compare_transfer_free">%1$d/day</string>
-    <string name="compare_filesize">Max file size</string>
+    <string name="compare_filesize">File size</string>
     <string name="compare_filesize_free">%1$d MB</string>
     <string name="compare_remote">Remote control</string>
     <string name="compare_remote_free">%1$d min/day</string>
     <string name="compare_unlimited">Unlimited</string>
+    <string name="compare_duration">Duration</string>
+    <string name="duration_free">Always free</string>
+    <string name="duration_days">%1$d days</string>
+    <string name="duration_lifetime">Lifetime</string>
+    <string name="plan_annual">Annual Pro</string>
+    <string name="plan_lifetime">Lifetime Pro</string>
+    <string name="plan_unavailable">Unavailable</string>
+    <string name="plan_lifetime_unavailable">Lifetime plan unavailable</string>
+    <string name="buy_annual_cta">Buy Annual Pro · %1$s · %2$d days</string>
+    <string name="buy_lifetime_cta">Buy Lifetime Pro · %1$s · Lifetime</string>
     <string name="price_promo_tag">Limited-time offer</string>
     <!-- Price unit is per-locale text; the amount itself is a constant (see PRO_PRICE). -->
     <string name="price_per_year">%1$s/yr</string>
     <string name="pro_price_per_day">≈%1$s/day</string>
-    <string name="pro_perks">One year · Renew anytime · Free updates</string>
     <string name="quota_left_hint">%1$d/%2$d left today</string>
     <string name="transfer_limit_reached">Daily limit reached — unlock Pro</string>
     <string name="transfer_size_limit">Over %1$d MB — unlock Pro</string>
@@ -196,6 +208,10 @@
     <string name="purchase_loading">Creating order…</string>
     <string name="purchase_qr_loading">Generating payment QR…</string>
     <string name="purchase_wechat_title">Pay with WeChat</string>
+    <string name="purchase_annual_title">Annual Pro · Pay with WeChat</string>
+    <string name="purchase_lifetime_title">Lifetime Pro · Pay with WeChat</string>
+    <string name="purchase_locked_annual">Order total %1$s · %2$d days</string>
+    <string name="purchase_locked_lifetime">Order total %1$s · Lifetime</string>
     <string name="purchase_scan_hint">Please scan the QR code from your album in WeChat to pay</string>
     <string name="purchase_save_qr">Save to album</string>
     <string name="purchase_saved">✓ Saved to album</string>
@@ -209,7 +225,7 @@
     <!-- Subscription expiry (home renew button/dialog + home banner) -->
     <string name="sub_expires_on">Expires %1$s</string>
     <string name="renew_action">Renew</string>
-    <string name="renew_carry_over">Adds 365 days to your current expiry date</string>
+    <string name="renew_or_upgrade">Renew or upgrade</string>
     <string name="sub_expired_renew">Pro has expired — renew to continue</string>
     <plurals name="sub_days_left">
         <item quantity="one">%1$d day left</item>
@@ -223,6 +239,7 @@
     <string name="purchase_opening_alipay">Opening Alipay…</string>
     <string name="purchase_waiting">Complete the payment above — activation is automatic once confirmed.</string>
     <string name="purchase_activated">🎉 Purchased · Pro unlocked</string>
+    <string name="purchase_lifetime_activated">🎉 Purchased · Lifetime Pro unlocked</string>
     <string name="purchase_restored">🎉 This device already owns Pro — restored, no charge</string>
     <string name="restore_action">Restore</string>
     <string name="restore_restoring">Restoring…</string>
@@ -237,6 +254,8 @@
     <string name="err_purchase_no_network">Internet connection required</string>
     <string name="err_purchase_unreachable">Couldn\'t reach the server. If you\'re on the camera\'s Wi-Fi, disconnect first and retry on a network with internet access.</string>
     <string name="err_purchase_failed">Couldn\'t create the order — try again later or contact support.</string>
+    <string name="err_purchase_product_mismatch">The order product does not match your selection. Payment was stopped; go back and select again.</string>
+    <string name="purchase_back_to_plans">Back to plans</string>
 
     <!-- Check for updates (settings footer) -->
     <string name="check_update">Check for updates</string>

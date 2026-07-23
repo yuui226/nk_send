@@ -3,6 +3,7 @@ package com.ztransfer.ui.screen
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,9 +15,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -68,7 +71,7 @@ import kotlin.math.ceil
 // 购买弹窗的金额也用它——同一笔钱在两屏用同一个金色,视觉上接得上。
 internal val ProGold = Color(0xFFE09B2D)
 // 对比表的免费/高级版两个值列的定宽(功能名占弹性剩余宽度)。
-private val CompareColWidth = 64.dp
+private val CompareColWidth = 62.dp
 
 // 到期预警的两道门槛:设置页进 30 天转橙提醒,首页进 7 天才值得占一条提示条。
 internal const val SUB_WARN_DAYS = 30
@@ -115,6 +118,7 @@ fun ProDialog(
     // 拉到再静默换掉——不阻塞开窗;只有价格真变了才会跳,那正是该跳的时候。
     LaunchedEffect(Unit) { LicenseManager.refreshPricingOnOpen() }
     val price by LicenseManager.pricing.collectAsState()
+    var selectedProduct by remember { mutableStateOf(LicenseManager.ProductId.ANNUAL) }
     var copied by remember { mutableStateOf(false) }
     // 购买流程叠在本弹窗之上;关闭后回到本弹窗(成功后由用户自行关闭)。
     var showPurchase by remember { mutableStateOf(false) }
@@ -124,6 +128,7 @@ fun ProDialog(
             // 购买+激活成功:关掉购买弹窗与本弹窗,再放烟花(烟花在页面顶层,须先关弹窗才可见)。
             onCelebrate = { showPurchase = false; onDismiss(); onCelebrate() },
             onHoldCameraWifi = onHoldCameraWifi,
+            product = selectedProduct,
             renew = renew
         )
     }
@@ -156,7 +161,11 @@ fun ProDialog(
                         .matchParentSize()
                         .background(Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent)))
                 )
-                Column(Modifier.padding(20.dp)) {
+                Column(
+                    Modifier
+                        .verticalScroll(rememberScrollState())
+                        .padding(20.dp)
+                ) {
                     // ---- 头部：购买页是金徽章 + 标题/卖点副标语;激活页左上换成毛玻璃返回箭头,
                     // 标题改"输入激活码"且不带卖点——激活码可能永久也可能几个月,别报"一年有效"。----
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -201,13 +210,6 @@ fun ProDialog(
                                 fontWeight = FontWeight.Bold,
                                 color = colors.onBackground
                             )
-                            if (!codeMode) {
-                                Text(
-                                    stringResource(R.string.pro_perks),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = colors.onSurfaceVariant
-                                )
-                            }
                         }
                         IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Default.Close, contentDescription = null, tint = colors.onSurfaceVariant)
@@ -229,24 +231,7 @@ fun ProDialog(
                                 .padding(horizontal = 14.dp, vertical = 10.dp)
                         ) {
                             // 表头:功能列留白,免费/高级版两列与行内值列同宽对齐。
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Spacer(Modifier.weight(1f))
-                                Text(
-                                    stringResource(R.string.tier_free),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = colors.onSurfaceVariant,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.width(CompareColWidth)
-                                )
-                                Text(
-                                    stringResource(R.string.pro_version),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = ProGold,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.width(CompareColWidth)
-                                )
-                            }
+                            CompareHeader()
                             Spacer(Modifier.height(6.dp))
                             Box(
                                 Modifier
@@ -257,7 +242,8 @@ fun ProDialog(
                             CompareRow(
                                 stringResource(R.string.compare_transfer),
                                 stringResource(R.string.compare_transfer_free, LicenseManager.FREE_DAILY_TRANSFER_LIMIT),
-                                stringResource(R.string.compare_unlimited)
+                                stringResource(R.string.compare_unlimited),
+                                stringResource(R.string.compare_unlimited),
                             )
                             CompareRow(
                                 stringResource(R.string.compare_filesize),
@@ -265,7 +251,8 @@ fun ProDialog(
                                     R.string.compare_filesize_free,
                                     LicenseManager.FREE_MAX_FILE_BYTES / (1024 * 1024)
                                 ),
-                                stringResource(R.string.compare_unlimited)
+                                stringResource(R.string.compare_unlimited),
+                                stringResource(R.string.compare_unlimited),
                             )
                             CompareRow(
                                 stringResource(R.string.compare_remote),
@@ -273,7 +260,16 @@ fun ProDialog(
                                     R.string.compare_remote_free,
                                     (LicenseManager.FREE_REMOTE_DAILY_MS / 60_000L).toInt()
                                 ),
-                                stringResource(R.string.compare_unlimited)
+                                stringResource(R.string.compare_unlimited),
+                                stringResource(R.string.compare_unlimited),
+                            )
+                            CompareRow(
+                                stringResource(R.string.compare_duration),
+                                stringResource(R.string.duration_free),
+                                stringResource(R.string.duration_days, price.annual.periodDays),
+                                stringResource(R.string.duration_lifetime),
+                                annualUnlimited = false,
+                                lifetimePermanent = true,
                             )
                         }
 
@@ -283,74 +279,24 @@ fun ProDialog(
                         // 则退化为单一价格(无角标无划线)。这里显示的只是展示价:真正收多少
                         // 以下单响应为准(见 PurchaseDialog)。
                         Spacer(Modifier.height(14.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (price.originalFen > 0) {
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = Color(0xFFE53935)
-                                ) {
-                                    Text(
-                                        stringResource(R.string.price_promo_tag),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                                    )
-                                }
-                                Spacer(Modifier.width(10.dp))
-                            }
-                            Text(
-                                stringResource(
-                                    R.string.price_per_year,
-                                    LicenseManager.formatPrice(price.priceFen)
-                                ),
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = ProGold
-                            )
-                            if (price.originalFen > 0) {
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    stringResource(
-                                        R.string.price_per_year,
-                                        LicenseManager.formatPrice(price.originalFen)
-                                    ),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    textDecoration = TextDecoration.LineThrough,
-                                    color = colors.onSurfaceVariant
-                                )
-                            }
-                        }
+                        ProductPlans(
+                            pricing = price,
+                            selected = selectedProduct,
+                            onSelect = { selectedProduct = it },
+                        )
                         // 年费摊到每天当脚注:一年十几块听着是笔钱,一天几分钱不是。
                         // 压在价格下方而非上方——放上面会和紧跟着的大号金额把同一个数字报两遍。
                         // 摊完不足 1 分就别报了(那会印出"合每天 ¥0.00")。
-                        val perDay = LicenseManager.perDayFen(price)
-                        if (perDay > 0) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                stringResource(
-                                    R.string.pro_price_per_day,
-                                    LicenseManager.formatPrice(perDay)
-                                ),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-
                         Spacer(Modifier.height(18.dp))
 
                         // ---- 主行动：全宽金色"立即购买"（与入口徽标同款扫光），拉起支付流程 ----
+                        val selectedPrice = price.forProduct(selectedProduct)
                         ProBadgeButton(
-                            label = stringResource(R.string.buy_now),
+                            label = purchaseCta(selectedProduct, selectedPrice),
                             onClick = { showPurchase = true },
                             modifier = Modifier.fillMaxWidth(),
-                            big = true
+                            big = true,
+                            enabled = selectedPrice.available && selectedPrice.priceFen > 0,
                         )
 
                         // ---- 次级：一排玻璃小按钮,三个平分整行,整排仅连接页给(showEnterCode):
@@ -525,12 +471,14 @@ fun RenewDialog(
     // 同 ProDialog:他正看着价格准备掏钱,开窗时再拉一次展示定价(先画缓存,拉到静默换)。
     LaunchedEffect(Unit) { LicenseManager.refreshPricingOnOpen() }
     val price by LicenseManager.pricing.collectAsState()
+    var selectedProduct by remember { mutableStateOf(LicenseManager.ProductId.ANNUAL) }
     var showPurchase by remember { mutableStateOf(false) }
     if (showPurchase) {
         PurchaseDialog(
             onDismiss = { showPurchase = false },
             onCelebrate = { showPurchase = false; onDismiss(); onCelebrate() },
             onHoldCameraWifi = onHoldCameraWifi,
+            product = selectedProduct,
             renew = true
         )
     }
@@ -552,7 +500,11 @@ fun RenewDialog(
                         .matchParentSize()
                         .background(Brush.verticalGradient(listOf(colors.glassSheen, Color.Transparent)))
                 )
-                Column(Modifier.padding(20.dp)) {
+                Column(
+                    Modifier
+                        .verticalScroll(rememberScrollState())
+                        .padding(20.dp)
+                ) {
                     // ---- 头部:金徽章 + "续费"标题/到期日副标 + 右上关闭(与 ProDialog 同构) ----
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
@@ -572,7 +524,7 @@ fun RenewDialog(
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
-                                stringResource(R.string.renew_action),
+                                stringResource(R.string.renew_or_upgrade),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = colors.onBackground
@@ -611,66 +563,22 @@ fun RenewDialog(
 
                     // ---- 续费价:与 ProDialog 同款促销排布(角标 + 金色现价 + 划线原价) ----
                     Spacer(Modifier.height(14.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        if (price.originalFen > 0) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color(0xFFE53935)
-                            ) {
-                                Text(
-                                    stringResource(R.string.price_promo_tag),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                                )
-                            }
-                            Spacer(Modifier.width(10.dp))
-                        }
-                        Text(
-                            stringResource(
-                                R.string.price_per_year,
-                                LicenseManager.formatPrice(price.priceFen)
-                            ),
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = ProGold
-                        )
-                        if (price.originalFen > 0) {
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                stringResource(
-                                    R.string.price_per_year,
-                                    LicenseManager.formatPrice(price.originalFen)
-                                ),
-                                style = MaterialTheme.typography.bodyMedium,
-                                textDecoration = TextDecoration.LineThrough,
-                                color = colors.onSurfaceVariant
-                            )
-                        }
-                    }
-                    // 陈述续期规则(服务器按原到期日 + 365 天算),顺带让人明白提前续不亏。
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        stringResource(R.string.renew_carry_over),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
+                    ProductPlans(
+                        pricing = price,
+                        selected = selectedProduct,
+                        onSelect = { selectedProduct = it },
                     )
-
+                    // 陈述续期规则(服务器按原到期日 + 365 天算),顺带让人明白提前续不亏。
                     Spacer(Modifier.height(18.dp))
 
                     // ---- 主行动:全宽金色"续费",拉起支付流程 ----
+                    val selectedPrice = price.forProduct(selectedProduct)
                     ProBadgeButton(
-                        label = stringResource(R.string.renew_action),
+                        label = purchaseCta(selectedProduct, selectedPrice),
                         onClick = { showPurchase = true },
                         modifier = Modifier.fillMaxWidth(),
-                        big = true
+                        big = true,
+                        enabled = selectedPrice.available && selectedPrice.priceFen > 0,
                     )
                 }
             }
@@ -797,32 +705,236 @@ private fun SubActionLabel(text: String) {
 
 /** 对比表行:功能名弹性列 + 免费/高级版两个定宽值列(高级版列金色加粗)。 */
 @Composable
-private fun CompareRow(name: String, free: String, pro: String) {
+private fun CompareHeader() {
     val colors = AppTheme.colors
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            stringResource(R.string.tier_feature),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.onBackground,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            stringResource(R.string.tier_free),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.width(CompareColWidth),
+        )
+        Text(
+            stringResource(R.string.tier_annual),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = ProGold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.width(CompareColWidth),
+        )
+        Text(
+            stringResource(R.string.tier_lifetime),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = ProGold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.width(CompareColWidth),
+        )
+    }
+}
+
+@Composable
+private fun CompareRow(
+    name: String,
+    free: String,
+    annual: String,
+    lifetime: String,
+    annualUnlimited: Boolean = true,
+    lifetimePermanent: Boolean = false,
+) {
+    val colors = AppTheme.colors
+    val unlimitedGreen = Color(0xFF20A86B)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.padding(vertical = 7.dp)
     ) {
         Text(
             name,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = colors.onBackground,
             modifier = Modifier.weight(1f)
         )
         Text(
             free,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
             color = colors.onSurfaceVariant,
             textAlign = TextAlign.Center,
             modifier = Modifier.width(CompareColWidth)
         )
         Text(
-            pro,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.SemiBold,
-            color = ProGold,
+            annual,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (annualUnlimited) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = if (annualUnlimited) unlimitedGreen else colors.onBackground,
             textAlign = TextAlign.Center,
             modifier = Modifier.width(CompareColWidth)
+        )
+        Text(
+            lifetime,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = if (lifetimePermanent) ProGold else unlimitedGreen,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.width(CompareColWidth),
+        )
+    }
+}
+
+@Composable
+private fun ProductPlans(
+    pricing: LicenseManager.Pricing,
+    selected: LicenseManager.ProductId,
+    onSelect: (LicenseManager.ProductId) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ProductPlanCard(
+            product = LicenseManager.ProductId.ANNUAL,
+            price = pricing.annual,
+            selected = selected == LicenseManager.ProductId.ANNUAL,
+            onSelect = onSelect,
+        )
+        ProductPlanCard(
+            product = LicenseManager.ProductId.LIFETIME,
+            price = pricing.lifetime,
+            selected = selected == LicenseManager.ProductId.LIFETIME,
+            onSelect = onSelect,
+        )
+    }
+}
+
+@Composable
+private fun ProductPlanCard(
+    product: LicenseManager.ProductId,
+    price: LicenseManager.ProductPricing,
+    selected: Boolean,
+    onSelect: (LicenseManager.ProductId) -> Unit,
+) {
+    val colors = AppTheme.colors
+    val enabled = price.available && price.priceFen > 0
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                if (selected && enabled) ProGold.copy(alpha = 0.12f)
+                else colors.onBackground.copy(alpha = 0.035f)
+            )
+            .border(
+                if (selected && enabled) 2.dp else 1.dp,
+                if (selected && enabled) ProGold else colors.glassPanelBorder,
+                shape,
+            )
+            .clickable(enabled = enabled) { onSelect(product) }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                stringResource(
+                    if (product == LicenseManager.ProductId.ANNUAL) {
+                        R.string.plan_annual
+                    } else {
+                        R.string.plan_lifetime
+                    }
+                ),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = if (enabled) colors.onBackground else colors.onSurfaceVariant,
+            )
+            Text(
+                if (product == LicenseManager.ProductId.ANNUAL) {
+                    stringResource(R.string.duration_days, price.periodDays)
+                } else if (enabled) {
+                    stringResource(R.string.duration_lifetime)
+                } else {
+                    stringResource(R.string.plan_unavailable)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (product == LicenseManager.ProductId.LIFETIME && enabled) {
+                    ProGold
+                } else {
+                    colors.onSurfaceVariant
+                },
+                fontWeight = if (product == LicenseManager.ProductId.LIFETIME && enabled) {
+                    FontWeight.Bold
+                } else {
+                    FontWeight.Normal
+                },
+            )
+            if (product == LicenseManager.ProductId.ANNUAL) {
+                val perDayFen = LicenseManager.perDayFen(price)
+                if (perDayFen > 0) {
+                    Text(
+                        stringResource(
+                            R.string.pro_price_per_day,
+                            LicenseManager.formatPrice(perDayFen),
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        if (enabled) {
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    LicenseManager.formatPrice(price.priceFen),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = ProGold,
+                )
+                if (price.originalFen > 0) {
+                    Text(
+                        LicenseManager.formatPrice(price.originalFen),
+                        style = MaterialTheme.typography.bodySmall,
+                        textDecoration = TextDecoration.LineThrough,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            Text(
+                stringResource(R.string.plan_unavailable),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun purchaseCta(
+    product: LicenseManager.ProductId,
+    price: LicenseManager.ProductPricing,
+): String {
+    if (!price.available || price.priceFen <= 0) {
+        return stringResource(
+            if (product == LicenseManager.ProductId.LIFETIME) {
+                R.string.plan_lifetime_unavailable
+            } else {
+                R.string.plan_unavailable
+            }
+        )
+    }
+    return if (product == LicenseManager.ProductId.ANNUAL) {
+        stringResource(
+            R.string.buy_annual_cta,
+            LicenseManager.formatPrice(price.priceFen),
+            price.periodDays,
+        )
+    } else {
+        stringResource(
+            R.string.buy_lifetime_cta,
+            LicenseManager.formatPrice(price.priceFen),
         )
     }
 }

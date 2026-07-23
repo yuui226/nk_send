@@ -390,6 +390,7 @@ fun HomeScreen(
                 onDismiss = { showRenew = false },
                 onCelebrate = { showRenew = false; fireworks.launch() },
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
+                product = LicenseManager.ProductId.ANNUAL,
                 renew = true
             )
         }

@@ -33,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -133,6 +134,7 @@ fun PurchaseDialog(
     onDismiss: () -> Unit,
     onCelebrate: () -> Unit = {},
     onHoldCameraWifi: (Boolean) -> Unit = {},
+    product: LicenseManager.ProductId,
     // 续费单(现有码延期)而非新购;成败文案以【服务器回的 renew】为准,本参数只负责下单时告知服务器。
     renew: Boolean = false,
 ) {
@@ -140,6 +142,7 @@ fun PurchaseDialog(
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val pricing by LicenseManager.pricing.collectAsState()
 
     // 购买期间主动断开相机(CameraViewModel.holdCameraWifi):关闭 PTP 会话让相机
     // 自行关掉 Wi-Fi 热点,并松开 requestNetwork 占用——相机热点没有外网,不断开则
@@ -158,18 +161,30 @@ fun PurchaseDialog(
     var code by remember { mutableStateOf<String?>(null) }
     var activated by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Int?>(null) }
+    var productMismatch by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
     var expired by remember { mutableStateOf(false) }    // 超 5 分钟未支付 → 提示重新发起
     var refreshKey by remember { mutableStateOf(0) }     // 递增触发重新建单
     var restored by remember { mutableStateOf(false) }   // 本机已拥有 → 免费恢复(而非新购买)
     var paidRenew by remember { mutableStateOf(false) }  // 服务器判定的续费单 → 成功页说"续费成功"
+    var paidProduct by remember { mutableStateOf(product) }
     // 本单锁定的实收价(分)。头部报的是它,不是缓存的展示价——展示价可能过时
     // (App 常连着相机热点拉不到新价),而这个数是服务器建单时现读的,扫出来的码就是它。
     var orderPriceFen by remember { mutableStateOf(0) }
 
     // 建单/续单:首次(refreshKey==0)先试本地旧单,拿不到再新建;刷新(>0)一律新建。
-    LaunchedEffect(refreshKey) {
+    LaunchedEffect(refreshKey, product) {
         expired = false; saved = false; saveFailed = false; qr = null
+        if (code == null) {
+            error = null
+            productMismatch = false
+            order = null
+            payUrl = null
+            orderPriceFen = 0
+            paidProduct = product
+            paidRenew = false
+            restored = false
+        }
         // 付款全流程都要外网。刚松开相机 Wi-Fi 后系统切到蜂窝需要一两秒,
         // 故给一段等待再判定"没网",避免刚进来就误报。
         var online = hasInternet(context)
@@ -182,27 +197,56 @@ fun PurchaseDialog(
             error = R.string.err_purchase_no_network
             return@LaunchedEffect
         }
-        var r: LicenseManager.OrderResult? = null
-        if (refreshKey == 0) {
+        val r: LicenseManager.OrderResult? = if (refreshKey == 0) {
             val resumed = LicenseManager.pendingOrder()
-            r = if (resumed != null) LicenseManager.orderStatus(resumed, wantUrl = true) else null
-            if (r == null || r is LicenseManager.OrderResult.Failed ||
-                (r is LicenseManager.OrderResult.Pending && r.payUrl == null)
-            ) r = LicenseManager.createOrder(renew)
+            val recovered = if (resumed != null) {
+                LicenseManager.orderStatus(resumed.order, wantUrl = true)
+            } else {
+                null
+            }
+            if (recovered == null ||
+                (recovered is LicenseManager.OrderResult.Failed && recovered.err == "NOT_FOUND") ||
+                (recovered is LicenseManager.OrderResult.Pending &&
+                    recovered.product == product && recovered.payUrl == null)
+            ) {
+                LicenseManager.createOrder(product, renew)
+            } else {
+                recovered
+            }
         } else {
-            r = LicenseManager.createOrder(renew)
+            LicenseManager.createOrder(product, renew)
+        }
+        if (r is LicenseManager.OrderResult.Pending && r.product != product) {
+            productMismatch = true
+            error = R.string.err_purchase_product_mismatch
+            return@LaunchedEffect
         }
         when (r) {
             is LicenseManager.OrderResult.Pending -> {
-                order = r.order; payUrl = r.payUrl; paidRenew = r.renew; orderPriceFen = r.priceFen
+                order = r.order
+                payUrl = r.payUrl
+                paidRenew = r.renew
+                paidProduct = r.product
+                orderPriceFen = r.priceFen
             }
             // order 为空 = 服务器认出本机已拥有、免费恢复(见 createOrder 的 already_pro)
             is LicenseManager.OrderResult.Paid -> {
-                order = r.order; code = r.code; paidRenew = r.renew
+                order = r.order
+                code = r.code
+                paidRenew = r.renew
+                paidProduct = r.product
+                orderPriceFen = r.priceFen
                 if (r.order.isEmpty()) restored = true
             }
             LicenseManager.OrderResult.Unreachable -> error = R.string.err_purchase_unreachable
-            is LicenseManager.OrderResult.Failed -> error = R.string.err_purchase_failed
+            is LicenseManager.OrderResult.Failed -> {
+                if (r.err == "PENDING_OTHER_PRODUCT" || r.err == "BAD_PRODUCT") {
+                    productMismatch = true
+                    error = R.string.err_purchase_product_mismatch
+                } else {
+                    error = R.string.err_purchase_failed
+                }
+            }
             null -> Unit
         }
     }
@@ -224,10 +268,32 @@ fun PurchaseDialog(
     // 轮询到账 → 自动激活。过期即停止轮询,不再空打死单。
     LaunchedEffect(order) {
         val o = order ?: return@LaunchedEffect
-        while (code == null && !expired) {
+        while (code == null && !expired && error == null) {
             delay(2000)
             val r = LicenseManager.orderStatus(o)
-            if (r is LicenseManager.OrderResult.Paid) { code = r.code; paidRenew = r.renew }
+            when {
+                r is LicenseManager.OrderResult.Pending && r.product != product -> {
+                    productMismatch = true
+                    error = R.string.err_purchase_product_mismatch
+                }
+                r is LicenseManager.OrderResult.Paid -> {
+                    code = r.code
+                    paidRenew = r.renew
+                    paidProduct = r.product
+                    orderPriceFen = r.priceFen
+                }
+                r is LicenseManager.OrderResult.Failed -> {
+                    if (r.err == "PENDING_OTHER_PRODUCT" || r.err == "BAD_PRODUCT") {
+                        productMismatch = true
+                        error = R.string.err_purchase_product_mismatch
+                    } else {
+                        error = R.string.err_purchase_failed
+                    }
+                }
+                r is LicenseManager.OrderResult.Unreachable -> {
+                    error = R.string.err_purchase_unreachable
+                }
+            }
         }
         val c = code ?: return@LaunchedEffect
         when (LicenseManager.activate(c, BuildConfig.VERSION_NAME)) {
@@ -269,16 +335,30 @@ fun PurchaseDialog(
                         Column(Modifier.weight(1f)) {
                             if (qr != null && code == null) {
                                 Text(
-                                    stringResource(R.string.purchase_wechat_title),
+                                    stringResource(
+                                        if (paidProduct == LicenseManager.ProductId.ANNUAL) {
+                                            R.string.purchase_annual_title
+                                        } else {
+                                            R.string.purchase_lifetime_title
+                                        }
+                                    ),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = colors.onSurfaceVariant
                                 )
                                 if (orderPriceFen > 0) {
                                     Text(
-                                        stringResource(
-                                            R.string.price_per_year,
-                                            LicenseManager.formatPrice(orderPriceFen)
-                                        ),
+                                        if (paidProduct == LicenseManager.ProductId.ANNUAL) {
+                                            stringResource(
+                                                R.string.purchase_locked_annual,
+                                                LicenseManager.formatPrice(orderPriceFen),
+                                                pricing.annual.periodDays,
+                                            )
+                                        } else {
+                                            stringResource(
+                                                R.string.purchase_locked_lifetime,
+                                                LicenseManager.formatPrice(orderPriceFen),
+                                            )
+                                        },
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.Bold,
                                         // 与解锁弹窗的定价同一个金色:同一笔钱,视觉接得上
@@ -315,6 +395,8 @@ fun PurchaseDialog(
                                     Text(
                                         when {
                                             restored -> stringResource(R.string.purchase_restored)
+                                            paidProduct == LicenseManager.ProductId.LIFETIME ->
+                                                stringResource(R.string.purchase_lifetime_activated)
                                             paidRenew && newSubExp > 0L ->
                                                 stringResource(R.string.purchase_renewed, formatSubDate(newSubExp))
                                             else -> stringResource(R.string.purchase_activated)
@@ -378,10 +460,19 @@ fun PurchaseDialog(
                                     shape = RoundedCornerShape(14.dp),
                                     panel = true,
                                     contentPadding = PaddingValues(horizontal = 26.dp, vertical = 12.dp),
-                                    onClick = { error = null; refreshKey++ }
+                                    onClick = {
+                                        if (productMismatch) onDismiss()
+                                        else {
+                                            error = null
+                                            refreshKey++
+                                        }
+                                    }
                                 ) {
                                     Text(
-                                        stringResource(R.string.retry),
+                                        stringResource(
+                                            if (productMismatch) R.string.purchase_back_to_plans
+                                            else R.string.retry
+                                        ),
                                         style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.Bold,
                                         color = colors.accentBlue

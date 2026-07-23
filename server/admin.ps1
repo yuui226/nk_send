@@ -8,6 +8,10 @@
 #   .\admin.ps1 unrevoke KRMXTP               解除吊销(查重误伤时用)
 #   .\admin.ps1 expiry KRMXTP 0               把该码设为永久(送永久授权)
 #   .\admin.ps1 expiry KRMXTP 90              在现有到期日上延长 90 天(补偿)
+#   .\admin.ps1 pricing                        查询年费 / 永久会员定价
+#   .\admin.ps1 pricing 19.9 39.9              修改年费定价(兼容旧用法)
+#   .\admin.ps1 pricing annual 19.9 39.9       修改年费定价
+#   .\admin.ps1 pricing lifetime <售价> <原价> 修改永久会员定价(金额单位:元)
 # 管理员令牌:优先读环境变量 ZT_ADMIN_TOKEN,否则读同目录 admin-token.txt,
 # 都没有则首次运行时提示输入并保存到 admin-token.txt(该文件是密钥,勿外传)。
 param(
@@ -80,6 +84,70 @@ function Show-Error($resp) {
 function Format-Time($iso) {
     if (-not $iso) { return "-" }
     try { return ([datetime]$iso).ToLocalTime().ToString("yyyy-MM-dd HH:mm") } catch { return $iso }
+}
+
+function Convert-YuanToFen($text, $allowEmpty) {
+    $value = if ($null -eq $text) { "" } else { [string]$text }
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return [PSCustomObject]@{ Ok = [bool]$allowEmpty; Empty = $true; Fen = 0 }
+    }
+    if ($value -notmatch '^\d+(?:\.\d{1,2})?$') {
+        return [PSCustomObject]@{ Ok = $false; Empty = $false; Fen = 0 }
+    }
+    $amount = [decimal]0
+    $style = [Globalization.NumberStyles]::AllowDecimalPoint
+    if (-not [decimal]::TryParse($value, $style, [Globalization.CultureInfo]::InvariantCulture, [ref]$amount)) {
+        return [PSCustomObject]@{ Ok = $false; Empty = $false; Fen = 0 }
+    }
+    $fen = $amount * [decimal]100
+    if ($fen -gt [int]::MaxValue) {
+        return [PSCustomObject]@{ Ok = $false; Empty = $false; Fen = 0 }
+    }
+    return [PSCustomObject]@{ Ok = $true; Empty = $false; Fen = [int]$fen }
+}
+
+function Format-PriceFen($fen) {
+    return ("{0:0.00} 元" -f ([decimal]$fen / [decimal]100))
+}
+
+function Get-PricingProduct($resp, $product) {
+    if (-not $resp -or -not $resp.ok) { return $null }
+    if ($resp.products) {
+        $entry = $resp.products.$product
+        if ($entry) { return $entry }
+    }
+    # 旧服务端只返回顶层年费字段；保留读取兼容，永久版不能凭空假定价格。
+    if ($product -eq "annual" -and $null -ne $resp.price_fen) {
+        return [PSCustomObject]@{
+            available = $true
+            price_fen = $resp.price_fen
+            original_fen = $resp.original_fen
+            period_days = $resp.period_days
+        }
+    }
+    return $null
+}
+
+function Test-PricingProductAvailable($entry) {
+    if (-not $entry) { return $false }
+    if ($null -ne $entry.available -and -not [bool]$entry.available) { return $false }
+    return ($null -ne $entry.price_fen)
+}
+
+function Test-LifetimePricingProtocol($resp) {
+    if (-not $resp -or -not $resp.ok -or -not $resp.products) { return $false }
+    return ($null -ne $resp.products.lifetime)
+}
+
+function Format-PricingSummary($entry, $product) {
+    if (-not (Test-PricingProductAvailable $entry)) { return "未配置" }
+    $price = Format-PriceFen $entry.price_fen
+    $original = if ($entry.original_fen -gt 0) { Format-PriceFen $entry.original_fen } else { "不划线" }
+    if ($product -eq "annual") {
+        $days = if ($entry.period_days) { [int]$entry.period_days } else { 365 }
+        return ("售价 {0} / {1} 天；划线原价 {2}" -f $price, $days, $original)
+    }
+    return ("售价 {0}；划线原价 {1}" -f $price, $original)
 }
 
 # 有效期:空 = 永久(手动发的码),否则订阅到期时刻。已过期的标黄——那台机现在是免费版。
@@ -242,24 +310,80 @@ function Invoke-Expiry {
 
 function Invoke-Pricing {
     $resp = Call "GET" "/v1/pricing" $null
-    if ($resp -and $resp.ok) {
-        $cur = "{0:N2} 元" -f ($resp.price_fen / 100)
-        $org = if ($resp.original_fen -gt 0) { "{0:N2} 元" -f ($resp.original_fen / 100) } else { "不划线" }
-        Write-Host ""
-        Write-Host ("当前定价: {0} / {1} 天   划线原价: {2}" -f $cur, $resp.period_days, $org) -ForegroundColor Cyan
-    }
+    if (-not $resp) { return }
+    if (-not $resp.ok) { Show-Error $resp; return }
+    $annual = Get-PricingProduct $resp "annual"
+    $lifetime = Get-PricingProduct $resp "lifetime"
+
+    Write-Host ""
+    Write-Host "当前定价:" -ForegroundColor Cyan
+    Write-Host ("  [1] 年费会员: {0}" -f (Format-PricingSummary $annual "annual"))
+    $lifetimeColor = if (Test-PricingProductAvailable $lifetime) { "White" } else { "Yellow" }
+    Write-Host ("  [2] 永久会员: {0}" -f (Format-PricingSummary $lifetime "lifetime")) -ForegroundColor $lifetimeColor
     Write-Host ""
     Write-Host "改价立即对新订单生效,不用重启服务;已生成的二维码仍按下单时的价收款。" -ForegroundColor DarkGray
+    $pick = (Read-Host "修改哪一种?(1 = 年费会员,2 = 永久会员;回车取消)").Trim()
+    $product = switch ($pick) {
+        "1" { "annual" }
+        "2" { "lifetime" }
+        default { $null }
+    }
+    if (-not $product) { Write-Host "已取消"; return }
+    if ($product -eq "lifetime" -and -not (Test-LifetimePricingProtocol $resp)) {
+        Write-Host "当前服务端不支持永久会员定价,已拒绝提交。请先升级服务端,以免误改年费价格。" -ForegroundColor Red
+        return
+    }
+    $productName = if ($product -eq "annual") { "年费会员" } else { "永久会员" }
+    $oldEntry = if ($product -eq "annual") { $annual } else { $lifetime }
+    $oldSummary = Format-PricingSummary $oldEntry $product
+
     $priceIn = Read-Host "新售价(元,比如 19.9;回车取消)"
-    if (-not ($priceIn -match '^\d+(\.\d{1,2})?$')) { Write-Host "已取消"; return }
-    $orgIn = Read-Host "划线原价(元,比如 39.9;回车 = 不划线)"
-    $priceFen = [int][math]::Round([double]$priceIn * 100)
-    $orgFen = 0
-    if ($orgIn -match '^\d+(\.\d{1,2})?$') { $orgFen = [int][math]::Round([double]$orgIn * 100) }
-    $resp = Call "POST" "/admin/pricing" @{ price_fen = $priceFen; original_fen = $orgFen }
+    if (-not ([string]$priceIn).Trim()) { Write-Host "已取消"; return }
+    $price = Convert-YuanToFen $priceIn $false
+    if (-not $price.Ok -or $price.Fen -le 0) {
+        Write-Host "售价格式不正确:只能输入大于 0 的金额,最多两位小数(例如 19.9)" -ForegroundColor Red
+        return
+    }
+    $originalIn = Read-Host "划线原价(元,比如 39.9;输入 0 或回车 = 不划线)"
+    $original = Convert-YuanToFen $originalIn $true
+    if (-not $original.Ok) {
+        Write-Host "划线原价格式不正确:只能输入非负金额,最多两位小数" -ForegroundColor Red
+        return
+    }
+    if ($original.Fen -gt 0 -and $original.Fen -le $price.Fen) {
+        Write-Host "划线原价必须输入 0 / 留空,或严格大于售价" -ForegroundColor Red
+        return
+    }
+
+    $newOriginal = if ($original.Fen -gt 0) { Format-PriceFen $original.Fen } else { "不划线" }
+    Write-Host ""
+    Write-Host ("商品: {0}" -f $productName) -ForegroundColor Cyan
+    Write-Host ("旧价格: {0}" -f $oldSummary)
+    Write-Host ("新价格: 售价 {0}；划线原价 {1}" -f (Format-PriceFen $price.Fen), $newOriginal) -ForegroundColor Yellow
+    $confirm = (Read-Host "确认提交?输入 y").Trim()
+    if ($confirm -ne "y") { Write-Host "已取消"; return }
+
+    $resp = Call "POST" "/admin/pricing" @{
+        product = $product
+        price_fen = $price.Fen
+        original_fen = $original.Fen
+    }
     if ($resp -and $resp.ok) {
-        $org = if ($resp.original_fen -gt 0) { "{0:N2} 元" -f ($resp.original_fen / 100) } else { "不划线" }
-        Write-Host ("已改为 {0:N2} 元 / {1} 天,划线原价 {2}" -f ($resp.price_fen / 100), $resp.period_days, $org) -ForegroundColor Green
+        # 新服务端返回整份定价时，顶层字段始终是年费；必须取本次修改的目标商品。
+        # 旧服务端没有 products，Get-PricingProduct 也只会为 annual 回退到顶层字段。
+        $resultEntry = Get-PricingProduct $resp $product
+        $resultPrice = if ($resultEntry -and $null -ne $resultEntry.price_fen) {
+            $resultEntry.price_fen
+        } else {
+            $price.Fen
+        }
+        $resultOriginal = if ($resultEntry -and $null -ne $resultEntry.original_fen) {
+            $resultEntry.original_fen
+        } else {
+            $original.Fen
+        }
+        $org = if ($resultOriginal -gt 0) { Format-PriceFen $resultOriginal } else { "不划线" }
+        Write-Host ("已修改{0}:售价 {1},划线原价 {2}" -f $productName, (Format-PriceFen $resultPrice), $org) -ForegroundColor Green
         Write-Host "App 端每天启动时最多拉一次新价,老用户界面上的展示价最多滞后一天;" -ForegroundColor DarkGray
         Write-Host "但下单时现读服务端,收的钱永远是这个新价。" -ForegroundColor DarkGray
     }
@@ -267,6 +391,53 @@ function Invoke-Pricing {
         Write-Host "失败: 划线原价低于售价,这样就成了'原价更便宜'的反向促销——多半是填反了" -ForegroundColor Red
     }
     else { Show-Error $resp }
+}
+
+function Invoke-PricingCli($arg1, $arg2, $arg3) {
+    if (-not $arg1) { return (Call "GET" "/v1/pricing" $null) }
+
+    $product = "annual"
+    $priceText = $arg1
+    $originalText = $arg2
+    if ($arg1 -in @("annual", "lifetime")) {
+        $product = $arg1.ToLowerInvariant()
+        $priceText = $arg2
+        $originalText = $arg3
+    }
+
+    $price = Convert-YuanToFen $priceText $false
+    $original = Convert-YuanToFen $originalText $true
+    if (-not $price.Ok -or $price.Fen -le 0) {
+        Write-Host "错误:售价必须是大于 0、最多两位小数的金额" -ForegroundColor Red
+        $script:PricingCliInvalid = $true
+        return $null
+    }
+    if (-not $original.Ok) {
+        Write-Host "错误:划线原价必须是非负、最多两位小数的金额" -ForegroundColor Red
+        $script:PricingCliInvalid = $true
+        return $null
+    }
+    if ($original.Fen -gt 0 -and $original.Fen -le $price.Fen) {
+        Write-Host "错误:划线原价只能为 0 / 省略,或严格大于售价" -ForegroundColor Red
+        $script:PricingCliInvalid = $true
+        return $null
+    }
+
+    if ($product -eq "lifetime") {
+        # 旧服务端会忽略 product 并按年费改价，写永久价前必须先确认新协议存在。
+        $pricingProtocol = Call "GET" "/v1/pricing" $null
+        if (-not (Test-LifetimePricingProtocol $pricingProtocol)) {
+            Write-Host "错误:当前服务端不支持永久会员定价,已拒绝提交。请先升级服务端。" -ForegroundColor Red
+            $script:PricingCliInvalid = $true
+            return $null
+        }
+    }
+
+    return (Call "POST" "/admin/pricing" @{
+        product = $product
+        price_fen = $price.Fen
+        original_fen = $original.Fen
+    })
 }
 
 # ---------------------------------------------------------------- App 更新管理
@@ -603,9 +774,8 @@ if ($Cmd) {
         "unrevoke" { Call "POST" "/admin/unrevoke" @{ code = $A1 } }
         "expiry" { Call "POST" "/admin/expiry" @{ code = $A1; days = [int]$A2 } }
         "pricing" {
-            # 无参 = 查当前定价;有参 = 改价(单位:元)
-            if ($A1) { Call "POST" "/admin/pricing" @{ price_fen = [int][math]::Round([double]$A1 * 100); original_fen = if ($A2) { [int][math]::Round([double]$A2 * 100) } else { 0 } } }
-            else { Call "GET" "/v1/pricing" $null }
+            # 无参 = 查两种定价。旧的 "pricing 售价 原价" 仍修改年费。
+            Invoke-PricingCli $A1 $A2 $A3
         }
         "update" { Call "GET" "/admin/update" $null }
         "update-validate" { Call "POST" "/admin/update/validate" @{} }
@@ -613,6 +783,7 @@ if ($Cmd) {
         default { Write-Error "未知命令: $Cmd(可用: new / list / unbind / revoke / unrevoke / pricing / update / update-validate / update-stats)"; exit 1 }
     }
     if ($resp) { $resp | ConvertTo-Json -Depth 6 }
+    if ($Cmd -eq "pricing" -and ($script:PricingCliInvalid -or -not $resp -or -not $resp.ok)) { exit 1 }
     exit 0
 }
 

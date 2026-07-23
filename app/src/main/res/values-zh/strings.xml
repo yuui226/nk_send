@@ -174,18 +174,30 @@
     <string name="unlock">解锁</string>
     <string name="enter_code">输入激活码</string>
     <string name="tier_free">免费</string>
+    <string name="tier_feature">功能</string>
+    <string name="tier_annual">高级版</string>
+    <string name="tier_lifetime">永久版</string>
     <string name="compare_transfer">传输</string>
-    <string name="compare_transfer_free">%1$d 个/天</string>
-    <string name="compare_filesize">单文件大小</string>
+    <string name="compare_transfer_free">%1$d/天</string>
+    <string name="compare_filesize">文件大小</string>
     <string name="compare_filesize_free">%1$d MB</string>
     <string name="compare_remote">遥控 · 监看</string>
     <string name="compare_remote_free">%1$d 分钟/天</string>
     <string name="compare_unlimited">无限</string>
+    <string name="compare_duration">时效</string>
+    <string name="duration_free">长期免费</string>
+    <string name="duration_days">%1$d 天</string>
+    <string name="duration_lifetime">永久</string>
+    <string name="plan_annual">年费高级版</string>
+    <string name="plan_lifetime">永久高级版</string>
+    <string name="plan_unavailable">未开放</string>
+    <string name="plan_lifetime_unavailable">永久版暂未开放</string>
+    <string name="buy_annual_cta">购买年费高级版 · %1$s · %2$d 天</string>
+    <string name="buy_lifetime_cta">购买永久高级版 · %1$s · 永久</string>
     <string name="price_promo_tag">限时特惠</string>
     <!-- 价格单位按语言拼，金额本身是常量（见 PRO_PRICE）。 -->
     <string name="price_per_year">%1$s/年</string>
     <string name="pro_price_per_day">≈%1$s/天</string>
-    <string name="pro_perks">一年有效 · 随时可续 · 免费更新</string>
     <string name="quota_left_hint">今日剩余额度 %1$d/%2$d</string>
     <string name="transfer_limit_reached">今日额度已用完，请解锁高级版</string>
     <string name="transfer_size_limit">超过 %1$d MB，请解锁高级版</string>
@@ -196,6 +208,10 @@
     <string name="purchase_loading">正在创建订单…</string>
     <string name="purchase_qr_loading">正在生成支付二维码…</string>
     <string name="purchase_wechat_title">微信扫码支付</string>
+    <string name="purchase_annual_title">年费高级版 · 微信扫码支付</string>
+    <string name="purchase_lifetime_title">永久高级版 · 微信扫码支付</string>
+    <string name="purchase_locked_annual">本单 %1$s · %2$d 天</string>
+    <string name="purchase_locked_lifetime">本单 %1$s · 永久</string>
     <string name="purchase_scan_hint">请到微信扫相册中的二维码付款</string>
     <string name="purchase_save_qr">保存到相册</string>
     <string name="purchase_saved">✓ 已保存到相册</string>
@@ -209,7 +225,7 @@
     <!-- 订阅到期（连接页续费按钮/弹窗 + 首页提示条） -->
     <string name="sub_expires_on">%1$s 到期</string>
     <string name="renew_action">续费</string>
-    <string name="renew_carry_over">将在原到期时间追加 365 天</string>
+    <string name="renew_or_upgrade">续费或升级</string>
     <string name="sub_expired_renew">高级版已到期，续费继续使用</string>
     <plurals name="sub_days_left">
         <item quantity="other">剩 %1$d 天到期</item>
@@ -221,6 +237,7 @@
     <string name="purchase_opening_alipay">正在打开支付宝…</string>
     <string name="purchase_waiting">在上方页面完成支付，到账后自动激活。</string>
     <string name="purchase_activated">🎉 购买成功 · 高级版已解锁</string>
+    <string name="purchase_lifetime_activated">🎉 购买成功 · 永久高级版已解锁</string>
     <string name="purchase_restored">🎉 本设备已购买过 · 已免费恢复,未重复扣款</string>
     <string name="restore_action">恢复授权</string>
     <string name="restore_restoring">恢复中…</string>
@@ -235,6 +252,8 @@
     <string name="err_purchase_no_network">需要连接互联网</string>
     <string name="err_purchase_unreachable">无法连接服务器。若当前连着相机 Wi-Fi，请先断开，用有外网的网络重试。</string>
     <string name="err_purchase_failed">下单失败，请稍后重试或联系客服。</string>
+    <string name="err_purchase_product_mismatch">订单商品与所选方案不一致，已停止支付。请返回后重新选择。</string>
+    <string name="purchase_back_to_plans">返回选择方案</string>
 
     <!-- 检查更新（设置页脚） -->
     <string name="check_update">检查更新</string>

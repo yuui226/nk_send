@@ -184,6 +184,7 @@ object LicenseManager {
     fun revertToFree() {
         prefs.edit().remove("token").remove("code").remove("last_renew")
             .remove("pending_order")   // 上一轮购买的残留单号,降级后已无意义
+            .remove("pending_order_product")
             .remove("sub_expired")
             .apply()
         _isPro.value = false
@@ -362,39 +363,122 @@ object LicenseManager {
     private const val PRICE_REFRESH_OPEN_MS = 60_000L
 
     /** [originalFen] 为 0 表示不划线;[priceFen] 恒 > 0。 */
-    data class Pricing(val priceFen: Int, val originalFen: Int, val periodDays: Int)
+    enum class ProductId(val wireValue: String) {
+        ANNUAL("annual"),
+        LIFETIME("lifetime");
 
-    private val _pricing = MutableStateFlow(
-        Pricing(FALLBACK_PRICE_FEN, FALLBACK_ORIGINAL_FEN, FALLBACK_PERIOD_DAYS)
+        companion object {
+            /** Old servers and old pending orders have no product field and always mean annual. */
+            fun fromWire(value: String?): ProductId? {
+                if (value.isNullOrBlank()) return ANNUAL
+                return entries.firstOrNull { it.wireValue == value.lowercase(Locale.US) }
+            }
+        }
+    }
+
+    data class ProductPricing(
+        val priceFen: Int,
+        val originalFen: Int,
+        val periodDays: Int,
+        val available: Boolean,
     )
+
+    data class Pricing(
+        val annual: ProductPricing,
+        val lifetime: ProductPricing,
+    ) {
+        fun forProduct(product: ProductId): ProductPricing =
+            if (product == ProductId.ANNUAL) annual else lifetime
+    }
+
+    private fun fallbackPricing() = Pricing(
+        annual = ProductPricing(
+            FALLBACK_PRICE_FEN,
+            FALLBACK_ORIGINAL_FEN,
+            FALLBACK_PERIOD_DAYS,
+            available = true,
+        ),
+        // Never compile a placeholder lifetime price into the APK.
+        lifetime = ProductPricing(0, 0, 0, available = false),
+    )
+
+    private val _pricing = MutableStateFlow(fallbackPricing())
     val pricing: StateFlow<Pricing> get() = _pricing
 
     private fun loadCachedPricing() {
-        val p = prefs.getInt("price_fen", 0)
-        if (p > 0) {
-            _pricing.value = Pricing(
-                p,
+        val annualPrice = prefs.getInt("price_fen", 0)
+        val annual = if (annualPrice > 0) {
+            ProductPricing(
+                annualPrice,
                 prefs.getInt("price_original_fen", 0),
-                prefs.getInt("price_period_days", FALLBACK_PERIOD_DAYS),
+                prefs.getInt("price_period_days", FALLBACK_PERIOD_DAYS).coerceAtLeast(1),
+                available = true,
             )
+        } else {
+            fallbackPricing().annual
         }
+        val lifetimePrice = prefs.getInt("lifetime_price_fen", 0)
+        val lifetimeAvailable = prefs.getBoolean("lifetime_available", false) && lifetimePrice > 0
+        _pricing.value = Pricing(
+            annual,
+            ProductPricing(
+                if (lifetimeAvailable) lifetimePrice else 0,
+                if (lifetimeAvailable) prefs.getInt("lifetime_original_fen", 0) else 0,
+                0,
+                lifetimeAvailable,
+            ),
+        )
     }
 
     /** 距上次成功拉价不足 [minAgeMs] 就跳过。拉不到就继续用缓存,不清不改。 */
     private suspend fun fetchPricing(minAgeMs: Long) {
-        if (System.currentTimeMillis() - prefs.getLong("price_at", 0L) < minAgeMs) return
+        // An APK upgrade may have a fresh legacy annual-only cache. Fetch once immediately so
+        // the newly introduced lifetime product is not hidden by the old cache timestamp.
+        if (prefs.getInt("pricing_catalog_version", 0) >= 2 &&
+            System.currentTimeMillis() - prefs.getLong("price_at", 0L) < minAgeMs
+        ) return
         val resp = get("/v1/pricing") ?: return
-        val p = resp.optInt("price_fen", 0)
-        if (!resp.optBoolean("ok") || p <= 0) return
-        val original = resp.optInt("original_fen", 0)
-        val days = resp.optInt("period_days", FALLBACK_PERIOD_DAYS).coerceAtLeast(1)
+        if (!resp.optBoolean("ok")) return
+        val products = resp.optJSONObject("products")
+        val annualJson = products?.optJSONObject(ProductId.ANNUAL.wireValue)
+        val annualPrice = annualJson?.optInt("price_fen", 0)
+            ?.takeIf { it > 0 }
+            ?: resp.optInt("price_fen", 0)
+        if (annualPrice <= 0) return
+        val annualOriginal = annualJson?.optInt("original_fen", 0)
+            ?: resp.optInt("original_fen", 0)
+        val annualDays = (annualJson?.optInt("period_days", FALLBACK_PERIOD_DAYS)
+            ?: resp.optInt("period_days", FALLBACK_PERIOD_DAYS)).coerceAtLeast(1)
+        val lifetimeJson = products?.optJSONObject(ProductId.LIFETIME.wireValue)
+        val lifetimePrice = lifetimeJson?.optInt("price_fen", 0) ?: 0
+        val lifetimeAvailable =
+            lifetimeJson?.optBoolean("available", false) == true && lifetimePrice > 0
+        val catalog = Pricing(
+            annual = ProductPricing(
+                annualPrice,
+                annualOriginal,
+                annualDays,
+                available = annualJson?.optBoolean("available", true) != false,
+            ),
+            lifetime = ProductPricing(
+                if (lifetimeAvailable) lifetimePrice else 0,
+                if (lifetimeAvailable) lifetimeJson?.optInt("original_fen", 0) ?: 0 else 0,
+                0,
+                lifetimeAvailable,
+            ),
+        )
         prefs.edit()
-            .putInt("price_fen", p)
-            .putInt("price_original_fen", original)
-            .putInt("price_period_days", days)
+            // Preserve the old annual cache keys for seamless APK upgrades.
+            .putInt("price_fen", catalog.annual.priceFen)
+            .putInt("price_original_fen", catalog.annual.originalFen)
+            .putInt("price_period_days", catalog.annual.periodDays)
+            .putBoolean("lifetime_available", catalog.lifetime.available)
+            .putInt("lifetime_price_fen", catalog.lifetime.priceFen)
+            .putInt("lifetime_original_fen", catalog.lifetime.originalFen)
+            .putInt("pricing_catalog_version", 2)
             .putLong("price_at", System.currentTimeMillis())
             .apply()
-        _pricing.value = Pricing(p, original, days)
+        _pricing.value = catalog
     }
 
     /** 高级版弹窗打开时调:他正要花钱,别让他看着隔夜的价。挂在 IO 上,不阻塞开窗。 */
@@ -410,8 +494,8 @@ object LicenseManager {
     }
 
     /** 年费摊到每天(分),四舍五入;不足 1 分返回 0,由 UI 决定整行不显示。 */
-    fun perDayFen(p: Pricing): Int =
-        Math.round(p.priceFen.toDouble() / p.periodDays).toInt()
+    fun perDayFen(p: ProductPricing): Int =
+        if (p.periodDays > 0) Math.round(p.priceFen.toDouble() / p.periodDays).toInt() else 0
 
     // ---------------------------------------------------------------- 购买(自动售码)
 
@@ -426,47 +510,86 @@ object LicenseManager {
             val order: String,
             val payUrl: String?,
             val payQr: String?,
+            val product: ProductId,
             val renew: Boolean = false,
             /** 本单锁定的实收价(分,0 = 服务器没给)。付款页显示它,不显示缓存的展示价。 */
             val priceFen: Int = 0
         ) : OrderResult()
         /** 已支付;code 为服务器发放的激活码(尚未绑定本机,走 [activate])。 */
-        data class Paid(val order: String, val code: String, val renew: Boolean = false) : OrderResult()
+        data class Paid(
+            val order: String,
+            val code: String,
+            val product: ProductId,
+            val renew: Boolean = false,
+            val priceFen: Int = 0,
+        ) : OrderResult()
         object Unreachable : OrderResult()
-        data class Failed(val err: String) : OrderResult()
+        data class Failed(
+            val err: String,
+            val pendingProduct: ProductId? = null,
+        ) : OrderResult()
     }
 
     /** 上次未走完的订单号:付款后 App 被杀等场景,重开购买页凭它续单不丢码。 */
-    fun pendingOrder(): String? = prefs.getString("pending_order", null)
+    data class PendingOrder(val order: String, val product: ProductId?)
+
+    fun pendingOrder(): PendingOrder? {
+        val order = prefs.getString("pending_order", null) ?: return null
+        val product = prefs.getString("pending_order_product", null)?.let(ProductId::fromWire)
+        return PendingOrder(order, product)
+    }
 
     /** 购买闭环走完(激活成功)后清除续单记录。 */
     fun clearPendingOrder() {
-        prefs.edit().remove("pending_order").apply()
+        prefs.edit().remove("pending_order").remove("pending_order_product").apply()
     }
 
     /**
      * [renew] 为真 = 给现有码续期(服务器按 max(now, 原到期日) + 1 年计,提前续不吃掉剩余时间),
      * 否则是新购。到期后重新购买也走 renew:真——服务器给他续原来那个码,而不是再发一个。
      */
-    suspend fun createOrder(renew: Boolean = false): OrderResult = withContext(Dispatchers.IO) {
+    suspend fun createOrder(
+        product: ProductId,
+        renew: Boolean = false,
+    ): OrderResult = withContext(Dispatchers.IO) {
         val resp = post("/v1/order/create", JSONObject().apply {
             put("fp", fingerprint)
+            put("product", product.wireValue)
             if (renew) put("renew", true)
         }) ?: return@withContext OrderResult.Unreachable
+        val responseProduct = ProductId.fromWire(resp.optString("product"))
+            ?: return@withContext OrderResult.Failed("BAD_PRODUCT")
         // 防重复购买:服务器认出本机已是某码的绑定设备 → 直接返码免费恢复,不再收钱。
         if (resp.optBoolean("already_pro")) {
             val owned = resp.optString("code")
-            return@withContext if (owned.isNotEmpty()) OrderResult.Paid("", owned)
+            return@withContext if (owned.isNotEmpty()) {
+                OrderResult.Paid(
+                    "",
+                    owned,
+                    responseProduct,
+                    resp.optBoolean("renew"),
+                    resp.optInt("price_fen", 0),
+                )
+            }
             else OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
         }
         val order = resp.optString("order")
         if (!resp.optBoolean("ok") || order.isEmpty())
-            return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
-        prefs.edit().putString("pending_order", order).apply()
+            return@withContext OrderResult.Failed(
+                resp.optString("err", "BAD_RESPONSE"),
+                resp.optString("pending_product")
+                    .takeIf { it.isNotBlank() }
+                    ?.let(ProductId::fromWire),
+            )
+        prefs.edit()
+            .putString("pending_order", order)
+            .putString("pending_order_product", responseProduct.wireValue)
+            .apply()
         OrderResult.Pending(
             order,
             resp.optString("pay_url").takeIf { it.isNotEmpty() },
             resp.optString("pay_qr").takeIf { it.isNotEmpty() },
+            responseProduct,
             resp.optBoolean("renew"),
             resp.optInt("price_fen", 0),
         )
@@ -482,12 +605,26 @@ object LicenseManager {
             }) ?: return@withContext OrderResult.Unreachable
             if (!resp.optBoolean("ok"))
                 return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
-            if (resp.optString("status") == "paid")
-                OrderResult.Paid(order, resp.optString("code"), resp.optBoolean("renew"))
-            else OrderResult.Pending(
+            val product = ProductId.fromWire(resp.optString("product"))
+                ?: return@withContext OrderResult.Failed("BAD_PRODUCT")
+            if (prefs.getString("pending_order", null) == order) {
+                prefs.edit().putString("pending_order_product", product.wireValue).apply()
+            }
+            if (resp.optString("status") == "paid") {
+                val code = resp.optString("code")
+                if (code.isEmpty()) return@withContext OrderResult.Failed("BAD_RESPONSE")
+                OrderResult.Paid(
+                    order,
+                    code,
+                    product,
+                    resp.optBoolean("renew"),
+                    resp.optInt("price_fen", 0),
+                )
+            } else OrderResult.Pending(
                 order,
                 resp.optString("pay_url").takeIf { it.isNotEmpty() },
                 resp.optString("pay_qr").takeIf { it.isNotEmpty() },
+                product,
                 resp.optBoolean("renew"),
                 resp.optInt("price_fen", 0),
             )
