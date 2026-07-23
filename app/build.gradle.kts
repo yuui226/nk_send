@@ -33,8 +33,8 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.36"
+        versionCode = 9
+        versionName = "1.40"
     }
 
     buildTypes {
@@ -96,6 +96,7 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("junit:junit:4.13.2")
 }
 
 // 手动安装到设备的便捷任务：./gradlew installToDevice（构建 release 后按需调用，

@@ -7,18 +7,26 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.matchParentSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -26,14 +34,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.ui.screen.GlassButton
+import com.ztransfer.ui.screen.GlassSurface
+import com.ztransfer.ui.theme.AppTheme
 import java.util.Locale
 
 /** 全局更新弹窗。硬更新不可关闭；自动更新失败时转为蓝奏云手动更新。 */
@@ -47,7 +64,9 @@ fun AppUpdateHost(
     val context = LocalContext.current
     val activity = context.findActivity() ?: return
     var installerStarted by remember(info.versionCode) { mutableStateOf(false) }
+    var inlineHint by remember(info.versionCode) { mutableStateOf<String?>(null) }
     val manualCopiedHint = stringResource(R.string.update_manual_copied)
+    val disconnectCameraHint = stringResource(R.string.update_disconnect_camera_wifi)
 
     val unknownSourcesLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -87,18 +106,20 @@ fun AppUpdateHost(
 
     fun startDownload() {
         if (cameraUsesWifi) {
-            Toast.makeText(context, R.string.update_disconnect_camera_wifi, Toast.LENGTH_SHORT).show()
+            inlineHint = disconnectCameraHint
             return
         }
+        inlineHint = null
         AppUpdateManager.download(info)
     }
 
     fun openFallbackDownload() {
         if (info.fallbackUrl.isBlank()) return
         if (cameraUsesWifi) {
-            Toast.makeText(context, R.string.update_disconnect_camera_wifi, Toast.LENGTH_SHORT).show()
+            inlineHint = disconnectCameraHint
             return
         }
+        inlineHint = null
         copyManualUpdateInfo()
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.fallbackUrl))) }
     }
@@ -108,8 +129,15 @@ fun AppUpdateHost(
     } else {
         stringResource(R.string.update_available_title)
     }
+    val colors = AppTheme.colors
+    val panelShape = RoundedCornerShape(22.dp)
+    val showStatus = inlineHint != null ||
+        state is AppUpdateManager.UiState.Resolving ||
+        state is AppUpdateManager.UiState.Downloading ||
+        state is AppUpdateManager.UiState.Verifying ||
+        state is AppUpdateManager.UiState.Failed
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = {
             if (!required && (state is AppUpdateManager.UiState.Available || state is AppUpdateManager.UiState.Failed)) {
                 AppUpdateManager.postpone(info)
@@ -118,89 +146,272 @@ fun AppUpdateHost(
         properties = DialogProperties(
             dismissOnBackPress = !required,
             dismissOnClickOutside = !required
-        ),
-        title = { Text(title) },
-        text = {
-            Column {
-                Text(stringResource(R.string.update_version, info.versionName))
-                if (info.sizeBytes > 0) {
+        )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = panelShape,
+            color = colors.glassSurfaceHeavy,
+            border = BorderStroke(1.dp, colors.glassPanelBorder),
+            shadowElevation = 10.dp,
+            tonalElevation = 0.dp
+        ) {
+            Box {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(colors.glassSheen, Color.Transparent)
+                            )
+                        )
+                )
+                Column(Modifier.padding(20.dp)) {
                     Text(
-                        stringResource(R.string.update_size, formatSize(info.sizeBytes)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.onBackground
                     )
-                }
-                if (info.notes.isNotBlank()) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(info.notes)
-                }
-                Spacer(Modifier.height(12.dp))
-                when (val current = state) {
-                    is AppUpdateManager.UiState.Available -> {
-                        if (!required) {
-                            TextButton(onClick = { AppUpdateManager.ignoreVersion(info) }) {
-                                Text(stringResource(R.string.update_ignore_version))
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        stringResource(R.string.update_version, info.versionName),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = colors.onBackground
+                    )
+                    if (info.sizeBytes > 0) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            stringResource(R.string.update_size, formatSize(info.sizeBytes)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant
+                        )
+                    }
+                    if (info.notes.isNotBlank()) {
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            info.notes,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onBackground
+                        )
+                    }
+                    if (showStatus) {
+                        Spacer(Modifier.height(14.dp))
+                        GlassSurface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            panel = true,
+                            tint = if (inlineHint != null || state is AppUpdateManager.UiState.Failed) {
+                                colors.statusError.copy(alpha = 0.08f)
+                            } else {
+                                Color.Transparent
+                            }
+                        ) {
+                            Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+                                if (inlineHint != null) {
+                                    Text(
+                                        inlineHint!!,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.statusError
+                                    )
+                                } else {
+                                    when (val current = state) {
+                                        is AppUpdateManager.UiState.Resolving -> Text(
+                                            stringResource(R.string.update_resolving),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.onSurfaceVariant
+                                        )
+                                        is AppUpdateManager.UiState.Downloading -> {
+                                            val progress = current.progress
+                                            if (progress == null) {
+                                                LinearProgressIndicator(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    color = colors.accentBlue,
+                                                    trackColor = colors.glassPanelBorder
+                                                )
+                                            } else {
+                                                LinearProgressIndicator(
+                                                    progress = progress / 100f,
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    color = colors.accentBlue,
+                                                    trackColor = colors.glassPanelBorder
+                                                )
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                if (progress == null) {
+                                                    stringResource(R.string.update_downloading)
+                                                } else {
+                                                    stringResource(
+                                                        R.string.update_downloading_percent,
+                                                        progress
+                                                    )
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colors.onSurfaceVariant
+                                            )
+                                        }
+                                        is AppUpdateManager.UiState.Verifying -> Text(
+                                            stringResource(R.string.update_verifying),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.onSurfaceVariant
+                                        )
+                                        is AppUpdateManager.UiState.Failed -> {
+                                            val failure = failureText(current.failure)
+                                            Text(
+                                                if (info.fallbackUrl.isNotBlank()) {
+                                                    stringResource(
+                                                        R.string.update_failure_manual,
+                                                        failure,
+                                                        manualCopiedHint
+                                                    )
+                                                } else {
+                                                    failure
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colors.statusError
+                                            )
+                                        }
+                                        else -> Unit
+                                    }
+                                }
                             }
                         }
                     }
-                    is AppUpdateManager.UiState.Resolving -> Text(stringResource(R.string.update_resolving))
-                    is AppUpdateManager.UiState.Downloading -> {
-                        val p = current.progress
-                        if (p == null) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        else LinearProgressIndicator(progress = p / 100f, modifier = Modifier.fillMaxWidth())
-                        Spacer(Modifier.height(8.dp))
-                        Text(if (p == null) stringResource(R.string.update_downloading) else stringResource(R.string.update_downloading_percent, p))
-                    }
-                    is AppUpdateManager.UiState.Verifying -> Text(stringResource(R.string.update_verifying))
-                    is AppUpdateManager.UiState.Ready -> Text(stringResource(R.string.update_ready))
-                    is AppUpdateManager.UiState.Failed -> {
-                        val manualUpdate = info.fallbackUrl.isNotBlank()
-                        Text(
-                            if (manualUpdate) manualCopiedHint else failureText(current.failure),
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
-                    else -> Unit
-                }
-            }
-        },
-        confirmButton = {
-            when (val current = state) {
-                is AppUpdateManager.UiState.Available -> TextButton(
-                    onClick = { startDownload() }
-                ) { Text(stringResource(R.string.update_now)) }
-                is AppUpdateManager.UiState.Failed -> when {
-                    info.fallbackUrl.isNotBlank() -> TextButton(onClick = { openFallbackDownload() }) {
-                        Text(stringResource(R.string.update_open_download_page))
-                    }
-                    current.failure != AppUpdateManager.Failure.INSTALLER_UNAVAILABLE ->
-                        TextButton(onClick = { startDownload() }) {
-                            Text(stringResource(R.string.retry))
+
+                    Spacer(Modifier.height(18.dp))
+                    when (val current = state) {
+                        is AppUpdateManager.UiState.Available -> {
+                            if (required) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    UpdateGlassButton(
+                                        label = stringResource(R.string.update_now),
+                                        onClick = ::startDownload,
+                                        prominent = true
+                                    )
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    UpdateGlassButton(
+                                        label = stringResource(R.string.update_ignore_version),
+                                        onClick = { AppUpdateManager.ignoreVersion(info) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    UpdateGlassButton(
+                                        label = stringResource(R.string.update_later),
+                                        onClick = { AppUpdateManager.postpone(info) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    UpdateGlassButton(
+                                        label = stringResource(R.string.update_now),
+                                        onClick = ::startDownload,
+                                        modifier = Modifier.weight(1f),
+                                        prominent = true
+                                    )
+                                }
+                            }
                         }
-                }
-                is AppUpdateManager.UiState.Ready -> TextButton(onClick = {
-                    val permission = AppUpdateManager.unknownSourcesIntent()
-                    if (permission != null) unknownSourcesLauncher.launch(permission)
-                    else AppUpdateManager.launchInstaller(activity, current)
-                }) { Text(stringResource(R.string.update_install)) }
-                else -> Unit
-            }
-        },
-        dismissButton = {
-            if (!required) {
-                when (state) {
-                    is AppUpdateManager.UiState.Available,
-                    is AppUpdateManager.UiState.Failed -> TextButton(onClick = { AppUpdateManager.postpone(info) }) {
-                        Text(stringResource(R.string.update_later))
+                        is AppUpdateManager.UiState.Failed -> {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(
+                                    8.dp,
+                                    Alignment.End
+                                )
+                            ) {
+                                if (!required) {
+                                    UpdateGlassButton(
+                                        label = stringResource(R.string.update_later),
+                                        onClick = { AppUpdateManager.postpone(info) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                when {
+                                    info.fallbackUrl.isNotBlank() -> UpdateGlassButton(
+                                        label = stringResource(R.string.update_open_download_page),
+                                        onClick = ::openFallbackDownload,
+                                        modifier = if (required) Modifier else Modifier.weight(1f),
+                                        prominent = true
+                                    )
+                                    current.failure != AppUpdateManager.Failure.INSTALLER_UNAVAILABLE ->
+                                        UpdateGlassButton(
+                                            label = stringResource(R.string.retry),
+                                            onClick = ::startDownload,
+                                            modifier = if (required) Modifier else Modifier.weight(1f),
+                                            prominent = true
+                                        )
+                                }
+                            }
+                        }
+                        is AppUpdateManager.UiState.Ready -> Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            UpdateGlassButton(
+                                label = stringResource(R.string.update_install),
+                                onClick = {
+                                    val permission = AppUpdateManager.unknownSourcesIntent()
+                                    if (permission != null) {
+                                        unknownSourcesLauncher.launch(permission)
+                                    } else {
+                                        AppUpdateManager.launchInstaller(activity, current)
+                                    }
+                                },
+                                prominent = true
+                            )
+                        }
+                        is AppUpdateManager.UiState.Downloading -> if (!required) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                UpdateGlassButton(
+                                    label = stringResource(R.string.cancel),
+                                    onClick = { AppUpdateManager.cancelDownload(info) }
+                                )
+                            }
+                        }
+                        else -> Unit
                     }
-                    is AppUpdateManager.UiState.Downloading -> TextButton(onClick = { AppUpdateManager.cancelDownload(info) }) {
-                        Text(stringResource(R.string.cancel))
-                    }
-                    else -> Unit
                 }
             }
         }
-    )
+    }
+}
+
+@Composable
+private fun UpdateGlassButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    prominent: Boolean = false
+) {
+    val colors = AppTheme.colors
+    GlassButton(
+        onClick = onClick,
+        modifier = modifier.height(40.dp),
+        shape = RoundedCornerShape(14.dp),
+        contentPadding = PaddingValues(horizontal = 11.dp, vertical = 9.dp),
+        panel = !prominent,
+        active = prominent,
+        activeColor = colors.accentBlue,
+        showBorder = false,
+        showSheen = false
+    ) {
+        Text(
+            label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onBackground
+        )
+    }
 }
 
 @Composable

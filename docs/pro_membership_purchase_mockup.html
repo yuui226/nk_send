@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ZTransfer 高级版购买弹窗演示</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090d18;
+      --surface: rgba(20, 27, 44, .88);
+      --surface-2: rgba(255, 255, 255, .055);
+      --line: rgba(255, 255, 255, .11);
+      --text: #f5f7fb;
+      --muted: #9aa4b6;
+      --gold: #f5c85b;
+      --gold-2: #ffdc83;
+      --gold-soft: rgba(245, 200, 91, .13);
+      --blue: #72b7ff;
+      --green: #71d7ad;
+      --danger: #ff6b6b;
+      --shadow: 0 30px 90px rgba(0, 0, 0, .55);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 18% 12%, rgba(56, 114, 214, .19), transparent 30rem),
+        radial-gradient(circle at 88% 82%, rgba(245, 200, 91, .1), transparent 26rem),
+        var(--bg);
+    }
+
+    button, input { font: inherit; }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 34px 0 48px;
+    }
+
+    .page-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      margin: 0 0 7px;
+      color: var(--gold);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(25px, 4vw, 40px);
+      letter-spacing: -.04em;
+    }
+
+    .subtitle {
+      max-width: 680px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .app-preview {
+      position: relative;
+      min-height: 810px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, .08);
+      border-radius: 30px;
+      background:
+        linear-gradient(160deg, rgba(20, 29, 50, .93), rgba(8, 12, 23, .97)),
+        var(--bg);
+      box-shadow: var(--shadow);
+    }
+
+    .app-preview::before {
+      content: "";
+      position: absolute;
+      inset: -25% 0 auto 45%;
+      height: 520px;
+      border-radius: 50%;
+      background: rgba(74, 132, 228, .14);
+      filter: blur(55px);
+    }
+
+    .fake-toolbar {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 68px;
+      padding: 0 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, .06);
+      color: rgba(255, 255, 255, .72);
+      font-size: 14px;
+    }
+
+    .fake-toolbar strong { color: var(--text); }
+
+    .fake-cards {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      padding: 24px;
+      opacity: .46;
+    }
+
+    .fake-card {
+      height: 92px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, .04);
+    }
+
+    .scrim {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 26px 18px;
+      background: rgba(3, 6, 12, .58);
+      backdrop-filter: blur(8px);
+    }
+
+    .dialog {
+      position: relative;
+      width: min(100%, 540px);
+      max-height: calc(100vh - 28px);
+      overflow-x: hidden;
+      overflow-y: auto;
+      border: 1px solid rgba(255, 255, 255, .14);
+      border-radius: 26px;
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, .075), transparent 28%),
+        rgba(17, 23, 38, .96);
+      box-shadow: 0 26px 80px rgba(0, 0, 0, .55);
+    }
+
+    .dialog::before {
+      content: "";
+      position: absolute;
+      inset: 0 10% auto;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .5), transparent);
+    }
+
+    .dialog-inner { padding: 20px; }
+
+    .dialog-head {
+      display: flex;
+      gap: 13px;
+      align-items: center;
+    }
+
+    .crown {
+      display: grid;
+      flex: 0 0 44px;
+      width: 44px;
+      height: 44px;
+      place-items: center;
+      border: 1px solid rgba(245, 200, 91, .22);
+      border-radius: 50%;
+      color: var(--gold);
+      background: var(--gold-soft);
+      box-shadow: 0 0 28px rgba(245, 200, 91, .08);
+      font-size: 20px;
+    }
+
+    .dialog-title { flex: 1; min-width: 0; }
+
+    .dialog-title h2 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -.02em;
+    }
+
+    .close {
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 50%;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 22px;
+    }
+
+    .comparison {
+      margin-top: 17px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: rgba(255, 255, 255, .035);
+    }
+
+    .compare-row {
+      display: grid;
+      grid-template-columns: minmax(86px, 1.32fr) repeat(3, minmax(66px, 1fr));
+      align-items: center;
+      min-height: 40px;
+      border-top: 1px solid rgba(255, 255, 255, .07);
+    }
+
+    .compare-row:first-child {
+      min-height: 38px;
+      border-top: 0;
+      background: rgba(255, 255, 255, .025);
+    }
+
+    .compare-row > span {
+      padding: 8px 5px;
+      color: #d7dce6;
+      font-size: 12px;
+      line-height: 1.3;
+      text-align: center;
+    }
+
+    .compare-row > span:first-child {
+      padding-left: 12px;
+      color: var(--muted);
+      text-align: left;
+    }
+
+    .compare-row.header > span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .02em;
+    }
+
+    .compare-row.header .yearly,
+    .compare-row.header .lifetime {
+      color: var(--gold);
+    }
+
+    .check {
+      color: #79f2c0 !important;
+      font-size: 12.5px !important;
+      font-weight: 900;
+      letter-spacing: .04em;
+      text-shadow: 0 0 12px rgba(113, 215, 173, .42);
+    }
+    .limit { color: #e8ebf2 !important; }
+
+    .time-row {
+      background: linear-gradient(90deg, transparent, rgba(245, 200, 91, .055));
+    }
+
+    .time-row .yearly,
+    .time-row .lifetime {
+      color: var(--gold-2);
+      font-weight: 800;
+    }
+
+    .time-row .lifetime {
+      font-size: 12.5px;
+      font-weight: 900;
+      letter-spacing: .04em;
+      text-shadow: 0 0 13px rgba(245, 200, 91, .5);
+    }
+
+    .plans-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 15px 1px 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .plans-label strong {
+      color: #e9edf5;
+      font-size: 12px;
+    }
+
+    .plans {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .plan {
+      position: relative;
+      min-height: 107px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      color: var(--text);
+      background: rgba(255, 255, 255, .035);
+      text-align: left;
+      cursor: pointer;
+      transition: transform .15s ease, border-color .15s ease, background .15s ease;
+    }
+
+    .plan:hover { transform: translateY(-1px); }
+
+    .plan.selected {
+      border-color: rgba(245, 200, 91, .7);
+      background:
+        radial-gradient(circle at 100% 0, rgba(245, 200, 91, .17), transparent 55%),
+        rgba(245, 200, 91, .075);
+      box-shadow: inset 0 0 0 1px rgba(245, 200, 91, .1);
+    }
+
+    .plan-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .plan-name {
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .radio {
+      width: 16px;
+      height: 16px;
+      border: 1px solid rgba(255, 255, 255, .27);
+      border-radius: 50%;
+    }
+
+    .selected .radio {
+      border: 4px solid var(--gold);
+      background: #332a16;
+    }
+
+    .price-line {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+      margin-top: 9px;
+    }
+
+    .price {
+      color: var(--gold-2);
+      font-size: 24px;
+      font-weight: 850;
+      letter-spacing: -.05em;
+    }
+
+    .period {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .original {
+      margin-left: 4px;
+      color: #7f899a;
+      font-size: 10px;
+      text-decoration: line-through;
+    }
+
+    .plan-note {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.35;
+    }
+
+    .tag {
+      position: absolute;
+      top: -8px;
+      right: 11px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      color: #2a210c;
+      background: var(--gold);
+      font-size: 9px;
+      font-weight: 900;
+      box-shadow: 0 5px 16px rgba(245, 200, 91, .2);
+    }
+
+    .cta {
+      width: 100%;
+      min-height: 50px;
+      margin-top: 12px;
+      border: 0;
+      border-radius: 15px;
+      color: #261e0c;
+      background: linear-gradient(135deg, #ffdf88, #eeb83d);
+      box-shadow: 0 12px 30px rgba(232, 176, 48, .19);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 900;
+      transition: transform .15s ease, filter .15s ease;
+    }
+
+    .cta:hover { filter: brightness(1.05); transform: translateY(-1px); }
+    .cta:active { transform: translateY(0); }
+
+    .cta small {
+      margin-left: 5px;
+      font-size: 11px;
+      font-weight: 700;
+      opacity: .72;
+    }
+
+    .sub-actions {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .sub-actions button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: #c7ceda;
+      background: rgba(255, 255, 255, .035);
+      cursor: pointer;
+      font-size: 10px;
+    }
+
+    .controls {
+      position: sticky;
+      top: 24px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(19, 25, 40, .86);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, .25);
+      backdrop-filter: blur(16px);
+    }
+
+    .controls h3 { margin: 0; font-size: 15px; }
+
+    .controls > p {
+      margin: 7px 0 17px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .field { margin-top: 12px; }
+
+    .field label {
+      display: block;
+      margin-bottom: 6px;
+      color: #cbd2df;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .field input {
+      width: 100%;
+      height: 39px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      outline: 0;
+      color: var(--text);
+      background: rgba(255, 255, 255, .045);
+    }
+
+    .field input:focus { border-color: rgba(245, 200, 91, .7); }
+
+    .controls-note {
+      margin-top: 16px;
+      padding: 11px;
+      border-radius: 12px;
+      color: #c8d0dd;
+      background: rgba(114, 183, 255, .08);
+      font-size: 10px;
+      line-height: 1.55;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 26px;
+      z-index: 10;
+      padding: 10px 15px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--text);
+      background: rgba(20, 27, 44, .96);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 14px);
+      transition: .2s ease;
+      font-size: 12px;
+    }
+
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 860px) {
+      .page { width: min(100% - 20px, 620px); padding-top: 20px; }
+      .page-head { display: block; }
+      .stage { grid-template-columns: 1fr; }
+      .controls { position: static; order: -1; }
+      .app-preview { min-height: 790px; border-radius: 24px; }
+    }
+
+    @media (max-width: 520px) {
+      .page { width: 100%; padding: 0; }
+      .page-head, .controls { display: none; }
+      .app-preview { min-height: 100vh; border: 0; border-radius: 0; }
+      .fake-toolbar { padding: 0 18px; }
+      .scrim { padding: 14px 10px; }
+      .dialog-inner { padding: 17px 14px; }
+      .compare-row { grid-template-columns: minmax(78px, 1.2fr) repeat(3, minmax(59px, 1fr)); }
+      .compare-row > span { font-size: 11px; }
+      .plans { grid-template-columns: 1fr; }
+      .plan { padding: 11px 10px; }
+      .price { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <div>
+        <p class="eyebrow">交互演示 · 待确认后实现</p>
+        <h1>高级版购买弹窗</h1>
+        <p class="subtitle">把年费高级版与永久版作为两个明确商品展示。用户先选方案，再用唯一主按钮下单；按钮始终复述本次购买的金额和权益周期。</p>
+      </div>
+    </header>
+
+    <section class="stage">
+      <div class="app-preview">
+        <div class="fake-toolbar"><strong>ZTransfer</strong><span>连接相机</span></div>
+        <div class="fake-cards"><div class="fake-card"></div><div class="fake-card"></div></div>
+
+        <div class="scrim">
+          <article class="dialog" role="dialog" aria-labelledby="dialog-title">
+            <div class="dialog-inner">
+              <header class="dialog-head">
+                <div class="crown" aria-hidden="true">♛</div>
+                <div class="dialog-title">
+                  <h2 id="dialog-title">解锁高级版</h2>
+                </div>
+                <button class="close" aria-label="关闭">×</button>
+              </header>
+
+              <section class="comparison" aria-label="版本对比">
+                <div class="compare-row header">
+                  <span>功能</span><span>免费版</span><span class="yearly">高级版</span><span class="lifetime">永久版</span>
+                </div>
+                <div class="compare-row">
+                  <span>传输</span><span class="limit">25/天</span><span class="check">无限</span><span class="check">无限</span>
+                </div>
+                <div class="compare-row">
+                  <span>单文件</span><span class="limit">400 MB</span><span class="check">无限</span><span class="check">无限</span>
+                </div>
+                <div class="compare-row">
+                  <span>遥控 · 监看</span><span class="limit">3 分钟/天</span><span class="check">无限</span><span class="check">无限</span>
+                </div>
+                <div class="compare-row time-row">
+                  <span>时效</span><span>长期免费</span><span class="yearly">365 天</span><span class="lifetime">永久</span>
+                </div>
+              </section>
+
+              <div class="plans-label"><strong>选择购买方案</strong></div>
+              <section class="plans" aria-label="购买方案">
+                <button class="plan selected" data-plan="yearly" aria-pressed="true">
+                  <span class="plan-top"><span class="plan-name">高级版 · 年费</span><span class="radio"></span></span>
+                  <span class="price-line">
+                    <span class="price yearly-price">¥19.9</span><span class="period">/ 365 天</span><span class="original yearly-original">¥39.9</span>
+                  </span>
+                  <span class="plan-note yearly-note">约 ¥0.05/天</span>
+                </button>
+
+                <button class="plan" data-plan="lifetime" aria-pressed="false">
+                  <span class="tag">一次买断</span>
+                  <span class="plan-top"><span class="plan-name">永久版</span><span class="radio"></span></span>
+                  <span class="price-line">
+                    <span class="price lifetime-price">¥59.9</span><span class="period">/ 永久</span><span class="original lifetime-original">¥99.9</span>
+                  </span>
+                  <span class="plan-note">一次购买 · 永久使用</span>
+                </button>
+              </section>
+
+              <button class="cta" id="buy-button">购买年费高级版 · ¥19.9 <small>365 天</small></button>
+
+              <footer class="sub-actions">
+                <button>输入激活码</button>
+                <button>恢复授权</button>
+                <button>客服</button>
+              </footer>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <aside class="controls">
+        <h3>演示控制</h3>
+        <p>永久价格尚未确定，下面仅修改本页预览，不代表服务端真实定价。</p>
+        <div class="field">
+          <label for="yearly-price-input">年费会员售价（元）</label>
+          <input id="yearly-price-input" inputmode="decimal" value="19.9">
+        </div>
+        <div class="field">
+          <label for="yearly-original-input">年费划线价（元，0 为不显示）</label>
+          <input id="yearly-original-input" inputmode="decimal" value="39.9">
+        </div>
+        <div class="field">
+          <label for="lifetime-price-input">永久会员售价（元）</label>
+          <input id="lifetime-price-input" inputmode="decimal" value="59.9">
+        </div>
+        <div class="field">
+          <label for="lifetime-original-input">永久划线价（元，0 为不显示）</label>
+          <input id="lifetime-original-input" inputmode="decimal" value="99.9">
+        </div>
+        <div class="controls-note">
+          设计原则：方案卡只负责选择，不直接建单；唯一金色按钮同时显示“金额 + 商品 + 时效”，减少点错方案和误解价格周期的风险。
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status">演示页不会创建真实订单</div>
+
+  <script>
+    const state = {
+      plan: "yearly",
+      yearly: 19.9,
+      yearlyOriginal: 39.9,
+      lifetime: 59.9,
+      lifetimeOriginal: 99.9
+    };
+
+    const money = value => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "¥—";
+      return "¥" + n.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+    };
+
+    const positive = (input, fallback) => {
+      const value = Number(input.value);
+      return Number.isFinite(value) && value > 0 ? value : fallback;
+    };
+
+    function render() {
+      document.querySelectorAll(".plan").forEach(card => {
+        const selected = card.dataset.plan === state.plan;
+        card.classList.toggle("selected", selected);
+        card.setAttribute("aria-pressed", String(selected));
+      });
+
+      document.querySelector(".yearly-price").textContent = money(state.yearly);
+      document.querySelector(".lifetime-price").textContent = money(state.lifetime);
+
+      const yearlyOriginal = document.querySelector(".yearly-original");
+      yearlyOriginal.textContent = money(state.yearlyOriginal);
+      yearlyOriginal.hidden = state.yearlyOriginal <= state.yearly;
+
+      const lifetimeOriginal = document.querySelector(".lifetime-original");
+      lifetimeOriginal.textContent = money(state.lifetimeOriginal);
+      lifetimeOriginal.hidden = state.lifetimeOriginal <= state.lifetime;
+
+      const perDay = state.yearly / 365;
+      document.querySelector(".yearly-note").textContent =
+        `约 ${money(perDay)}/天`;
+
+      const cta = document.querySelector("#buy-button");
+      if (state.plan === "yearly") {
+        cta.innerHTML = `购买年费高级版 · ${money(state.yearly)} <small>365 天</small>`;
+      } else {
+        cta.innerHTML = `购买永久版 · ${money(state.lifetime)} <small>一次买断</small>`;
+      }
+    }
+
+    document.querySelectorAll(".plan").forEach(card => {
+      card.addEventListener("click", () => {
+        state.plan = card.dataset.plan;
+        render();
+      });
+    });
+
+    const bindings = [
+      ["#yearly-price-input", "yearly", 19.9],
+      ["#yearly-original-input", "yearlyOriginal", 0],
+      ["#lifetime-price-input", "lifetime", 59.9],
+      ["#lifetime-original-input", "lifetimeOriginal", 0]
+    ];
+    bindings.forEach(([selector, key, fallback]) => {
+      document.querySelector(selector).addEventListener("input", event => {
+        state[key] = positive(event.target, fallback);
+        render();
+      });
+    });
+
+    document.querySelector("#buy-button").addEventListener("click", () => {
+      const toast = document.querySelector("#toast");
+      toast.textContent = `演示：将创建${state.plan === "yearly" ? "年费高级版" : "永久版"}订单（${money(state[state.plan])}）`;
+      toast.classList.add("show");
+      window.clearTimeout(window.__toastTimer);
+      window.__toastTimer = window.setTimeout(() => toast.classList.remove("show"), 2200);
+    });
+
+    render();
+  </script>
+</body>
+</html>

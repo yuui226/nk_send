@@ -944,6 +944,11 @@ async function resolveLanzou(release) {
     }
     const direct = new URL(String(parsed.data.directLink));
     if (direct.protocol !== 'https:') throw new Error('DIRECT_URL_NOT_HTTPS');
+    // 蓝奏云部分节点返回 :446；同一签名资源在标准 HTTPS 443 可用。
+    // 统一成 443，避免 Android DownloadManager 或移动网络长期等待特殊端口。
+    if (direct.hostname.endsWith('.lanosso.com') && direct.port === '446') {
+        direct.port = '443';
+    }
     return { url: direct.toString() };
 }
 
@@ -1014,6 +1019,47 @@ async function adminValidateUpdate(body) {
         return { ok: true, versionCode: release.versionCode || 0, ...direct };
     } catch (e) {
         return { ok: false, err: 'UPDATE_VALIDATION_FAILED', detail: e.message };
+    }
+}
+
+const MAX_ADMIN_APK_BYTES = 256 * 1024 * 1024;
+
+async function adminDownloadUpdateApk(res, body) {
+    try {
+        if (!body.url) throw new Error('url 不能为空');
+        const shareUrl = new URL(String(body.url));
+        if (shareUrl.protocol !== 'https:') throw new Error('url 必须是 HTTPS');
+        const release = { url: shareUrl.toString(), password: String(body.password || '') };
+        const direct = await resolveLanzou(release);
+        const response = await fetch(direct.url, {
+            redirect: 'follow',
+            signal: AbortSignal.timeout(300_000),
+        });
+        if (!response.ok) throw new Error(`APK_HTTP_${response.status}`);
+
+        const declaredSize = Number(response.headers.get('content-length') || 0);
+        if (declaredSize > MAX_ADMIN_APK_BYTES) throw new Error('APK_TOO_LARGE');
+        const chunks = [];
+        let total = 0;
+        for await (const chunk of response.body) {
+            total += chunk.length;
+            if (total > MAX_ADMIN_APK_BYTES) throw new Error('APK_TOO_LARGE');
+            chunks.push(Buffer.from(chunk));
+        }
+        if (total <= 0) throw new Error('APK_EMPTY');
+
+        const apk = Buffer.concat(chunks, total);
+        res.writeHead(200, {
+            'Content-Type': 'application/vnd.android.package-archive',
+            'Content-Length': apk.length,
+            'Cache-Control': 'no-store',
+        });
+        res.end(apk);
+        log(`ADMIN_UPDATE_APK_PROXIED bytes=${apk.length}`);
+    } catch (e) {
+        log(`ADMIN_UPDATE_APK_PROXY_FAILED err=${e.message}`);
+        if (!res.headersSent) send(res, 502, { ok: false, err: 'APK_DOWNLOAD_FAILED' });
+        else res.destroy();
     }
 }
 
@@ -1102,6 +1148,7 @@ const server = https.createServer(
                 if (route === 'GET /admin/update') return send(res, 200, adminGetUpdate());
                 if (route === 'GET /admin/update/stats') return send(res, 200, adminGetUpdateStats());
                 if (route === 'POST /admin/update/validate') return send(res, 200, await adminValidateUpdate(await readBody(req)));
+                if (route === 'POST /admin/update/apk') return adminDownloadUpdateApk(res, await readBody(req));
                 if (route === 'POST /admin/update/publish') return send(res, 200, adminPublishUpdate(await readBody(req)));
                 if (route === 'POST /admin/update/policy') return send(res, 200, adminSetUpdatePolicy(await readBody(req)));
                 return send(res, 404, { ok: false, err: 'NOT_FOUND' });

@@ -26,6 +26,7 @@ object Lab {
     const val NK_START_LIVE_VIEW = 0x9201
     const val NK_END_LIVE_VIEW = 0x9202
     const val NK_GET_LIVE_VIEW_IMG = 0x9203
+    const val NK_GET_LIVE_VIEW_IMG_EX = 0x9428
     const val NK_MF_DRIVE = 0x9204
     const val NK_CHANGE_AF_AREA = 0x9205
     const val NK_AF_DRIVE = 0x90C1
@@ -90,7 +91,7 @@ object Lab {
         NK_START_LIVE_VIEW to "StartLiveView",
         NK_END_LIVE_VIEW to "EndLiveView",
         NK_GET_LIVE_VIEW_IMG to "GetLiveViewImg",
-        0x9428 to "GetLiveViewImgEx(Z8/Z9)",
+        NK_GET_LIVE_VIEW_IMG_EX to "GetLiveViewImgEx",
         NK_CAPTURE_REC_IN_MEDIA to "InitiateCaptureRecInMedia",
         NK_CAPTURE_REC_IN_SDRAM to "InitiateCaptureRecInSdram",
         0x90CB to "AfCaptureSDRAM",
@@ -743,11 +744,29 @@ suspend fun NikonCamera.rcModelName(): String? {
 
 // ============================ Live View ============================
 
+/** 在 Live View 启动前解析一次取帧能力，避免部分机型在 LV 运行中拒绝 GetDeviceInfo。 */
+private suspend fun NikonCamera.resolveLiveViewImageOperation() {
+    if (liveViewImageOperation != null) return
+    val (rc, data) = labCommand(Lab.GET_DEVICE_INFO)
+    val supportsEnhanced = rc == Lab.OK && data != null &&
+        runCatching {
+            Lab.NK_GET_LIVE_VIEW_IMG_EX in parseDeviceInfo(data).operations
+        }.getOrDefault(false)
+    liveViewImageOperation = if (supportsEnhanced) {
+        Lab.NK_GET_LIVE_VIEW_IMG_EX
+    } else {
+        Lab.NK_GET_LIVE_VIEW_IMG
+    }
+}
+
 /**
  * 启动 Live View：Start（忙重试）→ DeviceReady 轮询直到就绪。
  * 返回是否成功；过程写入 [log]。
  */
 suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean {
+    resolveLiveViewImageOperation()
+    val frameOperation = liveViewImageOperation ?: Lab.NK_GET_LIVE_VIEW_IMG
+    log("LiveView frames: ${Lab.INTEREST_OPS[frameOperation] ?: hex4(frameOperation)}")
     // 0x2019 忙 / 0xA004 InvalidStatus（上一次 EndLiveView 后相机内部状态未落定时常见）
     // 都值得短暂重试。
     var rc = labCommand(Lab.NK_START_LIVE_VIEW).first
@@ -786,18 +805,68 @@ suspend fun NikonCamera.labEndLiveView(): Int =
     runCatching { labCommand(Lab.NK_END_LIVE_VIEW).first }.getOrDefault(-1)
 
 /**
- * 取一帧 Live View。返回 (整包数据, JPEG偏移)——不剥离头部，调用方拿偏移直接解码
- * （BitmapFactory 支持 offset），省掉热路径上每帧一次 100KB+ 的整包拷贝。
+ * 取一帧 Live View。首次调用从 DeviceInfo 选择机身广告的增强取帧 0x9428；明确不支持时
+ * 立即回退 0x9203，其它异常连续两次才回退。整包不剥离头部，BitmapFactory 直接从
+ * JPEG 偏移解码，省掉热路径上每帧一次 100KB+ 的复制。
  * 相机忙返回 null（调用方稍后重试）；其它失败抛响应码异常。
  */
-suspend fun NikonCamera.labGrabFrame(): Pair<ByteArray, Int>? {
-    val (rc, d) = labCommand(Lab.NK_GET_LIVE_VIEW_IMG)
-    if (rc == Lab.DEVICE_BUSY) return null
-    if (rc != Lab.OK || d == null) throw Exception("GetLiveViewImg resp=${hex4(rc)}")
-    val soi = findJpegStart(d)
-    if (soi < 0) throw Exception("GetLiveViewImg: no JPEG SOI in ${d.size} bytes")
-    return d to soi
-}
+suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
+    ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            if (liveViewImageOperation == null) {
+                // 正常路径已在 labStartLiveView 前解析；仅为直接调用 labGrabFrame 的
+                // 诊断代码兜底，不在 LV 运行中补发 GetDeviceInfo。
+                liveViewImageOperation = Lab.NK_GET_LIVE_VIEW_IMG
+            }
+
+            fun receive(operation: Int): Pair<Int, ByteArray?> {
+                sendCmd(operation)
+                return recvRespWithPayload()
+            }
+
+            var operation = liveViewImageOperation ?: Lab.NK_GET_LIVE_VIEW_IMG
+            var (rc, data) = receive(operation)
+            var soi = data?.let(::findJpegStart) ?: -1
+            val enhancedFailure =
+                operation == Lab.NK_GET_LIVE_VIEW_IMG_EX &&
+                (
+                    (rc != Lab.OK && rc != Lab.DEVICE_BUSY && rc != Lab.NK_NOT_LIVE_VIEW) ||
+                        (rc == Lab.OK && soi < 0)
+                    )
+            if (operation == Lab.NK_GET_LIVE_VIEW_IMG_EX && rc == Lab.OK && soi >= 0) {
+                liveViewEnhancedFailureCount = 0
+            } else if (enhancedFailure) {
+                liveViewEnhancedFailureCount = if (rc == PtpConstants.OPERATION_NOT_SUPPORTED) {
+                    2
+                } else {
+                    liveViewEnhancedFailureCount + 1
+                }
+            }
+            if (enhancedFailure && liveViewEnhancedFailureCount >= 2) {
+                // 明确不支持立即降级；其它错误（包括偶发空/坏首帧）连续两次才降级，
+                // 避免支持增强帧的机型因一次传输抖动永久丢失 AF 元数据。
+                operation = Lab.NK_GET_LIVE_VIEW_IMG
+                liveViewImageOperation = operation
+                liveViewEnhancedFailureCount = 0
+                val fallback = receive(operation)
+                rc = fallback.first
+                data = fallback.second
+                soi = data?.let(::findJpegStart) ?: -1
+            }
+
+            if (rc == Lab.DEVICE_BUSY) return@withContext null
+            if (rc != Lab.OK || data == null) {
+                throw Exception("${Lab.INTEREST_OPS[operation] ?: hex4(operation)} resp=${hex4(rc)}")
+            }
+            if (soi < 0) throw Exception("GetLiveViewImg: no JPEG SOI in ${data.size} bytes")
+            LiveViewPacket(
+                bytes = data,
+                jpegOffset = soi,
+                metadata = parseLiveViewMetadata(data, soi, operation),
+                receivedAtElapsedMs = SystemClock.elapsedRealtime()
+            )
+        }
+    }
 
 // ============================ 一次性完整探测 ============================
 

@@ -386,12 +386,48 @@ function Read-ApkVersionInfo($apkPath) {
     return $null
 }
 
-function Save-DirectApkMetadata($directUrl) {
+function Download-ApkThroughServer($shareUrl, $password, $targetPath) {
+    $bodyPath = [IO.Path]::GetTempFileName()
+    try {
+        $json = @{ url = $shareUrl; password = $password } | ConvertTo-Json -Compress
+        [IO.File]::WriteAllText($bodyPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            & curl.exe -k -f -sS -L --max-time 300 `
+                -X POST `
+                -H "X-Admin-Token: $script:Token" `
+                -H "Content-Type: application/json" `
+                --data-binary "@$bodyPath" `
+                -o $targetPath `
+                -- "$Server/admin/update/apk" 2>&1 | Out-Null
+            $curlExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+        return ($curlExit -eq 0 -and (Test-Path -LiteralPath $targetPath))
+    } finally {
+        Remove-Item -LiteralPath $bodyPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Save-DirectApkMetadata($directUrl, $shareUrl, $password) {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ztransfer-update-{0}.apk" -f [guid]::NewGuid().ToString("N"))
     try {
         Write-Host "正在下载一次 APK 以计算大小和 SHA-256..." -ForegroundColor DarkGray
-        & curl.exe -f -sS -L --max-time 300 -o $tmp -- $directUrl
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tmp)) { return $null }
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            & curl.exe -f -sS -L --max-time 300 -o $tmp -- $directUrl 2>&1 | Out-Null
+            $curlExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+        if ($curlExit -ne 0 -or -not (Test-Path -LiteralPath $tmp)) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            Write-Host "本机下载失败，正在通过服务器下载..." -ForegroundColor DarkGray
+            if (-not (Download-ApkThroughServer $shareUrl $password $tmp)) { return $null }
+        }
         $file = Get-Item $tmp
         if ($file.Length -le 0) { return $null }
         $version = Read-ApkVersionInfo $tmp
@@ -459,7 +495,7 @@ function Invoke-UpdatePublish {
     Write-Host "正在解析并验证分享链接..." -ForegroundColor DarkGray
     $valid = Call "POST" "/admin/update/validate" @{ url = $shareUrl; password = $password }
     if (-not $valid -or -not $valid.ok) { Show-Error $valid; return }
-    $meta = Save-DirectApkMetadata $valid.url
+    $meta = Save-DirectApkMetadata $valid.url $shareUrl $password
     if (-not $meta) { Write-Host "APK 下载或版本读取失败；未发布。" -ForegroundColor Red; return }
     $versionCode = [int]$meta.VersionCode
     $versionName = [string]$meta.VersionName

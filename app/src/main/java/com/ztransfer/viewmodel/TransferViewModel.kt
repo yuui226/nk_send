@@ -433,8 +433,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
 
                     updateTask(handle) { it.copy(status = TransferStatus.TRANSFERING) }
-                    // 本次传输计时起点：只在此处与完成处各读一次时钟，不进收包热路径。
-                    val transferStart = System.currentTimeMillis()
                     log { "DL_BEGIN: ${task.file.fileName} handle=$handle size=${task.file.size}" }
 
                     // 首个真正要下载的文件才拉起前台服务（全部命中"已存在"时不必启动，避免通知闪一下）。
@@ -609,7 +607,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     existing[savedName] = stats.bytes
                                     existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(stats.bytes)
                                     recordExistingExport(uri, savedName, stats.bytes)
-                                    val elapsed = System.currentTimeMillis() - transferStart
+                                    // 起点由协议层在取得相机 IO 独占权后记录；这里仍是正式文件
+                                    // 已落盘并完成改名/复制后的完成点。
+                                    val elapsed = android.os.SystemClock.elapsedRealtime() -
+                                        stats.startedAtElapsedMs
                                     // 免费额度按"真正传输完成"计数(此处是唯一完成点;
                                     // 跳过/续传改名捷径都不经过这里,不计)。
                                     LicenseManager.recordTransferDone()

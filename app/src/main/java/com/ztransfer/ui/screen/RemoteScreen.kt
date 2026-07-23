@@ -84,6 +84,10 @@ import androidx.compose.ui.unit.sp
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.Lab
+import com.ztransfer.protocol.LiveViewFocusFrame
+import com.ztransfer.protocol.LiveViewFocusJudgement
+import com.ztransfer.protocol.LiveViewMetadata
+import com.ztransfer.protocol.LiveViewPacket
 import com.ztransfer.protocol.RcParam
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
@@ -149,7 +153,14 @@ private val PHOTO_AUTO_ISO_PROPS = listOf(Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO
 
 private data class RemoteLiveFrame(
     val image: ImageBitmap,
-    val histogram: LuminanceHistogram?
+    val histogram: LuminanceHistogram?,
+    val metadata: LiveViewMetadata?,
+    val receivedAtElapsedMs: Long
+)
+
+private data class ConfirmedFocusMarker(
+    val fallbackPoint: Offset,
+    val confirmedAtElapsedMs: Long
 )
 
 private class HistogramThrottle {
@@ -388,7 +399,12 @@ private fun RemoteContent(
 
     val currentHistogramEnabled = rememberUpdatedState(showHistogram)
     val histogramThrottle = remember { HistogramThrottle() }
-    suspend fun decode(bytes: ByteArray, offset: Int = 0): RemoteLiveFrame? =
+    suspend fun decode(
+        bytes: ByteArray,
+        offset: Int = 0,
+        metadata: LiveViewMetadata? = null,
+        receivedAtElapsedMs: Long = SystemClock.elapsedRealtime()
+    ): RemoteLiveFrame? =
         withContext(Dispatchers.Default) {
             BitmapFactory.decodeByteArray(bytes, offset, bytes.size - offset)?.let { bitmap ->
                 val histogram = if (currentHistogramEnabled.value) {
@@ -406,7 +422,9 @@ private fun RemoteContent(
                 }
                 RemoteLiveFrame(
                     image = bitmap.asImageBitmap(),
-                    histogram = histogram
+                    histogram = histogram,
+                    metadata = metadata,
+                    receivedAtElapsedMs = receivedAtElapsedMs
                 )
             }
         }
@@ -527,10 +545,15 @@ private fun RemoteContent(
             fps = 0f   // 换会话（HD 切换/重启）时清掉上一会话的陈旧读数
             // 解码流水线：取帧（网络 IO）与解码（Default 线程）并行——取下一帧的同时
             // 解上一帧；CONFLATED 只留最新帧，解码偶尔跟不上时丢旧帧而不排队积压。
-            val frameCh = Channel<Pair<ByteArray, Int>>(Channel.CONFLATED)
+            val frameCh = Channel<LiveViewPacket>(Channel.CONFLATED)
             launch {
-                for ((buf, off) in frameCh) {
-                    decode(buf, off)?.let { frame = it }
+                for (packet in frameCh) {
+                    decode(
+                        packet.bytes,
+                        packet.jpegOffset,
+                        packet.metadata,
+                        packet.receivedAtElapsedMs
+                    )?.let { frame = it }
                 }
             }
             try {
@@ -803,17 +826,25 @@ private fun RemoteContent(
     var afLocked by remember { mutableStateOf(false) }   // 当前是否已合焦（对焦框变绿）
     var afJob by remember { mutableStateOf<Job?>(null) }
     var tapFocusFeedback by remember { mutableStateOf(TapFocusFeedback.IDLE) }
+    // tapFocusPoint 是本次点击的瞬时反馈位置；focusAreaPoint 只在相机确认
+    // ChangeAfArea 成功后更新，供后续半按 AF 与安全回退使用。
     var tapFocusPoint by remember { mutableStateOf(Offset(0.5f, 0.5f)) }
+    var focusAreaPoint by remember { mutableStateOf(Offset(0.5f, 0.5f)) }
     var tapFocusNonce by remember { mutableIntStateOf(0) }
     var tapFocusBusy by remember { mutableStateOf(false) }
     var tapFocusJob by remember { mutableStateOf<Job?>(null) }
     var tapFocusHideJob by remember { mutableStateOf<Job?>(null) }
+    // 与瞬时蓝/绿反馈分离：AF 成功后保留细红框，直到下一次对焦或断线。
+    // 相机帧头没有可信 AF 框时使用这里保存的应用请求点作为安全回退。
+    var confirmedFocusMarker by remember { mutableStateOf<ConfirmedFocusMarker?>(null) }
     fun startFocus() {
         if (afHeld || tapFocusBusy || probing || focusModeManual || afJob?.isActive == true) return
         tapFocusHideJob?.cancel()
         tapFocusFeedback = TapFocusFeedback.IDLE
+        confirmedFocusMarker = null
         afHeld = true
         afLocked = false
+        val requestedPoint = focusAreaPoint
         haptics.tick()   // 开始半按的轻反馈
         afJob?.cancel()
         afJob = scope.launch {
@@ -833,6 +864,10 @@ private fun RemoteContent(
             when {
                 result.responseCode == Lab.OK -> {
                     devLog("AF locked ($suffix)")
+                    confirmedFocusMarker = ConfirmedFocusMarker(
+                        fallbackPoint = requestedPoint,
+                        confirmedAtElapsedMs = SystemClock.elapsedRealtime()
+                    )
                     // 用户已松手/滑出时仍把协议终态收完，但不再给迟到的
                     // 合焦震动，避免“取消后手机又震一下”。
                     if (stillHeld) haptics.tick()
@@ -869,6 +904,9 @@ private fun RemoteContent(
             tapFocusHideJob?.cancel()
             tapFocusBusy = false
             tapFocusFeedback = TapFocusFeedback.IDLE
+            confirmedFocusMarker = null
+            tapFocusPoint = Offset(0.5f, 0.5f)
+            focusAreaPoint = Offset(0.5f, 0.5f)
             focusModeQueried = false
             recording = false
         }
@@ -929,6 +967,7 @@ private fun RemoteContent(
         }
         val cam = cameraViewModel.getCamera() ?: return
         tapFocusHideJob?.cancel()
+        confirmedFocusMarker = null
         tapFocusPoint = tap.normalized
         tapFocusFeedback = TapFocusFeedback.FOCUSING
         tapFocusNonce++
@@ -941,6 +980,9 @@ private fun RemoteContent(
             try {
                 val result = cam.rcFocusAt(tap.imageX, tap.imageY)
                 val af = result.afResult
+                if (result.moveResponseCode == Lab.OK) {
+                    focusAreaPoint = tap.normalized
+                }
                 tapFocusFeedback = if (result.moveResponseCode != Lab.OK || af == null) {
                     devLog(
                         "!! ChangeAfArea resp=0x%04X".format(result.moveResponseCode and 0xFFFF)
@@ -952,6 +994,10 @@ private fun RemoteContent(
                         af.responseCode == Lab.OK -> {
                             devLog("tap AF locked ($suffix)")
                             haptics.tick()
+                            confirmedFocusMarker = ConfirmedFocusMarker(
+                                fallbackPoint = tap.normalized,
+                                confirmedAtElapsedMs = SystemClock.elapsedRealtime()
+                            )
                             TapFocusFeedback.LOCKED
                         }
                         af.responseCode == Lab.NK_OUT_OF_FOCUS -> {
@@ -984,6 +1030,7 @@ private fun RemoteContent(
             } catch (e: Exception) {
                 if (e is SocketTimeoutException) cameraViewModel.onCameraTransportLost(cam)
                 tapFocusFeedback = TapFocusFeedback.FAILED
+                confirmedFocusMarker = null
                 devLog("!! tap AF exception: ${e.message}")
                 val completedNonce = tapFocusNonce
                 tapFocusHideJob = scope.launch {
@@ -1168,9 +1215,11 @@ private fun RemoteContent(
                 recSeconds = recSeconds,
                 afHeld = afHeld,
                 afLocked = afLocked,
+                afFocusPoint = focusAreaPoint,
                 tapFocusFeedback = tapFocusFeedback,
                 tapFocusPoint = tapFocusPoint,
                 tapFocusNonce = tapFocusNonce,
+                confirmedFocusMarker = confirmedFocusMarker,
                 onTapFocus = { focusAt(it) },
                 showFps = showFps,
                 fps = fps,
@@ -1317,9 +1366,11 @@ private fun RemoteContent(
                             recSeconds = recSeconds,
                             afHeld = afHeld,
                             afLocked = afLocked,
+                            afFocusPoint = focusAreaPoint,
                             tapFocusFeedback = tapFocusFeedback,
                             tapFocusPoint = tapFocusPoint,
                             tapFocusNonce = tapFocusNonce,
+                            confirmedFocusMarker = confirmedFocusMarker,
                             onTapFocus = { focusAt(it) },
                             showFps = showFps,
                             fps = fps,
@@ -1711,9 +1762,11 @@ private fun RemoteViewfinderPanel(
     recSeconds: Int,
     afHeld: Boolean,
     afLocked: Boolean,
+    afFocusPoint: Offset,
     tapFocusFeedback: TapFocusFeedback,
     tapFocusPoint: Offset,
     tapFocusNonce: Int,
+    confirmedFocusMarker: ConfirmedFocusMarker?,
     onTapFocus: (ViewfinderTap) -> Unit,
     showFps: Boolean,
     fps: Float,
@@ -1733,6 +1786,10 @@ private fun RemoteViewfinderPanel(
             tapFocusFeedback = tapFocusFeedback,
             tapFocusPoint = tapFocusPoint,
             tapFocusNonce = tapFocusNonce,
+            afHeld = afHeld,
+            afLocked = afLocked,
+            afFocusPoint = afFocusPoint,
+            confirmedFocusMarker = confirmedFocusMarker,
             onTapFocus = onTapFocus
         )
 
@@ -1786,39 +1843,6 @@ private fun RemoteViewfinderPanel(
             }
         }
 
-        if (afHeld) {
-            val reticleScale = remember { Animatable(1.4f) }
-            LaunchedEffect(Unit) { reticleScale.animateTo(1f, tween(180)) }
-            val lockScale by animateFloatAsState(
-                targetValue = if (afLocked) 0.9f else 1f,
-                animationSpec = Motion.bouncy(),
-                label = "afLock"
-            )
-            val reticleColor =
-                (if (afLocked) colors.statusConnected else colors.accentBlue).copy(alpha = 0.95f)
-            Canvas(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(64.dp)
-                    .graphicsLayer {
-                        val scale = reticleScale.value * lockScale
-                        scaleX = scale
-                        scaleY = scale
-                    }
-            ) {
-                val len = 12.dp.toPx()
-                val stroke = 2.dp.toPx()
-                val inset = stroke / 2
-                drawFocusCornerReticle(
-                    center = size.center,
-                    halfSize = size.width / 2f - inset,
-                    cornerLength = len,
-                    color = reticleColor,
-                    strokeWidth = stroke
-                )
-            }
-        }
-
         if (showFps && fps > 0f) {
             Text(
                 "%.1f fps".format(fps),
@@ -1859,6 +1883,10 @@ private fun ViewfinderImage(
     tapFocusFeedback: TapFocusFeedback,
     tapFocusPoint: Offset,
     tapFocusNonce: Int,
+    afHeld: Boolean,
+    afLocked: Boolean,
+    afFocusPoint: Offset,
+    confirmedFocusMarker: ConfirmedFocusMarker?,
     onTapFocus: (ViewfinderTap) -> Unit
 ) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1931,6 +1959,33 @@ private fun ViewfinderImage(
                     feedback = tapFocusFeedback,
                     point = tapFocusPoint,
                     nonce = tapFocusNonce,
+                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    modifier = Modifier.matchParentSize()
+                )
+            } else if (afHeld) {
+                TapFocusReticleOverlay(
+                    feedback = if (afLocked) {
+                        TapFocusFeedback.LOCKED
+                    } else {
+                        TapFocusFeedback.FOCUSING
+                    },
+                    point = afFocusPoint,
+                    nonce = tapFocusNonce,
+                    imageAspectRatio = imageWidth.toFloat() / imageHeight,
+                    modifier = Modifier.matchParentSize()
+                )
+            } else if (confirmedFocusMarker != null) {
+                val cameraFrame = liveFrame.metadata
+                    ?.takeIf {
+                        liveFrame.receivedAtElapsedMs >=
+                            confirmedFocusMarker.confirmedAtElapsedMs &&
+                            it.focusJudgement == LiveViewFocusJudgement.FOCUSED
+                    }
+                    ?.selectedFocusFrame
+                ConfirmedFocusReticleOverlay(
+                    fallbackPoint = confirmedFocusMarker.fallbackPoint,
+                    cameraFrame = cameraFrame,
+                    nonce = confirmedFocusMarker.confirmedAtElapsedMs,
                     imageAspectRatio = imageWidth.toFloat() / imageHeight,
                     modifier = Modifier.matchParentSize()
                 )
@@ -2469,6 +2524,71 @@ private fun TapFocusReticleOverlay(
             cornerLength = len,
             color = reticleColor,
             strokeWidth = stroke
+        )
+    }
+}
+
+/** AF 完成后的常驻红框；优先保留相机报告的尺寸与位置，未知头型退回应用请求点。 */
+@Composable
+private fun ConfirmedFocusReticleOverlay(
+    fallbackPoint: Offset,
+    cameraFrame: LiveViewFocusFrame?,
+    nonce: Long,
+    imageAspectRatio: Float,
+    modifier: Modifier = Modifier
+) {
+    val colors = AppTheme.colors
+    val appearScale = remember { Animatable(1.12f) }
+    LaunchedEffect(nonce) {
+        appearScale.snapTo(1.12f)
+        appearScale.animateTo(1f, tween(160))
+    }
+
+    Canvas(modifier) {
+        val imageRect = fitCenterRect(size.width, size.height, imageAspectRatio)
+        if (imageRect.width <= 0f || imageRect.height <= 0f) return@Canvas
+        val point = cameraFrame?.let { Offset(it.centerX, it.centerY) } ?: fallbackPoint
+        val fallbackHalf = 25.dp.toPx()
+        val minHalf = 13.dp.toPx()
+        // 动画缩放后再封顶，确保全画幅/边缘 AF 框也不会产生反向 coerceIn 区间。
+        val halfWidth = (
+            (cameraFrame?.let { imageRect.width * it.width / 2f } ?: fallbackHalf) *
+                appearScale.value
+            ).coerceIn(minOf(minHalf, imageRect.width / 2f), imageRect.width / 2f)
+        val halfHeight = (
+            (cameraFrame?.let { imageRect.height * it.height / 2f } ?: fallbackHalf) *
+                appearScale.value
+            ).coerceIn(minOf(minHalf, imageRect.height / 2f), imageRect.height / 2f)
+        val requestedCenter = Offset(
+            imageRect.left + imageRect.width * point.x.coerceIn(0f, 1f),
+            imageRect.top + imageRect.height * point.y.coerceIn(0f, 1f)
+        )
+        val center = Offset(
+            if (imageRect.width >= halfWidth * 2f) {
+                requestedCenter.x.coerceIn(
+                    imageRect.left + halfWidth,
+                    imageRect.right - halfWidth
+                )
+            } else {
+                imageRect.center.x
+            },
+            if (imageRect.height >= halfHeight * 2f) {
+                requestedCenter.y.coerceIn(
+                    imageRect.top + halfHeight,
+                    imageRect.bottom - halfHeight
+                )
+            } else {
+                imageRect.center.y
+            }
+        )
+        val cornerLength = minOf(10.dp.toPx(), halfWidth, halfHeight)
+        drawFocusCornerReticle(
+            center = center,
+            halfWidth = halfWidth,
+            halfHeight = halfHeight,
+            cornerLength = cornerLength,
+            color = colors.statusError.copy(alpha = 0.95f),
+            strokeWidth = 1.8.dp.toPx()
         )
     }
 }

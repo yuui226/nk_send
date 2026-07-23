@@ -56,6 +56,13 @@ class NikonCamera(private val context: Context) {
     // 每次 connect 新建 NikonCamera 实例，故换相机自动重新探测。仅 ioMutex 内访问。
     @Volatile private var fhdSupported: Boolean? = null
     private var fhdFailCount = 0
+    // 遥控监看的取帧操作码：首次取帧从 DeviceInfo 解析并缓存。
+    // 新机优先 0x9428（带 Display Information Data），不支持时回退 0x9203。
+    // 每次连接都会新建 NikonCamera，因此不会把上一台机身的判断带进新会话。
+    @Volatile internal var liveViewImageOperation: Int? = null
+    // 增强取帧偶发空/坏帧不能等同于“不支持”；连续两次才降级，成功即清零。
+    // 仅在 ioMutex 内访问。
+    internal var liveViewEnhancedFailureCount = 0
 
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
@@ -503,7 +510,9 @@ class NikonCamera(private val context: Context) {
     /** 单文件下载完成后的下载速度（MB/s，1024 进制，与 UI formatSpeed 同口径；纯网络读取吞吐）。 */
     data class DownloadStats(
         val bytes: Long,
-        val mbps: Float
+        val mbps: Float,
+        /** 已取得相机 IO 独占权、开始处理本文件的单调时钟时间戳。 */
+        val startedAtElapsedMs: Long
     )
 
     /**
@@ -529,14 +538,16 @@ class NikonCamera(private val context: Context) {
         withContext(Dispatchers.IO) {
             val scope = this
             var totalDownloaded = resumeOffset
-            val startTime = System.currentTimeMillis()
+            // 放在 ioMutex 内：锁外可能有缩略图/事件命令尚未结束，那段排队时间不属于
+            // 本文件传输。时间戳随成功结果交给保存层，让关闭流、改名/复制仍计入总耗时。
+            val startTime = android.os.SystemClock.elapsedRealtime()
             var lastProgressTime = startTime
             var readNanos = 0L
 
             fun buildStats(): DownloadStats {
                 val netBytes = totalDownloaded - resumeOffset
                 val mbps = if (readNanos > 0) netBytes / (readNanos / 1e9f) / (1024f * 1024f) else 0f
-                return DownloadStats(totalDownloaded, mbps)
+                return DownloadStats(totalDownloaded, mbps, startTime)
             }
             fun incomplete(got: Long, want: Long) =
                 Result.failure<DownloadStats>(Exception(context.getString(R.string.error_incomplete_data, got, want)))
@@ -558,7 +569,7 @@ class NikonCamera(private val context: Context) {
                             throw OutputWriteException(context.getString(R.string.error_write_file, e.message), e)
                         }
                         totalDownloaded += count
-                        val now = System.currentTimeMillis()
+                        val now = android.os.SystemClock.elapsedRealtime()
                         if (now - lastProgressTime >= 200) {
                             val total = if (progressTotalHint > 0) progressTotalHint else 0L
                             onProgress?.invoke(
@@ -599,7 +610,7 @@ class NikonCamera(private val context: Context) {
                                 }
                                 written += len - 4
                                 totalDownloaded += len - 4
-                                val now = System.currentTimeMillis()
+                                val now = android.os.SystemClock.elapsedRealtime()
                                 if (now - lastProgressTime >= 200) {
                                     val total = if (progressTotalHint > 0) progressTotalHint else expected
                                     onProgress?.invoke(DownloadProgress(totalDownloaded, total, (now - startTime) / 1000f))

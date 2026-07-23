@@ -244,14 +244,13 @@
     <string name="update_available_title">发现新版本</string>
     <string name="update_required_title">必须更新</string>
     <string name="update_version">版本 %1$s</string>
-    <string name="update_size">下载大小：%1$s</string>
+    <string name="update_size">大小：%1$s</string>
     <string name="update_disconnect_camera_wifi">请断开相机 Wi-Fi</string>
     <string name="update_ignore_version">忽略此版本</string>
     <string name="update_resolving">正在获取下载链接…</string>
     <string name="update_downloading">正在下载…</string>
     <string name="update_downloading_percent">正在下载… %1$d%%</string>
     <string name="update_verifying">正在校验…</string>
-    <string name="update_ready">可以安装</string>
     <string name="update_now">立即更新</string>
     <string name="update_install">安装</string>
     <string name="update_later">稍后</string>
@@ -260,5 +259,6 @@
     <string name="update_error_invalid_apk">安装包校验失败，已删除</string>
     <string name="update_error_installer">无法打开安装器</string>
     <string name="update_manual_copied">请手动更新，已复制到剪贴板</string>
+    <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">打开下载页</string>
 </resources>
