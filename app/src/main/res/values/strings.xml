@@ -45,6 +45,8 @@
     <string name="cd_collapse">Collapse</string>
     <string name="cd_all_queued">All added to queue</string>
     <string name="cd_transfer_group">Transfer this group</string>
+    <string name="burst_collection_a11y">Burst collection, %1$d photos</string>
+    <string name="burst_collection_count">%1$d</string>
 
     <!-- Transfer queue -->
     <string name="no_transfer_tasks">No transfer tasks</string>
@@ -72,6 +74,7 @@
     <string name="change_directory">Change folder</string>
     <string name="choose_directory">Choose folder</string>
     <string name="columns">Columns</string>
+    <string name="collapse_burst_photos">Show bursts as collections</string>
     <string name="appearance">Appearance</string>
     <string name="theme_system">System</string>
     <string name="theme_dark">Dark</string>
@@ -80,7 +83,6 @@
     <string name="language_system">System</string>
     <string name="haptic_feedback">Haptic feedback</string>
     <string name="keep_screen_on">Keep screen on</string>
-    <string name="keep_screen_on_desc">Keeps the screen on while the app is in the foreground to prevent disconnection</string>
     <string name="version_label">ZTransfer v%1$s</string>
     <string name="qq_group_copied">Support QQ %1$s copied</string>
     <string name="feedback">Feedback</string>
@@ -140,7 +142,8 @@
     <string name="remote_blocked_transfer">Transfer in progress — enter live view after it finishes</string>
     <string name="remote_title">Remote</string>
     <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>
-    <string name="remote_rec_start_failed">Couldn\'t start recording — check the memory card and camera status</string>
+    <string name="remote_rec_start_failed">Couldn\'t start recording — confirm movie mode and check the memory card</string>
+    <string name="remote_rec_stop_failed">Couldn\'t stop recording — check the camera and try again</string>
     <string name="remote_tap_focus_manual">Switch the camera to autofocus to use tap focus</string>
     <string name="dev_panel_title">Developer</string>
     <string name="dev_hd_liveview">XGA live view</string>
@@ -174,18 +177,30 @@
     <string name="unlock">Unlock</string>
     <string name="enter_code">Enter code</string>
     <string name="tier_free">Free</string>
+    <string name="tier_feature">Feature</string>
+    <string name="tier_annual">Annual</string>
+    <string name="tier_lifetime">Lifetime</string>
     <string name="compare_transfer">Transfers</string>
     <string name="compare_transfer_free">%1$d/day</string>
-    <string name="compare_filesize">Max file size</string>
+    <string name="compare_filesize">File size</string>
     <string name="compare_filesize_free">%1$d MB</string>
     <string name="compare_remote">Remote control</string>
     <string name="compare_remote_free">%1$d min/day</string>
     <string name="compare_unlimited">Unlimited</string>
+    <string name="compare_duration">Duration</string>
+    <string name="duration_free">Always free</string>
+    <string name="duration_days">%1$d days</string>
+    <string name="duration_lifetime">Lifetime</string>
+    <string name="plan_annual">Annual Pro</string>
+    <string name="plan_lifetime">Lifetime Pro</string>
+    <string name="plan_unavailable">Unavailable</string>
+    <string name="plan_lifetime_unavailable">Lifetime plan unavailable</string>
+    <string name="buy_annual_cta">Buy Annual Pro · %1$s · %2$d days</string>
+    <string name="buy_lifetime_cta">Buy Lifetime Pro · %1$s · Lifetime</string>
     <string name="price_promo_tag">Limited-time offer</string>
     <!-- Price unit is per-locale text; the amount itself is a constant (see PRO_PRICE). -->
     <string name="price_per_year">%1$s/yr</string>
     <string name="pro_price_per_day">≈%1$s/day</string>
-    <string name="pro_perks">One year · Renew anytime · Free updates</string>
     <string name="quota_left_hint">%1$d/%2$d left today</string>
     <string name="transfer_limit_reached">Daily limit reached — unlock Pro</string>
     <string name="transfer_size_limit">Over %1$d MB — unlock Pro</string>
@@ -196,6 +211,10 @@
     <string name="purchase_loading">Creating order…</string>
     <string name="purchase_qr_loading">Generating payment QR…</string>
     <string name="purchase_wechat_title">Pay with WeChat</string>
+    <string name="purchase_annual_title">Annual Pro · Pay with WeChat</string>
+    <string name="purchase_lifetime_title">Lifetime Pro · Pay with WeChat</string>
+    <string name="purchase_locked_annual">Order total %1$s · %2$d days</string>
+    <string name="purchase_locked_lifetime">Order total %1$s · Lifetime</string>
     <string name="purchase_scan_hint">Please scan the QR code from your album in WeChat to pay</string>
     <string name="purchase_save_qr">Save to album</string>
     <string name="purchase_saved">✓ Saved to album</string>
@@ -209,7 +228,8 @@
     <!-- Subscription expiry (home renew button/dialog + home banner) -->
     <string name="sub_expires_on">Expires %1$s</string>
     <string name="renew_action">Renew</string>
-    <string name="renew_carry_over">Adds 365 days to your current expiry date</string>
+    <string name="renew_or_upgrade">Renew or upgrade</string>
+    <string name="sub_expired">Pro has expired</string>
     <string name="sub_expired_renew">Pro has expired — renew to continue</string>
     <plurals name="sub_days_left">
         <item quantity="one">%1$d day left</item>
@@ -223,7 +243,8 @@
     <string name="purchase_opening_alipay">Opening Alipay…</string>
     <string name="purchase_waiting">Complete the payment above — activation is automatic once confirmed.</string>
     <string name="purchase_activated">🎉 Purchased · Pro unlocked</string>
-    <string name="purchase_restored">🎉 This device already owns Pro — restored, no charge</string>
+    <string name="purchase_lifetime_activated">🎉 Purchased · Lifetime Pro unlocked</string>
+    <string name="purchase_restored">🎉 Entitlement restored</string>
     <string name="restore_action">Restore</string>
     <string name="restore_restoring">Restoring…</string>
     <string name="restore_none">No license found for this device (not purchased, or now in use on another device).</string>
@@ -237,6 +258,11 @@
     <string name="err_purchase_no_network">Internet connection required</string>
     <string name="err_purchase_unreachable">Couldn\'t reach the server. If you\'re on the camera\'s Wi-Fi, disconnect first and retry on a network with internet access.</string>
     <string name="err_purchase_failed">Couldn\'t create the order — try again later or contact support.</string>
+    <string name="err_purchase_activation_failed">Activation failed. Please contact support.</string>
+    <string name="err_purchase_price_missing">The order total could not be verified. Payment was stopped; please retry.</string>
+    <string name="err_purchase_qr_failed">The payment QR code could not be loaded. Please retry, and do not pay twice.</string>
+    <string name="err_purchase_product_mismatch">The order product does not match your selection. Payment was stopped; go back and select again.</string>
+    <string name="purchase_back_to_plans">Back to plans</string>
 
     <!-- Check for updates (settings footer) -->
     <string name="check_update">Check for updates</string>
@@ -246,14 +272,13 @@
     <string name="update_available_title">Update available</string>
     <string name="update_required_title">Update required</string>
     <string name="update_version">Version %1$s</string>
-    <string name="update_size">Download: %1$s</string>
+    <string name="update_size">Size: %1$s</string>
     <string name="update_disconnect_camera_wifi">Disconnect the camera Wi-Fi first</string>
     <string name="update_ignore_version">Ignore this version</string>
     <string name="update_resolving">Getting download link…</string>
     <string name="update_downloading">Downloading…</string>
     <string name="update_downloading_percent">Downloading… %1$d%%</string>
     <string name="update_verifying">Verifying…</string>
-    <string name="update_ready">Ready to install</string>
     <string name="update_now">Update now</string>
     <string name="update_install">Install</string>
     <string name="update_later">Later</string>
@@ -262,5 +287,6 @@
     <string name="update_error_invalid_apk">Update verification failed. File deleted.</string>
     <string name="update_error_installer">Couldn\'t open installer</string>
     <string name="update_manual_copied">Update manually. Copied to clipboard</string>
+    <string name="update_failure_manual">%1$s. %2$s</string>
     <string name="update_open_download_page">Open download page</string>
 </resources>

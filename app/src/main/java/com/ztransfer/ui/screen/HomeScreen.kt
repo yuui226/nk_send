@@ -2,6 +2,11 @@ package com.ztransfer.ui.screen
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -12,6 +17,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
@@ -85,9 +91,9 @@ fun HomeScreen(
     val renewalNeeded by LicenseManager.renewalNeeded.collectAsState()
     // 订阅到期(要花钱才能继续用)——与 renewalNeeded 是两回事,别混:那个连上网就自己好了。
     val subExpired by LicenseManager.subExpired.collectAsState()
-    var showRenew by remember { mutableStateOf(false) }
+    var showPro by remember { mutableStateOf(false) }
     // 徽标左侧"续费"按钮打开的续费弹窗(剩余天数 + 续费价,再进付款);
-    // 与 showRenew(提示条直进付款)分开:一个是常驻入口,一个是临期/到期的急路径。
+    // 常驻与临期/到期入口共用同一个确认弹窗，避免绕过套餐与锁价确认。
     var showRenewInfo by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
@@ -149,7 +155,7 @@ fun HomeScreen(
         connectionAttention(wifiPhase)
     } else 0f
     val soonDays = if (isPro) {
-        val subExp = remember(showRenew, showRenewInfo) { LicenseManager.subExpiresAtSec() }
+        val subExp = remember(showRenewInfo) { LicenseManager.subExpiresAtSec() }
         if (subExp > 0L) subDaysLeft(subExp) else -1
     } else -1
     val banner: Pair<String, Boolean>? = when {   // (文案, 点了能不能续费)
@@ -158,6 +164,19 @@ fun HomeScreen(
         soonDays in 0..SUB_ALERT_DAYS ->
             pluralStringResource(R.plurals.sub_expiring_soon, soonDays, soonDays) to true
         else -> null
+    }
+    val restoredHint = stringResource(R.string.purchase_restored)
+    var restoredHintVisible by remember { mutableStateOf(false) }
+    var restoredHintNonce by remember { mutableStateOf(0) }
+    fun showRestoredHint() {
+        restoredHintVisible = true
+        restoredHintNonce++
+    }
+    LaunchedEffect(restoredHintNonce) {
+        if (restoredHintVisible) {
+            delay(1800)
+            restoredHintVisible = false
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -294,7 +313,7 @@ fun HomeScreen(
                             .then(
                                 if (renewable) Modifier
                                     .clip(bannerShape)
-                                    .clickable { showRenew = true }
+                                    .clickable { showRenewInfo = true }
                                 else Modifier
                             )
                             .background(colors.accentOrange.copy(alpha = 0.12f), bannerShape)
@@ -308,7 +327,6 @@ fun HomeScreen(
         // ---------- 左上角 "Z传" 悬浮按钮（设置入口，与照片列表页一致）；
         // 右上角：免费版显示"解锁高级版"金徽标。本页尚未连相机热点、多半还有外网，
         // 因此是全 app 唯一放"输入激活码"入口的弹窗（其余页面连着相机 Wi-Fi 无外网）----------
-        var showPro by remember { mutableStateOf(false) }
         // 已解锁：金徽标改显"高级版"，点击不弹窗，每点一次放一发独立烟花（可连点并发）。
         // 设置面板里的同款徽标也共用这一实例（见 SettingsOverlay 的 onPlayFireworks）。
         val fireworks = rememberFireworksState()
@@ -337,12 +355,14 @@ fun HomeScreen(
             if (!isPro) {
                 ProBadgeButton(
                     label = stringResource(R.string.unlock_pro),
-                    onClick = { showPro = true }
+                    onClick = {
+                        if (subExpired) showRenewInfo = true else showPro = true
+                    }
                 )
             } else {
                 // 订阅用户(有到期日;永久码没有):徽标左侧一颗与顶栏同规格的"续费"玻璃按钮。
                 // 常驻但安静——想续随时点得到,不想理它也不碍眼;到期日等细节都收进弹窗里。
-                val subExp = remember(showRenewInfo, showRenew) { LicenseManager.subExpiresAtSec() }
+                val subExp = remember(showRenewInfo) { LicenseManager.subExpiresAtSec() }
                 if (subExp > 0L) {
                     // 与右邻的"高级版"徽标同高同圆角(28dp/14dp),两颗并排像一对。
                     GlassButton(
@@ -371,9 +391,10 @@ fun HomeScreen(
                 onDismiss = { showPro = false },
                 showEnterCode = true,
                 onCelebrate = { fireworks.launch() },
+                onRestored = { showRestoredHint() },
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
                 // 到期的老用户从徽标再买 = 续原来那个码,不发新码。
-                renew = subExpired
+                renew = false
             )
         }
         // 徽标左侧"续费"按钮:先看剩余天数与价格,认可了再进付款。
@@ -384,16 +405,7 @@ fun HomeScreen(
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
             )
         }
-        // 提示条点开的续费:他已经买过且临期/到期,不必再看一遍天数和价格,直接付款页。
-        if (showRenew) {
-            PurchaseDialog(
-                onDismiss = { showRenew = false },
-                onCelebrate = { showRenew = false; fireworks.launch() },
-                onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
-                renew = true
-            )
-        }
-
+        // 提示条与常驻入口都先进入续费确认弹窗。
         // ---------- 设置面板：从 "Z传" 按钮位置变形展开 ----------
         if (showSettings) {
             SettingsOverlay(
@@ -409,6 +421,31 @@ fun HomeScreen(
         // ---------- 小技巧气泡：从 tips 按钮变形弹出的毛玻璃内容框 ----------
         if (showTips) {
             TipsBubble(anchorBounds = tipsAnchor, onDismiss = { showTips = false })
+        }
+
+        // 自动恢复与主动“恢复授权”共用页面底部的通用玻璃提示。
+        AnimatedVisibility(
+            visible = restoredHintVisible,
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 28.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = colors.glassSurfaceHeavy,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, colors.glassPanelBorder)
+            ) {
+                Text(
+                    restoredHint,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.onBackground
+                )
+            }
         }
 
         // ---------- 高级版烟花彩蛋：放在最上层（含设置面板之上），不拦截触摸，播完自行移除 ----------

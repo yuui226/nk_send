@@ -3,15 +3,19 @@ package com.ztransfer.license
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.Network
 import android.provider.Settings
 import android.util.Base64
 import com.ztransfer.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.URLEncoder
@@ -65,6 +69,7 @@ object LicenseManager {
 
     private lateinit var prefs: SharedPreferences
     private var fingerprint: String = ""
+    private var purchaseNetworkCallback: ConnectivityManager.NetworkCallback? = null
 
     private val _isPro = MutableStateFlow(false)
     val isPro: StateFlow<Boolean> get() = _isPro
@@ -84,6 +89,7 @@ object LicenseManager {
     val quotaLeft: StateFlow<Int> get() = _quotaLeft
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val purchaseRecoveryMutex = Mutex()
 
     /** 在 MainActivity.onCreate 调用一次:恢复本地状态,并静默续签 + 刷新定价。 */
     fun init(context: Context) {
@@ -95,8 +101,34 @@ object LicenseManager {
         _subExpired.value = prefs.getBoolean("sub_expired", false)
         _quotaLeft.value = quotaRemaining()
         loadCachedPricing()
+        registerPurchaseNetworkRecovery(app)
         scope.launch { renewIfDue() }
+        scope.launch { reconcilePendingPurchaseWithRetry() }
         scope.launch { fetchPricing(PRICE_REFRESH_MS) }
+    }
+
+    /**
+     * 从微信回到 App、Activity 重建时补完已付款订单。任务挂在应用级 scope，
+     * 不依赖购买弹窗是否仍在组合中；进程被杀也没关系，pending_order 会在下次启动继续。
+     */
+    fun onAppForeground() {
+        if (::prefs.isInitialized) scope.launch { reconcilePendingPurchaseWithRetry() }
+    }
+
+    /**
+     * 付款后若移动网络切换稍慢，网络真正可用时立即补单。回调跟随应用进程；
+     * 若进程已被系统杀掉，pending_order 仍会在下次 init 时恢复。
+     */
+    private fun registerPurchaseNetworkRecovery(context: Context) {
+        if (purchaseNetworkCallback != null) return
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                onAppForeground()
+            }
+        }
+        runCatching { connectivity.registerDefaultNetworkCallback(callback) }
+            .onSuccess { purchaseNetworkCallback = callback }
     }
 
     // ---------------------------------------------------------------- 指纹
@@ -184,6 +216,7 @@ object LicenseManager {
     fun revertToFree() {
         prefs.edit().remove("token").remove("code").remove("last_renew")
             .remove("pending_order")   // 上一轮购买的残留单号,降级后已无意义
+            .remove("pending_order_product")
             .remove("sub_expired")
             .apply()
         _isPro.value = false
@@ -362,39 +395,122 @@ object LicenseManager {
     private const val PRICE_REFRESH_OPEN_MS = 60_000L
 
     /** [originalFen] 为 0 表示不划线;[priceFen] 恒 > 0。 */
-    data class Pricing(val priceFen: Int, val originalFen: Int, val periodDays: Int)
+    enum class ProductId(val wireValue: String) {
+        ANNUAL("annual"),
+        LIFETIME("lifetime");
 
-    private val _pricing = MutableStateFlow(
-        Pricing(FALLBACK_PRICE_FEN, FALLBACK_ORIGINAL_FEN, FALLBACK_PERIOD_DAYS)
+        companion object {
+            /** Old servers and old pending orders have no product field and always mean annual. */
+            fun fromWire(value: String?): ProductId? {
+                if (value.isNullOrBlank()) return ANNUAL
+                return entries.firstOrNull { it.wireValue == value.lowercase(Locale.US) }
+            }
+        }
+    }
+
+    data class ProductPricing(
+        val priceFen: Int,
+        val originalFen: Int,
+        val periodDays: Int,
+        val available: Boolean,
     )
+
+    data class Pricing(
+        val annual: ProductPricing,
+        val lifetime: ProductPricing,
+    ) {
+        fun forProduct(product: ProductId): ProductPricing =
+            if (product == ProductId.ANNUAL) annual else lifetime
+    }
+
+    private fun fallbackPricing() = Pricing(
+        annual = ProductPricing(
+            FALLBACK_PRICE_FEN,
+            FALLBACK_ORIGINAL_FEN,
+            FALLBACK_PERIOD_DAYS,
+            available = true,
+        ),
+        // Never compile a placeholder lifetime price into the APK.
+        lifetime = ProductPricing(0, 0, 0, available = false),
+    )
+
+    private val _pricing = MutableStateFlow(fallbackPricing())
     val pricing: StateFlow<Pricing> get() = _pricing
 
     private fun loadCachedPricing() {
-        val p = prefs.getInt("price_fen", 0)
-        if (p > 0) {
-            _pricing.value = Pricing(
-                p,
+        val annualPrice = prefs.getInt("price_fen", 0)
+        val annual = if (annualPrice > 0) {
+            ProductPricing(
+                annualPrice,
                 prefs.getInt("price_original_fen", 0),
-                prefs.getInt("price_period_days", FALLBACK_PERIOD_DAYS),
+                prefs.getInt("price_period_days", FALLBACK_PERIOD_DAYS).coerceAtLeast(1),
+                available = true,
             )
+        } else {
+            fallbackPricing().annual
         }
+        val lifetimePrice = prefs.getInt("lifetime_price_fen", 0)
+        val lifetimeAvailable = prefs.getBoolean("lifetime_available", false) && lifetimePrice > 0
+        _pricing.value = Pricing(
+            annual,
+            ProductPricing(
+                if (lifetimeAvailable) lifetimePrice else 0,
+                if (lifetimeAvailable) prefs.getInt("lifetime_original_fen", 0) else 0,
+                0,
+                lifetimeAvailable,
+            ),
+        )
     }
 
     /** 距上次成功拉价不足 [minAgeMs] 就跳过。拉不到就继续用缓存,不清不改。 */
     private suspend fun fetchPricing(minAgeMs: Long) {
-        if (System.currentTimeMillis() - prefs.getLong("price_at", 0L) < minAgeMs) return
+        // An APK upgrade may have a fresh legacy annual-only cache. Fetch once immediately so
+        // the newly introduced lifetime product is not hidden by the old cache timestamp.
+        if (prefs.getInt("pricing_catalog_version", 0) >= 2 &&
+            System.currentTimeMillis() - prefs.getLong("price_at", 0L) < minAgeMs
+        ) return
         val resp = get("/v1/pricing") ?: return
-        val p = resp.optInt("price_fen", 0)
-        if (!resp.optBoolean("ok") || p <= 0) return
-        val original = resp.optInt("original_fen", 0)
-        val days = resp.optInt("period_days", FALLBACK_PERIOD_DAYS).coerceAtLeast(1)
+        if (!resp.optBoolean("ok")) return
+        val products = resp.optJSONObject("products")
+        val annualJson = products?.optJSONObject(ProductId.ANNUAL.wireValue)
+        val annualPrice = annualJson?.optInt("price_fen", 0)
+            ?.takeIf { it > 0 }
+            ?: resp.optInt("price_fen", 0)
+        if (annualPrice <= 0) return
+        val annualOriginal = annualJson?.optInt("original_fen", 0)
+            ?: resp.optInt("original_fen", 0)
+        val annualDays = (annualJson?.optInt("period_days", FALLBACK_PERIOD_DAYS)
+            ?: resp.optInt("period_days", FALLBACK_PERIOD_DAYS)).coerceAtLeast(1)
+        val lifetimeJson = products?.optJSONObject(ProductId.LIFETIME.wireValue)
+        val lifetimePrice = lifetimeJson?.optInt("price_fen", 0) ?: 0
+        val lifetimeAvailable =
+            lifetimeJson?.optBoolean("available", false) == true && lifetimePrice > 0
+        val catalog = Pricing(
+            annual = ProductPricing(
+                annualPrice,
+                annualOriginal,
+                annualDays,
+                available = annualJson?.optBoolean("available", true) != false,
+            ),
+            lifetime = ProductPricing(
+                if (lifetimeAvailable) lifetimePrice else 0,
+                if (lifetimeAvailable) lifetimeJson?.optInt("original_fen", 0) ?: 0 else 0,
+                0,
+                lifetimeAvailable,
+            ),
+        )
         prefs.edit()
-            .putInt("price_fen", p)
-            .putInt("price_original_fen", original)
-            .putInt("price_period_days", days)
+            // Preserve the old annual cache keys for seamless APK upgrades.
+            .putInt("price_fen", catalog.annual.priceFen)
+            .putInt("price_original_fen", catalog.annual.originalFen)
+            .putInt("price_period_days", catalog.annual.periodDays)
+            .putBoolean("lifetime_available", catalog.lifetime.available)
+            .putInt("lifetime_price_fen", catalog.lifetime.priceFen)
+            .putInt("lifetime_original_fen", catalog.lifetime.originalFen)
+            .putInt("pricing_catalog_version", 2)
             .putLong("price_at", System.currentTimeMillis())
             .apply()
-        _pricing.value = Pricing(p, original, days)
+        _pricing.value = catalog
     }
 
     /** 高级版弹窗打开时调:他正要花钱,别让他看着隔夜的价。挂在 IO 上,不阻塞开窗。 */
@@ -410,8 +526,8 @@ object LicenseManager {
     }
 
     /** 年费摊到每天(分),四舍五入;不足 1 分返回 0,由 UI 决定整行不显示。 */
-    fun perDayFen(p: Pricing): Int =
-        Math.round(p.priceFen.toDouble() / p.periodDays).toInt()
+    fun perDayFen(p: ProductPricing): Int =
+        if (p.periodDays > 0) Math.round(p.priceFen.toDouble() / p.periodDays).toInt() else 0
 
     // ---------------------------------------------------------------- 购买(自动售码)
 
@@ -426,47 +542,138 @@ object LicenseManager {
             val order: String,
             val payUrl: String?,
             val payQr: String?,
+            val product: ProductId,
             val renew: Boolean = false,
             /** 本单锁定的实收价(分,0 = 服务器没给)。付款页显示它,不显示缓存的展示价。 */
             val priceFen: Int = 0
         ) : OrderResult()
-        /** 已支付;code 为服务器发放的激活码(尚未绑定本机,走 [activate])。 */
-        data class Paid(val order: String, val code: String, val renew: Boolean = false) : OrderResult()
+        /** 已支付；新服务端会同时返回已绑定本机的 [token]，旧服务端则回落到 [activate]。 */
+        data class Paid(
+            val order: String,
+            val code: String,
+            val product: ProductId,
+            val renew: Boolean = false,
+            val priceFen: Int = 0,
+            val token: String? = null,
+        ) : OrderResult()
         object Unreachable : OrderResult()
-        data class Failed(val err: String) : OrderResult()
+        data class Failed(
+            val err: String,
+            val pendingProduct: ProductId? = null,
+        ) : OrderResult()
     }
 
     /** 上次未走完的订单号:付款后 App 被杀等场景,重开购买页凭它续单不丢码。 */
-    fun pendingOrder(): String? = prefs.getString("pending_order", null)
+    data class PendingOrder(val order: String, val product: ProductId?)
+
+    fun pendingOrder(): PendingOrder? {
+        val order = prefs.getString("pending_order", null) ?: return null
+        val product = prefs.getString("pending_order_product", null)?.let(ProductId::fromWire)
+        return PendingOrder(order, product)
+    }
 
     /** 购买闭环走完(激活成功)后清除续单记录。 */
-    fun clearPendingOrder() {
-        prefs.edit().remove("pending_order").apply()
+    fun clearPendingOrder(order: String? = null) {
+        val current = prefs.getString("pending_order", null)
+        if (!order.isNullOrEmpty() && current != order) return
+        prefs.edit().remove("pending_order").remove("pending_order_product").apply()
     }
 
     /**
-     * [renew] 为真 = 给现有码续期(服务器按 max(now, 原到期日) + 1 年计,提前续不吃掉剩余时间),
-     * 否则是新购。到期后重新购买也走 renew:真——服务器给他续原来那个码,而不是再发一个。
+     * 完成“已付款 → 本地高级版”的最后一步。新服务端在收款事务中已绑定设备并直接返 token；
+     * 旧服务端/旧订单没有 token 时仍走原激活接口，保持部署顺序与历史订单兼容。
      */
-    suspend fun createOrder(renew: Boolean = false): OrderResult = withContext(Dispatchers.IO) {
+    suspend fun completePaidOrder(
+        paid: OrderResult.Paid,
+        appVersion: String = BuildConfig.VERSION_NAME,
+    ): ActivationResult = withContext(Dispatchers.IO) {
+        val token = paid.token
+        if (!token.isNullOrBlank() && verifyToken(token) != null) {
+            saveToken(token, paid.code)
+            clearPendingOrder(paid.order)
+            return@withContext ActivationResult.Success
+        }
+        val activated = activate(paid.code, appVersion)
+        if (activated is ActivationResult.Success) clearPendingOrder(paid.order)
+        activated
+    }
+
+    /**
+     * 启动/回前台时恢复本地未闭环订单。待支付不在后台死循环轮询；只有网络瞬断或
+     * 已付款后的本地落证失败才做短退避，pending_order 始终保留到 token 真正保存成功。
+     */
+    private suspend fun reconcilePendingPurchaseWithRetry() {
+        // init、onStart、网络回调可能在同一秒撞上；已有恢复任务时直接合并，
+        // 不排队积累多轮查单与退避。
+        if (!purchaseRecoveryMutex.tryLock()) return
+        try {
+            val retryDelaysMs = longArrayOf(0L, 2_000L, 5_000L, 15_000L)
+            for (retryDelayMs in retryDelaysMs) {
+                val pending = pendingOrder() ?: return
+                if (retryDelayMs > 0) delay(retryDelayMs)
+                if (pendingOrder()?.order != pending.order) return
+                when (val result = orderStatus(pending.order)) {
+                    is OrderResult.Paid -> when (completePaidOrder(result)) {
+                        ActivationResult.Success -> return
+                        ActivationResult.Unreachable -> Unit
+                        is ActivationResult.Rejected -> return
+                    }
+                    OrderResult.Unreachable -> Unit
+                    is OrderResult.Pending -> return
+                    is OrderResult.Failed -> return
+                }
+            }
+        } finally {
+            purchaseRecoveryMutex.unlock()
+        }
+    }
+
+    /**
+     * [renew] 为真且购买年费 = 给现有年费码续期(按 max(now, 原到期日) + 1 年计)。
+     * 永久版始终是独立商品并另发永久码，不会改写或删除原年费码。
+     */
+    suspend fun createOrder(
+        product: ProductId,
+        renew: Boolean = false,
+    ): OrderResult = withContext(Dispatchers.IO) {
         val resp = post("/v1/order/create", JSONObject().apply {
             put("fp", fingerprint)
+            put("product", product.wireValue)
             if (renew) put("renew", true)
         }) ?: return@withContext OrderResult.Unreachable
+        val responseProduct = ProductId.fromWire(resp.optString("product"))
+            ?: return@withContext OrderResult.Failed("BAD_PRODUCT")
         // 防重复购买:服务器认出本机已是某码的绑定设备 → 直接返码免费恢复,不再收钱。
         if (resp.optBoolean("already_pro")) {
             val owned = resp.optString("code")
-            return@withContext if (owned.isNotEmpty()) OrderResult.Paid("", owned)
+            return@withContext if (owned.isNotEmpty()) {
+                OrderResult.Paid(
+                    "",
+                    owned,
+                    responseProduct,
+                    resp.optBoolean("renew"),
+                    resp.optInt("price_fen", 0),
+                )
+            }
             else OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
         }
         val order = resp.optString("order")
         if (!resp.optBoolean("ok") || order.isEmpty())
-            return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
-        prefs.edit().putString("pending_order", order).apply()
+            return@withContext OrderResult.Failed(
+                resp.optString("err", "BAD_RESPONSE"),
+                resp.optString("pending_product")
+                    .takeIf { it.isNotBlank() }
+                    ?.let(ProductId::fromWire),
+            )
+        prefs.edit()
+            .putString("pending_order", order)
+            .putString("pending_order_product", responseProduct.wireValue)
+            .apply()
         OrderResult.Pending(
             order,
             resp.optString("pay_url").takeIf { it.isNotEmpty() },
             resp.optString("pay_qr").takeIf { it.isNotEmpty() },
+            responseProduct,
             resp.optBoolean("renew"),
             resp.optInt("price_fen", 0),
         )
@@ -478,16 +685,33 @@ object LicenseManager {
             val resp = post("/v1/order/status", JSONObject().apply {
                 put("fp", fingerprint)
                 put("order", order)
+                put("model", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim())
+                put("app_ver", BuildConfig.VERSION_NAME)
                 if (wantUrl) put("want_url", true)
             }) ?: return@withContext OrderResult.Unreachable
             if (!resp.optBoolean("ok"))
                 return@withContext OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
-            if (resp.optString("status") == "paid")
-                OrderResult.Paid(order, resp.optString("code"), resp.optBoolean("renew"))
-            else OrderResult.Pending(
+            val product = ProductId.fromWire(resp.optString("product"))
+                ?: return@withContext OrderResult.Failed("BAD_PRODUCT")
+            if (prefs.getString("pending_order", null) == order) {
+                prefs.edit().putString("pending_order_product", product.wireValue).apply()
+            }
+            if (resp.optString("status") == "paid") {
+                val code = resp.optString("code")
+                if (code.isEmpty()) return@withContext OrderResult.Failed("BAD_RESPONSE")
+                OrderResult.Paid(
+                    order,
+                    code,
+                    product,
+                    resp.optBoolean("renew"),
+                    resp.optInt("price_fen", 0),
+                    resp.optString("token").takeIf { it.isNotEmpty() },
+                )
+            } else OrderResult.Pending(
                 order,
                 resp.optString("pay_url").takeIf { it.isNotEmpty() },
                 resp.optString("pay_qr").takeIf { it.isNotEmpty() },
+                product,
                 resp.optBoolean("renew"),
                 resp.optInt("price_fen", 0),
             )
@@ -495,7 +719,7 @@ object LicenseManager {
 
     /**
      * 拉取二维码图片字节(虎皮椒域名,普通 TLS,用默认信任而非连本服务器的 pinned 工厂)。
-     * 失败返回 null,由调用方降级为显示链接文案。
+     * 失败返回 null，由调用方显示可重试错误；服务端已创建的待支付订单不会因此作废。
      */
     suspend fun fetchBytes(url: String): ByteArray? = withContext(Dispatchers.IO) {
         try {
@@ -504,7 +728,25 @@ object LicenseManager {
             conn.readTimeout = 8000
             conn.instanceFollowRedirects = true   // 虎皮椒 qrcode 接口 302 跳转到最终 PNG,须跟随
             if (conn.responseCode >= 400) return@withContext null
-            conn.inputStream.use { it.readBytes() }
+            // 二维码通常只有几十 KiB。限制响应大小，避免异常上游或错误重定向让支付弹窗
+            // 一次性读入超大文件并挤爆 App 内存；无 Content-Length 时也按实际读取量截断。
+            val maxBytes = 2 * 1024 * 1024
+            if (conn.contentLengthLong > maxBytes) return@withContext null
+            conn.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream(
+                    conn.contentLength.coerceIn(0, maxBytes)
+                )
+                val buffer = ByteArray(8192)
+                var total = 0
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    if (total > maxBytes) return@withContext null
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            }
         } catch (_: Exception) {
             null
         }

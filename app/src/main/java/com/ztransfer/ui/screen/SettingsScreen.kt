@@ -64,7 +64,7 @@ internal const val QQ_NUMBER = "953000922"
 
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），从顶栏设置按钮变形弹出、关闭缩回按钮
- * （见 [AnchorPopup]）。内容按功能分为三块玻璃分区卡片：传输目录 / 显示 / 通用，
+ * （见 [AnchorPopup]）。内容按功能分为四块玻璃分区卡片：传输目录 / 照片列表 / 通用 / 界面，
  * 每块内部用细分隔线切分子项——区域清晰、留白克制，替代旧版一长条竖列。
  */
 @Composable
@@ -104,6 +104,7 @@ fun SettingsOverlay(
 
     // 右上角"解锁高级版"徽标打开的介绍对话框（免费/高级版对比 + 解锁按钮复制 QQ 号）。
     var showPro by remember { mutableStateOf(false) }
+    var showRenewInfo by remember { mutableStateOf(false) }
     // 页脚"我要换机"打开的对话框（取激活码 + 换机后果告知）。
     var showSwitchDevice by remember { mutableStateOf(false) }
     val subExpired by LicenseManager.subExpired.collectAsState()
@@ -114,6 +115,7 @@ fun SettingsOverlay(
     var footerHintText by remember { mutableStateOf("") }
     var footerHintVisible by remember { mutableStateOf(false) }
     var footerHintNonce by remember { mutableStateOf(0) }
+    val restoredHint = stringResource(R.string.purchase_restored)
     fun showFooterHint(text: String) {
         footerHintText = text
         footerHintVisible = true
@@ -191,7 +193,9 @@ fun SettingsOverlay(
                 } else {
                     ProBadgeButton(
                         label = stringResource(R.string.unlock_pro),
-                        onClick = { showPro = true }
+                        onClick = {
+                            if (subExpired) showRenewInfo = true else showPro = true
+                        }
                     )
                 }
                 Spacer(Modifier.width(8.dp))
@@ -203,14 +207,20 @@ fun SettingsOverlay(
                 ProDialog(
                     onDismiss = { showPro = false },
                     onCelebrate = onPlayFireworks,
+                    onRestored = { showFooterHint(restoredHint) },
                     onHoldCameraWifi = onHoldCameraWifi,
-                    // 到期的老用户从这里再买 = 续原来那个码,不发新码。
-                    renew = subExpired
+                    renew = false
+                )
+            }
+            if (showRenewInfo) {
+                RenewDialog(
+                    onDismiss = { showRenewInfo = false },
+                    onCelebrate = onPlayFireworks,
+                    onHoldCameraWifi = onHoldCameraWifi,
                 )
             }
 
-            // 到期日与续费入口不放这儿:裸在面板上显乱,已挪到连接页徽标左侧的"续费"
-            // 玻璃按钮(点开 RenewDialog);那里也是全 app 唯一确定有外网、付得了款的页面。
+            // 过期用户在此也进入统一的 RenewDialog，避免绕过套餐与价格确认。
 
             Spacer(Modifier.height(14.dp))
 
@@ -260,42 +270,110 @@ fun SettingsOverlay(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
 
-            // ---------- 卡片二：显示（列数 / 外观 / 语言）----------
+            // ---------- 卡片二：照片列表（列数 / 连拍合集）----------
             SettingsCard {
-                // 每行列数
-                SectionLabel(stringResource(R.string.columns))
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    (1..4).forEach { col ->
-                        SelectionChip(
-                            label = "$col",
-                            selected = state.thumbnailColumns == col,
-                            onClick = { viewModel.setThumbnailColumns(col) },
-                            textStyle = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f)
-                        )
+                // 每行列数：标题与选项并排，节省一整行高度。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(
+                        stringResource(R.string.columns),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(1.45f)
+                    ) {
+                        (1..4).forEach { col ->
+                            SelectionChip(
+                                label = "$col",
+                                selected = state.thumbnailColumns == col,
+                                onClick = { viewModel.setThumbnailColumns(col) },
+                                textStyle = MaterialTheme.typography.titleSmall,
+                                compact = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
 
                 CardDivider()
 
-                // 外观（深浅色主题）
-                SectionLabel(stringResource(R.string.appearance))
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ThemeMode.entries.forEach { mode ->
-                        SelectionChip(
-                            label = stringResource(when (mode) {
-                                ThemeMode.SYSTEM -> R.string.theme_system
-                                ThemeMode.DARK -> R.string.theme_dark
-                                ThemeMode.LIGHT -> R.string.theme_light
-                            }),
-                            selected = state.themeMode == mode,
-                            onClick = { viewModel.setThemeMode(mode) },
-                            modifier = Modifier.weight(1f)
-                        )
+                // 连拍合集：默认关闭，开启后仅改变照片列表的呈现方式，不改原始文件、
+                // 筛选或传输队列语义。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(
+                        stringResource(R.string.collapse_burst_photos),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = state.collapseBurstPhotos,
+                        onCheckedChange = { viewModel.setCollapseBurstPhotos(it) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ---------- 卡片三：通用（触感反馈 / 屏幕常亮）----------
+            SettingsCard {
+                // 触感反馈
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        SectionLabel(stringResource(R.string.haptic_feedback))
+                    }
+                    Switch(
+                        checked = state.hapticsEnabled,
+                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                    )
+                }
+
+                CardDivider()
+
+                // 屏幕常亮（默认开）：前台不熄屏，防系统冻结进程/Wi-Fi 打盹断连。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(
+                        stringResource(R.string.keep_screen_on),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = state.keepScreenOn,
+                        onCheckedChange = { viewModel.setKeepScreenOn(it) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ---------- 卡片四：界面（外观 / 语言），作为最后一个设置分组 ----------
+            SettingsCard {
+                // 外观：标题与主题选项并排。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(
+                        stringResource(R.string.appearance),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(2.4f)
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            SelectionChip(
+                                label = stringResource(when (mode) {
+                                    ThemeMode.SYSTEM -> R.string.theme_system
+                                    ThemeMode.DARK -> R.string.theme_dark
+                                    ThemeMode.LIGHT -> R.string.theme_light
+                                }),
+                                selected = state.themeMode == mode,
+                                onClick = { viewModel.setThemeMode(mode) },
+                                compact = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
 
@@ -369,42 +447,6 @@ fun SettingsOverlay(
                             }
                         }
                     }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // ---------- 卡片三：通用（触感反馈 / 屏幕常亮）----------
-            SettingsCard {
-                // 触感反馈
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        SectionLabel(stringResource(R.string.haptic_feedback))
-                    }
-                    Switch(
-                        checked = state.hapticsEnabled,
-                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
-                    )
-                }
-
-                CardDivider()
-
-                // 屏幕常亮（默认开）：前台不熄屏，防系统冻结进程/Wi-Fi 打盹断连。
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        SectionLabel(stringResource(R.string.keep_screen_on))
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            stringResource(R.string.keep_screen_on_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Switch(
-                        checked = state.keepScreenOn,
-                        onCheckedChange = { viewModel.setKeepScreenOn(it) }
-                    )
                 }
             }
 
@@ -530,7 +572,7 @@ private fun SettingsCard(
             // onBackground 极低透明度：深色主题下是白色微提亮、浅色下是黑色微压暗，两套都成立。
             .background(AppTheme.colors.onBackground.copy(alpha = 0.04f))
             .border(1.dp, borderColor, shape)
-            .padding(14.dp),
+            .padding(12.dp),
         content = content
     )
 }
@@ -541,7 +583,7 @@ private fun CardDivider() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp)
+            .padding(vertical = 8.dp)
             .height(1.dp)
             .background(AppTheme.colors.glassPanelBorder)
     )
@@ -558,7 +600,8 @@ internal fun ProBadgeButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    big: Boolean = false
+    big: Boolean = false,
+    enabled: Boolean = true,
 ) {
     // 高光带相位：-1（完全在按钮左侧外）扫到 +2（完全出右侧），尾段停顿让闪光有呼吸感。
     val sheen = rememberInfiniteTransition(label = "proSheen")
@@ -573,10 +616,14 @@ internal fun ProBadgeButton(
     )
     Surface(
         onClick = onClick,
+        enabled = enabled,
         shape = RoundedCornerShape(if (big) 16.dp else 14.dp),
         color = Color.Transparent,
         shadowElevation = 4.dp,
-        modifier = modifier.height(if (big) 46.dp else 28.dp)
+        modifier = modifier
+            .then(if (big) Modifier.heightIn(min = 48.dp) else Modifier.height(28.dp))
+            .clip(RoundedCornerShape(if (big) 16.dp else 14.dp))
+            .graphicsLayer { alpha = if (enabled) 1f else 0.5f }
     ) {
         Box(
             // big（定宽定高）需铺满 Surface 让内容居中；小号保持包裹内容，别撑满屏宽。
@@ -591,7 +638,11 @@ internal fun ProBadgeButton(
                     .graphicsLayer { translationX = size.width * sheenX }
                     .background(
                         Brush.horizontalGradient(
-                            listOf(Color.Transparent, Color.White.copy(alpha = 0.55f), Color.Transparent)
+                            listOf(
+                                Color.Transparent,
+                                Color(0xFFFFE5A0).copy(alpha = 0.65f),
+                                Color.Transparent,
+                            )
                         )
                     )
             )
@@ -599,8 +650,8 @@ internal fun ProBadgeButton(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(if (big) 6.dp else 4.dp),
                 modifier = Modifier
-                    .fillMaxHeight()
-                    .padding(horizontal = 12.dp)
+                    .then(if (big) Modifier else Modifier.fillMaxHeight())
+                    .padding(horizontal = 12.dp, vertical = if (big) 10.dp else 0.dp)
             ) {
                 Icon(
                     Icons.Default.WorkspacePremium,
@@ -612,7 +663,9 @@ internal fun ProBadgeButton(
                     label,
                     style = if (big) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF4A3216)
+                    color = Color(0xFF4A3216),
+                    textAlign = TextAlign.Center,
+                    maxLines = if (big) 2 else 1,
                 )
             }
         }
@@ -626,14 +679,15 @@ private fun SelectionChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    textStyle: TextStyle = MaterialTheme.typography.labelLarge
+    textStyle: TextStyle = MaterialTheme.typography.labelLarge,
+    compact: Boolean = false
 ) {
     val colors = AppTheme.colors
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         color = if (selected) colors.accentBlue else colors.surfaceVariant,
-        modifier = modifier.height(40.dp)
+        modifier = modifier.height(if (compact) 34.dp else 40.dp)
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
@@ -648,9 +702,10 @@ private fun SelectionChip(
 }
 
 @Composable
-private fun SectionLabel(text: String) {
+private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
+        modifier = modifier,
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold,
         color = AppTheme.colors.onBackground

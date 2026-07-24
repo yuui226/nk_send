@@ -45,6 +45,8 @@
     <string name="cd_collapse">收起</string>
     <string name="cd_all_queued">已全部加入佇列</string>
     <string name="cd_transfer_group">傳輸整組</string>
+    <string name="burst_collection_a11y">連拍合集，共 %1$d 張</string>
+    <string name="burst_collection_count">%1$d</string>
 
     <!-- 傳輸佇列 -->
     <string name="no_transfer_tasks">暫無傳輸任務</string>
@@ -72,6 +74,7 @@
     <string name="change_directory">變更目錄</string>
     <string name="choose_directory">選擇目錄</string>
     <string name="columns">欄數</string>
+    <string name="collapse_burst_photos">連拍顯示為合集</string>
     <string name="appearance">外觀</string>
     <string name="theme_system">跟隨系統</string>
     <string name="theme_dark">深色</string>
@@ -80,7 +83,6 @@
     <string name="language_system">跟隨系統</string>
     <string name="haptic_feedback">觸覺回饋</string>
     <string name="keep_screen_on">保持螢幕開啟</string>
-    <string name="keep_screen_on_desc">App 在前景時螢幕不熄滅，防止連線中斷</string>
     <string name="version_label">Z傳 v%1$s</string>
     <string name="qq_group_copied">已複製客服 QQ：%1$s</string>
     <string name="feedback">回饋</string>
@@ -140,7 +142,8 @@
     <string name="remote_blocked_transfer">傳輸進行中，完成後再進入監看</string>
     <string name="remote_title">遙控</string>
     <string name="remote_transfer_busy_hint">傳輸進行中，監看可能卡頓</string>
-    <string name="remote_rec_start_failed">無法開始錄影，請檢查記憶卡與相機狀態</string>
+    <string name="remote_rec_start_failed">無法開始錄影，請確認相機處於影片模式並檢查記憶卡</string>
+    <string name="remote_rec_stop_failed">無法停止錄影，請檢查相機後重試</string>
     <string name="remote_tap_focus_manual">請將相機切換到自動對焦後使用點按對焦</string>
     <string name="dev_panel_title">開發者</string>
     <string name="dev_hd_liveview">高清監看 (XGA)</string>
@@ -174,18 +177,30 @@
     <string name="unlock">解鎖</string>
     <string name="enter_code">輸入啟用碼</string>
     <string name="tier_free">免費</string>
+    <string name="tier_feature">功能</string>
+    <string name="tier_annual">高級版</string>
+    <string name="tier_lifetime">永久版</string>
     <string name="compare_transfer">傳輸</string>
-    <string name="compare_transfer_free">%1$d 個/天</string>
-    <string name="compare_filesize">單檔大小</string>
+    <string name="compare_transfer_free">%1$d/天</string>
+    <string name="compare_filesize">檔案大小</string>
     <string name="compare_filesize_free">%1$d MB</string>
     <string name="compare_remote">遙控 · 監看</string>
     <string name="compare_remote_free">%1$d 分鐘/天</string>
     <string name="compare_unlimited">無限</string>
+    <string name="compare_duration">時效</string>
+    <string name="duration_free">長期免費</string>
+    <string name="duration_days">%1$d 天</string>
+    <string name="duration_lifetime">永久</string>
+    <string name="plan_annual">年費高級版</string>
+    <string name="plan_lifetime">永久高級版</string>
+    <string name="plan_unavailable">未開放</string>
+    <string name="plan_lifetime_unavailable">永久版暫未開放</string>
+    <string name="buy_annual_cta">購買年費高級版 · %1$s · %2$d 天</string>
+    <string name="buy_lifetime_cta">購買永久高級版 · %1$s · 永久</string>
     <string name="price_promo_tag">限時特惠</string>
     <!-- 價格單位按語言拼，金額本身是常數（見 PRO_PRICE）。 -->
     <string name="price_per_year">%1$s/年</string>
     <string name="pro_price_per_day">≈%1$s/天</string>
-    <string name="pro_perks">一年有效 · 隨時可續 · 免費更新</string>
     <string name="quota_left_hint">今日剩餘額度 %1$d/%2$d</string>
     <string name="transfer_limit_reached">今日額度已用完，請解鎖高級版</string>
     <string name="transfer_size_limit">超過 %1$d MB，請解鎖高級版</string>
@@ -196,6 +211,10 @@
     <string name="purchase_loading">正在建立訂單…</string>
     <string name="purchase_qr_loading">正在產生支付二維碼…</string>
     <string name="purchase_wechat_title">微信掃碼付款</string>
+    <string name="purchase_annual_title">年費高級版 · 微信掃碼付款</string>
+    <string name="purchase_lifetime_title">永久高級版 · 微信掃碼付款</string>
+    <string name="purchase_locked_annual">本單 %1$s · %2$d 天</string>
+    <string name="purchase_locked_lifetime">本單 %1$s · 永久</string>
     <string name="purchase_scan_hint">請到微信掃相簿中的二維碼付款</string>
     <string name="purchase_save_qr">儲存到相簿</string>
     <string name="purchase_saved">✓ 已儲存到相簿</string>
@@ -209,7 +228,8 @@
     <!-- 訂閱到期（設定頁徽標註腳 + 首頁提示條） -->
     <string name="sub_expires_on">%1$s 到期</string>
     <string name="renew_action">續費</string>
-    <string name="renew_carry_over">將在原到期時間追加 365 天</string>
+    <string name="renew_or_upgrade">續費或升級</string>
+    <string name="sub_expired">高級版已到期</string>
     <string name="sub_expired_renew">高級版已到期，續費繼續使用</string>
     <plurals name="sub_days_left">
         <item quantity="other">剩 %1$d 天到期</item>
@@ -221,7 +241,8 @@
     <string name="purchase_opening_alipay">正在開啟支付寶…</string>
     <string name="purchase_waiting">在上方頁面完成付款，到帳後自動啟用。</string>
     <string name="purchase_activated">🎉 購買成功 · 高級版已解鎖</string>
-    <string name="purchase_restored">🎉 本裝置已購買過 · 已免費恢復,未重複扣款</string>
+    <string name="purchase_lifetime_activated">🎉 購買成功 · 永久高級版已解鎖</string>
+    <string name="purchase_restored">🎉 已恢復權益</string>
     <string name="restore_action">恢復授權</string>
     <string name="restore_restoring">恢復中…</string>
     <string name="restore_none">找不到本機的授權（尚未購買，或已在新裝置上使用）</string>
@@ -235,6 +256,11 @@
     <string name="err_purchase_no_network">需要連接網際網路</string>
     <string name="err_purchase_unreachable">無法連接伺服器。若目前連著相機 Wi-Fi，請先斷開，改用有外網的網路重試。</string>
     <string name="err_purchase_failed">下單失敗，請稍後重試或聯絡客服。</string>
+    <string name="err_purchase_activation_failed">啟用失敗，請聯絡客服</string>
+    <string name="err_purchase_price_missing">無法確認本單金額，已停止付款。請重試。</string>
+    <string name="err_purchase_qr_failed">付款二維碼載入失敗，請重試，不要重複付款。</string>
+    <string name="err_purchase_product_mismatch">訂單商品與所選方案不一致，已停止付款。請返回後重新選擇。</string>
+    <string name="purchase_back_to_plans">返回選擇方案</string>
 
     <!-- 檢查更新（設定頁腳） -->
     <string name="check_update">檢查更新</string>
@@ -244,14 +270,13 @@
     <string name="update_available_title">發現新版本</string>
     <string name="update_required_title">必須更新</string>
     <string name="update_version">版本 %1$s</string>
-    <string name="update_size">下載大小：%1$s</string>
+    <string name="update_size">大小：%1$s</string>
     <string name="update_disconnect_camera_wifi">請中斷相機 Wi-Fi</string>
     <string name="update_ignore_version">忽略此版本</string>
     <string name="update_resolving">正在取得下載連結…</string>
     <string name="update_downloading">正在下載…</string>
     <string name="update_downloading_percent">正在下載… %1$d%%</string>
     <string name="update_verifying">正在驗證…</string>
-    <string name="update_ready">可以安裝</string>
     <string name="update_now">立即更新</string>
     <string name="update_install">安裝</string>
     <string name="update_later">稍後</string>
@@ -260,5 +285,6 @@
     <string name="update_error_invalid_apk">安裝套件驗證失敗，已刪除</string>
     <string name="update_error_installer">無法開啟安裝程式</string>
     <string name="update_manual_copied">請手動更新，已複製到剪貼簿</string>
+    <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">開啟下載頁</string>
 </resources>

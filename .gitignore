@@ -36,3 +36,6 @@ dist/*.mapping.txt
 # 本地构建工具链 / 环境脚本
 .build-tools/
 env_build/
+
+# 本机 AI 工具权限配置
+.claude/settings.local.json

@@ -71,6 +71,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // 从微信返回、Activity 重建时补完已付款但本地尚未落证的订单。
+        com.ztransfer.license.LicenseManager.onAppForeground()
+    }
+
     /** Android 13+ 需运行时授权才能展示前台传输通知；拒绝不影响服务运行，仅隐藏通知。 */
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return

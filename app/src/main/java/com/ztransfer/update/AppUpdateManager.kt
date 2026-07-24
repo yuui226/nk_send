@@ -2,25 +2,25 @@ package com.ztransfer.update
 
 import android.app.Activity
 import android.app.DownloadManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
-import androidx.core.content.ContextCompat
+import android.util.Log
 import androidx.core.content.FileProvider
 import com.ztransfer.BuildConfig
 import com.ztransfer.license.LicenseManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,14 +30,17 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.MessageDigest
 
 /**
- * App 自更新的唯一状态机：检查元数据 → 临时直链 → DownloadManager → 完整性/签名校验 →
+ * App 自更新的唯一状态机：检查元数据 → 临时直链 → 直接下载 → 完整性/签名校验 →
  * 系统安装确认。蓝奏云分享信息只作为自动更新失败时的灾备，也不会尝试绕过 Android
  * 的安装授权。
  */
 object AppUpdateManager {
+    private const val TAG = "AppUpdate"
     private const val PREFS = "app_update"
     private const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
     private const val PROMPT_INTERVAL_MS = 24 * 60 * 60 * 1000L
@@ -70,31 +73,17 @@ object AppUpdateManager {
     private lateinit var context: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val checkMutex = Mutex()
-    private var progressJob: Job? = null
+    private var downloadJob: Job? = null
     private val _state = MutableStateFlow<UiState>(UiState.Idle)
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val prefs get() = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private val downloads get() = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-
-    private val downloadReceiver = object : BroadcastReceiver() {
-        override fun onReceive(receiverContext: Context?, intent: Intent?) {
-            if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
-            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
-            if (id == prefs.getLong(KEY_DOWNLOAD_ID, -2L)) scope.launch { inspectDownload(id) }
-        }
-    }
 
     fun init(appContext: Context) {
         if (::context.isInitialized) return
         context = appContext.applicationContext
-        ContextCompat.registerReceiver(
-            context,
-            downloadReceiver,
-            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-            ContextCompat.RECEIVER_EXPORTED
-        )
         scope.launch {
+            discardLegacySystemDownload()
             restoreDownloadOrCachedPrompt()
             val cached = decode(prefs.getString(KEY_CACHED_INFO, null))
             val cachedHardUpdate = cached?.isRequired(BuildConfig.VERSION_CODE) == true
@@ -143,7 +132,7 @@ object AppUpdateManager {
     fun download(info: LicenseManager.UpdateInfo) {
         if (_state.value is UiState.Resolving || _state.value is UiState.Downloading) return
         _state.value = UiState.Resolving(info)
-        scope.launch {
+        downloadJob = scope.launch {
             val direct = LicenseManager.resolveAppDownload(info.versionCode)
             if (direct == null) {
                 // 发布版本可能已变化；刷新一次元数据。版本没变才按真正的解析失败处理。
@@ -167,40 +156,45 @@ object AppUpdateManager {
             }
             val updateDir = File(root, "updates").apply { mkdirs() }
             val apk = File(updateDir, "ZTransfer-${info.versionCode}.apk")
+            val partial = File(updateDir, "${apk.name}.part")
             prefs.edit().remove(KEY_VERIFIED_PATH).apply()
             if (apk.exists() && !apk.delete()) {
                 _state.value = UiState.Failed(info, Failure.DOWNLOAD)
                 return@launch
             }
-            val id = runCatching {
-                val request = DownloadManager.Request(Uri.parse(direct))
-                    .setTitle("ZTransfer ${info.versionName}")
-                    .setDescription("Downloading update")
-                    .setMimeType("application/vnd.android.package-archive")
-                    .setAllowedOverMetered(true)
-                    .setAllowedOverRoaming(false)
-                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    .setDestinationInExternalFilesDir(
-                        context,
-                        Environment.DIRECTORY_DOWNLOADS,
-                        "updates/${apk.name}"
-                    )
-                downloads.enqueue(request)
-            }.getOrElse {
+            partial.delete()
+            prefs.edit().putString(KEY_DOWNLOAD_PATH, apk.absolutePath).apply()
+            _state.value = UiState.Downloading(info, 0)
+            try {
+                val downloaded = downloadWithRetry(info, direct, partial) { progress ->
+                    _state.value = UiState.Downloading(info, progress)
+                }
+                if (!downloaded) {
+                    clearDownloadRecord(deleteFile = true)
+                    _state.value = UiState.Failed(info, Failure.DOWNLOAD)
+                    return@launch
+                }
+                if (!partial.renameTo(apk)) throw IllegalStateException("无法保存下载文件")
+                verifyDownloaded(info)
+            } catch (_: CancellationException) {
+                partial.delete()
+            } catch (e: Exception) {
+                Log.e(TAG, "更新下载处理失败", e)
+                partial.delete()
+                clearDownloadRecord(deleteFile = true)
                 _state.value = UiState.Failed(info, Failure.DOWNLOAD)
-                return@launch
             }
-            prefs.edit().putLong(KEY_DOWNLOAD_ID, id).putString(KEY_DOWNLOAD_PATH, apk.absolutePath).apply()
-            _state.value = UiState.Downloading(info, null)
-            watchProgress(id)
         }
     }
 
     fun cancelDownload(info: LicenseManager.UpdateInfo) {
         if (info.isRequired(BuildConfig.VERSION_CODE)) return
-        val id = prefs.getLong(KEY_DOWNLOAD_ID, -1L)
-        if (id >= 0) downloads.remove(id)
+        downloadJob?.cancel()
+        downloadJob = null
         clearDownloadRecord(deleteFile = true)
+        context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?.resolve("updates/ZTransfer-${info.versionCode}.apk.part")
+            ?.delete()
         _state.value = UiState.Idle
     }
 
@@ -256,96 +250,136 @@ object AppUpdateManager {
             verifyDownloaded(info)
             return
         }
-        val id = prefs.getLong(KEY_DOWNLOAD_ID, -1L)
         val path = prefs.getString(KEY_DOWNLOAD_PATH, null)
-        if (id >= 0 && path != null) {
-            inspectDownload(id)
+        if (path != null && File(path).isFile) {
+            verifyDownloaded(info)
         } else {
+            clearDownloadRecord(deleteFile = true)
             maybePresent(info, force = false)
         }
     }
 
-    private fun watchProgress(id: Long) {
-        progressJob?.cancel()
-        progressJob = scope.launch {
-            while (true) {
-                val info = currentInfo() ?: return@launch
-                val cursor = runCatching {
-                    downloads.query(DownloadManager.Query().setFilterById(id))
-                }.getOrElse {
-                    _state.value = UiState.Failed(info, Failure.DOWNLOAD)
-                    return@launch
+    private suspend fun downloadWithRetry(
+        info: LicenseManager.UpdateInfo,
+        firstUrl: String,
+        target: File,
+        onProgress: (Int?) -> Unit
+    ): Boolean {
+        var directUrl = firstUrl
+        repeat(2) { attempt ->
+            target.delete()
+            onProgress(0)
+            try {
+                downloadDirect(directUrl, target, info.sizeBytes, onProgress)
+                return true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "直链下载失败，attempt=${attempt + 1}", e)
+                if (attempt == 0) {
+                    directUrl = LicenseManager.resolveAppDownload(info.versionCode) ?: return false
                 }
-                cursor.use {
-                    if (!it.moveToFirst()) {
-                        _state.value = UiState.Failed(info, Failure.DOWNLOAD)
-                        return@launch
-                    }
-                    val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                    if (status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED) {
-                        inspectDownload(id)
-                        return@launch
-                    }
-                    val done = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-                    val total = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-                    val progress = if (total > 0) ((done * 100) / total).toInt().coerceIn(0, 99) else null
-                    _state.value = UiState.Downloading(info, progress)
-                }
-                delay(750)
             }
+        }
+        return false
+    }
+
+    private suspend fun downloadDirect(
+        directUrl: String,
+        target: File,
+        expectedSize: Long,
+        onProgress: (Int?) -> Unit
+    ) {
+        val connection = URL(directUrl).openConnection() as HttpURLConnection
+        try {
+            connection.instanceFollowRedirects = true
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.setRequestProperty("Accept", "application/vnd.android.package-archive,*/*")
+            connection.setRequestProperty("Accept-Encoding", "identity")
+            connection.setRequestProperty("User-Agent", "ZTransfer/${BuildConfig.VERSION_NAME} Android")
+            val status = connection.responseCode
+            if (status !in 200..299) throw IllegalStateException("下载响应 $status")
+
+            val total = connection.contentLengthLong.takeIf { it > 0 } ?: expectedSize.takeIf { it > 0 }
+            var downloaded = 0L
+            var lastProgress = -1
+            connection.inputStream.buffered().use { input ->
+                target.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        currentCoroutineContext().ensureActive()
+                        output.write(buffer, 0, count)
+                        downloaded += count
+                        val progress = total?.let {
+                            ((downloaded * 100) / it).toInt().coerceIn(0, 99)
+                        }
+                        if (progress == null || progress != lastProgress) {
+                            onProgress(progress)
+                            if (progress != null) lastProgress = progress
+                        }
+                    }
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            if (downloaded <= 0) throw IllegalStateException("下载内容为空")
+        } finally {
+            connection.disconnect()
         }
     }
 
-    private suspend fun inspectDownload(id: Long) {
-        val info = currentInfo() ?: return
-        val cursor = runCatching {
-            downloads.query(DownloadManager.Query().setFilterById(id))
-        }.getOrElse {
-            clearDownloadRecord(deleteFile = true)
-            _state.value = UiState.Failed(info, Failure.DOWNLOAD)
-            return
-        }
-        val status = cursor.use {
-            if (!it.moveToFirst()) -1
-            else it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-        }
-        when (status) {
-            DownloadManager.STATUS_SUCCESSFUL -> verifyDownloaded(info)
-            DownloadManager.STATUS_FAILED, -1 -> {
-                clearDownloadRecord(deleteFile = true)
-                _state.value = UiState.Failed(info, Failure.DOWNLOAD)
+    /** 清掉升级前由 DownloadManager 创建、可能永久等待的旧任务。 */
+    private fun discardLegacySystemDownload() {
+        val id = prefs.getLong(KEY_DOWNLOAD_ID, -1L)
+        if (id >= 0) {
+            runCatching {
+                val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                manager.remove(id)
             }
-            else -> {
-                _state.value = UiState.Downloading(info, null)
-                watchProgress(id)
-            }
+            prefs.getString(KEY_DOWNLOAD_PATH, null)?.let { File(it).delete() }
         }
+        prefs.edit().remove(KEY_DOWNLOAD_ID).remove(KEY_DOWNLOAD_PATH).apply()
     }
 
     private suspend fun verifyDownloaded(info: LicenseManager.UpdateInfo) = withContext(Dispatchers.IO) {
         _state.value = UiState.Verifying(info)
         val path = prefs.getString(KEY_DOWNLOAD_PATH, null)
         val apk = path?.let(::File)
-        if (apk == null || !apk.isFile) return@withContext failVerification(info, Failure.DOWNLOAD, apk)
+        if (apk == null || !apk.isFile) {
+            return@withContext failVerification(info, Failure.DOWNLOAD, apk, "下载文件不存在")
+        }
         if (info.sizeBytes > 0 && apk.length() != info.sizeBytes) {
-            return@withContext failVerification(info, Failure.INVALID_APK, apk)
+            return@withContext failVerification(
+                info, Failure.INVALID_APK, apk,
+                "文件大小不符 actual=${apk.length()} expected=${info.sizeBytes}"
+            )
         }
         if (info.sha256.isNotEmpty() && sha256(apk) != info.sha256) {
-            return@withContext failVerification(info, Failure.INVALID_APK, apk)
+            return@withContext failVerification(info, Failure.INVALID_APK, apk, "SHA-256 不符")
         }
-        val archive = archiveInfo(apk) ?: return@withContext failVerification(info, Failure.INVALID_APK, apk)
+        val archive = archiveInfo(apk)
+            ?: return@withContext failVerification(info, Failure.INVALID_APK, apk, "无法解析 APK")
         if (archive.packageName != context.packageName) {
-            return@withContext failVerification(info, Failure.INVALID_APK, apk)
+            return@withContext failVerification(
+                info, Failure.INVALID_APK, apk,
+                "包名不符 actual=${archive.packageName} expected=${context.packageName}"
+            )
         }
         if (versionCode(archive) != info.versionCode.toLong()) {
-            return@withContext failVerification(info, Failure.INVALID_APK, apk)
+            return@withContext failVerification(
+                info, Failure.INVALID_APK, apk,
+                "版本号不符 actual=${versionCode(archive)} expected=${info.versionCode}"
+            )
         }
         val installed = runCatching {
             context.packageManager.getPackageInfo(context.packageName, signatureFlags())
-        }.getOrNull() ?: return@withContext failVerification(info, Failure.INVALID_APK, apk)
+        }.getOrNull()
+            ?: return@withContext failVerification(info, Failure.INVALID_APK, apk, "无法读取当前 App 签名")
         val archiveSigners = signingDigests(archive)
         if (archiveSigners.isEmpty() || archiveSigners != signingDigests(installed)) {
-            return@withContext failVerification(info, Failure.INVALID_APK, apk)
+            return@withContext failVerification(info, Failure.INVALID_APK, apk, "APK 签名不一致")
         }
         prefs.edit().remove(KEY_DOWNLOAD_ID).remove(KEY_DOWNLOAD_PATH)
             .putString(KEY_VERIFIED_PATH, apk.absolutePath).apply()
@@ -399,7 +433,13 @@ object AppUpdateManager {
     private fun bytesToHex(bytes: ByteArray): String =
         bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-    private fun failVerification(info: LicenseManager.UpdateInfo, failure: Failure, apk: File?) {
+    private fun failVerification(
+        info: LicenseManager.UpdateInfo,
+        failure: Failure,
+        apk: File?,
+        detail: String
+    ) {
+        Log.e(TAG, "更新校验失败: $detail")
         apk?.delete()
         prefs.edit().remove(KEY_VERIFIED_PATH).apply()
         clearDownloadRecord(deleteFile = false)
@@ -407,7 +447,6 @@ object AppUpdateManager {
     }
 
     private fun clearDownloadRecord(deleteFile: Boolean) {
-        progressJob?.cancel()
         if (deleteFile) prefs.getString(KEY_DOWNLOAD_PATH, null)?.let { File(it).delete() }
         prefs.edit().remove(KEY_DOWNLOAD_ID).remove(KEY_DOWNLOAD_PATH).apply()
     }

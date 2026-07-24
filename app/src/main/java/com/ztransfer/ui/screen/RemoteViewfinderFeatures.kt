@@ -69,11 +69,28 @@ internal fun DrawScope.drawFocusCornerReticle(
     cornerLength: Float,
     color: Color,
     strokeWidth: Float
+) = drawFocusCornerReticle(
+    center = center,
+    halfWidth = halfSize,
+    halfHeight = halfSize,
+    cornerLength = cornerLength,
+    color = color,
+    strokeWidth = strokeWidth
+)
+
+/** 可保留相机真实 AF 区域宽高比的四角框。 */
+internal fun DrawScope.drawFocusCornerReticle(
+    center: Offset,
+    halfWidth: Float,
+    halfHeight: Float,
+    cornerLength: Float,
+    color: Color,
+    strokeWidth: Float
 ) {
-    val x0 = center.x - halfSize
-    val x1 = center.x + halfSize
-    val y0 = center.y - halfSize
-    val y1 = center.y + halfSize
+    val x0 = center.x - halfWidth
+    val x1 = center.x + halfWidth
+    val y0 = center.y - halfHeight
+    val y1 = center.y + halfHeight
     drawLine(color, Offset(x0, y0 + cornerLength), Offset(x0, y0), strokeWidth, StrokeCap.Round)
     drawLine(color, Offset(x0, y0), Offset(x0 + cornerLength, y0), strokeWidth, StrokeCap.Round)
     drawLine(color, Offset(x1 - cornerLength, y0), Offset(x1, y0), strokeWidth, StrokeCap.Round)

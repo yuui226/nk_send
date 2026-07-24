@@ -25,13 +25,11 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -72,6 +70,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -103,6 +102,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.R
@@ -122,6 +123,7 @@ import com.ztransfer.viewmodel.currentFileProgress
 import com.ztransfer.viewmodel.remainingCount
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -130,6 +132,31 @@ data class FileGroup(
     val date: String,
     val files: List<NikonCamera.FileInfo>
 )
+
+/** 一段真实连拍。它只描述检测结果；是否折成虚拟卡位由列表设置决定。 */
+internal data class BurstPhotoGroup(
+    val id: String,
+    val files: List<NikonCamera.FileInfo>
+)
+
+/** LazyGrid 的展示层条目；合集卡不是相机文件，使用独立类型避免混入照片语义。 */
+internal sealed interface ThumbnailGridItem {
+    val key: Any
+
+    data class Photo(
+        val file: NikonCamera.FileInfo,
+        val burstId: String? = null
+    ) : ThumbnailGridItem {
+        override val key: Any = file.handle
+    }
+
+    data class BurstCollection(
+        val id: String,
+        val files: List<NikonCamera.FileInfo>
+    ) : ThumbnailGridItem {
+        override val key: Any = "burst_collection_$id"
+    }
+}
 
 /** 队列胶囊的三种内容形态：入口图标 / 完成短标 / 计数（速度+剩余数）。 */
 private enum class PillMode { ICON, DONE, COUNTING }
@@ -153,6 +180,10 @@ private const val BACK_TO_TOP_SNAP_INDEX = 24
 
 /** 正在播放收合动画的分组：[date] + 保留参与动画的前 [keep] 个格子（收起瞬间可见的那部分）。 */
 private data class CollapsingGroup(val date: String, val keep: Int)
+
+private const val BURST_REFLOW_DURATION_MS = 300
+private const val BURST_MEMBER_ENTER_DURATION_MS = 180
+private const val BURST_MEMBER_EXIT_DURATION_MS = 150
 
 /**
  * 手风琴收合：按 [progress]（1→0）缩减条目报告给布局的高度（内容顶部对齐、超出裁掉），
@@ -356,9 +387,19 @@ fun FileListScreen(
     val availableExts = remember(state.files) {
         state.files.map { it.extension }.distinct().sorted()
     }
-    // 连拍检测:基于原始列表计算,只在文件列表变化时重算。
-    // 驱动缩略图右上角的连拍角标 + "连拍"筛选(同一数据源,标记与筛选天然一致)。
-    val burstHandles = remember(state.files) { computeBurstHandles(state.files) }
+    // 连拍检测基于原始列表，只在文件列表变化时重算。角标、筛选和合集都共享这一份
+    // 结果，避免三个功能对“哪些照片属于连拍”产生分歧。
+    val burstGroups = remember(state.files) { computeBurstGroups(state.files) }
+    val burstHandles = remember(burstGroups) {
+        burstGroups.flatMapTo(HashSet()) { group -> group.files.map { it.handle } }
+    }
+    val burstIdByHandle = remember(burstGroups) {
+        buildMap {
+            burstGroups.forEach { group ->
+                group.files.forEach { file -> put(file.handle, group.id) }
+            }
+        }
+    }
     // 已传对号与“未传输”筛选必须共用这一个判定，避免界面同时出现
     // “带对号却仍在未传输列表”的自相矛盾。
     val exportedHandles: Set<Int> = remember(state.files, transferState.existingExportFiles) {
@@ -434,7 +475,26 @@ fun FileListScreen(
             .toList()
         groupFilesByDate(files)
     }
-    val flatFiles = remember(groups) { groups.flatMap { it.files } }
+    // 列表与预览共享同一份“合集是否展开”状态。预览页主动展开后，关闭预览仍能看到
+    // 底层列表已展开；反之亦然。合集关闭设置时，模型退化为原来的纯照片序列。
+    val expandedBurstCollections = remember { mutableStateMapOf<String, Boolean>() }
+    LaunchedEffect(transferState.collapseBurstPhotos, burstGroups) {
+        if (!transferState.collapseBurstPhotos) {
+            expandedBurstCollections.clear()
+        } else {
+            val validIds = burstGroups.mapTo(HashSet()) { it.id }
+            expandedBurstCollections.keys
+                .filterNot { it in validIds }
+                .forEach(expandedBurstCollections::remove)
+        }
+    }
+    // 该状态表只保存 true，收起时直接 remove；无需再构造 filterValues 视图。
+    val expandedBurstIds = expandedBurstCollections.keys.toSet()
+    // 只用一个轻量身份对象追踪“底层展示模型是否还是打开预览时那一版”；真正的预览
+    // 分页列表仅在长按发生时构建，避免每次连拍展开都为尚未打开的预览额外扫描全表。
+    val previewSourceIdentity = remember(
+        groups, burstIdByHandle, transferState.collapseBurstPhotos, expandedBurstIds
+    ) { Any() }
     val transfersBusy = transferState.tasks.any {
         it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
     }
@@ -444,21 +504,59 @@ fun FileListScreen(
     // 长按预览：全屏翻页 + 从被长按格子的位置放大展开。
     var previewIndex by remember { mutableStateOf<Int?>(null) }
     var previewAnchor by remember { mutableStateOf<Rect?>(null) }
-    // 预览会话固定为打开瞬间的筛选列表。“未传输”激活时，当前照片在
-    // 后台传完会从网格派生列表移除；若预览仍直接引用 flatFiles，固定下标会
+    var previewSourceAtOpen by remember { mutableStateOf<Any?>(null) }
+    // 预览会话固定为打开瞬间的展示模型。“未传输”激活时，当前照片在
+    // 后台传完会从网格派生列表移除；若预览仍直接引用实时模型，固定下标会
     // 突然指向下一张，末尾项还会直接让 overlay 消失。快照保证当次浏览稳定，
     // 关闭后底下列表已是最新筛选结果。
-    var previewFiles by remember { mutableStateOf<List<NikonCamera.FileInfo>>(emptyList()) }
-    val onPreview: (NikonCamera.FileInfo, Rect) -> Unit = { file, rect ->
-        val snapshot = flatFiles
-        val idx = snapshot.indexOfFirst { it.handle == file.handle }
-        if (idx >= 0) {
-            haptics.longPress()
-            previewFiles = snapshot
-            previewIndex = idx
-            previewAnchor = rect
+    var previewItems by remember { mutableStateOf<List<PhotoPreviewItem>>(emptyList()) }
+    val buildPreviewSnapshot: (Set<String>) -> List<PhotoPreviewItem> = { expandedIds ->
+        groups.flatMap { group ->
+            buildThumbnailGridItems(
+                files = group.files,
+                burstIdByHandle = burstIdByHandle,
+                collapseBurstPhotos = transferState.collapseBurstPhotos,
+                expandedBurstIds = expandedIds
+            ).map { item ->
+                when (item) {
+                    is ThumbnailGridItem.Photo ->
+                        PhotoPreviewItem.Photo(item.file, item.burstId)
+                    is ThumbnailGridItem.BurstCollection ->
+                        PhotoPreviewItem.BurstCollection(item.id, item.files)
+                }
+            }
         }
     }
+    val onPreview: (NikonCamera.FileInfo, Rect) -> Unit = { file, rect ->
+        val snapshot = buildPreviewSnapshot(expandedBurstIds)
+        val idx = snapshot.indexOfFirst {
+            it is PhotoPreviewItem.Photo && it.file.handle == file.handle
+        }
+        if (idx >= 0) {
+            haptics.longPress()
+            previewItems = snapshot
+            previewIndex = idx
+            previewAnchor = rect
+            previewSourceAtOpen = previewSourceIdentity
+        }
+    }
+    val onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit =
+        onPreviewBurst@{ burstId, files, rect ->
+            val first = files.firstOrNull() ?: return@onPreviewBurst
+            // 快照立即包含目标成员，保证底层展开动画尚未提交时也能直接落到第一张；
+            // 向左仍可回到合集页。折叠合集的长按会由卡片先触发同一个展开状态机。
+            val snapshot = buildPreviewSnapshot(expandedBurstIds + burstId)
+            val idx = snapshot.indexOfFirst {
+                it is PhotoPreviewItem.Photo && it.file.handle == first.handle
+            }
+            if (idx >= 0) {
+                haptics.longPress()
+                previewItems = snapshot
+                previewIndex = idx
+                previewAnchor = rect
+                previewSourceAtOpen = previewSourceIdentity
+            }
+        }
 
     // 队列 handle → 任务：列表角标与预览页"已入队"态共用。
     val queuedByHandle = remember(transferState.tasks) {
@@ -469,7 +567,8 @@ fun FileListScreen(
         if (transferState.transferDirUri == null) {
             // 预览层盖在设置面板之上，先关掉预览再弹设置，否则用户看不见。
             previewIndex = null
-            previewFiles = emptyList()
+            previewItems = emptyList()
+            previewSourceAtOpen = null
             showSettings = true; return@onTapFile
         }
         if (!state.isConnectedToCamera) {
@@ -494,6 +593,27 @@ fun FileListScreen(
             }
         }
     }
+
+    val onTransferBurstPreview: (List<NikonCamera.FileInfo>) -> Unit =
+        onTransferBurstPreview@{ files ->
+            val remaining = files.filter { it.handle !in queuedByHandle }
+            if (remaining.isEmpty()) return@onTransferBurstPreview
+            if (transferState.transferDirUri == null) {
+                previewIndex = null
+                previewItems = emptyList()
+                previewSourceAtOpen = null
+                showSettings = true
+                return@onTransferBurstPreview
+            }
+            if (!state.isConnectedToCamera) {
+                signalPulse++
+                showHint(notConnectedHint)
+                return@onTransferBurstPreview
+            }
+            // 全屏合集没有可信的列表坐标，不伪造飞行动画起点；整组只震一次、直接入队。
+            haptics.tick()
+            transferViewModel.addToQueue(remaining, cameraViewModel::getCamera)
+        }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
     // 用全局背景渐变刷（而非纯 background 色），与 Scaffold 底的纵深一致。
@@ -655,8 +775,12 @@ fun FileListScreen(
                 onTransferGroup = onTransferGroup,
                 onTapFile = onTapFile,
                 onPreview = onPreview,
+                onPreviewBurst = onPreviewBurst,
                 cellBoundsRegistry = cellBoundsRegistry,
                 burstHandles = burstHandles,
+                burstIdByHandle = burstIdByHandle,
+                collapseBurstPhotos = transferState.collapseBurstPhotos,
+                expandedBursts = expandedBurstCollections,
                 contentPadding = listPadding,
                 gridState = gridState,
                 filterRevealTick = filterRevealTick,
@@ -939,24 +1063,30 @@ fun FileListScreen(
 
         // 长按预览层：全屏翻页，从被长按格子的位置放大展开/收回。
         previewIndex?.let { idx ->
-            if (idx in previewFiles.indices) {
+            if (idx in previewItems.indices) {
                 PhotoPreviewOverlay(
-                    files = previewFiles,
+                    items = previewItems,
                     initialIndex = idx,
                     // 只有底层列表仍是打开瞬间的同一实例时，原格子坐标才可信。
-                    // 传输完成/文件增量加载导致 flatFiles 更换后，收起改为原地淡出，
+                    // 传输完成/文件增量加载/合集展开导致展示模型更换后，收起改为原地淡出，
                     // 避免飞向已被其他照片占据的旧位置。引用比较是 O(1)，不扫描大列表。
-                    anchorRect = previewAnchor.takeIf { previewFiles === flatFiles },
+                    anchorRect = previewAnchor.takeIf { previewSourceAtOpen === previewSourceIdentity },
                     cameraViewModel = cameraViewModel,
                     hapticsEnabled = transferState.hapticsEnabled,
                     initialRotationQuarterTurns = transferState.previewRotationQuarterTurns,
                     burstHandles = burstHandles,
                     queuedHandles = queuedByHandle.keys,
                     onTransfer = onTapFile,
+                    onTransferBurst = onTransferBurstPreview,
+                    onBurstExpandedChange = { id, expanded ->
+                        if (expanded) expandedBurstCollections[id] = true
+                        else expandedBurstCollections.remove(id)
+                    },
                     onRotationChanged = transferViewModel::setPreviewRotationQuarterTurns,
                     onDismiss = {
                         previewIndex = null
-                        previewFiles = emptyList()
+                        previewItems = emptyList()
+                        previewSourceAtOpen = null
                     }
                 )
             }
@@ -1460,6 +1590,46 @@ private fun GroupHeader(
     }
 }
 
+internal fun buildThumbnailGridItems(
+    files: List<NikonCamera.FileInfo>,
+    burstIdByHandle: Map<Int, String>,
+    collapseBurstPhotos: Boolean,
+    expandedBurstIds: Set<String>
+): List<ThumbnailGridItem> {
+    if (!collapseBurstPhotos || burstIdByHandle.isEmpty()) {
+        return files.map { file ->
+            ThumbnailGridItem.Photo(file, burstId = burstIdByHandle[file.handle])
+        }
+    }
+
+    // 先按当前筛选后的日期组收集成员。筛选可能令原本 ≥3 张的连拍只剩 1 张；
+    // 单张不再画“合集”，避免用户为看一张照片还要多点一次。
+    val visibleBursts = files
+        .mapNotNull { file -> burstIdByHandle[file.handle]?.let { it to file } }
+        .groupBy({ it.first }, { it.second })
+    val collected = HashSet<String>()
+    val result = ArrayList<ThumbnailGridItem>(files.size)
+
+    files.forEach { file ->
+        val burstId = burstIdByHandle[file.handle]
+        val members = burstId?.let(visibleBursts::get)
+        if (burstId == null || members == null || members.size < 2) {
+            result += ThumbnailGridItem.Photo(file, burstId = burstId)
+        } else if (collected.add(burstId)) {
+            result += ThumbnailGridItem.BurstCollection(burstId, members)
+            if (burstId in expandedBurstIds) {
+                members.forEach { member ->
+                    result += ThumbnailGridItem.Photo(
+                        file = member,
+                        burstId = burstId
+                    )
+                }
+            }
+        }
+    }
+    return result
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ThumbnailGrid(
@@ -1474,10 +1644,15 @@ private fun ThumbnailGrid(
     onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
+    onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit,
     cellBoundsRegistry: MutableMap<Int, Rect>,
     burstHandles: Set<Int>,
+    burstIdByHandle: Map<Int, String>,
+    collapseBurstPhotos: Boolean,
+    expandedBursts: MutableMap<String, Boolean>,
     contentPadding: PaddingValues,
     gridState: LazyGridState,
+    modifier: Modifier = Modifier,
     // 筛选入场：确定筛选的瞬间 tick 递增、window 开启 600ms（都在事件回调里同步置起，
     // 晚一帧格子就先以终态闪现穿帮）。窗口内组成的格子重播级联入场——复用分组展开的
     // "瞬时重排 + 级联入场"方案；条目位移动画不可用的原因见下方手风琴注释。
@@ -1485,12 +1660,11 @@ private fun ThumbnailGrid(
     filterRevealWindow: Boolean = false,
     exitingExportHandles: Set<Int> = emptySet(),
     exportReflowActive: Boolean = false,
-    onExportExitFinished: (Int) -> Unit = {},
-    modifier: Modifier = Modifier
+    onExportExitFinished: (Int) -> Unit = {}
 ) {
 
-    // 展开/收起动画（手风琴方案；不用条目位移动画——它对"被推出屏幕的条目"有框架级
-    // 边缘悬停，对"从屏外移入"的条目又根本不生效，大分组收起时什么动画都看不到）：
+    // 日期展开/收起动画（手风琴方案；不用条目位移动画——它对"被推出屏幕的条目"有框架级
+    // 边缘悬停，对"从屏外移入"的条目又根本不生效，大日期组收起时什么动画都看不到）：
     // - 收起：真实的高度收合。收起瞬间只保留该组当前可见的前 keep 个格子参与动画
     //  （其余在屏外，立即移除、无感知）；这些格子按 collapseProgress 收合高度并淡出，
     //   下方内容随布局逐帧连续上移——是布局本身在变化，不经过位移动画器，无任何钳制。
@@ -1508,6 +1682,87 @@ private fun ThumbnailGrid(
         }
     }
 
+    // 连拍展开/收起只做一次原子模型更新。成员的出现/消失与所有存量条目的重排均交给
+    // Foundation 1.7 的 LazyGrid animateItem：不裁剪屏外成员、不分批、不逐排改模型。
+    val expandedBurstIds = expandedBursts.keys.toSet()
+    var burstReflowActive by remember { mutableStateOf(false) }
+    var activeBurstReflowId by remember { mutableStateOf<String?>(null) }
+    var burstAnimationBusy by remember { mutableStateOf(false) }
+    val burstScope = rememberCoroutineScope()
+    var burstAnimationJob by remember { mutableStateOf<Job?>(null) }
+
+    // 设置切换会直接替换网格展示模型；取消尚未完成的展开/收起任务，避免旧协程
+    // 在新模型生效后晚一帧写回展开状态或留下半程 placement 动画。
+    LaunchedEffect(collapseBurstPhotos) {
+        burstAnimationJob?.cancel()
+        burstAnimationJob = null
+        burstAnimationBusy = false
+        burstReflowActive = false
+        activeBurstReflowId = null
+    }
+
+    val itemsByDate = remember(
+        groups,
+        burstIdByHandle,
+        collapseBurstPhotos,
+        expandedBurstIds
+    ) {
+        groups.associate { group ->
+            group.date to buildThumbnailGridItems(
+                files = group.files,
+                burstIdByHandle = burstIdByHandle,
+                collapseBurstPhotos = collapseBurstPhotos,
+                expandedBurstIds = expandedBurstIds
+            )
+        }
+    }
+
+    // “未传输”筛选的单格退场原本由 ThumbnailCell 回调完成。折叠合集里的成员不会
+    // compose，必须在这里直接结算，否则它会永远滞留在过滤快照中。
+    val hiddenBurstHandles = remember(itemsByDate, expandedBurstIds) {
+        itemsByDate.values.asSequence()
+            .flatten()
+            .filterIsInstance<ThumbnailGridItem.BurstCollection>()
+            .filter { it.id !in expandedBurstIds }
+            .flatMap { it.files.asSequence() }
+            .mapTo(HashSet()) { it.handle }
+    }
+    val hiddenExitingHandles = exitingExportHandles.intersect(hiddenBurstHandles)
+    LaunchedEffect(hiddenExitingHandles) {
+        hiddenExitingHandles.forEach(onExportExitFinished)
+    }
+
+    val toggleBurstCollection: (String) -> Unit = { burstId ->
+        if (!burstAnimationBusy && collapsing == null) {
+            burstAnimationBusy = true
+            burstAnimationJob = burstScope.launch {
+                try {
+                    val exists = itemsByDate.values.asSequence()
+                        .flatten()
+                        .filterIsInstance<ThumbnailGridItem.BurstCollection>()
+                        .any { it.id == burstId }
+                    if (!exists) return@launch
+
+                    // 先让所有条目的 animateItem 节点进入同一个重排窗口，再在下一帧只提交
+                    // 一次最终列表。无论连拍有几张，所有既有照片、合集和标题共享同一起点。
+                    activeBurstReflowId = burstId
+                    burstReflowActive = true
+                    withFrameNanos { }
+                    if (expandedBursts[burstId] == true) {
+                        expandedBursts.remove(burstId)
+                    } else {
+                        expandedBursts[burstId] = true
+                    }
+                    delay((BURST_REFLOW_DURATION_MS + 48).toLong())
+                } finally {
+                    burstReflowActive = false
+                    activeBurstReflowId = null
+                    burstAnimationBusy = false
+                }
+            }
+        }
+    }
+
     // 后台缩略图填充已移入 CameraViewModel.startThumbnailFill（与连接同生共死、
     // 与页面无关——停在队列页也照常推进）；本页只负责可见格子的即时加载。
 
@@ -1522,6 +1777,21 @@ private fun ThumbnailGrid(
         groups.forEach { group ->
             val collapsed = collapsedDates[group.date] == true
             val collapsingThis = collapsing?.date == group.date
+            val groupItems = itemsByDate[group.date].orEmpty()
+            // 所有既有格位——照片、合集、日期标题——严格共享同一个 placementSpec。
+            // 空闲时传 null，但 animateItem 节点始终存在，不会因临时挂载 modifier 错帧。
+            val placementSpec = when {
+                collapsingThis -> null
+                burstReflowActive -> tween<IntOffset>(
+                    durationMillis = BURST_REFLOW_DURATION_MS,
+                    easing = FastOutSlowInEasing
+                )
+                exportReflowActive -> tween<IntOffset>(
+                    durationMillis = 280,
+                    easing = FastOutSlowInEasing
+                )
+                else -> null
+            }
             // 分组头整行跨列，保持与列表模式一致的分组语义
             item(
                 span = { GridItemSpan(maxLineSpan) },
@@ -1529,13 +1799,11 @@ private fun ThumbnailGrid(
                 contentType = "header"
             ) {
                 Column(
-                    modifier = if (exportReflowActive) {
-                        Modifier.animateItemPlacement(
-                            animationSpec = tween(260, easing = FastOutSlowInEasing)
-                        )
-                    } else {
-                        Modifier
-                    }
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = null,
+                        placementSpec = placementSpec,
+                        fadeOutSpec = null
+                    )
                 ) {
                     Spacer(modifier = Modifier.height(4.dp))
                     GroupHeader(
@@ -1544,7 +1812,9 @@ private fun ThumbnailGrid(
                         // 收合动画进行中箭头即刻转向，不等动画结束。
                         collapsed = collapsed || collapsingThis,
                         onToggleCollapse = {
-                            if (collapsing == null) {   // 收合动画期间忽略再次点击
+                            // 日期与连拍都在改变同一网格布局，任一收合进行中都忽略再次点击，
+                            // 防止两套高度动画同帧竞争。
+                            if (collapsing == null && !burstAnimationBusy) {
                                 if (collapsed) {
                                     // 展开：瞬时重排 + 该组格子级联入场。
                                     recentlyExpanded = group.date
@@ -1554,9 +1824,8 @@ private fun ThumbnailGrid(
                                     toggleScope.launch {
                                         // 只保留当前可见的格子（+一行缓冲）参与收合动画。
                                         val visibleKeys = gridState.layoutInfo.visibleItemsInfo
-                                            .mapNotNull { it.key as? Int }
-                                            .toHashSet()
-                                        val lastVisible = group.files.indexOfLast { it.handle in visibleKeys }
+                                            .mapTo(HashSet()) { it.key }
+                                        val lastVisible = groupItems.indexOfLast { it.key in visibleKeys }
                                         if (lastVisible < 0) {
                                             collapsedDates[group.date] = true
                                         } else {
@@ -1580,38 +1849,40 @@ private fun ThumbnailGrid(
             // 从而"锁起来"的缩略图不加载；展开后 cell 重新 emit 才恢复加载。
             // 收合动画期间保留可见的前 keep 个格子，随 collapseProgress 收合。
             if (!collapsed || collapsingThis) {
-                val files = if (collapsingThis) {
-                    group.files.take(collapsing?.keep ?: 0)
-                } else group.files
+                val displayedItems = if (collapsingThis) {
+                    groupItems.take(collapsing?.keep ?: 0)
+                } else groupItems
                 itemsIndexed(
-                    files,
-                    key = { _, f -> f.handle },
-                    contentType = { _, _ -> "cell" }
-                ) { index, file ->
-                    ThumbnailCell(
-                        file = file,
-                        task = queuedByHandle[file.handle],
-                        alreadyExported = file.handle in exportedHandles,
-                        transfersBusy = transfersBusy,
-                        cameraViewModel = cameraViewModel,
-                        onTapFile = onTapFile,
-                        onPreview = onPreview,
-                        cellBoundsRegistry = cellBoundsRegistry,
-                        inBurst = file.handle in burstHandles,
-                        reveal = group.date == recentlyExpanded || filterRevealWindow,
-                        // 级联错峰：组内前 18 格按 15ms 递增，其余同批（基本都在屏外）。
-                        revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
-                        revealKey = filterRevealTick,
-                        exiting = file.handle in exitingExportHandles,
-                        onExitFinished = onExportExitFinished,
+                    displayedItems,
+                    key = { _, item -> item.key },
+                    contentType = { _, _ -> "thumbnail_grid_cell" }
+                ) { index, item ->
+                    // 照片与合集必须由完全相同的外层节点拥有尺寸和 placement 动画。
+                    // 只有本次操作合集的成员允许淡入/淡出。其他已展开合集即使被重排，
+                    // 也只使用与普通照片相同的 placement，不能重新触发透明度动画。
+                    val animateBurstMemberAppearance =
+                        burstReflowActive &&
+                            item is ThumbnailGridItem.Photo &&
+                            item.burstId == activeBurstReflowId
+                    Box(
                         modifier = Modifier
-                            .then(
-                                if (exportReflowActive && !collapsingThis) {
-                                    Modifier.animateItemPlacement(
-                                        animationSpec = tween(260, easing = FastOutSlowInEasing)
+                            .animateItem(
+                                fadeInSpec = if (animateBurstMemberAppearance) {
+                                    tween(
+                                        BURST_MEMBER_ENTER_DURATION_MS,
+                                        easing = FastOutSlowInEasing
                                     )
                                 } else {
-                                    Modifier
+                                    null
+                                },
+                                placementSpec = placementSpec,
+                                fadeOutSpec = if (animateBurstMemberAppearance) {
+                                    tween(
+                                        BURST_MEMBER_EXIT_DURATION_MS,
+                                        easing = FastOutSlowInEasing
+                                    )
+                                } else {
+                                    null
                                 }
                             )
                             .then(
@@ -1621,13 +1892,294 @@ private fun ThumbnailGrid(
                                     Modifier
                                 }
                             )
-                    )
+                            .padding(bottom = 6.dp)
+                            .aspectRatio(1f)
+                    ) {
+                        when (item) {
+                            is ThumbnailGridItem.BurstCollection -> {
+                                val expanded = expandedBursts[item.id] == true
+                                BurstCollectionCell(
+                                    files = item.files,
+                                    expanded = expanded,
+                                    queuedByHandle = queuedByHandle,
+                                    transfersBusy = transfersBusy,
+                                    cameraViewModel = cameraViewModel,
+                                    onTransferGroup = onTransferGroup,
+                                    onToggle = { toggleBurstCollection(item.id) },
+                                    onPreviewFirst = { rect ->
+                                        onPreviewBurst(item.id, item.files, rect)
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                            is ThumbnailGridItem.Photo -> {
+                                val file = item.file
+                                ThumbnailCell(
+                                    file = file,
+                                    task = queuedByHandle[file.handle],
+                                    alreadyExported = file.handle in exportedHandles,
+                                    transfersBusy = transfersBusy,
+                                    cameraViewModel = cameraViewModel,
+                                    onTapFile = onTapFile,
+                                    onPreview = onPreview,
+                                    cellBoundsRegistry = cellBoundsRegistry,
+                                    inBurst = file.handle in burstHandles,
+                                    inExpandedBurstCollection =
+                                        collapseBurstPhotos &&
+                                            item.burstId != null &&
+                                            item.burstId in expandedBurstIds,
+                                    // 连拍展开不参与缩放；这里只保留原有日期与筛选入场。
+                                    reveal =
+                                        group.date == recentlyExpanded || filterRevealWindow,
+                                    revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
+                                    revealKey = filterRevealTick,
+                                    exiting = file.handle in exitingExportHandles,
+                                    onExitFinished = onExportExitFinished,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
 
         if (isLoading) {
             item(span = { GridItemSpan(maxLineSpan) }) { LoadingMoreRow() }
+        }
+    }
+}
+
+@Composable
+private fun BurstCollectionCell(
+    files: List<NikonCamera.FileInfo>,
+    expanded: Boolean,
+    queuedByHandle: Map<Int, TransferTask>,
+    transfersBusy: Boolean,
+    cameraViewModel: CameraViewModel,
+    onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
+    onToggle: () -> Unit,
+    onPreviewFirst: (Rect) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = AppTheme.colors
+    val a11y = stringResource(R.string.burst_collection_a11y, files.size)
+    val remainingFiles = files.filter { it.handle !in queuedByHandle }
+    val allQueued = remainingFiles.isEmpty()
+    var plusBounds by remember { mutableStateOf<Rect?>(null) }
+    var collectionBounds by remember { mutableStateOf<Rect?>(null) }
+    val latestExpanded by rememberUpdatedState(expanded)
+    val latestOnToggle by rememberUpdatedState(onToggle)
+    val latestOnPreviewFirst by rememberUpdatedState(onPreviewFirst)
+    val chevronRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(240, easing = FastOutSlowInEasing),
+        label = "burstCollectionChevron"
+    )
+
+    BoxWithConstraints(
+        modifier = modifier
+            .onGloballyPositioned {
+                if (it.isAttached) {
+                    val bounds = it.boundsInRoot()
+                    if (bounds.width > 0f && bounds.height > 0f) collectionBounds = bounds
+                }
+            }
+            .semantics { contentDescription = a11y }
+    ) {
+        val cellWidth = maxWidth
+        // 在保持清晰触点的同时收紧视觉尺寸；极窄格子继续按比例缩小，避免两钮相碰。
+        val actionSize = when {
+            cellWidth < 78.dp -> 30.dp
+            cellWidth < 96.dp -> 34.dp
+            cellWidth < 132.dp -> 36.dp
+            else -> 40.dp
+        }
+        val actionInset = if (cellWidth < 96.dp) 3.dp else 7.dp
+        // 深色主题下照片透过玻璃底过多时按钮轮廓会发虚；只给合集两钮补一层很淡的
+        // 圆形暗底，保留玻璃高光与描边。浅色主题完全不变。
+        val actionBacking = if (colors.background == DarkAppColors.background) {
+            Color.Black.copy(alpha = 0.18f)
+        } else {
+            Color.Transparent
+        }
+        val stackFiles = files.take(3).reversed()
+
+        stackFiles.forEachIndexed { index, file ->
+            val last = stackFiles.lastIndex
+            val rotation = when (stackFiles.size) {
+                1 -> 0f
+                2 -> if (index == 0) -5f else 3f
+                else -> when (index) {
+                    0 -> -6f
+                    1 -> 5f
+                    else -> 0f
+                }
+            }
+            val x = when {
+                index == last -> 0.dp
+                index % 2 == 0 -> (-4).dp
+                else -> 4.dp
+            }
+            val y = if (index == last) 1.dp else 2.dp
+            BurstStackPhoto(
+                file = file,
+                cameraViewModel = cameraViewModel,
+                transfersBusy = transfersBusy,
+                showPlaceholderIcon = index == last,
+                modifier = Modifier
+                    .fillMaxSize(0.86f)
+                    .align(Alignment.Center)
+                    .offset(x = x, y = y)
+                    .graphicsLayer { rotationZ = rotation }
+            )
+        }
+
+        // 顶层轻暗角保证角标和底部按钮压在任何照片上都清晰，同时不把照片整体压灰。
+        Box(
+            modifier = Modifier
+                .fillMaxSize(0.86f)
+                .align(Alignment.Center)
+                .offset(y = 1.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.55f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.42f)
+                    )
+                )
+        )
+
+        // 图片区域仅响应长按；普通轻触仍不做任何事。按钮后绘制在更高层，
+        // 因而左下入队和右下展开不会被这层手势抢占。
+        Box(
+            modifier = Modifier
+                .fillMaxSize(0.86f)
+                .align(Alignment.Center)
+                .pointerInput(files.firstOrNull()?.handle) {
+                    detectTapGestures(
+                        onLongPress = {
+                            // 与右下按钮走同一展开状态机：折叠时先展开，已展开则不重复切换。
+                            if (!latestExpanded) latestOnToggle()
+                            collectionBounds?.let(latestOnPreviewFirst)
+                        }
+                    )
+                }
+        )
+
+        BurstCollectionBadge(
+            count = files.size,
+            iconSize = 13.dp,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .offset(x = 9.dp, y = 9.dp)
+        )
+
+        // 用户指定的位置：左下整组入队，右下展开/收起。按钮直接复用全局 GlassButton；
+        // 只有在 4 列极窄格子下按比例缩小，避免两颗触点互相覆盖。
+        GlassButton(
+            onClick = { onTransferGroup(remainingFiles, plusBounds) },
+            enabled = !allQueued,
+            shape = CircleShape,
+            contentPadding = PaddingValues(0.dp),
+            showSheen = false,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .offset(x = actionInset, y = -actionInset)
+                .size(actionSize)
+                .drawBehind { drawCircle(actionBacking) }
+                .onGloballyPositioned {
+                    if (it.isAttached) {
+                        val bounds = it.boundsInRoot()
+                        if (bounds.width > 0f && bounds.height > 0f) plusBounds = bounds
+                    }
+                }
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (allQueued) Icons.Default.Check else Icons.Default.Add,
+                    contentDescription = stringResource(
+                        if (allQueued) R.string.cd_all_queued else R.string.cd_transfer_group
+                    ),
+                    tint = if (allQueued) colors.statusConnected else colors.accentBlue,
+                    modifier = Modifier.size(actionSize * 0.54f)
+                )
+            }
+        }
+
+        GlassButton(
+            onClick = onToggle,
+            shape = CircleShape,
+            contentPadding = PaddingValues(0.dp),
+            showSheen = false,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = -actionInset, y = -actionInset)
+                .size(actionSize)
+                .drawBehind { drawCircle(actionBacking) }
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = stringResource(
+                        if (expanded) R.string.cd_collapse else R.string.cd_expand
+                    ),
+                    tint = colors.accentBlue,
+                    modifier = Modifier
+                        .size(actionSize * 0.58f)
+                        .rotate(chevronRotation)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun BurstStackPhoto(
+    file: NikonCamera.FileInfo,
+    cameraViewModel: CameraViewModel,
+    transfersBusy: Boolean,
+    showPlaceholderIcon: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val colors = AppTheme.colors
+    var thumbnail by remember(file.handle) {
+        mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
+    }
+    LaunchedEffect(file.handle, transfersBusy) {
+        if (thumbnail == null) thumbnail = cameraViewModel.loadThumbnail(file)
+    }
+    val shape = RoundedCornerShape(10.dp)
+
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(colors.thumbPlaceholder)
+            .border(1.dp, Color.White.copy(alpha = 0.62f), shape)
+    ) {
+        thumbnail?.let { image ->
+            Image(
+                bitmap = image,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } ?: if (showPlaceholderIcon) {
+            Icon(
+                imageVector = if (file.extension == ".mov" || file.extension == ".mp4") {
+                    Icons.Default.Movie
+                } else {
+                    Icons.Default.Image
+                },
+                contentDescription = null,
+                tint = colors.onSurfaceVariant.copy(alpha = 0.38f),
+                modifier = Modifier
+                    .size(28.dp)
+                    .align(Alignment.Center)
+            )
+        } else {
+            Unit
         }
     }
 }
@@ -1643,14 +2195,15 @@ private fun ThumbnailCell(
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
     cellBoundsRegistry: MutableMap<Int, Rect>,
+    modifier: Modifier = Modifier,
     inBurst: Boolean = false,
+    inExpandedBurstCollection: Boolean = false,
     reveal: Boolean = false,
     revealDelayMs: Long = 0L,
     // 变化即重播入场动画（筛选确定时存量格子也要重播）；平时保持不变。
     revealKey: Any? = null,
     exiting: Boolean = false,
-    onExitFinished: (Int) -> Unit = {},
-    modifier: Modifier = Modifier
+    onExitFinished: (Int) -> Unit = {}
 ) {
     val colors = AppTheme.colors
     // 展开/筛选入场：本组刚被展开或筛选刚确定时淡入+轻微放大、按 revealDelayMs 级联错峰；
@@ -1676,7 +2229,11 @@ private fun ThumbnailCell(
         }
     }
     // 已加载的缩略图按 handle 记住，transfersBusy 变化不会让它闪回占位。
-    var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
+    var thumbnail by remember(file.handle) {
+        // 网格插入/移除大量连拍成员时，可见项可能离开再重新进入组合。直接从缓存恢复，
+        // 避免先画一帧占位图、下一帧再换回缩略图造成列表闪烁。
+        mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
+    }
     // 可见格子始终允许取图（传输中请求排到文件间隙执行，见 loadThumbnail 注释）。
     // transfersBusy 仅作为重试键：传输结束时对瞬时失败（如短暂掉线）的格子再补一次。
     LaunchedEffect(file.handle, transfersBusy) {
@@ -1687,23 +2244,34 @@ private fun ThumbnailCell(
     // 记录本格子在根坐标系中的位置，供长按预览"从格子位置放大"用。
     var cellBounds by remember { mutableStateOf<Rect?>(null) }
 
+    val thumbnailShape = RoundedCornerShape(8.dp)
     Box(
         modifier = modifier
-            // 行距烘焙在格子底部：收合动画缩放整个条目（含间距），结束零跳变。
-            .padding(bottom = 6.dp)
-            .aspectRatio(1f)
             .graphicsLayer {
                 val revealP = revealProgress.value
                 val exitP = exitProgress.value
-                alpha = revealP * exitP
-                val revealScale = 0.94f + 0.06f * revealP
+                alpha = (if (reveal) revealP else 1f) * exitP
+                // 只有明确处于日期/筛选 reveal 窗口的格子才允许缩放；普通网格重排
+                // 永远保持 1x，避免连拍展开让无关照片整体“缩一下再弹回”。
+                val revealScale = if (reveal) 0.94f + 0.06f * revealP else 1f
                 val exitScale = 0.82f + 0.18f * exitP
                 val s = revealScale * exitScale
                 scaleX = s
                 scaleY = s
             }
-            .clip(RoundedCornerShape(8.dp))
+            .clip(thumbnailShape)
             .background(colors.thumbPlaceholder)
+            .then(
+                if (inExpandedBurstCollection) {
+                    Modifier.border(
+                        width = 1.dp,
+                        color = colors.accentOrange.copy(alpha = 0.92f),
+                        shape = thumbnailShape
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .onGloballyPositioned {
                 // 同一份 bounds 双用:长按预览的放大起点 + 打包动画的灵魂起点。
                 // 只收有效样本:分离/复用瞬间的零矩形会让动画从屏幕外冒出(见 queueArea 处)。
@@ -1771,7 +2339,7 @@ private fun ThumbnailCell(
         // 右上角连拍角标：与左上角类型标签同族的角贴(实色底 + 白色内容),
         // 青绿是连拍的专属色(蓝/紫/橙已被类型占用,绿是传输状态色)。
         // 叠帧图标 + 三条渐短的速度线("嗖"地扫过的拖尾),不用文字也一眼读出
-        // "这一串是按住快门快速扫出来的"。算法见 computeBurstHandles。
+        // "这一串是按住快门快速扫出来的"。算法见 computeBurstGroups。
         if (inBurst) {
             Surface(
                 shape = RoundedCornerShape(bottomStart = 6.dp),
@@ -2140,32 +2708,71 @@ private fun FilterChip(
  * [tint] 决定图标与速度线颜色（角标用白、胶囊用内容色）。
  */
 @Composable
-private fun BurstGlyph(tint: Color, modifier: Modifier = Modifier) {
+internal fun BurstGlyph(
+    tint: Color,
+    modifier: Modifier = Modifier,
+    iconSize: Dp = 11.dp
+) {
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp)
+        horizontalArrangement = Arrangement.spacedBy(iconSize * 0.18f)
     ) {
         Icon(
             Icons.Default.BurstMode,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(11.dp)
+            modifier = Modifier.size(iconSize)
         )
         // 三条渐短的速度线（拖尾越短越靠下）：细、压低到与图标齐高。
         Column(
-            verticalArrangement = Arrangement.spacedBy(1.25.dp),
+            verticalArrangement = Arrangement.spacedBy(iconSize * 0.11f),
             horizontalAlignment = Alignment.Start
         ) {
-            listOf(7.dp, 5.dp, 3.dp).forEach { w ->
+            listOf(0.64f, 0.45f, 0.27f).forEach { ratio ->
                 Box(
                     modifier = Modifier
-                        .width(w)
-                        .height(1.dp)
-                        .clip(RoundedCornerShape(0.5.dp))
+                        .width(iconSize * ratio)
+                        .height(iconSize * 0.09f)
+                        .clip(CircleShape)
                         .background(tint)
                 )
             }
+        }
+    }
+}
+
+/** 合集数量角标：列表与预览严格共用，仅通过 [iconSize] 等比缩放。 */
+@Composable
+internal fun BurstCollectionBadge(
+    count: Int,
+    modifier: Modifier = Modifier,
+    iconSize: Dp = 13.dp
+) {
+    val colors = AppTheme.colors
+    Surface(
+        shape = RoundedCornerShape(iconSize * 0.69f),
+        color = BurstBadgeColor.copy(alpha = 0.9f),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(
+                horizontal = iconSize * 0.46f,
+                vertical = iconSize * 0.23f
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(iconSize * 0.31f)
+        ) {
+            BurstGlyph(tint = colors.onAccent, iconSize = iconSize)
+            Text(
+                text = stringResource(R.string.burst_collection_count, count),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = (iconSize.value * 0.69f).sp,
+                    fontFeatureSettings = "tnum"
+                ),
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onAccent
+            )
         }
     }
 }
@@ -2433,20 +3040,26 @@ private fun QueueFlightGhost(flight: QueueFlight, target: Rect?, onDone: () -> U
 }
 
 /**
- * 连拍检测（试验期，当前仅驱动缩略图右上角的连拍角标）：
- * 同扩展名内按「拍摄日期 + 文件编号」排序，"编号连续 且 相邻拍摄间隔 ≤1 秒"的
- * 连续段长度 ≥3 视为一组连拍，返回全部成员 handle。
+ * 连拍检测：
+ * 同扩展名内按「拍摄日期 + 文件编号」排序，"编号连续 且 相邻拍摄间隔为 0..1 秒"的
+ * 连续段长度 ≥3 视为一组连拍。分组 id 取扩展名、日期、最早文件编号与 handle；
+ * 连拍末尾继续增加新照片时保持稳定，展开状态不会因为新照片到达而无故丢失。
  * 不依赖 ObjectInfo.SequenceNumber（机型可能恒填 0），只用文件名编号 + 秒级时间戳,
  * 对 RAW+JPG 双格式连拍两条轨各自成组。O(n log n)，仅在文件列表变化时重算。
  * 已知边界：编号 9999 回卷、跨零点的连拍会被切成两段——都只影响标记完整性，可接受。
  */
-private fun computeBurstHandles(files: List<NikonCamera.FileInfo>): Set<Int> {
-    if (files.size < 3) return emptySet()
+internal fun computeBurstGroups(files: List<NikonCamera.FileInfo>): List<BurstPhotoGroup> {
+    if (files.size < 3) return emptyList()
 
-    class Shot(val handle: Int, val num: Int, val daySec: Int, val date: String)
+    class Shot(
+        val file: NikonCamera.FileInfo,
+        val num: Int,
+        val daySec: Int,
+        val date: String
+    )
 
-    val result = HashSet<Int>()
-    files.groupBy { it.extension }.forEach { (_, group) ->
+    val result = ArrayList<BurstPhotoGroup>()
+    files.groupBy { it.extension }.forEach { (extension, group) ->
         val shots = group.mapNotNull { f ->
             // 时间：PTP DateTime "YYYYMMDDThhmmss…"，取日期串 + 当日秒数。
             val d = f.captureDate ?: return@mapNotNull null
@@ -2458,18 +3071,28 @@ private fun computeBurstHandles(files: List<NikonCamera.FileInfo>): Set<Int> {
             val stem = if (dot < 0) f.fileName else f.fileName.substring(0, dot)
             val digits = stem.takeLastWhile { it.isDigit() }
             if (digits.isEmpty() || digits.length > 9) return@mapNotNull null
-            Shot(f.handle, digits.toInt(), daySec, d.substring(0, 8))
+            Shot(f, digits.toInt(), daySec, d.substring(0, 8))
         }.sortedWith(compareBy({ it.date }, { it.num }))
 
         var runStart = 0
         for (i in 1..shots.size) {
+            val timeGap = if (i < shots.size) {
+                shots[i].daySec - shots[i - 1].daySec
+            } else {
+                Int.MAX_VALUE
+            }
             val broke = i == shots.size ||
                     shots[i].date != shots[i - 1].date ||
                     shots[i].num != shots[i - 1].num + 1 ||
-                    shots[i].daySec - shots[i - 1].daySec > 1
+                    timeGap !in 0..1
             if (broke) {
                 if (i - runStart >= 3) {
-                    for (j in runStart until i) result.add(shots[j].handle)
+                    val first = shots[runStart]
+                    result += BurstPhotoGroup(
+                        // handle 保证双卡/同名序列也不会撞 key；最早帧不变时，末尾续拍仍稳定。
+                        id = "${extension}_${first.date}_${first.num}_${first.file.handle}",
+                        files = shots.subList(runStart, i).map { it.file }
+                    )
                 }
                 runStart = i
             }

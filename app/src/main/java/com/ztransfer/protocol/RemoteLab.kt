@@ -26,6 +26,7 @@ object Lab {
     const val NK_START_LIVE_VIEW = 0x9201
     const val NK_END_LIVE_VIEW = 0x9202
     const val NK_GET_LIVE_VIEW_IMG = 0x9203
+    const val NK_GET_LIVE_VIEW_IMG_EX = 0x9428
     const val NK_MF_DRIVE = 0x9204
     const val NK_CHANGE_AF_AREA = 0x9205
     const val NK_AF_DRIVE = 0x90C1
@@ -90,7 +91,7 @@ object Lab {
         NK_START_LIVE_VIEW to "StartLiveView",
         NK_END_LIVE_VIEW to "EndLiveView",
         NK_GET_LIVE_VIEW_IMG to "GetLiveViewImg",
-        0x9428 to "GetLiveViewImgEx(Z8/Z9)",
+        NK_GET_LIVE_VIEW_IMG_EX to "GetLiveViewImgEx",
         NK_CAPTURE_REC_IN_MEDIA to "InitiateCaptureRecInMedia",
         NK_CAPTURE_REC_IN_SDRAM to "InitiateCaptureRecInSdram",
         0x90CB to "AfCaptureSDRAM",
@@ -370,10 +371,21 @@ private fun parsePropDescData(d: ByteArray): PropDescData {
     c.typed(dataType)                    // default
     val (cur, _) = c.typed(dataType)
     val formFlag = c.u8()
-    val values = if (formFlag == 2) {
-        val n = c.u16()
-        (0 until n).map { c.typed(dataType).first }
-    } else emptyList()
+    val values = when (formFlag) {
+        // Nikon 的布尔属性常用 Range(0..1) 而不是 Enumeration。只把严格的
+        // 二值范围展开；其他连续范围仍保持为空，避免为曝光参数制造庞大值表。
+        1 -> {
+            val min = c.typed(dataType).first
+            val max = c.typed(dataType).first
+            val step = c.typed(dataType).first
+            if (min == 0L && max == 1L && step == 1L) listOf(0L, 1L) else emptyList()
+        }
+        2 -> {
+            val n = c.u16()
+            (0 until n).map { c.typed(dataType).first }
+        }
+        else -> emptyList()
+    }
     return PropDescData(dataType, writable, cur, values)
 }
 
@@ -396,6 +408,21 @@ data class RcParam(
     val current: Long,
     val values: List<Long>
 )
+
+/** 各 Nikon 世代的 Auto ISO 属性优先级；按能力探测，不按型号字符串分支。 */
+internal fun rcAutoIsoCandidateProps(movieMode: Boolean): List<Int> =
+    if (movieMode) {
+        listOf(
+            Lab.PROP_NK_AUTO_ISO_ALT,
+            Lab.PROP_NK_AUTO_ISO
+        )
+    } else {
+        listOf(Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT)
+    }
+
+/** 只有明确可写且同时提供 0/非 0 两态的属性，才可作为开关。 */
+internal fun RcParam.rcIsBinaryToggle(): Boolean =
+    writable && values.any { it == 0L } && values.any { it != 0L }
 
 /** 当前镜头伺服方式。现代 Z 机优先走标准 FocusMode(0x500A)，旧 Nikon
  *  机身回退到厂商属性 0xD161；未知枚举保留原始值供日志定位，不伪造名称。 */
@@ -703,22 +730,73 @@ suspend fun NikonCamera.rcGetMovieMode(): Boolean? {
     return d[0].toInt() != 0
 }
 
-/** 开始录像（存卡）。忙则重试。失败时读录像禁止条件（0xD0A4 bitmask）记日志便于
- *  排查（无卡/机身菜单占用等）；成功路径不多花往返（同 labStartLiveView 的取舍）。
- *  调研提到个别 Z 机型需先设 ApplicationMode(0xD1F0)=1 才放行——【刻意不自动写】：
- *  改属性会永久改变机身状态且无恢复路径，还会在无卡等无关失败时误触发；
- *  若真机验证（清单 4A.2）失败，再按实测响应码显式支持。 */
-suspend fun NikonCamera.rcStartMovie(log: (String) -> Unit = {}): Int {
+internal data class RcMovieStartResult(
+    val responseCode: Int,
+    val prohibitCondition: Long?
+)
+
+private const val MOVIE_PROHIBIT_NO_CARD = 1L shl 0
+private const val MOVIE_PROHIBIT_CARD_ERROR = 1L shl 1
+private const val MOVIE_PROHIBIT_CARD_UNFORMATTED = 1L shl 2
+private const val MOVIE_PROHIBIT_CARD_FULL = 1L shl 3
+private const val MOVIE_PROHIBIT_BUFFER_PENDING = 1L shl 9
+private const val MOVIE_PROHIBIT_ALREADY_RECORDING = 1L shl 10
+private const val MOVIE_PROHIBIT_CARD_PROTECTED = 1L shl 11
+private const val MOVIE_PROHIBIT_ENLARGED_LIVE_VIEW = 1L shl 12
+private const val MOVIE_PROHIBIT_NOT_APPLICATION_MODE = 1L shl 14
+private const val MOVIE_PROHIBIT_STORAGE_MASK =
+    MOVIE_PROHIBIT_NO_CARD or
+        MOVIE_PROHIBIT_CARD_ERROR or
+        MOVIE_PROHIBIT_CARD_UNFORMATTED or
+        MOVIE_PROHIBIT_CARD_FULL or
+        MOVIE_PROHIBIT_CARD_PROTECTED
+private const val MOVIE_PROHIBIT_RESTARTABLE_MASK =
+    MOVIE_PROHIBIT_ENLARGED_LIVE_VIEW or MOVIE_PROHIBIT_NOT_APPLICATION_MODE
+
+internal fun movieProhibitIndicatesRecording(prohibitCondition: Long?): Boolean =
+    prohibitCondition?.and(MOVIE_PROHIBIT_ALREADY_RECORDING) != 0L
+
+/**
+ * 开录失败后是否值得在已进入应用模式的前提下重建一次 Live View 再试。
+ * 存储卡、写缓冲和已在录像不会被重启掩盖；有明确禁止位时只接受 LV/应用模式
+ * 两类可恢复状态。无禁止信息时，仅 InvalidStatus/持续 Busy 允许一次恢复。
+ */
+internal fun movieStartNeedsLiveViewRestart(
+    responseCode: Int,
+    prohibitCondition: Long?
+): Boolean {
+    if (responseCode == Lab.OK) return false
+    if (prohibitCondition != null && prohibitCondition and MOVIE_PROHIBIT_STORAGE_MASK != 0L) {
+        return false
+    }
+    if (prohibitCondition != null &&
+        prohibitCondition and
+        (MOVIE_PROHIBIT_BUFFER_PENDING or MOVIE_PROHIBIT_ALREADY_RECORDING) != 0L
+    ) {
+        return false
+    }
+    if (prohibitCondition != null && prohibitCondition != 0L) {
+        return prohibitCondition and MOVIE_PROHIBIT_RESTARTABLE_MASK != 0L
+    }
+    return responseCode == 0xA004 || responseCode == Lab.DEVICE_BUSY
+}
+
+/** 开始录像（存卡）。忙则重试；失败时一并返回录像禁止条件供上层决定是否重建 LV。 */
+internal suspend fun NikonCamera.rcStartMovieDetailed(
+    log: (String) -> Unit = {}
+): RcMovieStartResult {
     val rc = cmdBusyRetry(Lab.NK_START_MOVIE_REC)
+    var prohibitCondition: Long? = null
     if (rc != Lab.OK) {
         log("!! StartMovieRec resp=${hex4(rc)}")
         val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_MOV_PROHIBIT)
         if (prc == Lab.OK && pd != null && pd.size >= 4) {
             val cond = Cur(pd).u32()
+            prohibitCondition = cond
             if (cond != 0L) log("!! MovRecProhibit=${hex8(cond)}")
         }
     }
-    return rc
+    return RcMovieStartResult(rc, prohibitCondition)
 }
 
 /** 结束录像。忙则重试；实际停止以事件（0xC108 完成 / 0xC105 中断）为准。 */
@@ -743,11 +821,29 @@ suspend fun NikonCamera.rcModelName(): String? {
 
 // ============================ Live View ============================
 
+/** 在 Live View 启动前解析一次取帧能力，避免部分机型在 LV 运行中拒绝 GetDeviceInfo。 */
+private suspend fun NikonCamera.resolveLiveViewImageOperation() {
+    if (liveViewImageOperation != null) return
+    val (rc, data) = labCommand(Lab.GET_DEVICE_INFO)
+    val supportsEnhanced = rc == Lab.OK && data != null &&
+        runCatching {
+            Lab.NK_GET_LIVE_VIEW_IMG_EX in parseDeviceInfo(data).operations
+        }.getOrDefault(false)
+    liveViewImageOperation = if (supportsEnhanced) {
+        Lab.NK_GET_LIVE_VIEW_IMG_EX
+    } else {
+        Lab.NK_GET_LIVE_VIEW_IMG
+    }
+}
+
 /**
  * 启动 Live View：Start（忙重试）→ DeviceReady 轮询直到就绪。
  * 返回是否成功；过程写入 [log]。
  */
 suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean {
+    resolveLiveViewImageOperation()
+    val frameOperation = liveViewImageOperation ?: Lab.NK_GET_LIVE_VIEW_IMG
+    log("LiveView frames: ${Lab.INTEREST_OPS[frameOperation] ?: hex4(frameOperation)}")
     // 0x2019 忙 / 0xA004 InvalidStatus（上一次 EndLiveView 后相机内部状态未落定时常见）
     // 都值得短暂重试。
     var rc = labCommand(Lab.NK_START_LIVE_VIEW).first
@@ -786,18 +882,68 @@ suspend fun NikonCamera.labEndLiveView(): Int =
     runCatching { labCommand(Lab.NK_END_LIVE_VIEW).first }.getOrDefault(-1)
 
 /**
- * 取一帧 Live View。返回 (整包数据, JPEG偏移)——不剥离头部，调用方拿偏移直接解码
- * （BitmapFactory 支持 offset），省掉热路径上每帧一次 100KB+ 的整包拷贝。
+ * 取一帧 Live View。首次调用从 DeviceInfo 选择机身广告的增强取帧 0x9428；明确不支持时
+ * 立即回退 0x9203，其它异常连续两次才回退。整包不剥离头部，BitmapFactory 直接从
+ * JPEG 偏移解码，省掉热路径上每帧一次 100KB+ 的复制。
  * 相机忙返回 null（调用方稍后重试）；其它失败抛响应码异常。
  */
-suspend fun NikonCamera.labGrabFrame(): Pair<ByteArray, Int>? {
-    val (rc, d) = labCommand(Lab.NK_GET_LIVE_VIEW_IMG)
-    if (rc == Lab.DEVICE_BUSY) return null
-    if (rc != Lab.OK || d == null) throw Exception("GetLiveViewImg resp=${hex4(rc)}")
-    val soi = findJpegStart(d)
-    if (soi < 0) throw Exception("GetLiveViewImg: no JPEG SOI in ${d.size} bytes")
-    return d to soi
-}
+suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
+    ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            if (liveViewImageOperation == null) {
+                // 正常路径已在 labStartLiveView 前解析；仅为直接调用 labGrabFrame 的
+                // 诊断代码兜底，不在 LV 运行中补发 GetDeviceInfo。
+                liveViewImageOperation = Lab.NK_GET_LIVE_VIEW_IMG
+            }
+
+            fun receive(operation: Int): Pair<Int, ByteArray?> {
+                sendCmd(operation)
+                return recvRespWithPayload()
+            }
+
+            var operation = liveViewImageOperation ?: Lab.NK_GET_LIVE_VIEW_IMG
+            var (rc, data) = receive(operation)
+            var soi = data?.let(::findJpegStart) ?: -1
+            val enhancedFailure =
+                operation == Lab.NK_GET_LIVE_VIEW_IMG_EX &&
+                (
+                    (rc != Lab.OK && rc != Lab.DEVICE_BUSY && rc != Lab.NK_NOT_LIVE_VIEW) ||
+                        (rc == Lab.OK && soi < 0)
+                    )
+            if (operation == Lab.NK_GET_LIVE_VIEW_IMG_EX && rc == Lab.OK && soi >= 0) {
+                liveViewEnhancedFailureCount = 0
+            } else if (enhancedFailure) {
+                liveViewEnhancedFailureCount = if (rc == PtpConstants.OPERATION_NOT_SUPPORTED) {
+                    2
+                } else {
+                    liveViewEnhancedFailureCount + 1
+                }
+            }
+            if (enhancedFailure && liveViewEnhancedFailureCount >= 2) {
+                // 明确不支持立即降级；其它错误（包括偶发空/坏首帧）连续两次才降级，
+                // 避免支持增强帧的机型因一次传输抖动永久丢失 AF 元数据。
+                operation = Lab.NK_GET_LIVE_VIEW_IMG
+                liveViewImageOperation = operation
+                liveViewEnhancedFailureCount = 0
+                val fallback = receive(operation)
+                rc = fallback.first
+                data = fallback.second
+                soi = data?.let(::findJpegStart) ?: -1
+            }
+
+            if (rc == Lab.DEVICE_BUSY) return@withContext null
+            if (rc != Lab.OK || data == null) {
+                throw Exception("${Lab.INTEREST_OPS[operation] ?: hex4(operation)} resp=${hex4(rc)}")
+            }
+            if (soi < 0) throw Exception("GetLiveViewImg: no JPEG SOI in ${data.size} bytes")
+            LiveViewPacket(
+                bytes = data,
+                jpegOffset = soi,
+                metadata = parseLiveViewMetadata(data, soi, operation),
+                receivedAtElapsedMs = SystemClock.elapsedRealtime()
+            )
+        }
+    }
 
 // ============================ 一次性完整探测 ============================
 

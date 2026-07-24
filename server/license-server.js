@@ -9,6 +9,7 @@ const path = require('node:path');
 const https = require('node:https');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const MAX_PRICE_FEN = 10_000_000; // ¥100,000，远高于会员商品合理区间
 
 // ---------------------------------------------------------------- 配置
 
@@ -27,9 +28,8 @@ if (!PAY_ENABLED && (cfg.xhAppId || cfg.xhAppSecret || cfg.priceFen || cfg.payNo
     process.exit(1);
 }
 if (PAY_ENABLED) {
-    cfg.priceFen = Number(cfg.priceFen);
-    if (!Number.isInteger(cfg.priceFen) || cfg.priceFen <= 0) {
-        console.error('priceFen 必须为正整数(单位:分)');
+    if (!Number.isSafeInteger(cfg.priceFen) || cfg.priceFen <= 0 || cfg.priceFen > MAX_PRICE_FEN) {
+        console.error(`priceFen 必须为 1..${MAX_PRICE_FEN} 的安全整数(单位:分)`);
         process.exit(1);
     }
 }
@@ -43,69 +43,208 @@ const signingKey = crypto.createPrivateKey(fs.readFileSync(cfg.signingKeyPath, '
 // ---------------------------------------------------------------- 定价
 // 价格单独放 pricing.json(与 config.json 同目录),不塞进 config.json:
 // 改价就不必碰那个装着密钥的文件,也不用重启服务——每次现读,和 app-latest.json 同一套路。
-// 文件不存在则回落到 config.json 的 priceFen(不划线),老部署无缝。
+// 文件不存在则年费回落到 config.json 的 priceFen(不划线)，永久版使用用户确认的新品默认价。
 // ★ 展示价可以过时(App 缓存的),但下单一律现读这里,收的钱永远以服务端为准。
 const PRICING_PATH = path.join(path.dirname(CONFIG_PATH), 'pricing.json');
 const SUB_PERIOD_DAYS = 365;
+const PRODUCT_ANNUAL = 'annual';
+const PRODUCT_LIFETIME = 'lifetime';
+const PRODUCTS = new Set([PRODUCT_ANNUAL, PRODUCT_LIFETIME]);
+// 用户确认的新品默认价；年费仍完全沿用现有 config/pricing，不在代码中改价。
+// 一旦 pricing v2 明确配置 lifetime，始终以文件中的价格为准。
+const DEFAULT_LIFETIME_PRICE_FEN = 5990;
+const DEFAULT_LIFETIME_ORIGINAL_FEN = 9990;
 
 // 解析成功过的最后一份价。文件被改坏/写了一半时兜住它——没有这层就会静默回落到
 // config.json 里那个可能早就不用了的老价,按另一个价真收钱,还不留任何痕迹。
 let lastGoodPricing = null;
 let pricingBroken = false;   // 只在状态翻转时吼一次日志,别每个请求刷一屏
+let pricingUnavailableReason = null;
 
-/** 当前定价:{ priceFen 实收价, originalFen 划线原价(0 = 不划线) }。 */
+function validPrice(value) {
+    return Number.isSafeInteger(value) && value > 0 && value <= MAX_PRICE_FEN;
+}
+
+function validOriginal(value, priceFen) {
+    return Number.isSafeInteger(value) && value >= 0 && value <= MAX_PRICE_FEN
+        && (value === 0 || value > priceFen);
+}
+
+function normalizeProductPrice(value, required, label) {
+    if (value === undefined || value === null) {
+        if (required) throw new Error(`${label} 未配置`);
+        return { available: false, priceFen: 0, originalFen: 0 };
+    }
+    if (typeof value !== 'object' || Array.isArray(value) || !validPrice(value.priceFen)) {
+        throw new Error(`${label}.priceFen 不是正整数`);
+    }
+    const originalFen = value.originalFen === undefined ? 0 : value.originalFen;
+    if (!validOriginal(originalFen, value.priceFen)) {
+        throw new Error(`${label}.originalFen 必须为 0 或高于实收价的整数`);
+    }
+    return { available: true, priceFen: value.priceFen, originalFen };
+}
+
+function fallbackPricing() {
+    return {
+        annual: { available: true, priceFen: cfg.priceFen, originalFen: 0 },
+        lifetime: {
+            available: true,
+            priceFen: DEFAULT_LIFETIME_PRICE_FEN,
+            originalFen: DEFAULT_LIFETIME_ORIGINAL_FEN,
+        },
+    };
+}
+
+function normalizePricingFile(j) {
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('定价文件不是对象');
+    // 老 pricing.json 只配置年费，继续无缝读取；永久版补入已确认的新品默认价。
+    if (Object.prototype.hasOwnProperty.call(j, 'priceFen')) {
+        if (!validPrice(j.priceFen)) throw new Error('priceFen 不是有效正整数');
+        // 保留旧读取语义：legacy 文件的划线价填错只是不展示，不能让真实售价回退到 config。
+        const originalFen = Number.isSafeInteger(j.originalFen) && j.originalFen > j.priceFen
+            && j.originalFen <= MAX_PRICE_FEN ? j.originalFen : 0;
+        return {
+            annual: { available: true, priceFen: j.priceFen, originalFen },
+            lifetime: {
+                available: true,
+                priceFen: DEFAULT_LIFETIME_PRICE_FEN,
+                originalFen: DEFAULT_LIFETIME_ORIGINAL_FEN,
+            },
+        };
+    }
+    if (j.version !== 2) throw new Error('未知定价格式版本');
+    return {
+        annual: normalizeProductPrice(j.annual, true, PRODUCT_ANNUAL),
+        lifetime: normalizeProductPrice(j.lifetime ?? {
+            priceFen: DEFAULT_LIFETIME_PRICE_FEN,
+            originalFen: DEFAULT_LIFETIME_ORIGINAL_FEN,
+        }, true, PRODUCT_LIFETIME),
+    };
+}
+
+/** 当前定价:{ annual, lifetime }；永久版有已确认的默认价，v2 可显式覆盖。 */
 function pricing() {
     let raw;
     try {
         raw = fs.readFileSync(PRICING_PATH, 'utf8');
-    } catch {
+    } catch (e) {
         // 没有 pricing.json 是正常状态(还没设过价):用内存里上次成功的,否则 config.json 的价
-        return lastGoodPricing || { priceFen: cfg.priceFen, originalFen: 0 };
+        if (e.code === 'ENOENT') {
+            pricingUnavailableReason = null;
+            pricingBroken = false;
+            return lastGoodPricing || fallbackPricing();
+        }
+        pricingUnavailableReason = `READ_FAILED:${e.code || e.message}`;
+        if (!pricingBroken) log(`PRICING_UNAVAILABLE ${PRICING_PATH}: ${pricingUnavailableReason}`);
+        pricingBroken = true;
+        return lastGoodPricing;
     }
     try {
-        const j = JSON.parse(raw);
-        if (!Number.isInteger(j.priceFen) || j.priceFen <= 0) throw new Error('priceFen 不是正整数');
-        // 划线价必须【高于】实收价,否则就是"原价更便宜"的反向促销。手改文件绕过了
-        // adminSetPricing 的校验,所以这里也得挡一道。
-        const originalFen =
-            (Number.isInteger(j.originalFen) && j.originalFen > j.priceFen) ? j.originalFen : 0;
-        lastGoodPricing = { priceFen: j.priceFen, originalFen };
+        lastGoodPricing = normalizePricingFile(JSON.parse(raw));
         pricingBroken = false;
+        pricingUnavailableReason = null;
         return lastGoodPricing;
     } catch (e) {
+        pricingUnavailableReason = `INVALID:${e.message}`;
         if (!pricingBroken) {
             pricingBroken = true;
-            log(`PRICING_BAD ${PRICING_PATH}: ${e.message} —— 回落到`
-                + (lastGoodPricing ? `上次成功的价 ¥${lastGoodPricing.priceFen / 100}` : `config.json 的 ¥${cfg.priceFen / 100}`));
+            log(`PRICING_BAD ${PRICING_PATH}: ${e.message} —— `
+                + (lastGoodPricing ? `继续使用上次成功的年费价 ¥${lastGoodPricing.annual.priceFen / 100}` : '冷启动无可信价格，停止下单'));
         }
-        return lastGoodPricing || { priceFen: cfg.priceFen, originalFen: 0 };
+        return lastGoodPricing;
     }
 }
 
 function apiPricing() {
     const p = pricing();
-    return { ok: true, price_fen: p.priceFen, original_fen: p.originalFen, period_days: SUB_PERIOD_DAYS };
+    if (!p) return { ok: false, err: 'PRICING_UNAVAILABLE' };
+    const productJson = (item, periodDays) => item.available
+        ? {
+            available: true,
+            price_fen: item.priceFen,
+            original_fen: item.originalFen,
+            ...(periodDays === undefined ? {} : { period_days: periodDays }),
+        }
+        : { available: false };
+    return {
+        ok: true,
+        // 顶层字段是老 App 的兼容契约，始终表示年费商品。
+        price_fen: p.annual.priceFen,
+        original_fen: p.annual.originalFen,
+        period_days: SUB_PERIOD_DAYS,
+        products: {
+            annual: productJson(p.annual, SUB_PERIOD_DAYS),
+            lifetime: productJson(p.lifetime),
+        },
+    };
 }
 
 function adminSetPricing(body) {
-    const priceFen = parseInt(body.price_fen, 10);
-    if (!Number.isInteger(priceFen) || priceFen <= 0) return { ok: false, err: 'BAD_PRICE' };
-    const originalFen = parseInt(body.original_fen, 10) || 0;
+    const hasProduct = Object.prototype.hasOwnProperty.call(body, 'product');
+    const product = hasProduct ? body.product : PRODUCT_ANNUAL;
+    if (!PRODUCTS.has(product)) return { ok: false, err: 'BAD_PRODUCT' };
+    const priceFen = body.price_fen;
+    if (!validPrice(priceFen)) return { ok: false, err: 'BAD_PRICE' };
+    const originalFen = body.original_fen === undefined ? 0 : body.original_fen;
     // 划线价低于实收价就成了"原价更便宜"的反向促销,一定是填反了
-    if (originalFen && originalFen < priceFen) return { ok: false, err: 'ORIGINAL_TOO_LOW' };
+    if (!Number.isSafeInteger(originalFen) || originalFen < 0 || originalFen > MAX_PRICE_FEN) {
+        return { ok: false, err: 'BAD_ORIGINAL' };
+    }
+    if (originalFen !== 0 && originalFen <= priceFen) return { ok: false, err: 'ORIGINAL_TOO_LOW' };
+    const current = pricing();
+    if (!current) return { ok: false, err: 'PRICING_UNAVAILABLE' };
+    const next = {
+        version: 2,
+        annual: {
+            priceFen: current.annual.priceFen,
+            originalFen: current.annual.originalFen,
+        },
+        ...(current.lifetime.available ? {
+            lifetime: {
+                priceFen: current.lifetime.priceFen,
+                originalFen: current.lifetime.originalFen,
+            },
+        } : {}),
+    };
+    next[product] = { priceFen, originalFen };
     // 先写临时文件再 rename:rename 在同一文件系统上是原子的,写盘中途断电/被杀
     // 也不会留下半截 JSON 让 pricing() 读到坏值。
     const tmp = PRICING_PATH + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ priceFen, originalFen }, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
     fs.renameSync(tmp, PRICING_PATH);
-    log(`SET_PRICING ¥${priceFen / 100}${originalFen ? ` 原价 ¥${originalFen / 100}` : ''}`);
+    lastGoodPricing = normalizePricingFile(next);
+    pricingBroken = false;
+    log(`SET_PRICING product=${product} ¥${priceFen / 100}${originalFen ? ` 原价 ¥${originalFen / 100}` : ''}`);
     return apiPricing();
 }
 
 // ---------------------------------------------------------------- 数据库
 
 const db = new DatabaseSync(cfg.dbPath);
-db.exec(`
+db.exec('PRAGMA busy_timeout = 5000');
+
+function tableColumns(table) {
+    return new Map(db.prepare(`PRAGMA table_info(${table})`).all().map((row) => [row.name, row]));
+}
+
+function addColumnIfMissing(table, column, definition) {
+    if (!tableColumns(table).has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+}
+
+function requireColumns(table, requirements) {
+    const columns = tableColumns(table);
+    for (const [name, check] of Object.entries(requirements)) {
+        const column = columns.get(name);
+        if (!column || (check && !check(column))) {
+            throw new Error(`数据库迁移校验失败: ${table}.${name}`);
+        }
+    }
+}
+
+db.exec('BEGIN IMMEDIATE');
+try {
+    db.exec(`
 CREATE TABLE IF NOT EXISTS codes (
   code          TEXT PRIMARY KEY,
   status        TEXT NOT NULL DEFAULT 'active',
@@ -139,16 +278,21 @@ CREATE TABLE IF NOT EXISTS orders (
   out_trade_no TEXT PRIMARY KEY,
   device_fp    TEXT NOT NULL,
   amount_fen   INTEGER NOT NULL,
-  status       TEXT NOT NULL DEFAULT 'pending',  -- pending / paid
+  product      TEXT NOT NULL DEFAULT 'annual',
+  grant_days   INTEGER NOT NULL DEFAULT 365,
+  status       TEXT NOT NULL DEFAULT 'pending',  -- creating / pending / paid / refund_required / failed
   code         TEXT,
   renew_code   TEXT,                             -- NULL = 新购单;否则本单是给该码续费
   charge_id    TEXT,
   pay_url      TEXT,
   pay_qr       TEXT,
   created_at   TEXT NOT NULL,
-  paid_at      TEXT
+  paid_at      TEXT,
+  refund_reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_orders_fp ON orders(device_fp);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_creating_fp
+  ON orders(device_fp) WHERE status = 'creating';
 CREATE TABLE IF NOT EXISTS update_stats (
   source_version_code   INTEGER NOT NULL,
   source_version_name   TEXT NOT NULL DEFAULT '',
@@ -161,16 +305,37 @@ CREATE TABLE IF NOT EXISTS update_stats (
   PRIMARY KEY (source_version_code, target_version_code)
 );
 `);
-// 迁移:老库缺列时补上(已存在则抛错,忽略即可)
-try { db.exec('ALTER TABLE orders ADD COLUMN pay_qr TEXT'); } catch { /* 列已存在 */ }
-try { db.exec('ALTER TABLE activations ADD COLUMN device_model TEXT'); } catch { /* 列已存在 */ }
-try { db.exec('ALTER TABLE activations ADD COLUMN app_ver TEXT'); } catch { /* 列已存在 */ }
-// 迁移:去掉 max_devices —— 授权模型早已改成"单设备浮动"(见 apiActivate 的顶替逻辑),
-// 这列从来没有任何代码读过,却让台账显示"设备 1/2",看着像一码能两机。删掉免得再误导。
-try { db.exec('ALTER TABLE codes DROP COLUMN max_devices'); } catch { /* 已删除 */ }
-// 迁移:买断制 → 年费订阅
-try { db.exec('ALTER TABLE codes ADD COLUMN expires_at TEXT'); } catch { /* 列已存在 */ }
-try { db.exec('ALTER TABLE orders ADD COLUMN renew_code TEXT'); } catch { /* 列已存在 */ }
+    addColumnIfMissing('orders', 'pay_qr', 'pay_qr TEXT');
+    addColumnIfMissing('activations', 'device_model', 'device_model TEXT');
+    addColumnIfMissing('activations', 'app_ver', 'app_ver TEXT');
+    // 去掉从未读取过的旧设备数列；存在才迁移，任何真实 SQL 错误都让启动失败。
+    if (tableColumns('codes').has('max_devices')) db.exec('ALTER TABLE codes DROP COLUMN max_devices');
+    addColumnIfMissing('codes', 'expires_at', 'expires_at TEXT');
+    addColumnIfMissing('orders', 'renew_code', 'renew_code TEXT');
+    // 老订单一律是年费 365 天；新订单把商品与权益一并快照。
+    addColumnIfMissing('orders', 'product', "product TEXT NOT NULL DEFAULT 'annual'");
+    addColumnIfMissing('orders', 'grant_days', 'grant_days INTEGER NOT NULL DEFAULT 365');
+    addColumnIfMissing('orders', 'refund_reason', 'refund_reason TEXT');
+    // 永久版改为独立发码：尚未付款的旧永久订单不能再携带年费续费目标。
+    db.prepare(`UPDATE orders SET renew_code = NULL
+                WHERE product = 'lifetime' AND status IN ('creating', 'pending') AND code IS NULL`)
+        .run();
+    requireColumns('orders', {
+        out_trade_no: null,
+        device_fp: null,
+        amount_fen: null,
+        product: (c) => c.notnull === 1 && c.dflt_value === "'annual'",
+        grant_days: (c) => c.notnull === 1 && Number(c.dflt_value) === 365,
+        status: null,
+        renew_code: null,
+        pay_qr: null,
+        refund_reason: null,
+    });
+    db.exec('COMMIT');
+} catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* BEGIN 失败时无事务 */ }
+    throw e;
+}
 
 // ---------------------------------------------------------------- 工具
 
@@ -190,9 +355,6 @@ function newCode() {
 // 被顶替/吊销的设备下次续签即降级。反滥用的快速主力是查重(见下 CHURN_*),exp 只是离线兜底。
 // ★ 改天数只动这一个常量。
 const HARD_GRACE_SEC = 7 * 24 * 3600;   // 7 天
-
-// 订阅周期:一次付费买这么久,续费也按这个量延长。★ 改周期只动这一个常量。
-const SUB_PERIOD_MS = SUB_PERIOD_DAYS * 24 * 3600_000;   // 365 天
 
 // 码是否仍可用:未吊销,且(永久 或 未到期)。expires_at 为 NULL 表示永久授权(手动发的码)。
 // ISO 8601 UTC 的字典序即时序,直接字符串比较即可。
@@ -304,8 +466,36 @@ function apiActivate(body) {
     const bound = db.prepare('SELECT id FROM bindings WHERE code = ? AND device_fp = ?').get(code, fp);
     if (bound) {
         // 幂等:同一设备重复激活(卸载重装/再次点激活)直接重发通行证,不算换机、不计查重
-        db.prepare('UPDATE bindings SET last_renew_at = ?, app_ver = ? WHERE id = ?')
-            .run(now(), String(body.app_ver || ''), bound.id);
+        const model = String(body.model || '').trim();
+        const appVer = String(body.app_ver || '').trim();
+        db.prepare(`UPDATE bindings
+                       SET last_renew_at = ?,
+                           app_ver = CASE WHEN ? <> '' THEN ? ELSE app_ver END,
+                           device_model = CASE
+                               WHEN (device_model IS NULL OR device_model = '') AND ? <> '' THEN ?
+                               ELSE device_model
+                           END
+                     WHERE id = ?`)
+            .run(now(), appVer, appVer, model, model, bound.id);
+        // 新服务端已在收款事务中记了空元数据的首次激活；旧 APK 随后的幂等
+        // /activate 在这里补齐它，不新增历史、不改变反滥用计数。
+        db.prepare(`UPDATE activations
+                       SET device_model = CASE
+                               WHEN (device_model IS NULL OR device_model = '') AND ? <> '' THEN ?
+                               ELSE device_model
+                           END,
+                           app_ver = CASE
+                               WHEN (app_ver IS NULL OR app_ver = '') AND ? <> '' THEN ?
+                               ELSE app_ver
+                           END
+                     WHERE id = (
+                       SELECT id FROM activations
+                        WHERE code = ? AND device_fp = ?
+                          AND ((device_model IS NULL OR device_model = '')
+                            OR (app_ver IS NULL OR app_ver = ''))
+                        ORDER BY at DESC LIMIT 1
+                     )`)
+            .run(model, model, appVer, appVer, code, fp);
         return { ok: true, token: issueToken(code, fp, row.expires_at) };
     }
 
@@ -334,6 +524,8 @@ function apiActivate(body) {
 // 按设备指纹恢复(重装后无本地码时用户主动触发):仅当本机仍是该码当前绑定设备才成功。
 // 被顶替过的旧设备查不到绑定 → NOT_BOUND(符合单设备语义)。返回码供本地保存与"查看激活码"。
 // 订阅到期的码也当作没有:恢复出来也是个不能用的码,不如让 App 走购买/续费。
+// 同一设备有多张有效码时永久权益必须优先；只有没有永久码时才恢复最近绑定的订阅码。
+// 不能只按 activated_at 取最新，否则“永久先付款、旧年费二维码后付款”会把本地降回年费。
 function apiRestore(body) {
     const fp = String(body.fp || '').toLowerCase();
     if (!FP_RE.test(fp)) return { ok: false, err: 'NOT_BOUND' };
@@ -341,7 +533,9 @@ function apiRestore(body) {
                           FROM bindings b JOIN codes c ON c.code = b.code
                           WHERE b.device_fp = ? AND c.status = 'active'
                             AND (c.expires_at IS NULL OR c.expires_at > ?)
-                          ORDER BY b.activated_at DESC`).get(fp, now());
+                          ORDER BY CASE WHEN c.expires_at IS NULL THEN 0 ELSE 1 END,
+                                   b.activated_at DESC,
+                                   b.code ASC`).get(fp, now());
     if (!b) return { ok: false, err: 'NOT_BOUND' };
     db.prepare('UPDATE bindings SET last_renew_at = ? WHERE code = ? AND device_fp = ?')
         .run(now(), b.code, fp);
@@ -387,6 +581,12 @@ function adminNewCodes(body) {
 
 function adminListCodes() {
     const codes = db.prepare('SELECT * FROM codes ORDER BY created_at DESC').all();
+    const paidUnbound = paidUnboundOrders();
+    const refundRequired = db.prepare(`
+        SELECT out_trade_no, device_fp, amount_fen, product, code, charge_id, paid_at, refund_reason
+          FROM orders
+         WHERE status = 'refund_required'
+         ORDER BY paid_at DESC`).all();
     const bs = db.prepare('SELECT * FROM bindings ORDER BY activated_at').all();
     const byCode = new Map();
     for (const b of bs) {
@@ -405,6 +605,8 @@ function adminListCodes() {
     }
     return {
         ok: true,
+        paid_unbound: paidUnbound,
+        refund_required: refundRequired,
         codes: codes.map((c) => ({
             code: c.code, status: c.status, note: c.note, expires_at: c.expires_at,
             created_at: c.created_at, revoked_at: c.revoked_at, revoke_reason: c.revoke_reason,
@@ -413,6 +615,36 @@ function adminListCodes() {
         })),
     };
 }
+
+function paidUnboundOrders(olderThan = null) {
+    return db.prepare(`
+        SELECT o.out_trade_no, o.device_fp, o.amount_fen, o.product, o.code, o.paid_at
+          FROM orders o
+          LEFT JOIN bindings b ON b.code = o.code
+         WHERE o.status IN ('paid', 'refund_required') AND o.code IS NOT NULL
+           AND b.id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM activations a WHERE a.code = o.code)
+           AND (? IS NULL OR o.paid_at <= ?)
+         ORDER BY o.paid_at DESC`).all(olderThan, olderThan);
+}
+
+// 原子履约后“已付款且从未有过绑定”的集合应永远为空。人工解绑/正常换机已有
+// activations 历史，不在这里误报。超过 60 秒仍异常时只在集合变化时报警，
+// 避免每分钟重复刷日志；管理台同时通过 paid_unbound 暴露完整待核对清单。
+let lastPaidUnboundAlert = '';
+function alertPaidUnbound() {
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    const rows = paidUnboundOrders(cutoff);
+    const signature = rows.map((r) => `${r.out_trade_no}:${r.code}`).join(',');
+    if (signature === lastPaidUnboundAlert) return;
+    if (signature) {
+        log(`PAID_UNBOUND_ALERT count=${rows.length} orders=${signature}`);
+    } else if (lastPaidUnboundAlert) {
+        log('PAID_UNBOUND_CLEARED');
+    }
+    lastPaidUnboundAlert = signature;
+}
+setInterval(alertPaidUnbound, 60_000).unref();
 
 function adminUnbind(body) {
     const code = normCode(body.code), prefix = normFpPrefix(body.fp);
@@ -499,7 +731,47 @@ function xhHash(params) {
     return crypto.createHash('md5').update(str, 'utf8').digest('hex');
 }
 
-function xhPost(apiPath, params) {
+function xhSignatureValid(params) {
+    // 官方签名算法只定义平坦的键值对；不猜测嵌套对象的序列化方式。
+    const hasNestedValue = params && typeof params === 'object'
+        && Object.keys(params).some((k) => k !== 'hash' && params[k] !== null
+            && typeof params[k] === 'object');
+    return !hasNestedValue && Boolean(params && typeof params === 'object' && params.hash)
+        && constantTimeEq(xhHash(params), String(params.hash).toLowerCase());
+}
+
+function xhResponseSignatureValid(response) {
+    return xhSignatureValid(response)
+        || Boolean(response?.data && typeof response.data === 'object'
+            && xhSignatureValid(response.data));
+}
+
+function xhResponseHasSignature(response) {
+    return Boolean(response && typeof response === 'object'
+        && (Object.prototype.hasOwnProperty.call(response, 'hash')
+            || (response.data && typeof response.data === 'object'
+                && Object.prototype.hasOwnProperty.call(response.data, 'hash'))));
+}
+
+function parseFeeFen(value) {
+    const text = String(value ?? '').trim();
+    if (!/^(0|[1-9]\d{0,10})(?:\.(\d{1,2}))?$/.test(text)) return null;
+    const [yuan, fraction = ''] = text.split('.');
+    const fen = Number(yuan) * 100 + Number(fraction.padEnd(2, '0'));
+    return Number.isSafeInteger(fen) && fen >= 0 && fen <= MAX_PRICE_FEN ? fen : null;
+}
+
+function httpsPaymentUrl(value) {
+    if (!value) return '';
+    try {
+        const parsed = new URL(String(value));
+        return parsed.protocol === 'https:' ? parsed.toString() : '';
+    } catch {
+        return '';
+    }
+}
+
+function xhPost(apiPath, params, { allowUnsignedResponse = false } = {}) {
     params.appid = cfg.xhAppId;
     params.time = Math.floor(Date.now() / 1000);
     params.nonce_str = crypto.randomBytes(8).toString('hex');
@@ -515,10 +787,34 @@ function xhPost(apiPath, params) {
             timeout: 10_000,
         }, (res) => {
             const chunks = [];
-            res.on('data', (c) => chunks.push(c));
+            let size = 0;
+            res.on('data', (c) => {
+                size += c.length;
+                if (size > 64 * 1024) {
+                    req.destroy(new Error('xh response too large'));
+                    return;
+                }
+                chunks.push(c);
+            });
             res.on('end', () => {
-                try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
-                catch { reject(new Error('xh bad json')); }
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    reject(new Error(`xh http ${res.statusCode}`));
+                    return;
+                }
+                try {
+                    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+                    const hasSignature = xhResponseHasSignature(parsed);
+                    // 虎皮椒生产环境的查单响应与文档示例不一致，可能完全不返回 hash。
+                    // 仅查单端点允许缺少签名；只要响应携带了签名就仍须严格验证。
+                    // 下单响应始终要求有效签名，查单是否可履约还会在 confirmPaid 中
+                    // 严格核对订单号、金额、应用 ID（若返回）和支付状态。
+                    if ((!hasSignature && !allowUnsignedResponse)
+                        || (hasSignature && !xhResponseSignatureValid(parsed))) {
+                        throw new Error('xh bad response signature');
+                    }
+                    resolve(parsed);
+                }
+                catch (e) { reject(e instanceof SyntaxError ? new Error('xh bad json') : e); }
             });
         });
         req.on('timeout', () => req.destroy(new Error('xh timeout')));
@@ -527,9 +823,16 @@ function xhPost(apiPath, params) {
     });
 }
 
+let paymentPost = xhPost;
+
 // 同设备未支付订单的复用窗口:短于虎皮椒二维码 5 分钟有效期,
 // 保证复用到的码仍可扫;超过则新建(配合 App 端 5 分钟"过期刷新")。
 const PENDING_REUSE_MS = 4 * 60_000;
+// 跨商品/跨续费目标的冲突窗口必须覆盖上游二维码完整有效期。不能用上面的 4 分钟复用窗口：
+// 第 4~5 分钟旧二维码仍可能付款，此时若允许切商品建第二单会造成两种商品同时扣款。
+// 多留 1 分钟覆盖客户端/服务端时钟与上游失效传播误差。
+const PENDING_CONFLICT_MS = 6 * 60_000;
+const CREATING_STALE_MS = 30_000;
 
 // 下单前回查多少张该设备的未支付旧单(见 apiOrderCreate 闸三)。每张一次上游请求,
 // 所以要封顶;取最近的几张就够——用户不会去付一张几天前的码。
@@ -541,12 +844,90 @@ function newOrderId() {
         + crypto.randomInt(36 ** 4).toString(36).toUpperCase().padStart(4, '0');
 }
 
+function reserveOrder({ order, fp, product, grantDays, renewCode, priceFen }) {
+    const currentMs = Date.now();
+    const currentIso = new Date(currentMs).toISOString();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+        // 上游请求硬超时 10 秒；30 秒仍处于 creating 说明进程中断或本地落单失败。
+        db.prepare(`UPDATE orders SET status = 'failed'
+                    WHERE device_fp = ? AND status = 'creating' AND created_at <= ?`)
+            .run(fp, new Date(currentMs - CREATING_STALE_MS).toISOString());
+
+        const creating = db.prepare(`SELECT out_trade_no, product, renew_code, created_at
+                                     FROM orders WHERE device_fp = ? AND status = 'creating'`)
+            .get(fp);
+        if (creating) {
+            const same = creating.product === product
+                && (creating.renew_code || null) === renewCode;
+            db.exec('COMMIT');
+            return {
+                kind: 'blocked',
+                response: {
+                    ok: false,
+                    err: same ? 'ORDER_CREATING' : 'PENDING_OTHER_PRODUCT',
+                    product,
+                    pending_product: creating.product,
+                    retry_after_ms: Math.max(1000,
+                        CREATING_STALE_MS - (currentMs - Date.parse(creating.created_at))),
+                },
+            };
+        }
+
+        const pendingRows = db.prepare(`SELECT out_trade_no, pay_url, pay_qr, renew_code, amount_fen,
+                                               product, created_at
+                                        FROM orders
+                                        WHERE device_fp = ? AND status = 'pending' AND created_at > ?
+                                        ORDER BY created_at DESC`)
+            .all(fp, new Date(currentMs - PENDING_CONFLICT_MS).toISOString());
+        // 年费和永久是两个独立商品。用户改选套餐时立即创建新订单，旧二维码继续按原商品有效；
+        // 只有同商品、同续费目标才复用，避免同一次点击反复生成相同订单。
+        const sameIntent = pendingRows.find((row) =>
+            row.product === product && (row.renew_code || null) === renewCode);
+        if (sameIntent) {
+            const ageMs = currentMs - Date.parse(sameIntent.created_at);
+            db.exec('COMMIT');
+            if (ageMs < PENDING_REUSE_MS) {
+                return { kind: 'reuse', row: sameIntent };
+            }
+            // 旧二维码可能仍可支付，但已不再把接近失效的链接返回给 App；等完整冲突窗结束再建单。
+            return {
+                kind: 'blocked',
+                response: {
+                    ok: false,
+                    err: 'PENDING_ORDER_ACTIVE',
+                    product,
+                    retry_after_ms: Math.max(1000, PENDING_CONFLICT_MS - ageMs),
+                },
+            };
+        }
+
+        db.prepare(`INSERT INTO orders
+                    (out_trade_no, device_fp, amount_fen, product, grant_days, status,
+                     renew_code, pay_url, pay_qr, created_at)
+                    VALUES (?, ?, ?, ?, ?, 'creating', ?, '', '', ?)`)
+            .run(order, fp, priceFen, product, grantDays, renewCode, currentIso);
+        db.exec('COMMIT');
+        return { kind: 'reserved' };
+    } catch (e) {
+        try { db.exec('ROLLBACK'); } catch { /* BEGIN 失败时无事务 */ }
+        throw e;
+    }
+}
+
 async function apiOrderCreate(body) {
     if (!PAY_ENABLED) return { ok: false, err: 'PAY_DISABLED' };
     const fp = String(body.fp || '').toLowerCase();
     if (!FP_RE.test(fp)) return { ok: false, err: 'BAD_REQUEST' };
+    // 老 App 不传 product，必须继续购买年费；一旦显式传入则只接受两个稳定商品 ID。
+    const product = Object.prototype.hasOwnProperty.call(body, 'product')
+        ? body.product : PRODUCT_ANNUAL;
+    if (!PRODUCTS.has(product)) return { ok: false, err: 'BAD_PRODUCT' };
+    if (body.renew !== undefined && typeof body.renew !== 'boolean') {
+        return { ok: false, err: 'BAD_REQUEST' };
+    }
     // renew:用户在 App 里主动点的"续费"。他就是要付钱,前两道闸得让路(否则提前续费无门)。
-    const renewWanted = Boolean(body.renew);
+    const renewWanted = body.renew === true;
 
     // ---- 防重复收费(三道)----------------------------------------------------
     // 任一命中都不建单、不收钱,直接把这台机已有的码还给 App(App 侧走 already_pro 免费恢复)。
@@ -555,26 +936,54 @@ async function apiOrderCreate(body) {
     // 否则到期用户点购买只会被告知"你已经买过了",永远付不了续费的钱。
 
     // 一、本机已是某个有效码的绑定设备(重装后没走"恢复"就又点了购买)。
-    const owned = db.prepare(`SELECT b.code AS code FROM bindings b JOIN codes c ON c.code = b.code
+    const permanent = db.prepare(`
+        SELECT code FROM (
+          SELECT b.code AS code, b.activated_at AS at
+            FROM bindings b JOIN codes c ON c.code = b.code
+           WHERE b.device_fp = ? AND c.status = 'active' AND c.expires_at IS NULL
+          UNION ALL
+          SELECT o.code AS code, o.paid_at AS at
+            FROM orders o JOIN codes c ON c.code = o.code
+           WHERE o.device_fp = ? AND o.status IN ('paid', 'refund_required')
+             AND c.status = 'active' AND c.expires_at IS NULL
+        ) ORDER BY at DESC LIMIT 1`).get(fp, fp);
+    if (permanent && product === PRODUCT_LIFETIME) {
+        log(`ORDER_SKIP_PERMANENT fp=${fp.slice(0, 8)} code=${permanent.code} requested=${product}`);
+        return { ok: true, already_pro: true, code: permanent.code, product };
+    }
+
+    const owned = db.prepare(`SELECT b.code AS code, c.expires_at AS expires_at
+                              FROM bindings b JOIN codes c ON c.code = b.code
                               WHERE b.device_fp = ? AND c.status = 'active'
-                                AND (c.expires_at IS NULL OR c.expires_at > ?)
-                              ORDER BY b.activated_at DESC`).get(fp, now());
-    if (owned && !renewWanted) {
-        log(`ORDER_SKIP_OWNED fp=${fp.slice(0, 8)} code=${owned.code}`);
-        return { ok: true, already_pro: true, code: owned.code };
+                                AND c.expires_at IS NOT NULL
+                              ORDER BY b.activated_at DESC`).get(fp);
+    const t = now();
+    // 有多张历史码时必须在 SQL 内先筛“有效”再取最新，不能取到一张过期码后漏掉更早的有效码。
+    const ownedLive = db.prepare(`SELECT b.code AS code
+                                  FROM bindings b JOIN codes c ON c.code = b.code
+                                  WHERE b.device_fp = ? AND c.status = 'active' AND c.expires_at > ?
+                                  ORDER BY b.activated_at DESC`).get(fp, t);
+    const paidLive = db.prepare(`SELECT o.code AS code
+                                 FROM orders o JOIN codes c ON c.code = o.code
+                                 WHERE o.device_fp = ? AND o.status IN ('paid', 'refund_required')
+                                   AND c.status = 'active' AND c.expires_at > ?
+                                 ORDER BY o.paid_at DESC`).get(fp, t);
+    if (product === PRODUCT_ANNUAL && !renewWanted && ownedLive) {
+        log(`ORDER_SKIP_OWNED fp=${fp.slice(0, 8)} code=${ownedLive.code} product=${product}`);
+        return { ok: true, already_pro: true, code: ownedLive.code, product };
     }
 
     // 二、本机付过款、码也发了,但从未激活成功(付完就卸载重装/清数据 → App 丢了 pending_order)。
     //     此时既没有 binding,那张 paid 单也过不了下面复用查询的 status='pending' 过滤——
     //     没有这道就会再收一次钱,而服务器早就为这台机发过码了。
-    const paid = db.prepare(`SELECT o.code AS code FROM orders o JOIN codes c ON c.code = o.code
-                             WHERE o.device_fp = ? AND o.status = 'paid' AND c.status = 'active'
-                               AND (c.expires_at IS NULL OR c.expires_at > ?)
-                             ORDER BY o.paid_at DESC`).get(fp, now());
-    if (paid && !renewWanted) {
-        log(`ORDER_SKIP_PAID fp=${fp.slice(0, 8)} code=${paid.code}`);
-        return { ok: true, already_pro: true, code: paid.code };
+    if (product === PRODUCT_ANNUAL && paidLive && !renewWanted) {
+        log(`ORDER_SKIP_PAID fp=${fp.slice(0, 8)} code=${paidLive.code} product=${product}`);
+        return { ok: true, already_pro: true, code: paidLive.code, product };
     }
+
+    // 年费续费沿用原年费码；永久版是独立商品，永远另发一张永久码，原年费码保持不变。
+    const target = product === PRODUCT_ANNUAL ? owned : null;
+    let renewCode = target ? target.code : null;
 
     // 三、本机的未支付旧单 → 建新单前逐一向虎皮椒确认。
     //     "钱付了但 notify 没送到、App 又丢了单号"时,这是唯一能发现钱其实已到账的地方;
@@ -588,8 +997,11 @@ async function apiOrderCreate(body) {
     for (const s of stale) {
         const r = await confirmPaid(s.out_trade_no);
         if (r && r.code) {
-            log(`ORDER_SKIP_LATE_PAID fp=${fp.slice(0, 8)} order=${s.out_trade_no} code=${r.code}`);
-            return { ok: true, already_pro: true, code: r.code };
+            log(`ORDER_SKIP_LATE_PAID fp=${fp.slice(0, 8)} order=${s.out_trade_no} code=${r.code} product=${r.product}`);
+            // 同商品已到账就直接恢复；不同商品互不替代，继续创建用户当前选择的订单。
+            if (r.product === product) {
+                return { ok: true, already_pro: true, code: r.code, product: r.product };
+            }
         }
     }
     // --------------------------------------------------------------------------
@@ -603,63 +1015,102 @@ async function apiOrderCreate(body) {
     // orders 是对账台账(code ↔ charge_id ↔ 微信流水),本来就该留着。一行几百字节,
     // 攒到几万单也就几 MB,SQLite 毫无压力。
 
-    // 同设备复用窗口(PENDING_REUSE_MS)内的未支付订单直接复用,反复点购买不会刷出一堆新单
-    const pending = db.prepare(`SELECT out_trade_no, pay_url, pay_qr, renew_code, amount_fen FROM orders
-                                WHERE device_fp = ? AND status = 'pending' AND created_at > ?
-                                ORDER BY created_at DESC`)
-        .get(fp, new Date(Date.now() - PENDING_REUSE_MS).toISOString());
-    if (pending) {
-        // 复用旧单就得报旧价:二维码是按下单当时的 amount_fen 生成的,中途改价也不能变。
+    // 现读定价:App 缓存的展示价可能过时(它常连着相机热点没外网,拉不到新价),
+    // 但这里现读的才是真正要收的钱,并随响应回给 App —— 付款页显示的一定是这个数。
+    const currentPricing = pricing();
+    if (!currentPricing) return { ok: false, err: 'PRICING_UNAVAILABLE', product };
+    const selectedPricing = currentPricing[product];
+    if (!selectedPricing.available) return { ok: false, err: 'PRODUCT_UNAVAILABLE', product };
+    const priceFen = selectedPricing.priceFen;
+    const grantDays = product === PRODUCT_ANNUAL ? SUB_PERIOD_DAYS : 0;
+
+    // stale 主动查单期间权益可能被另一请求改变；预占前重算年费续费目标。
+    const permanentNow = db.prepare(`
+        SELECT code FROM (
+          SELECT b.code AS code, b.activated_at AS at
+            FROM bindings b JOIN codes c ON c.code = b.code
+           WHERE b.device_fp = ? AND c.status = 'active' AND c.expires_at IS NULL
+          UNION ALL
+          SELECT o.code AS code, o.paid_at AS at
+            FROM orders o JOIN codes c ON c.code = o.code
+           WHERE o.device_fp = ? AND o.status IN ('paid', 'refund_required')
+             AND c.status = 'active' AND c.expires_at IS NULL
+        ) ORDER BY at DESC LIMIT 1`).get(fp, fp);
+    if (permanentNow && product === PRODUCT_LIFETIME) {
+        log(`ORDER_SKIP_PERMANENT fp=${fp.slice(0, 8)} code=${permanentNow.code} requested=${product}`);
+        return { ok: true, already_pro: true, code: permanentNow.code, product };
+    }
+    const ownedNow = db.prepare(`SELECT b.code AS code
+                                 FROM bindings b JOIN codes c ON c.code = b.code
+                                 WHERE b.device_fp = ? AND c.status = 'active'
+                                   AND c.expires_at IS NOT NULL
+                                 ORDER BY b.activated_at DESC`).get(fp);
+    renewCode = (product === PRODUCT_ANNUAL ? ownedNow : null)?.code || null;
+
+    const order = newOrderId();
+    let reservation;
+    try {
+        reservation = reserveOrder({ order, fp, product, grantDays, renewCode, priceFen });
+    } catch (e) {
+        log(`ORDER_RESERVE_FAIL fp=${fp.slice(0, 8)} product=${product} err=${e.message}`);
+        return { ok: false, err: 'PAY_BUSY', product };
+    }
+    if (reservation.kind === 'blocked') {
+        log(`ORDER_PENDING_BLOCK fp=${fp.slice(0, 8)} requested=${product}`
+            + ` target=${renewCode || '-'} err=${reservation.response.err}`);
+        return reservation.response;
+    }
+    if (reservation.kind === 'reuse') {
+        const pending = reservation.row;
         return {
             ok: true, order: pending.out_trade_no, pay_url: pending.pay_url, pay_qr: pending.pay_qr,
-            renew: Boolean(pending.renew_code), price_fen: pending.amount_fen,
+            renew: Boolean(pending.renew_code), price_fen: pending.amount_fen, product,
         };
     }
 
-    // 续费目标:本机绑定的码,到期的也算——要续的正是它。找不到就是新购。
-    // 被吊销的不认:延长一个死码等于白收钱,当新购发新码。
-    const target = db.prepare(`SELECT b.code AS code, c.expires_at AS expires_at
-                               FROM bindings b JOIN codes c ON c.code = b.code
-                               WHERE b.device_fp = ? AND c.status = 'active'
-                               ORDER BY b.activated_at DESC`).get(fp);
-    // 永久码没有到期日可延,给它开续费单就是收了钱什么都不给。直接把码还他。
-    // (App 走不到这里——永久码用户看不到"续费"入口——但服务端不能靠客户端把门。)
-    if (target && !target.expires_at) {
-        log(`ORDER_SKIP_PERMANENT fp=${fp.slice(0, 8)} code=${target.code}`);
-        return { ok: true, already_pro: true, code: target.code };
-    }
-    const renewCode = target ? target.code : null;
-
-    const order = newOrderId();
-    // 现读定价:App 缓存的展示价可能过时(它常连着相机热点没外网,拉不到新价),
-    // 但这里现读的才是真正要收的钱,并随响应回给 App —— 付款页显示的一定是这个数。
-    const priceFen = pricing().priceFen;
     let resp;
     try {
-        resp = await xhPost('/payment/do.html', {
+        resp = await paymentPost('/payment/do.html', {
             version: '1.1',
             trade_order_id: order,
             total_fee: (priceFen / 100).toFixed(2),   // 虎皮椒金额单位为元
-            title: 'ZTransfer Pro',
+            title: product === PRODUCT_LIFETIME ? 'ZTransfer Pro 永久版' : 'ZTransfer Pro 年费版',
             notify_url: cfg.payNotifyUrl,
         });
     } catch (e) {
-        log(`ORDER_UPSTREAM_FAIL ${e.message}`);
+        db.prepare("UPDATE orders SET status = 'failed' WHERE out_trade_no = ? AND status = 'creating'")
+            .run(order);
+        log(`ORDER_UPSTREAM_FAIL product=${product} ${e.message}`);
         return { ok: false, err: 'PAY_UPSTREAM' };
     }
+    if (!xhResponseSignatureValid(resp)) {
+        db.prepare("UPDATE orders SET status = 'failed' WHERE out_trade_no = ? AND status = 'creating'")
+            .run(order);
+        log(`ORDER_CREATE_BAD_SIGNATURE ${order} product=${product}`);
+        return { ok: false, err: 'PAY_UPSTREAM' };
+    }
+    const payUrl = httpsPaymentUrl(resp.url);
+    const payQr = httpsPaymentUrl(resp.url_qrcode);
     // url_qrcode:现成的二维码图片地址(微信个人支付主用扫码);url:手机端支付链接。
     // 至少要有其一才算下单成功。
-    if (Number(resp.errcode) !== 0 || (!resp.url && !resp.url_qrcode)) {
-        log(`ORDER_CREATE_REJECTED ${resp.errmsg || JSON.stringify(resp).slice(0, 200)}`);
+    if (Number(resp.errcode) !== 0 || (!payUrl && !payQr)) {
+        db.prepare("UPDATE orders SET status = 'failed' WHERE out_trade_no = ? AND status = 'creating'")
+            .run(order);
+        log(`ORDER_CREATE_REJECTED product=${product} ${resp.errmsg || JSON.stringify(resp).slice(0, 200)}`);
         return { ok: false, err: 'PAY_UPSTREAM' };
     }
-    db.prepare(`INSERT INTO orders (out_trade_no, device_fp, amount_fen, renew_code, pay_url, pay_qr, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)`)
-        .run(order, fp, priceFen, renewCode, resp.url || '', resp.url_qrcode || '', now());
-    log(`ORDER_NEW ${order} fp=${fp.slice(0, 8)} ¥${priceFen / 100}${renewCode ? ` renew=${renewCode}` : ''}`);
+    const finalized = db.prepare(`UPDATE orders SET status = 'pending', pay_url = ?, pay_qr = ?
+                                  WHERE out_trade_no = ? AND status = 'creating'`)
+        .run(payUrl, payQr, order);
+    if (finalized.changes !== 1) {
+        log(`ORDER_FINALIZE_LOST ${order} product=${product}`);
+        return { ok: false, err: 'PAY_BUSY', product };
+    }
+    log(`ORDER_NEW ${order} fp=${fp.slice(0, 8)} product=${product} ¥${priceFen / 100}`
+        + `${renewCode ? ` target=${renewCode}` : ''}`);
     return {
-        ok: true, order, pay_url: resp.url || '', pay_qr: resp.url_qrcode || '',
-        renew: Boolean(renewCode), price_fen: priceFen,
+        ok: true, order, pay_url: payUrl, pay_qr: payQr,
+        renew: Boolean(renewCode), price_fen: priceFen, product,
     };
 }
 
@@ -670,58 +1121,138 @@ const orderCheckAt = new Map();
 /**
  * 向虎皮椒确认支付;确认到账则发码或续期(幂等:一单永远只发同一个码)。返回最新订单行。
  */
-async function confirmPaid(order) {
+async function confirmPaid(order, { force = false } = {}) {
     let row = db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
-    if (!row || row.code) return row;
+    if (!row || row.status === 'paid' || row.status === 'refund_required' || row.code) return row;
+    if (row.status !== 'pending') return row;
 
     const last = orderCheckAt.get(order) || 0;
-    if (Date.now() - last < 4500) return row;
+    if (!force && Date.now() - last < 4500) return row;
     orderCheckAt.set(order, Date.now());
     if (orderCheckAt.size > 10_000) orderCheckAt.clear(); // 同 rateBuckets 的内存兜底
 
     let q;
     try {
-        q = await xhPost('/payment/query.html', { out_trade_order: order });
+        q = await paymentPost('/payment/query.html', { out_trade_order: order },
+            { allowUnsignedResponse: true });
     } catch (e) {
-        log(`ORDER_QUERY_FAIL ${order} ${e.message}`);
+        log(`ORDER_QUERY_FAIL ${order} product=${row.product} ${e.message}`);
+        return row;
+    }
+    // 生产查单响应目前不带文档示例中的 hash；缺失签名时依赖固定 HTTPS 上游和下面的
+    // 交易字段逐项核对。若上游返回了签名，则签名错误仍然 fail closed。
+    if (xhResponseHasSignature(q) && !xhResponseSignatureValid(q)) {
+        log(`ORDER_QUERY_BAD_SIGNATURE ${order} product=${row.product}`);
+        return row;
+    }
+    if (!q || typeof q !== 'object' || Number(q.errcode) !== 0
+        || !q.data || typeof q.data !== 'object') {
+        return row;
+    }
+    const queryStatus = String(q.data.status || '');
+    if (!['WP', 'OD', 'CD'].includes(queryStatus)) {
+        log(`ORDER_QUERY_BAD_STATUS ${order} product=${row.product} status=${queryStatus || '-'}`);
+        return row;
+    }
+    const queryOrder = String(q.data?.out_trade_order || q.data?.trade_order_id || '');
+    const queryAmountFen = parseFeeFen(q.data?.total_amount ?? q.data?.total_fee);
+    if (queryOrder !== order || queryAmountFen !== row.amount_fen
+        || (q.data?.appid !== undefined && String(q.data.appid) !== String(cfg.xhAppId))
+        || (q.appid !== undefined && String(q.appid) !== String(cfg.xhAppId))) {
+        log(`ORDER_QUERY_MISMATCH ${order} product=${row.product}`
+            + ` got_order=${queryOrder || '-'} got_amount_fen=${queryAmountFen ?? '-'} expected=${row.amount_fen}`);
         return row;
     }
     // data.status: WP待支付 OD已支付 CD已取消;仅 OD 发码
-    if (Number(q.errcode) !== 0 || !q.data || q.data.status !== 'OD') return row;
-
-    // await 之后重读再发码;以下全部为同步语句,单线程下不会与并发确认交错出双码
-    row = db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
-    if (!row || row.code) return row;
-
-    // 续费单延长原码,不发新码;目标在下单后被吊销的话当新购处理——钱已经收了,
-    // 必须让他拿到一个能用的东西。
-    const target = row.renew_code
-        ? db.prepare("SELECT code, expires_at FROM codes WHERE code = ? AND status = 'active'").get(row.renew_code)
-        : null;
-    let code;
-    if (target) {
-        code = target.code;
-        // 永久码没有到期日可延,续费对它没有意义,原样奉还。
-        if (target.expires_at) {
-            // 从 max(现在, 原到期) 起算:提前续不吃掉剩余时间,过期很久才回来续也不白送中间那段。
-            const base = Math.max(Date.now(), Date.parse(target.expires_at));
-            db.prepare('UPDATE codes SET expires_at = ? WHERE code = ?')
-                .run(new Date(base + SUB_PERIOD_MS).toISOString(), code);
-        }
-    } else {
-        const ins = db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)');
-        const expiresAt = new Date(Date.now() + SUB_PERIOD_MS).toISOString();
-        for (;;) {
-            code = newCode();
-            try { ins.run(code, `xh:${order}`, now(), expiresAt); break; }
-            catch (e) { if (!String(e.message).includes('UNIQUE')) throw e; } // 撞码重试(概率 ~0)
-        }
+    if (queryStatus !== 'OD') return row;
+    const queryChargeId = String(q.data.open_order_id || '').trim();
+    if (!queryChargeId || queryChargeId.length > 128) {
+        log(`ORDER_QUERY_BAD_CHARGE_ID ${order} product=${row.product}`);
+        return row;
     }
-    db.prepare(`UPDATE orders SET status = 'paid', code = ?, charge_id = ?, paid_at = ?
-                WHERE out_trade_no = ?`)
-        .run(code, String(q.data.open_order_id || ''), now(), order);
-    log(`ORDER_PAID ${order} code=${code}${target ? ' (renew)' : ''} xh=${q.data.open_order_id || '-'}`);
-    return db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
+
+    // 上游 await 之后以写事务重读订单。履约与 paid 标记在同一事务中：
+    // notify、App 轮询甚至另一个服务进程同时确认，也只会有一个事务真正发放权益。
+    let code;
+    let target = null;
+    let paidRow;
+    let redundantPermanent = false;
+    try {
+        db.exec('BEGIN IMMEDIATE');
+        row = db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
+        if (!row || row.status === 'paid' || row.status === 'refund_required' || row.code) {
+            db.exec('COMMIT');
+            return row;
+        }
+        if (row.status !== 'pending') throw new Error(`BAD_ORDER_STATUS_${row.status}`);
+        if (!PRODUCTS.has(row.product)) throw new Error(`BAD_ORDER_PRODUCT_${row.product}`);
+        if (row.product === PRODUCT_ANNUAL &&
+            (!Number.isInteger(row.grant_days) || row.grant_days <= 0)) {
+            throw new Error(`BAD_ORDER_GRANT_DAYS_${row.grant_days}`);
+        }
+
+        // 目标在下单后被吊销时改为发新码：钱已到账，不能履约成一个不可用的死码。
+        target = row.product === PRODUCT_ANNUAL && row.renew_code
+            ? db.prepare("SELECT code, expires_at FROM codes WHERE code = ? AND status = 'active'")
+                .get(row.renew_code)
+            : null;
+        if (target) {
+            code = target.code;
+            if (target.expires_at) {
+                // 年费只使用订单 grant_days 快照；提前续不损失剩余时间。
+                const base = Math.max(Date.now(), Date.parse(target.expires_at));
+                db.prepare('UPDATE codes SET expires_at = ? WHERE code = ?')
+                    .run(new Date(base + row.grant_days * 24 * 3600_000).toISOString(), code);
+            } else {
+                // 下单时还是年费、付款前被管理员或另一张永久订单升级。钱已到账只能记账幂等，
+                // 但永久权益无法再延长；单独打高优先级日志供人工核对/退款，绝不能静默吞掉。
+                redundantPermanent = true;
+            }
+        } else {
+            const ins = db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)');
+            const expiresAt = row.product === PRODUCT_LIFETIME
+                ? null : new Date(Date.now() + row.grant_days * 24 * 3600_000).toISOString();
+            const fulfilledAt = now();
+            for (;;) {
+                code = newCode();
+                try { ins.run(code, `xh:${order}`, fulfilledAt, expiresAt); break; }
+                catch (e) { if (!String(e.message).includes('UNIQUE')) throw e; } // 撞码重试(概率 ~0)
+            }
+            // 新购权益在收款事务里直接完成首次绑定。不能再把“已付款 → 绑定本机”
+            // 留给购买弹窗里的下一次网络请求，否则弹窗关闭/进程被杀会留下 0 设备的码。
+            // 这里只处理新生成的码；续费 target 分支只延期，绝不改变现有绑定。
+            db.prepare(`INSERT INTO bindings
+                        (code, device_fp, device_model, app_ver, activated_at, last_renew_at)
+                        VALUES (?, ?, '', '', ?, ?)`)
+                .run(code, row.device_fp, fulfilledAt, fulfilledAt);
+            // 保持既有反滥用计数语义：购买后的首次绑定过去也会由 /v1/activate
+            // 记一条激活历史；现在只是把同一动作前移到收款事务。
+            db.prepare(`INSERT INTO activations
+                        (code, device_fp, device_model, app_ver, at)
+                        VALUES (?, ?, '', '', ?)`)
+                .run(code, row.device_fp, fulfilledAt);
+        }
+        const finalStatus = redundantPermanent ? 'refund_required' : 'paid';
+        const refundReason = redundantPermanent ? 'annual_payment_after_permanent_upgrade' : null;
+        const marked = db.prepare(`UPDATE orders SET status = ?, code = ?, charge_id = ?, paid_at = ?,
+                                                     refund_reason = ?
+                                   WHERE out_trade_no = ? AND status = 'pending' AND code IS NULL`)
+            .run(finalStatus, code, queryChargeId, now(), refundReason, order);
+        if (marked.changes !== 1) throw new Error('ORDER_MARK_PAID_LOST_RACE');
+        db.exec('COMMIT');
+        paidRow = db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
+    } catch (e) {
+        try { db.exec('ROLLBACK'); } catch { /* BEGIN 失败时无事务可回滚 */ }
+        log(`ORDER_FULFILL_FAILED ${order} product=${row?.product || '-'} err=${e.message}`);
+        return db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order) || row;
+    }
+    log(`ORDER_PAID ${order} code=${code} product=${paidRow.product}`
+        + `${target ? ` target=${target.code}` : ''} xh=${queryChargeId}`);
+    if (redundantPermanent) {
+        log(`ORDER_PAID_REDUNDANT_PERMANENT ${order} code=${code} amount_fen=${paidRow.amount_fen}`
+            + ` xh=${q.data.open_order_id || '-'} MANUAL_REFUND_REQUIRED`);
+    }
+    return paidRow;
 }
 
 async function apiOrderStatus(body) {
@@ -734,12 +1265,66 @@ async function apiOrderStatus(body) {
     if (!row) return { ok: false, err: 'NOT_FOUND' };
     if (!row.code) row = await confirmPaid(order) || row;
 
-    if (row.code) return { ok: true, status: 'paid', code: row.code, renew: Boolean(row.renew_code) };
+    if (row.code) {
+        const entitlement = db.prepare(`
+            SELECT c.status, c.expires_at, b.id AS binding_id
+              FROM codes c
+              LEFT JOIN bindings b ON b.code = c.code AND b.device_fp = ?
+             WHERE c.code = ?`).get(fp, row.code);
+        let token;
+        if (entitlement?.binding_id && codeLive(entitlement)) {
+            const model = String(body.model || '').trim();
+            const appVer = String(body.app_ver || '').trim();
+            // notify 可能先于 App 查单完成绑定，当时拿不到机型/版本；首次查单时补齐，
+            // 空字段绝不覆盖旧 APK 后续 /activate 已写入的有效信息。
+            if (model || appVer) {
+                db.prepare(`UPDATE bindings
+                               SET device_model = CASE WHEN ? <> '' THEN ? ELSE device_model END,
+                                   app_ver = CASE WHEN ? <> '' THEN ? ELSE app_ver END,
+                                   last_renew_at = ?
+                             WHERE id = ?`)
+                    .run(model, model, appVer, appVer, now(), entitlement.binding_id);
+                db.prepare(`UPDATE activations
+                               SET device_model = CASE
+                                       WHEN (device_model IS NULL OR device_model = '') AND ? <> '' THEN ?
+                                       ELSE device_model
+                                   END,
+                                   app_ver = CASE
+                                       WHEN (app_ver IS NULL OR app_ver = '') AND ? <> '' THEN ?
+                                       ELSE app_ver
+                                   END
+                             WHERE id = (
+                               SELECT id FROM activations
+                                WHERE code = ? AND device_fp = ?
+                                  AND ((device_model IS NULL OR device_model = '')
+                                    OR (app_ver IS NULL OR app_ver = ''))
+                                ORDER BY at DESC LIMIT 1
+                             )`)
+                    .run(model, model, appVer, appVer, row.code, fp);
+            }
+            token = issueToken(row.code, fp, entitlement.expires_at);
+        }
+        return {
+            ok: true,
+            status: 'paid',
+            code: row.code,
+            ...(token ? { token } : {}),
+            renew: Boolean(row.renew_code),
+            product: row.product,
+            price_fen: row.amount_fen,
+            refund_required: row.status === 'refund_required',
+        };
+    }
     // want_url:App 重进购买页续用旧单时才要支付链接,常规轮询不带。
     // 超过复用窗口的旧链接码可能已过期,不再给出——App 拿不到会自行新建订单。
     // price_fen 给的是【下单当时】锁定的 amount_fen,不是现价:二维码是按那个价生成的,
     // 中途改价也不能让付款页显示成新价。
-    const out = { ok: true, status: 'pending', renew: Boolean(row.renew_code) };
+    const out = {
+        ok: true,
+        status: 'pending',
+        renew: Boolean(row.renew_code),
+        product: row.product,
+    };
     if (body.want_url && row.created_at > new Date(Date.now() - PENDING_REUSE_MS).toISOString()) {
         out.pay_url = row.pay_url;
         out.pay_qr = row.pay_qr;
@@ -753,18 +1338,34 @@ async function apiOrderStatus(body) {
  * confirmPaid 的主动查单(单一发码路径);处理完固定回纯文本 "success" 停止重推。
  */
 async function apiPayNotify(params) {
-    if (!PAY_ENABLED) return;
-    if (!params.hash || xhHash(params) !== params.hash) {
+    if (!PAY_ENABLED) return { ack: true };
+    if (!xhSignatureValid(params)) {
         log(`NOTIFY_BAD_HASH ${JSON.stringify(params).slice(0, 200)}`);
-        return;
+        // 非法请求不是上游可重试故障，固定确认以免成为验签打靶/重放放大器。
+        return { ack: true };
     }
     const order = String(params.trade_order_id || '');
     if (params.status === 'OD' && /^ZT[A-Z0-9]{4,20}$/.test(order)) {
-        await confirmPaid(order);
+        const row = db.prepare('SELECT * FROM orders WHERE out_trade_no = ?').get(order);
+        const notifyAmountFen = parseFeeFen(params.total_fee);
+        if (!row || String(params.appid || '') !== String(cfg.xhAppId)
+            || notifyAmountFen !== row.amount_fen) {
+            log(`NOTIFY_MISMATCH ${order} product=${row?.product || '-'}`
+                + ` appid=${params.appid || '-'} amount_fen=${notifyAmountFen ?? '-'}`
+                + ` expected=${row?.amount_fen ?? '-'}`);
+            return { ack: false };
+        }
+        // 已验签的到账通知必须绕过 App 轮询的 4.5 秒节流。
+        const confirmed = await confirmPaid(order, { force: true });
+        const fulfilled = confirmed?.code
+            && (confirmed.status === 'paid' || confirmed.status === 'refund_required');
+        return { ack: Boolean(fulfilled) };
     } else if (params.status && params.status !== 'OD') {
         // CD已退款 / RD退款中 / UD退款失败:记日志人工跟进(必要时 /admin/revoke 吊码)
-        log(`NOTIFY_REFUND ${order} status=${params.status}`);
+        const row = db.prepare('SELECT product FROM orders WHERE out_trade_no = ?').get(order);
+        log(`NOTIFY_REFUND ${order} product=${row?.product || '-'} status=${params.status}`);
     }
+    return { ack: true };
 }
 
 // ---------------------------------------------------------------- HTTP
@@ -944,6 +1545,11 @@ async function resolveLanzou(release) {
     }
     const direct = new URL(String(parsed.data.directLink));
     if (direct.protocol !== 'https:') throw new Error('DIRECT_URL_NOT_HTTPS');
+    // 蓝奏云部分节点返回 :446；同一签名资源在标准 HTTPS 443 可用。
+    // 统一成 443，避免 Android DownloadManager 或移动网络长期等待特殊端口。
+    if (direct.hostname.endsWith('.lanosso.com') && direct.port === '446') {
+        direct.port = '443';
+    }
     return { url: direct.toString() };
 }
 
@@ -1017,6 +1623,47 @@ async function adminValidateUpdate(body) {
     }
 }
 
+const MAX_ADMIN_APK_BYTES = 256 * 1024 * 1024;
+
+async function adminDownloadUpdateApk(res, body) {
+    try {
+        if (!body.url) throw new Error('url 不能为空');
+        const shareUrl = new URL(String(body.url));
+        if (shareUrl.protocol !== 'https:') throw new Error('url 必须是 HTTPS');
+        const release = { url: shareUrl.toString(), password: String(body.password || '') };
+        const direct = await resolveLanzou(release);
+        const response = await fetch(direct.url, {
+            redirect: 'follow',
+            signal: AbortSignal.timeout(300_000),
+        });
+        if (!response.ok) throw new Error(`APK_HTTP_${response.status}`);
+
+        const declaredSize = Number(response.headers.get('content-length') || 0);
+        if (declaredSize > MAX_ADMIN_APK_BYTES) throw new Error('APK_TOO_LARGE');
+        const chunks = [];
+        let total = 0;
+        for await (const chunk of response.body) {
+            total += chunk.length;
+            if (total > MAX_ADMIN_APK_BYTES) throw new Error('APK_TOO_LARGE');
+            chunks.push(Buffer.from(chunk));
+        }
+        if (total <= 0) throw new Error('APK_EMPTY');
+
+        const apk = Buffer.concat(chunks, total);
+        res.writeHead(200, {
+            'Content-Type': 'application/vnd.android.package-archive',
+            'Content-Length': apk.length,
+            'Cache-Control': 'no-store',
+        });
+        res.end(apk);
+        log(`ADMIN_UPDATE_APK_PROXIED bytes=${apk.length}`);
+    } catch (e) {
+        log(`ADMIN_UPDATE_APK_PROXY_FAILED err=${e.message}`);
+        if (!res.headersSent) send(res, 502, { ok: false, err: 'APK_DOWNLOAD_FAILED' });
+        else res.destroy();
+    }
+}
+
 function adminPublishUpdate(body) {
     try {
         const next = normalizeRelease(body);
@@ -1050,7 +1697,8 @@ function adminSetUpdatePolicy(body) {
     }
 }
 
-const server = https.createServer(
+function createServer() {
+    const server = https.createServer(
     { cert: fs.readFileSync(cfg.tlsCertPath), key: fs.readFileSync(cfg.tlsKeyPath) },
     async (req, res) => {
         const ip = req.socket.remoteAddress || '?';
@@ -1102,6 +1750,7 @@ const server = https.createServer(
                 if (route === 'GET /admin/update') return send(res, 200, adminGetUpdate());
                 if (route === 'GET /admin/update/stats') return send(res, 200, adminGetUpdateStats());
                 if (route === 'POST /admin/update/validate') return send(res, 200, await adminValidateUpdate(await readBody(req)));
+                if (route === 'POST /admin/update/apk') return adminDownloadUpdateApk(res, await readBody(req));
                 if (route === 'POST /admin/update/publish') return send(res, 200, adminPublishUpdate(await readBody(req)));
                 if (route === 'POST /admin/update/policy') return send(res, 200, adminSetUpdatePolicy(await readBody(req)));
                 return send(res, 404, { ok: false, err: 'NOT_FOUND' });
@@ -1133,17 +1782,18 @@ const server = https.createServer(
                 return send(res, 200, await apiOrderStatus(await readBody(req)));
             }
             if (route === 'POST /pay/notify') {
-                // 虎皮椒回调是表单编码;无论处理结果如何都回 "success" 停止重推,
-                // 万一漏单由 App 轮询查单兜底。
+                // 虎皮椒回调是表单编码；只有权益已经落库或请求本身非法时才确认。
+                // 已验签但暂未履约必须让上游重推，不能把可靠性完全押在 App 仍保持前台轮询。
                 // 限速额度给得松:这是虎皮椒的服务器在推,它会重试最多 6 次,
                 // 挡掉一次只是少了个加速信号(闸三会兜住),但挡不住就是个免费的验签打靶场。
                 if (limit('read')) {
                     res.writeHead(429, { 'Content-Type': 'text/plain' });
                     return res.end('rate limited');
                 }
-                await apiPayNotify(Object.fromEntries(new URLSearchParams(await readRaw(req))));
-                res.writeHead(200, { 'Content-Type': 'text/plain' });
-                return res.end('success');
+                const result = await apiPayNotify(
+                    Object.fromEntries(new URLSearchParams(await readRaw(req))));
+                res.writeHead(result.ack ? 200 : 503, { 'Content-Type': 'text/plain' });
+                return res.end(result.ack ? 'success' : 'retry');
             }
 
             return send(res, 404, { ok: false, err: 'NOT_FOUND' });
@@ -1156,12 +1806,51 @@ const server = https.createServer(
 
 // 慢连接兜底。Node 默认 requestTimeout 300 秒——一个人挂着半截请求就能白占一条连接 5 分钟,
 // 攒够几百条就把服务拖死(slowloris)。本服务所有接口都是几十毫秒级的小请求,收紧无损。
-server.requestTimeout = 30_000;
-server.headersTimeout = 15_000;
-server.keepAliveTimeout = 10_000;
+    server.requestTimeout = 30_000;
+    server.headersTimeout = 15_000;
+    server.keepAliveTimeout = 10_000;
 // 连接数上限:超了直接拒新连接。App 轮询每次也就占一条短连,512 远够用;
 // 没有这道,连接洪水能把内存撑爆。
-server.maxConnections = 512;
+    server.maxConnections = 512;
+    return server;
+}
 
-server.listen(cfg.port, () => log(`license server listening on :${cfg.port}, db=${cfg.dbPath}, `
-    + (PAY_ENABLED ? `pay=xh ¥${pricing().priceFen / 100}` : 'pay=disabled')));
+if (require.main === module) {
+    const server = createServer();
+    server.listen(cfg.port, () => {
+        const currentPricing = pricing();
+        const paymentState = !PAY_ENABLED ? 'pay=disabled'
+            : currentPricing ? `pay=xh annual=¥${currentPricing.annual.priceFen / 100}`
+                : `pay=blocked pricing=${pricingUnavailableReason || 'unavailable'}`;
+        log(`license server listening on :${cfg.port}, db=${cfg.dbPath}, ${paymentState}`);
+    });
+}
+
+module.exports = {
+    createServer,
+    __testing: {
+        db,
+        cfg,
+        pricing,
+        apiPricing,
+        adminSetPricing,
+        adminListCodes,
+        apiRestore,
+        apiOrderCreate,
+        apiOrderStatus,
+        apiPayNotify,
+        confirmPaid,
+        reserveOrder,
+        xhHash,
+        xhSignatureValid,
+        parseFeeFen,
+        setPaymentPost(fn) { paymentPost = fn; },
+        resetPaymentPost() { paymentPost = xhPost; },
+        resetOrderThrottle() { orderCheckAt.clear(); },
+        constants: {
+            PENDING_REUSE_MS,
+            PENDING_CONFLICT_MS,
+            CREATING_STALE_MS,
+        },
+    },
+};
