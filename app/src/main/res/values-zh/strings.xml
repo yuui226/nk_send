@@ -239,7 +239,7 @@
     <string name="purchase_waiting">在上方页面完成支付，到账后自动激活。</string>
     <string name="purchase_activated">🎉 购买成功 · 高级版已解锁</string>
     <string name="purchase_lifetime_activated">🎉 购买成功 · 永久高级版已解锁</string>
-    <string name="purchase_restored">🎉 本设备已购买过 · 已免费恢复,未重复扣款</string>
+    <string name="purchase_restored">🎉 已恢复权益</string>
     <string name="restore_action">恢复授权</string>
     <string name="restore_restoring">恢复中…</string>
     <string name="restore_none">未找到本机的授权（尚未购买，或已在新设备上使用）</string>
@@ -253,6 +253,7 @@
     <string name="err_purchase_no_network">需要连接互联网</string>
     <string name="err_purchase_unreachable">无法连接服务器。若当前连着相机 Wi-Fi，请先断开，用有外网的网络重试。</string>
     <string name="err_purchase_failed">下单失败，请稍后重试或联系客服。</string>
+    <string name="err_purchase_activation_failed">激活失败，请联系客服</string>
     <string name="err_purchase_price_missing">无法确认本单金额，已停止支付。请重试。</string>
     <string name="err_purchase_qr_failed">支付二维码加载失败，请重试，不要重复付款。</string>
     <string name="err_purchase_product_mismatch">订单商品与所选方案不一致，已停止支付。请返回后重新选择。</string>

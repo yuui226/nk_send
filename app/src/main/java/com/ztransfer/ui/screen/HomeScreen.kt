@@ -2,6 +2,11 @@ package com.ztransfer.ui.screen
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -12,6 +17,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
@@ -158,6 +164,19 @@ fun HomeScreen(
         soonDays in 0..SUB_ALERT_DAYS ->
             pluralStringResource(R.plurals.sub_expiring_soon, soonDays, soonDays) to true
         else -> null
+    }
+    val restoredHint = stringResource(R.string.purchase_restored)
+    var restoredHintVisible by remember { mutableStateOf(false) }
+    var restoredHintNonce by remember { mutableStateOf(0) }
+    fun showRestoredHint() {
+        restoredHintVisible = true
+        restoredHintNonce++
+    }
+    LaunchedEffect(restoredHintNonce) {
+        if (restoredHintVisible) {
+            delay(1800)
+            restoredHintVisible = false
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -372,6 +391,7 @@ fun HomeScreen(
                 onDismiss = { showPro = false },
                 showEnterCode = true,
                 onCelebrate = { fireworks.launch() },
+                onRestored = { showRestoredHint() },
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
                 // 到期的老用户从徽标再买 = 续原来那个码,不发新码。
                 renew = false
@@ -401,6 +421,31 @@ fun HomeScreen(
         // ---------- 小技巧气泡：从 tips 按钮变形弹出的毛玻璃内容框 ----------
         if (showTips) {
             TipsBubble(anchorBounds = tipsAnchor, onDismiss = { showTips = false })
+        }
+
+        // 自动恢复与主动“恢复授权”共用页面底部的通用玻璃提示。
+        AnimatedVisibility(
+            visible = restoredHintVisible,
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 28.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = colors.glassSurfaceHeavy,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, colors.glassPanelBorder)
+            ) {
+                Text(
+                    restoredHint,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.onBackground
+                )
+            }
         }
 
         // ---------- 高级版烟花彩蛋：放在最上层（含设置面板之上），不拦截触摸，播完自行移除 ----------

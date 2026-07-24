@@ -239,7 +239,7 @@
     <string name="purchase_waiting">在上方頁面完成付款，到帳後自動啟用。</string>
     <string name="purchase_activated">🎉 購買成功 · 高級版已解鎖</string>
     <string name="purchase_lifetime_activated">🎉 購買成功 · 永久高級版已解鎖</string>
-    <string name="purchase_restored">🎉 本裝置已購買過 · 已免費恢復,未重複扣款</string>
+    <string name="purchase_restored">🎉 已恢復權益</string>
     <string name="restore_action">恢復授權</string>
     <string name="restore_restoring">恢復中…</string>
     <string name="restore_none">找不到本機的授權（尚未購買，或已在新裝置上使用）</string>
@@ -253,6 +253,7 @@
     <string name="err_purchase_no_network">需要連接網際網路</string>
     <string name="err_purchase_unreachable">無法連接伺服器。若目前連著相機 Wi-Fi，請先斷開，改用有外網的網路重試。</string>
     <string name="err_purchase_failed">下單失敗，請稍後重試或聯絡客服。</string>
+    <string name="err_purchase_activation_failed">啟用失敗，請聯絡客服</string>
     <string name="err_purchase_price_missing">無法確認本單金額，已停止付款。請重試。</string>
     <string name="err_purchase_qr_failed">付款二維碼載入失敗，請重試，不要重複付款。</string>
     <string name="err_purchase_product_mismatch">訂單商品與所選方案不一致，已停止付款。請返回後重新選擇。</string>

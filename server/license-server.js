@@ -466,8 +466,36 @@ function apiActivate(body) {
     const bound = db.prepare('SELECT id FROM bindings WHERE code = ? AND device_fp = ?').get(code, fp);
     if (bound) {
         // 幂等:同一设备重复激活(卸载重装/再次点激活)直接重发通行证,不算换机、不计查重
-        db.prepare('UPDATE bindings SET last_renew_at = ?, app_ver = ? WHERE id = ?')
-            .run(now(), String(body.app_ver || ''), bound.id);
+        const model = String(body.model || '').trim();
+        const appVer = String(body.app_ver || '').trim();
+        db.prepare(`UPDATE bindings
+                       SET last_renew_at = ?,
+                           app_ver = CASE WHEN ? <> '' THEN ? ELSE app_ver END,
+                           device_model = CASE
+                               WHEN (device_model IS NULL OR device_model = '') AND ? <> '' THEN ?
+                               ELSE device_model
+                           END
+                     WHERE id = ?`)
+            .run(now(), appVer, appVer, model, model, bound.id);
+        // 新服务端已在收款事务中记了空元数据的首次激活；旧 APK 随后的幂等
+        // /activate 在这里补齐它，不新增历史、不改变反滥用计数。
+        db.prepare(`UPDATE activations
+                       SET device_model = CASE
+                               WHEN (device_model IS NULL OR device_model = '') AND ? <> '' THEN ?
+                               ELSE device_model
+                           END,
+                           app_ver = CASE
+                               WHEN (app_ver IS NULL OR app_ver = '') AND ? <> '' THEN ?
+                               ELSE app_ver
+                           END
+                     WHERE id = (
+                       SELECT id FROM activations
+                        WHERE code = ? AND device_fp = ?
+                          AND ((device_model IS NULL OR device_model = '')
+                            OR (app_ver IS NULL OR app_ver = ''))
+                        ORDER BY at DESC LIMIT 1
+                     )`)
+            .run(model, model, appVer, appVer, code, fp);
         return { ok: true, token: issueToken(code, fp, row.expires_at) };
     }
 
@@ -496,6 +524,8 @@ function apiActivate(body) {
 // 按设备指纹恢复(重装后无本地码时用户主动触发):仅当本机仍是该码当前绑定设备才成功。
 // 被顶替过的旧设备查不到绑定 → NOT_BOUND(符合单设备语义)。返回码供本地保存与"查看激活码"。
 // 订阅到期的码也当作没有:恢复出来也是个不能用的码,不如让 App 走购买/续费。
+// 同一设备有多张有效码时永久权益必须优先；只有没有永久码时才恢复最近绑定的订阅码。
+// 不能只按 activated_at 取最新，否则“永久先付款、旧年费二维码后付款”会把本地降回年费。
 function apiRestore(body) {
     const fp = String(body.fp || '').toLowerCase();
     if (!FP_RE.test(fp)) return { ok: false, err: 'NOT_BOUND' };
@@ -503,7 +533,9 @@ function apiRestore(body) {
                           FROM bindings b JOIN codes c ON c.code = b.code
                           WHERE b.device_fp = ? AND c.status = 'active'
                             AND (c.expires_at IS NULL OR c.expires_at > ?)
-                          ORDER BY b.activated_at DESC`).get(fp, now());
+                          ORDER BY CASE WHEN c.expires_at IS NULL THEN 0 ELSE 1 END,
+                                   b.activated_at DESC,
+                                   b.code ASC`).get(fp, now());
     if (!b) return { ok: false, err: 'NOT_BOUND' };
     db.prepare('UPDATE bindings SET last_renew_at = ? WHERE code = ? AND device_fp = ?')
         .run(now(), b.code, fp);
@@ -549,6 +581,7 @@ function adminNewCodes(body) {
 
 function adminListCodes() {
     const codes = db.prepare('SELECT * FROM codes ORDER BY created_at DESC').all();
+    const paidUnbound = paidUnboundOrders();
     const refundRequired = db.prepare(`
         SELECT out_trade_no, device_fp, amount_fen, product, code, charge_id, paid_at, refund_reason
           FROM orders
@@ -572,6 +605,7 @@ function adminListCodes() {
     }
     return {
         ok: true,
+        paid_unbound: paidUnbound,
         refund_required: refundRequired,
         codes: codes.map((c) => ({
             code: c.code, status: c.status, note: c.note, expires_at: c.expires_at,
@@ -581,6 +615,36 @@ function adminListCodes() {
         })),
     };
 }
+
+function paidUnboundOrders(olderThan = null) {
+    return db.prepare(`
+        SELECT o.out_trade_no, o.device_fp, o.amount_fen, o.product, o.code, o.paid_at
+          FROM orders o
+          LEFT JOIN bindings b ON b.code = o.code
+         WHERE o.status IN ('paid', 'refund_required') AND o.code IS NOT NULL
+           AND b.id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM activations a WHERE a.code = o.code)
+           AND (? IS NULL OR o.paid_at <= ?)
+         ORDER BY o.paid_at DESC`).all(olderThan, olderThan);
+}
+
+// 原子履约后“已付款且从未有过绑定”的集合应永远为空。人工解绑/正常换机已有
+// activations 历史，不在这里误报。超过 60 秒仍异常时只在集合变化时报警，
+// 避免每分钟重复刷日志；管理台同时通过 paid_unbound 暴露完整待核对清单。
+let lastPaidUnboundAlert = '';
+function alertPaidUnbound() {
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    const rows = paidUnboundOrders(cutoff);
+    const signature = rows.map((r) => `${r.out_trade_no}:${r.code}`).join(',');
+    if (signature === lastPaidUnboundAlert) return;
+    if (signature) {
+        log(`PAID_UNBOUND_ALERT count=${rows.length} orders=${signature}`);
+    } else if (lastPaidUnboundAlert) {
+        log('PAID_UNBOUND_CLEARED');
+    }
+    lastPaidUnboundAlert = signature;
+}
+setInterval(alertPaidUnbound, 60_000).unref();
 
 function adminUnbind(body) {
     const code = normCode(body.code), prefix = normFpPrefix(body.fp);
@@ -1148,11 +1212,25 @@ async function confirmPaid(order, { force = false } = {}) {
             const ins = db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)');
             const expiresAt = row.product === PRODUCT_LIFETIME
                 ? null : new Date(Date.now() + row.grant_days * 24 * 3600_000).toISOString();
+            const fulfilledAt = now();
             for (;;) {
                 code = newCode();
-                try { ins.run(code, `xh:${order}`, now(), expiresAt); break; }
+                try { ins.run(code, `xh:${order}`, fulfilledAt, expiresAt); break; }
                 catch (e) { if (!String(e.message).includes('UNIQUE')) throw e; } // 撞码重试(概率 ~0)
             }
+            // 新购权益在收款事务里直接完成首次绑定。不能再把“已付款 → 绑定本机”
+            // 留给购买弹窗里的下一次网络请求，否则弹窗关闭/进程被杀会留下 0 设备的码。
+            // 这里只处理新生成的码；续费 target 分支只延期，绝不改变现有绑定。
+            db.prepare(`INSERT INTO bindings
+                        (code, device_fp, device_model, app_ver, activated_at, last_renew_at)
+                        VALUES (?, ?, '', '', ?, ?)`)
+                .run(code, row.device_fp, fulfilledAt, fulfilledAt);
+            // 保持既有反滥用计数语义：购买后的首次绑定过去也会由 /v1/activate
+            // 记一条激活历史；现在只是把同一动作前移到收款事务。
+            db.prepare(`INSERT INTO activations
+                        (code, device_fp, device_model, app_ver, at)
+                        VALUES (?, ?, '', '', ?)`)
+                .run(code, row.device_fp, fulfilledAt);
         }
         const finalStatus = redundantPermanent ? 'refund_required' : 'paid';
         const refundReason = redundantPermanent ? 'annual_payment_after_permanent_upgrade' : null;
@@ -1188,10 +1266,49 @@ async function apiOrderStatus(body) {
     if (!row.code) row = await confirmPaid(order) || row;
 
     if (row.code) {
+        const entitlement = db.prepare(`
+            SELECT c.status, c.expires_at, b.id AS binding_id
+              FROM codes c
+              LEFT JOIN bindings b ON b.code = c.code AND b.device_fp = ?
+             WHERE c.code = ?`).get(fp, row.code);
+        let token;
+        if (entitlement?.binding_id && codeLive(entitlement)) {
+            const model = String(body.model || '').trim();
+            const appVer = String(body.app_ver || '').trim();
+            // notify 可能先于 App 查单完成绑定，当时拿不到机型/版本；首次查单时补齐，
+            // 空字段绝不覆盖旧 APK 后续 /activate 已写入的有效信息。
+            if (model || appVer) {
+                db.prepare(`UPDATE bindings
+                               SET device_model = CASE WHEN ? <> '' THEN ? ELSE device_model END,
+                                   app_ver = CASE WHEN ? <> '' THEN ? ELSE app_ver END,
+                                   last_renew_at = ?
+                             WHERE id = ?`)
+                    .run(model, model, appVer, appVer, now(), entitlement.binding_id);
+                db.prepare(`UPDATE activations
+                               SET device_model = CASE
+                                       WHEN (device_model IS NULL OR device_model = '') AND ? <> '' THEN ?
+                                       ELSE device_model
+                                   END,
+                                   app_ver = CASE
+                                       WHEN (app_ver IS NULL OR app_ver = '') AND ? <> '' THEN ?
+                                       ELSE app_ver
+                                   END
+                             WHERE id = (
+                               SELECT id FROM activations
+                                WHERE code = ? AND device_fp = ?
+                                  AND ((device_model IS NULL OR device_model = '')
+                                    OR (app_ver IS NULL OR app_ver = ''))
+                                ORDER BY at DESC LIMIT 1
+                             )`)
+                    .run(model, model, appVer, appVer, row.code, fp);
+            }
+            token = issueToken(row.code, fp, entitlement.expires_at);
+        }
         return {
             ok: true,
             status: 'paid',
             code: row.code,
+            ...(token ? { token } : {}),
             renew: Boolean(row.renew_code),
             product: row.product,
             price_fen: row.amount_fen,
@@ -1718,6 +1835,7 @@ module.exports = {
         apiPricing,
         adminSetPricing,
         adminListCodes,
+        apiRestore,
         apiOrderCreate,
         apiOrderStatus,
         apiPayNotify,

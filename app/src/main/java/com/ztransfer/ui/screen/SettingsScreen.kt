@@ -115,6 +115,7 @@ fun SettingsOverlay(
     var footerHintText by remember { mutableStateOf("") }
     var footerHintVisible by remember { mutableStateOf(false) }
     var footerHintNonce by remember { mutableStateOf(0) }
+    val restoredHint = stringResource(R.string.purchase_restored)
     fun showFooterHint(text: String) {
         footerHintText = text
         footerHintVisible = true
@@ -206,6 +207,7 @@ fun SettingsOverlay(
                 ProDialog(
                     onDismiss = { showPro = false },
                     onCelebrate = onPlayFireworks,
+                    onRestored = { showFooterHint(restoredHint) },
                     onHoldCameraWifi = onHoldCameraWifi,
                     renew = false
                 )

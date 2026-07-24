@@ -205,7 +205,24 @@ function Get-Ledger {
 
 function Show-Ledger($resp) {
     $codes = @($resp.codes)
+    $paidUnbound = @($resp.paid_unbound)
     $refunds = @($resp.refund_required)
+    if ($paidUnbound.Count -gt 0) {
+        Write-Host ""
+        Write-Host ("!!! 有 {0} 笔已付款订单从未完成设备绑定，请立即核对 !!!" -f $paidUnbound.Count) -ForegroundColor Red
+        foreach ($r in $paidUnbound) {
+            $fpPrefix = if ($r.device_fp) { ([string]$r.device_fp).Substring(0, [Math]::Min(8, ([string]$r.device_fp).Length)) } else { "-" }
+            Write-Host (
+                "  订单 {0}  激活码 {1}  付款 {2}  商品 {3}  设备 {4}  金额 {5}" -f
+                $r.out_trade_no,
+                $r.code,
+                (Format-Time $r.paid_at),
+                $r.product,
+                $fpPrefix,
+                (Format-PriceFen $r.amount_fen)
+            ) -ForegroundColor Yellow
+        }
+    }
     if ($refunds.Count -gt 0) {
         Write-Host ""
         Write-Host ("!!! 有 {0} 笔已收款订单需要人工核对并退款 !!!" -f $refunds.Count) -ForegroundColor Red

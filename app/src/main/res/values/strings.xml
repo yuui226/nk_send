@@ -241,7 +241,7 @@
     <string name="purchase_waiting">Complete the payment above — activation is automatic once confirmed.</string>
     <string name="purchase_activated">🎉 Purchased · Pro unlocked</string>
     <string name="purchase_lifetime_activated">🎉 Purchased · Lifetime Pro unlocked</string>
-    <string name="purchase_restored">🎉 This device already owns Pro — restored, no charge</string>
+    <string name="purchase_restored">🎉 Entitlement restored</string>
     <string name="restore_action">Restore</string>
     <string name="restore_restoring">Restoring…</string>
     <string name="restore_none">No license found for this device (not purchased, or now in use on another device).</string>
@@ -255,6 +255,7 @@
     <string name="err_purchase_no_network">Internet connection required</string>
     <string name="err_purchase_unreachable">Couldn\'t reach the server. If you\'re on the camera\'s Wi-Fi, disconnect first and retry on a network with internet access.</string>
     <string name="err_purchase_failed">Couldn\'t create the order — try again later or contact support.</string>
+    <string name="err_purchase_activation_failed">Activation failed. Please contact support.</string>
     <string name="err_purchase_price_missing">The order total could not be verified. Payment was stopped; please retry.</string>
     <string name="err_purchase_qr_failed">The payment QR code could not be loaded. Please retry, and do not pay twice.</string>
     <string name="err_purchase_product_mismatch">The order product does not match your selection. Payment was stopped; go back and select again.</string>

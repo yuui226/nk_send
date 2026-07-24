@@ -224,10 +224,56 @@ test('payment regression suite', async (suite) => {
             .get(created.order);
         assert.equal(paid.status, 'paid');
         assert.ok(paid.code);
+        const binding = db.prepare('SELECT device_fp FROM bindings WHERE code = ?').get(paid.code);
+        assert.equal(binding.device_fp, fp);
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM activations WHERE code = ?')
+            .get(paid.code).n, 1);
+        const status = await api.apiOrderStatus({
+            fp,
+            order: created.order,
+            model: 'Test Phone',
+            app_ver: '9.9',
+        });
+        assert.equal(status.status, 'paid');
+        assert.ok(status.token);
+        const tokenPayload = JSON.parse(Buffer.from(status.token.split('.')[0], 'base64url'));
+        assert.equal(tokenPayload.code, paid.code);
+        assert.equal(tokenPayload.fp, fp);
+        const bindingMetadata = db.prepare(
+            'SELECT device_model, app_ver FROM bindings WHERE code = ? AND device_fp = ?'
+        ).get(paid.code, fp);
+        assert.deepEqual({ ...bindingMetadata }, { device_model: 'Test Phone', app_ver: '9.9' });
+        assert.equal(api.adminListCodes().paid_unbound.length, 0);
         const expiresAt = db.prepare('SELECT expires_at FROM codes WHERE code = ?').get(paid.code).expires_at;
         await api.confirmPaid(created.order, { force: true });
         assert.equal(db.prepare('SELECT expires_at FROM codes WHERE code = ?').get(paid.code).expires_at,
             expiresAt);
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bindings WHERE code = ?').get(paid.code).n, 1);
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM activations WHERE code = ?')
+            .get(paid.code).n, 1);
+    });
+
+    await suite.test('首次绑定写入失败时发码与 paid 标记一并回滚', async () => {
+        const fp = '45454545454545454545454545454545';
+        const statuses = new Map();
+        installUpstream(statuses);
+        const created = await api.apiOrderCreate({ fp, product: 'annual' });
+        db.exec(`CREATE TRIGGER test_fail_paid_binding
+                 BEFORE INSERT ON bindings
+                 WHEN NEW.device_fp = '${fp}'
+                 BEGIN SELECT RAISE(ABORT, 'test binding failure'); END;`);
+        try {
+            statuses.set(created.order, 'OD');
+            const result = await api.confirmPaid(created.order, { force: true });
+            assert.equal(result.status, 'pending');
+            assert.equal(result.code, null);
+            assert.equal(db.prepare('SELECT COUNT(*) AS n FROM codes WHERE note = ?')
+                .get(`xh:${created.order}`).n, 0);
+            assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bindings WHERE device_fp = ?')
+                .get(fp).n, 0);
+        } finally {
+            db.exec('DROP TRIGGER test_fail_paid_binding');
+        }
     });
 
     await suite.test('已验签通知未履约或金额不符时不确认', async () => {
@@ -335,6 +381,28 @@ test('payment regression suite', async (suite) => {
             .get(fulfilled.code).expires_at, null);
     });
 
+    await suite.test('续费只延期，不改变付款期间已发生的换机绑定', async () => {
+        const originalFp = '91919191919191919191919191919191';
+        const switchedFp = '92929292929292929292929292929292';
+        const code = 'CDEFGH';
+        const originalExpiry = new Date(Date.now() + 86_400_000).toISOString();
+        db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)')
+            .run(code, 'test-renew-no-rebind', new Date().toISOString(), originalExpiry);
+        db.prepare('INSERT INTO bindings (code, device_fp, activated_at) VALUES (?, ?, ?)')
+            .run(code, originalFp, new Date().toISOString());
+        const statuses = new Map();
+        installUpstream(statuses);
+        const renewal = await api.apiOrderCreate({ fp: originalFp, product: 'annual', renew: true });
+        db.prepare('UPDATE bindings SET device_fp = ? WHERE code = ?').run(switchedFp, code);
+        statuses.set(renewal.order, 'OD');
+        const fulfilled = await api.confirmPaid(renewal.order, { force: true });
+        assert.equal(fulfilled.code, code);
+        assert.equal(db.prepare('SELECT device_fp FROM bindings WHERE code = ?').get(code).device_fp,
+            switchedFp);
+        assert.ok(db.prepare('SELECT expires_at FROM codes WHERE code = ?').get(code).expires_at
+            > originalExpiry);
+    });
+
     await suite.test('年费与永久二维码分别付款时各自自然发码', async () => {
         const fp = '36363636363636363636363636363636';
         const statuses = new Map();
@@ -354,6 +422,30 @@ test('payment regression suite', async (suite) => {
             .get(annualPaid.code).expires_at);
         assert.equal(db.prepare('SELECT expires_at FROM codes WHERE code = ?')
             .get(lifetimePaid.code).expires_at, null);
+    });
+
+    await suite.test('恢复授权始终优先永久码，不受两张二维码付款顺序影响', async () => {
+        const fp = '37373737373737373737373737373737';
+        const statuses = new Map();
+        installUpstream(statuses);
+
+        // 用户先生成永久二维码，又改选年费；两张二维码随后都被付款。
+        const lifetime = await api.apiOrderCreate({ fp, product: 'lifetime' });
+        const annual = await api.apiOrderCreate({ fp, product: 'annual' });
+        statuses.set(lifetime.order, 'OD');
+        statuses.set(annual.order, 'OD');
+        const lifetimePaid = await api.confirmPaid(lifetime.order, { force: true });
+        const annualPaid = await api.confirmPaid(annual.order, { force: true });
+
+        // 明确模拟年费绑定发生得更晚；恢复仍不得用年费覆盖永久权益。
+        db.prepare('UPDATE bindings SET activated_at = ? WHERE code = ?')
+            .run('2025-01-01T00:00:00.000Z', lifetimePaid.code);
+        db.prepare('UPDATE bindings SET activated_at = ? WHERE code = ?')
+            .run('2026-01-01T00:00:00.000Z', annualPaid.code);
+
+        const restored = api.apiRestore({ fp });
+        assert.equal(restored.ok, true);
+        assert.equal(restored.code, lifetimePaid.code);
     });
 
     await suite.test('旧年费单在权益变永久后付款，持久标记退款', async () => {
@@ -384,5 +476,38 @@ test('payment regression suite', async (suite) => {
         assert.equal(refund.product, 'annual');
         assert.equal(refund.amount_fen, annual.price_fen);
         assert.equal(refund.refund_reason, 'annual_payment_after_permanent_upgrade');
+    });
+
+    await suite.test('管理台暴露任何历史已付款未绑定异常', () => {
+        const code = 'DEFGHJ';
+        const order = 'ZTUNBOUND1';
+        const previouslyBoundCode = 'EFGHJK';
+        const previouslyBoundOrder = 'ZTUNBOUND2';
+        const paidAt = new Date(Date.now() - 120_000).toISOString();
+        db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)')
+            .run(code, `xh:${order}`, paidAt, new Date(Date.now() + 86_400_000).toISOString());
+        db.prepare(`INSERT INTO orders
+                    (out_trade_no, device_fp, amount_fen, product, grant_days, status,
+                     code, created_at, paid_at)
+                    VALUES (?, ?, 2690, 'annual', 365, 'paid', ?, ?, ?)`)
+            .run(order, '93939393939393939393939393939393', code, paidAt, paidAt);
+        // 有激活历史但当前无 binding 代表人工解绑/正常换机过程，不是“付款从未交付”。
+        db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)')
+            .run(previouslyBoundCode, `xh:${previouslyBoundOrder}`, paidAt,
+                new Date(Date.now() + 86_400_000).toISOString());
+        db.prepare(`INSERT INTO orders
+                    (out_trade_no, device_fp, amount_fen, product, grant_days, status,
+                     code, created_at, paid_at)
+                    VALUES (?, ?, 2690, 'annual', 365, 'paid', ?, ?, ?)`)
+            .run(previouslyBoundOrder, '94949494949494949494949494949494',
+                previouslyBoundCode, paidAt, paidAt);
+        db.prepare(`INSERT INTO activations
+                    (code, device_fp, device_model, app_ver, at)
+                    VALUES (?, ?, 'Old Phone', '1.0', ?)`)
+            .run(previouslyBoundCode, '94949494949494949494949494949494', paidAt);
+        const anomalies = api.adminListCodes().paid_unbound;
+        const anomaly = anomalies.find((item) => item.out_trade_no === order);
+        assert.equal(anomaly.code, code);
+        assert.equal(anomalies.some((item) => item.out_trade_no === previouslyBoundOrder), false);
     });
 });

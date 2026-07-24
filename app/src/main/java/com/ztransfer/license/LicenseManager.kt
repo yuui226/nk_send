@@ -3,15 +3,19 @@ package com.ztransfer.license
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.Network
 import android.provider.Settings
 import android.util.Base64
 import com.ztransfer.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.URLEncoder
@@ -65,6 +69,7 @@ object LicenseManager {
 
     private lateinit var prefs: SharedPreferences
     private var fingerprint: String = ""
+    private var purchaseNetworkCallback: ConnectivityManager.NetworkCallback? = null
 
     private val _isPro = MutableStateFlow(false)
     val isPro: StateFlow<Boolean> get() = _isPro
@@ -84,6 +89,7 @@ object LicenseManager {
     val quotaLeft: StateFlow<Int> get() = _quotaLeft
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val purchaseRecoveryMutex = Mutex()
 
     /** 在 MainActivity.onCreate 调用一次:恢复本地状态,并静默续签 + 刷新定价。 */
     fun init(context: Context) {
@@ -95,8 +101,34 @@ object LicenseManager {
         _subExpired.value = prefs.getBoolean("sub_expired", false)
         _quotaLeft.value = quotaRemaining()
         loadCachedPricing()
+        registerPurchaseNetworkRecovery(app)
         scope.launch { renewIfDue() }
+        scope.launch { reconcilePendingPurchaseWithRetry() }
         scope.launch { fetchPricing(PRICE_REFRESH_MS) }
+    }
+
+    /**
+     * 从微信回到 App、Activity 重建时补完已付款订单。任务挂在应用级 scope，
+     * 不依赖购买弹窗是否仍在组合中；进程被杀也没关系，pending_order 会在下次启动继续。
+     */
+    fun onAppForeground() {
+        if (::prefs.isInitialized) scope.launch { reconcilePendingPurchaseWithRetry() }
+    }
+
+    /**
+     * 付款后若移动网络切换稍慢，网络真正可用时立即补单。回调跟随应用进程；
+     * 若进程已被系统杀掉，pending_order 仍会在下次 init 时恢复。
+     */
+    private fun registerPurchaseNetworkRecovery(context: Context) {
+        if (purchaseNetworkCallback != null) return
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                onAppForeground()
+            }
+        }
+        runCatching { connectivity.registerDefaultNetworkCallback(callback) }
+            .onSuccess { purchaseNetworkCallback = callback }
     }
 
     // ---------------------------------------------------------------- 指纹
@@ -515,13 +547,14 @@ object LicenseManager {
             /** 本单锁定的实收价(分,0 = 服务器没给)。付款页显示它,不显示缓存的展示价。 */
             val priceFen: Int = 0
         ) : OrderResult()
-        /** 已支付;code 为服务器发放的激活码(尚未绑定本机,走 [activate])。 */
+        /** 已支付；新服务端会同时返回已绑定本机的 [token]，旧服务端则回落到 [activate]。 */
         data class Paid(
             val order: String,
             val code: String,
             val product: ProductId,
             val renew: Boolean = false,
             val priceFen: Int = 0,
+            val token: String? = null,
         ) : OrderResult()
         object Unreachable : OrderResult()
         data class Failed(
@@ -540,8 +573,59 @@ object LicenseManager {
     }
 
     /** 购买闭环走完(激活成功)后清除续单记录。 */
-    fun clearPendingOrder() {
+    fun clearPendingOrder(order: String? = null) {
+        val current = prefs.getString("pending_order", null)
+        if (!order.isNullOrEmpty() && current != order) return
         prefs.edit().remove("pending_order").remove("pending_order_product").apply()
+    }
+
+    /**
+     * 完成“已付款 → 本地高级版”的最后一步。新服务端在收款事务中已绑定设备并直接返 token；
+     * 旧服务端/旧订单没有 token 时仍走原激活接口，保持部署顺序与历史订单兼容。
+     */
+    suspend fun completePaidOrder(
+        paid: OrderResult.Paid,
+        appVersion: String = BuildConfig.VERSION_NAME,
+    ): ActivationResult = withContext(Dispatchers.IO) {
+        val token = paid.token
+        if (!token.isNullOrBlank() && verifyToken(token) != null) {
+            saveToken(token, paid.code)
+            clearPendingOrder(paid.order)
+            return@withContext ActivationResult.Success
+        }
+        val activated = activate(paid.code, appVersion)
+        if (activated is ActivationResult.Success) clearPendingOrder(paid.order)
+        activated
+    }
+
+    /**
+     * 启动/回前台时恢复本地未闭环订单。待支付不在后台死循环轮询；只有网络瞬断或
+     * 已付款后的本地落证失败才做短退避，pending_order 始终保留到 token 真正保存成功。
+     */
+    private suspend fun reconcilePendingPurchaseWithRetry() {
+        // init、onStart、网络回调可能在同一秒撞上；已有恢复任务时直接合并，
+        // 不排队积累多轮查单与退避。
+        if (!purchaseRecoveryMutex.tryLock()) return
+        try {
+            val retryDelaysMs = longArrayOf(0L, 2_000L, 5_000L, 15_000L)
+            for (retryDelayMs in retryDelaysMs) {
+                val pending = pendingOrder() ?: return
+                if (retryDelayMs > 0) delay(retryDelayMs)
+                if (pendingOrder()?.order != pending.order) return
+                when (val result = orderStatus(pending.order)) {
+                    is OrderResult.Paid -> when (completePaidOrder(result)) {
+                        ActivationResult.Success -> return
+                        ActivationResult.Unreachable -> Unit
+                        is ActivationResult.Rejected -> return
+                    }
+                    OrderResult.Unreachable -> Unit
+                    is OrderResult.Pending -> return
+                    is OrderResult.Failed -> return
+                }
+            }
+        } finally {
+            purchaseRecoveryMutex.unlock()
+        }
     }
 
     /**
@@ -601,6 +685,8 @@ object LicenseManager {
             val resp = post("/v1/order/status", JSONObject().apply {
                 put("fp", fingerprint)
                 put("order", order)
+                put("model", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim())
+                put("app_ver", BuildConfig.VERSION_NAME)
                 if (wantUrl) put("want_url", true)
             }) ?: return@withContext OrderResult.Unreachable
             if (!resp.optBoolean("ok"))
@@ -619,6 +705,7 @@ object LicenseManager {
                     product,
                     resp.optBoolean("renew"),
                     resp.optInt("price_fen", 0),
+                    resp.optString("token").takeIf { it.isNotEmpty() },
                 )
             } else OrderResult.Pending(
                 order,

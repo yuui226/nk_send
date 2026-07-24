@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Z传 · 付款自动激活流程</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172033;
+      --muted: #697386;
+      --line: #dce2ec;
+      --surface: #ffffff;
+      --page: #f3f6fb;
+      --blue: #2864dc;
+      --blue-soft: #eaf1ff;
+      --green: #16794b;
+      --green-soft: #e7f7ef;
+      --amber: #9a5a00;
+      --amber-soft: #fff4dc;
+      --purple: #7047b6;
+      --purple-soft: #f1eaff;
+      --shadow: 0 14px 38px rgba(31, 45, 78, .09);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(40, 100, 220, .10), transparent 30rem),
+        var(--page);
+      font: 15px/1.65 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 52px 0 64px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: end;
+      gap: 28px;
+      margin-bottom: 30px;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--blue);
+      font-weight: 750;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 780px;
+      font-size: clamp(30px, 5vw, 52px);
+      line-height: 1.12;
+      letter-spacing: -.04em;
+    }
+
+    .subtitle {
+      max-width: 720px;
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .core-rule {
+      min-width: 260px;
+      padding: 18px 20px;
+      border: 1px solid #bcd0f8;
+      border-radius: 18px;
+      background: rgba(255,255,255,.78);
+      box-shadow: var(--shadow);
+    }
+
+    .core-rule small {
+      display: block;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .core-rule strong {
+      color: var(--blue);
+      font-size: 18px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 30px;
+      align-items: stretch;
+      margin: 24px 0 32px;
+    }
+
+    .step {
+      position: relative;
+      min-height: 250px;
+      padding: 22px 20px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .step:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -25px;
+      z-index: 2;
+      width: 20px;
+      color: #9aa7bb;
+      font-size: 26px;
+      font-weight: 700;
+      text-align: center;
+      transform: translateY(-50%);
+    }
+
+    .step-number {
+      display: grid;
+      width: 38px;
+      height: 38px;
+      place-items: center;
+      margin-bottom: 18px;
+      border-radius: 12px;
+      color: var(--blue);
+      background: var(--blue-soft);
+      font-weight: 800;
+    }
+
+    .step.server {
+      border-color: #9ed8bb;
+      background: linear-gradient(180deg, #fff, var(--green-soft));
+    }
+
+    .step.server .step-number {
+      color: var(--green);
+      background: #d5f0e2;
+    }
+
+    .step h2 {
+      margin: 0 0 10px;
+      font-size: 20px;
+      line-height: 1.3;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 16px;
+    }
+
+    .chip {
+      padding: 4px 9px;
+      border-radius: 999px;
+      color: #4f5b6f;
+      background: #eef2f7;
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .server .chip {
+      color: var(--green);
+      background: rgba(255,255,255,.78);
+    }
+
+    .atomic {
+      display: grid;
+      gap: 7px;
+      margin: 15px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .atomic li {
+      padding: 7px 10px;
+      border: 1px solid rgba(22, 121, 75, .16);
+      border-radius: 10px;
+      color: #245c44;
+      background: rgba(255,255,255,.7);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .atomic-note {
+      display: block;
+      margin-top: 11px;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .recovery {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 24px;
+      margin-top: 32px;
+    }
+
+    .panel {
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .panel h2 {
+      margin: 0 0 6px;
+      font-size: 23px;
+    }
+
+    .panel > p {
+      margin: 0 0 20px;
+      color: var(--muted);
+    }
+
+    .cases {
+      display: grid;
+      gap: 12px;
+    }
+
+    .case {
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      gap: 13px;
+      padding: 15px;
+      border-radius: 15px;
+      background: #f7f9fc;
+    }
+
+    .case-icon {
+      display: grid;
+      width: 44px;
+      height: 44px;
+      place-items: center;
+      border-radius: 13px;
+      color: var(--amber);
+      background: var(--amber-soft);
+      font-size: 21px;
+      font-weight: 800;
+    }
+
+    .case strong { display: block; margin-bottom: 2px; }
+    .case span { color: var(--muted); font-size: 14px; }
+
+    .unchanged {
+      border-color: #d7c9f0;
+      background: linear-gradient(150deg, #fff, var(--purple-soft));
+    }
+
+    .unchanged-list {
+      display: grid;
+      gap: 11px;
+      margin: 18px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .unchanged-list li {
+      padding: 13px 14px;
+      border: 1px solid rgba(112, 71, 182, .15);
+      border-radius: 13px;
+      background: rgba(255,255,255,.76);
+    }
+
+    .unchanged-list strong {
+      color: var(--purple);
+    }
+
+    .bottom-line {
+      margin-top: 28px;
+      padding: 20px 24px;
+      border-radius: 18px;
+      color: #17412f;
+      background: var(--green-soft);
+      text-align: center;
+      font-size: 18px;
+      font-weight: 750;
+    }
+
+    footer {
+      margin-top: 20px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 13px;
+    }
+
+    @media (max-width: 900px) {
+      header, .recovery { grid-template-columns: 1fr; }
+      .core-rule { min-width: 0; }
+      .flow {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+      .step { min-height: 0; }
+      .step:not(:last-child)::after {
+        content: "↓";
+        top: auto;
+        right: 50%;
+        bottom: -22px;
+        transform: translateX(50%);
+      }
+    }
+
+    @media print {
+      body { background: #fff; }
+      main { width: 100%; padding: 16px; }
+      .step, .panel, .core-rule { box-shadow: none; break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">ZTransfer · Payment &amp; Activation</p>
+        <h1>付款成功后，授权怎样安全到达用户手机？</h1>
+        <p class="subtitle">
+          核心原则很简单：钱一到账，服务端先把权益完整保存；App 随后只负责把已经属于本机的授权取回来。
+        </p>
+      </div>
+      <aside class="core-rule">
+        <small>系统不再依赖</small>
+        <strong>购买弹窗一直开着</strong>
+      </aside>
+    </header>
+
+    <section class="flow" aria-label="付款自动激活主流程">
+      <article class="step">
+        <div class="step-number">1</div>
+        <h2>App 创建订单</h2>
+        <p>订单和本机设备标识写入服务端，同时把订单号保存在手机里。</p>
+        <div class="chips">
+          <span class="chip">pending_order</span>
+          <span class="chip">设备指纹</span>
+        </div>
+      </article>
+
+      <article class="step">
+        <div class="step-number">2</div>
+        <h2>用户完成付款</h2>
+        <p>用户保存二维码后去微信付款。此时即使关闭弹窗，也不会丢失订单。</p>
+        <div class="chips">
+          <span class="chip">微信</span>
+          <span class="chip">虎皮椒</span>
+        </div>
+      </article>
+
+      <article class="step server">
+        <div class="step-number">3</div>
+        <h2>服务端原子履约</h2>
+        <p>确认到账后，下面三件事必须一起成功：</p>
+        <ul class="atomic">
+          <li>生成新的激活码</li>
+          <li>绑定下单设备</li>
+          <li>订单标记为已付款</li>
+        </ul>
+        <span class="atomic-note">任一步失败，全部回滚并等待重试</span>
+      </article>
+
+      <article class="step">
+        <div class="step-number">4</div>
+        <h2>App 取回授权</h2>
+        <p>查单接口直接返回本机 token。启动、回到前台、网络恢复都会自动补查。</p>
+        <div class="chips">
+          <span class="chip">启动恢复</span>
+          <span class="chip">前台恢复</span>
+          <span class="chip">联网恢复</span>
+        </div>
+      </article>
+
+      <article class="step">
+        <div class="step-number">5</div>
+        <h2>高级版生效</h2>
+        <p>App 验证 token，切换为高级版；确认保存成功后，才删除本地待处理订单。</p>
+        <div class="chips">
+          <span class="chip">PRO</span>
+          <span class="chip">清除 pending</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="recovery">
+      <article class="panel">
+        <h2>出现意外时会怎样？</h2>
+        <p>权益已经先保存在服务端，所以客户端异常不会影响用户已经买到的东西。</p>
+        <div class="cases">
+          <div class="case">
+            <div class="case-icon">×</div>
+            <div>
+              <strong>用户关闭购买弹窗</strong>
+              <span>不影响付款和绑定；回到 App 后自动查单并恢复。</span>
+            </div>
+          </div>
+          <div class="case">
+            <div class="case-icon">↻</div>
+            <div>
+              <strong>App 被系统杀掉</strong>
+              <span>订单号仍在本地；下次启动继续完成本地授权。</span>
+            </div>
+          </div>
+          <div class="case">
+            <div class="case-icon">!</div>
+            <div>
+              <strong>网络暂时不可用</strong>
+              <span>不清订单，退避重试；网络恢复时再次处理。</span>
+            </div>
+          </div>
+          <div class="case">
+            <div class="case-icon">旧</div>
+            <div>
+              <strong>旧版本 App</strong>
+              <span>服务端仍先绑定；旧 App 再调用激活接口时按幂等方式返回授权。</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel unchanged">
+        <h2>这些规则没有改变</h2>
+        <p>本次只修复新购付款后的首次交付，不扩大到其它授权行为。</p>
+        <ul class="unchanged-list">
+          <li><strong>年费续费：</strong>只延长原激活码有效期，不改变设备绑定。</li>
+          <li><strong>永久版：</strong>生成新的永久码并绑定下单设备，原年费码保持不变。</li>
+          <li><strong>换机：</strong>仍然只有在新设备手动输入激活码时，才顶替旧设备。</li>
+          <li><strong>人工解绑：</strong>有历史激活记录，不会被“付款从未绑定”监控误报。</li>
+        </ul>
+      </article>
+    </section>
+
+    <div class="bottom-line">
+      最终结果：付款完成时后台已经是“激活码 + 1 台设备”，App 是否暂时离开不再影响权益。
+    </div>
+
+    <footer>当前实现流程示意 · 2026-07-24</footer>
+  </main>
+</body>
+</html>

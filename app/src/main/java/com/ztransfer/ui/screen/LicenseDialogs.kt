@@ -109,6 +109,7 @@ fun ProDialog(
     onDismiss: () -> Unit,
     showEnterCode: Boolean = false,
     onCelebrate: () -> Unit = {},
+    onRestored: () -> Unit = {},
     // 购买期间需临时松开对相机 Wi-Fi 的占用(相机热点没外网,付款联不上);由承载页接到 CameraViewModel。
     onHoldCameraWifi: (Boolean) -> Unit = {},
     // 订阅用户买年费时续原码；改选永久版时另发永久码，原年费码保持有效。
@@ -131,6 +132,7 @@ fun ProDialog(
             onDismiss = { showPurchase = false },
             // 购买+激活成功:关掉购买弹窗与本弹窗,再放烟花(烟花在页面顶层,须先关弹窗才可见)。
             onCelebrate = { showPurchase = false; onDismiss(); onCelebrate() },
+            onRestored = { showPurchase = false; onDismiss(); onRestored() },
             onHoldCameraWifi = onHoldCameraWifi,
             product = selectedProduct,
             renew = renew
@@ -350,7 +352,10 @@ fun ProDialog(
                                         restoring = true; restoreMsg = null; copied = false
                                         scope.launch {
                                             when (LicenseManager.restorePurchase()) {
-                                                LicenseManager.RestoreResult.Success -> success = true
+                                                LicenseManager.RestoreResult.Success -> {
+                                                    onDismiss()
+                                                    onRestored()
+                                                }
                                                 LicenseManager.RestoreResult.NotFound ->
                                                     restoreMsg = R.string.restore_none
                                                 LicenseManager.RestoreResult.Unreachable ->

@@ -33,7 +33,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -51,9 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -137,13 +134,14 @@ private fun saveToGallery(context: Context, bitmap: Bitmap, name: String): Boole
  *   普通网址码(只有 weixin:// 收款码才被禁),扫开即在微信内付款。
  *   我们自己画码而不是塞它的 H5 页:排版自己说了算,还能一键存相册。
  *
- * 本地存有未走完的旧单时自动续上(付款后 App 被杀/中途退出都不丢码)。
- * 激活失败不阻塞:码已到手并展示,用户可稍后走"输入激活码"。
+ * 本地存有未走完的旧单时自动续上；应用级恢复还会在启动、回前台和网络恢复时补完，
+ * 不再依赖本弹窗存活。旧服务端没有随查单返回 token 时，激活请求会退避重试。
  */
 @Composable
 fun PurchaseDialog(
     onDismiss: () -> Unit,
     onCelebrate: () -> Unit = {},
+    onRestored: () -> Unit = {},
     onHoldCameraWifi: (Boolean) -> Unit = {},
     product: LicenseManager.ProductId,
     // 年费续费时请求现有码延期；选择永久版时服务端仍按独立商品另发永久码。
@@ -151,7 +149,6 @@ fun PurchaseDialog(
     renew: Boolean = false,
 ) {
     val colors = AppTheme.colors
-    val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val pricing by LicenseManager.pricing.collectAsState()
@@ -172,10 +169,10 @@ fun PurchaseDialog(
     // 存相册失败单独记,不能并进 error(见下方保存按钮处的注释)
     var saveFailed by remember { mutableStateOf(false) }
     var code by remember { mutableStateOf<String?>(null) }
+    var paidOrder by remember { mutableStateOf<LicenseManager.OrderResult.Paid?>(null) }
     var activated by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<Int?>(null) }
     var productMismatch by remember { mutableStateOf(false) }
-    var copied by remember { mutableStateOf(false) }
     var expired by remember { mutableStateOf(false) }    // 超 5 分钟未支付 → 提示重新发起
     var refreshKey by remember { mutableStateOf(0) }     // 递增触发重新建单
     var restored by remember { mutableStateOf(false) }   // 本机已拥有 → 免费恢复(而非新购买)
@@ -198,6 +195,7 @@ fun PurchaseDialog(
             paidProduct = product
             paidRenew = false
             restored = false
+            paidOrder = null
         }
         // 付款全流程都要外网。刚松开相机 Wi-Fi 后系统切到蜂窝需要一两秒,
         // 故给一段等待再判定"没网",避免刚进来就误报。
@@ -210,6 +208,21 @@ fun PurchaseDialog(
         if (!online) {
             error = R.string.err_purchase_no_network
             return@LaunchedEffect
+        }
+        // 普通购买先按设备指纹静默恢复。重装后本机已有有效授权时，直接进入“已恢复”
+        // 成功页，既不创建订单，也不让服务端返码后的自动激活中间态闪到用户眼前。
+        // 续费不能走这里：订阅用户本来就有授权，恢复成功不能阻止他主动续费。
+        if (refreshKey == 0 && !renew) {
+            when (LicenseManager.restorePurchase()) {
+                LicenseManager.RestoreResult.Success -> {
+                    onRestored()
+                    return@LaunchedEffect
+                }
+                LicenseManager.RestoreResult.NotFound -> Unit
+                // 网络刚从相机热点切到蜂窝时可能短暂失败；继续原下单流程，
+                // createOrder 的 already_pro 防重复购买仍是第二道兜底。
+                LicenseManager.RestoreResult.Unreachable -> Unit
+            }
         }
         val r: LicenseManager.OrderResult? = if (refreshKey == 0) {
             val resumed = LicenseManager.pendingOrder()
@@ -256,6 +269,7 @@ fun PurchaseDialog(
             is LicenseManager.OrderResult.Paid -> {
                 order = r.order
                 code = r.code
+                paidOrder = r
                 paidRenew = r.renew
                 paidProduct = r.product
                 orderPriceFen = r.priceFen
@@ -307,7 +321,7 @@ fun PurchaseDialog(
     }
 
     // 轮询到账 → 自动激活。过期即停止轮询,不再空打死单。
-    LaunchedEffect(order) {
+    LaunchedEffect(order, paidOrder) {
         val o = order ?: return@LaunchedEffect
         var retryDelayMs = 2_000L
         while (code == null && !expired && error == null) {
@@ -320,6 +334,7 @@ fun PurchaseDialog(
                 }
                 r is LicenseManager.OrderResult.Paid -> {
                     code = r.code
+                    paidOrder = r
                     paidRenew = r.renew
                     paidProduct = r.product
                     orderPriceFen = r.priceFen
@@ -349,20 +364,36 @@ fun PurchaseDialog(
                 }
             }
         }
-        val c = code ?: return@LaunchedEffect
-        when (LicenseManager.activate(c, BuildConfig.VERSION_NAME)) {
-            LicenseManager.ActivationResult.Success -> {
-                activated = true
-                LicenseManager.clearPendingOrder()
+        val paid = paidOrder ?: return@LaunchedEffect
+        var activationRetryDelayMs = 2_000L
+        while (!activated) {
+            when (LicenseManager.completePaidOrder(paid, BuildConfig.VERSION_NAME)) {
+                LicenseManager.ActivationResult.Success -> {
+                    if (restored) {
+                        onRestored()
+                        return@LaunchedEffect
+                    }
+                    activated = true
+                }
+                LicenseManager.ActivationResult.Unreachable -> {
+                    delay(activationRetryDelayMs)
+                    activationRetryDelayMs = nextOrderRetryDelay(activationRetryDelayMs)
+                }
+                is LicenseManager.ActivationResult.Rejected -> {
+                    // 当前服务端的付款与绑定已原子完成；若仍被明确拒绝，属于异常状态。
+                    code = null
+                    paidOrder = null
+                    error = R.string.err_purchase_activation_failed
+                    return@LaunchedEffect
+                }
             }
-            else -> Unit
         }
     }
 
     // 关闭统一走右上角叉号:成功后关闭顺带放烟花(与"完成"同一动作)。
     val close: () -> Unit = { if (activated) onCelebrate() else onDismiss() }
     // 待支付期锁掉点外部/返回手势:用户正要去截图或切微信,误触就白等一场。
-    val dismissible = code != null || error != null
+    val dismissible = activated || code != null || error != null
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
@@ -444,7 +475,7 @@ fun PurchaseDialog(
                             // ---- 到账:自动激活成功 → 只报喜,别的什么都不说 ----
                             // 激活码此刻对用户毫无用处(已自动激活),摆在这只会引出"这码干嘛用的"。
                             // 真要它的时机只有换机,那时去设置里的「我要换机」拿(SwitchDeviceDialog)。
-                            code != null -> {
+                            activated || code != null -> {
                                 Spacer(Modifier.height(4.dp))
                                 if (activated) {
                                     // 续费的人已经是高级版,再说一遍"已解锁"没意义——他要看的是新的到期日。
@@ -452,7 +483,6 @@ fun PurchaseDialog(
                                     val newSubExp = remember(activated) { LicenseManager.subExpiresAtSec() }
                                     Text(
                                         when {
-                                            restored -> stringResource(R.string.purchase_restored)
                                             paidProduct == LicenseManager.ProductId.LIFETIME ->
                                                 stringResource(R.string.purchase_lifetime_activated)
                                             paidRenew && newSubExp > 0L ->
@@ -479,27 +509,18 @@ fun PurchaseDialog(
                                         )
                                     }
                                 } else {
-                                    // 已收款但自动激活未成功:亮出码 + 手动输入引导。
-                                    // 这里不再报"支付成功已激活"——它和下面那句"自动激活未成功"直接打架。
-                                    TextButton(onClick = {
-                                        clipboard.setText(AnnotatedString(code!!))
-                                        copied = true
-                                    }) {
-                                        Text(
-                                            code!!,
-                                            style = MaterialTheme.typography.headlineMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = colors.onBackground
-                                        )
-                                    }
+                                    // 正常自动激活或网络切换重试期间只显示稳定的处理中状态，
+                                    // 不先闪激活码再立刻切到“已恢复/已解锁”。
+                                    CircularProgressIndicator(
+                                        color = colors.accentYellow,
+                                        modifier = Modifier.size(38.dp),
+                                        strokeWidth = 3.dp,
+                                    )
+                                    Spacer(Modifier.height(10.dp))
                                     Text(
-                                        stringResource(
-                                            if (copied) R.string.purchase_code_copied
-                                            else R.string.purchase_paid_not_active
-                                        ),
+                                        stringResource(R.string.activating),
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = colors.accentOrange,
-                                        textAlign = TextAlign.Center
+                                        color = colors.onSurfaceVariant,
                                     )
                                 }
                             }
