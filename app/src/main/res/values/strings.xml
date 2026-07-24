@@ -142,7 +142,7 @@
     <string name="remote_blocked_transfer">Transfer in progress — enter live view after it finishes</string>
     <string name="remote_title">Remote</string>
     <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>
-    <string name="remote_rec_start_failed">Couldn\'t start recording — confirm movie mode and check the memory card</string>
+    <string name="remote_rec_start_failed">Couldn\'t start recording</string>
     <string name="remote_rec_stop_failed">Couldn\'t stop recording — check the camera and try again</string>
     <string name="remote_tap_focus_manual">Switch the camera to autofocus to use tap focus</string>
     <string name="dev_panel_title">Developer</string>

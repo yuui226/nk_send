@@ -36,6 +36,8 @@ class NikonCamera(private val context: Context) {
     private var evtInput: java.io.InputStream? = null
     private var cmdOutput: OutputStream? = null
     private var usbPtp: UsbPtpConnection? = null
+    private var connectedUsbManager: UsbManager? = null
+    private var connectedUsbDevice: UsbDevice? = null
     private var tid = 0
     private val cmdReader = PacketReader(context)
     private val evtReader = PacketReader(context)
@@ -68,6 +70,9 @@ class NikonCamera(private val context: Context) {
     // 断线会创建新的 NikonCamera，自然不会把旧连接的记账带过去。
     @Volatile internal var remoteMovieApplicationPropSet = false
     @Volatile internal var remoteMovieApplicationOpSet = false
+    // USB 监看页持有的尼康完整远控模式（0x90C2）。进入页面设 1，退出成对清 0；
+    // 放在连接对象上可跨横竖屏重建记账，断线换实例则自然清空。
+    @Volatile internal var remoteControlModeSet = false
 
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
@@ -225,6 +230,8 @@ class NikonCamera(private val context: Context) {
             }
 
             transport.readTimeoutMs = SO_TIMEOUT_MS
+            connectedUsbManager = manager
+            connectedUsbDevice = device
             log { "USB_CONNECT ready" }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -233,6 +240,99 @@ class NikonCamera(private val context: Context) {
             Result.failure(e)
         }
     }
+
+    /**
+     * Replaces the media-browsing PTP session with a fresh USB remote-control session.
+     *
+     * Nikon's USB tethering path requires a newly opened session, drains GetEventEx once,
+     * then reads DeviceInfo before entering control mode. A stale OpenSession is explicitly
+     * closed and retried on a new UsbDeviceConnection.
+     */
+    internal suspend fun refreshUsbRemoteSession(): String =
+        ioMutex.withLock {
+            withContext(Dispatchers.IO) {
+                val manager = connectedUsbManager
+                    ?: throw IllegalStateException("USB manager unavailable")
+                val device = connectedUsbDevice
+                    ?: throw IllegalStateException("USB device unavailable")
+
+                if (sessionOpen) {
+                    runCatching {
+                        sendCmd(PtpConstants.CLOSE_SESSION)
+                        recvResp()
+                    }
+                    sessionOpen = false
+                }
+                runCatching { usbPtp?.close() }
+                usbPtp = null
+                kotlinx.coroutines.delay(100)
+
+                var openResponse = -1
+                repeat(2) { attempt ->
+                    val transport = UsbPtpConnection.open(manager, device).getOrThrow()
+                    usbPtp = transport
+                    transport.readTimeoutMs = USB_CONNECT_TIMEOUT_MS
+                    // The verified Nikon remote trace starts its fresh session at transaction 1.
+                    tid = 0
+
+                    sendCmd(PtpConstants.OPEN_SESSION, 1)
+                    openResponse = recvResp()
+                    if (openResponse == PtpConstants.SESSION_ALREADY_OPEN) {
+                        runCatching {
+                            sendCmd(PtpConstants.CLOSE_SESSION)
+                            recvResp()
+                        }
+                        runCatching { transport.close() }
+                        usbPtp = null
+                        if (attempt == 0) kotlinx.coroutines.delay(700)
+                    } else {
+                        if (openResponse != PtpConstants.RESPONSE_OK) {
+                            throw IllegalStateException(
+                                "OpenSession response=0x%04X".format(openResponse)
+                            )
+                        }
+                        sessionOpen = true
+
+                        sendCmd(0x941C) // Nikon GetEventEx: drain stale events after OpenSession.
+                        val drainResponse = recvRespWithPayload().first
+
+                        sendCmd(PtpConstants.GET_DEVICE_INFO)
+                        val (deviceInfoResponse, deviceInfoData) = recvRespWithPayload()
+                        if (deviceInfoResponse != PtpConstants.RESPONSE_OK) {
+                            throw IllegalStateException(
+                                "GetDeviceInfo response=0x%04X".format(deviceInfoResponse)
+                            )
+                        }
+                        liveViewImageOperation =
+                            if (deviceInfoData != null &&
+                                runCatching {
+                                    0x9428 in parseDeviceInfo(deviceInfoData).operations
+                                }.getOrDefault(false)
+                            ) {
+                                0x9428
+                            } else {
+                                0x9203
+                            }
+                        val eventReaderStarted = transport.startEventReader()
+
+                        transport.readTimeoutMs = SO_TIMEOUT_MS
+                        remoteControlModeSet = false
+                        remoteMovieApplicationPropSet = false
+                        remoteMovieApplicationOpSet = false
+                        return@withContext buildString {
+                            append("session=0x%04X".format(openResponse))
+                            append(" drain=0x%04X".format(drainResponse))
+                            append(" info=0x%04X".format(deviceInfoResponse))
+                            append(" irq=").append(if (eventReaderStarted) "Y" else "N")
+                        }
+                    }
+                }
+
+                throw IllegalStateException(
+                    "Fresh OpenSession response=0x%04X".format(openResponse)
+                )
+            }
+        }
 
     private fun startEvtThread() {
         val socket = evtSocket ?: return
@@ -759,6 +859,8 @@ class NikonCamera(private val context: Context) {
         sessionOpen = false
         try { usbPtp?.close() } catch (_: Exception) {}
         usbPtp = null
+        connectedUsbManager = null
+        connectedUsbDevice = null
         try { cmdInput?.close() } catch (_: Exception) {}
         try { cmdSocket?.close() } catch (_: Exception) {}
         try { evtInput?.close() } catch (_: Exception) {}

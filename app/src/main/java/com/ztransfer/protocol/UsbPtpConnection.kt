@@ -30,7 +30,9 @@ internal class UsbPtpConnection private constructor(
     private val bulkIn: UsbEndpoint,
     private val bulkOut: UsbEndpoint,
     private val bulkInRequest: UsbRequest,
-    private val bulkOutRequest: UsbRequest
+    private val bulkOutRequest: UsbRequest,
+    private val interruptIn: UsbEndpoint?,
+    private val interruptRequest: UsbRequest?
 ) : Closeable {
 
     data class StreamResult(
@@ -64,6 +66,22 @@ internal class UsbPtpConnection private constructor(
     private val usbReadBuffer = ByteArray(ioBuffer.size)
     private var bufferedReadOffset = 0
     private var bufferedReadEnd = 0
+    private val interruptBuffer =
+        interruptIn?.let { ByteBuffer.allocate(maxOf(64, it.maxPacketSize)) }
+    private var interruptQueued = false
+
+    /**
+     * Keeps the PTP interrupt endpoint armed during Nikon USB remote control.
+     * Completed events are drained while waiting for bulk transfers, then immediately re-armed.
+     */
+    fun startEventReader(): Boolean {
+        val request = interruptRequest ?: return false
+        val buffer = interruptBuffer ?: return false
+        if (interruptQueued) return true
+        buffer.clear()
+        interruptQueued = request.queue(buffer)
+        return interruptQueued
+    }
 
     fun sendCommand(code: Int, transactionId: Int, params: IntArray) {
         val count = params.size.coerceAtMost(5)
@@ -178,8 +196,10 @@ internal class UsbPtpConnection private constructor(
     override fun close() {
         if (closed) return
         closed = true
+        runCatching { interruptRequest?.cancel() }
         runCatching { bulkInRequest.cancel() }
         runCatching { bulkOutRequest.cancel() }
+        runCatching { interruptRequest?.close() }
         runCatching { bulkInRequest.close() }
         runCatching { bulkOutRequest.close() }
         runCatching { connection.releaseInterface(ptpInterface) }
@@ -247,14 +267,11 @@ internal class UsbPtpConnection private constructor(
             if (!bulkInRequest.queue(buffer)) {
                 throw IOException("PTP/USB bulk IN queue failed endpoint=0x${bulkIn.address.toString(16)}")
             }
-            val completed = try {
-                connection.requestWait(readTimeoutMs.coerceAtLeast(1).toLong())
+            try {
+                waitForRequest(bulkInRequest, readTimeoutMs.coerceAtLeast(1))
             } catch (e: TimeoutException) {
                 bulkInRequest.cancel()
                 throw SocketTimeoutException("PTP/USB bulk read timed out")
-            }
-            if (completed !== bulkInRequest) {
-                throw IOException("PTP/USB unexpected completed request")
             }
             val result = buffer.position()
             if (result > 0) {
@@ -292,14 +309,11 @@ internal class UsbPtpConnection private constructor(
                     "PTP/USB bulk OUT queue failed endpoint=0x${bulkOut.address.toString(16)}"
                 )
             }
-            val completed = try {
-                connection.requestWait(WRITE_TIMEOUT_MS.toLong())
+            try {
+                waitForRequest(bulkOutRequest, WRITE_TIMEOUT_MS)
             } catch (e: TimeoutException) {
                 bulkOutRequest.cancel()
                 throw SocketTimeoutException("PTP/USB bulk write timed out")
-            }
-            if (completed !== bulkOutRequest) {
-                throw IOException("PTP/USB unexpected completed request")
             }
             val result = buffer.position() - start
             if (result <= 0) {
@@ -308,6 +322,29 @@ internal class UsbPtpConnection private constructor(
                 )
             }
             offset += result
+        }
+    }
+
+    private fun waitForRequest(expected: UsbRequest, timeoutMs: Int) {
+        val deadline = System.nanoTime() + timeoutMs.toLong() * 1_000_000L
+        while (true) {
+            val remainingNanos = deadline - System.nanoTime()
+            if (remainingNanos <= 0L) throw TimeoutException()
+            val completed = connection.requestWait(
+                ((remainingNanos + 999_999L) / 1_000_000L).coerceAtLeast(1L)
+            )
+            if (completed === expected) return
+            if (completed === interruptRequest) {
+                interruptQueued = false
+                val buffer = interruptBuffer
+                val request = interruptRequest
+                if (!closed && buffer != null && request != null) {
+                    buffer.clear()
+                    interruptQueued = request.queue(buffer)
+                }
+                continue
+            }
+            throw IOException("PTP/USB unexpected completed request")
         }
     }
 
@@ -381,13 +418,37 @@ internal class UsbPtpConnection private constructor(
                 connection.close()
                 throw IOException("Unable to initialize PTP bulk OUT request")
             }
+            var interruptIn: UsbEndpoint? = null
+            for (index in 0 until intf.endpointCount) {
+                val endpoint = intf.getEndpoint(index)
+                if (endpoint.type == UsbConstants.USB_ENDPOINT_XFER_INT &&
+                    endpoint.direction == UsbConstants.USB_DIR_IN
+                ) {
+                    interruptIn = endpoint
+                    break
+                }
+            }
+            val interruptRequest = interruptIn?.let { endpoint ->
+                UsbRequest().also { request ->
+                    if (!request.initialize(connection, endpoint)) {
+                        request.close()
+                        outRequest.close()
+                        inRequest.close()
+                        connection.releaseInterface(intf)
+                        connection.close()
+                        throw IOException("Unable to initialize PTP interrupt IN request")
+                    }
+                }
+            }
             UsbPtpConnection(
                 connection,
                 intf,
                 endpoints.input,
                 endpoints.output,
                 inRequest,
-                outRequest
+                outRequest,
+                interruptIn,
+                interruptRequest
             )
         }
     }

@@ -142,7 +142,7 @@
     <string name="remote_blocked_transfer">傳輸進行中，完成後再進入監看</string>
     <string name="remote_title">遙控</string>
     <string name="remote_transfer_busy_hint">傳輸進行中，監看可能卡頓</string>
-    <string name="remote_rec_start_failed">無法開始錄影，請確認相機處於影片模式並檢查記憶卡</string>
+    <string name="remote_rec_start_failed">無法開始錄影</string>
     <string name="remote_rec_stop_failed">無法停止錄影，請檢查相機後重試</string>
     <string name="remote_tap_focus_manual">請將相機切換到自動對焦後使用點按對焦</string>
     <string name="dev_panel_title">開發者</string>

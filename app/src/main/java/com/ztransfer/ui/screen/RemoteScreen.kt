@@ -83,6 +83,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.LiveViewFocusFrame
 import com.ztransfer.protocol.LiveViewFocusJudgement
@@ -106,15 +107,18 @@ import com.ztransfer.protocol.rcGetFocusMode
 import com.ztransfer.protocol.rcGetMovieMode
 import com.ztransfer.protocol.rcGetParam
 import com.ztransfer.protocol.rcPollEvents
+import com.ztransfer.protocol.rcPrepareAndStartMovieDetailed
 import com.ztransfer.protocol.rcRefreshParam
 import com.ztransfer.protocol.rcIsBinaryToggle
 import com.ztransfer.protocol.rcSetApplicationMode
+import com.ztransfer.protocol.rcSetControlMode
 import com.ztransfer.protocol.rcSetLvSize
 import com.ztransfer.protocol.rcSetValueVerified
 import com.ztransfer.protocol.rcStartMovieDetailed
 import com.ztransfer.protocol.runLabProbe
 import com.ztransfer.protocol.movieStartNeedsLiveViewRestart
 import com.ztransfer.protocol.movieProhibitIndicatesRecording
+import com.ztransfer.protocol.diagnosticSummary
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
@@ -127,6 +131,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -510,10 +515,10 @@ private fun RemoteContent(
     var recording by remember { mutableStateOf(false) }
     var recBusy by remember { mutableStateOf(false) }
     var lastStopCmdAt by remember { mutableLongStateOf(0L) }
-    // Nikon Z 系远程开录前需要进入应用模式。libgphoto2 的 Nikon 路径会同时尝试
-    // 属性 0xD1F0=1 与操作码 0x9435(1)，而不是把二者当互斥回退；Z5 与 Z8 分属
-    // 偏好不同入口的世代。成功的入口分别记账，停录后成对恢复。
+    // Nikon Z 系远程开录前需要进入应用模式。USB 使用已验证的 0x9435 路径；
+    // 旧连接路径仍保留 D1F0 兼容入口。成功的入口分别记账，停录后成对恢复。
     var appModeClearBusy by remember { mutableStateOf(false) }
+    var movieUsbSessionDiagnostic by remember { mutableStateOf<String?>(null) }
     suspend fun ensureApplicationMode(cam: NikonCamera) {
         if (!cam.remoteMovieApplicationPropSet) {
             val rc = runCatching { cam.rcSetApplicationMode(true) }.getOrDefault(-1)
@@ -526,9 +531,18 @@ private fun RemoteContent(
             if (rc == Lab.OK) cam.remoteMovieApplicationOpSet = true
         }
     }
-    suspend fun clearAppMode() {
+    suspend fun clearAppMode(
+        targetCamera: NikonCamera? = cameraViewModel.getCamera(),
+        force: Boolean = false
+    ) {
         if (appModeClearBusy) return
-        val cam = cameraViewModel.getCamera() ?: return
+        val cam = targetCamera ?: return
+        // USB 完整远控会话把 ApplicationMode 作为会话级状态持有：停止录像或收到
+        // 完成事件都不清，只有退出监看（force=true）才在 EndLiveView 后成对恢复。
+        if (!force &&
+            cam.connectionType == CameraConnectionType.USB &&
+            cam.remoteControlModeSet
+        ) return
         if (!cam.remoteMovieApplicationPropSet && !cam.remoteMovieApplicationOpSet) return
         appModeClearBusy = true
         try {
@@ -552,12 +566,12 @@ private fun RemoteContent(
             appModeClearBusy = false
         }
     }
-    suspend fun refreshMovieMode() {
+    suspend fun refreshMovieMode(refreshExposureOnChange: Boolean = true) {
         val cam = cameraViewModel.getCamera() ?: return
         val mv = runCatching { cam.rcGetMovieMode() }.getOrNull() ?: return
         val was = movieMode
         movieMode = mv
-        if (mv && !was) {
+        if (refreshExposureOnChange && mv && !was) {
             // 切入录像位：拉取录像侧独立参数组（照片/录像两套属性互不相通）
             MOVIE_EXPOSURE_PROPS.forEach { refreshParam(it) }
             // Auto ISO 的属性码在 Nikon Z 系与照片模式共用，但描述中的当前值/
@@ -568,7 +582,7 @@ private fun RemoteContent(
             recording = false   // 拨杆离开录像位，录制状态必然已结束
             clearAppMode()
             // 切回照片位：照片侧值域/可写性可能在录像期间变过，重新拉一遍
-            if (was) {
+            if (refreshExposureOnChange && was) {
                 EXPOSURE_PROPS.forEach { refreshParam(it) }
                 refreshAutoIso()
             }
@@ -683,16 +697,73 @@ private fun RemoteContent(
             initialLoaded = false
             return@LaunchedEffect
         }
-        // 先把通道让给参数读取（此时事件轮询尚未开始、缩略图填充已停），参数最快点亮，
-        // 再放开事件轮询并启动监看。
-        EXPOSURE_PROPS.forEach { refreshParam(it) }
-        refreshAutoIso()
-        refreshMode()
-        refreshFocusMode()
-        initialLoaded = true
-        startSession(hdLiveView)
-        // 拨杆位置放监看启动之后：只影响快门键形态，不值得让首帧多等一个往返
-        refreshMovieMode()
+        val sessionCamera = cameraViewModel.getCamera() ?: return@LaunchedEffect
+        var adoptedInitialLiveView: NikonCamera? = null
+        try {
+            // USB 监看沿用 Nikon 完整远控模式；应用模式只在用户真正开录时切换。
+            if (sessionCamera.connectionType == CameraConnectionType.USB) {
+                movieUsbSessionDiagnostic = runCatching {
+                    sessionCamera.refreshUsbRemoteSession()
+                }.getOrElse { "session error=${it.javaClass.simpleName}" }
+                movieUsbSessionDiagnostic?.let(::devLog)
+
+                val rc = runCatching {
+                    sessionCamera.rcSetControlMode(true)
+                }.getOrDefault(-1)
+                devLog("SetControlMode(1) resp=0x%04X".format(rc and 0xFFFF))
+
+                if (rc == Lab.OK) {
+                    // Match Nikon's USB tethering order exactly: XGA profile and
+                    // StartLiveView immediately after control mode, before any
+                    // exposure/property reads.
+                    val profileRc = runCatching {
+                        sessionCamera.rcSetLvSize(3)
+                    }.getOrDefault(-1)
+                    val started = runCatching {
+                        sessionCamera.labStartLiveView { devLog(it) }
+                    }.getOrDefault(false)
+                    if (started) adoptedInitialLiveView = sessionCamera
+                    movieUsbSessionDiagnostic =
+                        "${movieUsbSessionDiagnostic.orEmpty()} lv3=0x%04X/%s".format(
+                            profileRc and 0xFFFF,
+                            if (started) "Y" else "N"
+                        ).trim()
+                }
+            }
+
+            // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
+            // 视频组，会表现为参数出现、清空、再加载一遍。
+            refreshMovieMode(refreshExposureOnChange = false)
+            val initialExposureProps =
+                if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+            initialExposureProps.forEach { refreshParam(it) }
+            refreshAutoIso()
+            refreshMode()
+            refreshFocusMode()
+            initialLoaded = true
+            startSession(hdLiveView, adoptedInitialLiveView)
+            awaitCancellation()
+        } finally {
+            if (sessionCamera.connectionType == CameraConnectionType.USB &&
+                sessionCamera.remoteControlModeSet
+            ) {
+                withContext(NonCancellable) {
+                    // 退出监看才结束 LV 并归还机身控制；录像开始/停止本身绝不拆会话。
+                    if (recording) {
+                        runCatching { sessionCamera.rcEndMovie() }
+                        recording = false
+                    }
+                    val oldLvJob = lvJob
+                    oldLvJob?.cancelAndJoin()
+                    if (lvJob === oldLvJob) lvJob = null
+                    clearAppMode(sessionCamera, force = true)
+                    val rc = runCatching {
+                        sessionCamera.rcSetControlMode(false)
+                    }.getOrDefault(-1)
+                    devLog("SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
+                }
+            }
+        }
     }
 
     val autoIsoParam = autoIsoProp?.let { params[it] }
@@ -1211,15 +1282,22 @@ private fun RemoteContent(
                 val cam = expectedCamera
                 haptics.longPress()   // 与拍照同级的触发反馈（经全局震动设置门控）
                 if (!recording) {
-                    // 先保留旧机型已经验证过的直接 0x920A 路径；只有相机明确拒绝且
-                    // 不是存储卡原因时，才进入 Nikon Z 系的应用模式 + 重建 LV 恢复。
+                    val usbRemoteSession =
+                        cam.connectionType == CameraConnectionType.USB &&
+                            cam.remoteControlModeSet
+                    // USB 的应用模式、存储目标与开录必须是不可被事件轮询打断的连续序列；
+                    // Wi-Fi 保留已经验证的直接路径及有界恢复。
                     var result = runCatching {
-                        cam.rcStartMovieDetailed { devLog(it) }
+                        if (usbRemoteSession) {
+                            cam.rcPrepareAndStartMovieDetailed { devLog(it) }
+                        } else {
+                            cam.rcStartMovieDetailed { devLog(it) }
+                        }
                     }.getOrNull()
                     var restartedLiveView = false
                     var adoptedLiveView: NikonCamera? = null
 
-                    if (result?.let {
+                    if (!usbRemoteSession && result?.let {
                         movieStartNeedsLiveViewRestart(
                             it.responseCode,
                             it.prohibitCondition
@@ -1264,7 +1342,15 @@ private fun RemoteContent(
                     } else {
                         devLog("!! movie start resp=0x%04X".format(rc and 0xFFFF))
                         clearAppMode()   // 没开成录像就别让相机留在应用模式
-                        showHint(recFailHint)
+                        val diagnostic = listOfNotNull(
+                            result?.diagnosticSummary(),
+                            movieUsbSessionDiagnostic
+                        ).joinToString("\n").ifEmpty { null }
+                        showHint(
+                            if (diagnostic == null) recFailHint
+                            else "$recFailHint\n$diagnostic",
+                            durationMs = 12_000L
+                        )
                     }
                 } else {
                     lastStopCmdAt = System.currentTimeMillis()   // 之后 2s 内的"已开始"事件按迟到回声忽略
@@ -1303,7 +1389,10 @@ private fun RemoteContent(
                         devLog("!! movie end resp=0x%04X".format(rc and 0xFFFF))
                         // 命令失败时不能假装已经停止，也不能清应用模式；相机若其实已
                         // 自行停止，随后到达的完成/中断事件会纠正 recording 并清理。
-                        showHint(recStopFailHint)
+                        showHint(
+                            "$recStopFailHint\nstop=0x%04X".format(rc and 0xFFFF),
+                            durationMs = 6000L
+                        )
                     }
                 }
             } finally {

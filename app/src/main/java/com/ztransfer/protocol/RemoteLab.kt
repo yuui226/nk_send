@@ -32,11 +32,13 @@ object Lab {
     const val NK_AF_DRIVE = 0x90C1
     const val NK_CAPTURE_REC_IN_MEDIA = 0x9207
     const val NK_CAPTURE_REC_IN_SDRAM = 0x90C0
+    const val NK_SET_CONTROL_MODE = 0x90C2
     const val NK_GET_EVENT = 0x90C7
     const val NK_DEVICE_READY = 0x90C8
     const val NK_GET_VENDOR_PROP_CODES = 0x90CA
     const val NK_GET_VENDOR_CODES = 0x9439      // Z8/Z9 世代
     const val NK_GET_EVENT_EX = 0x941C
+    const val NK_GET_DEVICE_PROP_VALUE_EX = 0x943B
 
     const val NK_START_MOVIE_REC = 0x920A   // StartMovieRecInCard
     const val NK_END_MOVIE_REC = 0x920B     // EndMovieRec
@@ -53,6 +55,7 @@ object Lab {
 
     // ---- 响应码 ----
     const val OK = 0x2001
+    const val ACCESS_DENIED = 0x200F
     const val DEVICE_BUSY = 0x2019
     const val NK_OUT_OF_FOCUS = 0xA002   // AfDrive 未能合焦
     const val NK_NOT_LIVE_VIEW = 0xA00B
@@ -78,7 +81,7 @@ object Lab {
     const val PROP_NK_AF_MODE = 0xD161
     const val PROP_NK_MOV_PROHIBIT = 0xD0A4      // 录像禁止条件 bitmask，0=可录
     const val PROP_NK_LV_SELECTOR = 0xD1A6       // 照片/录像实体拨杆：0=照片 1=录像
-    const val PROP_NK_APPLICATION_MODE = 0xD1F0  // Z 系远程录像放行开关（Z 30 实测需要）
+    const val PROP_NK_APPLICATION_MODE = 0xD1F0  // 部分机型的应用模式属性入口
     // 录像模式独立的曝光参数（与照片侧 0x5007/0xD100/0x500F/0x5010 平行的一套，
     // 拨杆在录像位时读写这组；编码与照片侧同构）
     const val PROP_NK_MOVIE_SHUTTER = 0xD1A8
@@ -103,7 +106,7 @@ object Lab {
         NK_GET_EVENT to "GetEvent",
         NK_GET_EVENT_EX to "GetEventEx",
         NK_DEVICE_READY to "DeviceReady",
-        0x90C2 to "ChangeCameraMode",
+        NK_SET_CONTROL_MODE to "SetControlMode",
         0x9435 to "ChangeApplicationMode",
         NK_GET_VENDOR_PROP_CODES to "GetVendorPropCodes",
         NK_GET_VENDOR_CODES to "GetVendorCodes(Z8/Z9)",
@@ -240,7 +243,7 @@ data class LabDeviceInfo(
     val props: Set<Int>,
 )
 
-private fun parseDeviceInfo(d: ByteArray): LabDeviceInfo {
+internal fun parseDeviceInfo(d: ByteArray): LabDeviceInfo {
     val c = Cur(d)
     c.u16()                       // StandardVersion
     val vendorExtId = c.u32()
@@ -732,8 +735,17 @@ suspend fun NikonCamera.rcGetMovieMode(): Boolean? {
 
 internal data class RcMovieStartResult(
     val responseCode: Int,
-    val prohibitCondition: Long?
+    val prohibitCondition: Long?,
+    val prohibitExtendedResponse: Int? = null,
+    val applicationModeResponse: Int? = null,
 )
+
+internal fun RcMovieStartResult.diagnosticSummary(): String = buildString {
+    append("start=").append(hex4(responseCode))
+    prohibitCondition?.let { append(" prohibit=").append(hex8(it)) }
+    prohibitExtendedResponse?.let { append(" preEx=").append(hex4(it)) }
+    applicationModeResponse?.let { append(" appOp=").append(hex4(it)) }
+}
 
 private const val MOVIE_PROHIBIT_NO_CARD = 1L shl 0
 private const val MOVIE_PROHIBIT_CARD_ERROR = 1L shl 1
@@ -799,12 +811,89 @@ internal suspend fun NikonCamera.rcStartMovieDetailed(
     return RcMovieStartResult(rc, prohibitCondition)
 }
 
+/**
+ * USB 远控会话内的开录原子序列。禁止条件读取、应用模式和 0x920A 共用一次
+ * [NikonCamera.ioMutex]，事件轮询与取帧不能插入中途看到半切换状态或把应用模式清回去。
+ * Live View 与 PTP 会话始终保持，不在这里发送 EndLiveView。
+ */
+internal suspend fun NikonCamera.rcPrepareAndStartMovieDetailed(
+    log: (String) -> Unit = {}
+): RcMovieStartResult {
+    val result = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+        fun command(code: Int, vararg params: Int): Pair<Int, ByteArray?> {
+            sendCmd(code, *params)
+            return recvRespWithPayload()
+        }
+
+        val prohibitExtendedRc = command(
+            Lab.NK_GET_DEVICE_PROP_VALUE_EX,
+            Lab.PROP_NK_MOV_PROHIBIT
+        ).first
+        val preflightProhibit = command(
+            Lab.GET_DEVICE_PROP_VALUE,
+            Lab.PROP_NK_MOV_PROHIBIT
+        ).let { (rc, data) ->
+            if (rc == Lab.OK && data != null && data.size >= 4) Cur(data).u32() else null
+        }
+        val applicationModeRequired = preflightProhibit != 0L
+
+        var appOpRc: Int? = null
+        if (applicationModeRequired && !remoteMovieApplicationOpSet) {
+            val rc = command(Lab.NK_CHANGE_APP_MODE, 1).first
+            appOpRc = rc
+            if (rc == Lab.OK) remoteMovieApplicationOpSet = true
+        }
+
+        val applicationModeReady =
+            !applicationModeRequired ||
+                remoteMovieApplicationOpSet
+        val startRc = if (applicationModeReady) {
+            command(Lab.NK_START_MOVIE_REC).first
+        } else {
+            appOpRc ?: Lab.ACCESS_DENIED
+        }
+
+        var prohibitCondition: Long? =
+            if (startRc != Lab.OK) preflightProhibit else null
+        if (startRc != Lab.OK) {
+            val (prohibitRc, prohibitData) = command(
+                Lab.GET_DEVICE_PROP_VALUE,
+                Lab.PROP_NK_MOV_PROHIBIT
+            )
+            if (prohibitRc == Lab.OK && prohibitData != null && prohibitData.size >= 4) {
+                prohibitCondition = Cur(prohibitData).u32()
+            }
+        }
+
+        RcMovieStartResult(
+            responseCode = startRc,
+            prohibitCondition = prohibitCondition,
+            prohibitExtendedResponse = prohibitExtendedRc,
+            applicationModeResponse = appOpRc
+        )
+        }
+    }
+    log("Movie prepare ${result.diagnosticSummary()}")
+    return result
+}
+
 /** 结束录像。忙则重试；实际停止以事件（0xC108 完成 / 0xC105 中断）为准。 */
 suspend fun NikonCamera.rcEndMovie(): Int = cmdBusyRetry(Lab.NK_END_MOVIE_REC)
 
-/** 设/清应用模式（0xD1F0）：Z 系（Z 30 实测）远程开录的放行开关。
- *  调用方负责成对使用——设 1 后在录像结束/拨杆离开录像位时清回 0，
- *  不让相机滞留在应用模式。 */
+/**
+ * 尼康完整远控模式。USB 进入监看时设 1，退出监看时清 0；模式切换成功后等待机身就绪，
+ * 后续 Live View、参数控制和录像命令始终复用同一个 PTP 会话。
+ */
+suspend fun NikonCamera.rcSetControlMode(enabled: Boolean): Int {
+    if (enabled == remoteControlModeSet) return Lab.OK
+    val rc = cmdBusyRetry(Lab.NK_SET_CONTROL_MODE, if (enabled) 1 else 0)
+    if (rc != Lab.OK) return rc
+    remoteControlModeSet = enabled
+    return Lab.OK
+}
+
+/** 部分 Nikon 机型通过 0xD1F0 设/清应用模式；不支持该属性的机型改走 0x9435。 */
 suspend fun NikonCamera.rcSetApplicationMode(on: Boolean): Int =
     labSetProp(Lab.PROP_NK_APPLICATION_MODE, byteArrayOf(if (on) 1 else 0))
 
