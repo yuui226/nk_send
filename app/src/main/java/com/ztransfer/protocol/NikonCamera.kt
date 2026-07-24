@@ -63,6 +63,11 @@ class NikonCamera(private val context: Context) {
     // 增强取帧偶发空/坏帧不能等同于“不支持”；连续两次才降级，成功即清零。
     // 仅在 ioMutex 内访问。
     internal var liveViewEnhancedFailureCount = 0
+    // 远程录像兼容模式的成对记账放在连接对象上，而不是 Compose 页面里：
+    // 横竖屏重建或离开后重进监看页时仍能正确停止录像并恢复相机状态；
+    // 断线会创建新的 NikonCamera，自然不会把旧连接的记账带过去。
+    @Volatile internal var remoteMovieApplicationPropSet = false
+    @Volatile internal var remoteMovieApplicationOpSet = false
 
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI

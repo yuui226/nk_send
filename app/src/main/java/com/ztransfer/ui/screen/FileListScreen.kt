@@ -2265,7 +2265,7 @@ private fun ThumbnailCell(
                 if (inExpandedBurstCollection) {
                     Modifier.border(
                         width = 1.dp,
-                        color = BurstMemberBorderColor,
+                        color = colors.accentOrange.copy(alpha = 0.92f),
                         shape = thumbnailShape
                     )
                 } else {
@@ -2856,7 +2856,6 @@ private const val MAX_PACK_GHOSTS = 8
 // 实色 0.85 底上配白色内容,深浅主题通用(与金徽标同为"单值双主题"的少数例外)。
 // internal:预览大图的左上角连拍角标(PhotoPreview)与此同色。
 internal val BurstBadgeColor = Color(0xFF26A69A)
-private val BurstMemberBorderColor = Color(0xFF4DB6AC).copy(alpha = 0.92f)
 
 // 保护角标底色(琥珀黄):机内选片/保护标记,黄底配深色钥匙如一枚金钥匙,
 // 与彩色分类角贴分层。单值双主题(深浅通用)。

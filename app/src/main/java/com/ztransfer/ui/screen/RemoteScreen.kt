@@ -88,11 +88,13 @@ import com.ztransfer.protocol.LiveViewFocusFrame
 import com.ztransfer.protocol.LiveViewFocusJudgement
 import com.ztransfer.protocol.LiveViewMetadata
 import com.ztransfer.protocol.LiveViewPacket
+import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.RcParam
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
 import com.ztransfer.protocol.rcAfDriveAndWait
+import com.ztransfer.protocol.rcAutoIsoCandidateProps
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
 import com.ztransfer.protocol.rcChangeApplicationMode
@@ -105,11 +107,14 @@ import com.ztransfer.protocol.rcGetMovieMode
 import com.ztransfer.protocol.rcGetParam
 import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.protocol.rcRefreshParam
+import com.ztransfer.protocol.rcIsBinaryToggle
 import com.ztransfer.protocol.rcSetApplicationMode
 import com.ztransfer.protocol.rcSetLvSize
 import com.ztransfer.protocol.rcSetValueVerified
-import com.ztransfer.protocol.rcStartMovie
+import com.ztransfer.protocol.rcStartMovieDetailed
 import com.ztransfer.protocol.runLabProbe
+import com.ztransfer.protocol.movieStartNeedsLiveViewRestart
+import com.ztransfer.protocol.movieProhibitIndicatesRecording
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
@@ -117,6 +122,7 @@ import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -149,7 +155,8 @@ private val MOVIE_EXPOSURE_PROPS = listOf(
 )
 // 事件刷新的匹配范围（两套都听：拨杆随时可能切换）
 private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
-private val PHOTO_AUTO_ISO_PROPS = listOf(Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT)
+private val ALL_AUTO_ISO_PROPS =
+    (rcAutoIsoCandidateProps(false) + rcAutoIsoCandidateProps(true)).distinct()
 private const val TAP_FOCUS_LOCKED_FEEDBACK_MS = 900L
 private const val TAP_FOCUS_MARKER_VISIBLE_MS = 3_000L
 
@@ -357,6 +364,7 @@ private fun RemoteContent(
     var fps by remember { mutableFloatStateOf(0f) }
     var capturing by remember { mutableStateOf(false) }
     var modeText by remember { mutableStateOf<String?>(null) }
+    var movieMode by remember { mutableStateOf(false) }
     var focusModeText by remember { mutableStateOf<String?>(null) }
     var focusModeProp by remember { mutableStateOf<Int?>(null) }
     var focusModeManual by remember { mutableStateOf(false) }
@@ -365,6 +373,7 @@ private fun RemoteContent(
     // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
     val pendingSets = remember { mutableMapOf<Int, Job>() }
     var autoIsoProp by remember { mutableStateOf<Int?>(null) }
+    var autoIsoPropMovieMode by remember { mutableStateOf<Boolean?>(null) }
     var autoIsoBusy by remember { mutableStateOf(false) }
     // 初始参数是否已加载完：用于把事件轮询推迟到之后开始，避免进页时 GetEvent 与
     // 曝光参数与模式读取抢 ioMutex、拖慢参数首次显示。
@@ -438,14 +447,24 @@ private fun RemoteContent(
 
     suspend fun refreshAutoIso() {
         val cam = cameraViewModel.getCamera() ?: return
+        val preferredProps = rcAutoIsoCandidateProps(movieMode)
         val candidates = buildList {
-            autoIsoProp?.let(::add)
-            addAll(PHOTO_AUTO_ISO_PROPS)
+            // 同一模式内复用已验证成功的属性；拨杆切换后则重新按新模式优先级
+            // 选择。Z30 的视频开关优先 0xD16A，Z5 等机型回退到 0xD054。
+            autoIsoProp
+                ?.takeIf { autoIsoPropMovieMode == movieMode && it in preferredProps }
+                ?.let(::add)
+            addAll(preferredProps)
         }.distinct()
         val found = candidates.firstNotNullOfOrNull { prop ->
-            runCatching { cam.rcGetParam(prop) }.getOrNull()
+            runCatching { cam.rcGetParam(prop) }.getOrNull()?.takeIf { param ->
+                // 各代 Nikon 会使用不同属性，只接受相机明确给出开、关两值的
+                // 可写属性，避免把部分机型恒为 1 的 0xD16A 当成开关。
+                param.rcIsBinaryToggle()
+            }
         }
         autoIsoProp = found?.prop
+        autoIsoPropMovieMode = movieMode
         if (found == null) {
             params.remove(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY)
             return
@@ -488,30 +507,49 @@ private fun RemoteContent(
     // 快门键变成开始/停止录像。读不到该属性的机型永远按照片模式（优雅降级）。
     // recording 以事件为准（0xC10A 开始 / 0xC108 完成 / 0xC105 中断），发命令成功时
     // 乐观置位让 UI 立即响应；lastStopCmdAt 用于滤掉停止后才轮询到的迟到"已开始"回声。
-    var movieMode by remember { mutableStateOf(false) }
     var recording by remember { mutableStateOf(false) }
+    var recBusy by remember { mutableStateOf(false) }
     var lastStopCmdAt by remember { mutableLongStateOf(0L) }
-    // 远程开录放行（Z 30 实测直发 0x920A 被拒）：两条路线——属性 0xD1F0=1 或操作码
-    // 0x9435 ChangeApplicationMode(1)，开录失败时逐级尝试并分别记账；录像一停/拨杆
-    // 离开录像位就按账恢复，成对使用不让相机滞留在应用模式。
-    var appModeSet by remember { mutableStateOf(false) }   // 经属性 0xD1F0 设过 1
-    var appOpSet by remember { mutableStateOf(false) }     // 经操作码 0x9435 设过 1
-    suspend fun clearAppMode() {
-        if (!appModeSet && !appOpSet) return
-        val cam = cameraViewModel.getCamera()
-        if (appOpSet) {
-            appOpSet = false
-            val rc = cam?.let { runCatching { it.rcChangeApplicationMode(0) }.getOrDefault(-1) }
-            if (rc != null && rc != Lab.OK) {
-                devLog("!! ChangeApplicationMode(0) resp=0x%04X".format(rc and 0xFFFF))
-            }
+    // Nikon Z 系远程开录前需要进入应用模式。libgphoto2 的 Nikon 路径会同时尝试
+    // 属性 0xD1F0=1 与操作码 0x9435(1)，而不是把二者当互斥回退；Z5 与 Z8 分属
+    // 偏好不同入口的世代。成功的入口分别记账，停录后成对恢复。
+    var appModeClearBusy by remember { mutableStateOf(false) }
+    suspend fun ensureApplicationMode(cam: NikonCamera) {
+        if (!cam.remoteMovieApplicationPropSet) {
+            val rc = runCatching { cam.rcSetApplicationMode(true) }.getOrDefault(-1)
+            devLog("ApplicationMode=1 resp=0x%04X".format(rc and 0xFFFF))
+            if (rc == Lab.OK) cam.remoteMovieApplicationPropSet = true
         }
-        if (appModeSet) {
-            appModeSet = false
-            val rc = cam?.let { runCatching { it.rcSetApplicationMode(false) }.getOrDefault(-1) }
-            if (rc != null && rc != Lab.OK) {
-                devLog("!! ApplicationMode=0 resp=0x%04X".format(rc and 0xFFFF))
+        if (!cam.remoteMovieApplicationOpSet) {
+            val rc = runCatching { cam.rcChangeApplicationMode(1) }.getOrDefault(-1)
+            devLog("ChangeApplicationMode(1) resp=0x%04X".format(rc and 0xFFFF))
+            if (rc == Lab.OK) cam.remoteMovieApplicationOpSet = true
+        }
+    }
+    suspend fun clearAppMode() {
+        if (appModeClearBusy) return
+        val cam = cameraViewModel.getCamera() ?: return
+        if (!cam.remoteMovieApplicationPropSet && !cam.remoteMovieApplicationOpSet) return
+        appModeClearBusy = true
+        try {
+            if (cam.remoteMovieApplicationOpSet) {
+                val rc = runCatching { cam.rcChangeApplicationMode(0) }.getOrDefault(-1)
+                if (rc == Lab.OK) {
+                    cam.remoteMovieApplicationOpSet = false
+                } else {
+                    devLog("!! ChangeApplicationMode(0) resp=0x%04X".format(rc and 0xFFFF))
+                }
             }
+            if (cam.remoteMovieApplicationPropSet) {
+                val rc = runCatching { cam.rcSetApplicationMode(false) }.getOrDefault(-1)
+                if (rc == Lab.OK) {
+                    cam.remoteMovieApplicationPropSet = false
+                } else {
+                    devLog("!! ApplicationMode=0 resp=0x%04X".format(rc and 0xFFFF))
+                }
+            }
+        } finally {
+            appModeClearBusy = false
         }
     }
     suspend fun refreshMovieMode() {
@@ -522,6 +560,9 @@ private fun RemoteContent(
         if (mv && !was) {
             // 切入录像位：拉取录像侧独立参数组（照片/录像两套属性互不相通）
             MOVIE_EXPOSURE_PROPS.forEach { refreshParam(it) }
+            // Auto ISO 的属性码在 Nikon Z 系与照片模式共用，但描述中的当前值/
+            // 可写性会随拨杆和曝光模式变化，必须在切换后重新读取。
+            refreshAutoIso()
         }
         if (!mv) {
             recording = false   // 拨杆离开录像位，录制状态必然已结束
@@ -540,10 +581,11 @@ private fun RemoteContent(
     // 会话在页面存续期内【永不放弃】：断流退避重启、断线后等重连自动换新连接续播——
     // 持续取帧本身就是相机的保活信号，会话若静默死掉，相机空闲片刻就按待机计时器休眠。
     var lvJob by remember { mutableStateOf<Job?>(null) }
-    fun startSession(hd: Boolean) {
+    fun startSession(hd: Boolean, adoptActiveLiveView: NikonCamera? = null) {
         val prev = lvJob
         lvJob = scope.launch {
             prev?.cancelAndJoin()
+            var adoptedCamera = adoptActiveLiveView
             fps = 0f   // 换会话（HD 切换/重启）时清掉上一会话的陈旧读数
             // 解码流水线：取帧（网络 IO）与解码（Default 线程）并行——取下一帧的同时
             // 解上一帧；CONFLATED 只留最新帧，解码偶尔跟不上时丢旧帧而不排队积压。
@@ -563,10 +605,17 @@ private fun RemoteContent(
                     // 每轮现取相机实例：断线重连后拿到的是新连接，旧会话自然淘汰
                     val cam = cameraViewModel.getCamera()
                     if (cam == null) { delay(2000); continue }
-                    // LV 分辨率须在 LV 关闭时设置
-                    runCatching { cam.rcSetLvSize(if (hd) 3 else 2) }
-                    val started = runCatching { cam.labStartLiveView { devLog(it) } }
-                        .getOrDefault(false)
+                    // 录像兼容恢复可能已经按“应用模式 → StartLiveView → StartMovie”
+                    // 完成了相机侧启动；首轮直接接管这个 LV，不能重复发送 StartLiveView。
+                    val started = if (cam === adoptedCamera) {
+                        adoptedCamera = null
+                        true
+                    } else {
+                        // LV 分辨率须在 LV 关闭时设置
+                        runCatching { cam.rcSetLvSize(if (hd) 3 else 2) }
+                        runCatching { cam.labStartLiveView { devLog(it) } }
+                            .getOrDefault(false)
+                    }
                     if (!started) { delay(3000); continue }
                     // 首个成功帧只建立统计基准，不把 StartLiveView 后的相机预热、
                     // DeviceBusy 等待算进首个 FPS 窗口。后续按帧间隔计数：
@@ -648,8 +697,15 @@ private fun RemoteContent(
 
     val autoIsoParam = autoIsoProp?.let { params[it] }
     val autoIsoEnabled = autoIsoParam?.current?.let { it != 0L }
-    val autoIsoAvailable = autoIsoParam?.writable == true && autoIsoEnabled != null
-    val effectiveAutoIsoValue = params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY]?.current
+    // 不根据曝光模式字符串禁用：Z30 等机型会返回 0x8010 一类扩展枚举。
+    // 可用性完全由当前拨杆位置下相机返回的可写二值属性决定。
+    val autoIsoAvailable = autoIsoParam?.writable == true &&
+        autoIsoEnabled != null
+    val effectiveAutoIsoValue = if (movieMode) {
+        params[Lab.PROP_NK_MOVIE_ISO]?.current
+    } else {
+        params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY]?.current
+    }
 
     // AUTO 开启时刷新相机当前实际采用的 ISO。D0B5 是只读的 ISOControlSensitivity；
     // D0B4/500F 是用户设定的基础 ISO，不能用于显示自动测光结果。这里只轮询标量值，
@@ -694,12 +750,16 @@ private fun RemoteContent(
                     Lab.EVT_NK_MOVIE_REC_STARTED -> {
                         if (System.currentTimeMillis() - lastStopCmdAt > 2000) recording = true
                     }
-                    Lab.EVT_NK_MOVIE_REC_COMPLETE, Lab.EVT_NK_MOVIE_REC_INTERRUPTED ->
+                    Lab.EVT_NK_MOVIE_REC_COMPLETE, Lab.EVT_NK_MOVIE_REC_INTERRUPTED -> {
                         recording = false
+                        // 用户主动停止时 toggleRecord 负责等完成事件并清理；相机因卡满、
+                        // 过热等自行停止时事件循环必须接管，不能把应用模式留在机身上。
+                        if (!recBusy) clearAppMode()
+                    }
                     Lab.EVT_DEVICE_PROP_CHANGED -> {
                         val reportedProp = e.second.toInt()
                         val prop = rcCanonicalExposureProp(reportedProp)
-                        if (reportedProp in PHOTO_AUTO_ISO_PROPS) refreshAutoIso()
+                        if (reportedProp in ALL_AUTO_ISO_PROPS) refreshAutoIso()
                         if (reportedProp == Lab.PROP_NK_ISO_CONTROL_SENSITIVITY &&
                             autoIsoProp?.let { params[it]?.current != 0L } == true
                         ) {
@@ -722,7 +782,7 @@ private fun RemoteContent(
                             active.forEach {
                                 if (pendingSets[it]?.isActive != true) refreshParam(it)
                             }
-                            if (!movieMode) refreshAutoIso()
+                            refreshAutoIso()
                         }
                         if (prop == Lab.PROP_FOCUS_MODE || prop == Lab.PROP_NK_AF_MODE ||
                             prop == focusModeProp
@@ -959,12 +1019,12 @@ private fun RemoteContent(
         }
     }
     // ---------- 录像开关 ----------
-    // 开始：命令成功即乐观置位（UI 立即变停止键），事件 0xC10A 再确认；失败弹瞬时提示
-    //（常见原因：无卡/禁止条件）。停止：本地先置停——EndMovieRec 失败多半是相机已自行
-    // 停录（卡满/过热），事件会再纠正。recBusy 防抖：命令往返期间忽略连点。
-    var recBusy by remember { mutableStateOf(false) }
+    // 开始：命令成功即乐观置位（UI 立即变停止键），事件 0xC10A 再确认；失败弹瞬时提示。
+    // 停止：只有 EndMovieRec 成功才切换 UI；失败时保留录像态，避免 UI 与相机相反。
+    // recBusy 防抖：命令往返期间忽略连点。
     var recSeconds by remember { mutableIntStateOf(0) }
     val recFailHint = stringResource(R.string.remote_rec_start_failed)
+    val recStopFailHint = stringResource(R.string.remote_rec_stop_failed)
     val manualFocusHint = stringResource(R.string.remote_tap_focus_manual)
 
     fun focusAt(tap: ViewfinderTap) {
@@ -1065,12 +1125,13 @@ private fun RemoteContent(
 
     fun setAutoIso(enabled: Boolean) {
         val p = autoIsoProp?.let { params[it] } ?: return
-        if (!p.writable || autoIsoBusy || movieMode) return
+        if (!p.writable || autoIsoBusy) return
         val target = if (enabled) {
             p.values.firstOrNull { it != 0L } ?: 1L
         } else {
             p.values.firstOrNull { it == 0L } ?: 0L
         }
+        val requestedMovieMode = movieMode
         if ((p.current != 0L) == enabled) return
 
         autoIsoBusy = true
@@ -1084,13 +1145,55 @@ private fun RemoteContent(
                     params[p.prop] = p
                     return@launch
                 }
-                val result = runCatching { cam.rcSetValueVerified(p, target) }.getOrNull()
-                result?.actual?.let { params[p.prop] = it }
-                if (result?.confirmed != true) {
+                val candidates = buildList {
+                    add(p)
+                    if (requestedMovieMode) {
+                        rcAutoIsoCandidateProps(movieMode = true)
+                            .filterNot { it == p.prop }
+                            .forEach { prop ->
+                                runCatching { cam.rcGetParam(prop) }.getOrNull()
+                                    ?.takeIf { it.rcIsBinaryToggle() }
+                                    ?.let(::add)
+                            }
+                    }
+                }
+                var confirmedParam: RcParam? = null
+                for (candidate in candidates) {
+                    val candidateTarget = if (enabled) {
+                        candidate.values.first { it != 0L }
+                    } else {
+                        candidate.values.first { it == 0L }
+                    }
+                    if ((candidate.current != 0L) == enabled) {
+                        confirmedParam = candidate
+                        break
+                    }
+                    val result = runCatching {
+                        cam.rcSetValueVerified(candidate, candidateTarget)
+                    }.getOrNull()
+                    result?.actual?.let { params[candidate.prop] = it }
+                    if (result?.confirmed == true) {
+                        confirmedParam = result.actual ?: candidate.copy(current = candidateTarget)
+                        break
+                    }
+                    if (candidate.prop == p.prop && result?.actual == null) {
+                        params[p.prop] = p
+                    }
                     val rc = result?.responseCode ?: -1
-                    devLog("!! Auto ISO set/readback resp=0x%04X".format(rc and 0xFFFF))
+                    devLog(
+                        "!! Auto ISO prop=0x%04X set/readback resp=0x%04X".format(
+                            candidate.prop,
+                            rc and 0xFFFF
+                        )
+                    )
+                }
+                confirmedParam?.let {
+                    autoIsoProp = it.prop
+                    autoIsoPropMovieMode = requestedMovieMode
+                    params[it.prop] = it
                 }
                 refreshAutoIso()
+                if (movieMode) refreshParam(Lab.PROP_NK_MOVIE_ISO)
             } finally {
                 autoIsoBusy = false
             }
@@ -1108,28 +1211,56 @@ private fun RemoteContent(
                 val cam = expectedCamera
                 haptics.longPress()   // 与拍照同级的触发反馈（经全局震动设置门控）
                 if (!recording) {
-                    var rc = runCatching { cam.rcStartMovie { devLog(it) } }.getOrDefault(-1)
-                    // 被拒时按放行序列逐级尝试（Z 30 实测需要）：属性路线 → 操作码路线，
-                    // 每级成功即记账（clearAppMode 成对恢复），再重发开录。
-                    if (rc != Lab.OK && !appModeSet) {
-                        val src = runCatching { cam.rcSetApplicationMode(true) }.getOrDefault(-1)
-                        devLog("ApplicationMode=1 resp=0x%04X".format(src and 0xFFFF))
-                        if (src == Lab.OK) {
-                            appModeSet = true
-                            rc = runCatching { cam.rcStartMovie { devLog(it) } }.getOrDefault(-1)
+                    // 先保留旧机型已经验证过的直接 0x920A 路径；只有相机明确拒绝且
+                    // 不是存储卡原因时，才进入 Nikon Z 系的应用模式 + 重建 LV 恢复。
+                    var result = runCatching {
+                        cam.rcStartMovieDetailed { devLog(it) }
+                    }.getOrNull()
+                    var restartedLiveView = false
+                    var adoptedLiveView: NikonCamera? = null
+
+                    if (result?.let {
+                        movieStartNeedsLiveViewRestart(
+                            it.responseCode,
+                            it.prohibitCondition
+                        )
+                    } == true) {
+                        // 应用模式必须先于 Live View 生效的机型：只做一次有界恢复。
+                        // 先让旧会话完整 EndLiveView，再以正确前置状态重启；存储卡类
+                        // 禁止位已在判定函数中排除，不会用重启掩盖真实卡错误。
+                        val oldLvJob = lvJob
+                        oldLvJob?.cancelAndJoin()
+                        if (lvJob === oldLvJob) lvJob = null
+                        if (cameraViewModel.getCamera() === cam) {
+                            ensureApplicationMode(cam)
+                            runCatching { cam.rcSetLvSize(if (hdLiveView) 3 else 2) }
+                            val liveViewStarted = runCatching {
+                                cam.labStartLiveView { devLog(it) }
+                            }.getOrDefault(false)
+                            restartedLiveView = true
+                            if (liveViewStarted) {
+                                adoptedLiveView = cam
+                                result = runCatching {
+                                    cam.rcStartMovieDetailed { devLog(it) }
+                                }.getOrNull()
+                            }
                         }
                     }
-                    if (rc != Lab.OK && !appOpSet) {
-                        val orc = runCatching { cam.rcChangeApplicationMode(1) }.getOrDefault(-1)
-                        devLog("ChangeApplicationMode(1) resp=0x%04X".format(orc and 0xFFFF))
-                        if (orc == Lab.OK) {
-                            appOpSet = true
-                            rc = runCatching { cam.rcStartMovie { devLog(it) } }.getOrDefault(-1)
-                        }
+
+                    if (restartedLiveView) {
+                        startSession(hdLiveView, adoptedLiveView)
                     }
-                    if (rc == Lab.OK) {
+
+                    val rc = result?.responseCode ?: -1
+                    if (rc == Lab.OK || movieProhibitIndicatesRecording(result?.prohibitCondition)) {
                         recording = true
-                        devLog("movie rec started")
+                        if (rc == Lab.OK) {
+                            devLog("movie rec started")
+                        } else {
+                            // 页面重进或开始事件丢失时，相机可能已经在录。禁止位 bit10
+                            // 是可靠状态信号：接管为录像态，下一次点击即可正常停止。
+                            devLog("movie rec already active; adopting camera state")
+                        }
                     } else {
                         devLog("!! movie start resp=0x%04X".format(rc and 0xFFFF))
                         clearAppMode()   // 没开成录像就别让相机留在应用模式
@@ -1137,11 +1268,43 @@ private fun RemoteContent(
                     }
                 } else {
                     lastStopCmdAt = System.currentTimeMillis()   // 之后 2s 内的"已开始"事件按迟到回声忽略
+                    val needsFinalizationWait =
+                        cam.remoteMovieApplicationPropSet || cam.remoteMovieApplicationOpSet
+                    // 仅兼容恢复路径需要等相机写卡完成再退出应用模式。旧机型沿用原
+                    // 即时停止路径，不因缺少 Nikon 完成事件而多等 8 秒。
+                    val completion = if (needsFinalizationWait) {
+                        async(start = CoroutineStart.UNDISPATCHED) {
+                            withTimeoutOrNull(8_000) {
+                                eventFlow.first {
+                                    it.first == Lab.EVT_NK_MOVIE_REC_COMPLETE ||
+                                        it.first == Lab.EVT_NK_MOVIE_REC_INTERRUPTED
+                                }
+                            }
+                        }
+                    } else null
                     val rc = runCatching { cam.rcEndMovie() }.getOrDefault(-1)
-                    recording = false
-                    if (rc == Lab.OK) devLog("movie rec ended")
-                    else devLog("!! movie end resp=0x%04X".format(rc and 0xFFFF))
-                    clearAppMode()   // 录像已停，恢复应用模式记账
+                    if (rc == Lab.OK) {
+                        recording = false
+                        if (completion != null) {
+                            val event = completion.await()
+                            if (event == null) {
+                                devLog("!! movie completion event timeout")
+                            } else {
+                                devLog("movie rec ended")
+                            }
+                        } else {
+                            devLog("movie rec ended")
+                        }
+                        // Z 系可能需要数秒写完长 GOP；完成/中断事件之后再恢复应用模式，
+                        // 避免文件尚在收尾时把相机切回普通控制态。
+                        clearAppMode()
+                    } else {
+                        completion?.cancel()
+                        devLog("!! movie end resp=0x%04X".format(rc and 0xFFFF))
+                        // 命令失败时不能假装已经停止，也不能清应用模式；相机若其实已
+                        // 自行停止，随后到达的完成/中断事件会纠正 recording 并清理。
+                        showHint(recStopFailHint)
+                    }
                 }
             } finally {
                 recBusy = false
@@ -1305,7 +1468,10 @@ private fun RemoteContent(
                 activeProps.chunked(2).forEach { rowProps ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         rowProps.forEach { prop ->
-                            val hasAutoIso = prop == Lab.PROP_ISO && autoIsoAvailable
+                            // 视频 Auto ISO 的机型属性差异仍待更多真机确认，当前仅保留
+                            // 照片模式入口，避免向用户暴露无法可靠生效的开关。
+                            val hasAutoIso =
+                                !movieMode && prop == Lab.PROP_ISO && autoIsoAvailable
                             ParamTile(
                                 label = paramLabel(prop),
                                 param = params[prop],
@@ -1465,7 +1631,8 @@ private fun RemoteContent(
                         activeProps.chunked(2).forEach { rowProps ->
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 rowProps.forEach { prop ->
-                                    val hasAutoIso = prop == Lab.PROP_ISO && autoIsoAvailable
+                                    val hasAutoIso =
+                                        !movieMode && prop == Lab.PROP_ISO && autoIsoAvailable
                                     ParamTile(
                                         label = paramLabel(prop),
                                         param = params[prop],
