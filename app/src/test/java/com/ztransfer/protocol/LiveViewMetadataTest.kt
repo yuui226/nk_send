@@ -29,6 +29,8 @@ class LiveViewMetadataTest {
             putBe32(data, 12, jpegSize)
             putBe16(data, 16, 5568)
             putBe16(data, 18, 3712)
+            putBe16(data, 28, 1024)
+            putBe16(data, 30, 680)
             data[42] = judgement.toByte()
             data[44] = frameCount.toByte()
             data[45] = selectedIndex.toByte()
@@ -52,6 +54,8 @@ class LiveViewMetadataTest {
 
         assertNotNull(metadata)
         assertEquals(LiveViewFocusJudgement.FOCUSED, metadata?.focusJudgement)
+        assertEquals(1024, metadata?.focusCoordinateWidth)
+        assertEquals(680, metadata?.focusCoordinateHeight)
         val frame = metadata?.selectedFocusFrame
         assertNotNull(frame)
         assertEquals(0.5f, frame?.centerX ?: 0f, 0.0001f)
@@ -123,5 +127,22 @@ class LiveViewMetadataTest {
 
         assertEquals(LiveViewFocusJudgement.FOCUSED, metadata?.focusJudgement)
         assertNull(metadata?.selectedFocusFrame)
+    }
+
+    @Test
+    fun ignoresInvalidFocusCoordinateGrid() {
+        val packet = z30Packet().also {
+            putBe16(it, 28, 0)
+            putBe16(it, 30, 4000)
+        }
+        val metadata = parseLiveViewMetadata(
+            packet,
+            jpegOffset = 512,
+            operation = Lab.NK_GET_LIVE_VIEW_IMG_EX
+        )
+
+        assertNotNull(metadata)
+        assertNull(metadata?.focusCoordinateWidth)
+        assertNull(metadata?.focusCoordinateHeight)
     }
 }

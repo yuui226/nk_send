@@ -54,6 +54,9 @@ data class TransferState(
     /** 导出目录内完整文件：归一化文件名 -> 已有大小集合，用于相机列表直接标记已传照片。 */
     val existingExportFiles: Map<String, Set<Long>> = emptyMap(),
     val thumbnailColumns: Int = 3,
+    // 连拍合集显示（默认关闭，保持旧版照片网格原样）：开启后列表把每段已识别的连拍
+    // 收成一个可展开的虚拟卡位；原始文件集合、筛选和传输语义均不改变。
+    val collapseBurstPhotos: Boolean = false,
     // 触感反馈开关：默认开启，用户关闭后持久化，下次启动保持。
     val hapticsEnabled: Boolean = true,
     // 屏幕常亮（默认开启）：应用在前台时不熄屏——熄屏后系统会冻结进程/让 Wi-Fi 打盹，
@@ -66,7 +69,7 @@ data class TransferState(
     val filterExtensions: Set<String>? = null,
     // 只看机内"保护"(🔑)标记过的照片（机内选片工作流）。持久化。
     val filterProtectedOnly: Boolean = false,
-    // 只看连拍照片（检测算法见 FileListScreen.computeBurstHandles）。持久化。
+    // 只看连拍照片（检测算法见 FileListScreen.computeBurstGroups）。持久化。
     val filterBurstOnly: Boolean = false,
     // 只看导出目录中尚未存在的照片。与缩略图已传对号共用同一份索引。持久化。
     val filterUntransferredOnly: Boolean = false,
@@ -153,6 +156,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 transferDirUri = dir,
                 thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4),
+                collapseBurstPhotos = prefs.getBoolean("collapse_burst_photos", false),
                 hapticsEnabled = prefs.getBoolean("haptics_enabled", true),
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
                 themeMode = prefs.getString("theme_mode", null)
@@ -182,6 +186,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val c = columns.coerceIn(1, 4)
         prefs.edit().putInt("thumbnail_columns", c).apply()
         _state.update { it.copy(thumbnailColumns = c) }
+    }
+
+    fun setCollapseBurstPhotos(enabled: Boolean) {
+        prefs.edit().putBoolean("collapse_burst_photos", enabled).apply()
+        _state.update { it.copy(collapseBurstPhotos = enabled) }
     }
 
     fun setThemeMode(mode: ThemeMode) {

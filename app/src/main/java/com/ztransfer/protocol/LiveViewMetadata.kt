@@ -25,7 +25,10 @@ data class LiveViewFocusFrame(
 
 data class LiveViewMetadata(
     val focusJudgement: LiveViewFocusJudgement,
-    val selectedFocusFrame: LiveViewFocusFrame?
+    val selectedFocusFrame: LiveViewFocusFrame?,
+    /** `ChangeAfArea(x, y)` 使用的相机显示坐标网格；未知头型时由 UI 回退 JPEG 尺寸。 */
+    val focusCoordinateWidth: Int?,
+    val focusCoordinateHeight: Int?
 )
 
 /** 一帧完整 Live View 载荷；JPEG 直接从 [jpegOffset] 解码，避免热路径复制。 */
@@ -50,6 +53,7 @@ private fun ByteArray.be32(offset: Int): Long =
  * - 大端字段；
  * - +8 为头长，+12 为 JPEG 长度；
  * - +16/+18 为完整坐标系；
+ * - +28/+30 为 `ChangeAfArea` 使用的显示坐标网格；
  * - +42 为对焦判断（0 无信息、1 未合焦、2 合焦）；
  * - +44/+45 为 AF 框数量/选中索引；
  * - +48 起每框 8 字节：宽、高、中心 X、中心 Y。
@@ -85,6 +89,11 @@ internal fun parseLiveViewMetadata(
     val coordinateWidth = payload.be16(16)
     val coordinateHeight = payload.be16(18)
     if (coordinateWidth <= 0 || coordinateHeight <= 0) return null
+    val focusCoordinateWidth = payload.be16(28)
+    val focusCoordinateHeight = payload.be16(30)
+    val validFocusCoordinateGrid =
+        focusCoordinateWidth in 1..coordinateWidth &&
+            focusCoordinateHeight in 1..coordinateHeight
 
     val judgement = when (payload[42].toInt() and 0xFF) {
         0 -> LiveViewFocusJudgement.NONE
@@ -131,5 +140,10 @@ internal fun parseLiveViewMetadata(
         null
     }
 
-    return LiveViewMetadata(judgement, selectedFrame)
+    return LiveViewMetadata(
+        focusJudgement = judgement,
+        selectedFocusFrame = selectedFrame,
+        focusCoordinateWidth = focusCoordinateWidth.takeIf { validFocusCoordinateGrid },
+        focusCoordinateHeight = focusCoordinateHeight.takeIf { validFocusCoordinateGrid }
+    )
 }

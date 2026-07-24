@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -299,18 +300,21 @@ fun AppUpdateHost(
                                     UpdateGlassButton(
                                         label = stringResource(R.string.update_ignore_version),
                                         onClick = { AppUpdateManager.ignoreVersion(info) },
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.weight(1f),
+                                        centerContent = true
                                     )
                                     UpdateGlassButton(
                                         label = stringResource(R.string.update_later),
                                         onClick = { AppUpdateManager.postpone(info) },
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.weight(1f),
+                                        centerContent = true
                                     )
                                     UpdateGlassButton(
                                         label = stringResource(R.string.update_now),
                                         onClick = ::startDownload,
                                         modifier = Modifier.weight(1f),
-                                        prominent = true
+                                        prominent = true,
+                                        centerContent = true
                                     )
                                 }
                             }
@@ -388,7 +392,8 @@ private fun UpdateGlassButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    prominent: Boolean = false
+    prominent: Boolean = false,
+    centerContent: Boolean = false
 ) {
     val colors = AppTheme.colors
     GlassButton(
@@ -404,6 +409,8 @@ private fun UpdateGlassButton(
     ) {
         Text(
             label,
+            modifier = if (centerContent) Modifier.fillMaxWidth() else Modifier,
+            textAlign = if (centerContent) TextAlign.Center else TextAlign.Start,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium,

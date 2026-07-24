@@ -64,7 +64,7 @@ internal const val QQ_NUMBER = "953000922"
 
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），从顶栏设置按钮变形弹出、关闭缩回按钮
- * （见 [AnchorPopup]）。内容按功能分为三块玻璃分区卡片：传输目录 / 显示 / 通用，
+ * （见 [AnchorPopup]）。内容按功能分为四块玻璃分区卡片：传输目录 / 照片列表 / 通用 / 界面，
  * 每块内部用细分隔线切分子项——区域清晰、留白克制，替代旧版一长条竖列。
  */
 @Composable
@@ -270,42 +270,110 @@ fun SettingsOverlay(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
 
-            // ---------- 卡片二：显示（列数 / 外观 / 语言）----------
+            // ---------- 卡片二：照片列表（列数 / 连拍合集）----------
             SettingsCard {
-                // 每行列数
-                SectionLabel(stringResource(R.string.columns))
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    (1..4).forEach { col ->
-                        SelectionChip(
-                            label = "$col",
-                            selected = state.thumbnailColumns == col,
-                            onClick = { viewModel.setThumbnailColumns(col) },
-                            textStyle = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f)
-                        )
+                // 每行列数：标题与选项并排，节省一整行高度。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(
+                        stringResource(R.string.columns),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(1.45f)
+                    ) {
+                        (1..4).forEach { col ->
+                            SelectionChip(
+                                label = "$col",
+                                selected = state.thumbnailColumns == col,
+                                onClick = { viewModel.setThumbnailColumns(col) },
+                                textStyle = MaterialTheme.typography.titleSmall,
+                                compact = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
 
                 CardDivider()
 
-                // 外观（深浅色主题）
-                SectionLabel(stringResource(R.string.appearance))
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ThemeMode.entries.forEach { mode ->
-                        SelectionChip(
-                            label = stringResource(when (mode) {
-                                ThemeMode.SYSTEM -> R.string.theme_system
-                                ThemeMode.DARK -> R.string.theme_dark
-                                ThemeMode.LIGHT -> R.string.theme_light
-                            }),
-                            selected = state.themeMode == mode,
-                            onClick = { viewModel.setThemeMode(mode) },
-                            modifier = Modifier.weight(1f)
-                        )
+                // 连拍合集：默认关闭，开启后仅改变照片列表的呈现方式，不改原始文件、
+                // 筛选或传输队列语义。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(
+                        stringResource(R.string.collapse_burst_photos),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = state.collapseBurstPhotos,
+                        onCheckedChange = { viewModel.setCollapseBurstPhotos(it) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ---------- 卡片三：通用（触感反馈 / 屏幕常亮）----------
+            SettingsCard {
+                // 触感反馈
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        SectionLabel(stringResource(R.string.haptic_feedback))
+                    }
+                    Switch(
+                        checked = state.hapticsEnabled,
+                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                    )
+                }
+
+                CardDivider()
+
+                // 屏幕常亮（默认开）：前台不熄屏，防系统冻结进程/Wi-Fi 打盹断连。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(
+                        stringResource(R.string.keep_screen_on),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = state.keepScreenOn,
+                        onCheckedChange = { viewModel.setKeepScreenOn(it) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ---------- 卡片四：界面（外观 / 语言），作为最后一个设置分组 ----------
+            SettingsCard {
+                // 外观：标题与主题选项并排。
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(
+                        stringResource(R.string.appearance),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(2.4f)
+                    ) {
+                        ThemeMode.entries.forEach { mode ->
+                            SelectionChip(
+                                label = stringResource(when (mode) {
+                                    ThemeMode.SYSTEM -> R.string.theme_system
+                                    ThemeMode.DARK -> R.string.theme_dark
+                                    ThemeMode.LIGHT -> R.string.theme_light
+                                }),
+                                selected = state.themeMode == mode,
+                                onClick = { viewModel.setThemeMode(mode) },
+                                compact = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
 
@@ -379,42 +447,6 @@ fun SettingsOverlay(
                             }
                         }
                     }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // ---------- 卡片三：通用（触感反馈 / 屏幕常亮）----------
-            SettingsCard {
-                // 触感反馈
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        SectionLabel(stringResource(R.string.haptic_feedback))
-                    }
-                    Switch(
-                        checked = state.hapticsEnabled,
-                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
-                    )
-                }
-
-                CardDivider()
-
-                // 屏幕常亮（默认开）：前台不熄屏，防系统冻结进程/Wi-Fi 打盹断连。
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        SectionLabel(stringResource(R.string.keep_screen_on))
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            stringResource(R.string.keep_screen_on_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant
-                        )
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Switch(
-                        checked = state.keepScreenOn,
-                        onCheckedChange = { viewModel.setKeepScreenOn(it) }
-                    )
                 }
             }
 
@@ -540,7 +572,7 @@ private fun SettingsCard(
             // onBackground 极低透明度：深色主题下是白色微提亮、浅色下是黑色微压暗，两套都成立。
             .background(AppTheme.colors.onBackground.copy(alpha = 0.04f))
             .border(1.dp, borderColor, shape)
-            .padding(14.dp),
+            .padding(12.dp),
         content = content
     )
 }
@@ -551,7 +583,7 @@ private fun CardDivider() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp)
+            .padding(vertical = 8.dp)
             .height(1.dp)
             .background(AppTheme.colors.glassPanelBorder)
     )
@@ -647,14 +679,15 @@ private fun SelectionChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    textStyle: TextStyle = MaterialTheme.typography.labelLarge
+    textStyle: TextStyle = MaterialTheme.typography.labelLarge,
+    compact: Boolean = false
 ) {
     val colors = AppTheme.colors
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         color = if (selected) colors.accentBlue else colors.surfaceVariant,
-        modifier = modifier.height(40.dp)
+        modifier = modifier.height(if (compact) 34.dp else 40.dp)
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
@@ -669,9 +702,10 @@ private fun SelectionChip(
 }
 
 @Composable
-private fun SectionLabel(text: String) {
+private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     Text(
         text,
+        modifier = modifier,
         style = MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold,
         color = AppTheme.colors.onBackground

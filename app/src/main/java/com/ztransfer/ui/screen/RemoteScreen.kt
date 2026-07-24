@@ -150,6 +150,8 @@ private val MOVIE_EXPOSURE_PROPS = listOf(
 // 事件刷新的匹配范围（两套都听：拨杆随时可能切换）
 private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
 private val PHOTO_AUTO_ISO_PROPS = listOf(Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT)
+private const val TAP_FOCUS_LOCKED_FEEDBACK_MS = 900L
+private const val TAP_FOCUS_MARKER_VISIBLE_MS = 3_000L
 
 private data class RemoteLiveFrame(
     val image: ImageBitmap,
@@ -169,10 +171,10 @@ private class HistogramThrottle {
 }
 
 private data class ViewfinderTap(
-    val imageX: Int,
-    val imageY: Int,
-    val imageWidth: Int,
-    val imageHeight: Int,
+    val focusX: Int,
+    val focusY: Int,
+    val focusCoordinateWidth: Int,
+    val focusCoordinateHeight: Int,
     val normalized: Offset
 )
 
@@ -566,8 +568,11 @@ private fun RemoteContent(
                     val started = runCatching { cam.labStartLiveView { devLog(it) } }
                         .getOrDefault(false)
                     if (!started) { delay(3000); continue }
-                    var frames = 0
-                    var windowStart = System.currentTimeMillis()
+                    // 首个成功帧只建立统计基准，不把 StartLiveView 后的相机预热、
+                    // DeviceBusy 等待算进首个 FPS 窗口。后续按帧间隔计数：
+                    // N 个间隔 / 实际经过时间，避免把窗口起点帧多算一次。
+                    var frameIntervals = 0
+                    var windowStart = 0L
                     var errStreak = 0
                     while (isActive) {
                         val grabbed = try {
@@ -585,11 +590,15 @@ private fun RemoteContent(
                         if (grabbed == null) { delay(40); continue }
                         errStreak = 0
                         frameCh.trySend(grabbed)
-                        frames++
-                        val now = System.currentTimeMillis()
+                        val now = SystemClock.elapsedRealtime()
+                        if (windowStart == 0L) {
+                            windowStart = now
+                            continue
+                        }
+                        frameIntervals++
                         if (now - windowStart >= 1000) {
-                            fps = frames * 1000f / (now - windowStart)
-                            frames = 0
+                            fps = frameIntervals * 1000f / (now - windowStart)
+                            frameIntervals = 0
                             windowStart = now
                         }
                     }
@@ -834,7 +843,7 @@ private fun RemoteContent(
     var tapFocusBusy by remember { mutableStateOf(false) }
     var tapFocusJob by remember { mutableStateOf<Job?>(null) }
     var tapFocusHideJob by remember { mutableStateOf<Job?>(null) }
-    // 与瞬时蓝/绿反馈分离：AF 成功后保留细红框，直到下一次对焦或断线。
+    // 与瞬时蓝/绿反馈分离：AF 成功后保留细红框，并在合焦完成 3 秒后自动隐藏。
     // 相机帧头没有可信 AF 框时使用这里保存的应用请求点作为安全回退。
     var confirmedFocusMarker by remember { mutableStateOf<ConfirmedFocusMarker?>(null) }
     fun startFocus() {
@@ -974,11 +983,12 @@ private fun RemoteContent(
         tapFocusBusy = true
         haptics.tick()
         devLog(
-            "tap AF point=(${tap.imageX},${tap.imageY}) frame=${tap.imageWidth}x${tap.imageHeight}"
+            "tap AF point=(${tap.focusX},${tap.focusY}) " +
+                "grid=${tap.focusCoordinateWidth}x${tap.focusCoordinateHeight}"
         )
         tapFocusJob = scope.launch {
             try {
-                val result = cam.rcFocusAt(tap.imageX, tap.imageY)
+                val result = cam.rcFocusAt(tap.focusX, tap.focusY)
                 val af = result.afResult
                 if (result.moveResponseCode == Lab.OK) {
                     focusAreaPoint = tap.normalized
@@ -1019,10 +1029,17 @@ private fun RemoteContent(
                     }
                 }
                 val completedNonce = tapFocusNonce
+                val focusLocked = tapFocusFeedback == TapFocusFeedback.LOCKED
                 tapFocusHideJob = scope.launch {
-                    delay(if (tapFocusFeedback == TapFocusFeedback.LOCKED) 900 else 1_300)
+                    delay(if (focusLocked) TAP_FOCUS_LOCKED_FEEDBACK_MS else 1_300L)
                     if (tapFocusNonce == completedNonce) {
                         tapFocusFeedback = TapFocusFeedback.IDLE
+                    }
+                    if (focusLocked) {
+                        delay(TAP_FOCUS_MARKER_VISIBLE_MS - TAP_FOCUS_LOCKED_FEEDBACK_MS)
+                        if (tapFocusNonce == completedNonce) {
+                            confirmedFocusMarker = null
+                        }
                     }
                 }
             } catch (e: CancellationException) {
@@ -1894,11 +1911,22 @@ private fun ViewfinderImage(
         if (liveFrame != null) {
             val imageWidth = liveFrame.image.width
             val imageHeight = liveFrame.image.height
+            // ChangeAfArea 的坐标基准由增强帧头 +28/+30 声明，未必等于当前
+            // 解码 JPEG 尺寸（例如低清监看仍可能沿用 XGA AF 网格）。
+            val focusCoordinateWidth =
+                liveFrame.metadata?.focusCoordinateWidth ?: imageWidth
+            val focusCoordinateHeight =
+                liveFrame.metadata?.focusCoordinateHeight ?: imageHeight
             val currentTapHandler by rememberUpdatedState(onTapFocus)
             Box(
                 Modifier
                     .matchParentSize()
-                    .pointerInput(imageWidth, imageHeight) {
+                    .pointerInput(
+                        imageWidth,
+                        imageHeight,
+                        focusCoordinateWidth,
+                        focusCoordinateHeight
+                    ) {
                         detectTapGestures { tap ->
                             val imageRect = fitCenterRect(
                                 size.width.toFloat(),
@@ -1914,10 +1942,14 @@ private fun ViewfinderImage(
                                     ((tap.y - imageRect.top) / imageRect.height).coerceIn(0f, 1f)
                                 currentTapHandler(
                                     ViewfinderTap(
-                                        imageX = (normalizedX * (imageWidth - 1)).roundToInt(),
-                                        imageY = (normalizedY * (imageHeight - 1)).roundToInt(),
-                                        imageWidth = imageWidth,
-                                        imageHeight = imageHeight,
+                                        focusX = (
+                                            normalizedX * (focusCoordinateWidth - 1)
+                                            ).roundToInt(),
+                                        focusY = (
+                                            normalizedY * (focusCoordinateHeight - 1)
+                                            ).roundToInt(),
+                                        focusCoordinateWidth = focusCoordinateWidth,
+                                        focusCoordinateHeight = focusCoordinateHeight,
                                         normalized = Offset(normalizedX, normalizedY)
                                     )
                                 )

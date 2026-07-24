@@ -45,6 +45,8 @@
     <string name="cd_collapse">Collapse</string>
     <string name="cd_all_queued">All added to queue</string>
     <string name="cd_transfer_group">Transfer this group</string>
+    <string name="burst_collection_a11y">Burst collection, %1$d photos</string>
+    <string name="burst_collection_count">%1$d</string>
 
     <!-- Transfer queue -->
     <string name="no_transfer_tasks">No transfer tasks</string>
@@ -72,6 +74,7 @@
     <string name="change_directory">Change folder</string>
     <string name="choose_directory">Choose folder</string>
     <string name="columns">Columns</string>
+    <string name="collapse_burst_photos">Show bursts as collections</string>
     <string name="appearance">Appearance</string>
     <string name="theme_system">System</string>
     <string name="theme_dark">Dark</string>
@@ -80,7 +83,6 @@
     <string name="language_system">System</string>
     <string name="haptic_feedback">Haptic feedback</string>
     <string name="keep_screen_on">Keep screen on</string>
-    <string name="keep_screen_on_desc">Keeps the screen on while the app is in the foreground to prevent disconnection</string>
     <string name="version_label">ZTransfer v%1$s</string>
     <string name="qq_group_copied">Support QQ %1$s copied</string>
     <string name="feedback">Feedback</string>

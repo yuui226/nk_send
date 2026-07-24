@@ -3,6 +3,7 @@ package com.ztransfer.ui.screen
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BurstMode
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.RotateLeft
@@ -46,12 +48,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
@@ -62,8 +63,11 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.abs
@@ -87,8 +91,57 @@ import com.ztransfer.viewmodel.PhotoExif
 // 注意与 CameraViewModel.VIDEO_EXTENSIONS（封面黑边兜底）保持同步。
 private val VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 
+/** 预览分页模型与列表展示模型同构：合集是独立页面，不伪装成其中某张照片。 */
+internal sealed interface PhotoPreviewItem {
+    val key: Any
+
+    data class Photo(
+        val file: NikonCamera.FileInfo,
+        val burstId: String? = null
+    ) : PhotoPreviewItem {
+        override val key: Any = file.handle
+    }
+
+    data class BurstCollection(
+        val id: String,
+        val files: List<NikonCamera.FileInfo>
+    ) : PhotoPreviewItem {
+        override val key: Any = "preview_burst_$id"
+    }
+}
+
+internal fun isPreviewBurstExpanded(
+    items: List<PhotoPreviewItem>,
+    collectionPage: Int,
+    burstId: String
+): Boolean =
+    (items.getOrNull(collectionPage + 1) as? PhotoPreviewItem.Photo)?.burstId == burstId
+
+internal fun expandPreviewBurst(
+    items: List<PhotoPreviewItem>,
+    collectionPage: Int,
+    collection: PhotoPreviewItem.BurstCollection
+): List<PhotoPreviewItem> {
+    if (isPreviewBurstExpanded(items, collectionPage, collection.id)) return items
+    val members = collection.files.map { file ->
+        PhotoPreviewItem.Photo(file = file, burstId = collection.id)
+    }
+    return buildList(items.size + members.size) {
+        addAll(items.take(collectionPage + 1))
+        addAll(members)
+        addAll(items.drop(collectionPage + 1))
+    }
+}
+
+internal fun collapsePreviewBurst(
+    items: List<PhotoPreviewItem>,
+    burstId: String
+): List<PhotoPreviewItem> =
+    items.filterNot { it is PhotoPreviewItem.Photo && it.burstId == burstId }
+
 /**
- * 全屏照片预览层：显示缓存缩略图的**未裁切**（Fit）完整画面，可左右翻页浏览整份列表。
+ * 全屏预览层：普通页显示缓存缩略图的**未裁切**（Fit）完整画面；折叠连拍在分页中
+ * 保持为一个合集页，只有用户主动展开才把成员插入其后。
  * 整体从被长按格子 [anchorRect] 的位置缩放展开，关闭时反向缩回（从哪来回哪去）。
  * 不下载原图（缩略图低清但瞬开、不抢传输通道）。
  * 本层在深浅两种主题下都保持黑底沉浸式（照片查看器惯例，黑底最衬照片），
@@ -96,8 +149,8 @@ private val VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PhotoPreviewOverlay(
-    files: List<NikonCamera.FileInfo>,
+internal fun PhotoPreviewOverlay(
+    items: List<PhotoPreviewItem>,
     initialIndex: Int,
     anchorRect: Rect?,
     cameraViewModel: CameraViewModel,
@@ -111,11 +164,19 @@ fun PhotoPreviewOverlay(
     queuedHandles: Set<Int> = emptySet(),
     // 把当前预览文件加入传输队列（父层负责目录校验、连接状态、入队与吸入动画）。
     onTransfer: (NikonCamera.FileInfo) -> Unit = {},
+    // 合集页整组入队；预览没有列表格子锚点，因此只执行入队，不播放错误起点的飞行动画。
+    onTransferBurst: (List<NikonCamera.FileInfo>) -> Unit = {},
+    // 预览内主动展开/收起合集时同步底层列表，关闭预览后两处状态一致。
+    onBurstExpandedChange: (String, Boolean) -> Unit = { _, _ -> },
     // 每次旋转后回传归一化方向，父层写入全局偏好。
     onRotationChanged: (Int) -> Unit = {},
     onDismiss: () -> Unit
 ) {
-    val pagerState = rememberPagerState(initialPage = initialIndex) { files.size }
+    // 会话内固定持有自己的分页快照；后台增量加载/筛选不会让正在看的页突然换内容。
+    // 只有用户在合集页主动展开/收起时，才在当前页后插入/移除该组成员。
+    var previewItems by remember { mutableStateOf(items) }
+    val pagerState = rememberPagerState(initialPage = initialIndex) { previewItems.size }
+    val previewScope = rememberCoroutineScope()
     val cameraState by cameraViewModel.state.collectAsState()
     var overlayBounds by remember { mutableStateOf<Rect?>(null) }
     val progress = remember { Animatable(0f) }
@@ -146,9 +207,33 @@ fun PhotoPreviewOverlay(
     var rotationDegrees by remember {
         mutableFloatStateOf(-90f * Math.floorMod(initialRotationQuarterTurns, 4))
     }
-    val currentHandle = files.getOrNull(pagerState.currentPage)?.handle
+    val currentItem = previewItems.getOrNull(pagerState.currentPage)
+    val currentFile = (currentItem as? PhotoPreviewItem.Photo)?.file
+    val currentHandle = currentFile?.handle
 
     val haptics = rememberHaptics(hapticsEnabled)
+
+    fun collectionExpandedAt(page: Int, id: String): Boolean =
+        isPreviewBurstExpanded(previewItems, page, id)
+
+    val togglePreviewBurst: (PhotoPreviewItem.BurstCollection) -> Unit = { collection ->
+        val page = pagerState.currentPage
+        val expanded = collectionExpandedAt(page, collection.id)
+        haptics.tick()
+        if (expanded) {
+            // 只可能从合集页触发收起；当前页不变，安全移除其后的成员。
+            previewItems = collapsePreviewBurst(previewItems, collection.id)
+            onBurstExpandedChange(collection.id, false)
+        } else {
+            previewItems = expandPreviewBurst(previewItems, page, collection)
+            onBurstExpandedChange(collection.id, true)
+            // 插入完成后一帧平滑进入第一张；合集页仍保留在左侧，用户可滑回并收起。
+            previewScope.launch {
+                withFrameNanos { }
+                pagerState.animateScrollToPage(page + 1)
+            }
+        }
+    }
 
     // 预览期间暂停后台缩略图填充，把 ioMutex 让给 FHD/EXIF 取图。
     DisposableEffect(Unit) {
@@ -158,7 +243,8 @@ fun PhotoPreviewOverlay(
 
     // 加载单页 FHD；返回 true 表示"本次确实取到并解码成功"（用于当前页到位的触感反馈）。
     suspend fun loadFhdPage(page: Int, awaitExisting: Boolean = false): Boolean {
-        val file = files.getOrNull(page) ?: return false
+        val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
+            ?: return false
         // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
         if (file.extension in VIDEO_EXTENSIONS) return false
         val h = file.handle
@@ -182,7 +268,8 @@ fun PhotoPreviewOverlay(
 
     // 加载单页 EXIF（仅当前页，不预加载邻居——EXIF 只在当前页底栏显示，预加载纯浪费通道）。
     suspend fun loadExifPage(page: Int) {
-        val file = files.getOrNull(page) ?: return
+        val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
+            ?: return
         val h = file.handle
         if (h in exifData || exifLoading.containsKey(h)) return
         exifLoading[h] = true
@@ -195,10 +282,12 @@ fun PhotoPreviewOverlay(
 
     // 即时淘汰（独立 effect，翻页瞬间就跑，不排在 1–3s 的慢加载后面）：保留窗口 ±2。
     // 与加载解耦是关键——否则快速翻页时淘汰永远排在慢加载之后、来不及执行，内存会一路涨。
-    LaunchedEffect(pagerState.currentPage, currentHandle) {
+    LaunchedEffect(previewItems, pagerState.currentPage, currentHandle) {
         val cp = pagerState.currentPage
-        val keep = (cp - 2).coerceAtLeast(0)..(cp + 2).coerceAtMost(files.lastIndex)
-        val keepH = keep.mapNotNull { files.getOrNull(it)?.handle }.toSet()
+        val keep = (cp - 2).coerceAtLeast(0)..(cp + 2).coerceAtMost(previewItems.lastIndex)
+        val keepH = keep.mapNotNull { page ->
+            (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file?.handle
+        }.toSet()
         fhdBitmaps.keys.filter { it !in keepH }.forEach { fhdBitmaps.remove(it) }
         exifData.keys.filter { it !in keepH }.forEach { exifData.remove(it) }
     }
@@ -206,13 +295,18 @@ fun PhotoPreviewOverlay(
     // 当前页拥有最高优先级。连接状态纳入 key：停留在预览页断线后原地重连，
     // 即使页码没变也会重新请求 FHD，而不是一直停留在缩略图。
     // 当前页与邻页由同一协程严格串行，避免首次失败时两个 effect 重复请求并触发熔断。
-    LaunchedEffect(currentHandle, cameraState.isConnectedToCamera) {
+    LaunchedEffect(
+        previewItems,
+        pagerState.currentPage,
+        currentHandle,
+        cameraState.isConnectedToCamera
+    ) {
         if (!cameraState.isConnectedToCamera) return@LaunchedEffect
         val cp = pagerState.currentPage
         if (loadFhdPage(cp, awaitExisting = true)) haptics.tick()
         loadExifPage(cp)
         if (cp > 0) loadFhdPage(cp - 1)
-        if (cp < files.lastIndex) loadFhdPage(cp + 1)
+        if (cp < previewItems.lastIndex) loadFhdPage(cp + 1)
     }
 
     Box(
@@ -238,6 +332,7 @@ fun PhotoPreviewOverlay(
         HorizontalPager(
             state = pagerState,
             beyondBoundsPageCount = 1,
+            key = { page -> previewItems[page].key },
             userScrollEnabled = !currentZoomed,
             modifier = Modifier
                 .fillMaxSize()
@@ -264,24 +359,38 @@ fun PhotoPreviewOverlay(
                     }
                 }
         ) { page ->
-            val file = files[page]
-            PreviewPage(
-                file = file,
-                cameraViewModel = cameraViewModel,
-                fhdBitmap = fhdBitmaps[file.handle],
-                isLoadingFhd = fhdLoading.containsKey(file.handle),
-                rotationDegrees = rotationDegrees,
-                isCurrent = page == pagerState.currentPage,
-                onZoomedChange = { currentZoomed = it },
-                onTap = startClose
-            )
+            when (val item = previewItems[page]) {
+                is PhotoPreviewItem.Photo -> {
+                    val file = item.file
+                    PreviewPage(
+                        file = file,
+                        cameraViewModel = cameraViewModel,
+                        fhdBitmap = fhdBitmaps[file.handle],
+                        isLoadingFhd = fhdLoading.containsKey(file.handle),
+                        rotationDegrees = rotationDegrees,
+                        isCurrent = page == pagerState.currentPage,
+                        onZoomedChange = { currentZoomed = it },
+                        onTap = startClose
+                    )
+                }
+                is PhotoPreviewItem.BurstCollection -> {
+                    BurstCollectionPreviewPage(
+                        collection = item,
+                        cameraViewModel = cameraViewModel,
+                        isCurrent = page == pagerState.currentPage,
+                        onZoomedChange = { currentZoomed = it },
+                        onTap = startClose
+                    )
+                }
+            }
         }
 
-        // 顶部：序号 + 文件名（随进度淡入，不参与缩放）。
-        val current = files.getOrNull(pagerState.currentPage)
-        if (current != null) {
+        // 顶部：普通照片显示序号 + 文件名；合集只保留序号，视觉信息由共用角标承担。
+        if (currentItem != null) {
+            val pageNumber = "${pagerState.currentPage + 1}/${previewItems.size}"
+            val title = (currentItem as? PhotoPreviewItem.Photo)?.file?.fileName
             Text(
-                text = "${pagerState.currentPage + 1}/${files.size}  ·  ${current.fileName}",
+                text = title?.let { "$pageNumber  ·  $it" } ?: pageNumber,
                 style = MaterialTheme.typography.labelMedium,
                 color = Color.White.copy(alpha = 0.85f * progress.value),
                 textAlign = TextAlign.Center,
@@ -295,7 +404,9 @@ fun PhotoPreviewOverlay(
 
         // 左上角：连拍/保护角标——与列表页缩略图的角标同语义,预览中集中到左上,
         // 圆角胶囊形态适配大图舞台;位于标题行下方一行,随展开进度淡入,不参与缩放。
-        if (current != null && (current.handle in burstHandles || current.isProtected)) {
+        if (currentFile != null &&
+            (currentFile.handle in burstHandles || currentFile.isProtected)
+        ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -305,7 +416,7 @@ fun PhotoPreviewOverlay(
                     .padding(top = 36.dp, start = 12.dp)
                     .graphicsLayer { alpha = progress.value }
             ) {
-                if (current.handle in burstHandles) {
+                if (currentFile.handle in burstHandles) {
                     Surface(
                         shape = RoundedCornerShape(7.dp),
                         color = BurstBadgeColor.copy(alpha = 0.85f)
@@ -330,7 +441,7 @@ fun PhotoPreviewOverlay(
                         }
                     }
                 }
-                if (current.isProtected) {
+                if (currentFile.isProtected) {
                     // 黑底胶囊在黑幕/暗部照片上需要细描边定界(列表页衬在照片上无此问题)。
                     // 钥匙 + "保护"文字，与旁边的连拍角标（图标+字）一致。
                     Surface(
@@ -363,7 +474,7 @@ fun PhotoPreviewOverlay(
 
         // 顶部极细进度条：当前页正在取 FHD 高清版时显示（"正在加载高清"的低调提示，
         // 取代旧的突兀底部小转圈）。随展开动画淡入，取到即消失。
-        val curLoadingFhd = current?.let { fhdLoading.containsKey(it.handle) } == true
+        val curLoadingFhd = currentFile?.let { fhdLoading.containsKey(it.handle) } == true
         if (curLoadingFhd) {
             LinearProgressIndicator(
                 color = AccentBlue.copy(alpha = 0.9f),
@@ -377,70 +488,171 @@ fun PhotoPreviewOverlay(
             )
         }
 
-        // ---- 底部栏：当前照片的 EXIF 参数 ----
+        // ---- 底部栏：当前真实照片的 EXIF 参数 ----
         // 跟手淡入淡出：alpha 由翻页滚动进度实时驱动——离开当前页时随手指滑动淡出、
         // 新页吸附到位时淡入，不等翻完。内容在滑过半（currentPage 翻转、此刻 alpha≈0
         // 看不见）时切换，因此看不到硬切；Crossfade 再兜住"落定页 EXIF 异步到达"的淡入。
         // alpha 计算写在 graphicsLayer 内读滚动值：每帧只重绘图层，不触发子树重组。
-        val curExif = current?.let { exifData[it.handle] }
-        Crossfade(
-            targetState = curExif,
-            animationSpec = tween(220),
-            label = "exifBar",
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .graphicsLayer {
-                    val swipe = (1f - abs(pagerState.currentPageOffsetFraction) * 2f).coerceIn(0f, 1f)
-                    alpha = progress.value * swipe
-                }
-        ) { exif ->
-            val hasExif = exif != null && (exif.aperture != null || exif.shutterSpeed != null
-                || exif.iso != null || exif.focalLength != null)
-            if (hasExif) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp)
-                        .heightIn(min = 44.dp)
-                        .padding(vertical = 24.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    ExifMetadataBar(
-                        exif = exif!!,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
+        // 合集是虚拟分页，不进入 Crossfade。若把 null 交给 Crossfade，它会保留上一张照片的
+        // 参数内容做 220ms 退场，落到合集页时就会闪一下；直接移除整棵参数子树才是正确语义。
+        currentFile?.let { file ->
+            val curExif = exifData[file.handle]
+            Crossfade(
+                targetState = curExif,
+                animationSpec = tween(220),
+                label = "exifBar",
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        val swipe =
+                            (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
+                                .coerceIn(0f, 1f)
+                        alpha = progress.value * swipe
+                    }
+            ) { exif ->
+                val hasExif = exif != null &&
+                    (exif.aperture != null || exif.shutterSpeed != null ||
+                        exif.iso != null || exif.focalLength != null)
+                if (hasExif) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 16.dp)
+                            .heightIn(min = 44.dp)
+                            .padding(vertical = 24.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        ExifMetadataBar(
+                            exif = exif!!,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    }
                 }
             }
         }
 
-        // 右下角：全局旋转与传输队列按钮，纵向排列。
-        if (current != null) {
-            val curQueued = current.handle in queuedHandles
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .padding(end = 20.dp, bottom = 80.dp)
-                    .graphicsLayer { alpha = progress.value },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (current.extension !in VIDEO_EXTENSIONS) {
-                    RotationButton(onClick = {
-                        val nextDegrees = rotationDegrees - 90f
-                        rotationDegrees = nextDegrees
-                        // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
-                        val nextTurns = Math.floorMod((-nextDegrees / 90f).toInt(), 4)
-                        onRotationChanged(nextTurns)
-                    })
+        // 普通照片沿用右下旋转/入队；合集页改为底部左右双按钮，与列表卡的
+        // “左下 + / 右下 >”完全同语义。合集展开后自动进入第一张成员。
+        when (val item = currentItem) {
+            is PhotoPreviewItem.Photo -> {
+                val current = item.file
+                val curQueued = current.handle in queuedHandles
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(end = 20.dp, bottom = 80.dp)
+                        .graphicsLayer { alpha = progress.value },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (current.extension !in VIDEO_EXTENSIONS) {
+                        RotationButton(onClick = {
+                            val nextDegrees = rotationDegrees - 90f
+                            rotationDegrees = nextDegrees
+                            // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
+                            val nextTurns = Math.floorMod((-nextDegrees / 90f).toInt(), 4)
+                            onRotationChanged(nextTurns)
+                        })
+                    }
+                    TransferQueueButton(
+                        queued = curQueued,
+                        onClick = { onTransfer(current) }
+                    )
                 }
-                TransferQueueButton(
-                    queued = curQueued,
-                    onClick = { onTransfer(current) }
+            }
+            is PhotoPreviewItem.BurstCollection -> {
+                val expanded = collectionExpandedAt(pagerState.currentPage, item.id)
+                val allQueued = item.files.all { it.handle in queuedHandles }
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = 112.dp)
+                        .graphicsLayer { alpha = progress.value },
+                    horizontalArrangement = Arrangement.spacedBy(22.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TransferQueueButton(
+                        queued = allQueued,
+                        onClick = { onTransferBurst(item.files) },
+                        buttonSize = 48.dp
+                    )
+                    BurstPreviewToggleButton(
+                        expanded = expanded,
+                        onClick = { togglePreviewBurst(item) }
+                    )
+                }
+            }
+            null -> Unit
+        }
+    }
+}
+
+@Composable
+private fun BurstCollectionPreviewPage(
+    collection: PhotoPreviewItem.BurstCollection,
+    cameraViewModel: CameraViewModel,
+    isCurrent: Boolean,
+    onZoomedChange: (Boolean) -> Unit,
+    onTap: () -> Unit
+) {
+    val a11y = stringResource(R.string.burst_collection_a11y, collection.files.size)
+    LaunchedEffect(isCurrent) {
+        if (isCurrent) onZoomedChange(false)
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .semantics { contentDescription = a11y }
+            .pointerInput(collection.id) {
+                detectTapGestures(onTap = { onTap() })
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        val stackSize = minOf(maxWidth * 0.72f, maxHeight * 0.46f, 360.dp)
+        Box(modifier = Modifier.size(stackSize)) {
+            val stackFiles = collection.files.take(3).reversed()
+            val stackInset = stackSize * 0.07f + 6.dp
+            stackFiles.forEachIndexed { index, file ->
+                val last = stackFiles.lastIndex
+                val rotation = when (stackFiles.size) {
+                    1 -> 0f
+                    2 -> if (index == 0) -5f else 3f
+                    else -> when (index) {
+                        0 -> -6f
+                        1 -> 5f
+                        else -> 0f
+                    }
+                }
+                val x = when {
+                    index == last -> 0.dp
+                    index % 2 == 0 -> (-12).dp
+                    else -> 12.dp
+                }
+                BurstStackPhoto(
+                    file = file,
+                    cameraViewModel = cameraViewModel,
+                    transfersBusy = false,
+                    showPlaceholderIcon = index == last,
+                    modifier = Modifier
+                        .fillMaxSize(0.86f)
+                        .align(Alignment.Center)
+                        .offset(x = x, y = if (index == last) 2.dp else 5.dp)
+                        .graphicsLayer { rotationZ = rotation }
                 )
             }
+
+            BurstCollectionBadge(
+                count = collection.files.size,
+                iconSize = 16.dp,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = stackInset, y = stackInset)
+            )
         }
     }
 }
@@ -456,6 +668,38 @@ private fun RotationButton(onClick: () -> Unit) {
     ) {
         Icon(Icons.Default.RotateLeft, stringResource(R.string.cd_rotate_photo),
             tint = colors.accentBlue, modifier = Modifier.size(22.dp))
+    }
+}
+
+@Composable
+private fun BurstPreviewToggleButton(
+    expanded: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = AppTheme.colors
+    val rotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(240, easing = FastOutSlowInEasing),
+        label = "previewBurstChevron"
+    )
+    GlassButton(
+        onClick = onClick,
+        modifier = Modifier.size(48.dp),
+        shape = CircleShape,
+        contentPadding = PaddingValues(0.dp)
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = stringResource(
+                    if (expanded) R.string.cd_collapse else R.string.cd_expand
+                ),
+                tint = colors.accentBlue,
+                modifier = Modifier
+                    .size(25.dp)
+                    .graphicsLayer { rotationZ = rotation }
+            )
+        }
     }
 }
 
@@ -497,23 +741,26 @@ private fun ExifMetadataBar(
 private fun TransferQueueButton(
     queued: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    buttonSize: Dp = 44.dp
 ) {
     val colors = AppTheme.colors
     GlassButton(
         onClick = { if (!queued) onClick() },
-        modifier = modifier.size(44.dp),
+        modifier = modifier.size(buttonSize),
         shape = CircleShape,
-        contentPadding = PaddingValues(11.dp)
+        contentPadding = PaddingValues(0.dp)
     ) {
-        Icon(
-            imageVector = if (queued) Icons.Default.Check else Icons.Default.Add,
-            contentDescription = stringResource(
-                if (queued) R.string.cd_queued else R.string.cd_transfer
-            ),
-            tint = if (queued) colors.statusConnected else colors.accentBlue,
-            modifier = Modifier.size(22.dp)
-        )
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = if (queued) Icons.Default.Check else Icons.Default.Add,
+                contentDescription = stringResource(
+                    if (queued) R.string.cd_queued else R.string.cd_transfer
+                ),
+                tint = if (queued) colors.statusConnected else colors.accentBlue,
+                modifier = Modifier.size(buttonSize * 0.5f)
+            )
+        }
     }
 }
 

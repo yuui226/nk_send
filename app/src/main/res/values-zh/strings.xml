@@ -45,6 +45,8 @@
     <string name="cd_collapse">收起</string>
     <string name="cd_all_queued">已全部加入队列</string>
     <string name="cd_transfer_group">传输整组</string>
+    <string name="burst_collection_a11y">连拍合集，共 %1$d 张</string>
+    <string name="burst_collection_count">%1$d</string>
 
     <!-- 传输队列 -->
     <string name="no_transfer_tasks">暂无传输任务</string>
@@ -72,6 +74,7 @@
     <string name="change_directory">更改目录</string>
     <string name="choose_directory">选择目录</string>
     <string name="columns">列数</string>
+    <string name="collapse_burst_photos">连拍展示为合集</string>
     <string name="appearance">外观</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_dark">深色</string>
@@ -80,7 +83,6 @@
     <string name="language_system">跟随系统</string>
     <string name="haptic_feedback">触感反馈</string>
     <string name="keep_screen_on">屏幕常亮</string>
-    <string name="keep_screen_on_desc">应用在前台时不熄屏，防止连接中断</string>
     <string name="version_label">Z传 v%1$s</string>
     <string name="qq_group_copied">已复制客服 QQ：%1$s</string>
     <string name="feedback">反馈</string>
