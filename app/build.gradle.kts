@@ -79,6 +79,9 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.8.2")
 
     implementation(platform("androidx.compose:compose-bom:2023.10.01"))
+    // 1.7 起 LazyGrid 的 animateItem 原生同时处理插入、移除和重排；仅定向覆盖
+    // Foundation，避免旧 animateItemPlacement 在大量网格变更时产生离屏钳制。
+    implementation("androidx.compose.foundation:foundation:1.7.6")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")

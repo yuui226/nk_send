@@ -67,44 +67,19 @@ class BurstGridItemsTest {
     }
 
     @Test
-    fun collapseAnimationLimitsOnlyMembersAndKeepsCollection() {
+    fun expandedModelContainsEveryMemberWithoutAnimationWindowTruncation() {
+        val manyFiles = (1..120).map(::file)
+        val manyBurstIds = manyFiles.associate { it.handle to "burst-large" }
         val items = buildThumbnailGridItems(
-            files = files,
-            burstIdByHandle = burstIds,
+            files = manyFiles,
+            burstIdByHandle = manyBurstIds,
             collapseBurstPhotos = true,
-            expandedBurstIds = setOf("burst-a"),
-            burstMemberLimits = mapOf("burst-a" to 1)
+            expandedBurstIds = setOf("burst-large")
         )
 
         assertTrue(items.first() is ThumbnailGridItem.BurstCollection)
-        assertEquals(listOf(1), items.drop(1).map {
+        assertEquals(manyFiles.map { it.handle }, items.drop(1).map {
             (it as ThumbnailGridItem.Photo).file.handle
         })
-    }
-
-    @Test
-    fun reflowBufferKeepsAtLeastTwoViewportsAndOneExtraRow() {
-        assertEquals(
-            45,
-            burstReflowBufferCells(
-                viewportHeightPx = 720,
-                cellHeightPx = 108,
-                visibleItemCount = 20,
-                columns = 3
-            )
-        )
-    }
-
-    @Test
-    fun reflowBufferFallsBackToVisibleRowsWhenCellSizeIsUnavailable() {
-        assertEquals(
-            33,
-            burstReflowBufferCells(
-                viewportHeightPx = 720,
-                cellHeightPx = 0,
-                visibleItemCount = 15,
-                columns = 3
-            )
-        )
     }
 }

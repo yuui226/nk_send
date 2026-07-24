@@ -1,7 +1,6 @@
 package com.ztransfer.ui.screen
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -331,7 +330,7 @@ internal fun PhotoPreviewOverlay(
         // 图片翻页器：整体从被长按格子的位置缩放展开。相邻页预载一页，快速翻页不用等图。
         HorizontalPager(
             state = pagerState,
-            beyondBoundsPageCount = 1,
+            beyondViewportPageCount = 1,
             key = { page -> previewItems[page].key },
             userScrollEnabled = !currentZoomed,
             modifier = Modifier
@@ -491,44 +490,41 @@ internal fun PhotoPreviewOverlay(
         // ---- 底部栏：当前真实照片的 EXIF 参数 ----
         // 跟手淡入淡出：alpha 由翻页滚动进度实时驱动——离开当前页时随手指滑动淡出、
         // 新页吸附到位时淡入，不等翻完。内容在滑过半（currentPage 翻转、此刻 alpha≈0
-        // 看不见）时切换，因此看不到硬切；Crossfade 再兜住"落定页 EXIF 异步到达"的淡入。
+        // 看不见）时直接切换，因此不会保留上一页参数的退场副本。
         // alpha 计算写在 graphicsLayer 内读滚动值：每帧只重绘图层，不触发子树重组。
-        // 合集是虚拟分页，不进入 Crossfade。若把 null 交给 Crossfade，它会保留上一张照片的
-        // 参数内容做 220ms 退场，落到合集页时就会闪一下；直接移除整棵参数子树才是正确语义。
+        // 新页 EXIF 异步到达后再独立淡入；合集页直接移除整棵参数子树。
         currentFile?.let { file ->
             val curExif = exifData[file.handle]
-            Crossfade(
-                targetState = curExif,
-                animationSpec = tween(220),
-                label = "exifBar",
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .graphicsLayer {
-                        val swipe =
-                            (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
-                                .coerceIn(0f, 1f)
-                        alpha = progress.value * swipe
-                    }
-            ) { exif ->
-                val hasExif = exif != null &&
-                    (exif.aperture != null || exif.shutterSpeed != null ||
-                        exif.iso != null || exif.focalLength != null)
-                if (hasExif) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(horizontal = 16.dp)
-                            .heightIn(min = 44.dp)
-                            .padding(vertical = 24.dp),
-                        verticalAlignment = Alignment.Bottom
-                    ) {
-                        ExifMetadataBar(
-                            exif = exif!!,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                    }
+            val displayExif = curExif?.takeIf {
+                it.aperture != null || it.shutterSpeed != null ||
+                    it.iso != null || it.focalLength != null
+            }
+            val loadedAlpha by animateFloatAsState(
+                targetValue = if (displayExif != null) 1f else 0f,
+                animationSpec = tween(180, easing = FastOutSlowInEasing),
+                label = "exifLoaded"
+            )
+            if (displayExif != null) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp)
+                        .heightIn(min = 44.dp)
+                        .padding(vertical = 24.dp)
+                        .graphicsLayer {
+                            val swipe =
+                                (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
+                                    .coerceIn(0f, 1f)
+                            alpha = progress.value * swipe * loadedAlpha
+                        },
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    ExifMetadataBar(
+                        exif = displayExif,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
                 }
             }
         }
@@ -705,7 +701,7 @@ private fun BurstPreviewToggleButton(
 
 /**
  * 底部毛玻璃参数条：光圈 / 快门 / ISO / 焦距。
- * 淡入淡出由外层（overlay 展开进度 × 翻页跟手 × Crossfade）统一驱动，本身不管透明度。
+ * 淡入淡出由外层（overlay 展开进度 × 翻页跟手 × 加载完成度）统一驱动，本身不管透明度。
  */
 @Composable
 private fun ExifMetadataBar(

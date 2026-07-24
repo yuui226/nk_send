@@ -122,8 +122,6 @@ import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.currentFileProgress
 import com.ztransfer.viewmodel.remainingCount
 import kotlin.math.abs
-import kotlin.math.ceil
-import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -183,42 +181,9 @@ private const val BACK_TO_TOP_SNAP_INDEX = 24
 /** 正在播放收合动画的分组：[date] + 保留参与动画的前 [keep] 个格子（收起瞬间可见的那部分）。 */
 private data class CollapsingGroup(val date: String, val keep: Int)
 
-/**
- * 连拍收合只裁掉距视口至少两屏以外的尾部成员；[keep] 以内的成员保留真实格位，
- * 让后续照片拥有可信的重排起点。
- */
-private data class CollapsingBurst(val id: String, val keep: Int)
-
-private const val BURST_REFLOW_BUFFER_VIEWPORTS = 2
-private const val BURST_EXPAND_ROWS_PER_STEP = 2
-private const val BURST_EXPAND_STEP_DURATION_MS = 110
-private const val BURST_COLLAPSE_DURATION_MS = 300
-private const val BURST_COLLAPSE_PREFETCH_ROWS = 5
-
-/**
- * 连拍重排的安全窗口，以完整网格行返回。像素估算与可见条目数取较大值，再额外留一行：
- * 即使视口中混有日期标题或只露出半行，也不会过早裁掉用户即将看到的格位。
- */
-internal fun burstReflowBufferCells(
-    viewportHeightPx: Int,
-    cellHeightPx: Int,
-    visibleItemCount: Int,
-    columns: Int
-): Int {
-    val safeColumns = columns.coerceAtLeast(1)
-    val pixelRows = if (viewportHeightPx > 0 && cellHeightPx > 0) {
-        ceil(
-            viewportHeightPx.toDouble() * BURST_REFLOW_BUFFER_VIEWPORTS /
-                cellHeightPx.toDouble()
-        ).toInt()
-    } else {
-        0
-    }
-    val visibleRows = ceil(
-        visibleItemCount.coerceAtLeast(1).toDouble() / safeColumns.toDouble()
-    ).toInt() * BURST_REFLOW_BUFFER_VIEWPORTS
-    return (max(pixelRows, visibleRows) + 1) * safeColumns
-}
+private const val BURST_REFLOW_DURATION_MS = 300
+private const val BURST_MEMBER_ENTER_DURATION_MS = 180
+private const val BURST_MEMBER_EXIT_DURATION_MS = 150
 
 /**
  * 手风琴收合：按 [progress]（1→0）缩减条目报告给布局的高度（内容顶部对齐、超出裁掉），
@@ -1629,8 +1594,7 @@ internal fun buildThumbnailGridItems(
     files: List<NikonCamera.FileInfo>,
     burstIdByHandle: Map<Int, String>,
     collapseBurstPhotos: Boolean,
-    expandedBurstIds: Set<String>,
-    burstMemberLimits: Map<String, Int> = emptyMap()
+    expandedBurstIds: Set<String>
 ): List<ThumbnailGridItem> {
     if (!collapseBurstPhotos || burstIdByHandle.isEmpty()) {
         return files.map { file ->
@@ -1654,10 +1618,7 @@ internal fun buildThumbnailGridItems(
         } else if (collected.add(burstId)) {
             result += ThumbnailGridItem.BurstCollection(burstId, members)
             if (burstId in expandedBurstIds) {
-                val displayedMembers = burstMemberLimits[burstId]
-                    ?.let { members.take(it) }
-                    ?: members
-                displayedMembers.forEach { member ->
+                members.forEach { member ->
                     result += ThumbnailGridItem.Photo(
                         file = member,
                         burstId = burstId
@@ -1721,21 +1682,11 @@ private fun ThumbnailGrid(
         }
     }
 
-    // 连拍合集独立保存展开状态：
-    // - 展开：最多先插入覆盖两屏以上的成员，让当前视口中的所有存量元素沿同一 placement
-    //   轨迹让位；其余尾部等这些元素安全离屏后再无动画补入。
-    // - 收起：只预裁掉距视口至少两屏之外的尾部，目标成员淡出后一次性移除；普通照片、
-    //   其他合集和日期标题用同一 placement 规格补位。
-    // 重排期间绝不逐帧改变格子尺寸，也不缩放任何照片，避免整页弹跳和网格轨迹扭曲。
+    // 连拍展开/收起只做一次原子模型更新。成员的出现/消失与所有存量条目的重排均交给
+    // Foundation 1.7 的 LazyGrid animateItem：不裁剪屏外成员、不分批、不逐排改模型。
     val expandedBurstIds = expandedBursts.keys.toSet()
-    var collapsingBurst by remember { mutableStateOf<CollapsingBurst?>(null) }
-    val burstCollapseProgress = remember { Animatable(1f) }
-    var expandingBurstId by remember { mutableStateOf<String?>(null) }
-    var expandingBurstLimit by remember { mutableStateOf<Int?>(null) }
-    var expandingBurstEnteringHandles by remember { mutableStateOf<Set<Int>>(emptySet()) }
-    val burstExpandProgress = remember { Animatable(1f) }
     var burstReflowActive by remember { mutableStateOf(false) }
-    var burstCollapseReflowActive by remember { mutableStateOf(false) }
+    var activeBurstReflowId by remember { mutableStateOf<String?>(null) }
     var burstAnimationBusy by remember { mutableStateOf(false) }
     val burstScope = rememberCoroutineScope()
     var burstAnimationJob by remember { mutableStateOf<Job?>(null) }
@@ -1746,37 +1697,22 @@ private fun ThumbnailGrid(
         burstAnimationJob?.cancel()
         burstAnimationJob = null
         burstAnimationBusy = false
-        collapsingBurst = null
-        expandingBurstId = null
-        expandingBurstLimit = null
-        expandingBurstEnteringHandles = emptySet()
         burstReflowActive = false
-        burstCollapseReflowActive = false
-        burstCollapseProgress.snapTo(1f)
-        burstExpandProgress.snapTo(1f)
+        activeBurstReflowId = null
     }
 
     val itemsByDate = remember(
         groups,
         burstIdByHandle,
         collapseBurstPhotos,
-        expandedBurstIds,
-        collapsingBurst,
-        expandingBurstId,
-        expandingBurstLimit
+        expandedBurstIds
     ) {
-        val memberLimits = collapsingBurst
-            ?.let { mapOf(it.id to it.keep) }
-            ?: expandingBurstId?.let { id ->
-                expandingBurstLimit?.let { limit -> mapOf(id to limit) }
-            }.orEmpty()
         groups.associate { group ->
             group.date to buildThumbnailGridItems(
                 files = group.files,
                 burstIdByHandle = burstIdByHandle,
                 collapseBurstPhotos = collapseBurstPhotos,
-                expandedBurstIds = expandedBurstIds,
-                burstMemberLimits = memberLimits
+                expandedBurstIds = expandedBurstIds
             )
         }
     }
@@ -1801,135 +1737,26 @@ private fun ThumbnailGrid(
             burstAnimationBusy = true
             burstAnimationJob = burstScope.launch {
                 try {
-                    val burstFiles = itemsByDate.values.asSequence()
+                    val exists = itemsByDate.values.asSequence()
                         .flatten()
                         .filterIsInstance<ThumbnailGridItem.BurstCollection>()
-                        .firstOrNull { it.id == burstId }
-                        ?.files
-                        .orEmpty()
-                    if (burstFiles.isEmpty()) return@launch
+                        .any { it.id == burstId }
+                    if (!exists) return@launch
 
-                    val layoutInfo = gridState.layoutInfo
-                    val visibleItems = layoutInfo.visibleItemsInfo
-                    val visibleCellHeight = visibleItems.asSequence()
-                        .filterNot { it.key.toString().startsWith("header_") }
-                        .map { it.size.height }
-                        .filter { it > 0 }
-                        .maxOrNull()
-                        ?: 0
-                    val bufferCells = burstReflowBufferCells(
-                        viewportHeightPx =
-                            layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset,
-                        cellHeightPx = visibleCellHeight,
-                        visibleItemCount = visibleItems.size,
-                        columns = columns
-                    )
-
+                    // 先让所有条目的 animateItem 节点进入同一个重排窗口，再在下一帧只提交
+                    // 一次最终列表。无论连拍有几张，所有既有照片、合集和标题共享同一起点。
+                    activeBurstReflowId = burstId
+                    burstReflowActive = true
+                    withFrameNanos { }
                     if (expandedBursts[burstId] == true) {
-                        // 箭头立即反向。远端尾部可以提前裁掉，但裁剪边界必须位于当前可见
-                        // 成员之后至少两屏；这样预裁剪只发生在用户绝对看不到的区域，也不会
-                        // 把后续照片/合集提前“瞬移”到视口边缘。
-                        val visibleKeys = visibleItems
-                            .mapTo(HashSet()) { it.key }
-                        val lastVisible = burstFiles.indexOfLast { it.handle in visibleKeys }
-                        val visibleMemberCount = (lastVisible + 1).coerceAtLeast(0)
-                        val keep = (visibleMemberCount + bufferCells)
-                            .coerceAtMost(burstFiles.size)
-                        collapsingBurst = CollapsingBurst(burstId, keep)
-                        burstCollapseProgress.snapTo(1f)
-                        // 给 LazyGrid 一帧登记保留窗口的真实位置。被预裁掉的尾部此时至少
-                        // 在两屏之外，当前视口的任何元素都不会改变位置。
-                        withFrameNanos { }
-
-                        // 接下来只在裁剪边界之外预整理长尾，把第一排后续内容放到视口后五行。
-                        // 这一步使用 snap 且目标仍不可见；等两帧让 LazyGrid 完成预取后，
-                        // 所有真正会进入视口的条目便拥有同一个动画起点。
-                        val nearKeep = (
-                            visibleMemberCount +
-                                columns.coerceAtLeast(1) * BURST_COLLAPSE_PREFETCH_ROWS
-                            )
-                            .coerceAtMost(keep)
-                        if (nearKeep != keep) {
-                            collapsingBurst = CollapsingBurst(burstId, nearKeep)
-                            withFrameNanos { }
-                            withFrameNanos { }
-                        }
-
-                        if (nearKeep > 0) {
-                            burstCollapseProgress.animateTo(
-                                0f,
-                                tween(180, easing = FastOutSlowInEasing)
-                            )
-                        }
-                        // 一次性提交最终模型。普通照片、其他合集和标题都在同一帧取得目标，
-                        // 并共享完全相同的时长与缓动，不再存在逐排重排造成的相位差。
-                        burstCollapseReflowActive = true
-                        burstReflowActive = true
-                        withFrameNanos { }
                         expandedBursts.remove(burstId)
-                        collapsingBurst = null
-                        burstCollapseProgress.snapTo(1f)
-                        delay(BURST_COLLAPSE_DURATION_MS.toLong())
-                        withFrameNanos { }
-                        withFrameNanos { }
-                        burstReflowActive = false
-                        burstCollapseReflowActive = false
                     } else {
-                        // 超长连拍只动画展开覆盖两屏以上的成员，并以两行为一步推进。
-                        // 后续照片每次只移动到邻近的真实网格位置，连续越过底边；剩余尾部
-                        // 等所有存量元素安全离屏后再补入。
-                        val insertedMembers = bufferCells.coerceAtMost(burstFiles.size)
-                        burstReflowActive = true
-                        expandingBurstId = burstId
-                        val stepCells =
-                            columns.coerceAtLeast(1) * BURST_EXPAND_ROWS_PER_STEP
-                        var shownMembers = 0
-                        expandingBurstLimit = 0
-                        withFrameNanos { }
                         expandedBursts[burstId] = true
-                        while (shownMembers < insertedMembers) {
-                            val nextShown = (shownMembers + stepCells)
-                                .coerceAtMost(insertedMembers)
-                            // 只让本轮真正新增的成员从透明进入；上一轮成员保持 1，不会随
-                            // 进度重置而闪回。普通照片与其他合集完全不参与这层透明度动画。
-                            expandingBurstEnteringHandles = burstFiles
-                                .subList(shownMembers, nextShown)
-                                .mapTo(HashSet()) { it.handle }
-                            burstExpandProgress.snapTo(0f)
-                            expandingBurstLimit = nextShown
-                            burstExpandProgress.animateTo(
-                                1f,
-                                tween(
-                                    BURST_EXPAND_STEP_DURATION_MS,
-                                    easing = FastOutSlowInEasing
-                                )
-                            )
-                            shownMembers = nextShown
-                        }
-                        withFrameNanos { }
-                        withFrameNanos { }
-                        burstReflowActive = false
-                        expandingBurstEnteringHandles = emptySet()
-                        // placement 已结束，后续存量元素至少在两屏之外；此时再补全超长尾部。
-                        // 保持 expandingBurstId 到补入完成，使屏外新增成员使用正常终态。
-                        withFrameNanos { }
-                        expandingBurstLimit = null
-                        withFrameNanos { }
-                        expandingBurstId = null
                     }
+                    delay((BURST_REFLOW_DURATION_MS + 48).toLong())
                 } finally {
-                    if (expandingBurstId == burstId) {
-                        expandingBurstId = null
-                        expandingBurstLimit = null
-                        expandingBurstEnteringHandles = emptySet()
-                        burstExpandProgress.snapTo(1f)
-                    }
-                    if (collapsingBurst?.id == burstId) {
-                        collapsingBurst = null
-                        burstCollapseProgress.snapTo(1f)
-                    }
                     burstReflowActive = false
-                    burstCollapseReflowActive = false
+                    activeBurstReflowId = null
                     burstAnimationBusy = false
                 }
             }
@@ -1951,33 +1778,19 @@ private fun ThumbnailGrid(
             val collapsed = collapsedDates[group.date] == true
             val collapsingThis = collapsing?.date == group.date
             val groupItems = itemsByDate[group.date].orEmpty()
-            // 同一轮重排中，照片、合集与标题必须共享完全相同的时长和 easing；
-            // 否则相邻元素会彼此错速，看起来像合集在漂移。
-            val placementSpec = if (
-                (exportReflowActive || burstReflowActive) && !collapsingThis
-            ) {
-                tween<IntOffset>(
-                    durationMillis = if (burstReflowActive) {
-                        if (burstCollapseReflowActive) {
-                            BURST_COLLAPSE_DURATION_MS
-                        } else {
-                            BURST_EXPAND_STEP_DURATION_MS
-                        }
-                    } else {
-                        280
-                    },
-                    easing = if (burstReflowActive) {
-                        if (burstCollapseReflowActive) {
-                            FastOutSlowInEasing
-                        } else {
-                            LinearEasing
-                        }
-                    } else {
-                        FastOutSlowInEasing
-                    }
+            // 所有既有格位——照片、合集、日期标题——严格共享同一个 placementSpec。
+            // 空闲时传 null，但 animateItem 节点始终存在，不会因临时挂载 modifier 错帧。
+            val placementSpec = when {
+                collapsingThis -> null
+                burstReflowActive -> tween<IntOffset>(
+                    durationMillis = BURST_REFLOW_DURATION_MS,
+                    easing = FastOutSlowInEasing
                 )
-            } else {
-                snap<IntOffset>()
+                exportReflowActive -> tween<IntOffset>(
+                    durationMillis = 280,
+                    easing = FastOutSlowInEasing
+                )
+                else -> null
             }
             // 分组头整行跨列，保持与列表模式一致的分组语义
             item(
@@ -1986,9 +1799,11 @@ private fun ThumbnailGrid(
                 contentType = "header"
             ) {
                 Column(
-                    // placement 节点始终保留，避免连拍展开前临时挂载节点导致所有
-                    // 已有缩略图重建绘制层、出现一次整体缩放弹跳。空闲时用 snap 零开销。
-                    modifier = Modifier.animateItemPlacement(animationSpec = placementSpec)
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = null,
+                        placementSpec = placementSpec,
+                        fadeOutSpec = null
+                    )
                 ) {
                     Spacer(modifier = Modifier.height(4.dp))
                     GroupHeader(
@@ -2043,27 +1858,33 @@ private fun ThumbnailGrid(
                     contentType = { _, _ -> "thumbnail_grid_cell" }
                 ) { index, item ->
                     // 照片与合集必须由完全相同的外层节点拥有尺寸和 placement 动画。
-                    // 若动画 modifier 分别挂在 Box 与 BoxWithConstraints 上，即使规格相同，
-                    // 两棵测量/图层链也可能在 LazyGrid 重新放置时错开一帧。
-                    val transitionModifier = when (item) {
-                        is ThumbnailGridItem.Photo -> when {
-                            item.burstId != null &&
-                                item.burstId == collapsingBurst?.id ->
-                                Modifier.graphicsLayer {
-                                    alpha = burstCollapseProgress.value
-                                }
-                            item.file.handle in expandingBurstEnteringHandles ->
-                                Modifier.graphicsLayer {
-                                    // 每批新成员各自淡入，不缩放；不会牵连存量照片。
-                                    alpha = burstExpandProgress.value
-                                }
-                            else -> Modifier
-                        }
-                        is ThumbnailGridItem.BurstCollection -> Modifier
-                    }
+                    // 只有本次操作合集的成员允许淡入/淡出。其他已展开合集即使被重排，
+                    // 也只使用与普通照片相同的 placement，不能重新触发透明度动画。
+                    val animateBurstMemberAppearance =
+                        burstReflowActive &&
+                            item is ThumbnailGridItem.Photo &&
+                            item.burstId == activeBurstReflowId
                     Box(
                         modifier = Modifier
-                            .animateItemPlacement(animationSpec = placementSpec)
+                            .animateItem(
+                                fadeInSpec = if (animateBurstMemberAppearance) {
+                                    tween(
+                                        BURST_MEMBER_ENTER_DURATION_MS,
+                                        easing = FastOutSlowInEasing
+                                    )
+                                } else {
+                                    null
+                                },
+                                placementSpec = placementSpec,
+                                fadeOutSpec = if (animateBurstMemberAppearance) {
+                                    tween(
+                                        BURST_MEMBER_EXIT_DURATION_MS,
+                                        easing = FastOutSlowInEasing
+                                    )
+                                } else {
+                                    null
+                                }
+                            )
                             .then(
                                 if (collapsingThis) {
                                     Modifier.collapseHeight { collapseProgress.value }
@@ -2071,14 +1892,12 @@ private fun ThumbnailGrid(
                                     Modifier
                                 }
                             )
-                            .then(transitionModifier)
                             .padding(bottom = 6.dp)
                             .aspectRatio(1f)
                     ) {
                         when (item) {
                             is ThumbnailGridItem.BurstCollection -> {
-                                val expanded = expandedBursts[item.id] == true &&
-                                    collapsingBurst?.id != item.id
+                                val expanded = expandedBursts[item.id] == true
                                 BurstCollectionCell(
                                     files = item.files,
                                     expanded = expanded,
@@ -2446,7 +2265,7 @@ private fun ThumbnailCell(
                 if (inExpandedBurstCollection) {
                     Modifier.border(
                         width = 1.dp,
-                        color = BurstBadgeColor.copy(alpha = 0.68f),
+                        color = BurstMemberBorderColor,
                         shape = thumbnailShape
                     )
                 } else {
@@ -3037,6 +2856,7 @@ private const val MAX_PACK_GHOSTS = 8
 // 实色 0.85 底上配白色内容,深浅主题通用(与金徽标同为"单值双主题"的少数例外)。
 // internal:预览大图的左上角连拍角标(PhotoPreview)与此同色。
 internal val BurstBadgeColor = Color(0xFF26A69A)
+private val BurstMemberBorderColor = Color(0xFF4DB6AC).copy(alpha = 0.92f)
 
 // 保护角标底色(琥珀黄):机内选片/保护标记,黄底配深色钥匙如一枚金钥匙,
 // 与彩色分类角贴分层。单值双主题(深浅通用)。
