@@ -156,7 +156,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 transferDirUri = dir,
                 thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4),
-                collapseBurstPhotos = prefs.getBoolean("collapse_burst_photos", false),
+                collapseBurstPhotos = prefs.getBoolean("collapse_burst_photos", true),
                 hapticsEnabled = prefs.getBoolean("haptics_enabled", true),
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
                 themeMode = prefs.getString("theme_mode", null)

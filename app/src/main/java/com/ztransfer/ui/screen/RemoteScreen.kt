@@ -1493,7 +1493,9 @@ private fun RemoteContent(
                 showFps = showFps,
                 fps = fps,
                 connected = connected,
-                modifier = Modifier.fillMaxWidth().aspectRatio(3f / 2f)
+                modifier = Modifier.fillMaxWidth().aspectRatio(
+                    frame?.let { it.image.width.toFloat() / it.image.height.toFloat() } ?: (3f / 2f)
+                )
             )
             Spacer(Modifier.height(8.dp))
             Row(
@@ -1620,8 +1622,9 @@ private fun RemoteContent(
                     val toolGap = 8.dp
                     val availableViewfinderWidth =
                         (maxWidth - toolRailWidth - toolGap).coerceAtLeast(0.dp)
-                    val viewfinderWidth = minOf(availableViewfinderWidth, maxHeight * 1.5f)
-                    val viewfinderHeight = viewfinderWidth / 1.5f
+                    val viewfinderAspectRatio = frame?.let { it.image.width.toFloat() / it.image.height.toFloat() } ?: 1.5f
+                    val viewfinderWidth = minOf(availableViewfinderWidth, maxHeight * viewfinderAspectRatio)
+                    val viewfinderHeight = viewfinderWidth / viewfinderAspectRatio
                     Row(
                         modifier = Modifier
                             .width(viewfinderWidth + toolGap + toolRailWidth)
