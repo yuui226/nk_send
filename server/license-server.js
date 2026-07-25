@@ -1398,10 +1398,33 @@ function send(res, status, obj) {
 
 // ---------------------------------------------------------------- App 检查更新 / 下载
 // 版本信息放 config.json 同目录的 app-latest.json,由 admin.ps1 远程管理,无需登录服务器
-// 或重启服务。App 真正开始下载时,服务端才向解析服务换取一次短期直链。原始分享链接
-// 同时作为灾备下发,仅在解析服务故障时让用户走浏览器。以后更换解析方无需再升级 App。
+// 或重启服务。新版本只允许发布到自有 OSS 的永久公网地址，服务端直接原样下发，不再解析。
+// resolveLanzou 仅为已经发布的旧记录保留兼容，等所有用户跨过旧版本后可以彻底删除。
 const APP_LATEST_PATH = path.join(path.dirname(CONFIG_PATH), 'app-latest.json');
 const LANZOU_PARSER_URL = String(cfg.lanzouParserUrl || 'https://lz.qaiu.top/json/parser');
+const OSS_UPDATE_HOST = String(cfg.ossUpdateHost || 'ztransfer.oss-cn-beijing.aliyuncs.com').toLowerCase();
+// 紧急下载灾备：蓝奏云临时域名在部分用户网络中被解析到 127.0.0.1。
+// 仅覆盖明确列出的发布版本；发布下一 versionCode 后自动回落到常规解析流程，
+// 避免把旧 APK 误发给新版本。APK 内容仍由 App 按大小、SHA-256、包名、版本和签名校验。
+const APP_DOWNLOAD_OVERRIDES = new Map([
+    [14, 'https://ztransfer.oss-cn-beijing.aliyuncs.com/Z%E4%BC%A01.45.bin'],
+]);
+
+function isOssReleaseUrl(value) {
+    try {
+        const url = new URL(String(value || ''));
+        return url.protocol === 'https:' &&
+            url.hostname.toLowerCase() === OSS_UPDATE_HOST &&
+            !url.username &&
+            !url.password &&
+            !url.search &&
+            !url.hash &&
+            url.pathname.startsWith('/releases/') &&
+            url.pathname.toLowerCase().endsWith('.bin');
+    } catch {
+        return false;
+    }
+}
 
 function normalizeRelease(j) {
     if (!j || !Number.isInteger(j.versionCode) || j.versionCode <= 0 || !j.url) {
@@ -1496,7 +1519,7 @@ function apiAppLatest(params) {
         sha256: j.sha256,
         sizeBytes: j.sizeBytes,
         publishedAt: j.publishedAt,
-        // 既兼容旧 App,也是新版在解析服务故障时的浏览器灾备入口。
+        // OSS 发布时这里就是永久公网直链；旧记录仍保留原分享页以兼容旧 App。
         url: j.url,
         password: j.password,
     };
@@ -1553,6 +1576,14 @@ async function resolveLanzou(release) {
     return { url: direct.toString() };
 }
 
+async function resolveReleaseDownload(release) {
+    if (isOssReleaseUrl(release.url)) {
+        return { url: release.url, source: 'OSS' };
+    }
+    const direct = await resolveLanzou(release);
+    return { ...direct, source: 'LANZOU_LEGACY' };
+}
+
 async function apiAppDownload(body) {
     const release = releaseInfo();
     if (!release) return { ok: false, err: 'NO_VERSION_INFO' };
@@ -1561,9 +1592,18 @@ async function apiAppDownload(body) {
         // 防止本接口被当成任意蓝奏云解析代理,同时避免用旧弹窗下载已经撤回的包。
         return { ok: false, err: 'VERSION_CHANGED', latestVersionCode: release.versionCode };
     }
+    const overrideUrl = APP_DOWNLOAD_OVERRIDES.get(release.versionCode);
+    if (overrideUrl) {
+        log(`APP_DOWNLOAD_OVERRIDE version=${release.versionCode}`);
+        return {
+            ok: true,
+            versionCode: release.versionCode,
+            url: overrideUrl,
+        };
+    }
     try {
-        const direct = await resolveLanzou(release);
-        log(`APP_DOWNLOAD_RESOLVED version=${release.versionCode}`);
+        const direct = await resolveReleaseDownload(release);
+        log(`APP_DOWNLOAD_RESOLVED version=${release.versionCode} source=${direct.source}`);
         return {
             ok: true,
             versionCode: release.versionCode,
@@ -1616,7 +1656,7 @@ async function adminValidateUpdate(body) {
             release = releaseInfo();
         }
         if (!release) return { ok: false, err: 'NO_VERSION_INFO' };
-        const direct = await resolveLanzou(release);
+        const direct = await resolveReleaseDownload(release);
         return { ok: true, versionCode: release.versionCode || 0, ...direct };
     } catch (e) {
         return { ok: false, err: 'UPDATE_VALIDATION_FAILED', detail: e.message };
@@ -1631,7 +1671,7 @@ async function adminDownloadUpdateApk(res, body) {
         const shareUrl = new URL(String(body.url));
         if (shareUrl.protocol !== 'https:') throw new Error('url 必须是 HTTPS');
         const release = { url: shareUrl.toString(), password: String(body.password || '') };
-        const direct = await resolveLanzou(release);
+        const direct = await resolveReleaseDownload(release);
         const response = await fetch(direct.url, {
             redirect: 'follow',
             signal: AbortSignal.timeout(300_000),
@@ -1667,6 +1707,13 @@ async function adminDownloadUpdateApk(res, body) {
 function adminPublishUpdate(body) {
     try {
         const next = normalizeRelease(body);
+        if (!isOssReleaseUrl(next.url)) {
+            return {
+                ok: false,
+                err: 'OSS_URL_REQUIRED',
+                detail: `url 必须是 https://${OSS_UPDATE_HOST}/releases/*.bin 的无参数永久地址`,
+            };
+        }
         const current = releaseInfo();
         if (current && next.versionCode <= current.versionCode) {
             return { ok: false, err: 'VERSION_NOT_NEWER' };
@@ -1839,6 +1886,8 @@ module.exports = {
         apiOrderCreate,
         apiOrderStatus,
         apiPayNotify,
+        isOssReleaseUrl,
+        resolveReleaseDownload,
         confirmPaid,
         reserveOrder,
         xhHash,

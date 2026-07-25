@@ -59,15 +59,29 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem Build-completion time stamp HHMM, e.g. 0929 = finished at 09:29.
-rem %TIME% may be " 9:29:.." (leading space for single-digit hour); pad it to 0.
-set "HH=%TIME:~0,2%"
-set "MM=%TIME:~3,2%"
-set "HH=%HH: =0%"
-set "STAMP=%HH%%MM%"
+rem Read versionName from app\build.gradle.kts, e.g. versionName = "1.46".
+set "VERSION_NAME="
+for /f "tokens=3" %%V in ('findstr /r /c:"^[ ]*versionName = " "app\build.gradle.kts"') do set "VERSION_NAME=%%~V"
+if not defined VERSION_NAME (
+    echo.
+    echo ERROR: versionName not found in app\build.gradle.kts
+    pause
+    exit /b 1
+)
 
-rem Copy the artifact into the script's own folder (dist\), named with the stamp.
-set "DST=%~dp0ztransfer_%STAMP%.%EXT%"
+rem Build-completion timestamp: two-digit year + month/day/hour/minute.
+rem Example: 2026-07-25 13:20 becomes 2607251320.
+for /f %%T in ('powershell.exe -NoProfile -Command "Get-Date -Format yyMMddHHmm"') do set "STAMP=%%T"
+if not defined STAMP (
+    echo.
+    echo ERROR: failed to generate build timestamp
+    pause
+    exit /b 1
+)
+
+rem Example: ZTransfer-1.46-2607251320.apk
+set "BASENAME=ZTransfer-%VERSION_NAME%-%STAMP%"
+set "DST=%~dp0%BASENAME%.%EXT%"
 
 if not exist "%SRC%" (
     echo.
@@ -84,7 +98,7 @@ rem R8 mapping file: required to de-obfuscate crash stack traces from this
 rem exact build. Keep it local (do NOT distribute it with the app).
 set "MAPPING=app\build\outputs\mapping\release\mapping.txt"
 if exist "%MAPPING%" (
-    copy /Y "%MAPPING%" "%~dp0ztransfer_%STAMP%.mapping.txt" >nul
-    echo Mapping copied to:  %~dp0ztransfer_%STAMP%.mapping.txt
+    copy /Y "%MAPPING%" "%~dp0%BASENAME%.mapping.txt" >nul
+    echo Mapping copied to:  %~dp0%BASENAME%.mapping.txt
 )
 pause

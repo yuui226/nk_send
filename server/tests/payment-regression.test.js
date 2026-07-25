@@ -91,6 +91,30 @@ function queryResponse(order, status = 'WP', overrides = {}) {
     };
 }
 
+test('OSS 更新地址只接受固定 Bucket 下的永久 bin 对象', () => {
+    assert.equal(
+        api.isOssReleaseUrl('https://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a1b2c3d4e5f6.bin'),
+        true,
+    );
+    for (const url of [
+        'http://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a.bin',
+        'https://other.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a.bin',
+        'https://ztransfer.oss-cn-beijing.aliyuncs.com/ZTransfer-v15-a.bin',
+        'https://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a.apk',
+        'https://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a.bin?Expires=123',
+    ]) {
+        assert.equal(api.isOssReleaseUrl(url), false, url);
+    }
+});
+
+test('OSS 更新地址直接下发，不调用蓝奏云解析', async () => {
+    const url = 'https://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a1b2c3d4e5f6.bin';
+    assert.deepEqual(
+        await api.resolveReleaseDownload({ url, password: '' }),
+        { url, source: 'OSS' },
+    );
+});
+
 function installUpstream(statusByOrder = new Map()) {
     let createCalls = 0;
     let queryCalls = 0;

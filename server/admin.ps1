@@ -28,6 +28,13 @@ $ErrorActionPreference = 'Stop'
 $Server = if ($env:ZT_SERVER) { $env:ZT_SERVER } else { "https://106.15.239.203:8443" }
 $TokenFile = Join-Path $PSScriptRoot "admin-token.txt"
 $MaxPriceFen = 10000000
+$OssBucket = if ($env:ZT_OSS_BUCKET) { $env:ZT_OSS_BUCKET } else { "ztransfer" }
+$OssRegion = if ($env:ZT_OSS_REGION) { $env:ZT_OSS_REGION } else { "cn-beijing" }
+$OssEndpoint = if ($env:ZT_OSS_ENDPOINT) { $env:ZT_OSS_ENDPOINT } else { "https://oss-cn-beijing.aliyuncs.com" }
+$OssUtilBundled = Join-Path (Split-Path $PSScriptRoot -Parent) "tools\ossutil\2.3.0\ossutil-2.3.0-windows-amd64\ossutil.exe"
+$OssSetupDoc = Join-Path $PSScriptRoot "OSS发布设置.md"
+$OssCredentialDir = Join-Path $env:LOCALAPPDATA "ZTransfer"
+$OssCredentialFile = Join-Path $OssCredentialDir "oss-upload-credential.json"
 
 # 与 Android App 的 CERT_PIN_B64 相同：curl -k 仅跳过自签名证书链/主机名校验，
 # --pinnedpubkey 仍会核对服务端 SPKI SHA-256，不能把管理员令牌交给冒充服务器的人。
@@ -544,8 +551,7 @@ function Show-UpdateInfo($release) {
     Write-Host ""
     Write-Host ("当前发布: {0} (versionCode {1})" -f $release.versionName, $release.versionCode) -ForegroundColor Cyan
     Write-Host ("更新策略: {0}" -f $mode)
-    Write-Host ("蓝奏云:   {0}" -f $release.url)
-    Write-Host ("提取码:   {0}" -f $(if ($release.password) { $release.password } else { "(无)" }))
+    Write-Host ("下载地址: {0}" -f $release.url)
     Write-Host ("文件大小: {0:N2} MiB" -f ($release.sizeBytes / 1MB))
     Write-Host ("SHA-256:  {0}" -f $(if ($release.sha256) { $release.sha256 } else { "(旧版本未记录)" }))
     Write-Host ("发布时间: {0}" -f $(Format-Time $release.publishedAt))
@@ -588,16 +594,6 @@ function Invoke-UpdateStats {
     }
     Write-Host ""
     $table | Format-Table -AutoSize
-}
-
-function Invoke-UpdateValidate {
-    $release = Get-UpdateInfo
-    if (-not $release) { return }
-    Write-Host "正在通过解析服务验证当前蓝奏云分享链接..." -ForegroundColor DarkGray
-    $resp = Call "POST" "/admin/update/validate" @{}
-    if ($resp -and $resp.ok) {
-        Write-Host "链接有效" -ForegroundColor Green
-    } else { Show-Error $resp }
 }
 
 function Find-AndroidTool($fileNames, $relativePatterns) {
@@ -646,99 +642,249 @@ function Read-ApkVersionInfo($apkPath) {
     return $null
 }
 
-function Download-ApkThroughServer($shareUrl, $password, $targetPath) {
-    $bodyPath = [IO.Path]::GetTempFileName()
+function Get-OssUtilPath {
+    if (Test-Path -LiteralPath $OssUtilBundled) { return $OssUtilBundled }
+    $cmd = Get-Command "ossutil.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $cmd) { $cmd = Get-Command "ossutil" -ErrorAction SilentlyContinue | Select-Object -First 1 }
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+function Convert-SecureStringToPlainText($secureValue) {
+    $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureValue)
     try {
-        $json = @{ url = $shareUrl; password = $password } | ConvertTo-Json -Compress
-        [IO.File]::WriteAllText($bodyPath, $json, (New-Object System.Text.UTF8Encoding($false)))
-        $previousErrorAction = $ErrorActionPreference
-        try {
-            $ErrorActionPreference = "Continue"
-            & curl.exe -k -f -sS -L --max-time 300 `
-                -X POST `
-                -H "X-Admin-Token: $script:Token" `
-                -H "Content-Type: application/json" `
-                --data-binary "@$bodyPath" `
-                -o $targetPath `
-                -- "$Server/admin/update/apk" 2>&1 | Out-Null
-            $curlExit = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $previousErrorAction
-        }
-        return ($curlExit -eq 0 -and (Test-Path -LiteralPath $targetPath))
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
     } finally {
-        Remove-Item -LiteralPath $bodyPath -Force -ErrorAction SilentlyContinue
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
     }
 }
 
-function Save-DirectApkMetadata($directUrl, $shareUrl, $password) {
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ztransfer-update-{0}.apk" -f [guid]::NewGuid().ToString("N"))
+function Get-OssCredentials {
+    if (-not (Test-Path -LiteralPath $OssCredentialFile -PathType Leaf)) { return $null }
     try {
-        Write-Host "正在下载一次 APK 以计算大小和 SHA-256..." -ForegroundColor DarkGray
+        $saved = Get-Content -LiteralPath $OssCredentialFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $accessKeyId = ([string]$saved.accessKeyId).Trim()
+        $secureSecret = ConvertTo-SecureString ([string]$saved.encryptedAccessKeySecret)
+        $accessKeySecret = Convert-SecureStringToPlainText $secureSecret
+        if (-not $accessKeyId -or -not $accessKeySecret) { return $null }
+        return @{
+            AccessKeyId = $accessKeyId
+            AccessKeySecret = $accessKeySecret
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Invoke-OssUtilAuthenticated($ossutil, $commandArgs) {
+    $credential = Get-OssCredentials
+    if (-not $credential) { return 97 }
+    $previousAccessKeyId = $env:OSS_ACCESS_KEY_ID
+    $previousAccessKeySecret = $env:OSS_ACCESS_KEY_SECRET
+    try {
+        $env:OSS_ACCESS_KEY_ID = $credential.AccessKeyId
+        $env:OSS_ACCESS_KEY_SECRET = $credential.AccessKeySecret
+        & $ossutil @commandArgs | Out-Host
+        return $LASTEXITCODE
+    } finally {
+        if ($null -eq $previousAccessKeyId) { Remove-Item Env:OSS_ACCESS_KEY_ID -ErrorAction SilentlyContinue }
+        else { $env:OSS_ACCESS_KEY_ID = $previousAccessKeyId }
+        if ($null -eq $previousAccessKeySecret) { Remove-Item Env:OSS_ACCESS_KEY_SECRET -ErrorAction SilentlyContinue }
+        else { $env:OSS_ACCESS_KEY_SECRET = $previousAccessKeySecret }
+    }
+}
+
+function Invoke-OssSetup {
+    $ossutil = Get-OssUtilPath
+    if (-not $ossutil) {
+        Write-Host "项目内未找到 ossutil.exe，请重新下载项目工具包。" -ForegroundColor Red
+        return $false
+    }
+    Write-Host ""
+    Write-Host "OSS 上传配置（只需一次）" -ForegroundColor Cyan
+    Write-Host ("控制台设置说明: {0}" -f $OssSetupDoc) -ForegroundColor DarkGray
+    Write-Host "只需输入下面两项，其余设置全部自动完成。" -ForegroundColor Yellow
+    $accessKeyId = (Read-Host "AccessKey ID").Trim()
+    if (-not $accessKeyId) {
+        Write-Host "AccessKey ID 不能为空。" -ForegroundColor Red
+        return $false
+    }
+    $plainSecret = (Read-Host "AccessKey Secret").Trim()
+    if (-not $plainSecret) {
+        Write-Host "AccessKey Secret 不能为空。" -ForegroundColor Red
+        return $false
+    }
+    # 从网页或 CSV 复制时常会带首尾空白；统一清理后再交给 OSS 签名。
+    $secureSecret = ConvertTo-SecureString $plainSecret -AsPlainText -Force
+    New-Item -ItemType Directory -Path $OssCredentialDir -Force | Out-Null
+    $saved = @{
+        version = 1
+        accessKeyId = $accessKeyId
+        encryptedAccessKeySecret = ConvertFrom-SecureString $secureSecret
+    } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($OssCredentialFile, $saved, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "凭证已由 Windows 当前账号加密保存，不会写入项目。" -ForegroundColor DarkGray
+    Write-Host "正在测试 releases/ 目录访问权限..." -ForegroundColor DarkGray
+    $testArgs = @(
+        "ls", "oss://$OssBucket/releases/",
+        "--limited-num", "1",
+        "--region", $OssRegion,
+        "--endpoint", $OssEndpoint
+    )
+    if ((Invoke-OssUtilAuthenticated $ossutil $testArgs) -ne 0) {
+        Write-Host "OSS 测试失败。" -ForegroundColor Red
+        Write-Host "若上方是 SignatureDoesNotMatch：AccessKey ID 与 Secret 不配对，请重新复制同一条密钥。" -ForegroundColor Yellow
+        Write-Host "若上方是 AccessDenied：密钥正确，但还没有给 RAM 用户添加 OSS 权限。" -ForegroundColor Yellow
+        return $false
+    }
+    Write-Host "OSS 配置有效。" -ForegroundColor Green
+    return $true
+}
+
+function Select-ApkFile {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $dialog = New-Object System.Windows.Forms.OpenFileDialog
+        try {
+            $dialog.Title = "选择要发布的 ZTransfer APK"
+            $dialog.Filter = "Android 安装包 (*.apk)|*.apk|所有文件 (*.*)|*.*"
+            $dialog.CheckFileExists = $true
+            $dialog.Multiselect = $false
+            if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                return $dialog.FileName
+            }
+            return $null
+        } finally {
+            $dialog.Dispose()
+        }
+    } catch {
+        $path = (Read-Host "请输入 APK 完整路径（可把文件拖到窗口）").Trim().Trim('"')
+        if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            return (Resolve-Path -LiteralPath $path).Path
+        }
+        return $null
+    }
+}
+
+function Read-LocalApkMetadata($apkPath) {
+    $file = Get-Item -LiteralPath $apkPath
+    if ($file.Length -le 0) { return $null }
+    $version = Read-ApkVersionInfo $apkPath
+    if (-not $version) {
+        Write-Host "无法读取 APK 版本信息。请确认 Android SDK Build Tools 已安装。" -ForegroundColor Red
+        return $null
+    }
+    if ($version.PackageName -ne "com.ztransfer") {
+        Write-Host ("包名不正确: {0}；期望 com.ztransfer。未发布。" -f $version.PackageName) -ForegroundColor Red
+        return $null
+    }
+    return @{
+        SizeBytes = [long]$file.Length
+        Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $apkPath).Hash.ToLowerInvariant()
+        VersionCode = [int]$version.VersionCode
+        VersionName = [string]$version.VersionName
+        PackageName = [string]$version.PackageName
+    }
+}
+
+function New-OssReleaseTarget($meta) {
+    if ($OssBucket -notmatch '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$') {
+        throw "ZT_OSS_BUCKET 格式无效"
+    }
+    $endpointUri = [uri]$OssEndpoint
+    if ($endpointUri.Scheme -ne "https" -or -not $endpointUri.Host) {
+        throw "ZT_OSS_ENDPOINT 必须是 HTTPS 地址"
+    }
+    $hashPrefix = $meta.Sha256.Substring(0, 12)
+    $objectKey = "releases/ZTransfer-v{0}-{1}.bin" -f $meta.VersionCode, $hashPrefix
+    $escapedKey = (($objectKey -split "/") | ForEach-Object { [uri]::EscapeDataString($_) }) -join "/"
+    return @{
+        ObjectKey = $objectKey
+        OssUri = "oss://$OssBucket/$objectKey"
+        PublicUrl = "https://$OssBucket.$($endpointUri.Host)/$escapedKey"
+    }
+}
+
+function Upload-ApkToOss($apkPath, $meta, $target) {
+    $ossutil = Get-OssUtilPath
+    if (-not $ossutil) {
+        Write-Host "项目内未找到 ossutil.exe，请重新下载项目工具包。" -ForegroundColor Red
+        return $false
+    }
+    if (-not (Get-OssCredentials)) {
+        Write-Host "尚未配置 OSS 上传凭证。" -ForegroundColor Yellow
+        $configure = (Read-Host "现在配置？输入 y").Trim().ToLowerInvariant()
+        if ($configure -ne "y" -or -not (Invoke-OssSetup)) { return $false }
+    }
+
+    Write-Host ("正在上传到 {0}..." -f $target.OssUri) -ForegroundColor DarkGray
+    $uploadArgs = @(
+        "cp", $apkPath, $target.OssUri,
+        "--region", $OssRegion,
+        "--endpoint", $OssEndpoint,
+        "--acl", "public-read",
+        "--content-type", "application/octet-stream",
+        "--cache-control", "public, max-age=31536000, immutable",
+        "--metadata", "sha256=$($meta.Sha256)",
+        "--force",
+        "--no-progress"
+    )
+    if ((Invoke-OssUtilAuthenticated $ossutil $uploadArgs) -ne 0) {
+        Write-Host "OSS 上传失败；尚未发布版本信息。" -ForegroundColor Red
+        return $false
+    }
+    Write-Host "OSS 上传完成。" -ForegroundColor Green
+    return $true
+}
+
+function Test-PublicOssApk($url, $expectedMeta) {
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ztransfer-oss-verify-{0}.apk" -f [guid]::NewGuid().ToString("N"))
+    try {
+        Write-Host "正在从公网完整下载一次并校验大小、SHA-256、包名和版本..." -ForegroundColor DarkGray
         $previousErrorAction = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
-            & curl.exe -f -sS -L --max-time 300 -o $tmp -- $directUrl 2>&1 | Out-Null
+            & curl.exe -f -sS -L --max-time 300 -o $tmp -- $url
             $curlExit = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousErrorAction
         }
         if ($curlExit -ne 0 -or -not (Test-Path -LiteralPath $tmp)) {
-            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-            Write-Host "本机下载失败，正在通过服务器下载..." -ForegroundColor DarkGray
-            if (-not (Download-ApkThroughServer $shareUrl $password $tmp)) { return $null }
+            Write-Host "OSS 公网地址不能下载；未发布。" -ForegroundColor Red
+            return $false
         }
-        $file = Get-Item $tmp
-        if ($file.Length -le 0) { return $null }
-        $version = Read-ApkVersionInfo $tmp
-        if (-not $version) {
-            Write-Host "无法从 APK 读取版本信息。请先安装 Android SDK Build Tools；未发布。" -ForegroundColor Red
-            return $null
+        $actual = Read-LocalApkMetadata $tmp
+        if (-not $actual) { return $false }
+        if ($actual.SizeBytes -ne [long]$expectedMeta.SizeBytes -or
+            $actual.Sha256 -ne [string]$expectedMeta.Sha256 -or
+            $actual.VersionCode -ne [int]$expectedMeta.VersionCode -or
+            $actual.VersionName -ne [string]$expectedMeta.VersionName) {
+            Write-Host "OSS 下载内容与本地 APK 不一致；未发布。" -ForegroundColor Red
+            return $false
         }
-        if ($version.PackageName -ne "com.ztransfer") {
-            Write-Host ("包名不正确: {0}；期望 com.ztransfer。未发布。" -f $version.PackageName) -ForegroundColor Red
-            return $null
-        }
-        return @{
-            SizeBytes = [long]$file.Length
-            Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant()
-            VersionCode = [int]$version.VersionCode
-            VersionName = [string]$version.VersionName
-            PackageName = [string]$version.PackageName
-        }
+        Write-Host "公网下载校验通过。" -ForegroundColor Green
+        return $true
     } finally {
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
     }
 }
 
-function Parse-LanzouShareText($text) {
-    if (-not $text) { return $null }
-    $urlMatch = [regex]::Match([string]$text, 'https://[^\s，。；;）)\]】]+', 'IgnoreCase')
-    if (-not $urlMatch.Success) { return $null }
-    $passwordMatch = [regex]::Match(
-        [string]$text,
-        '(?:密码|提取码|访问密码)\s*[:：]?\s*([A-Za-z0-9]+)',
-        'IgnoreCase'
-    )
-    return @{
-        Url = $urlMatch.Value
-        Password = if ($passwordMatch.Success) { $passwordMatch.Groups[1].Value } else { "" }
+function Invoke-UpdateValidate {
+    $release = Get-UpdateInfo
+    if (-not $release) { return }
+    $expectedPrefix = "https://$OssBucket.$(([uri]$OssEndpoint).Host)/"
+    if (-not ([string]$release.url).StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Host "当前发布仍是旧下载源；下一次发布将自动切换到 OSS。" -ForegroundColor Yellow
+        return
     }
-}
-
-function Get-LanzouShareFromClipboard {
-    while ($true) {
-        $text = try { Get-Clipboard -Raw -Format Text } catch { $null }
-        $share = Parse-LanzouShareText $text
-        if ($share) {
-            Write-Host ""
-            Write-Host ("已识别: {0}" -f $share.Url) -ForegroundColor Cyan
-            Write-Host ("提取码: {0}" -f $(if ($share.Password) { $share.Password } else { "(无)" }))
-            return $share
-        } else {
-            $pick = (Read-Host "请复制蓝奏云分享文本后回车；输入 0 取消").Trim()
-            if ($pick -eq "0") { return $null }
-        }
+    $expected = @{
+        SizeBytes = [long]$release.sizeBytes
+        Sha256 = [string]$release.sha256
+        VersionCode = [int]$release.versionCode
+        VersionName = [string]$release.versionName
+    }
+    if (Test-PublicOssApk $release.url $expected) {
+        Write-Host "当前 OSS 下载地址有效。" -ForegroundColor Green
     }
 }
 
@@ -746,17 +892,11 @@ function Invoke-UpdatePublish {
     $current = Get-UpdateInfo
     if ($current) { Show-UpdateInfo $current }
 
-    $share = Get-LanzouShareFromClipboard
-    if (-not $share) { Write-Host "已取消"; return }
-    $shareUrl = $share.Url
-    $password = $share.Password
-    $notes = Read-Host "更新说明(可留空)"
-
-    Write-Host "正在解析并验证分享链接..." -ForegroundColor DarkGray
-    $valid = Call "POST" "/admin/update/validate" @{ url = $shareUrl; password = $password }
-    if (-not $valid -or -not $valid.ok) { Show-Error $valid; return }
-    $meta = Save-DirectApkMetadata $valid.url $shareUrl $password
-    if (-not $meta) { Write-Host "APK 下载或版本读取失败；未发布。" -ForegroundColor Red; return }
+    $apkPath = Select-ApkFile
+    if (-not $apkPath) { Write-Host "已取消"; return }
+    Write-Host "正在读取本地 APK..." -ForegroundColor DarkGray
+    $meta = Read-LocalApkMetadata $apkPath
+    if (-not $meta) { return }
     $versionCode = [int]$meta.VersionCode
     $versionName = [string]$meta.VersionName
     if ($current -and $versionCode -le [int]$current.versionCode) {
@@ -764,7 +904,9 @@ function Invoke-UpdatePublish {
         return
     }
 
-    Write-Host ("已从 APK 读取版本: {0} (versionCode {1})" -f $versionName, $versionCode) -ForegroundColor Green
+    $target = New-OssReleaseTarget $meta
+    Write-Host ("已读取版本: {0} (versionCode {1})" -f $versionName, $versionCode) -ForegroundColor Green
+    $notes = Read-Host "更新说明(可留空)"
     Write-Host ""
     Write-Host "更新策略:" -ForegroundColor Cyan
     Write-Host "  [1] 软更新：用户可以稍后或忽略(推荐)"
@@ -772,28 +914,35 @@ function Invoke-UpdatePublish {
     $policy = (Read-Host "选择(回车 = 1)").Trim()
     $minSupported = if ($policy -eq "2") { $versionCode } else { 1 }
 
+    Write-Host ""
+    Write-Host ("待发布: {0} (versionCode {1}), {2:N2} MiB" -f $versionName, $versionCode, ($meta.SizeBytes / 1MB)) -ForegroundColor Cyan
+    Write-Host ("策略: {0}" -f $(if ($minSupported -eq $versionCode) { "硬更新" } else { "软更新" }))
+    Write-Host ("OSS 地址: {0}" -f $target.PublicUrl)
+    Write-Host ("SHA-256: {0}" -f $meta.Sha256) -ForegroundColor DarkGray
+    $confirm = (Read-Host "确认上传并发布？输入 y").Trim().ToLowerInvariant()
+    if ($confirm -ne "y") { Write-Host "已取消"; return }
+
+    if (-not (Upload-ApkToOss $apkPath $meta $target)) { return }
+    if (-not (Test-PublicOssApk $target.PublicUrl $meta)) { return }
     $draft = @{
         versionCode = $versionCode
         versionName = $versionName
         minSupportedVersionCode = $minSupported
-        url = $shareUrl
-        password = $password
+        url = $target.PublicUrl
+        password = ""
         notes = $notes
         sha256 = $meta.Sha256
         sizeBytes = $meta.SizeBytes
         publishedAt = ""
     }
-
-    Write-Host ""
-    Write-Host ("待发布: {0} (versionCode {1}), {2:N2} MiB" -f $versionName, $versionCode, ($meta.SizeBytes / 1MB)) -ForegroundColor Cyan
-    Write-Host ("策略: {0}" -f $(if ($minSupported -eq $versionCode) { "硬更新" } else { "软更新" }))
-    Write-Host ("SHA-256: {0}" -f $meta.Sha256) -ForegroundColor DarkGray
-    $confirm = Read-Host "确认发布?输入 y"
-    if ($confirm -ne "y") { Write-Host "已取消"; return }
     $resp = Call "POST" "/admin/update/publish" $draft
     if ($resp -and $resp.ok) {
-        Write-Host "发布成功，App 下次检查更新时生效；无需重启服务。" -ForegroundColor Green
-    } else { Show-Error $resp }
+        Write-Host "发布成功，App 将直接从 OSS 下载；无需重启服务。" -ForegroundColor Green
+        Write-Host ("公网下载链接: {0}" -f $target.PublicUrl) -ForegroundColor Cyan
+    } else {
+        Show-Error $resp
+        Write-Host ("APK 已上传但版本信息未发布，可保留或稍后在 OSS 删除: {0}" -f $target.OssUri) -ForegroundColor Yellow
+    }
 }
 
 function Invoke-UpdatePolicy {
@@ -819,20 +968,22 @@ function Invoke-UpdateMenu {
         Write-Host ""
         Write-Host "=============== App 更新管理 ===============" -ForegroundColor Cyan
         Write-Host "  [1] 查看当前发布"
-        Write-Host "  [2] 验证当前蓝奏云链接"
+        Write-Host "  [2] 配置 / 测试 OSS 上传"
         Write-Host "  [3] 发布新版本"
-        Write-Host "  [4] 修改软/硬更新策略"
-        Write-Host "  [5] 查看更新统计"
+        Write-Host "  [4] 验证当前 OSS 下载"
+        Write-Host "  [5] 修改软/硬更新策略"
+        Write-Host "  [6] 查看更新统计"
         Write-Host "  [0] 返回"
         $choice = Read-Host "选择"
         switch ($choice.Trim()) {
             "1" { Invoke-UpdateStatus }
-            "2" { Invoke-UpdateValidate }
+            "2" { [void](Invoke-OssSetup) }
             "3" { Invoke-UpdatePublish }
-            "4" { Invoke-UpdatePolicy }
-            "5" { Invoke-UpdateStats }
+            "4" { Invoke-UpdateValidate }
+            "5" { Invoke-UpdatePolicy }
+            "6" { Invoke-UpdateStats }
             "0" { return }
-            default { Write-Host "输入 0-5" -ForegroundColor Yellow }
+            default { Write-Host "输入 0-6" -ForegroundColor Yellow }
         }
     }
 }

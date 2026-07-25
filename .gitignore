@@ -38,4 +38,5 @@ dist/*.mapping.txt
 env_build/
 
 # 本机 AI 工具权限配置
+tools/ossutil/
 .claude/settings.local.json
