@@ -71,8 +71,8 @@
 
 认证方式固定为 `AK`，凭证固定加密，不再询问。凭证由 Windows 当前账号加密后保存在
 `%LOCALAPPDATA%\ZTransfer\oss-upload-credential.json`，只有同一台电脑上的同一 Windows
-用户可以解密，不会写入项目。项目里的 `tools/ossutil/` 只保存阿里云官方命令行工具，
-并已被 Git 忽略。
+用户可以解密，不会写入项目。项目固定使用的 Windows `ossutil.exe` 已加入 Git，克隆项目
+后可直接运行；下载压缩包仍被忽略。换设备后只需重新录入 AccessKey。
 
 ## 4. 以后发布
 

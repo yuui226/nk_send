@@ -205,8 +205,18 @@ AccessKey Secret 由 Windows 当前账号加密：
 tools\ossutil\2.3.0\ossutil-2.3.0-windows-amd64\ossutil.exe
 ```
 
-`tools/ossutil/` 已被 Git 忽略。若项目内不存在该工具，也可以把 `ossutil.exe` 安装到
-系统 `PATH`。
+项目固定使用的 Windows `ossutil.exe` 已加入 Git，克隆完整项目后可以直接使用。下载时
+留下的 `ossutil.zip` 仍被忽略，不会重复占用仓库空间。若 EXE 遗失，也可以重新放回上面的
+固定路径，或者把 `ossutil.exe` 安装到系统 `PATH`。
+
+仓库内 OSSUtil 2.3.0 Windows AMD64 文件的 SHA-256 是：
+
+```text
+7BD88C9A26BA36712AD734D70844C248FBB572DCD2E66B7B0CF89472E9623E2B
+```
+
+新设备克隆后仍需在管理工具菜单 `[2]` 中输入自己的 AccessKey。Git 只保存发布程序，
+不会保存或同步 OSS 凭证。
 
 ## 5. 日常发布新版本
 
@@ -690,4 +700,3 @@ OSS/CDN 缓存把旧 APK 当成新 APK。
 | `app/src/main/java/com/ztransfer/update/AppUpdateManager.kt` | Android 下载、校验和安装逻辑 |
 | `dist/build.bat` | 正式 APK/AAB 打包和命名 |
 | `docs/App更新系统.md` | App 更新系统整体设计 |
-

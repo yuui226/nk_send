@@ -37,6 +37,8 @@ dist/*.mapping.txt
 .build-tools/
 env_build/
 
+# ossutil 发布程序随项目分发，下载压缩包仍只保留在本机
+tools/ossutil/**/*.zip
+
 # 本机 AI 工具权限配置
-tools/ossutil/
 .claude/settings.local.json
