@@ -515,8 +515,8 @@ private fun RemoteContent(
     var recording by remember { mutableStateOf(false) }
     var recBusy by remember { mutableStateOf(false) }
     var lastStopCmdAt by remember { mutableLongStateOf(0L) }
-    // Nikon Z 系远程开录前需要进入应用模式。USB 使用已验证的 0x9435 路径；
-    // 旧连接路径仍保留 D1F0 兼容入口。成功的入口分别记账，停录后成对恢复。
+    // Nikon Z 系远程开录前需要进入应用模式。USB 优先走已验证的 0x9435，
+    // 明确不支持时回退 D1F0；成功的入口分别记账，退出监看时成对恢复。
     var appModeClearBusy by remember { mutableStateOf(false) }
     var movieUsbSessionDiagnostic by remember { mutableStateOf<String?>(null) }
     suspend fun ensureApplicationMode(cam: NikonCamera) {

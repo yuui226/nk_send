@@ -738,13 +738,18 @@ internal data class RcMovieStartResult(
     val prohibitCondition: Long?,
     val prohibitExtendedResponse: Int? = null,
     val applicationModeResponse: Int? = null,
+    val applicationModePropertyResponse: Int? = null,
+    val startCommandResponse: Int? = responseCode,
 )
 
 internal fun RcMovieStartResult.diagnosticSummary(): String = buildString {
-    append("start=").append(hex4(responseCode))
+    append("result=").append(hex4(responseCode))
+    append(" startOp=")
+    append(startCommandResponse?.let(::hex4) ?: "not-sent")
     prohibitCondition?.let { append(" prohibit=").append(hex8(it)) }
     prohibitExtendedResponse?.let { append(" preEx=").append(hex4(it)) }
     applicationModeResponse?.let { append(" appOp=").append(hex4(it)) }
+    applicationModePropertyResponse?.let { append(" appProp=").append(hex4(it)) }
 }
 
 private const val MOVIE_PROHIBIT_NO_CARD = 1L shl 0
@@ -766,7 +771,13 @@ private const val MOVIE_PROHIBIT_RESTARTABLE_MASK =
     MOVIE_PROHIBIT_ENLARGED_LIVE_VIEW or MOVIE_PROHIBIT_NOT_APPLICATION_MODE
 
 internal fun movieProhibitIndicatesRecording(prohibitCondition: Long?): Boolean =
-    prohibitCondition?.and(MOVIE_PROHIBIT_ALREADY_RECORDING) != 0L
+    prohibitCondition?.let { it and MOVIE_PROHIBIT_ALREADY_RECORDING != 0L } == true
+
+internal fun movieProhibitRequiresApplicationMode(prohibitCondition: Long?): Boolean =
+    prohibitCondition?.let { it and MOVIE_PROHIBIT_NOT_APPLICATION_MODE != 0L } == true
+
+internal fun shouldFallbackToApplicationModeProperty(applicationModeResponse: Int): Boolean =
+    applicationModeResponse == PtpConstants.OPERATION_NOT_SUPPORTED
 
 /**
  * 开录失败后是否值得在已进入应用模式的前提下重建一次 Live View 再试。
@@ -826,51 +837,76 @@ internal suspend fun NikonCamera.rcPrepareAndStartMovieDetailed(
             return recvRespWithPayload()
         }
 
+        fun setProperty(prop: Int, raw: ByteArray): Int {
+            sendCmdWithData(Lab.SET_DEVICE_PROP_VALUE, raw, prop)
+            return recvRespWithPayload().first
+        }
+
+        fun readMovieProhibit(): Long? =
+            command(
+                Lab.GET_DEVICE_PROP_VALUE,
+                Lab.PROP_NK_MOV_PROHIBIT
+            ).let { (rc, data) ->
+                if (rc == Lab.OK && data != null && data.size >= 4) Cur(data).u32() else null
+            }
+
         val prohibitExtendedRc = command(
             Lab.NK_GET_DEVICE_PROP_VALUE_EX,
             Lab.PROP_NK_MOV_PROHIBIT
         ).first
-        val preflightProhibit = command(
-            Lab.GET_DEVICE_PROP_VALUE,
-            Lab.PROP_NK_MOV_PROHIBIT
-        ).let { (rc, data) ->
-            if (rc == Lab.OK && data != null && data.size >= 4) Cur(data).u32() else null
-        }
-        val applicationModeRequired = preflightProhibit != 0L
+        val preflightProhibit = readMovieProhibit()
+        val applicationModeRequired =
+            movieProhibitRequiresApplicationMode(preflightProhibit)
 
         var appOpRc: Int? = null
-        if (applicationModeRequired && !remoteMovieApplicationOpSet) {
+        var appPropRc: Int? = null
+        if (applicationModeRequired &&
+            !remoteMovieApplicationOpSet &&
+            !remoteMovieApplicationPropSet
+        ) {
             val rc = command(Lab.NK_CHANGE_APP_MODE, 1).first
             appOpRc = rc
             if (rc == Lab.OK) remoteMovieApplicationOpSet = true
+
+            // 新世代机型优先沿用已经验证的 0x9435 路径；只有相机明确表示不支持
+            // 该操作码时，才回退到旧/另一世代使用的 ApplicationMode 属性入口。
+            if (shouldFallbackToApplicationModeProperty(rc)) {
+                val propRc = setProperty(
+                    Lab.PROP_NK_APPLICATION_MODE,
+                    byteArrayOf(1)
+                )
+                appPropRc = propRc
+                if (propRc == Lab.OK) {
+                    remoteMovieApplicationPropSet = true
+                    // 读取一次切换后的真实禁止条件，既让相机完成属性应用，也为失败
+                    // 诊断保留最新状态；是否发送开录以属性写入成功为准。
+                    readMovieProhibit()
+                }
+            }
         }
 
         val applicationModeReady =
             !applicationModeRequired ||
-                remoteMovieApplicationOpSet
-        val startRc = if (applicationModeReady) {
-            command(Lab.NK_START_MOVIE_REC).first
-        } else {
-            appOpRc ?: Lab.ACCESS_DENIED
-        }
+                remoteMovieApplicationOpSet ||
+                remoteMovieApplicationPropSet
+        val startCommandRc =
+            if (applicationModeReady) command(Lab.NK_START_MOVIE_REC).first else null
+        val resultRc =
+            startCommandRc ?: appPropRc ?: appOpRc ?: Lab.ACCESS_DENIED
 
         var prohibitCondition: Long? =
-            if (startRc != Lab.OK) preflightProhibit else null
-        if (startRc != Lab.OK) {
-            val (prohibitRc, prohibitData) = command(
-                Lab.GET_DEVICE_PROP_VALUE,
-                Lab.PROP_NK_MOV_PROHIBIT
-            )
-            if (prohibitRc == Lab.OK && prohibitData != null && prohibitData.size >= 4) {
-                prohibitCondition = Cur(prohibitData).u32()
-            }
+            if (resultRc != Lab.OK) preflightProhibit else null
+        if (resultRc != Lab.OK) {
+            readMovieProhibit()?.let { prohibitCondition = it }
         }
 
         RcMovieStartResult(
-            responseCode = startRc,
+            responseCode = resultRc,
             prohibitCondition = prohibitCondition,
             prohibitExtendedResponse = prohibitExtendedRc,
-            applicationModeResponse = appOpRc
+            applicationModeResponse = appOpRc,
+            applicationModePropertyResponse = appPropRc,
+            startCommandResponse = startCommandRc,
         )
         }
     }
