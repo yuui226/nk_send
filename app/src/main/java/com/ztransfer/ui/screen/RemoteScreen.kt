@@ -447,7 +447,6 @@ private fun RemoteContent(
     // 暂停态用 Compose 状态镜像：recorder.isPaused 是普通 @Volatile 字段，
     // 直接读它不会触发重组，暂停/继续按钮图标会卡住不切换。
     var recPaused by remember { mutableStateOf(false) }
-    var recDoneVisible by remember { mutableStateOf(false) }
     fun devLog(line: String) {
         logLines.add(line)
         if (logLines.size > 300) logLines.removeAt(0)
@@ -1559,18 +1558,18 @@ private fun RemoteContent(
             // 否则 mp4 缺 moov 无法播放。
             val name = withContext(Dispatchers.IO + NonCancellable) { r.stop() }
             if (name != null) {
-                // 绿色对勾即完成反馈，不再弹 Toast
-                recDoneVisible = true
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(R.string.cd_remote_rec_toast_saved, name),
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                android.widget.Toast.makeText(
+                    context,
+                    context.getString(R.string.cd_remote_rec_toast_failed),
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
             }
-            // 停止失败：不弹任何反馈，按钮直接回到待机红点即可
-        }
-    }
-
-    // 绿色对勾自动消失：1.5 秒后按钮回到待机红点
-    LaunchedEffect(recDoneVisible) {
-        if (recDoneVisible) {
-            delay(1500)
-            recDoneVisible = false
         }
     }
 
@@ -1748,7 +1747,7 @@ private fun RemoteContent(
                 },
                 contentAlignment = Alignment.Center,
                 label = "immersiveDirection",
-                modifier = Modifier.fillMaxSize().clipToBounds(false)
+                modifier = Modifier.fillMaxSize()
             ) { direction ->
                 Box(
                     modifier = Modifier
@@ -1851,7 +1850,7 @@ private fun RemoteContent(
             },
             contentAlignment = Alignment.Center,
             label = "remoteImmersiveFullscreen",
-            modifier = Modifier.fillMaxSize().clipToBounds(false)
+            modifier = Modifier.fillMaxSize()
         ) { fullscreen ->
         if (fullscreen) {
             ImmersiveFullscreenLayer()
@@ -2077,8 +2076,7 @@ private fun RemoteContent(
                 onStop = { stopRecorder() },
                 modifier = Modifier.height(36.dp),
                 enabled = isPro,
-                onLockedTap = { showHint(context.getString(R.string.remote_rec_pro_only)) },
-                showDone = recDoneVisible
+                onLockedTap = { showHint(context.getString(R.string.remote_rec_pro_only)) }
             )
             Spacer(Modifier.height(12.dp))
 
@@ -2251,8 +2249,7 @@ private fun RemoteContent(
                             onStop = { stopRecorder() },
                             modifier = Modifier.height(36.dp),
                             enabled = isPro,
-                            onLockedTap = { showHint(context.getString(R.string.remote_rec_pro_only)) },
-                            showDone = recDoneVisible
+                            onLockedTap = { showHint(context.getString(R.string.remote_rec_pro_only)) }
                         )
                         Spacer(Modifier.weight(1f))
                         TopIconToggle(
