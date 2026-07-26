@@ -52,6 +52,7 @@ private val LightColorScheme = lightColorScheme(
 @Composable
 fun ZTransferTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
+    skinPreset: SkinPreset = SkinPreset.FROSTED_GLASS,
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (themeMode) {
@@ -60,7 +61,9 @@ fun ZTransferTheme(
         ThemeMode.LIGHT -> false
     }
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
-    val appColors = if (darkTheme) DarkAppColors else LightAppColors
+    val appColors = skinAppColors(skinPreset, darkTheme)
+    // 皮肤按钮纹理：皮革/木纹返回可平铺画刷，毛玻璃为 null；只有 GlassButton 消费。
+    val buttonTexture = rememberButtonTextureBrush(skinPreset, darkTheme)
     val view = LocalView.current
 
     if (!view.isInEditMode) {
@@ -77,7 +80,10 @@ fun ZTransferTheme(
         }
     }
 
-    CompositionLocalProvider(LocalAppColors provides appColors) {
+    CompositionLocalProvider(
+        LocalAppColors provides appColors,
+        LocalButtonTexture provides buttonTexture,
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = Typography,

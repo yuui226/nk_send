@@ -81,6 +81,10 @@
     <string name="theme_light">淺色</string>
     <string name="language">語言</string>
     <string name="language_system">跟隨系統</string>
+    <string name="skin_frosted_glass">毛玻璃</string>
+    <string name="skin_leather">皮革</string>
+    <string name="skin_wood">木紋</string>
+    <string name="cd_skin">介面皮膚</string>
     <string name="haptic_feedback">觸覺回饋</string>
     <string name="keep_screen_on">保持螢幕開啟</string>
     <string name="version_label">Z傳 v%1$s</string>
@@ -144,16 +148,28 @@
     <string name="remote_transfer_busy_hint">傳輸進行中，監看可能卡頓</string>
     <string name="remote_rec_start_failed">無法開始錄影</string>
     <string name="remote_rec_stop_failed">無法停止錄影，請檢查相機後重試</string>
+    <string name="remote_rec_no_audio">無麥克風權限，錄製無聲音</string>
+    <string name="remote_rec_pro_only">畫面錄製為高級版功能</string>
     <string name="remote_tap_focus_manual">請將相機切換到自動對焦後使用點按對焦</string>
     <string name="dev_panel_title">開發者</string>
     <string name="dev_hd_liveview">高清監看 (XGA)</string>
     <string name="cd_remote_histogram">監看直方圖</string>
     <string name="cd_remote_grid">構圖參考線</string>
-    <string name="cd_remote_enter_fullscreen">進入全螢幕</string>
-    <string name="cd_remote_exit_fullscreen">退出全螢幕</string>
+    <string name="cd_remote_rotate">旋轉螢幕</string>
+    <string name="cd_remote_fullscreen_enter">全螢幕監看</string>
+    <string name="cd_remote_fullscreen_exit">退出全螢幕</string>
+    <string name="cd_remote_fullscreen_direction">切換方向</string>
     <string name="dev_fps_overlay">幀率顯示</string>
     <string name="lab_run_probe">完整探測</string>
     <string name="lab_copy_log">複製日誌</string>
+    <string name="cd_remote_zebra">斑馬紋</string>
+    <string name="cd_remote_level">水平儀</string>
+    <string name="cd_remote_rec_start">錄製</string>
+    <string name="cd_remote_rec_pause">暫停錄製</string>
+    <string name="cd_remote_rec_resume">恢復錄製</string>
+    <string name="cd_remote_rec_stop">停止錄製</string>
+    <string name="cd_remote_rec_toast_saved">已儲存錄製: %1$s</string>
+    <string name="cd_remote_rec_toast_failed">錄製失敗</string>
 
     <!-- 授權/啟用 -->
     <string name="license">授權</string>

@@ -1,0 +1,1323 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ZTransfer 监看页面 v2 — 工具行测量换行 + 沉浸式全屏</title>
+  <style>
+    :root {
+      --page-bg-top: #181818;
+      --page-bg-bottom: #0D0D0D;
+      --glass: rgba(30,30,30,0.45);
+      --glass-heavy: rgba(20,24,32,0.94);
+      --glass-border: rgba(255,255,255,0.10);
+      --text: #E0E0E0;
+      --text-dim: #8e98a8;
+      --accent: #4FC3F7;
+      --accent-bg: rgba(79,195,247,0.18);
+      --error: #F44336;
+      --success: #4CAF50;
+      --vf-bg: #0D0D0D;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans SC', sans-serif;
+      background: linear-gradient(180deg, var(--page-bg-top), var(--page-bg-bottom));
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 20px;
+    }
+
+    .demo-wrapper {
+      display: flex;
+      gap: 40px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    /* ======== Phone frame ======== */
+    .phone {
+      width: var(--phone-w, 390px);
+      min-height: 760px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 36px;
+      background: linear-gradient(180deg, #181818, #0D0D0D);
+      padding: 12px 12px 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.05);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ======== Top bar ======== */
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 40px; flex-shrink: 0;
+    }
+    .signal-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 32px; padding: 0 12px; border-radius: 16px;
+      background: linear-gradient(145deg, rgba(45,53,65,0.88), rgba(25,30,39,0.92));
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 5px 14px rgba(0,0,0,0.24), inset 0 1px rgba(255,255,255,0.06);
+      font-size: 11px; cursor: pointer;
+    }
+    .signal-bars { display: flex; align-items: flex-end; gap: 2px; height: 13px; }
+    .signal-bars span { width: 3.5px; border-radius: 1.5px; background: var(--success); }
+    .signal-bars span:nth-child(1){height:5px} .signal-bars span:nth-child(2){height:8px}
+    .signal-bars span:nth-child(3){height:10px} .signal-bars span:nth-child(4){height:13px}
+    .signal-dbm { font-family: monospace; font-size: 10px; color: #cbd3de; }
+
+    .back-btn {
+      display: grid; place-items: center;
+      width: 32px; height: 32px; border-radius: 50%;
+      background: linear-gradient(145deg, rgba(45,53,65,0.88), rgba(25,30,39,0.92));
+      border: 1px solid rgba(255,255,255,0.12);
+      cursor: pointer; color: #c5ccd6; transition: transform 0.11s, border-color 0.15s;
+    }
+    .back-btn:hover { border-color: rgba(255,255,255,0.27); color: #fff; }
+    .back-btn:active { transform: scale(0.9); }
+    .back-btn svg { width: 16px; height: 16px; }
+
+    /* ======== Viewfinder ======== */
+    .viewfinder-wrap { position: relative; margin-top: 10px; flex-shrink: 0; }
+    .viewfinder {
+      position: relative; width: 100%; aspect-ratio: 3/2;
+      border-radius: 14px; background: var(--vf-bg); overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.10);
+      box-shadow: inset 0 0 40px rgba(0,0,0,0.3); cursor: crosshair;
+    }
+    .vf-scene {
+      position: absolute; inset: 0;
+      background:
+        linear-gradient(180deg, transparent 45%, rgba(5,10,14,0.25) 47%),
+        linear-gradient(135deg, #61717c 0 22%, #29333a 22% 34%, #8b7764 34% 58%, #33444a 58% 76%, #172126 76%);
+    }
+    .vf-vignette {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at center, transparent 68%, rgba(0,0,0,0.35) 100%);
+      pointer-events: none;
+    }
+
+    /* Zebra stripe overlay */
+    .zebra-overlay {
+      position: absolute; inset: 0; display: none; pointer-events: none; overflow: hidden;
+      background: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 3px,
+        rgba(255,255,255,0.12) 3px,
+        rgba(255,255,255,0.12) 5px
+      );
+      -webkit-mask-image: radial-gradient(ellipse 85% 90% at 50% 50%, black 40%, rgba(0,0,0,0.3) 100%);
+      mask-image: radial-gradient(ellipse 85% 90% at 50% 50%, black 40%, rgba(0,0,0,0.3) 100%);
+    }
+    .zebra-overlay.on { display: block; }
+
+    /* Level indicator overlay */
+    .level-overlay {
+      position: absolute; inset: 0; display: none; pointer-events: none;
+    }
+    .level-overlay.on { display: block; }
+    .level-overlay svg { width: 100%; height: 100%; }
+
+    /* Focus box */
+    .focus-box {
+      position: absolute; width: 42px; height: 32px;
+      left: 52%; top: 42%; transform: translate(-50%, -50%); pointer-events: none;
+    }
+    .focus-box .corner {
+      position: absolute; width: 10px; height: 10px;
+      border-color: rgba(79,195,247,0.9); border-style: solid;
+    }
+    .corner.tl { top:-2px; left:-2px; border-width:2px 0 0 2px; }
+    .corner.tr { top:-2px; right:-2px; border-width:2px 2px 0 0; }
+    .corner.bl { bottom:-2px; left:-2px; border-width:0 0 2px 2px; }
+    .corner.br { bottom:-2px; right:-2px; border-width:0 2px 2px 0; }
+
+    .grid-lines { position: absolute; inset: 0; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+    .grid-lines.on { opacity: 0.34; }
+    .grid-lines .gl { position: absolute; background: #fff; }
+    .grid-lines .gl.v { width:1px; height:100%; top:0; }
+    .grid-lines .gl.v1{left:33.333%} .grid-lines .gl.v2{left:66.666%}
+    .grid-lines .gl.h { height:1px; width:100%; left:0; }
+    .grid-lines .gl.h1{top:33.333%} .grid-lines .gl.h2{top:66.666%}
+
+    .vf-badges { position:absolute; left:8px; top:8px; display:flex; gap:4px; }
+    .badge {
+      display:inline-flex; align-items:center; height:20px; padding:0 7px;
+      border-radius:7px; background:rgba(0,0,0,0.58);
+      border:1px solid rgba(255,255,255,0.08);
+      font-weight:700; font-size:10px; font-family:monospace; color:#fff;
+    }
+    .rec-indicator {
+      position:absolute; right:8px; top:8px;
+      display:none; align-items:center; gap:5px;
+      padding:2px 7px; border-radius:7px; background:rgba(0,0,0,0.58);
+    }
+    .rec-indicator.active { display:inline-flex; }
+    .rec-dot { width:7px; height:7px; background:var(--error); border-radius:50%;
+      animation:recPulse 0.6s ease-in-out infinite alternate; }
+    @keyframes recPulse { from{opacity:1} to{opacity:0.3} }
+    .rec-time { font-family:monospace; font-size:10px; font-weight:700; color:#fff; }
+
+    .vf-fps {
+      position:absolute; right:8px; bottom:8px;
+      padding:2px 6px; border-radius:7px; background:rgba(0,0,0,0.55);
+      font-family:monospace; font-size:10px; color:#fff; display:none;
+    }
+    .vf-fps.on { display:block; }
+    .vf-histogram {
+      position:absolute; left:8px; bottom:8px;
+      width:118px; height:62px; border-radius:8px;
+      background:rgba(0,0,0,0.50); display:none; padding:4px 6px;
+    }
+    .vf-histogram.on { display:block; }
+    .vf-no-conn {
+      position:absolute; inset:0; display:none;
+      justify-content:center; align-items:center;
+      font-size:13px; color:var(--text-dim);
+    }
+    .vf-no-conn.show { display:flex; }
+
+    /* ======== Tool rows — portrait: greedy wrap, 全屏/旋转 permanently pinned right ========
+       Measured from the app: button height 36px, width = icon + 24px.
+       HD 44 · FPS 44 · 直方图 43 · 参考线 42 · 斑马纹 42 · 水平仪 42
+       pinned 全屏 41 · 旋转 44 · gap 6 · reserved right side 97 (=41+6+44+6)      */
+    .tool-rows { flex-shrink: 0; }
+    .tool-row {
+      display: flex; align-items: center; gap: 6px;
+      width: 100%; margin-top: 6px; flex-shrink: 0;
+    }
+    .tool-row[hidden] { display: none; }
+    .tool-group, .tool-pinned { display: flex; align-items: center; gap: 6px; }
+    .tool-spacer { flex: 1 1 auto; min-width: 6px; }
+    .tool-row.rec-row { justify-content: flex-start; }
+
+    .tool-btn {
+      position: relative;
+      display: grid; place-items: center;
+      width: 38px; height: 38px; border-radius: 50%;
+      background: linear-gradient(145deg, rgba(45,53,65,0.88), rgba(25,30,39,0.92));
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 5px 14px rgba(0,0,0,0.24), inset 0 1px rgba(255,255,255,0.06);
+      color: #c5ccd6; cursor: pointer; flex: none;
+      transition: transform 0.11s, border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    /* portrait wrapping rows use the app's measured pill geometry */
+    .tool-rows .tool-btn { height: 36px; border-radius: 18px; }
+    .tool-btn:hover { border-color: rgba(255,255,255,0.27); color: #fff; }
+    .tool-btn:active { transform: scale(0.9); }
+    .tool-btn.active {
+      color: var(--accent);
+      border-color: rgba(79,195,247,0.58);
+      background: var(--accent-bg);
+    }
+    .tool-btn svg { width: 20px; height: 20px; overflow: visible; }
+    .standout-btn {
+      color: #fff;
+      border-color: rgba(255,255,255,0.25);
+      background: linear-gradient(145deg, rgba(39,47,59,0.94), rgba(30,36,46,0.94));
+    }
+    .standout-btn::after {
+      content: ""; position: absolute; inset: -5px;
+      border: 1px solid rgba(79,195,247,0.12); border-radius: inherit; pointer-events: none;
+    }
+
+    /* wrap debug outline — makes the two rows readable while resizing */
+    .tool-rows.show-bounds .tool-row { outline: 1px dashed rgba(79,195,247,0.22); outline-offset: 2px; }
+
+    /* ======== Parameter tiles ======== */
+    .params-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 7px;
+      margin-top: 10px; flex-shrink: 0;
+    }
+    .param-tile {
+      position: relative; height: 54px; border-radius: 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)), var(--glass);
+      border: 1px solid rgba(255,255,255,0.12);
+      overflow: hidden; cursor: pointer; user-select: none; touch-action: none;
+    }
+    .param-tile:hover { border-color: rgba(255,255,255,0.2); }
+    .param-tile.dragging { border-color: var(--accent); border-width: 1.5px; }
+    .param-label {
+      position: absolute; left: 10px; top: 6px;
+      font-size: 10px; font-weight: 600; color: rgba(176,176,176,0.85);
+    }
+    .param-value {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      font-family: monospace; font-size: 16px; font-weight: 600; color: var(--text);
+    }
+    .param-auto-badge {
+      position: absolute; right: 0; top: 0; padding: 2px 8px;
+      border-radius: 0 12px 0 6px; font-size: 9px; font-weight: 500;
+      cursor: pointer; background: rgba(45,45,45,0.85); color: var(--text-dim);
+    }
+    .param-auto-badge.on { background: rgba(255,183,77,0.90); color: rgba(0,0,0,0.75); }
+    .param-drag-hint {
+      position: absolute; right: 8px; bottom: 5px;
+      font-size: 10px; line-height: 1; color: rgba(176,176,176,0.35);
+    }
+
+    /* ======== Shutter ======== */
+    .shutter-area { flex: 1; display: flex; justify-content: center; align-items: center; min-height: 80px; }
+    .shutter-btn {
+      position: relative; width: 70px; height: 70px; border-radius: 50%;
+      border: 3px solid rgba(224,224,224,0.9); background: transparent;
+      cursor: pointer; transition: transform 0.12s, border-color 0.15s;
+      display: grid; place-items: center; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .shutter-btn:active { transform: scale(0.95); }
+    .shutter-btn.focusing { transform: scale(0.95); border-color: var(--accent); }
+    .shutter-btn.disabled { border-color: rgba(224,224,224,0.3); pointer-events: none; }
+    .shutter-inner {
+      width: 52px; height: 52px; border-radius: 50%; background: #edf0f4;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.9);
+      transition: transform 0.12s, background 0.15s, border-radius 0.16s, width 0.16s, height 0.16s;
+    }
+    .shutter-btn.focusing .shutter-inner { transform: scale(0.8); }
+    .shutter-btn.movie .shutter-inner { background: var(--error); }
+    .shutter-btn.recording .shutter-inner {
+      background: var(--error); width: 24px; height: 24px; border-radius: 6px;
+    }
+
+    /* ======== Trial badge — overlaid inside viewfinder, bottom-left ======== */
+    .vf-trial-badge {
+      position: absolute; left: 8px; bottom: 8px; z-index: 3;
+      padding: 3px 8px; border-radius: 7px;
+      background: var(--glass-heavy); border: 1px solid var(--glass-border);
+      font-size: 10px; font-family: monospace; color: var(--text-dim);
+      display: none;
+    }
+    .vf-trial-badge.show { display: block; }
+
+    /* ======== Landscape mode: viewfinder top-left, tools below, params right ======== */
+    .phone.landscape {
+      width: 760px; min-height: auto; height: 420px;
+      flex-direction: column; padding: 6px 10px 8px 10px;
+    }
+    .phone.rot-1 .notch { left:8px; top:50%; right:auto; }
+    .phone.rot-2 .notch { left:auto; right:8px; top:50%; }
+    /* rot-1: notch on left → viewfinder shifts right to avoid cutout */
+    .phone.rot-1 .ls-left { padding-left:28px; }
+    .phone.rot-1 .ls-body { padding-right:6px; }
+    /* rot-2: notch on right → content shifts left, plus right-panel gets margin */
+    .phone.rot-2 .ls-body { padding-right:28px; padding-left:6px; }
+    .notch {
+      display:none; position:absolute; z-index:10;
+      width:12px; height:12px; border-radius:50%;
+      background:#000; border:1px solid rgba(255,255,255,0.08);
+    }
+    .phone.landscape .notch { display:block; }
+    .phone.landscape .topbar {
+      position:absolute; right:10px; top:6px; height:auto; gap:4px; z-index:10;
+    }
+    /* rot-2: notch + status bar on RIGHT → topbar moves LEFT, clears status-bar area */
+    .phone.rot-2 .topbar { right:auto; left:38px; }
+    /* Landscape body: left area (vf + tools), right area (params + shutter) */
+    .ls-body {
+      display:flex; flex:1; min-height:0; gap:8px; align-items:stretch;
+    }
+    .ls-left {
+      flex:1; min-width:0; display:flex; flex-direction:column;
+    }
+    /* Viewfinder — pushed to top, fills height */
+    .phone.landscape .viewfinder-wrap {
+      margin-top:0; flex:1; min-height:0;
+      display:flex; align-items:center; justify-content:center;
+    }
+    .phone.landscape .viewfinder {
+      width:100%; max-height:100%; aspect-ratio:3/2; /* fills width, capped by height */
+    }
+    /* Tool row — all overlay tools visible in one row below viewfinder */
+    .ls-tools {
+      display:flex; align-items:center; gap:5px;
+      height:40px; flex-shrink:0; margin-top:4px;
+      justify-content: center;
+    }
+    .ls-tools .tool-btn { width:34px; height:34px; }
+    .ls-tools .tool-btn svg { width:17px; height:17px; }
+    /* Right panel — params + shutter */
+    .phone.landscape .right-panel {
+      width:170px; display:flex; flex-direction:column;
+      justify-content:center; gap:10px; flex-shrink:0;
+      height:100%;
+    }
+    .phone.landscape .params-grid {
+      display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:0;
+    }
+    .phone.landscape .param-tile {
+      height:46px; min-width:0;
+    }
+    .phone.landscape .param-label { font-size:8px; left:5px; top:3px; }
+    .phone.landscape .param-value { font-size:13px; }
+    .phone.landscape .param-auto-badge { font-size:7px; padding:1px 4px; border-radius:0 9px 0 4px; }
+    .phone.landscape .param-drag-hint { font-size:8px; right:4px; bottom:2px; }
+    .phone.landscape .shutter-area {
+      min-height:0; max-height:none; display:flex; justify-content:center; align-items:center;
+    }
+    .phone.landscape .shutter-btn { width:52px; height:52px; border-width:2.5px; }
+    .phone.landscape .shutter-inner { width:40px; height:40px; }
+    .phone.landscape .shutter-btn.recording .shutter-inner { width:20px; height:20px; border-radius:5px; }
+    .phone.landscape .vf-trial-badge { left:10px; bottom:10px; font-size:9px; }
+
+    /* ======== Immersive fullscreen ========
+       Always landscape (90° / 270°). Rotated canvas anchored top-left, no bottom
+       tool row at all, image = largest undistorted 3:2 rect after insets, so the
+       viewfinder container ratio == frame ratio and there are no black bands.
+       Surround is the same #0D0D0D as the viewfinder backing → single surface.  */
+    .fs-overlay {
+      position: absolute; inset: 0; z-index: 40;
+      background: var(--vf-bg);
+      overflow: hidden;
+    }
+    .fs-canvas {
+      position: absolute; left: 50%; top: 50%;
+      transform-origin: 50% 50%;
+      /* width/height/transform assigned in JS: w = screenH, h = screenW */
+    }
+    .fs-scale { position: absolute; inset: 0; transform-origin: 50% 50%; }
+    .fs-content { position: absolute; /* left/right/top/bottom = insets, from JS */ }
+    /* The live image: top-left anchored, explicit px size = largest 3:2 rect */
+    .fs-vf {
+      position: relative; border: none; box-shadow: inset 0 0 40px rgba(0,0,0,0.3);
+      background: var(--vf-bg); border-radius: 14px; aspect-ratio: auto;
+      width: auto; max-width: none;
+    }
+    /* cutout marker — sits in the status-bar inset band */
+    .fs-cutout {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      width: 12px; height: 12px; border-radius: 50%;
+      background: #000; border: 1px solid rgba(255,255,255,0.10);
+    }
+    .fs-canvas[data-dir="90"]  .fs-cutout { left: 9px; }
+    .fs-canvas[data-dir="270"] .fs-cutout { right: 9px; }
+    /* Exactly two floating controls, top-right, 12px from the content edges */
+    .fs-controls {
+      position: absolute; top: 12px; right: 12px;
+      display: flex; align-items: center; gap: 10px; z-index: 5;
+    }
+    .fs-btn {
+      width: 40px; height: 40px; border-radius: 22px;
+      display: grid; place-items: center;
+      border: none;                       /* no border */
+      background: rgba(28,32,40,0.42);    /* glassmorphism, no sheen */
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+      backdrop-filter: blur(14px) saturate(140%);
+      color: #fff; cursor: pointer;
+      transition: transform 0.11s, background 0.15s;
+    }
+    .fs-btn:hover { background: rgba(40,46,58,0.55); }
+    .fs-btn:active { transform: scale(0.9); }
+    .fs-ghost { pointer-events: none; }
+
+    /* animations — enter 200ms/40ms delay fade + 240ms scale .96→1
+       exit 140ms fade + 160ms scale 1→1.02
+       direction cross-fade: in 190ms/40ms + 220ms scale, out 130ms + 150ms scale */
+    @keyframes fsFadeIn  { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes fsFadeOut { from { opacity: 1 } to { opacity: 0 } }
+    @keyframes fsScaleIn  { from { transform: scale(0.96) } to { transform: scale(1) } }
+    @keyframes fsScaleOut { from { transform: scale(1) } to { transform: scale(1.02) } }
+
+    .fs-overlay.fs-enter { animation: fsFadeIn 200ms ease 40ms both; }
+    .fs-canvas.fs-enter > .fs-scale { animation: fsScaleIn 240ms cubic-bezier(0.2,0.8,0.2,1) both; }
+    .fs-overlay.fs-exit { animation: fsFadeOut 140ms ease both; }
+    .fs-canvas.fs-exit > .fs-scale { animation: fsScaleOut 160ms ease both; }
+    .fs-canvas.fs-dir-in { animation: fsFadeIn 190ms ease 40ms both; }
+    .fs-canvas.fs-dir-in > .fs-scale { animation: fsScaleIn 220ms cubic-bezier(0.2,0.8,0.2,1) both; }
+    .fs-canvas.fs-dir-out { animation: fsFadeOut 130ms ease both; }
+    .fs-canvas.fs-dir-out > .fs-scale { animation: fsScaleOut 150ms ease both; }
+
+    /* ======== Controls panel ======== */
+    .controls-panel {
+      width: 320px;
+      background: rgba(20,24,32,0.92);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      align-self: flex-start;
+      position: sticky; top: 20px;
+    }
+    .controls-panel h2 { font-size: 17px; margin-bottom: 4px; }
+    .controls-panel .subtitle { font-size: 12px; color: var(--text-dim); margin-bottom: 16px; }
+    .control-group { margin-bottom: 14px; }
+    .control-group label {
+      display: block; font-size: 11px; color: var(--text-dim);
+      margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .control-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .ctrl-btn {
+      padding: 5px 12px; border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(45,53,65,0.5);
+      color: var(--text); font-size: 12px; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .ctrl-btn:hover { border-color: rgba(255,255,255,0.25); }
+    .ctrl-btn.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+    .ctrl-btn.danger { border-color: rgba(244,67,54,0.3); }
+    .ctrl-btn.danger.on { background: rgba(244,67,54,0.18); border-color: var(--error); color: var(--error); }
+
+    input[type=range] {
+      width: 100%; accent-color: var(--accent); background: transparent; margin: 2px 0 4px;
+    }
+    .readout {
+      font-family: monospace; font-size: 11px; color: var(--accent);
+      background: rgba(79,195,247,0.07); border: 1px solid rgba(79,195,247,0.14);
+      border-radius: 8px; padding: 5px 8px; line-height: 1.5;
+    }
+
+    .mode-switch { display: flex; gap: 4px; margin-bottom: 16px; }
+    .mode-btn {
+      flex: 1; padding: 7px 4px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.1); background: transparent;
+      color: var(--text-dim); font-size: 12px; cursor: pointer;
+      transition: all 0.15s; text-align: center;
+    }
+    .mode-btn.active {
+      background: rgba(79,195,247,0.12); border-color: var(--accent);
+      color: var(--accent); font-weight: 600;
+    }
+    .desc-row {
+      display: flex; gap: 8px; align-items: flex-start;
+      margin-top: 16px; padding: 12px; border-radius: 12px;
+      background: rgba(79,195,247,0.06);
+      border: 1px solid rgba(79,195,247,0.12);
+    }
+    .desc-row .icon-big { font-size: 22px; flex-shrink: 0; }
+    .desc-row p { font-size: 12px; color: var(--text-dim); line-height: 1.6; margin: 0; }
+    .desc-row p strong { color: var(--text); }
+    .desc-row p + p { margin-top: 8px; }
+
+    @media (max-width: 800px) {
+      .demo-wrapper { flex-direction: column; align-items: center; }
+      .controls-panel { width: 100%; max-width: 390px; position: static; }
+      .phone.landscape { width: 100%; max-width: 390px; height: auto; flex-direction: column; }
+      .phone.landscape .right-panel { width: 100%; margin-left: 0; flex-direction: row; flex-wrap: wrap; }
+      .phone.landscape .tool-row { flex-direction: row; width: auto; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- SVG icons — unchanged set (matched to the app's canvas-drawn marks) -->
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <defs>
+    <symbol id="i-back" viewBox="0 0 24 24">
+      <path d="M5 12h14M14 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-rotate" viewBox="0 0 24 24">
+      <path d="M5.8 5.1A8.5 8.5 0 1 1 4.5 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <polyline points="2.5,9 4.5,12 7,9.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-fullscreen" viewBox="0 0 24 24">
+      <path d="M4 4h6v2H6v4H4zM14 4h6v6h-2V6h-4zM20 20h-6v-2h4v-4h2zM4 20h6v-2H6v-4H4z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <!-- ToolWell toggle — a little grid/dots icon meaning "tools" -->
+    <symbol id="i-tools" viewBox="0 0 24 24">
+      <circle cx="6" cy="6" r="2.2" fill="currentColor"/>
+      <circle cx="12" cy="6" r="2.2" fill="currentColor"/>
+      <circle cx="18" cy="6" r="2.2" fill="currentColor"/>
+      <circle cx="6" cy="12" r="2.2" fill="currentColor"/>
+      <circle cx="12" cy="12" r="2.2" fill="currentColor"/>
+      <circle cx="18" cy="12" r="2.2" fill="currentColor"/>
+      <circle cx="6" cy="18" r="2.2" fill="currentColor"/>
+      <circle cx="12" cy="18" r="2.2" fill="currentColor"/>
+      <circle cx="18" cy="18" r="2.2" fill="currentColor"/>
+    </symbol>
+    <!-- Reconstructed tool icons — all 1.5px stroke, no boxes, clean geometry -->
+
+    <!-- HD — bold lettering -->
+    <symbol id="i-hd" viewBox="0 0 24 24">
+      <text x="12" y="16.5" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="12" fill="currentColor">HD</text>
+    </symbol>
+
+    <!-- FPS — bold lettering -->
+    <symbol id="i-fps" viewBox="0 0 24 24">
+      <text x="12" y="16.5" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="11.5" fill="currentColor">FPS</text>
+    </symbol>
+
+    <!-- Histogram — 5 vertical bars, center tallest = luminance distribution -->
+    <symbol id="i-hist" viewBox="0 0 24 24">
+      <line x1="5" y1="18" x2="5" y2="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="9" y1="18" x2="9" y2="7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="13" y1="18" x2="13" y2="4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="17" y1="18" x2="17" y2="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="21" y1="18" x2="21" y2="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </symbol>
+
+    <!-- Grid — classic tic-tac-toe 井 shape -->
+    <symbol id="i-grid" viewBox="0 0 24 24">
+      <line x1="8" y1="3" x2="8" y2="21" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="16" y1="3" x2="16" y2="21" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="3" y1="8" x2="21" y2="8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="3" y1="16" x2="21" y2="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </symbol>
+
+    <!-- Zebra — 5 diagonal stripes, no border -->
+    <symbol id="i-zebra" viewBox="0 0 24 24">
+      <line x1="5" y1="4" x2="10" y2="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="8" y1="4" x2="13" y2="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="11" y1="4" x2="16" y2="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="14" y1="4" x2="19" y2="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="17" y1="4" x2="22" y2="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </symbol>
+
+    <!-- Level — horizontal bar + center bubble + end reference ticks -->
+    <symbol id="i-level" viewBox="0 0 24 24">
+      <line x1="3" y1="15" x2="21" y2="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="3" y1="12" x2="3" y2="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="21" y1="12" x2="21" y2="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="12" cy="12" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    </symbol>
+
+    <!-- Fullscreen — four corners, L-shaped arrows pointing outward -->
+    <symbol id="i-fullscreen" viewBox="0 0 24 24">
+      <polyline points="4,4 4,9 6,9 6,6 9,6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="20,4 20,9 18,9 18,6 15,6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="4,20 4,15 6,15 6,18 9,18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="20,20 20,15 18,15 18,18 15,18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+
+    <!-- Rotate — clockwise arc + solid arrowhead -->
+    <symbol id="i-rotate" viewBox="0 0 24 24">
+      <path d="M5.8 5.1A8.5 8.5 0 1 1 4.5 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <polygon points="2,9.5 4.5,12 7,9" fill="currentColor"/>
+    </symbol>
+
+    <!-- ToolWell trigger — 3×2 grid of dots, hinting "more tools inside" -->
+    <symbol id="i-tools" viewBox="0 0 24 24">
+      <circle cx="6" cy="6" r="1.6" fill="currentColor"/>
+      <circle cx="12" cy="6" r="1.6" fill="currentColor"/>
+      <circle cx="18" cy="6" r="1.6" fill="currentColor"/>
+      <circle cx="6" cy="13" r="1.6" fill="currentColor"/>
+      <circle cx="12" cy="13" r="1.6" fill="currentColor"/>
+      <circle cx="18" cy="13" r="1.6" fill="currentColor"/>
+    </symbol>
+    <!-- Bug icon for dev panel -->
+    <symbol id="i-bug" viewBox="0 0 24 24">
+      <path d="M8 3v3M16 3v3M4 8h16M6 8v9a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V8M10 13h4M12 11v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <!-- Fullscreen exit — solid Material arrow_back glyph (drawn 18px vs rotate 20px) -->
+    <symbol id="i-arrow-back-solid" viewBox="0 0 24 24">
+      <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z" fill="currentColor"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="demo-wrapper">
+
+  <!-- ===== Phone ===== -->
+  <div class="phone portrait" id="phone">
+    <span class="notch" aria-hidden="true"></span>
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="signal-pill">
+        <span class="signal-bars"><span></span><span></span><span></span><span></span></span>
+        <span class="signal-dbm">-42 dBm</span>
+      </div>
+      <button class="back-btn" aria-label="返回"><svg><use href="#i-back"/></svg></button>
+    </div>
+
+    <!-- Viewfinder -->
+    <div class="viewfinder-wrap">
+      <div class="viewfinder">
+        <div class="vf-scene"></div>
+        <div class="vf-vignette"></div>
+
+        <!-- Zebra stripes -->
+        <div class="zebra-overlay"></div>
+        <!-- Level indicator -->
+        <div class="level-overlay">
+          <svg viewBox="0 0 300 200" preserveAspectRatio="none">
+            <line x1="10%" y1="50%" x2="90%" y2="50%" stroke="#4CAF50" stroke-width="1.2" opacity="0.7" stroke-linecap="round"/>
+            <line x1="6%" y1="50%" x2="9%" y2="50%" stroke="#4CAF50" stroke-width="2.5" stroke-linecap="round"/>
+            <line x1="91%" y1="50%" x2="94%" y2="50%" stroke="#4CAF50" stroke-width="2.5" stroke-linecap="round"/>
+            <polygon points="150,95 147.5,100.5 152.5,100.5" fill="#4CAF50" opacity="0.85"/>
+          </svg>
+        </div>
+
+        <div class="focus-box">
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+        </div>
+
+        <div class="vf-badges">
+          <span class="badge mode-badge">M</span>
+          <span class="badge focus-badge">AF-S</span>
+        </div>
+        <div class="rec-indicator">
+          <span class="rec-dot"></span>
+          <span class="rec-time">0:00</span>
+        </div>
+        <div class="grid-lines">
+          <span class="gl v v1"></span><span class="gl v v2"></span>
+          <span class="gl h h1"></span><span class="gl h h2"></span>
+        </div>
+        <div class="vf-histogram"><canvas class="hist-canvas"></canvas></div>
+        <div class="vf-fps on">12.5 fps</div>
+        <div class="vf-no-conn show"><span>相机未连接</span></div>
+        <div class="vf-trial-badge show">今日剩余 2:48</div>
+      </div>
+    </div>
+
+    <!-- Tool rows — greedy wrap; 全屏 + 旋转 permanently pinned to row 1's right edge.
+         Row 2 is only rendered when something actually overflowed. -->
+    <div class="tool-rows" id="toolRows">
+      <div class="tool-row row-1" id="toolRow1">
+        <div class="tool-group" id="toolGroup1"></div>
+        <div class="tool-spacer"></div>
+        <div class="tool-pinned">
+          <button class="tool-btn standout-btn" id="btnFullscreen" style="width:41px" title="沉浸式全屏">
+            <svg style="width:17px;height:17px"><use href="#i-fullscreen"/></svg>
+          </button>
+          <button class="tool-btn standout-btn" id="btnRotate" style="width:44px" title="旋转">
+            <svg style="width:20px;height:20px"><use href="#i-rotate"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="tool-row row-2" id="toolRow2" hidden>
+        <div class="tool-group" id="toolGroup2"></div>
+      </div>
+    </div>
+
+    <!-- Recording control row — its own row, left-aligned -->
+    <div class="tool-row rec-row">
+      <button class="tool-btn" id="btnRecPortrait" style="color:var(--error);">
+        <svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>
+      </button>
+    </div>
+
+    <!-- Params -->
+    <div class="params-grid">
+      <div class="param-tile" data-param="ev">
+        <span class="param-label">EV</span><span class="param-value">+0.0</span><span class="param-drag-hint">↕</span>
+      </div>
+      <div class="param-tile" data-param="iso">
+        <span class="param-label">ISO</span><span class="param-value">100</span>
+        <span class="param-auto-badge on">AUTO</span><span class="param-drag-hint">↕</span>
+      </div>
+      <div class="param-tile" data-param="aperture">
+        <span class="param-label">f</span><span class="param-value">f/2.8</span><span class="param-drag-hint">↕</span>
+      </div>
+      <div class="param-tile" data-param="shutter">
+        <span class="param-label">S</span><span class="param-value">1/125</span><span class="param-drag-hint">↕</span>
+      </div>
+    </div>
+
+    <!-- Shutter -->
+    <div class="shutter-area">
+      <button class="shutter-btn" id="shutterBtn" aria-label="快门">
+        <span class="shutter-inner"></span>
+      </button>
+    </div>
+
+  </div>
+
+  <!-- ===== Controls panel ===== -->
+  <div class="controls-panel">
+    <h2>监看页面 v2</h2>
+    <p class="subtitle">竖屏工具行测量换行（全屏/旋转永久钉右） · 沉浸式全屏无黑边</p>
+
+    <div class="mode-switch">
+      <button class="mode-btn active" data-rot="0">📱 竖屏</button>
+      <button class="mode-btn" data-rot="1">↻ 横向 (90°)</button>
+      <button class="mode-btn" data-rot="2">↺ 横向 (270°)</button>
+    </div>
+
+    <div class="control-group">
+      <label>机身宽度 — 拖动看换行</label>
+      <input type="range" id="ctrlPhoneW" min="264" max="440" step="1" value="390">
+      <p class="readout" id="wrapReadout">—</p>
+    </div>
+
+    <div class="control-group">
+      <label>沉浸式全屏（始终横向）</label>
+      <div class="control-row">
+        <button class="ctrl-btn" id="ctrlFsEnter">进入全屏</button>
+        <button class="ctrl-btn" id="ctrlFsExit">退出全屏</button>
+        <button class="ctrl-btn" id="ctrlFsDir">方向 90°</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>相机连接</label>
+      <div class="control-row">
+        <button class="ctrl-btn on" id="ctrlConnected">已连接</button>
+        <button class="ctrl-btn" id="ctrlDisconnected">未连接</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>覆盖层工具（竖屏行内换行）</label>
+      <div class="control-row">
+        <button class="ctrl-btn on" id="ctrlHD">HD</button>
+        <button class="ctrl-btn on" id="ctrlFps">FPS</button>
+        <button class="ctrl-btn" id="ctrlHist">直方图</button>
+        <button class="ctrl-btn" id="ctrlGrid">参考线</button>
+        <button class="ctrl-btn" id="ctrlZebra">斑马纹</button>
+        <button class="ctrl-btn" id="ctrlLevel">水平仪</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>录像</label>
+      <div class="control-row">
+        <button class="ctrl-btn danger" id="ctrlRec">🔴 开始录像</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>曝光模式 / 对焦模式</label>
+      <div class="control-row">
+        <button class="ctrl-btn on" data-mode="M">M</button>
+        <button class="ctrl-btn" data-mode="A">A</button>
+        <button class="ctrl-btn" data-mode="S">S</button>
+        <button class="ctrl-btn" data-mode="P">P</button>
+        <button class="ctrl-btn on" data-focus="AF-S">AF-S</button>
+        <button class="ctrl-btn" data-focus="AF-C">AF-C</button>
+      </div>
+    </div>
+
+    <div class="desc-row">
+      <span class="icon-big">💡</span>
+      <div>
+        <p>
+          <strong>竖屏工具行 — 测量换行</strong><br>
+          HD / FPS / 直方图 / 参考线 / 斑马纹 / 水平仪 按顺序从左贪心填满第一行，
+          放不下的自动折到第二行左对齐；<strong>全屏与旋转永久钉在第一行最右</strong>，永不换行，
+          中间用弹性空隙隔开。第二行没有溢出时<strong>完全不渲染</strong>（没有空行、没有幽灵高度）。
+          两行都与取景器同宽、共用左边缘。按钮高 36px、宽 = 图标 + 24px、间距 6px、右侧预留 97px。
+        </p>
+        <p>
+          <strong>沉浸式全屏 — 无黑边</strong><br>
+          始终横向（90° / 270°）。画面取 insets 之后能容纳的<strong>最大不失真矩形</strong>，
+          容器比例 == 画面比例，因此没有上下黑带；内容<strong>左上对齐</strong>。
+          全屏里<strong>没有底部工具行</strong>（工具与录制控制全部隐藏），省下来的宽高全给画面。
+          状态栏 inset 在 90° 落左、270° 落右，同侧还带屏幕挖孔，故该侧取
+          <code>max(状态栏, 挖孔, 6px)</code>；导航栏 inset 在对侧。
+          取景器保留 14px 圆角与 #0D0D0D 背板，四周同色 → 无接缝。
+          右上角只有两枚 40×40 玻璃按钮（22px 圆角、无描边无高光）：退出为实心箭头 18px、
+          旋转为线性图标 20px —— 差 2px 让两者视觉重量相当。
+          进入 200ms 淡入(40ms 延迟) + 240ms 0.96→1.0；退出 140ms 淡出 + 160ms 1.0→1.02；
+          方向切换为交叉淡变（不做 90°→270° 连续旋转，避免经过倒置）。
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ===== State =====
+  const state = {
+    connected: false,
+    rotation: 0,       // 0=portrait, 1=landscape-90°, 2=landscape-270°
+    orientation: 'portrait',
+    // Tools
+    hd: false,
+    fps: true,
+    histogram: false,
+    grid: false,
+    zebra: false,
+    level: false,
+    immersiveFullscreen: false,
+    fsDirection: 90,   // 90 | 270 — fullscreen is always landscape
+    // Recording
+    recording: false, recSeconds: 0, recTimer: null,
+    // Exposure
+    mode: 'M', focusMode: 'AF-S', movieMode: false,
+    // Params
+    iso: { value: '100', auto: true },
+    shutter: { value: '1/125' },
+    aperture: { value: 'f/2.8' },
+    ev: { value: '+0.0' },
+    // Trial
+    trial: true,
+  };
+
+  // ===== Measured geometry (from the app) =====
+  // Tool button height 36, width = icon + 24. Gap 6. Pinned 全屏 41 + 旋转 44.
+  const TOOL_GAP = 6;
+  const PINNED_RESERVE = 41 + TOOL_GAP + 44 + TOOL_GAP; // 97
+  const TOOLS = [
+    { k: 'hd',        href: '#i-hd',    w: 44, icon: 20, title: 'HD 画质' },
+    { k: 'fps',       href: '#i-fps',   w: 44, icon: 20, title: '帧率' },
+    { k: 'histogram', href: '#i-hist',  w: 43, icon: 19, title: '直方图' },
+    { k: 'grid',      href: '#i-grid',  w: 42, icon: 18, title: '参考线' },
+    { k: 'zebra',     href: '#i-zebra', w: 42, icon: 18, title: '斑马纹' },
+    { k: 'level',     href: '#i-level', w: 42, icon: 18, title: '水平仪' },
+    // (the real app also has a dev bug button, only when unlocked — omitted here)
+  ];
+
+  const phone = document.getElementById('phone');
+  const q = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+  // ===== Shared viewfinder overlay markup (portrait / landscape / fullscreen) =====
+  function vfInnerHTML() {
+    return `
+      <div class="vf-scene"></div><div class="vf-vignette"></div>
+      <div class="zebra-overlay"></div>
+      <div class="level-overlay">
+        <svg viewBox="0 0 300 200" preserveAspectRatio="none">
+          <line x1="10%" y1="50%" x2="90%" y2="50%" stroke="#4CAF50" stroke-width="1.2" opacity="0.7" stroke-linecap="round"/>
+          <line x1="6%" y1="50%" x2="9%" y2="50%" stroke="#4CAF50" stroke-width="2.5" stroke-linecap="round"/>
+          <line x1="91%" y1="50%" x2="94%" y2="50%" stroke="#4CAF50" stroke-width="2.5" stroke-linecap="round"/>
+          <polygon points="150,95 147.5,100.5 152.5,100.5" fill="#4CAF50" opacity="0.85"/>
+        </svg>
+      </div>
+      <div class="focus-box"><span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span></div>
+      <div class="vf-badges"><span class="badge mode-badge">M</span><span class="badge focus-badge">AF-S</span></div>
+      <div class="rec-indicator"><span class="rec-dot"></span><span class="rec-time">0:00</span></div>
+      <div class="grid-lines"><span class="gl v v1"></span><span class="gl v v2"></span><span class="gl h h1"></span><span class="gl h h2"></span></div>
+      <div class="vf-histogram"><canvas class="hist-canvas"></canvas></div>
+      <div class="vf-fps">12.5 fps</div>
+      <div class="vf-no-conn"><span>相机未连接</span></div>
+      <div class="vf-trial-badge">今日剩余 2:48</div>`;
+  }
+
+  function recTimeText() {
+    const m = Math.floor(state.recSeconds / 60), s = state.recSeconds % 60;
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  // ===== UI sync — class based so every viewfinder instance updates =====
+  function updateUI() {
+    q('.vf-no-conn').forEach(el => el.classList.toggle('show', !state.connected));
+    q('.shutter-btn').forEach(el => {
+      el.classList.toggle('disabled', !state.connected);
+      el.classList.toggle('movie', state.movieMode);
+      el.classList.toggle('recording', state.recording);
+    });
+
+    // Overlays
+    q('.grid-lines').forEach(el => el.classList.toggle('on', state.grid));
+    q('.vf-histogram').forEach(el => el.classList.toggle('on', state.histogram));
+    q('.vf-fps').forEach(el => el.classList.toggle('on', state.fps));
+    q('.zebra-overlay').forEach(el => el.classList.toggle('on', state.zebra));
+    q('.level-overlay').forEach(el => el.classList.toggle('on', state.level));
+
+    // Tool buttons (portrait rows + landscape row)
+    q('[data-well]').forEach(btn => btn.classList.toggle('active', !!state[btn.dataset.well]));
+
+    // Recording + badges
+    q('.rec-indicator').forEach(el => el.classList.toggle('active', state.recording));
+    q('.rec-time').forEach(el => el.textContent = recTimeText());
+    q('.mode-badge').forEach(el => el.textContent = state.mode);
+    q('.focus-badge').forEach(el => el.textContent = state.focusMode);
+    q('.vf-trial-badge').forEach(el => el.classList.toggle('show', state.trial));
+
+    if (state.histogram) drawHistogram();
+  }
+
+  function drawHistogram() {
+    q('.vf-histogram.on .hist-canvas').forEach(canvas => {
+      const parent = canvas.parentElement;
+      if (!parent) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = parent.clientWidth, h = parent.clientHeight;
+      if (!w || !h) return;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      const bars = 64, barW = w / bars;
+      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      for (let i = 0; i < bars; i++) {
+        const x = i / bars;
+        let amp;
+        if (x < 0.15) amp = Math.sin(x * Math.PI * 3) * 0.2 + 0.1;
+        else if (x < 0.5) amp = 0.3 + Math.random() * 0.5;
+        else if (x < 0.8) amp = 0.5 + Math.random() * 0.4;
+        else amp = 0.2 + Math.random() * 0.15;
+        ctx.fillRect(i * barW + 0.5, h - Math.max(1, amp * h * 0.85), barW - 1, Math.max(1, amp * h * 0.85));
+      }
+    });
+  }
+
+  function syncControlsToState() {
+    document.getElementById('ctrlConnected').classList.toggle('on', state.connected);
+    document.getElementById('ctrlDisconnected').classList.toggle('on', !state.connected);
+    document.getElementById('ctrlHD').classList.toggle('on', state.hd);
+    document.getElementById('ctrlFps').classList.toggle('on', state.fps);
+    document.getElementById('ctrlHist').classList.toggle('on', state.histogram);
+    document.getElementById('ctrlGrid').classList.toggle('on', state.grid);
+    document.getElementById('ctrlZebra').classList.toggle('on', state.zebra);
+    document.getElementById('ctrlLevel').classList.toggle('on', state.level);
+    const r = document.getElementById('ctrlRec');
+    r.classList.toggle('on', state.recording);
+    r.textContent = state.recording ? '⏹ 停止录像' : '🔴 开始录像';
+    document.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', b.dataset.mode === state.mode));
+    document.querySelectorAll('[data-focus]').forEach(b => b.classList.toggle('on', b.dataset.focus === state.focusMode));
+    document.getElementById('ctrlFsEnter').classList.toggle('on', state.immersiveFullscreen);
+    document.getElementById('ctrlFsExit').classList.toggle('on', !state.immersiveFullscreen);
+    document.getElementById('ctrlFsDir').textContent = '方向 ' + state.fsDirection + '°';
+  }
+
+  // ===== Change 1: greedy measure-and-wrap tool rows =====
+  function toolBtnHTML(t) {
+    return `<button class="tool-btn${state[t.k] ? ' active' : ''}" data-well="${t.k}" title="${t.title}"` +
+      ` style="width:${t.w}px"><svg style="width:${t.icon}px;height:${t.icon}px"><use href="${t.href}"/></svg></button>`;
+  }
+
+  let lastAvailable = -1;
+  function layoutToolRows(force) {
+    const rows = document.getElementById('toolRows');
+    if (!rows) return;                        // landscape has no wrapping rows
+    const available = Math.round(rows.clientWidth);
+    if (!available) return;
+    if (!force && available === lastAvailable) return;
+    lastAvailable = available;
+
+    // Greedy: accumulate width + gap, stop at (available - 97) reserved for the
+    // permanently pinned 全屏 + 旋转 pair. Everything left over wraps to row 2.
+    const limit = available - PINNED_RESERVE;
+    let used = 0, split = 0;
+    for (let i = 0; i < TOOLS.length; i++) {
+      const next = used === 0 ? TOOLS[i].w : used + TOOL_GAP + TOOLS[i].w;
+      if (next <= limit) { used = next; split = i + 1; } else break;
+    }
+
+    document.getElementById('toolGroup1').innerHTML = TOOLS.slice(0, split).map(toolBtnHTML).join('');
+    document.getElementById('toolGroup2').innerHTML = TOOLS.slice(split).map(toolBtnHTML).join('');
+    // Row 2 is not rendered at all when nothing overflowed (no empty row, no phantom height)
+    document.getElementById('toolRow2').hidden = split >= TOOLS.length;
+
+    const out = document.getElementById('wrapReadout');
+    if (out) {
+      out.textContent = `可用宽度 ${available}px（机身 ${Math.round(phone.getBoundingClientRect().width)} − 24）`
+        + ` · 阈值 ${limit}px\n第一行 ${split} 个工具 + 钉住的 全屏/旋转 · 换行 ${TOOLS.length - split} 个`;
+      out.style.whiteSpace = 'pre-line';
+    }
+    updateUI();
+  }
+
+  // ===== Change 2: immersive fullscreen =====
+  const INSETS = { status: 28, nav: 20, cutout: 30, min: 6 };
+  function fsInsets(dir) {
+    // status-bar side also carries the display cutout → max(status, cutout, 6)
+    const statusSide = Math.max(INSETS.status, INSETS.cutout, INSETS.min);
+    const navSide = Math.max(INSETS.nav, INSETS.min);
+    return dir === 90
+      ? { l: statusSide, r: navSide, t: INSETS.min, b: INSETS.min }   // 90°: status left, nav right
+      : { l: navSide, r: statusSide, t: INSETS.min, b: INSETS.min };  // 270°: status right, nav left
+  }
+
+  function buildFsCanvas(dir) {
+    const el = document.createElement('div');
+    el.className = 'fs-canvas';
+    el.dataset.dir = String(dir);
+    el.innerHTML = `<div class="fs-scale">
+        <span class="fs-cutout"></span>
+        <div class="fs-content">
+          <div class="viewfinder fs-vf">${vfInnerHTML()}</div>
+          <div class="fs-controls">
+            <button class="fs-btn fs-exit" title="退出全屏" aria-label="退出全屏"><svg style="width:18px;height:18px"><use href="#i-arrow-back-solid"/></svg></button>
+            <button class="fs-btn fs-dir" title="切换方向" aria-label="切换方向"><svg style="width:20px;height:20px"><use href="#i-rotate"/></svg></button>
+          </div>
+        </div>
+      </div>`;
+    return el;
+  }
+
+  function layoutFullscreen() {
+    const ov = document.getElementById('fsOverlay');
+    if (!ov) return;
+    const W = ov.clientWidth, H = ov.clientHeight;   // screen box (portrait-ish)
+    q('.fs-canvas', ov).forEach(c => {
+      const dir = Number(c.dataset.dir);
+      // rotated canvas: its own width is the screen height and vice versa
+      c.style.width = H + 'px';
+      c.style.height = W + 'px';
+      c.style.transform = `translate(-50%,-50%) rotate(${dir === 90 ? 90 : -90}deg)`;
+      const ins = fsInsets(dir);
+      const content = c.querySelector('.fs-content');
+      content.style.left = ins.l + 'px'; content.style.right = ins.r + 'px';
+      content.style.top = ins.t + 'px'; content.style.bottom = ins.b + 'px';
+      // largest undistorted 3:2 rect inside the content box → container ratio == frame ratio
+      const cw = H - ins.l - ins.r, ch = W - ins.t - ins.b;
+      const s = Math.min(cw / 3, ch / 2);
+      const vf = c.querySelector('.fs-vf');
+      vf.style.width = Math.floor(3 * s) + 'px';
+      vf.style.height = Math.floor(2 * s) + 'px';
+    });
+  }
+
+  function bindFsButtons(root) {
+    root.querySelector('.fs-exit')?.addEventListener('click', e => { e.stopPropagation(); exitFullscreen(); });
+    root.querySelector('.fs-dir')?.addEventListener('click', e => { e.stopPropagation(); toggleFsDirection(); });
+  }
+
+  function enterFullscreen(animate = true) {
+    if (document.getElementById('fsOverlay')) return;
+    state.immersiveFullscreen = true;
+    const ov = document.createElement('div');
+    ov.id = 'fsOverlay';
+    ov.className = 'fs-overlay';
+    const canvas = buildFsCanvas(state.fsDirection);
+    ov.appendChild(canvas);
+    phone.appendChild(ov);
+    layoutFullscreen();
+    bindFsButtons(canvas);
+    if (animate) {
+      ov.classList.add('fs-enter');
+      canvas.classList.add('fs-enter');
+      setTimeout(() => { ov.classList.remove('fs-enter'); canvas.classList.remove('fs-enter'); }, 300);
+    }
+    updateUI();
+    syncControlsToState();
+  }
+
+  function exitFullscreen(animate = true) {
+    state.immersiveFullscreen = false;
+    const ov = document.getElementById('fsOverlay');
+    syncControlsToState();
+    if (!ov) return;
+    ov.id = '';                                  // free the id immediately
+    if (!animate) { ov.remove(); return; }
+    ov.classList.add('fs-exit');
+    q('.fs-canvas', ov).forEach(c => c.classList.add('fs-exit'));
+    setTimeout(() => ov.remove(), 180);
+  }
+
+  // Direction toggle = cross-fade (deliberately not a continuous 90°→270° spin)
+  function toggleFsDirection() {
+    state.fsDirection = state.fsDirection === 90 ? 270 : 90;
+    const ov = document.getElementById('fsOverlay');
+    syncControlsToState();
+    if (!ov) return;
+    const live = ov.querySelector('.fs-canvas:not(.fs-ghost)');
+    if (!live) return;
+
+    // ghost keeps the old direction and fades out while the live one fades in
+    const ghost = live.cloneNode(true);
+    ghost.classList.add('fs-ghost', 'fs-dir-out');
+    ghost.classList.remove('fs-enter', 'fs-dir-in');
+    ov.appendChild(ghost);
+    setTimeout(() => ghost.remove(), 175);
+
+    live.dataset.dir = String(state.fsDirection);
+    live.classList.remove('fs-enter', 'fs-dir-in');
+    void live.offsetWidth;                        // restart animation
+    live.classList.add('fs-dir-in');
+    setTimeout(() => live.classList.remove('fs-dir-in'), 260);
+    layoutFullscreen();
+    updateUI();
+  }
+
+  // ===== Phone button bindings (ids recreated on orientation rebuild) =====
+  function bindPhoneButtons() {
+    document.getElementById('btnFullscreen')?.addEventListener('click', e => {
+      e.stopPropagation(); enterFullscreen();
+    });
+    document.getElementById('btnRotate')?.addEventListener('click', () => {
+      state.rotation = (state.rotation + 1) % 3;
+      state.orientation = state.rotation === 0 ? 'portrait' : 'landscape';
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.rot) === state.rotation));
+      applyOrientation();
+    });
+
+    const sb = document.getElementById('shutterBtn');
+    sb?.addEventListener('pointerdown', (e) => {
+      if (!state.connected) return;
+      e.currentTarget.classList.add('focusing');
+    });
+    sb?.addEventListener('pointerup', (e) => {
+      const btn = e.currentTarget;
+      btn.classList.remove('focusing');
+      if (!state.connected) return;
+      const rect = btn.getBoundingClientRect();
+      const inBtn = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom;
+      if (inBtn && state.recording) { state.recording = false; stopRec(); }
+      else if (inBtn && state.movieMode) { state.recording = true; startRec(); }
+      else if (inBtn) flashViewfinder();
+      updateUI(); syncControlsToState();
+    });
+    sb?.addEventListener('pointerleave', (e) => e.currentTarget.classList.remove('focusing'));
+
+    document.getElementById('btnRecPortrait')?.addEventListener('click', toggleRecording);
+    document.getElementById('btnRecLandscape')?.addEventListener('click', toggleRecording);
+  }
+
+  // Delegated: tool toggles + tap-to-focus (survive every DOM rebuild)
+  document.addEventListener('click', (e) => {
+    const toolBtn = e.target.closest('[data-well]');
+    if (toolBtn) {
+      const tool = toolBtn.dataset.well;
+      state[tool] = !state[tool];
+      updateUI(); syncControlsToState();
+      return;
+    }
+    const vf = e.target.closest('.viewfinder');
+    if (vf && state.connected) {
+      const p = vfLocalPoint(vf, e.clientX, e.clientY);
+      const fb = vf.querySelector('.focus-box');
+      if (fb) { fb.style.left = (p.x * 100) + '%'; fb.style.top = (p.y * 100) + '%'; }
+    }
+  });
+
+  // Maps a screen point into the viewfinder's own coordinate space, accounting
+  // for the fullscreen canvas rotation (90° / 270°).
+  function vfLocalPoint(vf, clientX, clientY) {
+    const rect = vf.getBoundingClientRect();
+    const canvas = vf.closest('.fs-canvas');
+    if (!canvas) {
+      return { x: (clientX - rect.left) / rect.width, y: (clientY - rect.top) / rect.height };
+    }
+    const dir = Number(canvas.dataset.dir);
+    const sx = clientX - (rect.left + rect.width / 2);
+    const sy = clientY - (rect.top + rect.height / 2);
+    const W = rect.height, H = rect.width;   // unrotated local size is swapped
+    let lx, ly;
+    if (dir === 90) { lx = sy + W / 2; ly = -sx + H / 2; }
+    else { lx = -sy + W / 2; ly = sx + H / 2; }
+    return { x: Math.min(1, Math.max(0, lx / W)), y: Math.min(1, Math.max(0, ly / H)) };
+  }
+
+  function toggleRecording() {
+    if (state.recording) { state.recording = false; stopRec(); }
+    else { state.movieMode = true; state.recording = true; startRec(); }
+    updateUI(); syncControlsToState();
+  }
+
+  function flashViewfinder() {
+    q('.viewfinder').forEach(vf => {
+      vf.style.transition = 'none';
+      vf.style.boxShadow = 'inset 0 0 120px rgba(255,255,255,0.6)';
+      setTimeout(() => { vf.style.transition = 'box-shadow 0.4s ease-out'; vf.style.boxShadow = ''; }, 50);
+    });
+  }
+  function startRec() {
+    stopRec(); state.recSeconds = 0;
+    state.recTimer = setInterval(() => {
+      state.recSeconds++;
+      q('.rec-time').forEach(el => el.textContent = recTimeText());
+    }, 1000);
+  }
+  function stopRec() { if (state.recTimer) { clearInterval(state.recTimer); state.recTimer = null; } }
+
+  // ===== Orientation =====
+  let portraitCache = null;
+  function cachePortrait() {
+    if (portraitCache) return;
+    portraitCache = phone.innerHTML;
+  }
+  function applyOrientation() {
+    const wasFullscreen = state.immersiveFullscreen;
+    exitFullscreen(false);                        // overlay is rebuilt below if needed
+    phone.classList.remove('rot-0', 'rot-1', 'rot-2', 'landscape', 'portrait');
+    if (state.orientation === 'landscape') {
+      phone.classList.add('landscape', 'rot-' + state.rotation);
+      ensureLandscapeLayout();
+    } else {
+      phone.classList.add('portrait', 'rot-0');
+      if (portraitCache) { phone.innerHTML = portraitCache; bindPhoneButtons(); }
+      layoutToolRows(true);
+    }
+    updateUI();
+    syncControlsToState();
+    if (wasFullscreen) enterFullscreen(false);
+  }
+
+  function ensureLandscapeLayout() {
+    phone.innerHTML = '';
+    const notch = document.createElement('span'); notch.className = 'notch'; phone.appendChild(notch);
+
+    // Topbar — overlay top-right
+    const tb = document.createElement('div'); tb.className = 'topbar';
+    tb.innerHTML = `<div class="signal-pill"><span class="signal-bars"><span></span><span></span><span></span><span></span></span><span class="signal-dbm">-42 dBm</span></div><button class="back-btn" aria-label="返回"><svg><use href="#i-back"/></svg></button>`;
+    phone.appendChild(tb);
+
+    // Body: left (vf+tools) + right (params+shutter)
+    const body = document.createElement('div'); body.className = 'ls-body';
+
+    const left = document.createElement('div'); left.className = 'ls-left';
+
+    const vfw = document.createElement('div'); vfw.className = 'viewfinder-wrap';
+    vfw.innerHTML = `<div class="viewfinder">${vfInnerHTML()}</div>`;
+    left.appendChild(vfw);
+
+    // Tool row below viewfinder — all overlay tools in one row
+    const tr = document.createElement('div'); tr.className = 'ls-tools'; tr.id = 'toolRowLandscape';
+    tr.innerHTML = TOOLS.map(t =>
+      `<button class="tool-btn ${state[t.k] ? 'active' : ''}" data-well="${t.k}" title="${t.title}"><svg><use href="${t.href}"/></svg></button>`
+    ).join('') +
+      `<button class="tool-btn" id="btnRecLandscape" style="color:var(--error);"><svg viewBox="0 0 24 24" width="17" height="17"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg></button>` +
+      `<div class="tool-spacer" style="display:block;width:8px;flex:none;"></div>` +
+      `<button class="tool-btn standout-btn" id="btnFullscreen" title="沉浸式全屏"><svg><use href="#i-fullscreen"/></svg></button>` +
+      `<button class="tool-btn standout-btn" id="btnRotate" title="旋转"><svg><use href="#i-rotate"/></svg></button>`;
+    left.appendChild(tr);
+
+    body.appendChild(left);
+
+    // Right panel — params + shutter, vertically centered with flex spacers
+    const right = document.createElement('div'); right.className = 'right-panel';
+    right.innerHTML = `
+      <div style="flex:1; min-height:0;"></div>
+      <div class="params-grid">
+        <div class="param-tile"><span class="param-label">EV</span><span class="param-value">+0.0</span></div>
+        <div class="param-tile"><span class="param-label">ISO</span><span class="param-value">100</span><span class="param-auto-badge on">AUTO</span></div>
+        <div class="param-tile"><span class="param-label">f</span><span class="param-value">f/2.8</span></div>
+        <div class="param-tile"><span class="param-label">S</span><span class="param-value">1/125</span></div>
+      </div>
+      <div class="shutter-area"><button class="shutter-btn" id="shutterBtn"><span class="shutter-inner"></span></button></div>
+      <div style="flex:1; min-height:0;"></div>`;
+    body.appendChild(right);
+
+    phone.appendChild(body);
+    bindPhoneButtons();
+  }
+
+  // ===== Control panel bindings =====
+  document.getElementById('ctrlConnected').addEventListener('click', () => { state.connected = true; updateUI(); syncControlsToState(); });
+  document.getElementById('ctrlDisconnected').addEventListener('click', () => { state.connected = false; updateUI(); syncControlsToState(); });
+  ['HD', 'Fps', 'Hist', 'Grid', 'Zebra', 'Level'].forEach(t => {
+    const key = t === 'Fps' ? 'fps' : t === 'Hist' ? 'histogram' : t === 'Grid' ? 'grid'
+      : t === 'Zebra' ? 'zebra' : t === 'Level' ? 'level' : 'hd';
+    document.getElementById('ctrl' + t).addEventListener('click', () => { state[key] = !state[key]; updateUI(); syncControlsToState(); });
+  });
+  document.getElementById('ctrlRec').addEventListener('click', toggleRecording);
+  document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => { state.mode = b.dataset.mode; updateUI(); syncControlsToState(); }));
+  document.querySelectorAll('[data-focus]').forEach(b => b.addEventListener('click', () => { state.focusMode = b.dataset.focus; updateUI(); syncControlsToState(); }));
+  document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => {
+    const r = parseInt(b.dataset.rot);
+    state.rotation = r; state.orientation = r === 0 ? 'portrait' : 'landscape';
+    document.querySelectorAll('.mode-btn').forEach(b2 => b2.classList.toggle('active', parseInt(b2.dataset.rot) === r));
+    applyOrientation();
+  }));
+  document.getElementById('ctrlFsEnter').addEventListener('click', () => enterFullscreen());
+  document.getElementById('ctrlFsExit').addEventListener('click', () => exitFullscreen());
+  document.getElementById('ctrlFsDir').addEventListener('click', () => toggleFsDirection());
+  document.getElementById('ctrlPhoneW').addEventListener('input', (e) => {
+    phone.style.setProperty('--phone-w', e.target.value + 'px');
+    layoutToolRows(true);
+    layoutFullscreen();
+  });
+
+  // Re-split whenever the available width changes
+  const ro = new ResizeObserver(() => { layoutToolRows(false); layoutFullscreen(); });
+  ro.observe(phone);
+  window.addEventListener('resize', () => { layoutToolRows(true); layoutFullscreen(); });
+
+  // ===== Init =====
+  function init() {
+    state.connected = true;
+    cachePortrait();
+    bindPhoneButtons();
+    layoutToolRows(true);
+    updateUI();
+    syncControlsToState();
+  }
+  init();
+  console.log('ZTransfer 监看页面 v2 — 工具行测量换行 + 沉浸式全屏 已就绪');
+</script>
+</body>
+</html>

@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
+import com.ztransfer.ui.theme.LocalButtonTexture
 import com.ztransfer.ui.theme.Motion
 
 /**
@@ -41,7 +42,6 @@ fun GlassSurface(
     panel: Boolean = false,
     active: Boolean = false,
     activeColor: Color? = null,
-    showBorder: Boolean = true,
     showSheen: Boolean = true,
     tint: Color = Color.Transparent,
     borderColor: Color? = null,
@@ -58,12 +58,8 @@ fun GlassSurface(
         else if (panel) colors.glassSheen else colors.glassHighlightTop
     val normalHighlightBottom = if (!showSheen || panel) Color.Transparent
         else colors.glassHighlightBottom
-    val normalBorderTop = if (panel) colors.glassPanelBorder else colors.glassBorderTop
-    val normalBorderBottom = if (panel) colors.glassPanelBorder else colors.glassBorderBottom
     val highlightTop = lerp(normalHighlightTop, resolvedActiveColor.copy(alpha = 0.30f), activeProgress)
     val highlightBottom = lerp(normalHighlightBottom, resolvedActiveColor.copy(alpha = 0.12f), activeProgress)
-    val borderTop = lerp(normalBorderTop, resolvedActiveColor.copy(alpha = 0.95f), activeProgress)
-    val borderBottom = lerp(normalBorderBottom, resolvedActiveColor.copy(alpha = 0.52f), activeProgress)
     val decoration = modifier
         .graphicsLayer {
             this.shape = shape
@@ -73,12 +69,13 @@ fun GlassSurface(
         .background(Brush.verticalGradient(listOf(highlightTop, highlightBottom)))
         .background(tint)
         .then(
-            if (showBorder) {
+            // 描边只保留两类"定义面板边缘"的用法：panel 的细 hairline 与调用方显式
+            // 指定语义色的 borderColor（如已连接徽标的绿圈）。普通玻璃表面不再画
+            // 渐变描边——按钮/浮层的外圈亮框正是它画出来的。
+            if (borderColor != null || panel) {
                 Modifier.border(
                     width = 1.dp,
-                    brush = borderColor?.let(::SolidColor)
-                        ?: if (panel) SolidColor(borderTop)
-                        else Brush.verticalGradient(listOf(borderTop, borderBottom)),
+                    brush = borderColor?.let(::SolidColor) ?: SolidColor(colors.glassPanelBorder),
                     shape = shape
                 )
             } else {
@@ -89,25 +86,24 @@ fun GlassSurface(
 }
 
 /**
- * 统一的"毛玻璃"悬浮按钮：半透明底 + 自上而下白色高光渐变 + 上亮下暗细描边，
+ * 统一的"毛玻璃"悬浮按钮：半透明底 + 自上而下白色高光渐变，不画外沿描边——
+ * 玻璃感全部来自底色与高光，按钮任何状态（含激活态）都不出现描边亮框。
  * 与 "Z传" 悬浮按钮同款视觉。全局悬浮控件（返回/标题/清空/重试等）复用，保证设计语言一致。
  *
  * 按压微缩放：按下快速下沉到 0.95、松开弹性回弹——全 App 玻璃按钮统一的"手感"，
  * 一处定义处处生效。
  *
- * [panel]：面板内变体。默认样式的白描边 + 投影是为悬浮在照片/内容之上设计的，
- * 放进平整的玻璃弹窗（如高级版/换机弹窗）里会像多画了一个框；panel 为真时改用
- * 面板内卡片的同一玻璃语言——淡底、细 panelBorder 描边、顶部微高光、无投影，
+ * [panel]：面板内变体。默认样式的投影是为悬浮在照片/内容之上设计的，
+ * 放进平整的玻璃弹窗（如高级版/换机弹窗）里显得突兀；panel 为真时改用
+ * 面板内卡片的同一玻璃语言——淡底、顶部微高光、无投影，
  * 浅色/深色主题各自取 onBackground 同族色，两套主题都贴着面板长。
  *
- * [active]：持续选中态。保留毛玻璃基底和按压手感，叠加强调色淡光、
- * 强调色轮廓与稍高投影，供筛选等“离开页面后仍持续生效”的状态使用。
+ * [active]：持续选中态。保留毛玻璃基底和按压手感，叠加强调色淡光与稍高投影，
+ * 供筛选等“离开页面后仍持续生效”的状态使用；不画强调色轮廓圈。
  * [activeColor] 可让有明确语义色的按钮复用同一套激活动画，不另造组件。
  *
- * [showBorder]：仅控制外沿描边，玻璃底、高光、激活态和按压反馈不受影响。
- * 小尺寸工具按钮可关闭描边，避免 1dp 亮边挤压图标的视觉空间。
  * [showSheen]：控制未激活时的白色顶部高光。紧凑按钮可关闭它，避免高光在
- * 小面积圆角表面上看起来像第二圈白框；激活色淡光仍会正常显示。
+ * 小面积圆角表面上看起来像一圈白框；激活色淡光仍会正常显示。
  */
 @Composable
 fun GlassButton(
@@ -119,7 +115,6 @@ fun GlassButton(
     panel: Boolean = false,
     active: Boolean = false,
     activeColor: Color? = null,
-    showBorder: Boolean = true,
     showSheen: Boolean = true,
     content: @Composable RowScope.() -> Unit
 ) {
@@ -139,22 +134,23 @@ fun GlassButton(
         animationSpec = tween(180),
         label = "glassActive"
     )
+    // 按钮读 button* token（皮肤只覆写这组）；面板/GlassSurface 读 glass* token，
+    // 因此换皮肤只有按钮换材质，弹窗和卡片保持默认毛玻璃。
     val normalHighlightTop = if (!showSheen) Color.Transparent
-        else if (panel) colors.glassSheen else colors.glassHighlightTop
+        else if (panel) colors.buttonSheen else colors.buttonHighlightTop
     val normalHighlightBottom = if (!showSheen || panel) Color.Transparent
-        else colors.glassHighlightBottom
-    val normalBorderTop = if (panel) colors.glassPanelBorder else colors.glassBorderTop
-    val normalBorderBottom = if (panel) colors.glassPanelBorder else colors.glassBorderBottom
+        else colors.buttonHighlightBottom
     val highlightTop = lerp(normalHighlightTop, resolvedActiveColor.copy(alpha = 0.30f), activeProgress)
     val highlightBottom = lerp(normalHighlightBottom, resolvedActiveColor.copy(alpha = 0.12f), activeProgress)
-    val borderTop = lerp(normalBorderTop, resolvedActiveColor.copy(alpha = 0.95f), activeProgress)
-    val borderBottom = lerp(normalBorderBottom, resolvedActiveColor.copy(alpha = 0.52f), activeProgress)
     val elevation = if (panel) 0.dp else (4f + 3f * activeProgress).dp
+    // 皮肤纹理（皮革/木纹为可平铺画刷，毛玻璃为 null）：叠在底色之上、高光之下。
+    // 强度已烘焙进 tile 像素（见 SkinTexture.kt），这里按原样平铺即可。
+    val skinTexture = LocalButtonTexture.current
     Surface(
         onClick = onClick,
         enabled = enabled,
         shape = shape,
-        color = if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.glassSurface,
+        color = if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.buttonSurface,
         shadowElevation = elevation,
         interactionSource = interactionSource,
         modifier = modifier.graphicsLayer {
@@ -167,20 +163,11 @@ fun GlassButton(
     ) {
         Row(
             modifier = Modifier
+                // 纹理层夹在 Surface 底色与高光渐变之间，随 Surface 的 shape 一起被裁剪；
+                // 低透明度平铺，不影响其上文字/图标的可读性。
+                .then(if (skinTexture != null) Modifier.background(skinTexture) else Modifier)
                 .background(
                     brush = Brush.verticalGradient(listOf(highlightTop, highlightBottom))
-                )
-                .then(
-                    if (showBorder) {
-                        Modifier.border(
-                            width = 1.dp,
-                            brush = if (panel) SolidColor(borderTop)
-                            else Brush.verticalGradient(listOf(borderTop, borderBottom)),
-                            shape = shape
-                        )
-                    } else {
-                        Modifier
-                    }
                 )
                 .padding(contentPadding),
             verticalAlignment = Alignment.CenterVertically,

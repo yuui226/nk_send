@@ -16,6 +16,7 @@ import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.ResumeUnavailableException
 import com.ztransfer.service.TransferService
+import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +65,8 @@ data class TransferState(
     val keepScreenOn: Boolean = true,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    // UI 皮肤预设（毛玻璃/经典等），全局配色与纹理风格。
+    val skinPreset: SkinPreset = SkinPreset.FROSTED_GLASS,
     // 照片类型筛选（归一化扩展名，如 ".jpg"）：null = 全部（不过滤，新类型也放行）。
     // 持久化跨会话生效；设备上没有所选类型时列表自然为空，不做特殊处理。
     val filterExtensions: Set<String>? = null,
@@ -76,7 +79,7 @@ data class TransferState(
     // 预览大图的全局逆时针旋转方向（0..3 个 90°）。跨照片、跨会话持久化。
     val previewRotationQuarterTurns: Int = 0,
     // 监看页是否使用应用内横屏全屏布局。跨进页、跨应用重启持久化。
-    val remoteFullscreen: Boolean = false,
+    val remoteRotation: Int = 0,  // 0=竖屏, 1=横90°, 2=横270°
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
     // 切换后由设置面板触发 Activity.recreate() 生效。
     val appLanguage: String = AppLocale.SYSTEM
@@ -162,6 +165,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
                     ?: ThemeMode.SYSTEM,
+                skinPreset = runCatching { SkinPreset.valueOf(prefs.getString("skin_preset", SkinPreset.FROSTED_GLASS.name) ?: SkinPreset.FROSTED_GLASS.name) }.getOrDefault(SkinPreset.FROSTED_GLASS),
                 // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
                 filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet(),
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
@@ -170,7 +174,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 previewRotationQuarterTurns = Math.floorMod(
                     prefs.getInt("preview_rotation_quarter_turns", 0), 4
                 ),
-                remoteFullscreen = prefs.getBoolean("remote_fullscreen", false),
+                remoteRotation = prefs.getInt("remote_rotation", 0),
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
         }
@@ -198,6 +202,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(themeMode = mode) }
     }
 
+    fun setSkinPreset(skin: SkinPreset) {
+        prefs.edit().putString("skin_preset", skin.name).apply()
+        _state.update { it.copy(skinPreset = skin) }
+    }
+
     fun setHapticsEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("haptics_enabled", enabled).apply()
         _state.update { it.copy(hapticsEnabled = enabled) }
@@ -216,9 +225,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** 保存监看页的应用内横屏状态；不改变 Android Activity 的系统方向。 */
-    fun setRemoteFullscreen(enabled: Boolean) {
-        prefs.edit().putBoolean("remote_fullscreen", enabled).apply()
-        _state.update { it.copy(remoteFullscreen = enabled) }
+    fun setRemoteRotation(rotation: Int) {
+        prefs.edit().putInt("remote_rotation", rotation).apply()
+        _state.update { it.copy(remoteRotation = rotation) }
     }
 
     /** 应用内语言；写入后需 Activity.recreate() 才对界面生效（attachBaseContext 重读偏好）。 */

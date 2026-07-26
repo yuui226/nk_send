@@ -81,6 +81,10 @@
     <string name="theme_light">浅色</string>
     <string name="language">语言</string>
     <string name="language_system">跟随系统</string>
+    <string name="skin_frosted_glass">毛玻璃</string>
+    <string name="skin_leather">皮革</string>
+    <string name="skin_wood">木纹</string>
+    <string name="cd_skin">界面皮肤</string>
     <string name="haptic_feedback">触感反馈</string>
     <string name="keep_screen_on">屏幕常亮</string>
     <string name="version_label">Z传 v%1$s</string>
@@ -144,16 +148,28 @@
     <string name="remote_transfer_busy_hint">传输进行中，监看可能卡顿</string>
     <string name="remote_rec_start_failed">无法开始录像</string>
     <string name="remote_rec_stop_failed">无法停止录像，请检查相机后重试</string>
+    <string name="remote_rec_no_audio">无麦克风权限，录制无声音</string>
+    <string name="remote_rec_pro_only">画面录制为高级版功能</string>
     <string name="remote_tap_focus_manual">请将相机切换到自动对焦后使用点按对焦</string>
     <string name="dev_panel_title">开发者</string>
     <string name="dev_hd_liveview">高清监看 (XGA)</string>
     <string name="cd_remote_histogram">监看直方图</string>
     <string name="cd_remote_grid">构图参考线</string>
-    <string name="cd_remote_enter_fullscreen">进入全屏</string>
-    <string name="cd_remote_exit_fullscreen">退出全屏</string>
+    <string name="cd_remote_rotate">旋转屏幕</string>
+    <string name="cd_remote_fullscreen_enter">全屏监看</string>
+    <string name="cd_remote_fullscreen_exit">退出全屏</string>
+    <string name="cd_remote_fullscreen_direction">切换方向</string>
     <string name="dev_fps_overlay">帧率显示</string>
     <string name="lab_run_probe">完整探测</string>
     <string name="lab_copy_log">复制日志</string>
+    <string name="cd_remote_zebra">斑马纹</string>
+    <string name="cd_remote_level">水平仪</string>
+    <string name="cd_remote_rec_start">录制</string>
+    <string name="cd_remote_rec_pause">暂停录制</string>
+    <string name="cd_remote_rec_resume">恢复录制</string>
+    <string name="cd_remote_rec_stop">停止录制</string>
+    <string name="cd_remote_rec_toast_saved">已保存录制: %1$s</string>
+    <string name="cd_remote_rec_toast_failed">录制失败</string>
 
     <!-- 授权/激活 -->
     <string name="license">授权</string>

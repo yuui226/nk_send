@@ -404,7 +404,6 @@ private fun UpdateGlassButton(
         panel = !prominent,
         active = prominent,
         activeColor = colors.accentBlue,
-        showBorder = false,
         showSheen = false
     ) {
         Text(

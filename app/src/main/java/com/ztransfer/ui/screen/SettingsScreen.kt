@@ -448,6 +448,31 @@ fun SettingsOverlay(
                         }
                     }
                 }
+
+                CardDivider()
+
+                // UI 皮肤
+                SectionLabel(
+                    stringResource(R.string.cd_skin),
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                SkinPreset.entries.chunked(3).forEachIndexed { rowIndex, rowItems ->
+                    if (rowIndex > 0) Spacer(Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        rowItems.forEach { skin ->
+                            SelectionChip(
+                                label = stringResource(skin.displayNameResId),
+                                selected = state.skinPreset == skin,
+                                onClick = { viewModel.setSkinPreset(skin) },
+                                compact = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(14.dp))

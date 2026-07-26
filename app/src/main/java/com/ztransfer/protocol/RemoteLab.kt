@@ -79,6 +79,9 @@ object Lab {
     const val PROP_NK_ISO_CONTROL_SENSITIVITY = 0xD0B5
     const val PROP_NK_AUTO_ISO_ALT = 0xD16A
     const val PROP_NK_AF_MODE = 0xD161
+    const val PROP_NK_ANGLE_LEVEL = 0xD067       // 机身电子水平仪滚转角，只读
+                                                 // libgphoto2 ptp.h: PTP_DPC_NIKON_AngleLevel
+                                                 // Z 30/Z 50/Z 8/Z 9/Z 6iii 全世代共用此 DPC
     const val PROP_NK_MOV_PROHIBIT = 0xD0A4      // 录像禁止条件 bitmask，0=可录
     const val PROP_NK_LV_SELECTOR = 0xD1A6       // 照片/录像实体拨杆：0=照片 1=录像
     const val PROP_NK_APPLICATION_MODE = 0xD1F0  // 部分机型的应用模式属性入口
@@ -131,6 +134,7 @@ object Lab {
         PROP_WHITE_BALANCE to "WhiteBalance",
         PROP_FOCUS_MODE to "FocusMode",
         PROP_NK_AF_MODE to "NikonAutofocusMode",
+        PROP_NK_ANGLE_LEVEL to "AngleLevel",
         PROP_NK_RECORDING_MEDIA to "RecordingMedia",
         PROP_NK_LV_STATUS to "LiveViewStatus",
         PROP_NK_LV_PROHIBIT to "LiveViewProhibit",
@@ -288,6 +292,8 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
     Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_ISO_CONTROL_SENSITIVITY,
     Lab.PROP_NK_MOVIE_ISO -> "ISO$raw"
     Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT -> if (raw == 0L) "Off" else "On"
+    // 16.16 定点度数（详见 rcAngleLevelRoll 的编码说明）。
+    Lab.PROP_NK_ANGLE_LEVEL -> "%.1f°".format(raw / 65536.0)
     Lab.PROP_EXPOSURE_PROGRAM -> when (raw) {
         1L -> "M"; 2L -> "P"; 3L -> "A"; 4L -> "S"; else -> "0x${raw.toString(16)}"
     }
@@ -494,6 +500,43 @@ suspend fun NikonCamera.rcRefreshParam(param: RcParam): RcParam? {
         ?: return null
     return if (scalar) param.copy(current = current) else null
 }
+
+/**
+ * 机身电子水平仪（Nikon AngleLevel 0xD067）的滚转角：单位度、范围 (-180,180]，0 即水平。
+ * 无法解释的编码返回 null，调用方据此不画任何角度。
+ *
+ * 编码依据：该属性是只读 INT32，值为 16.16 定点的度数（libgphoto2 对 0xD067 固定按
+ * 1/65536 缩放渲染）。libgphoto2 自带的 nikon-z7 属性 dump 可直接验算：
+ * `Angle Level(0xd067):(read only) (type=0x5) 358.8' (23514322)` → 23514322/65536 = 358.8，
+ * 即相机按 0..360 的环报角，358.8 就是反方向偏 1.2°、几乎水平。
+ * 8/16 位类型装不下 360° 的 16.16 编码，只可能是整度数，一并容错。
+ *
+ * 正负方向（顺时针为正还是为负）尚未在真机核对；若实机上水平线歪的方向相反，
+ * 只需在这里对结果取反即可，绘制层不必改。
+ */
+fun rcAngleLevelRoll(param: RcParam): Float? {
+    val degrees = when (param.dataType) {
+        0x0005, 0x0006 -> param.current.toDouble() / 65536.0   // INT32/UINT32：16.16 定点
+        0x0001, 0x0002, 0x0003, 0x0004 -> param.current.toDouble()
+        else -> return null
+    }
+    if (!degrees.isFinite()) return null
+    var roll = degrees % 360.0
+    if (roll > 180.0) roll -= 360.0
+    if (roll <= -180.0) roll += 360.0
+    return roll.toFloat()
+}
+
+/**
+ * 读一次电子水平仪属性描述，供后续只刷标量值（[rcRefreshParam]）复用数据类型。
+ * 机身不支持 0xD067（GetDevicePropDesc 直接失败）或值不是可解释的标量时返回 null。
+ *
+ * 支持性只认这一次实际响应，不查 0x90CA/0x9439 的广告清单：Nikon 厂商属性经常
+ * 不出现在 DeviceInfo 与厂商码列表里却照样可读（见 docs/无线遥控相机调研.md），
+ * 直接问属性描述才是权威答案。
+ */
+suspend fun NikonCamera.rcGetAngleLevel(): RcParam? =
+    rcGetParam(Lab.PROP_NK_ANGLE_LEVEL)?.takeIf { rcAngleLevelRoll(it) != null }
 
 suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
     val candidates = intArrayOf(Lab.PROP_FOCUS_MODE, Lab.PROP_NK_AF_MODE)
@@ -1157,6 +1200,21 @@ suspend fun NikonCamera.runLabProbe(
     val (vrc, vd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_F_NUMBER)
     log("GetDevicePropValue(FNumber) resp=${hex4(vrc)} ${vd?.size ?: 0}B")
 
+    // ---- 5b. 电子水平仪 AngleLevel (0xD067) 专检 ----
+    // Z 30 为首要目标机身，此属性是水平仪唯一数据源（libgphoto2 ptp.h 定义
+    // PTP_DPC_NIKON_AngleLevel = 0xD067，Z 30/Z 50/Z 8/Z 9/Z 6iii 全世代共用）。
+    // 属性不支持 = toggle 拒绝锁存 + devLog，不画假角度。
+    val (alrc, ald) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_ANGLE_LEVEL)
+    if (alrc == Lab.OK && ald != null && ald.size >= 4) {
+        val raw = ald.indices.fold(0L) { acc, i ->
+            acc or ((ald[i].toLong() and 0xFF) shl (8 * i))
+        }
+        val rollDeg = raw / 65536.0   // 16.16 定点度数
+        log("AngleLevel(0xD067) raw=$raw (INT32 16.16 fixed) roll=%.1f° source=0xD067 poll".format(rollDeg))
+    } else {
+        log("!! AngleLevel(0xD067) resp=${hex4(alrc)} — level NOT available on this body")
+    }
+
     // ---- 6. SetDevicePropValue 零副作用测试：曝光补偿原值写回 ----
     val (crc, cd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_EXP_COMPENSATION)
     if (crc == Lab.OK && cd != null && cd.isNotEmpty()) {
@@ -1213,6 +1271,7 @@ suspend fun NikonCamera.runLabProbe(
     // ---- 9. 结论 ----
     log("--- verdict ---")
     log("live view:      ${if (lvOk) "YES" else "NO"}")
+    log("angle level:    ${if (alrc == Lab.OK && ald != null && ald.size >= 4) "0xD067 OK" else "UNAVAILABLE"}")
     log("capture opcode: ${if (Lab.NK_CAPTURE_REC_IN_MEDIA in ops || Lab.NK_CAPTURE_REC_IN_SDRAM in ops) "advertised" else "MISSING"}")
     log("event polling:  ${if (Lab.NK_GET_EVENT in ops || Lab.NK_GET_EVENT_EX in ops) "advertised" else "MISSING"}")
     log("=== probe done in ${System.currentTimeMillis() - t0}ms ===")

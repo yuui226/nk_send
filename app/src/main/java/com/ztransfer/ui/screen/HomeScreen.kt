@@ -543,8 +543,7 @@ private fun ConnectionMethodCard(
             tint = when {
                 error != null -> colors.statusError.copy(alpha = 0.055f)
                 else -> Color.Transparent
-            },
-            showBorder = false
+            }
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 // 空白区负责卡片形变；前景按钮拥有独立手势，不与卡片反馈竞争。

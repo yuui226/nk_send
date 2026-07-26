@@ -81,6 +81,10 @@
     <string name="theme_light">Light</string>
     <string name="language">Language</string>
     <string name="language_system">System</string>
+    <string name="skin_frosted_glass">Frosted Glass</string>
+    <string name="skin_leather">Leather</string>
+    <string name="skin_wood">Wood</string>
+    <string name="cd_skin">UI Skin</string>
     <string name="haptic_feedback">Haptic feedback</string>
     <string name="keep_screen_on">Keep screen on</string>
     <string name="version_label">ZTransfer v%1$s</string>
@@ -144,16 +148,28 @@
     <string name="remote_transfer_busy_hint">Transfers in progress — live view may stutter</string>
     <string name="remote_rec_start_failed">Couldn\'t start recording</string>
     <string name="remote_rec_stop_failed">Couldn\'t stop recording — check the camera and try again</string>
+    <string name="remote_rec_no_audio">No microphone permission — recording without sound</string>
+    <string name="remote_rec_pro_only">Recording is a Pro feature</string>
     <string name="remote_tap_focus_manual">Switch the camera to autofocus to use tap focus</string>
     <string name="dev_panel_title">Developer</string>
     <string name="dev_hd_liveview">XGA live view</string>
     <string name="cd_remote_histogram">Live view histogram</string>
     <string name="cd_remote_grid">Framing grid</string>
-    <string name="cd_remote_enter_fullscreen">Enter full screen</string>
-    <string name="cd_remote_exit_fullscreen">Exit full screen</string>
+    <string name="cd_remote_rotate">Rotate screen</string>
+    <string name="cd_remote_fullscreen_enter">Fullscreen monitor</string>
+    <string name="cd_remote_fullscreen_exit">Exit fullscreen</string>
+    <string name="cd_remote_fullscreen_direction">Switch direction</string>
     <string name="dev_fps_overlay">FPS overlay</string>
     <string name="lab_run_probe">Probe</string>
     <string name="lab_copy_log">Copy log</string>
+    <string name="cd_remote_zebra">Zebra stripes</string>
+    <string name="cd_remote_level">Level</string>
+    <string name="cd_remote_rec_start">Record</string>
+    <string name="cd_remote_rec_pause">Pause recording</string>
+    <string name="cd_remote_rec_resume">Resume recording</string>
+    <string name="cd_remote_rec_stop">Stop recording</string>
+    <string name="cd_remote_rec_toast_saved">Recording saved: %1$s</string>
+    <string name="cd_remote_rec_toast_failed">Recording failed</string>
 
     <!-- License / activation -->
     <string name="license">License</string>

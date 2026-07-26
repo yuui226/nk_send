@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
             // 在主题之上先取出来，切换即全局重排配色。
             val transferViewModel: TransferViewModel = viewModel()
             val transferState by transferViewModel.state.collectAsState()
-            ZTransferTheme(themeMode = transferState.themeMode) {
+            ZTransferTheme(themeMode = transferState.themeMode, skinPreset = transferState.skinPreset) {
                 MainScreen(transferViewModel)
             }
         }

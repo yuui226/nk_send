@@ -842,7 +842,6 @@ fun FileListScreen(
                     else onNavigateToRemote()
                 },
                 shape = CircleShape,
-                showBorder = false,
                 showSheen = false,
                 // 使用重玻璃底保证叠在照片上也清晰；GlassSurface 的圆形硬裁剪确保
                 // 内部没有 Surface/Row 形成的矩形底或矩形点击状态层。
