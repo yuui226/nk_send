@@ -817,39 +817,27 @@ fun FileListScreen(
                 .navigationBarsPadding()
                 .padding(start = 20.dp, bottom = 24.dp)
         ) {
-            val remoteInteraction = remember { MutableInteractionSource() }
-            val remotePressed by remoteInteraction.collectIsPressedAsState()
-            val remotePressScale by animateFloatAsState(
-                targetValue = if (remotePressed) 0.95f else 1f,
-                animationSpec = if (remotePressed) tween(80) else Motion.bouncy(),
-                label = "remoteEntryPress"
-            )
-            GlassSurface(
-                modifier = Modifier
-                    .size(52.dp)
-                    .graphicsLayer {
-                        scaleX = remotePressScale
-                        scaleY = remotePressScale
-                    }
-                    .clickable(
-                        interactionSource = remoteInteraction,
-                        indication = null,
-                        role = Role.Button
-                    ) {
-                    if (transfersBusy) showHint(remoteBlockedHint)
+            GlassButton(
+                onClick = {
+                    // 端侧录制与照片传输共用同一个 SAF 保存目录。与加入传输队列的
+                    // 拦截顺序一致：目录未设置时先引导设置，不进入监看后再让用户返工。
+                    if (transferState.transferDirUri == null) showSettings = true
+                    else if (transfersBusy) showHint(remoteBlockedHint)
                     // 免费版当日监看时长已用完:入口处直接提示,不进页再弹回。
                     else if (LicenseManager.remoteTimeLeftMs() <= 0L) showHint(remoteEndedHint)
                     else onNavigateToRemote()
                 },
+                modifier = Modifier
+                    .size(52.dp),
                 shape = CircleShape,
+                contentPadding = PaddingValues(14.dp),
                 showSheen = false,
-                // 使用重玻璃底保证叠在照片上也清晰；GlassSurface 的圆形硬裁剪确保
-                // 内部没有 Surface/Row 形成的矩形底或矩形点击状态层。
-                tint = colors.glassSurfaceHeavy
+                // 入口必须走公共按钮材质：毛玻璃、皮革、木纹均与当前主题同步。
+                // 按压缩放由 GlassButton 统一提供，不在此重复实现。
+                shadowElevation = 6.dp
             ) {
                 RemoteMark(
                     modifier = Modifier
-                        .align(Alignment.Center)
                         .size(24.dp),
                     color = if (transfersBusy) colors.onSurfaceVariant.copy(alpha = 0.5f) else colors.accentBlue,
                     contentDescription = stringResource(R.string.cd_remote_entry)

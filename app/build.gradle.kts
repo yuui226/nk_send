@@ -33,8 +33,8 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "1.47"
+        versionCode = 18
+        versionName = "1.49"
     }
 
     buildTypes {

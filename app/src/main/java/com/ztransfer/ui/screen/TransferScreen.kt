@@ -129,20 +129,37 @@ fun TransferScreen(
         if (transferState.tasks.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // 空状态图标缓慢呼吸：页面此时无其它动态，一点"活感"不至于死板。
+                    // 空状态只保留品牌双 Z 的低对比度剪影。透明度与尺寸做极轻的慢呼吸，
+                    // 文案保持稳定，避免整个空状态像加载中一样闪烁。
                     val breathe = rememberInfiniteTransition(label = "emptyQueue")
                     val breatheAlpha by breathe.animateFloat(
-                        initialValue = 0.35f, targetValue = 0.6f,
-                        animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
+                        initialValue = 0.42f,
+                        targetValue = 0.54f,
+                        animationSpec = infiniteRepeatable(
+                            tween(2400, easing = FastOutSlowInEasing),
+                            RepeatMode.Reverse
+                        ),
                         label = "emptyQueueAlpha"
                     )
-                    Icon(
-                        Icons.Default.CloudDownload, contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
+                    val breatheScale by breathe.animateFloat(
+                        initialValue = 0.985f,
+                        targetValue = 1.015f,
+                        animationSpec = infiniteRepeatable(
+                            tween(2400, easing = FastOutSlowInEasing),
+                            RepeatMode.Reverse
+                        ),
+                        label = "emptyQueueScale"
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(stringResource(R.string.no_transfer_tasks), color = colors.onSurfaceVariant)
+                    ZMark(
+                        modifier = Modifier
+                            .height(58.dp)
+                            .graphicsLayer {
+                                alpha = breatheAlpha
+                                scaleX = breatheScale
+                                scaleY = breatheScale
+                        },
+                        color = colors.onSurfaceVariant
+                    )
                 }
             }
         } else {

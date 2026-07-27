@@ -289,7 +289,7 @@ fun ProDialog(
                                     compact = compactTable,
                                 )
                                 CompareRow(
-                                    stringResource(R.string.compare_monitor_recording),
+                                    stringResource(R.string.compare_on_device_recording),
                                     stringResource(R.string.compare_unavailable),
                                     stringResource(R.string.compare_available),
                                     stringResource(R.string.compare_available),

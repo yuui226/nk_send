@@ -82,6 +82,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var keepaliveJob: Job? = null
     private var watcherJob: Job? = null
     private var eventPollJob: Job? = null
+    private var fileLoadJob: Job? = null
+    // 首次连接的整卡 ObjectInfo 枚举可能跨越数秒。进入监看时取消并记住尚未完成，
+    // 退出后从已发布的文件继续，避免 GetObjectInfo 与 Live View 取帧争抢 ioMutex。
+    private var fileLoadPending = false
     private var usbPermissionJob: Job? = null
     private var usbConnectJob: Job? = null
     private var pendingUsbPermissionDeviceId: Int? = null
@@ -554,7 +558,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val remoteActiveFlow = MutableStateFlow(false)
 
     fun setRemoteActive(active: Boolean) {
+        val wasActive = remoteActiveFlow.value
         remoteActiveFlow.value = active
+        if (active) {
+            if (fileLoadJob?.isActive == true) {
+                log { "FILE_SCAN pause for remote loaded=${_state.value.files.size}" }
+            }
+            fileLoadJob?.cancel()
+        } else if (wasActive && fileLoadPending && _state.value.isConnectedToCamera) {
+            log { "FILE_SCAN resume after remote loaded=${_state.value.files.size}" }
+            loadFiles(preserveExisting = true)
+        }
     }
 
     // FHD 长按预览活跃期间暂停后台缩略图填充：FHD 取图比缩略图慢得多（1-3s vs 100ms），
@@ -915,25 +929,41 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun loadFiles() {
+    private fun loadFiles(preserveExisting: Boolean = false) {
         val cam = camera ?: return
-        thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
-        noThumbHandles.clear()      // handle 跨会话可能复用，负缓存一并作废
-        _state.update { it.copy(isLoadingFiles = true, files = emptyList()) }
+        fileLoadJob?.cancel()
+        fileLoadPending = true
+        if (!preserveExisting) {
+            thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
+            noThumbHandles.clear()      // handle 跨会话可能复用，负缓存一并作废
+        }
+        _state.update {
+            it.copy(
+                isLoadingFiles = !remoteActiveFlow.value,
+                files = if (preserveExisting) it.files else emptyList()
+            )
+        }
+        // 监看先于列表枚举：保留“待加载”标记，退出监看后再启动，不向 ioMutex 排队。
+        if (remoteActiveFlow.value) return
 
-        viewModelScope.launch {
+        log {
+            "FILE_SCAN start preserve=$preserveExisting existing=${_state.value.files.size}"
+        }
+        val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             try {
                 // 双卡机型（Z5 II / Z6 III 等）：枚举【所有】存储卡的对象并合并，单卡机型
                 // 行为不变。PTP StorageID 低 16 位为逻辑存储号，0 表示卡槽无卡，跳过；
                 // handle 全机唯一、与卡无关，下载/缩略图等后续链路零改动。
                 val storageIds = cam.getStorageIds().filter { it and 0xFFFF != 0 }
                 if (storageIds.isEmpty()) {
+                    fileLoadPending = false
                     _state.update { it.copy(isLoadingFiles = false) }
                     return@launch
                 }
 
                 val handles = storageIds.flatMap { cam.getObjectHandles(it) }.distinct()
                 if (handles.isEmpty()) {
+                    fileLoadPending = false
                     _state.update { it.copy(isLoadingFiles = false) }
                     return@launch
                 }
@@ -941,11 +971,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // handle 降序 ≈ 拍摄时间由新到旧；按批追加即可，最终展示顺序由
                 // FileListScreen.groupFilesByDate 统一按日期分组排序，避免此处每批 O(n log n) 全量重排。
                 // 双卡照片按拍摄日期自然混排进同一分组。
-                val sortedHandles = handles.sortedDescending()
-                val allFiles = mutableListOf<NikonCamera.FileInfo>()
+                val existingFiles =
+                    if (preserveExisting && camera === cam) _state.value.files else emptyList()
+                val existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
+                val sortedHandles = handles.asSequence()
+                    .filterNot { it in existingHandles }
+                    .sortedDescending()
+                    .toList()
+                val allFiles = existingFiles.toMutableList()
                 // 备份模式下同一张照片在两张卡各有一份（handle 不同）：按 名称+大小+拍摄时间
                 // 去重，列表只显示一份；溢出/RAW+JPG 分卡等模式互不相同，不受影响。
-                val seen = HashSet<String>()
+                val seen = existingFiles.asSequence()
+                    .map { "${it.fileName}|${it.size}|${it.captureDate}" }
+                    .toHashSet()
 
                 cam.streamFileInfo(sortedHandles, batchSize = 20) { batch, loaded, total ->
                     val fresh = batch.filter { seen.add("${it.fileName}|${it.size}|${it.captureDate}") }
@@ -955,12 +993,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
                 }
 
+                fileLoadPending = false
+                log { "FILE_SCAN done files=${allFiles.size}" }
                 _state.update { it.copy(isLoadingFiles = false) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // 进入监看的正常抢占：保留已加载部分与 pending，退出后继续剩余 handles。
+                throw e
             } catch (_: Exception) {
                 // 扫描中断（掉线/读超时）：保留已加载的部分，掉线由心跳发现并触发重连。
+                fileLoadPending = false
                 _state.update { it.copy(isLoadingFiles = false) }
+            } finally {
+                // 新会话可能已启动了下一轮加载；旧任务的迟到 finally 不得把新任务的
+                // loading 状态清掉。
+                if (fileLoadJob === coroutineContext[Job]) {
+                    fileLoadJob = null
+                    _state.update { it.copy(isLoadingFiles = false) }
+                }
             }
         }
+        fileLoadJob = job
+        job.start()
     }
 
     fun getCamera(): NikonCamera? = camera

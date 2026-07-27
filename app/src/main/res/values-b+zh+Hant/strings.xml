@@ -49,7 +49,6 @@
     <string name="burst_collection_count">%1$d</string>
 
     <!-- 傳輸佇列 -->
-    <string name="no_transfer_tasks">暫無傳輸任務</string>
     <string name="status_waiting">等待</string>
     <string name="status_skipped">跳過</string>
     <string name="status_cancelled">已取消</string>
@@ -149,7 +148,7 @@
     <string name="remote_rec_start_failed">無法開始錄影</string>
     <string name="remote_rec_stop_failed">無法停止錄影，請檢查相機後重試</string>
     <string name="remote_rec_no_audio">無麥克風權限，錄製無聲音</string>
-    <string name="remote_rec_pro_only">畫面錄製為高級版功能</string>
+    <string name="remote_rec_pro_only">端側錄製是高級版功能</string>
     <string name="remote_tap_focus_manual">請將相機切換到自動對焦後使用點按對焦</string>
     <string name="dev_panel_title">開發者</string>
     <string name="dev_hd_liveview">高清監看 (XGA)</string>
@@ -202,7 +201,7 @@
     <string name="compare_remote">遙控 · 監看</string>
     <string name="compare_remote_free">%1$d 分鐘/天</string>
     <string name="compare_unlimited">無限</string>
-    <string name="compare_monitor_recording">監看錄製</string>
+    <string name="compare_on_device_recording">端側錄製</string>
     <string name="compare_unavailable">不可用</string>
     <string name="compare_available">可用</string>
     <string name="compare_duration">時效</string>

@@ -22,14 +22,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import com.ztransfer.ui.theme.AppTheme
@@ -187,9 +192,94 @@ private fun Modifier.naturalMaterialOptics(
             )
             SkinPreset.FROSTED_GLASS -> error("handled above")
         }
+        // 真皮按钮是一块略微隆起的厚皮：顶部环境光与底部厚度阴影只沿纵向展开，
+        // 不画闭合轮廓，避免重新出现圆框/多边形框。按下时厚度收紧，像皮面被压低。
+        val leatherBodyDepth = if (skin == SkinPreset.LEATHER) {
+            val relaxed = 1f - 0.70f * press
+            Brush.verticalGradient(
+                colorStops = arrayOf(
+                    0.00f to Color(0xFFFFD8C0).copy(
+                        alpha = (if (dark) 0.085f else 0.12f) * panelFactor * relaxed
+                    ),
+                    0.13f to Color(0xFFFFC7A5).copy(
+                        alpha = (if (dark) 0.026f else 0.038f) * panelFactor * relaxed
+                    ),
+                    0.34f to Color.Transparent,
+                    0.69f to Color.Transparent,
+                    0.88f to Color(0xFF3A100A).copy(
+                        alpha = (if (dark) 0.055f else 0.040f) * panelFactor * relaxed
+                    ),
+                    1.00f to Color(0xFF1B0705).copy(
+                        alpha = (if (dark) 0.26f else 0.20f) * panelFactor * relaxed
+                    )
+                )
+            )
+        } else {
+            null
+        }
         onDrawBehind {
             drawRect(materialLight)
+            leatherBodyDepth?.let(::drawRect)
             drawRect(depth)
+        }
+    }
+}
+
+/**
+ * 皮革专属的压凹钢印。
+ *
+ * 内容轮廓分别向左上形成内阴影、向右下露一线暖色反光；与原图案重叠的主体区域会被
+ * 扣除，只留下细窄边缘，不复制完整图案，因此不会形成重影。语义色仍由原内容负责。
+ * 使用小范围离屏遮罩而非模糊或常驻动画，光向与按钮本体保持一致。
+ */
+private fun Modifier.leatherStampedContent(
+    enabled: Boolean,
+    dark: Boolean,
+    pressProgress: Float
+): Modifier {
+    if (!enabled) return this
+    return drawWithCache {
+        val press = pressProgress.coerceIn(0f, 1f)
+        val depthPx = (if (dark) 0.48.dp else 0.42.dp).toPx() * (1f - 0.16f * press)
+        val layerBounds = Rect(
+            left = -depthPx * 2f,
+            top = -depthPx * 2f,
+            right = size.width + depthPx * 2f,
+            bottom = size.height + depthPx * 2f
+        )
+        val innerShadowPaint = Paint().apply {
+            alpha = if (dark) 0.62f else 0.48f
+            colorFilter = ColorFilter.tint(
+                if (dark) Color(0xFF120504) else Color(0xFF35110B),
+                BlendMode.SrcIn
+            )
+        }
+        val lowerRimPaint = Paint().apply {
+            alpha = if (dark) 0.34f else 0.42f
+            colorFilter = ColorFilter.tint(
+                if (dark) Color(0xFFFFB994) else Color(0xFFFFE0C8),
+                BlendMode.SrcIn
+            )
+        }
+        val knockoutPaint = Paint().apply {
+            blendMode = BlendMode.DstOut
+        }
+
+        onDrawWithContent stampedDraw@{
+            fun stampedEdge(offset: Offset, tintPaint: Paint) {
+                // 先画偏移轮廓，再用原位置轮廓挖掉重合部分，只留下不到 1dp 的月牙边。
+                drawContext.canvas.saveLayer(layerBounds, tintPaint)
+                translate(offset.x, offset.y) { this@stampedDraw.drawContent() }
+                drawContext.canvas.saveLayer(layerBounds, knockoutPaint)
+                this@stampedDraw.drawContent()
+                drawContext.canvas.restore()
+                drawContext.canvas.restore()
+            }
+
+            // 凹刻的受光方向与凸起按钮相反：左上是内阴影，右下是被照亮的压痕边。
+            stampedEdge(Offset(-depthPx, -depthPx), innerShadowPaint)
+            stampedEdge(Offset(depthPx, depthPx), lowerRimPaint)
+            this@stampedDraw.drawContent()
         }
     }
 }
@@ -298,9 +388,16 @@ fun GlassButton(
     val resolvedActiveColor = activeColor ?: colors.accentBlue
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    val texturePalette = LocalButtonTexturePalette.current
+    val isLeatherButton = texturePalette?.skin == SkinPreset.LEATHER
     // 按下用短 tween 快速跟手，松开用全局弹簧回弹（与顶栏胶囊等共用手感参数）。
+    // 厚皮不做玻璃按钮那种明显缩小，而是以轻微下沉表现真实键程。
     val pressScale by animateFloatAsState(
-        targetValue = if (pressed && enabled) 0.95f else 1f,
+        targetValue = if (pressed && enabled) {
+            if (isLeatherButton) 0.975f else 0.95f
+        } else {
+            1f
+        },
         animationSpec = if (pressed) tween(80) else Motion.bouncy(),
         label = "glassPress"
     )
@@ -323,10 +420,19 @@ fun GlassButton(
         else colors.buttonHighlightBottom
     val highlightTop = lerp(normalHighlightTop, resolvedActiveColor.copy(alpha = 0.30f), activeProgress)
     val highlightBottom = lerp(normalHighlightBottom, resolvedActiveColor.copy(alpha = 0.12f), activeProgress)
-    val elevation = shadowElevation ?: if (panel) 0.dp else (4f + 3f * activeProgress).dp
     // 三种皮肤都使用可平铺画刷；毛玻璃是最轻的微霜颗粒，叠在底色之上、高光之下。
     // 强度已烘焙进 tile 像素（见 SkinTexture.kt），这里按原样平铺即可。
-    val texturePalette = LocalButtonTexturePalette.current
+    val baseElevation = shadowElevation ?: when {
+        panel -> 0.dp
+        isLeatherButton -> (8f + 2f * activeProgress).dp
+        else -> (4f + 3f * activeProgress).dp
+    }
+    // 静止皮革比玻璃更像有厚度的实体块；按下时阴影与键程同时收紧。
+    val elevation = if (isLeatherButton && !panel) {
+        (baseElevation.value * (1f - 0.68f * pressLight)).dp
+    } else {
+        baseElevation
+    }
     val compositionTextureSeed = currentCompositeKeyHash
     val skinTexture = remember(texturePalette, textureSeed, compositionTextureSeed) {
         texturePalette?.brushFor(textureSeed ?: compositionTextureSeed)
@@ -343,6 +449,11 @@ fun GlassButton(
         modifier = modifier.graphicsLayer {
             scaleX = pressScale
             scaleY = pressScale
+            translationY = if (isLeatherButton && !panel) {
+                1.6.dp.toPx() * pressLight
+            } else {
+                0f
+            }
             // 禁用态整体压淡：M3 Surface 的 enabled 只拦点击不改视觉，
             // 不加这行会出现"看起来可点、点了没反应"的假活按钮。
             alpha = if (enabled) 1f else 0.45f
@@ -375,7 +486,12 @@ fun GlassButton(
                     panel = panel,
                     pressProgress = pressLight
                 )
-                .padding(contentPadding),
+                .padding(contentPadding)
+                .leatherStampedContent(
+                    enabled = texturePalette?.skin == SkinPreset.LEATHER,
+                    dark = dark,
+                    pressProgress = pressLight
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             content = content

@@ -1,6 +1,7 @@
 package com.ztransfer.recorder
 
 import android.annotation.SuppressLint
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaCodec
@@ -55,7 +56,8 @@ class ViewfinderRecorder(
     private val srcWidth: Int,
     private val srcHeight: Int,
     private val frameRate: Int = 60,
-    private val withAudio: Boolean = false
+    private val withAudio: Boolean = false,
+    private val preferredAudioInput: AudioDeviceInfo? = null
 ) {
     // 编码尺寸向下取偶：YUV420 色度按 2x2 块下采样，奇数宽高会让转换时数组越界。
     // 帧尺寸校验仍按 srcWidth/srcHeight 比对，取像素时只读左上角偶数区域。
@@ -341,6 +343,17 @@ class ViewfinderRecorder(
                 rec.release()
                 return
             }
+            val preferredInput = preferredAudioInput
+            if (preferredInput != null) {
+                val preferred = rec.setPreferredDevice(preferredInput)
+                Log.d(
+                    TAG,
+                    "Built-in mic preference: accepted=$preferred " +
+                        "id=${preferredInput.id} type=${preferredInput.type}"
+                )
+            } else {
+                Log.w(TAG, "No TYPE_BUILTIN_MIC input found; using system audio input route")
+            }
 
             val format = MediaFormat.createAudioFormat(AUDIO_MIME_TYPE, AUDIO_SAMPLE_RATE, 1).apply {
                 setInteger(MediaFormat.KEY_AAC_PROFILE,
@@ -361,6 +374,12 @@ class ViewfinderRecorder(
                 ac.release()
                 return
             }
+            val routedInput = rec.routedDevice
+            Log.d(
+                TAG,
+                "Audio input routed: id=${routedInput?.id} type=${routedInput?.type} " +
+                    "builtIn=${routedInput?.type == AudioDeviceInfo.TYPE_BUILTIN_MIC}"
+            )
 
             this.audioRecord = rec
             this.audioCodec = ac

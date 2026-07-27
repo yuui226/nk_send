@@ -49,7 +49,6 @@
     <string name="burst_collection_count">%1$d</string>
 
     <!-- Transfer queue -->
-    <string name="no_transfer_tasks">No transfer tasks</string>
     <string name="status_waiting">Waiting</string>
     <string name="status_skipped">Skipped</string>
     <string name="status_cancelled">Cancelled</string>
@@ -149,7 +148,7 @@
     <string name="remote_rec_start_failed">Couldn\'t start recording</string>
     <string name="remote_rec_stop_failed">Couldn\'t stop recording — check the camera and try again</string>
     <string name="remote_rec_no_audio">No microphone permission — recording without sound</string>
-    <string name="remote_rec_pro_only">Recording is a Pro feature</string>
+    <string name="remote_rec_pro_only">On-device recording is a Pro feature</string>
     <string name="remote_tap_focus_manual">Switch the camera to autofocus to use tap focus</string>
     <string name="dev_panel_title">Developer</string>
     <string name="dev_hd_liveview">XGA live view</string>
@@ -202,7 +201,7 @@
     <string name="compare_remote">Remote control</string>
     <string name="compare_remote_free">%1$d min/day</string>
     <string name="compare_unlimited">Unlimited</string>
-    <string name="compare_monitor_recording">Monitor recording</string>
+    <string name="compare_on_device_recording">On-device recording</string>
     <string name="compare_unavailable">No</string>
     <string name="compare_available">Yes</string>
     <string name="compare_duration">Duration</string>

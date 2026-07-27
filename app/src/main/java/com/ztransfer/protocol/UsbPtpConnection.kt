@@ -63,7 +63,14 @@ internal class UsbPtpConnection private constructor(
     // A bulk endpoint is packet based, not a TCP-style byte stream. Always submit a reasonably
     // sized USB read and retain bytes beyond the caller's request (most importantly, bytes that
     // arrive in the same packet as the 12-byte PTP container header).
-    private val usbReadBuffer = ByteArray(ioBuffer.size)
+    //
+    // Live View traces from the reference app use one reusable 64 KiB request for frame data.
+    // Keeping this separate from the 256 KiB file-transfer buffer avoids asking UsbRequest to
+    // stage/map 256 KiB heap buffers twice per small (~12 KiB on Z30) frame transaction.
+    private val usbReadBuffer = ByteArray(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) USB_READ_REQUEST_SIZE else 16 * 1024
+    )
+    private val usbReadRequestBuffer = ByteBuffer.allocateDirect(usbReadBuffer.size)
     private var bufferedReadOffset = 0
     private var bufferedReadEnd = 0
     private val interruptBuffer =
@@ -263,7 +270,8 @@ internal class UsbPtpConnection private constructor(
         bufferedReadEnd = 0
         var skippedZeroLengthPacket = false
         while (true) {
-            val buffer = ByteBuffer.wrap(usbReadBuffer)
+            val buffer = usbReadRequestBuffer
+            buffer.clear()
             if (!bulkInRequest.queue(buffer)) {
                 throw IOException("PTP/USB bulk IN queue failed endpoint=0x${bulkIn.address.toString(16)}")
             }
@@ -275,6 +283,8 @@ internal class UsbPtpConnection private constructor(
             }
             val result = buffer.position()
             if (result > 0) {
+                buffer.flip()
+                buffer.get(usbReadBuffer, 0, result)
                 val count = minOf(length, result)
                 usbReadBuffer.copyInto(
                     destination = target,
@@ -359,6 +369,7 @@ internal class UsbPtpConnection private constructor(
         private const val TYPE_DATA = 2
         private const val TYPE_RESPONSE = 3
 
+        private const val USB_READ_REQUEST_SIZE = 64 * 1024
         private const val WRITE_TIMEOUT_MS = 10_000
         private const val MAX_IN_MEMORY_PAYLOAD = 256L * 1024L * 1024L
         private const val MAX_CONTAINER_SIZE = 0xFFFFFFFFL

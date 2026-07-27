@@ -4,6 +4,7 @@ import android.content.Context
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.Network
+import android.os.SystemClock
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import kotlinx.coroutines.CancellationException
@@ -45,6 +46,9 @@ class NikonCamera(private val context: Context) {
     // internal 而非 private:遥控实验(RemoteLab.kt)以扩展函数复用同一互斥与收发原语,
     // 保证实验命令与传输/缩略图/心跳严格串行,不引入第二条 IO 路径。
     internal val ioMutex = Mutex()
+    // 一次自动对焦由多条独立 PTP 事务组成。对焦流程和普通遥控命令仍须严格串行，
+    // 只有 Live View 取帧绕过此锁；因此不会为了释放 ioMutex 引入参数/拍摄命令穿插。
+    internal val focusMutex = Mutex()
     // 会话是否已 OpenSession 成功；用于决定 close() 是否需要发送 CloseSession，
     // 避免在握手中途失败时空等 CloseSession 响应（最长可达 soTimeout）。
     @Volatile private var sessionOpen = false
@@ -62,6 +66,10 @@ class NikonCamera(private val context: Context) {
     // 新机优先 0x9428（带 Display Information Data），不支持时回退 0x9203。
     // 每次连接都会新建 NikonCamera，因此不会把上一台机身的判断带进新会话。
     @Volatile internal var liveViewImageOperation: Int? = null
+    // StartLiveView 后最后一次 DeviceReady 轮询完成的时刻。USB 监看用它补足机身
+    // 传感器/编码器的启动预热窗口；即使页面先读取参数再接管已开启的 LV，也只等待
+    // 尚未覆盖的那部分时间，不会重复写死一整段延迟。
+    @Volatile internal var liveViewReadyAtElapsedMs = 0L
     // 增强取帧偶发空/坏帧不能等同于“不支持”；连续两次才降级，成功即清零。
     // 仅在 ioMutex 内访问。
     internal var liveViewEnhancedFailureCount = 0
@@ -73,7 +81,6 @@ class NikonCamera(private val context: Context) {
     // USB 监看页持有的尼康完整远控模式（0x90C2）。进入页面设 1，退出成对清 0；
     // 放在连接对象上可跨横竖屏重建记账，断线换实例则自然清空。
     @Volatile internal var remoteControlModeSet = false
-
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
 
@@ -82,6 +89,9 @@ class NikonCamera(private val context: Context) {
         // 命令/事件通道的常规读超时。
         const val SO_TIMEOUT_MS = 60_000
         private const val USB_CONNECT_TIMEOUT_MS = 5_000
+        // 仅给 Android USB Host 释放接口留一个调度窗口。真机验证表明更长的固定等待
+        // 不会改善首次取帧，反而让页面看起来冻结。
+        internal const val USB_REMOTE_REOPEN_SETTLE_MS = 100L
         // TCP 连接超时：本地热点正常握手 <300ms；缩短它让"相机侧 PTP 服务还没就绪"的
         // 失败尝试更快结束、更快进入下一轮重试。
         const val CONNECT_TIMEOUT_MS = 3_000
@@ -265,7 +275,10 @@ class NikonCamera(private val context: Context) {
                 }
                 runCatching { usbPtp?.close() }
                 usbPtp = null
-                kotlinx.coroutines.delay(100)
+                val settleStartedAt = SystemClock.elapsedRealtime()
+                val reopenSettleMs = USB_REMOTE_REOPEN_SETTLE_MS
+                log { "USB_REMOTE settling before fresh session ${reopenSettleMs}ms" }
+                kotlinx.coroutines.delay(reopenSettleMs)
 
                 var openResponse = -1
                 repeat(2) { attempt ->
@@ -284,7 +297,9 @@ class NikonCamera(private val context: Context) {
                         }
                         runCatching { transport.close() }
                         usbPtp = null
-                        if (attempt == 0) kotlinx.coroutines.delay(700)
+                        if (attempt == 0) {
+                            kotlinx.coroutines.delay(USB_REMOTE_REOPEN_SETTLE_MS)
+                        }
                     } else {
                         if (openResponse != PtpConstants.RESPONSE_OK) {
                             throw IllegalStateException(
@@ -324,6 +339,9 @@ class NikonCamera(private val context: Context) {
                             append(" drain=0x%04X".format(drainResponse))
                             append(" info=0x%04X".format(deviceInfoResponse))
                             append(" irq=").append(if (eventReaderStarted) "Y" else "N")
+                            append(" settle=").append(reopenSettleMs).append("/")
+                                .append(SystemClock.elapsedRealtime() - settleStartedAt)
+                                .append("ms")
                         }
                     }
                 }
@@ -513,16 +531,22 @@ class NikonCamera(private val context: Context) {
         batchSize: Int = 20,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit
     ) = withContext(Dispatchers.IO) {
+        val loadContext = coroutineContext
         val total = handles.size
         var loaded = 0
         handles.chunked(batchSize).forEach { batch ->
             // 每批单独持锁，批间释放 ioMutex：缩略图模式下缩略图请求可在批间插入，
             // 从而随列表一起渐进出图，而不是等整份列表加载完才开始。
+            // 批内每个 ObjectInfo 之间也检查取消：进入监看时最多等当前一条事务收尾，
+            // 不会被余下 19 条已经开始的整批扫描挡住。
             // IO 异常（掉线/读超时）直接向上抛给调用方终止扫描：逐个 handle 硬试会让
             // 每个都等满 60s 读超时、扫描假死数十分钟；单文件 PTP 级失败在
             // getObjectInfoInternal 内已按 null 跳过，不会走到这里。
             val files = ioMutex.withLock {
-                batch.mapNotNull { handle -> getObjectInfoInternal(handle) }
+                batch.mapNotNull { handle ->
+                    loadContext.ensureActive()
+                    getObjectInfoInternal(handle)
+                }
             }
             loaded += files.size
             if (files.isNotEmpty()) {

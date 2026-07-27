@@ -154,19 +154,23 @@ private fun hex8(v: Long) = "0x%08X".format(v)
 
 /** 单条无 data-out 事务：发命令、收响应码+数据载荷。与正式操作共用互斥锁。 */
 suspend fun NikonCamera.labCommand(code: Int, vararg params: Int): Pair<Int, ByteArray?> =
-    ioMutex.withLock {
-        withContext(Dispatchers.IO) {
-            sendCmd(code, *params)
-            recvRespWithPayload()
+    focusMutex.withLock {
+        ioMutex.withLock {
+            withContext(Dispatchers.IO) {
+                sendCmd(code, *params)
+                recvRespWithPayload()
+            }
         }
     }
 
 /** SetDevicePropValue：把 [raw]（属性的原始小端编码）写给相机，返回响应码。 */
 suspend fun NikonCamera.labSetProp(prop: Int, raw: ByteArray): Int =
-    ioMutex.withLock {
-        withContext(Dispatchers.IO) {
-            sendCmdWithData(Lab.SET_DEVICE_PROP_VALUE, raw, prop)
-            recvRespWithPayload().first
+    focusMutex.withLock {
+        ioMutex.withLock {
+            withContext(Dispatchers.IO) {
+                sendCmdWithData(Lab.SET_DEVICE_PROP_VALUE, raw, prop)
+                recvRespWithPayload().first
+            }
         }
     }
 
@@ -657,51 +661,79 @@ private fun NikonCamera.recvFocusResponse(deadlineMs: Long): Pair<Int, ByteArray
     }
 }
 
-private suspend fun NikonCamera.afDriveAndWaitLocked(
-    startedAt: Long,
-    deadlineMs: Long
-): RcAfResult {
-    if (SystemClock.elapsedRealtime() >= deadlineMs) {
-        return RcAfResult(Lab.DEVICE_BUSY, 0, SystemClock.elapsedRealtime() - startedAt, true)
+/**
+ * 一条完整的对焦 PTP 事务。锁只覆盖“发送 + 收完整响应”，等待 AF 状态的间隔不占锁，
+ * 让 Live View 能在相机允许时穿插取帧。
+ *
+ * 返回 null 表示在拿到 I/O 锁前已超过整套对焦流程的截止时间，此时没有发送命令，
+ * 因而不会留下迟到响应污染下一事务。
+ */
+private suspend fun NikonCamera.focusCommand(
+    code: Int,
+    deadlineMs: Long,
+    vararg params: Int
+): Pair<Int, ByteArray?>? = withContext(Dispatchers.IO) {
+    ioMutex.withLock {
+        if (SystemClock.elapsedRealtime() >= deadlineMs) return@withLock null
+        sendCmd(code, *params)
+        recvFocusResponse(deadlineMs)
     }
-    sendCmd(Lab.NK_AF_DRIVE)
-    val startRc = recvFocusResponse(deadlineMs).first
+}
+
+internal suspend fun runAfDriveAndWait(
+    startedAt: Long,
+    deadlineMs: Long,
+    elapsedRealtime: () -> Long,
+    command: suspend (Int) -> Int?,
+    pause: suspend (Long) -> Unit
+): RcAfResult {
+    fun timeoutResult(polls: Int) = RcAfResult(
+        responseCode = Lab.DEVICE_BUSY,
+        polls = polls,
+        elapsedMs = elapsedRealtime() - startedAt,
+        timedOut = true
+    )
+
+    if (elapsedRealtime() >= deadlineMs) {
+        return timeoutResult(polls = 0)
+    }
+    val startRc = command(Lab.NK_AF_DRIVE) ?: return timeoutResult(polls = 0)
     if (startRc != Lab.OK) {
-        return RcAfResult(startRc, 0, SystemClock.elapsedRealtime() - startedAt, false)
+        return RcAfResult(startRc, 0, elapsedRealtime() - startedAt, false)
     }
 
     var polls = 0
     while (true) {
-        if (SystemClock.elapsedRealtime() >= deadlineMs) {
-            return RcAfResult(
-                responseCode = Lab.DEVICE_BUSY,
-                polls = polls,
-                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                timedOut = true
-            )
+        if (elapsedRealtime() >= deadlineMs) {
+            return timeoutResult(polls)
         }
-        sendCmd(Lab.NK_DEVICE_READY)
-        val readyRc = recvFocusResponse(deadlineMs).first
+        val readyRc = command(Lab.NK_DEVICE_READY) ?: return timeoutResult(polls)
         polls++
         if (readyRc != Lab.DEVICE_BUSY) {
             return RcAfResult(
                 responseCode = readyRc,
                 polls = polls,
-                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
+                elapsedMs = elapsedRealtime() - startedAt,
                 timedOut = false
             )
         }
-        if (SystemClock.elapsedRealtime() >= deadlineMs) {
-            return RcAfResult(
-                responseCode = Lab.DEVICE_BUSY,
-                polls = polls,
-                elapsedMs = SystemClock.elapsedRealtime() - startedAt,
-                timedOut = true
-            )
+        if (elapsedRealtime() >= deadlineMs) {
+            return timeoutResult(polls)
         }
-        delay(150)
+        pause(150)
     }
 }
+
+private suspend fun NikonCamera.afDriveAndWait(
+    startedAt: Long,
+    deadlineMs: Long
+): RcAfResult = runAfDriveAndWait(
+    startedAt = startedAt,
+    deadlineMs = deadlineMs,
+    elapsedRealtime = SystemClock::elapsedRealtime,
+    command = { code -> focusCommand(code, deadlineMs)?.first },
+    pause = { durationMs -> delay(durationMs) }
+)
 
 /**
  * 按 Nikon 实机抓包时序执行一次完整自动对焦：
@@ -710,35 +742,31 @@ private suspend fun NikonCamera.afDriveAndWaitLocked(
  * 2. 轮询 DeviceReady(0x90C8)；
  * 3. 0x2019 继续等待，0x2001 为合焦成功，0xA002 为未合焦。
  *
- * 整个序列持有 [NikonCamera.ioMutex]，防止 Live View 取帧或事件轮询插入 AF
- * 事务中间。这与抓包中对焦期间暂停取帧的行为一致。
+ * [NikonCamera.focusMutex] 防止两套 AF 流程互相穿插；[NikonCamera.ioMutex] 只保护
+ * 每条完整 PTP 事务，使 Live View 能在 DeviceReady 的轮询间隔内继续取帧。
  */
 suspend fun NikonCamera.rcAfDriveAndWait(timeoutMs: Long = 6_000L): RcAfResult =
-    ioMutex.withLock {
-        withContext(Dispatchers.IO) {
-            val startedAt = SystemClock.elapsedRealtime()
-            afDriveAndWaitLocked(startedAt, startedAt + timeoutMs)
-        }
+    focusMutex.withLock {
+        val startedAt = SystemClock.elapsedRealtime()
+        afDriveAndWait(startedAt, startedAt + timeoutMs)
     }
 
-/** 移动 AF 区域并立即执行一次完整 AF，整套命令不被取帧打断。 */
+/** 移动 AF 区域并立即执行一次完整 AF；命令顺序固定，但等待间隔允许 Live View 取帧。 */
 suspend fun NikonCamera.rcFocusAt(
     x: Int,
     y: Int,
     timeoutMs: Long = 6_000L
-): RcTapFocusResult = ioMutex.withLock {
-    withContext(Dispatchers.IO) {
-        val startedAt = SystemClock.elapsedRealtime()
-        val deadlineMs = startedAt + timeoutMs
-        sendCmd(Lab.NK_CHANGE_AF_AREA, x, y)
-        val moveRc = recvFocusResponse(deadlineMs).first
-        if (moveRc != Lab.OK) RcTapFocusResult(moveRc, null)
-        else {
-            // 实抓三次均为 ChangeAfArea OK 后 80–84ms 再发 AfDrive；给相机时间
-            // 把新坐标应用到 AF 区域，避免驱动仍落在上一个点位。
-            delay(80)
-            RcTapFocusResult(moveRc, afDriveAndWaitLocked(startedAt, deadlineMs))
-        }
+): RcTapFocusResult = focusMutex.withLock {
+    val startedAt = SystemClock.elapsedRealtime()
+    val deadlineMs = startedAt + timeoutMs
+    val moveRc = focusCommand(Lab.NK_CHANGE_AF_AREA, deadlineMs, x, y)?.first
+        ?: return@withLock RcTapFocusResult(Lab.DEVICE_BUSY, null)
+    if (moveRc != Lab.OK) RcTapFocusResult(moveRc, null)
+    else {
+        // 实抓三次均为 ChangeAfArea OK 后 80–84ms 再发 AfDrive；给相机时间
+        // 把新坐标应用到 AF 区域，避免驱动仍落在上一个点位。
+        delay(80)
+        RcTapFocusResult(moveRc, afDriveAndWait(startedAt, deadlineMs))
     }
 }
 
@@ -865,6 +893,86 @@ internal suspend fun NikonCamera.rcStartMovieDetailed(
     return RcMovieStartResult(rc, prohibitCondition)
 }
 
+/** 执行 USB 开录序列；调用方必须已持有 ioMutex 并处于 I/O 调度器。 */
+private fun NikonCamera.prepareAndStartMovieLocked(): RcMovieStartResult {
+    fun command(code: Int, vararg params: Int): Pair<Int, ByteArray?> {
+        sendCmd(code, *params)
+        return recvRespWithPayload()
+    }
+
+    fun setProperty(prop: Int, raw: ByteArray): Int {
+        sendCmdWithData(Lab.SET_DEVICE_PROP_VALUE, raw, prop)
+        return recvRespWithPayload().first
+    }
+
+    fun readMovieProhibit(): Long? =
+        command(
+            Lab.GET_DEVICE_PROP_VALUE,
+            Lab.PROP_NK_MOV_PROHIBIT
+        ).let { (rc, data) ->
+            if (rc == Lab.OK && data != null && data.size >= 4) Cur(data).u32() else null
+        }
+
+    val prohibitExtendedRc = command(
+        Lab.NK_GET_DEVICE_PROP_VALUE_EX,
+        Lab.PROP_NK_MOV_PROHIBIT
+    ).first
+    val preflightProhibit = readMovieProhibit()
+    val applicationModeRequired =
+        movieProhibitRequiresApplicationMode(preflightProhibit)
+
+    var appOpRc: Int? = null
+    var appPropRc: Int? = null
+    if (applicationModeRequired &&
+        !remoteMovieApplicationOpSet &&
+        !remoteMovieApplicationPropSet
+    ) {
+        val rc = command(Lab.NK_CHANGE_APP_MODE, 1).first
+        appOpRc = rc
+        if (rc == Lab.OK) remoteMovieApplicationOpSet = true
+
+        // 新世代机型优先沿用已经验证的 0x9435 路径；只有相机明确表示不支持
+        // 该操作码时，才回退到旧/另一世代使用的 ApplicationMode 属性入口。
+        if (shouldFallbackToApplicationModeProperty(rc)) {
+            val propRc = setProperty(
+                Lab.PROP_NK_APPLICATION_MODE,
+                byteArrayOf(1)
+            )
+            appPropRc = propRc
+            if (propRc == Lab.OK) {
+                remoteMovieApplicationPropSet = true
+                // 读取一次切换后的真实禁止条件，既让相机完成属性应用，也为失败
+                // 诊断保留最新状态；是否发送开录以属性写入成功为准。
+                readMovieProhibit()
+            }
+        }
+    }
+
+    val applicationModeReady =
+        !applicationModeRequired ||
+            remoteMovieApplicationOpSet ||
+            remoteMovieApplicationPropSet
+    val startCommandRc =
+        if (applicationModeReady) command(Lab.NK_START_MOVIE_REC).first else null
+    val resultRc =
+        startCommandRc ?: appPropRc ?: appOpRc ?: Lab.ACCESS_DENIED
+
+    var prohibitCondition: Long? =
+        if (resultRc != Lab.OK) preflightProhibit else null
+    if (resultRc != Lab.OK) {
+        readMovieProhibit()?.let { prohibitCondition = it }
+    }
+
+    return RcMovieStartResult(
+        responseCode = resultRc,
+        prohibitCondition = prohibitCondition,
+        prohibitExtendedResponse = prohibitExtendedRc,
+        applicationModeResponse = appOpRc,
+        applicationModePropertyResponse = appPropRc,
+        startCommandResponse = startCommandRc,
+    )
+}
+
 /**
  * USB 远控会话内的开录原子序列。禁止条件读取、应用模式和 0x920A 共用一次
  * [NikonCamera.ioMutex]，事件轮询与取帧不能插入中途看到半切换状态或把应用模式清回去。
@@ -873,84 +981,9 @@ internal suspend fun NikonCamera.rcStartMovieDetailed(
 internal suspend fun NikonCamera.rcPrepareAndStartMovieDetailed(
     log: (String) -> Unit = {}
 ): RcMovieStartResult {
-    val result = ioMutex.withLock {
-        withContext(Dispatchers.IO) {
-        fun command(code: Int, vararg params: Int): Pair<Int, ByteArray?> {
-            sendCmd(code, *params)
-            return recvRespWithPayload()
-        }
-
-        fun setProperty(prop: Int, raw: ByteArray): Int {
-            sendCmdWithData(Lab.SET_DEVICE_PROP_VALUE, raw, prop)
-            return recvRespWithPayload().first
-        }
-
-        fun readMovieProhibit(): Long? =
-            command(
-                Lab.GET_DEVICE_PROP_VALUE,
-                Lab.PROP_NK_MOV_PROHIBIT
-            ).let { (rc, data) ->
-                if (rc == Lab.OK && data != null && data.size >= 4) Cur(data).u32() else null
-            }
-
-        val prohibitExtendedRc = command(
-            Lab.NK_GET_DEVICE_PROP_VALUE_EX,
-            Lab.PROP_NK_MOV_PROHIBIT
-        ).first
-        val preflightProhibit = readMovieProhibit()
-        val applicationModeRequired =
-            movieProhibitRequiresApplicationMode(preflightProhibit)
-
-        var appOpRc: Int? = null
-        var appPropRc: Int? = null
-        if (applicationModeRequired &&
-            !remoteMovieApplicationOpSet &&
-            !remoteMovieApplicationPropSet
-        ) {
-            val rc = command(Lab.NK_CHANGE_APP_MODE, 1).first
-            appOpRc = rc
-            if (rc == Lab.OK) remoteMovieApplicationOpSet = true
-
-            // 新世代机型优先沿用已经验证的 0x9435 路径；只有相机明确表示不支持
-            // 该操作码时，才回退到旧/另一世代使用的 ApplicationMode 属性入口。
-            if (shouldFallbackToApplicationModeProperty(rc)) {
-                val propRc = setProperty(
-                    Lab.PROP_NK_APPLICATION_MODE,
-                    byteArrayOf(1)
-                )
-                appPropRc = propRc
-                if (propRc == Lab.OK) {
-                    remoteMovieApplicationPropSet = true
-                    // 读取一次切换后的真实禁止条件，既让相机完成属性应用，也为失败
-                    // 诊断保留最新状态；是否发送开录以属性写入成功为准。
-                    readMovieProhibit()
-                }
-            }
-        }
-
-        val applicationModeReady =
-            !applicationModeRequired ||
-                remoteMovieApplicationOpSet ||
-                remoteMovieApplicationPropSet
-        val startCommandRc =
-            if (applicationModeReady) command(Lab.NK_START_MOVIE_REC).first else null
-        val resultRc =
-            startCommandRc ?: appPropRc ?: appOpRc ?: Lab.ACCESS_DENIED
-
-        var prohibitCondition: Long? =
-            if (resultRc != Lab.OK) preflightProhibit else null
-        if (resultRc != Lab.OK) {
-            readMovieProhibit()?.let { prohibitCondition = it }
-        }
-
-        RcMovieStartResult(
-            responseCode = resultRc,
-            prohibitCondition = prohibitCondition,
-            prohibitExtendedResponse = prohibitExtendedRc,
-            applicationModeResponse = appOpRc,
-            applicationModePropertyResponse = appPropRc,
-            startCommandResponse = startCommandRc,
-        )
+    val result = focusMutex.withLock {
+        ioMutex.withLock {
+            withContext(Dispatchers.IO) { prepareAndStartMovieLocked() }
         }
     }
     log("Movie prepare ${result.diagnosticSummary()}")
@@ -989,6 +1022,18 @@ suspend fun NikonCamera.rcModelName(): String? {
 
 // ============================ Live View ============================
 
+/** 竞品 Z30 USB 实抓：DeviceReady 后约 733ms 才开始第一笔取帧。 */
+internal const val USB_LIVE_VIEW_WARMUP_MS = 750L
+
+internal fun liveViewWarmupRemainingMs(
+    connectionType: CameraConnectionType,
+    readyAtElapsedMs: Long,
+    nowElapsedMs: Long
+): Long {
+    if (connectionType != CameraConnectionType.USB || readyAtElapsedMs <= 0L) return 0L
+    return (readyAtElapsedMs + USB_LIVE_VIEW_WARMUP_MS - nowElapsedMs).coerceAtLeast(0L)
+}
+
 /** 在 Live View 启动前解析一次取帧能力，避免部分机型在 LV 运行中拒绝 GetDeviceInfo。 */
 private suspend fun NikonCamera.resolveLiveViewImageOperation() {
     if (liveViewImageOperation != null) return
@@ -1009,6 +1054,7 @@ private suspend fun NikonCamera.resolveLiveViewImageOperation() {
  * 返回是否成功；过程写入 [log]。
  */
 suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean {
+    liveViewReadyAtElapsedMs = 0L
     resolveLiveViewImageOperation()
     val frameOperation = liveViewImageOperation ?: Lab.NK_GET_LIVE_VIEW_IMG
     log("LiveView frames: ${Lab.INTEREST_OPS[frameOperation] ?: hex4(frameOperation)}")
@@ -1043,11 +1089,15 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
     if (ready != Lab.OK) {
         log("!! DeviceReady(0x90C8) resp=${hex4(ready)} after ${System.currentTimeMillis() - t0}ms")
     }
+    liveViewReadyAtElapsedMs = SystemClock.elapsedRealtime()
     return true
 }
 
-suspend fun NikonCamera.labEndLiveView(): Int =
-    runCatching { labCommand(Lab.NK_END_LIVE_VIEW).first }.getOrDefault(-1)
+suspend fun NikonCamera.labEndLiveView(): Int {
+    val rc = runCatching { labCommand(Lab.NK_END_LIVE_VIEW).first }.getOrDefault(-1)
+    liveViewReadyAtElapsedMs = 0L
+    return rc
+}
 
 /**
  * 取一帧 Live View。首次调用从 DeviceInfo 选择机身广告的增强取帧 0x9428；明确不支持时

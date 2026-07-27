@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.DocumentsContract
@@ -105,6 +107,7 @@ import com.ztransfer.protocol.RcParam
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
+import com.ztransfer.protocol.liveViewWarmupRemainingMs
 import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcAngleLevelRoll
 import com.ztransfer.protocol.rcAutoIsoCandidateProps
@@ -178,8 +181,30 @@ private val MOVIE_EXPOSURE_PROPS = listOf(
 private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
 private val ALL_AUTO_ISO_PROPS =
     (rcAutoIsoCandidateProps(false) + rcAutoIsoCandidateProps(true)).distinct()
+private const val USB_LIVE_VIEW_STABLE_FRAMES = 8
 private const val TAP_FOCUS_LOCKED_FEEDBACK_MS = 1800L
 private const val TAP_FOCUS_MARKER_VISIBLE_MS = 3_000L
+
+/**
+ * A single GetEvent can repeat the same property change many times while Live View starts.
+ * The first batch is already covered by the post-start parameter snapshot; steady-state batches
+ * are de-duplicated by logical property so redundant descriptors do not compete with frames.
+ */
+internal fun coalesceRemoteEvents(
+    events: List<Pair<Int, Long>>,
+    suppressPropertyChanges: Boolean
+): List<Pair<Int, Long>> = buildList {
+    val changedProps = mutableSetOf<Int>()
+    for (event in events) {
+        if (event.first != Lab.EVT_DEVICE_PROP_CHANGED) {
+            add(event)
+            continue
+        }
+        if (suppressPropertyChanges) continue
+        val canonicalProp = rcCanonicalExposureProp(event.second.toInt())
+        if (changedProps.add(canonicalProp)) add(event)
+    }
+}
 
 private data class RemoteLiveFrame(
     val image: ImageBitmap,
@@ -411,6 +436,10 @@ private fun RemoteContent(
     // 初始参数是否已加载完：用于把事件轮询推迟到之后开始，避免进页时 GetEvent 与
     // 曝光参数与模式读取抢 ioMutex、拖慢参数首次显示。
     var initialLoaded by remember { mutableStateOf(false) }
+    // 只控制后台相机命令何时放行；取帧本身不设任何 FPS 上限。
+    var liveViewStable by remember { mutableStateOf(false) }
+    // USB 首批事件早于进页参数快照，无须再逐项回读；Wi-Fi 不走这条抑制路径。
+    var startupEventBaselinePending by remember { mutableStateOf(false) }
     // 参数加载完且监看首帧已显示 → 通知外层（免费版试用计时以此为起点）。
     // 键取 frame 是否为空而非 frame 本身，避免每帧重启 effect。
     LaunchedEffect(initialLoaded, frame == null) {
@@ -665,10 +694,16 @@ private fun RemoteContent(
     // 会话在页面存续期内【永不放弃】：断流退避重启、断线后等重连自动换新连接续播——
     // 持续取帧本身就是相机的保活信号，会话若静默死掉，相机空闲片刻就按待机计时器休眠。
     var lvJob by remember { mutableStateOf<Job?>(null) }
-    fun startSession(hd: Boolean, adoptActiveLiveView: NikonCamera? = null) {
+    fun startSession(
+        hd: Boolean,
+        adoptActiveLiveView: NikonCamera? = null,
+        suppressStartupPropertyEvents: Boolean = false
+    ) {
         val prev = lvJob
         lvJob = scope.launch {
             prev?.cancelAndJoin()
+            liveViewStable = false
+            startupEventBaselinePending = suppressStartupPropertyEvents
             var adoptedCamera = adoptActiveLiveView
             fps = 0f   // 换会话（HD 切换/重启）时清掉上一会话的陈旧读数
             // 解码流水线：取帧（网络 IO）与解码（Default 线程）并行——取下一帧的同时
@@ -701,18 +736,87 @@ private fun RemoteContent(
                             .getOrDefault(false)
                     }
                     if (!started) { delay(3000); continue }
+                    val warmupRemainingMs = liveViewWarmupRemainingMs(
+                        connectionType = cam.connectionType,
+                        readyAtElapsedMs = cam.liveViewReadyAtElapsedMs,
+                        nowElapsedMs = SystemClock.elapsedRealtime()
+                    )
+                    if (warmupRemainingMs > 0L) {
+                        devLog("LV USB warmup ${warmupRemainingMs}ms")
+                        delay(warmupRemainingMs)
+                    }
+                    val requiresUsbStabilization =
+                        cam.connectionType == CameraConnectionType.USB
+                    if (!requiresUsbStabilization) liveViewStable = true
+                    val stabilizationStartedAt = SystemClock.elapsedRealtime()
+                    var startupSuccessfulFrames = 0
+                    var startupBusyResponses = 0
                     // 首个成功帧只建立统计基准，不把 StartLiveView 后的相机预热、
                     // DeviceBusy 等待算进首个 FPS 窗口。后续按帧间隔计数：
                     // N 个间隔 / 实际经过时间，避免把窗口起点帧多算一次。
                     var frameIntervals = 0
                     var windowStart = 0L
                     var errStreak = 0
+                    val startupDiagnosticsEndAt =
+                        SystemClock.elapsedRealtime() + if (requiresUsbStabilization) 15_000L else 0L
+                    var diagnosticWindowStart = SystemClock.elapsedRealtime()
+                    var diagnosticPolls = 0
+                    var diagnosticSuccesses = 0
+                    var diagnosticBusy = 0
+                    var diagnosticErrors = 0
+                    var diagnosticTotalNanos = 0L
+                    var diagnosticMaxNanos = 0L
+                    fun recordStartupPoll(
+                        elapsedNanos: Long,
+                        success: Boolean = false,
+                        busy: Boolean = false,
+                        error: Boolean = false
+                    ) {
+                        val nowMs = SystemClock.elapsedRealtime()
+                        if (!requiresUsbStabilization || nowMs > startupDiagnosticsEndAt) return
+                        diagnosticPolls++
+                        if (success) diagnosticSuccesses++
+                        if (busy) diagnosticBusy++
+                        if (error) diagnosticErrors++
+                        diagnosticTotalNanos += elapsedNanos
+                        diagnosticMaxNanos = maxOf(diagnosticMaxNanos, elapsedNanos)
+                        val windowMs = nowMs - diagnosticWindowStart
+                        if (windowMs < 1_000L) return
+                        val averageMs =
+                            diagnosticTotalNanos / diagnosticPolls.coerceAtLeast(1) / 1_000_000.0
+                        val maxMs = diagnosticMaxNanos / 1_000_000.0
+                        val successFps = diagnosticSuccesses * 1_000f / windowMs
+                        devLog(
+                            "LV USB IO: %.1ffps polls=%d busy=%d err=%d avg=%.1fms max=%.1fms"
+                                .format(
+                                    successFps,
+                                    diagnosticPolls,
+                                    diagnosticBusy,
+                                    diagnosticErrors,
+                                    averageMs,
+                                    maxMs
+                                )
+                        )
+                        diagnosticWindowStart = nowMs
+                        diagnosticPolls = 0
+                        diagnosticSuccesses = 0
+                        diagnosticBusy = 0
+                        diagnosticErrors = 0
+                        diagnosticTotalNanos = 0L
+                        diagnosticMaxNanos = 0L
+                    }
                     while (isActive) {
+                        val pollStartedAtNanos = SystemClock.elapsedRealtimeNanos()
                         val grabbed = try {
                             cam.labGrabFrame()
                         } catch (e: CancellationException) {
                             throw e   // 会话被取消（退页/重启），不能当普通错误吞掉
                         } catch (e: Exception) {
+                            recordStartupPoll(
+                                elapsedNanos =
+                                    SystemClock.elapsedRealtimeNanos() - pollStartedAtNanos,
+                                error = true
+                            )
                             // 非忙失败（掉出 LV / 连接异常）：退避后回外层整体重启
                             errStreak++
                             devLog("!! LV: ${e.message}")
@@ -720,10 +824,29 @@ private fun RemoteContent(
                             delay(300)
                             continue
                         }
-                        if (grabbed == null) { delay(40); continue }
+                        val pollElapsedNanos =
+                            SystemClock.elapsedRealtimeNanos() - pollStartedAtNanos
+                        if (grabbed == null) {
+                            recordStartupPoll(elapsedNanos = pollElapsedNanos, busy = true)
+                            if (!liveViewStable) startupBusyResponses++
+                            delay(40)
+                            continue
+                        }
+                        recordStartupPoll(elapsedNanos = pollElapsedNanos, success = true)
                         errStreak = 0
                         frameCh.trySend(grabbed)
                         val now = SystemClock.elapsedRealtime()
+                        if (!liveViewStable && requiresUsbStabilization) {
+                            startupSuccessfulFrames++
+                            if (startupSuccessfulFrames >= USB_LIVE_VIEW_STABLE_FRAMES) {
+                                liveViewStable = true
+                                devLog(
+                                    "LV USB stable: frames=$startupSuccessfulFrames " +
+                                        "busy=$startupBusyResponses " +
+                                        "elapsed=${now - stabilizationStartedAt}ms; uncapped"
+                                )
+                            }
+                        }
                         if (windowStart == 0L) {
                             windowStart = now
                             continue
@@ -739,10 +862,12 @@ private fun RemoteContent(
                     // 未关的 LV 直接重开会吃 InvalidStatus、rcSetLvSize 也不生效；
                     // 关闭失败无所谓（可能本就已掉出 LV）。
                     fps = 0f
+                    liveViewStable = false
                     if (isActive) runCatching { cam.labEndLiveView() }
                     delay(2000)
                 }
             } finally {
+                liveViewStable = false
                 withContext(NonCancellable) {
                     runCatching { cameraViewModel.getCamera()?.labEndLiveView() }
                 }
@@ -811,7 +936,14 @@ private fun RemoteContent(
             refreshMode()
             refreshFocusMode()
             initialLoaded = true
-            startSession(hdLiveView, adoptedInitialLiveView)
+            startSession(
+                hd = hdLiveView,
+                adoptActiveLiveView = adoptedInitialLiveView,
+                // USB starts LV before this block's parameter snapshot, so its first property
+                // event batch is older than the values now shown. Wi-Fi starts LV afterwards
+                // and must keep that first batch.
+                suppressStartupPropertyEvents = adoptedInitialLiveView != null
+            )
             awaitCancellation()
         } finally {
             if (sessionCamera.connectionType == CameraConnectionType.USB &&
@@ -851,8 +983,10 @@ private fun RemoteContent(
     // AUTO 开启时刷新相机当前实际采用的 ISO。D0B5 是只读的 ISOControlSensitivity；
     // D0B4/500F 是用户设定的基础 ISO，不能用于显示自动测光结果。这里只轮询标量值，
     // 500ms 一次足够跟随测光变化，也不会持续挤占 Live View 取帧通道。
-    LaunchedEffect(connected, movieMode, autoIsoProp, autoIsoEnabled) {
-        if (!connected || movieMode || autoIsoEnabled != true) return@LaunchedEffect
+    LaunchedEffect(connected, movieMode, autoIsoProp, autoIsoEnabled, liveViewStable) {
+        if (!connected || !liveViewStable || movieMode || autoIsoEnabled != true) {
+            return@LaunchedEffect
+        }
         val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
         var effective = params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY]
             ?: runCatching { cam.rcGetParam(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY) }.getOrNull()
@@ -928,10 +1062,20 @@ private fun RemoteContent(
         var pollTick = 0
         while (isActive) {
             // 让初始参数先加载完再开始轮询，避免抢锁拖慢进页
-            if (!initialLoaded) { delay(150); continue }
+            if (!initialLoaded || !liveViewStable) { delay(150); continue }
             val cam = cameraViewModel.getCamera()
             if (cam == null) { delay(1500); continue }
-            val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
+            val polledEvents = runCatching { cam.rcPollEvents() }
+            if (polledEvents.isFailure) {
+                delay(600)
+                continue
+            }
+            val suppressStartupPropertyRefresh = startupEventBaselinePending
+            startupEventBaselinePending = false
+            val events = coalesceRemoteEvents(
+                events = polledEvents.getOrDefault(emptyList()),
+                suppressPropertyChanges = suppressStartupPropertyRefresh
+            )
             for (e in events) {
                 eventFlow.emit(e)
                 when (e.first) {
@@ -1153,7 +1297,7 @@ private fun RemoteContent(
         afLocked = false
         // 普通松手不取消协议等待：相机端 AF 已经开始，只取消本地协程
         // 会留下“UI 已结束、相机仍在对焦”的分裂状态。拍摄/录像命令会
-        // 经同一 ioMutex 自然排在 AF 终态之后。只在断连时取消等待。
+        // 显式等待这个任务到达 AF 终态。只在断连时取消等待。
         if (cancelPending) {
             pending?.cancel()
             afJob = null
@@ -1639,7 +1783,20 @@ private fun RemoteContent(
         android.util.Log.d("RemoteScreen",
             "录像输出：${if (sink is RecordingSink.Saf) "SAF 传输目录" else "应用私有目录"}")
 
-        val recorder = ViewfinderRecorder(sink, w, h, withAudio = withAudio)
+        val builtInMic = if (withAudio) {
+            context.getSystemService(AudioManager::class.java)
+                ?.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                ?.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+        } else {
+            null
+        }
+        val recorder = ViewfinderRecorder(
+            sink = sink,
+            srcWidth = w,
+            srcHeight = h,
+            withAudio = withAudio,
+            preferredAudioInput = builtInMic
+        )
         if (!recorder.start()) {
             // 开录失败：SAF 模式下把刚建的空文档删掉，别在用户目录留 0 字节垃圾。
             createdDocUri?.let { uri ->
