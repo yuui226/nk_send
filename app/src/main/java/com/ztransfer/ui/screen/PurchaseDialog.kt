@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -49,11 +50,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.google.zxing.BarcodeFormat
@@ -150,6 +155,7 @@ fun PurchaseDialog(
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val pricing by LicenseManager.pricing.collectAsState()
 
@@ -178,6 +184,7 @@ fun PurchaseDialog(
     var restored by remember { mutableStateOf(false) }   // 本机已拥有 → 免费恢复(而非新购买)
     var paidRenew by remember { mutableStateOf(false) }  // 服务器判定的续费单 → 成功页说"续费成功"
     var paidProduct by remember { mutableStateOf(product) }
+    var copied by remember { mutableStateOf(false) }
     // 本单锁定的实收价(分)。头部报的是它,不是缓存的展示价——展示价可能过时
     // (App 常连着相机热点拉不到新价),而这个数是服务器建单时现读的,扫出来的码就是它。
     var orderPriceFen by remember { mutableStateOf(0) }
@@ -392,10 +399,17 @@ fun PurchaseDialog(
 
     // 关闭统一走右上角叉号:成功后关闭顺带放烟花(与"完成"同一动作)。
     val close: () -> Unit = { if (activated) onCelebrate() else onDismiss() }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1_600)
+            copied = false
+        }
+    }
     // 待支付期锁掉点外部/返回手势:用户正要去截图或切微信,误触就白等一场。
     val dismissible = activated || code != null || error != null
     Dialog(
-        onDismissRequest = onDismiss,
+        // 成功页没有右上角叉号；点外部、系统返回与“完成”统一关闭并触发庆祝。
+        onDismissRequest = close,
         properties = DialogProperties(
             dismissOnBackPress = dismissible,
             dismissOnClickOutside = dismissible
@@ -420,81 +434,154 @@ fun PurchaseDialog(
                 ) {
                     // ---- 头部:左边说清"付什么、多少钱",右边叉号退出 ----
                     // 钱已经付完就撤掉金额:那时这里是庆祝页,只该说"解锁了",再挂个价签是提醒他刚花了钱。
-                    Row(verticalAlignment = Alignment.Top) {
-                        Column(Modifier.weight(1f)) {
-                            if (qr != null && code == null) {
-                                Text(
-                                    stringResource(
-                                        if (paidProduct == LicenseManager.ProductId.ANNUAL) {
-                                            R.string.purchase_annual_title
-                                        } else {
-                                            R.string.purchase_lifetime_title
-                                        }
-                                    ),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = colors.onSurfaceVariant
-                                )
-                                if (orderPriceFen > 0) {
+                    if (!activated) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Column(Modifier.weight(1f)) {
+                                if (qr != null && code == null) {
                                     Text(
-                                        if (paidProduct == LicenseManager.ProductId.ANNUAL) {
-                                            stringResource(
-                                                R.string.purchase_locked_annual,
-                                                LicenseManager.formatPrice(orderPriceFen),
-                                                pricing.annual.periodDays,
-                                            )
-                                        } else {
-                                            stringResource(
-                                                R.string.purchase_locked_lifetime,
-                                                LicenseManager.formatPrice(orderPriceFen),
-                                            )
-                                        },
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        // 与解锁弹窗的定价同一个金色:同一笔钱,视觉接得上
-                                        color = colors.accentYellow
+                                        stringResource(
+                                            if (paidProduct == LicenseManager.ProductId.ANNUAL) {
+                                                R.string.purchase_annual_title
+                                            } else {
+                                                R.string.purchase_lifetime_title
+                                            }
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = colors.onSurfaceVariant
                                     )
+                                    if (orderPriceFen > 0) {
+                                        Text(
+                                            if (paidProduct == LicenseManager.ProductId.ANNUAL) {
+                                                stringResource(
+                                                    R.string.purchase_locked_annual,
+                                                    LicenseManager.formatPrice(orderPriceFen),
+                                                    pricing.annual.periodDays,
+                                                )
+                                            } else {
+                                                stringResource(
+                                                    R.string.purchase_locked_lifetime,
+                                                    LicenseManager.formatPrice(orderPriceFen),
+                                                )
+                                            },
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            // 与解锁弹窗的定价同一个金色:同一笔钱,视觉接得上
+                                            color = colors.accentYellow
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        IconButton(onClick = close, modifier = Modifier.size(32.dp)) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.cd_close),
-                                tint = colors.onSurfaceVariant
-                            )
+                            IconButton(onClick = close, modifier = Modifier.size(32.dp)) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.cd_close),
+                                    tint = colors.onSurfaceVariant
+                                )
+                            }
                         }
                     }
 
                     Column(
                         Modifier
                             .fillMaxWidth()
-                            .padding(top = 4.dp),
+                            .padding(top = if (activated) 0.dp else 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         when {
-                            // ---- 到账:自动激活成功 → 只报喜,别的什么都不说 ----
-                            // 激活码此刻对用户毫无用处(已自动激活),摆在这只会引出"这码干嘛用的"。
-                            // 真要它的时机只有换机,那时去设置里的「我要换机」拿(SwitchDeviceDialog)。
+                            // ---- 到账并激活成功：交付激活码，同时保留短暂的自动激活中间态。 ----
                             activated || code != null -> {
-                                Spacer(Modifier.height(4.dp))
                                 if (activated) {
-                                    // 续费的人已经是高级版,再说一遍"已解锁"没意义——他要看的是新的到期日。
-                                    // 日期从续费后新通行证的 sub 读;万一读不到(永久码)就退回通用文案。
                                     val newSubExp = remember(activated) { LicenseManager.subExpiresAtSec() }
+                                    val activationCode = code ?: LicenseManager.purchasedCode()
+
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = colors.statusConnected,
+                                        modifier = Modifier.size(46.dp)
+                                    )
+                                    Spacer(Modifier.height(8.dp))
                                     Text(
-                                        when {
-                                            paidProduct == LicenseManager.ProductId.LIFETIME ->
-                                                stringResource(R.string.purchase_lifetime_activated)
-                                            paidRenew && newSubExp > 0L ->
-                                                stringResource(R.string.purchase_renewed, formatSubDate(newSubExp))
-                                            else -> stringResource(R.string.purchase_activated)
+                                        if (paidRenew && newSubExp > 0L) {
+                                            stringResource(R.string.purchase_renewed, formatSubDate(newSubExp))
+                                        } else {
+                                            stringResource(R.string.purchase_activated)
                                         },
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = colors.statusConnected,
                                         textAlign = TextAlign.Center
                                     )
-                                    Spacer(Modifier.height(16.dp))
+                                    if (activationCode != null) {
+                                        Spacer(Modifier.height(20.dp))
+                                        Text(
+                                            stringResource(R.string.purchase_activation_code_label),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = colors.onSurfaceVariant,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                        Spacer(Modifier.height(7.dp))
+                                        val cardShape = RoundedCornerShape(14.dp)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(cardShape)
+                                                .background(colors.onBackground.copy(alpha = 0.04f))
+                                                .border(1.dp, colors.glassPanelBorder, cardShape)
+                                                .padding(
+                                                    start = 16.dp,
+                                                    end = 10.dp,
+                                                    top = 10.dp,
+                                                    bottom = 10.dp
+                                                )
+                                        ) {
+                                            Text(
+                                                activationCode,
+                                                style = MaterialTheme.typography.titleLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                letterSpacing = 1.sp,
+                                                color = colors.onBackground,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            GlassButton(
+                                                onClick = {
+                                                    clipboard.setText(AnnotatedString(activationCode))
+                                                    copied = true
+                                                },
+                                                shape = RoundedCornerShape(12.dp),
+                                                panel = true,
+                                                contentPadding = PaddingValues(
+                                                    horizontal = 16.dp,
+                                                    vertical = 8.dp
+                                                )
+                                            ) {
+                                                Text(
+                                                    stringResource(
+                                                        if (copied) R.string.code_copied
+                                                        else R.string.copy_code
+                                                    ),
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = if (copied) {
+                                                        colors.statusConnected
+                                                    } else {
+                                                        colors.accentBlue
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.height(10.dp))
+                                        Text(
+                                            stringResource(R.string.purchase_activation_code_keep),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.onSurfaceVariant,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    Spacer(Modifier.height(20.dp))
                                     GlassButton(
                                         shape = RoundedCornerShape(14.dp),
                                         panel = true,

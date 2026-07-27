@@ -230,7 +230,7 @@ fun ProDialog(
 
                     if (!codeMode) {
                         // ================= 购买页 =================
-                        // ---- 对比表：玻璃内卡承载（与设置分区卡片同族），表头 + 三行 ----
+                        // ---- 对比表：玻璃内卡承载（与设置分区卡片同族）----
                         val cardShape = RoundedCornerShape(14.dp)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             val compactTable = maxWidth < 300.dp
@@ -285,6 +285,14 @@ fun ProDialog(
                                     ),
                                     stringResource(R.string.compare_unlimited),
                                     stringResource(R.string.compare_unlimited),
+                                    valueColumnWidth = valueColumnWidth,
+                                    compact = compactTable,
+                                )
+                                CompareRow(
+                                    stringResource(R.string.compare_monitor_recording),
+                                    stringResource(R.string.compare_unavailable),
+                                    stringResource(R.string.compare_available),
+                                    stringResource(R.string.compare_available),
                                     valueColumnWidth = valueColumnWidth,
                                     compact = compactTable,
                                 )
@@ -635,8 +643,7 @@ fun RenewDialog(
  *
  * 单设备浮动授权——码在新机激活即顶替旧机(旧机自动掉回免费版),所以取码与告知后果
  * 必须同屏:用户点复制之前就该知道本机会被停用,以及外传会把码刷失效。
- * 激活码平时不出现在任何界面(购买成功页也不给):它是换机凭据,不是日常信息,
- * 只有主动走到这一步的人才需要它。
+ * 激活码会在购买成功时交付一次；之后只有主动走到这里的用户需要再次查看。
  */
 @Composable
 fun SwitchDeviceDialog(onDismiss: () -> Unit) {

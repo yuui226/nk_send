@@ -47,7 +47,8 @@ class ButtonTexturePalette internal constructor(
 val LocalButtonTexturePalette = staticCompositionLocalOf<ButtonTexturePalette?> { null }
 
 /**
- * 三种材质均使用 8 个确定性变体。纹理只在变体第一次被按钮选中时生成，之后进程级缓存；
+ * 皮革/木纹使用 8 个、微霜使用 4 个确定性变体。纹理只在变体第一次被按钮选中时生成，
+ * 之后进程级缓存；
  * 避免切换主题时一次性生成整套纹理造成卡顿。
  */
 @Composable
@@ -202,15 +203,15 @@ private fun torusDelta(a: Float, b: Float): Float {
 }
 
 // =================================================================================================
-// 木纹：非对称年轮 + 多尺度 domain warp + 顺纹纤维 + 少量柔和木结。
+// 木纹：非对称年轮 + 多尺度 domain warp + 顺纹纤维 + 细导管 + 少量柔和木结。
 // 主纹沿按钮长边延伸；各频率均为整数，配合周期噪声保持 128px tile 无缝。
 // =================================================================================================
 
 private fun woodTilePixels(dark: Boolean, seed: Int): IntArray {
     val out = IntArray(TILE * TILE)
-    val maxAlpha = if (dark) 0.34f else 0.23f
-    val lightRgb = if (dark) 0xD7A45E else 0xFFE2AE
-    val darkRgb = if (dark) 0x170B03 else 0x6A3515
+    val maxAlpha = if (dark) 0.30f else 0.21f
+    val lightRgb = if (dark) 0xE0B16E else 0xF6D59A
+    val darkRgb = if (dark) 0x160B05 else 0x5C3013
     val phase = cellHash(seed, 11, seed + 31)
     val knotEnabled = Math.floorMod(seed, 3) == 0
     val knotX = 0.18f + 0.64f * cellHash(seed, 17, seed + 43)
@@ -227,7 +228,7 @@ private fun woodTilePixels(dark: Boolean, seed: Int): IntArray {
             val bend = 0.075f * low + 0.028f * mid +
                 0.018f * sin(TAU * (u + phase)) * cos(TAU * v)
 
-            // 少数变体带一个淡木结。使用环面距离，靠近 tile 边缘时仍能无缝接续。
+            // 少数变体带一个淡木结。环面距离让木结靠近 tile 边缘时仍能无缝接续。
             val knotDx = torusDelta(u, knotX)
             val knotDy = torusDelta(v, knotY)
             val knotDistance = sqrt(
@@ -237,17 +238,23 @@ private fun woodTilePixels(dark: Boolean, seed: Int): IntArray {
             val knotMask = if (knotEnabled) exp(-2.7f * knotDistance * knotDistance) else 0f
             val knotWarp = knotMask * 0.48f *
                 sin(TAU * (u - knotX + periodicValueNoise(u, v, 3, 3, seed + 307)))
+            val knotCore = if (knotEnabled) exp(-10f * knotDistance * knotDistance) else 0f
+            val knotRing = knotMask * sin(TAU * (3.4f * knotDistance + 0.15f * mid))
 
-            // 年轮保持 5 个完整周期；高斯型晚材线比硬阈值更像自然生长层。
+            // 年轮保持 5 个完整周期；两级柔和晚材线比硬阈值更像真实生长层。
             val ringCoordinate = 5f * (v + bend) +
                 0.20f * sin(TAU * (u + phase)) + knotWarp
             val ringCycle = fract(ringCoordinate)
             val lateWoodCenter = 0.79f + 0.045f * mid
             val lateWoodDistance = (ringCycle - lateWoodCenter) / 0.075f
             val lateWood = exp(-lateWoodDistance * lateWoodDistance)
+            val lateWoodShoulder = exp(
+                -((ringCycle - lateWoodCenter + 0.105f) / 0.14f) *
+                    ((ringCycle - lateWoodCenter + 0.105f) / 0.14f)
+            )
             val earlyWood = cos(TAU * ringCycle)
 
-            // 高频纤维仍沿长边走，另叠一组极细的深色导管线，避免只有五条粗波浪。
+            // 高频纤维沿长边走，宽窄不一，避免只剩下几条规则粗波浪。
             val fiberWarp = periodicValueNoise(u, v, 9, 7, seed + 401)
             val fiber = sin(TAU * (27f * v + 0.55f * fiberWarp + bend * 4f))
             val fineCoordinate = 17f * (v + 0.55f * bend) + 0.38f * fiberWarp
@@ -257,11 +264,37 @@ private fun woodTilePixels(dark: Boolean, seed: Int): IntArray {
             val fiberMask = 0.55f + 0.45f *
                 periodicValueNoise(u, v, 7, 3, seed + 503).coerceIn(-0.8f, 0.8f)
             val macroTone = periodicValueNoise(u, v, 3, 2, seed + 601)
-            val texture = 0.20f * macroTone +
-                0.17f * earlyWood -
-                0.88f * lateWood -
-                0.14f * fineLine * fiberMask +
-                0.055f * fiber
+
+            // 椭圆形细导管沿木纹方向拉长，只画实心暗痕，不画孔洞外圈。
+            val vesselGridX = u * 12f
+            val vesselGridY = v * 26f
+            val vesselCellX = floor(vesselGridX).toInt()
+            val vesselCellY = floor(vesselGridY).toInt()
+            val vesselLocalX = fract(vesselGridX)
+            val vesselLocalY = fract(vesselGridY)
+            val vesselHash = cellHash(vesselCellX, vesselCellY, seed + 719)
+            val vesselCenterX = 0.18f + 0.64f *
+                cellHash(vesselCellX, vesselCellY, seed + 761)
+            val vesselCenterY = 0.20f + 0.60f *
+                cellHash(vesselCellX, vesselCellY, seed + 809)
+            val vesselDx = (vesselLocalX - vesselCenterX) / 0.34f
+            val vesselDy = (vesselLocalY - vesselCenterY) / 0.09f
+            val vessel = if (vesselHash > 0.72f) {
+                exp(-3.2f * (vesselDx * vesselDx + vesselDy * vesselDy)) *
+                    smoothStep(0.72f, 0.96f, vesselHash)
+            } else {
+                0f
+            }
+
+            val texture = 0.16f * macroTone +
+                0.14f * earlyWood -
+                0.72f * lateWood -
+                0.12f * lateWoodShoulder -
+                0.12f * fineLine * fiberMask +
+                0.045f * fiber -
+                0.18f * vessel -
+                0.24f * knotCore +
+                0.08f * knotRing
             out[y * TILE + x] = packSigned(texture, maxAlpha, lightRgb, darkRgb)
         }
     }
@@ -269,60 +302,102 @@ private fun woodTilePixels(dark: Boolean, seed: Int): IntArray {
 }
 
 // =================================================================================================
-// 皮革：经过 domain warp 的多尺度软颗粒 + 低频皮色斑驳 + 稀疏细皱 + 微毛孔。
-// 不绘制 Voronoi 单元边界，避免按钮上出现明显的多边形或圆形闭合框。
+// 皮革：先生成连续高度场，再根据固定柔光计算粒面法线明暗。
+// 这样颗粒有真实的凸起与阴影，而不是把红色噪声直接贴在按钮上；不绘制任何单元外框。
 // =================================================================================================
 
 private fun leatherTilePixels(dark: Boolean, seed: Int): IntArray {
     val out = IntArray(TILE * TILE)
-    val maxAlpha = if (dark) 0.38f else 0.28f
-    val lightRgb = if (dark) 0xD88A72 else 0xF8C2AA
-    val darkRgb = if (dark) 0x180706 else 0x64251D
+    val height = FloatArray(TILE * TILE)
+    val pigment = FloatArray(TILE * TILE)
+    val maxAlpha = if (dark) 0.35f else 0.25f
+    val lightRgb = if (dark) 0xE2A08A else 0xF4BEA3
+    val darkRgb = if (dark) 0x150605 else 0x512019
+    val wrinkleDirection = if ((seed and 1) == 0) 1f else -1f
 
+    // 第一遍只构造皮面高度。三种互不成格的颗粒尺度叠加后仍保持周期化，可无缝平铺。
     for (y in 0 until TILE) {
         val v = y.toFloat() / TILE
         for (x in 0 until TILE) {
             val u = x.toFloat() / TILE
 
-            // 先扭曲采样坐标，打散各尺度噪声的方向性；噪声本身周期化，因此仍能无缝。
-            val warpU = 0.032f * periodicValueNoise(u, v, 3, 4, seed + 101)
-            val warpV = 0.032f * periodicValueNoise(u, v, 4, 3, seed + 151)
-            val macroTone = 0.70f * periodicValueNoise(u, v, 2, 2, seed + 401) +
-                0.30f * periodicValueNoise(u, v, 4, 5, seed + 503)
-
-            // 两个互不成格的噪声尺度形成柔软皮纹，不会出现封闭的蜂窝边界。
-            val pebble = 0.68f * periodicValueNoise(
+            val warpU = 0.026f * periodicValueNoise(u, v, 3, 4, seed + 101)
+            val warpV = 0.026f * periodicValueNoise(u, v, 4, 3, seed + 151)
+            val broadGrain = periodicValueNoise(
                 u + warpU,
                 v + warpV,
-                9,
                 8,
+                7,
                 seed + 607
-            ) + 0.32f * periodicValueNoise(
+            )
+            val pebble = periodicValueNoise(
                 u - warpV,
                 v + warpU,
-                17,
+                16,
                 15,
                 seed + 659
             )
+            val fineGrain = periodicValueNoise(
+                u + warpU * 0.45f,
+                v - warpV * 0.45f,
+                29,
+                27,
+                seed + 691
+            )
 
-            // 少量不闭合的斜向细皱；毛孔只作为暗点，不画孔洞外圈。
+            // 细皱直接压入高度场。低频遮罩把长线切断，避免规则的平行刻痕。
             val wrinkleWarp = periodicValueNoise(u, v, 4, 3, seed + 701)
-            val wrinkleCarrier = abs(sin(TAU * (2f * u + v + 0.38f * wrinkleWarp)))
+            val wrinkleCarrier = abs(
+                sin(TAU * (2f * u + wrinkleDirection * v + 0.42f * wrinkleWarp))
+            )
             val wrinkleMask = smoothStep(
-                0.35f,
-                0.82f,
+                0.48f,
+                0.86f,
                 periodicValueNoise(u, v, 2, 3, seed + 743)
             )
-            val wrinkle = smoothStep(0.90f, 0.985f, wrinkleCarrier) * wrinkleMask
-            val poreNoise = periodicValueNoise(u, v, 23, 19, seed + 809)
-            val pore = smoothStep(0.64f, 0.92f, poreNoise)
-            val micro = periodicValueNoise(u, v, 31, 29, seed + 907)
+            val wrinkle = smoothStep(0.945f, 0.995f, wrinkleCarrier) * wrinkleMask
+            height[y * TILE + x] =
+                0.48f * broadGrain +
+                0.36f * pebble +
+                0.16f * fineGrain -
+                0.24f * wrinkle
+            pigment[y * TILE + x] =
+                0.72f * periodicValueNoise(u, v, 2, 2, seed + 401) +
+                0.28f * periodicValueNoise(u, v, 4, 5, seed + 503)
+        }
+    }
 
-            val texture = 0.18f * macroTone +
-                0.34f * pebble -
-                0.08f * wrinkle -
-                0.06f * pore +
-                0.08f * micro
+    // 第二遍用高度差近似法线。光从左上方掠过，每颗皮粒便自然产生一亮一暗的立体面。
+    fun heightAt(x: Int, y: Int): Float {
+        val wrappedX = Math.floorMod(x, TILE)
+        val wrappedY = Math.floorMod(y, TILE)
+        return height[wrappedY * TILE + wrappedX]
+    }
+
+    for (y in 0 until TILE) {
+        for (x in 0 until TILE) {
+            val center = heightAt(x, y)
+            val slopeX = heightAt(x + 1, y) - heightAt(x - 1, y)
+            val slopeY = heightAt(x, y + 1) - heightAt(x, y - 1)
+            val neighborMean = (
+                heightAt(x - 1, y) +
+                    heightAt(x + 1, y) +
+                    heightAt(x, y - 1) +
+                    heightAt(x, y + 1)
+                ) * 0.25f
+            val normalLight = (-1.35f * slopeX - 1.05f * slopeY).coerceIn(-1f, 1f)
+            val localRelief = (center - neighborMean).coerceIn(-0.35f, 0.35f)
+
+            // 毛孔是极少量实心暗点；不画外沿高光，避免再次出现圆形框。
+            val poreHash = cellHash(x, y, seed + 809)
+            val pore = smoothStep(0.994f, 0.9996f, poreHash)
+            val micro = cellHash(x, y, seed + 907) * 2f - 1f
+            val texture =
+                0.14f * pigment[y * TILE + x] +
+                0.72f * normalLight +
+                0.42f * localRelief -
+                0.22f * pore +
+                0.035f * micro
             out[y * TILE + x] = packSigned(texture, maxAlpha, lightRgb, darkRgb)
         }
     }

@@ -124,6 +124,77 @@ private fun Modifier.liquidGlassOptics(
 }
 
 /**
+ * 天然材质只使用克制的局部反光：皮革是宽阔哑光，木纹是沿纹理滑过的缎光。
+ * 与液态玻璃一样，Brush 只在尺寸或按压进度改变时重建，不运行常驻动画。
+ */
+private fun Modifier.naturalMaterialOptics(
+    skin: SkinPreset?,
+    dark: Boolean,
+    panel: Boolean,
+    pressProgress: Float
+): Modifier {
+    if (skin == null || skin == SkinPreset.FROSTED_GLASS) return this
+    return drawWithCache {
+        val width = size.width.coerceAtLeast(1f)
+        val height = size.height.coerceAtLeast(1f)
+        val longest = max(width, height)
+        val press = pressProgress.coerceIn(0f, 1f)
+        val panelFactor = if (panel) 0.66f else 1f
+        val depth = Brush.radialGradient(
+            colors = listOf(
+                Color.Black.copy(
+                    alpha = (if (dark) 0.10f else 0.065f) * panelFactor
+                ),
+                Color.Transparent
+            ),
+            center = Offset(width * 1.02f, height * 1.08f),
+            radius = longest * 0.92f
+        )
+        val materialLight = when (skin) {
+            SkinPreset.LEATHER -> Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFFFFD2B8).copy(
+                        alpha = (if (dark) 0.055f else 0.065f) * panelFactor +
+                            0.015f * press
+                    ),
+                    Color(0xFFFFC3A1).copy(
+                        alpha = (if (dark) 0.016f else 0.020f) * panelFactor
+                    ),
+                    Color.Transparent
+                ),
+                center = Offset(
+                    width * (0.12f + 0.06f * press),
+                    height * (0.02f + 0.04f * press)
+                ),
+                radius = longest * 1.08f
+            )
+            SkinPreset.WOOD -> Brush.linearGradient(
+                colorStops = arrayOf(
+                    0.00f to Color.Transparent,
+                    0.24f to Color.Transparent,
+                    0.46f to Color(0xFFFFD997).copy(
+                        alpha = (if (dark) 0.075f else 0.10f) * panelFactor +
+                            0.045f * press
+                    ),
+                    0.62f to Color(0xFFFFEDC5).copy(
+                        alpha = (if (dark) 0.026f else 0.035f) * panelFactor
+                    ),
+                    0.78f to Color.Transparent,
+                    1.00f to Color.Transparent
+                ),
+                start = Offset(-width * (0.34f - 0.10f * press), 0f),
+                end = Offset(width * (1.10f + 0.12f * press), height * 0.42f)
+            )
+            SkinPreset.FROSTED_GLASS -> error("handled above")
+        }
+        onDrawBehind {
+            drawRect(materialLight)
+            drawRect(depth)
+        }
+    }
+}
+
+/**
  * 全局毛玻璃容器。按钮、卡片等浮层只负责传入形状和状态色，玻璃底、高光、描边与投影
  * 始终由这里统一绘制，避免各页面复制一套近似实现。
  */
@@ -296,6 +367,12 @@ fun GlassButton(
                     panel = panel,
                     activeColor = resolvedActiveColor,
                     activeProgress = activeProgress,
+                    pressProgress = pressLight
+                )
+                .naturalMaterialOptics(
+                    skin = texturePalette?.skin,
+                    dark = dark,
+                    panel = panel,
                     pressProgress = pressLight
                 )
                 .padding(contentPadding),

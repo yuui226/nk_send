@@ -202,6 +202,9 @@
     <string name="compare_remote">Remote control</string>
     <string name="compare_remote_free">%1$d min/day</string>
     <string name="compare_unlimited">Unlimited</string>
+    <string name="compare_monitor_recording">Monitor recording</string>
+    <string name="compare_unavailable">No</string>
+    <string name="compare_available">Yes</string>
     <string name="compare_duration">Duration</string>
     <string name="duration_free">Always free</string>
     <string name="duration_days">%1$d days</string>
@@ -254,11 +257,12 @@
         <item quantity="one">Pro expires in %1$d day</item>
         <item quantity="other">Pro expires in %1$d days</item>
     </plurals>
-    <string name="purchase_renewed">🎉 Renewed · Valid until %1$s</string>
+    <string name="purchase_renewed">Renewed · Valid until %1$s</string>
     <string name="purchase_opening_alipay">Opening Alipay…</string>
     <string name="purchase_waiting">Complete the payment above — activation is automatic once confirmed.</string>
-    <string name="purchase_activated">🎉 Purchased · Pro unlocked</string>
-    <string name="purchase_lifetime_activated">🎉 Purchased · Lifetime Pro unlocked</string>
+    <string name="purchase_activated">Pro unlocked</string>
+    <string name="purchase_activation_code_label">Your activation code</string>
+    <string name="purchase_activation_code_keep">Keep your activation code safe. If lost, you won\'t be able to switch devices.</string>
     <string name="purchase_restored">🎉 Entitlement restored</string>
     <string name="restore_action">Restore</string>
     <string name="restore_restoring">Restoring…</string>

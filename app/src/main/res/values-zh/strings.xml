@@ -202,6 +202,9 @@
     <string name="compare_remote">遥控 · 监看</string>
     <string name="compare_remote_free">%1$d 分钟/天</string>
     <string name="compare_unlimited">无限</string>
+    <string name="compare_monitor_recording">监看录制</string>
+    <string name="compare_unavailable">不可用</string>
+    <string name="compare_available">可用</string>
     <string name="compare_duration">时效</string>
     <string name="duration_free">长期免费</string>
     <string name="duration_days">%1$d 天</string>
@@ -252,11 +255,12 @@
     <plurals name="sub_expiring_soon">
         <item quantity="other">高级版还有 %1$d 天到期</item>
     </plurals>
-    <string name="purchase_renewed">🎉 续费成功 · 有效期延长至 %1$s</string>
+    <string name="purchase_renewed">续费成功 · 有效期延长至 %1$s</string>
     <string name="purchase_opening_alipay">正在打开支付宝…</string>
     <string name="purchase_waiting">在上方页面完成支付，到账后自动激活。</string>
-    <string name="purchase_activated">🎉 购买成功 · 高级版已解锁</string>
-    <string name="purchase_lifetime_activated">🎉 购买成功 · 永久高级版已解锁</string>
+    <string name="purchase_activated">高级版已解锁</string>
+    <string name="purchase_activation_code_label">你的激活码</string>
+    <string name="purchase_activation_code_keep">请妥善保存激活码，遗失将无法换机。</string>
     <string name="purchase_restored">🎉 已恢复权益</string>
     <string name="restore_action">恢复授权</string>
     <string name="restore_restoring">恢复中…</string>
