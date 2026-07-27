@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +37,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import com.ztransfer.ui.theme.AppTheme
@@ -409,6 +412,7 @@ fun GlassButton(
     activeColor: Color? = null,
     showSheen: Boolean = true,
     shadowElevation: Dp? = null,
+    frostedOpacityBoost: Float = 0f,
     textureSeed: Int? = null,
     content: @Composable RowScope.() -> Unit
 ) {
@@ -467,15 +471,20 @@ fun GlassButton(
         texturePalette?.brushFor(textureSeed ?: compositionTextureSeed)
     }
     val isFrostedGlass = texturePalette?.skin == SkinPreset.FROSTED_GLASS
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        shape = shape,
-        color = if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.buttonSurface,
-        border = null,
-        shadowElevation = elevation,
-        interactionSource = interactionSource,
-        modifier = modifier.graphicsLayer {
+    val baseColor = if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.buttonSurface
+    val containerColor =
+        if (isFrostedGlass && !panel && frostedOpacityBoost > 0f) {
+            val boost = frostedOpacityBoost.coerceIn(0f, 1f)
+            baseColor.copy(alpha = baseColor.alpha + (1f - baseColor.alpha) * boost)
+        } else {
+            baseColor
+        }
+    // 静止时不创建矩形 RenderNode。毛玻璃是半透明的，部分 GPU 会把合成层边界
+    // 显成方框；只有按压动画或禁用态确实需要变换时才临时创建图层。
+    val transformedModifier = if (pressScale == 1f && enabled) {
+        modifier
+    } else {
+        modifier.graphicsLayer {
             scaleX = pressScale
             scaleY = pressScale
             translationY = if (isLeatherButton && !panel) {
@@ -487,19 +496,23 @@ fun GlassButton(
             // 不加这行会出现"看起来可点、点了没反应"的假活按钮。
             alpha = if (enabled) 1f else 0.45f
         }
-    ) {
-        Row(
-            modifier = Modifier
-                // 材质层直接绘制为 shape，不再依赖矩形 graphicsLayer 裁切。这个约束由
-                // 公共按钮统一维护，入口按钮、更新按钮及后续新增按钮不会再各自复发。
+    }
+
+    if (isFrostedGlass) {
+        // 毛玻璃不再经过 Material Surface。它的 elevation、默认 indication 和半透明
+        // 背景会分层缓存，正是圆形入口及更新按钮上残余矩形框的来源。
+        Box(
+            modifier = transformedModifier
+                .clip(shape)
+                .background(containerColor)
                 .buttonMaterialBase(
                     shape = shape,
-                    texture = skinTexture,
+                    texture = null,
                     highlightTop = highlightTop,
                     highlightBottom = highlightBottom
                 )
                 .liquidGlassOptics(
-                    enabled = isFrostedGlass,
+                    enabled = true,
                     shape = shape,
                     dark = dark,
                     showSheen = showSheen,
@@ -508,22 +521,58 @@ fun GlassButton(
                     activeProgress = activeProgress,
                     pressProgress = pressLight
                 )
-                .naturalMaterialOptics(
-                    skin = texturePalette?.skin,
-                    shape = shape,
-                    dark = dark,
-                    panel = panel,
-                    pressProgress = pressLight
-                )
-                .padding(contentPadding)
-                .leatherStampedContent(
-                    enabled = texturePalette?.skin == SkinPreset.LEATHER,
-                    dark = dark,
-                    pressProgress = pressLight
+                .clickable(
+                    enabled = enabled,
+                    role = Role.Button,
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onClick
                 ),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            content = content
-        )
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier.padding(contentPadding),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                content = content
+            )
+        }
+    } else {
+        Surface(
+            onClick = onClick,
+            enabled = enabled,
+            shape = shape,
+            color = containerColor,
+            border = null,
+            shadowElevation = elevation,
+            interactionSource = interactionSource,
+            modifier = transformedModifier
+        ) {
+            Row(
+                modifier = Modifier
+                    .buttonMaterialBase(
+                        shape = shape,
+                        texture = skinTexture,
+                        highlightTop = highlightTop,
+                        highlightBottom = highlightBottom
+                    )
+                    .naturalMaterialOptics(
+                        skin = texturePalette?.skin,
+                        shape = shape,
+                        dark = dark,
+                        panel = panel,
+                        pressProgress = pressLight
+                    )
+                    .padding(contentPadding)
+                    .leatherStampedContent(
+                        enabled = texturePalette?.skin == SkinPreset.LEATHER,
+                        dark = dark,
+                        pressProgress = pressLight
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                content = content
+            )
+        }
     }
 }

@@ -832,6 +832,9 @@ fun FileListScreen(
                 shape = CircleShape,
                 contentPadding = PaddingValues(14.dp),
                 showSheen = false,
+                // 深色由 0.38 提至约 0.60，浅色由 0.80 提至约 0.87；
+                // 仍能透出背景，但入口不会再像一层几乎看不见的薄膜。
+                frostedOpacityBoost = 0.35f,
                 // 入口必须走公共按钮材质：毛玻璃、皮革、木纹均与当前主题同步。
                 // 按压缩放由 GlassButton 统一提供，不在此重复实现。
                 shadowElevation = 6.dp

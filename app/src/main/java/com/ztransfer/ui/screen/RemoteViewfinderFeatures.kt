@@ -345,38 +345,52 @@ internal fun FullscreenEnterMark(modifier: Modifier = Modifier) {
     }
 }
 
-/** 旋转——刻板意义上的「刷新」符号：顺时针圆弧 + 弧末端沿切线向前的实心箭头。 */
+/** 旋转：右侧为视觉主体的开放圆弧，末端用轻量线性箭头延续切线方向。 */
 @Composable
 internal fun RotateMark(modifier: Modifier = Modifier) {
     val c = LocalContentColor.current
     Canvas(modifier) {
         val sw = ToolMarkStrokeWidth.toPx()
-        val cx = size.width / 2f; val cy = size.height / 2f
-        val r = size.width / 2f - sw
-        // 从 -60° 起顺时针扫 300°，缺口留在上方偏右（Material Refresh 同款布局）
-        val sa = -60f; val sweep = 300f; val ea = sa + sweep
-        val arc = Path().apply {
-            val sr = Math.toRadians(sa.toDouble())
-            moveTo(cx + r * cos(sr).toFloat(), cy + r * sin(sr).toFloat())
-            arcTo(Rect(cx - r, cy - r, cx + r, cy + r), sa, sweep, false)
+        val s = size.minDimension
+        val cx = size.width * 0.50f
+        val cy = size.height * 0.49f
+        val r = s * 0.29f
+        val startAngle = -125f
+        val sweepAngle = 225f
+
+        // 略多于半圈，让右侧圆弧完整、左侧保持开放，避免看起来像“刷新”图标。
+        drawArc(
+            color = c,
+            startAngle = startAngle,
+            sweepAngle = sweepAngle,
+            useCenter = false,
+            topLeft = Offset(cx - r, cy - r),
+            size = Size(r * 2f, r * 2f),
+            style = Stroke(sw, cap = StrokeCap.Round)
+        )
+
+        // 箭头沿弧线末端的顺时针切线展开。使用两根圆头细线，不再用醒目的实心三角形。
+        val endAngle = startAngle + sweepAngle
+        fun pointAt(angle: Float, distance: Float): Offset {
+            val radians = Math.toRadians(angle.toDouble())
+            return Offset(
+                x = cx + cos(radians).toFloat() * distance,
+                y = cy + sin(radians).toFloat() * distance
+            )
         }
-        drawPath(arc, c, style = Stroke(sw, cap = StrokeCap.Round))
-        // 箭头必须沿行进方向延伸：顺时针弧在末端角 θ 处的切线 T = (-sinθ, cosθ)，
-        // 尖端 = 末端点 + T·len（越过弧末端继续向前），底边两角沿径向法线 N = (cosθ, sinθ)
-        // 骑在弧末端上——这样整个图形才读作顺时针旋转，反了就成「倒带」。
-        val rad = Math.toRadians(ea.toDouble())
-        val px = cx + r * cos(rad).toFloat(); val py = cy + r * sin(rad).toFloat()
-        val tx = -sin(rad).toFloat(); val ty = cos(rad).toFloat()
-        val nx = cos(rad).toFloat(); val ny = sin(rad).toFloat()
-        val len = r * 0.55f  // 尖端超出弧末端的长度
-        val wid = r * 0.38f  // 底边半宽
-        val head = Path().apply {
-            moveTo(px + tx * len, py + ty * len)
-            lineTo(px + nx * wid, py + ny * wid)
-            lineTo(px - nx * wid, py - ny * wid)
-            close()
-        }
-        drawPath(head, c)
+        val tip = pointAt(endAngle, r)
+        val tangentAngle = endAngle + 90f
+        val arrowLength = s * 0.16f
+        val wingSpread = 32f
+        listOf(tangentAngle + 180f - wingSpread, tangentAngle + 180f + wingSpread)
+            .forEach { wingAngle ->
+                val radians = Math.toRadians(wingAngle.toDouble())
+                val wingEnd = Offset(
+                    x = tip.x + cos(radians).toFloat() * arrowLength,
+                    y = tip.y + sin(radians).toFloat() * arrowLength
+                )
+                drawLine(c, tip, wingEnd, sw, StrokeCap.Round)
+            }
     }
 }
 

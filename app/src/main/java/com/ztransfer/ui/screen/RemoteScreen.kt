@@ -433,6 +433,7 @@ private fun RemoteContent(
     var autoIsoProp by remember { mutableStateOf<Int?>(null) }
     var autoIsoPropMovieMode by remember { mutableStateOf<Boolean?>(null) }
     var autoIsoBusy by remember { mutableStateOf(false) }
+    var autoIsoProbeLogKey by remember { mutableStateOf<String?>(null) }
     // 初始参数是否已加载完：用于把事件轮询推迟到之后开始，避免进页时 GetEvent 与
     // 曝光参数与模式读取抢 ioMutex、拖慢参数首次显示。
     var initialLoaded by remember { mutableStateOf(false) }
@@ -554,18 +555,40 @@ private fun RemoteContent(
         val preferredProps = rcAutoIsoCandidateProps(movieMode)
         val candidates = buildList {
             // 同一模式内复用已验证成功的属性；拨杆切换后则重新按新模式优先级
-            // 选择。Z30 的视频开关优先 0xD16A，Z5 等机型回退到 0xD054。
+            // 选择。录像优先专用的 0xD0AD，再兼容旧机型的 0xD16A/0xD054。
             autoIsoProp
                 ?.takeIf { autoIsoPropMovieMode == movieMode && it in preferredProps }
                 ?.let(::add)
             addAll(preferredProps)
         }.distinct()
+        val probeDetails = mutableListOf<String>()
         val found = candidates.firstNotNullOfOrNull { prop ->
-            runCatching { cam.rcGetParam(prop) }.getOrNull()?.takeIf { param ->
-                // 各代 Nikon 会使用不同属性，只接受相机明确给出开、关两值的
-                // 可写属性，避免把部分机型恒为 1 的 0xD16A 当成开关。
-                param.rcIsBinaryToggle()
+            val param = runCatching { cam.rcGetParam(prop) }.getOrNull()
+            probeDetails += if (param == null) {
+                "0x%04X=unavailable".format(prop)
+            } else {
+                "0x%04X=w%d/t%04X/c%d/v%s".format(
+                    prop,
+                    if (param.writable) 1 else 0,
+                    param.dataType,
+                    param.current,
+                    param.values.take(4).joinToString("/", prefix = "[", postfix = "]")
+                )
             }
+            param?.takeIf {
+                // 录像优先使用专用的 D0AD；D16A/D054 仅作旧机型回退。部分机身不返回
+                // enum/range，能力探测允许这种可写 0/1 描述，真正写入仍由回读结果确认。
+                it.rcIsBinaryToggle()
+            }
+        }
+        val probeLog = "Auto ISO probe mode=%s %s selected=%s".format(
+            if (movieMode) "movie" else "photo",
+            probeDetails.joinToString(","),
+            found?.let { "0x%04X".format(it.prop) } ?: "none"
+        )
+        if (autoIsoProbeLogKey != probeLog) {
+            autoIsoProbeLogKey = probeLog
+            devLog(probeLog)
         }
         autoIsoProp = found?.prop
         autoIsoPropMovieMode = movieMode
@@ -974,28 +997,31 @@ private fun RemoteContent(
     // 可用性完全由当前拨杆位置下相机返回的可写二值属性决定。
     val autoIsoAvailable = autoIsoParam?.writable == true &&
         autoIsoEnabled != null
-    val effectiveAutoIsoValue = if (movieMode) {
-        params[Lab.PROP_NK_MOVIE_ISO]?.current
-    } else {
+    val effectiveAutoIsoValue =
         params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY]?.current
-    }
 
-    // AUTO 开启时刷新相机当前实际采用的 ISO。D0B5 是只读的 ISOControlSensitivity；
-    // D0B4/500F 是用户设定的基础 ISO，不能用于显示自动测光结果。这里只轮询标量值，
-    // 500ms 一次足够跟随测光变化，也不会持续挤占 Live View 取帧通道。
+    // AUTO 开启时，照片和录像都从只读 D0B5 取得相机当前实际采用的 ISO。
+    // D1AA 是录像侧的用户设定/基础 ISO，开启自动后不会随测光持续变化，不能用于读数。
+    // 这里只轮询标量值，500ms 一次足够跟随测光变化，也不会重复拉取属性描述。
     LaunchedEffect(connected, movieMode, autoIsoProp, autoIsoEnabled, liveViewStable) {
-        if (!connected || !liveViewStable || movieMode || autoIsoEnabled != true) {
+        if (!connected || !liveViewStable || autoIsoEnabled != true) {
             return@LaunchedEffect
         }
         val cam = cameraViewModel.getCamera() ?: return@LaunchedEffect
-        var effective = params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY]
-            ?: runCatching { cam.rcGetParam(Lab.PROP_NK_ISO_CONTROL_SENSITIVITY) }.getOrNull()
-            ?: return@LaunchedEffect
-        params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY] = effective
+        val effectiveProp = Lab.PROP_NK_ISO_CONTROL_SENSITIVITY
+        var initialEffective = params[effectiveProp]
+        var acquireAttempts = 0
+        while (isActive && initialEffective == null && acquireAttempts < 8) {
+            initialEffective = runCatching { cam.rcGetParam(effectiveProp) }.getOrNull()
+            if (initialEffective == null) delay(150)
+            acquireAttempts++
+        }
+        var effective = initialEffective ?: return@LaunchedEffect
+        params[effectiveProp] = effective
         while (isActive) {
             runCatching { cam.rcRefreshParam(effective) }.getOrNull()?.let {
                 effective = it
-                params[Lab.PROP_NK_ISO_CONTROL_SENSITIVITY] = it
+                params[effectiveProp] = it
             }
             delay(500)
         }
@@ -1501,9 +1527,9 @@ private fun RemoteContent(
                 var confirmedParam: RcParam? = null
                 for (candidate in candidates) {
                     val candidateTarget = if (enabled) {
-                        candidate.values.first { it != 0L }
+                        candidate.values.firstOrNull { it != 0L } ?: 1L
                     } else {
-                        candidate.values.first { it == 0L }
+                        candidate.values.firstOrNull { it == 0L } ?: 0L
                     }
                     if ((candidate.current != 0L) == enabled) {
                         confirmedParam = candidate
@@ -1515,6 +1541,12 @@ private fun RemoteContent(
                     result?.actual?.let { params[candidate.prop] = it }
                     if (result?.confirmed == true) {
                         confirmedParam = result.actual ?: candidate.copy(current = candidateTarget)
+                        devLog(
+                            "Auto ISO prop=0x%04X set=%d confirmed".format(
+                                candidate.prop,
+                                candidateTarget
+                            )
+                        )
                         break
                     }
                     if (candidate.prop == p.prop && result?.actual == null) {
@@ -2081,6 +2113,7 @@ private fun RemoteContent(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalGap = toolGap,
                 verticalGap = toolRowGap,
+                pinnedEndCount = 2,
                 content = {
                     overlayTools.forEach { tool -> tool() }
                     TopIconToggle(
@@ -2106,10 +2139,10 @@ private fun RemoteContent(
                 activeProps.chunked(2).forEach { rowProps ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         rowProps.forEach { prop ->
-                            // 视频 Auto ISO 的机型属性差异仍待更多真机确认，当前仅保留
-                            // 照片模式入口，避免向用户暴露无法可靠生效的开关。
+                            val isoProp =
+                                if (movieMode) Lab.PROP_NK_MOVIE_ISO else Lab.PROP_ISO
                             val hasAutoIso =
-                                !movieMode && prop == Lab.PROP_ISO && autoIsoAvailable
+                                prop == isoProp && autoIsoAvailable
                             ParamTile(
                                 label = paramLabel(prop),
                                 param = params[prop],
@@ -2309,9 +2342,10 @@ private fun RemoteContent(
                                         if (landscapeToolBarHeightPx != it.height) {
                                             landscapeToolBarHeightPx = it.height
                                         }
-                                    },
+                                },
                                 horizontalGap = 5.dp,
-                                verticalGap = 4.dp
+                                verticalGap = 4.dp,
+                                pinnedEndCount = 2
                             ) {
                                 if (devUnlocked) {
                                     TopIconToggle(
@@ -2397,10 +2431,14 @@ private fun RemoteContent(
                                 activeProps.chunked(2).forEach { rowProps ->
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         rowProps.forEach { prop ->
+                                            val isoProp =
+                                                if (movieMode) {
+                                                    Lab.PROP_NK_MOVIE_ISO
+                                                } else {
+                                                    Lab.PROP_ISO
+                                                }
                                             val hasAutoIso =
-                                                !movieMode &&
-                                                    prop == Lab.PROP_ISO &&
-                                                    autoIsoAvailable
+                                                prop == isoProp && autoIsoAvailable
                                             ParamTile(
                                                 label = paramLabel(prop),
                                                 param = params[prop],
@@ -3658,6 +3696,7 @@ private fun AdaptiveRemoteToolBar(
     modifier: Modifier = Modifier,
     horizontalGap: androidx.compose.ui.unit.Dp = 6.dp,
     verticalGap: androidx.compose.ui.unit.Dp = 4.dp,
+    pinnedEndCount: Int = 0,
     content: @Composable () -> Unit
 ) {
     Layout(modifier = modifier, content = content) { measurables, constraints ->
@@ -3667,12 +3706,38 @@ private fun AdaptiveRemoteToolBar(
         // 无最小/最大宽度测量得到按钮真实固有宽度；TopIconToggle 只设最小尺寸，
         // HD/FPS 在字体放大后会自然变宽，然后由这里决定是否整颗换行。
         val placeables = measurables.map { it.measure(Constraints()) }
-        val rows = mutableListOf<MutableList<Int>>()
+        val pinnedCount = pinnedEndCount.coerceIn(0, placeables.size)
+        val regularEnd = placeables.size - pinnedCount
+        val pinnedIndices = (regularEnd until placeables.size).toList()
+        val pinnedWidth = pinnedIndices.sumOf { placeables[it].width } +
+            gapPx * (pinnedIndices.size - 1).coerceAtLeast(0)
+
+        // 第一行先为尾部固定项预留真实宽度，因此全屏和旋转永远处在第一行按钮组的
+        // 最右端。这里是“紧跟普通工具后的行内尾部”，不是用空白把按钮撑到屏幕右缘。
+        // 普通工具只使用剩余空间，放不下就整颗移到后续行。
+        val firstRowCapacity = if (pinnedIndices.isEmpty()) {
+            maxWidth
+        } else {
+            (maxWidth - pinnedWidth - gapPx).coerceAtLeast(0)
+        }
+        val firstRow = mutableListOf<Int>()
         var nextTool = 0
-        while (nextTool < placeables.size) {
+        var firstRowWidth = 0
+        while (nextTool < regularEnd) {
+            val placeable = placeables[nextTool]
+            val candidateWidth =
+                firstRowWidth + (if (firstRow.isEmpty()) 0 else gapPx) + placeable.width
+            if (candidateWidth > firstRowCapacity) break
+            firstRow += nextTool
+            firstRowWidth = candidateWidth
+            nextTool++
+        }
+
+        val rows = mutableListOf<MutableList<Int>>(firstRow)
+        while (nextTool < regularEnd) {
             val row = mutableListOf<Int>()
             var rowWidth = 0
-            while (nextTool < placeables.size) {
+            while (nextTool < regularEnd) {
                 val placeable = placeables[nextTool]
                 val candidateWidth =
                     rowWidth + (if (row.isEmpty()) 0 else gapPx) + placeable.width
@@ -3686,8 +3751,9 @@ private fun AdaptiveRemoteToolBar(
             rows += row
         }
 
-        val rowHeights = rows.map { row ->
-            row.maxOfOrNull { placeables[it].height } ?: 0
+        val rowHeights = rows.mapIndexed { rowIndex, row ->
+            val indices = if (rowIndex == 0) row + pinnedIndices else row
+            indices.maxOfOrNull { placeables[it].height } ?: 0
         }
         val naturalHeight = rowHeights.sum() + rowGapPx * (rows.size - 1).coerceAtLeast(0)
         val layoutHeight = naturalHeight.coerceIn(constraints.minHeight, constraints.maxHeight)
@@ -3701,6 +3767,17 @@ private fun AdaptiveRemoteToolBar(
                     val placeable = placeables[index]
                     placeable.placeRelative(x, y + (rowHeight - placeable.height) / 2)
                     x += placeable.width + gapPx
+                }
+                if (rowIndex == 0 && pinnedIndices.isNotEmpty()) {
+                    var pinnedX = if (row.isEmpty()) 0 else x
+                    pinnedIndices.forEach { index ->
+                        val placeable = placeables[index]
+                        placeable.placeRelative(
+                            pinnedX,
+                            y + (rowHeight - placeable.height) / 2
+                        )
+                        pinnedX += placeable.width + gapPx
+                    }
                 }
                 y += rowHeight + rowGapPx
             }

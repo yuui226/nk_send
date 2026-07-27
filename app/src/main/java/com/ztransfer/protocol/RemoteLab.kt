@@ -75,6 +75,7 @@ object Lab {
     const val PROP_NK_LV_STATUS = 0xD1A2
     const val PROP_NK_LV_PROHIBIT = 0xD1A4
     const val PROP_NK_LV_IMAGE_SIZE = 0xD1AC
+    const val PROP_NK_MOVIE_AUTO_ISO = 0xD0AD
     const val PROP_NK_ISO_EX = 0xD0B4
     const val PROP_NK_ISO_CONTROL_SENSITIVITY = 0xD0B5
     const val PROP_NK_AUTO_ISO_ALT = 0xD16A
@@ -141,6 +142,7 @@ object Lab {
         PROP_NK_LV_IMAGE_SIZE to "LiveViewImageSize",
         PROP_NK_LV_SELECTOR to "LiveViewSelector",
         PROP_NK_MOV_PROHIBIT to "MovRecProhibitCond",
+        PROP_NK_MOVIE_AUTO_ISO to "MovieISOAutoControl",
         PROP_NK_APPLICATION_MODE to "ApplicationMode",
         PROP_NK_MOVIE_SHUTTER to "MovieShutterSpeed",
         PROP_NK_MOVIE_F_NUMBER to "MovieFNumber",
@@ -426,6 +428,7 @@ data class RcParam(
 internal fun rcAutoIsoCandidateProps(movieMode: Boolean): List<Int> =
     if (movieMode) {
         listOf(
+            Lab.PROP_NK_MOVIE_AUTO_ISO,
             Lab.PROP_NK_AUTO_ISO_ALT,
             Lab.PROP_NK_AUTO_ISO
         )
@@ -433,9 +436,22 @@ internal fun rcAutoIsoCandidateProps(movieMode: Boolean): List<Int> =
         listOf(Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT)
     }
 
-/** 只有明确可写且同时提供 0/非 0 两态的属性，才可作为开关。 */
-internal fun RcParam.rcIsBinaryToggle(): Boolean =
-    writable && values.any { it == 0L } && values.any { it != 0L }
+/**
+ * 判断属性能否作为 Auto ISO 开关。
+ *
+ * 部分 Nikon 机身会把 D0AD/D054/D16A 描述为可写 UINT8，却不附带 enum/range form；
+ * 这仍是标准的 0/1 On/Off 属性。只对 8 位、当前值确实为 0/1 的无 form 属性放宽，
+ * 写入端仍会回读确认，避免把其他厂商属性误认成开关。
+ */
+internal fun RcParam.rcIsBinaryToggle(): Boolean {
+    if (!writable) return false
+    val hasExplicitStates = values.any { it == 0L } && values.any { it != 0L }
+    val isImplicitByteToggle =
+        values.isEmpty() &&
+            dataType in setOf(0x0001, 0x0002) &&
+            current in 0L..1L
+    return hasExplicitStates || isImplicitByteToggle
+}
 
 /** 当前镜头伺服方式。现代 Z 机优先走标准 FocusMode(0x500A)，旧 Nikon
  *  机身回退到厂商属性 0xD161；未知枚举保留原始值供日志定位，不伪造名称。 */
