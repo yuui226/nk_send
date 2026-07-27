@@ -27,7 +27,9 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -43,12 +45,19 @@ import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.theme.SkinPreset
 import kotlin.math.max
 
+private fun Outline.toMaterialPath(): Path = when (this) {
+    is Outline.Generic -> path
+    is Outline.Rectangle -> Path().apply { addRect(rect) }
+    is Outline.Rounded -> Path().apply { addRoundRect(roundRect) }
+}
+
 /**
  * 轻量液态玻璃光场。所有 Brush 都缓存在 DrawModifier 中，静止时没有状态循环或 CPU 运算；
- * 按下/激活只改变少量渐变参数。完整轮廓由外层 shape 裁切，这里不画任何闭合描边。
+ * 按下/激活只改变少量渐变参数。每一层直接按 shape 绘制，不画任何闭合描边。
  */
 private fun Modifier.liquidGlassOptics(
     enabled: Boolean,
+    shape: Shape,
     dark: Boolean,
     showSheen: Boolean,
     panel: Boolean,
@@ -58,6 +67,7 @@ private fun Modifier.liquidGlassOptics(
 ): Modifier {
     if (!enabled) return this
     return drawWithCache {
+        val outlinePath = shape.createOutline(size, layoutDirection, this).toMaterialPath()
         val width = size.width.coerceAtLeast(1f)
         val height = size.height.coerceAtLeast(1f)
         val longest = max(width, height)
@@ -120,11 +130,27 @@ private fun Modifier.liquidGlassOptics(
         )
 
         onDrawBehind {
-            drawRect(ambient)
-            drawRect(depth)
-            if (active > 0.001f) drawRect(activeBloom)
-            drawRect(specular)
+            // 每一层都直接按最终轮廓绘制，不创建矩形离屏层再裁切。这样无论按钮是
+            // 圆形还是圆角矩形，GPU 都没有机会把缓存层边界显示成一圈方框。
+            drawPath(outlinePath, ambient)
+            drawPath(outlinePath, depth)
+            if (active > 0.001f) drawPath(outlinePath, activeBloom)
+            drawPath(outlinePath, specular)
         }
+    }
+}
+
+private fun Modifier.buttonMaterialBase(
+    shape: Shape,
+    texture: Brush?,
+    highlightTop: Color,
+    highlightBottom: Color
+): Modifier = drawWithCache {
+    val outlinePath = shape.createOutline(size, layoutDirection, this).toMaterialPath()
+    val highlight = Brush.verticalGradient(listOf(highlightTop, highlightBottom))
+    onDrawBehind {
+        texture?.let { drawPath(outlinePath, it) }
+        drawPath(outlinePath, highlight)
     }
 }
 
@@ -134,12 +160,14 @@ private fun Modifier.liquidGlassOptics(
  */
 private fun Modifier.naturalMaterialOptics(
     skin: SkinPreset?,
+    shape: Shape,
     dark: Boolean,
     panel: Boolean,
     pressProgress: Float
 ): Modifier {
     if (skin == null || skin == SkinPreset.FROSTED_GLASS) return this
     return drawWithCache {
+        val outlinePath = shape.createOutline(size, layoutDirection, this).toMaterialPath()
         val width = size.width.coerceAtLeast(1f)
         val height = size.height.coerceAtLeast(1f)
         val longest = max(width, height)
@@ -218,9 +246,9 @@ private fun Modifier.naturalMaterialOptics(
             null
         }
         onDrawBehind {
-            drawRect(materialLight)
-            leatherBodyDepth?.let(::drawRect)
-            drawRect(depth)
+            drawPath(outlinePath, materialLight)
+            leatherBodyDepth?.let { drawPath(outlinePath, it) }
+            drawPath(outlinePath, depth)
         }
     }
 }
@@ -324,6 +352,7 @@ fun GlassSurface(
         .background(tint)
         .liquidGlassOptics(
             enabled = true,
+            shape = shape,
             dark = dark,
             showSheen = showSheen,
             panel = panel,
@@ -461,18 +490,17 @@ fun GlassButton(
     ) {
         Row(
             modifier = Modifier
-                .graphicsLayer {
-                    this.shape = shape
-                    clip = true
-                }
-                // 纹理层夹在 Surface 底色与高光渐变之间，随 Surface 的 shape 一起被裁剪；
-                // 低透明度平铺，不影响其上文字/图标的可读性。
-                .then(if (skinTexture != null) Modifier.background(skinTexture) else Modifier)
-                .background(
-                    brush = Brush.verticalGradient(listOf(highlightTop, highlightBottom))
+                // 材质层直接绘制为 shape，不再依赖矩形 graphicsLayer 裁切。这个约束由
+                // 公共按钮统一维护，入口按钮、更新按钮及后续新增按钮不会再各自复发。
+                .buttonMaterialBase(
+                    shape = shape,
+                    texture = skinTexture,
+                    highlightTop = highlightTop,
+                    highlightBottom = highlightBottom
                 )
                 .liquidGlassOptics(
                     enabled = isFrostedGlass,
+                    shape = shape,
                     dark = dark,
                     showSheen = showSheen,
                     panel = panel,
@@ -482,6 +510,7 @@ fun GlassButton(
                 )
                 .naturalMaterialOptics(
                     skin = texturePalette?.skin,
+                    shape = shape,
                     dark = dark,
                     panel = panel,
                     pressProgress = pressLight

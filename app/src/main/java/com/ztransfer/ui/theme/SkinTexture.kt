@@ -29,10 +29,12 @@ class ButtonTexturePalette internal constructor(
 ) {
     private val brushes = arrayOfNulls<Brush>(TEXTURE_VARIANTS)
 
-    fun brushFor(seed: Int): Brush {
-        val variantCount = if (skin == SkinPreset.FROSTED_GLASS) FROST_TEXTURE_VARIANTS
-        else TEXTURE_VARIANTS
-        val variant = Math.floorMod(mixSeed(seed), variantCount)
+    fun brushFor(seed: Int): Brush? {
+        // 毛玻璃不能再使用矩形位图 tile：即使像素本身接近无缝，GPU 采样、缩放和
+        // 离屏合成仍可能把 tile 边界显成按钮上的方框。毛玻璃颗粒和体积光统一交给
+        // GlassButton 的矢量光场绘制；皮革、木纹才使用位图纹理。
+        if (skin == SkinPreset.FROSTED_GLASS) return null
+        val variant = Math.floorMod(mixSeed(seed), TEXTURE_VARIANTS)
         return brushes[variant] ?: ShaderBrush(
             ImageShader(
                 image = buttonTextureTile(skin, dark, variant),

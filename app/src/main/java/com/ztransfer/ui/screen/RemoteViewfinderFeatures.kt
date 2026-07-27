@@ -299,7 +299,9 @@ internal fun HdMark(modifier: Modifier = Modifier) {
             color = color,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            lineHeight = 13.sp
+            lineHeight = 13.sp,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }
@@ -314,7 +316,9 @@ internal fun FpsMark(modifier: Modifier = Modifier) {
             color = color,
             fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
-            lineHeight = 11.sp
+            lineHeight = 11.sp,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }

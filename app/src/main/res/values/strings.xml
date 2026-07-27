@@ -167,6 +167,7 @@
     <string name="cd_remote_rec_resume">Resume recording</string>
     <string name="cd_remote_rec_stop">Stop recording</string>
     <string name="cd_remote_rec_saved">Recording saved</string>
+    <string name="remote_rec_saved_label">Saved</string>
     <string name="cd_remote_rec_toast_failed">Recording failed</string>
 
     <!-- License / activation -->

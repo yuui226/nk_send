@@ -94,20 +94,30 @@ fun RecControlBar(
     val buttonSize = 28.dp
     val iconSize = 14.dp
     val iconPadding = PaddingValues(7.dp)
-    // 小工具改为 36dp 圆形后，录制控件仍按一格 / 两格加间距占位。
-    // 展开胶囊本身略窄于两格占位，左侧录制按钮位置保持不动。
+    // 布局宽度必须与可见 Surface 完全一致；额外的透明占位会与工具栏外部间距
+    // 叠加，让端侧录制按钮到相邻按钮的距离看起来比其他按钮更大。
     val collapsedLayoutWidth = 36.dp
-    val expandedLayoutWidth = 78.dp
+    val expandedLayoutWidth = 70.dp
+    val savedLayoutWidth = 88.dp
     val collapsedSurfaceWidth = 36.dp
     val expandedSurfaceWidth = 70.dp
+    val savedSurfaceWidth = 88.dp
     val expanded = isRecording || isFinalizing || showDone
     val animatedLayoutWidth by animateDpAsState(
-        targetValue = if (expanded) expandedLayoutWidth else collapsedLayoutWidth,
+        targetValue = when {
+            showDone -> savedLayoutWidth
+            expanded -> expandedLayoutWidth
+            else -> collapsedLayoutWidth
+        },
         animationSpec = Motion.bouncy(),
         label = "recControlLayoutWidth"
     )
     val animatedSurfaceWidth by animateDpAsState(
-        targetValue = if (expanded) expandedSurfaceWidth else collapsedSurfaceWidth,
+        targetValue = when {
+            showDone -> savedSurfaceWidth
+            expanded -> expandedSurfaceWidth
+            else -> collapsedSurfaceWidth
+        },
         animationSpec = Motion.bouncy(),
         label = "recControlSurfaceWidth"
     )
@@ -117,6 +127,7 @@ fun RecControlBar(
     val pauseDesc = stringResource(R.string.cd_remote_rec_pause)
     val resumeDesc = stringResource(R.string.cd_remote_rec_resume)
     val savedDesc = stringResource(R.string.cd_remote_rec_saved)
+    val savedLabel = stringResource(R.string.remote_rec_saved_label)
     val lockedHintText = stringResource(R.string.remote_rec_pro_only)
     var lockedHintNonce by remember { mutableIntStateOf(0) }
     var lockedHintVisible by remember { mutableStateOf(false) }
@@ -282,6 +293,38 @@ fun RecControlBar(
                             }
                         }
                     }
+                }
+
+                // 保存完成后复用暂停键让出的右侧槽位：对号先弹入，短标签随后从左缘
+                // 轻微放大淡入；胶囊随内容再舒展一点，节奏与传输队列的 Done 一致。
+                AnimatedVisibility(
+                    visible = showDone,
+                    enter = fadeIn(tween(200, delayMillis = 60)) +
+                        scaleIn(
+                            initialScale = 0.82f,
+                            animationSpec = Motion.bouncy(),
+                            transformOrigin = TransformOrigin(0f, 0.5f)
+                        ),
+                    exit = fadeOut(tween(120)) +
+                        scaleOut(
+                            targetScale = 0.90f,
+                            animationSpec = tween(120),
+                            transformOrigin = TransformOrigin(0f, 0.5f)
+                        ),
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(x = 37.dp)
+                ) {
+                    Text(
+                        text = savedLabel,
+                        color = colors.statusConnected,
+                        fontSize = 10.sp,
+                        lineHeight = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 5.dp)
+                    )
                 }
 
             }

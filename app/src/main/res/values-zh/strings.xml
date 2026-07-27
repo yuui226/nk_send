@@ -167,6 +167,7 @@
     <string name="cd_remote_rec_resume">恢复录制</string>
     <string name="cd_remote_rec_stop">停止录制</string>
     <string name="cd_remote_rec_saved">录制已保存</string>
+    <string name="remote_rec_saved_label">已保存</string>
     <string name="cd_remote_rec_toast_failed">录制失败</string>
 
     <!-- 授权/激活 -->

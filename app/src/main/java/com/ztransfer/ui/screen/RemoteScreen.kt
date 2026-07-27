@@ -80,6 +80,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -257,7 +258,6 @@ fun RemoteScreen(
     transferViewModel: TransferViewModel,
     onNavigateBack: () -> Unit
 ) {
-    val colors = AppTheme.colors
     val backgroundBrush = rememberAppBackgroundBrush()
     val transferState by transferViewModel.state.collectAsState()
     val context = LocalContext.current
@@ -1716,12 +1716,13 @@ private fun RemoteContent(
             }
             recFinalizing = false
             if (name != null) {
-                // 保存成功不再弹系统 Toast：让反馈留在用户刚操作的录制按钮上，
-                // 短暂显示对号后自动恢复，既确认落盘又不遮挡监看画面。
+                // 保存成功不再弹系统 Toast：对号与“已保存”短标签留在用户刚操作的
+                // 胶囊上，配合成功触感短暂停留后再自动收回。
                 recSaveFeedbackJob?.cancel()
+                haptics.success()
                 recSaveSuccess = true
                 recSaveFeedbackJob = scope.launch {
-                    delay(1_250)
+                    delay(1_800)
                     recSaveSuccess = false
                 }
             } else {
@@ -2019,14 +2020,14 @@ private fun RemoteContent(
                             hdLiveView = !hdLiveView
                             startSession(hdLiveView)
                         }
-                    ) { HdMark(Modifier.size(20.dp)) }
+                    ) { HdMark() }
                 })
                 add(@Composable {
                     TopIconToggle(
                         active = showFps,
                         contentDescription = stringResource(R.string.dev_fps_overlay),
                         onClick = { toggleFpsControl() }
-                    ) { FpsMark(Modifier.size(20.dp)) }
+                    ) { FpsMark() }
                 })
                 add(@Composable {
                     TopIconToggle(
@@ -2073,13 +2074,13 @@ private fun RemoteContent(
                     )
                 })
             }
-            // 自定义两行布局：先无约束测出每个孩子的真实固有尺寸，再贪心分行。
-            // 末两个孩子固定是【进全屏 / 转屏】，贴第一行最右；其余监看工具从左
-            // 起填，第一行装不下的整颗落到第二行（行距 4.dp）左对齐；第二行只在
-            // 真的有溢出按钮时占高度，每行内按钮各自垂直居中。
+            // 所有按钮按真实固有宽度顺序折行；窄屏/大字体下宁可增加一行，
+            // 也绝不压窄按钮或让文字换行。
             val toolRowGap = 4.dp
-            Layout(
+            AdaptiveRemoteToolBar(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalGap = toolGap,
+                verticalGap = toolRowGap,
                 content = {
                     overlayTools.forEach { tool -> tool() }
                     TopIconToggle(
@@ -2093,52 +2094,7 @@ private fun RemoteContent(
                         onClick = onCycleRotation
                     ) { RotateMark(Modifier.size(20.dp)) }
                 }
-            ) { measurables, constraints ->
-                val gapPx = toolGap.roundToPx()
-                val rowGapPx = toolRowGap.roundToPx()
-                val maxW = constraints.maxWidth
-                // 无约束测量：拿到的就是按钮真实渲染宽度（含 M3 的 48dp 可点击
-                // 下限、字体缩放后的 HD/FPS 文字宽），不再依赖任何估宽表。
-                val placeables = measurables.map { it.measure(Constraints()) }
-                val pinned = placeables.takeLast(2)   // 进全屏 + 转屏
-                val tools = placeables.dropLast(2)    // 监看工具组（含动态宽度录制胶囊）
-                val pinnedWidth = pinned.sumOf { it.width } + gapPx
-                // 贪心装填第一行：工具间距 + 与右端固定组之间至少留一档间距。
-                var firstRowCount = 0
-                var usedWidth = 0
-                for (p in tools) {
-                    val need = usedWidth + (if (firstRowCount == 0) 0 else gapPx) + p.width
-                    if (need + gapPx + pinnedWidth > maxW) break
-                    usedWidth = need
-                    firstRowCount++
-                }
-                val row1 = tools.take(firstRowCount)
-                val row2 = tools.drop(firstRowCount)
-                val row1Height = (row1 + pinned).maxOf { it.height }
-                val row2Height = if (row2.isEmpty()) 0 else row2.maxOf { it.height }
-                val totalHeight = row1Height + if (row2.isEmpty()) 0 else rowGapPx + row2Height
-                layout(maxW, totalHeight) {
-                    var x = 0
-                    row1.forEach { p ->
-                        p.placeRelative(x, (row1Height - p.height) / 2)
-                        x += p.width + gapPx
-                    }
-                    // 右端固定组：转屏贴最右，进全屏在其左侧一档间距处。
-                    val fullscreen = pinned[0]
-                    val rotate = pinned[1]
-                    rotate.placeRelative(maxW - rotate.width, (row1Height - rotate.height) / 2)
-                    fullscreen.placeRelative(
-                        maxW - rotate.width - gapPx - fullscreen.width,
-                        (row1Height - fullscreen.height) / 2
-                    )
-                    var x2 = 0
-                    val row2Top = row1Height + rowGapPx
-                    row2.forEach { p ->
-                        p.placeRelative(x2, row2Top + (row2Height - p.height) / 2)
-                        x2 += p.width + gapPx
-                    }
-                }
-            }
+            )
             Spacer(Modifier.height(12.dp))
 
             // 2×2 数值拨轮微调：读数即控件——在数值上【上下拖动】，数值列随手指 1:1
@@ -2203,9 +2159,16 @@ private fun RemoteContent(
                 val normalVerticalPadding = 8.dp
                 val controlsGap = 8.dp
                 val parameterPanelWidth = 170.dp
-                val toolRowHeight = 40.dp
+                val fallbackToolBarHeight = 40.dp
                 val toolRowGap = 4.dp
                 val fullscreenVerticalBreathingRoom = 4.dp
+                val density = LocalDensity.current
+                var landscapeToolBarHeightPx by remember { mutableIntStateOf(0) }
+                val landscapeToolBarHeight = if (landscapeToolBarHeightPx > 0) {
+                    with(density) { landscapeToolBarHeightPx.toDp() }
+                } else {
+                    fallbackToolBarHeight
+                }
 
                 fun fitWithin(
                     availableWidth: androidx.compose.ui.unit.Dp,
@@ -2234,7 +2197,7 @@ private fun RemoteContent(
                 val normalViewfinderHeight = (
                     maxHeight -
                         normalVerticalPadding * 2 -
-                        toolRowHeight -
+                        landscapeToolBarHeight -
                         toolRowGap
                     ).coerceAtLeast(0.dp)
                 val (normalImageWidth, normalImageHeight) =
@@ -2339,10 +2302,16 @@ private fun RemoteContent(
                         Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
                             Spacer(Modifier.weight(1f))
                             Spacer(Modifier.height(toolRowGap))
-                            Row(
-                                modifier = Modifier.fillMaxWidth().height(toolRowHeight),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            AdaptiveRemoteToolBar(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onSizeChanged {
+                                        if (landscapeToolBarHeightPx != it.height) {
+                                            landscapeToolBarHeightPx = it.height
+                                        }
+                                    },
+                                horizontalGap = 5.dp,
+                                verticalGap = 4.dp
                             ) {
                                 if (devUnlocked) {
                                     TopIconToggle(
@@ -2364,12 +2333,12 @@ private fun RemoteContent(
                                         hdLiveView = !hdLiveView
                                         startSession(hdLiveView)
                                     }
-                                ) { HdMark(Modifier.size(20.dp)) }
+                                ) { HdMark() }
                                 TopIconToggle(
                                     active = showFps,
                                     contentDescription = stringResource(R.string.dev_fps_overlay),
                                     onClick = { toggleFpsControl() }
-                                ) { FpsMark(Modifier.size(20.dp)) }
+                                ) { FpsMark() }
                                 TopIconToggle(
                                     active = showHistogram,
                                     contentDescription = stringResource(R.string.cd_remote_histogram),
@@ -2402,7 +2371,6 @@ private fun RemoteContent(
                                     isFinalizing = recFinalizing,
                                     showDone = recSaveSuccess
                                 )
-                                Spacer(Modifier.weight(1f))
                                 TopIconToggle(
                                     active = false,
                                     contentDescription =
@@ -3681,7 +3649,66 @@ private fun ConfirmedFocusReticleOverlay(
     }
 }
 
-/** 顶栏紧凑切换按钮：尺寸、玻璃激活态和按压效果保持统一。 */
+/**
+ * 监看工具栏：所有按钮按真实固有尺寸从左向右排列，按钮间距始终一致。
+ * 空间不足时整颗按钮移到下一行，行数不设上限；任何一项都不会被 weight 或父级约束压窄。
+ */
+@Composable
+private fun AdaptiveRemoteToolBar(
+    modifier: Modifier = Modifier,
+    horizontalGap: androidx.compose.ui.unit.Dp = 6.dp,
+    verticalGap: androidx.compose.ui.unit.Dp = 4.dp,
+    content: @Composable () -> Unit
+) {
+    Layout(modifier = modifier, content = content) { measurables, constraints ->
+        val gapPx = horizontalGap.roundToPx()
+        val rowGapPx = verticalGap.roundToPx()
+        val maxWidth = constraints.maxWidth
+        // 无最小/最大宽度测量得到按钮真实固有宽度；TopIconToggle 只设最小尺寸，
+        // HD/FPS 在字体放大后会自然变宽，然后由这里决定是否整颗换行。
+        val placeables = measurables.map { it.measure(Constraints()) }
+        val rows = mutableListOf<MutableList<Int>>()
+        var nextTool = 0
+        while (nextTool < placeables.size) {
+            val row = mutableListOf<Int>()
+            var rowWidth = 0
+            while (nextTool < placeables.size) {
+                val placeable = placeables[nextTool]
+                val candidateWidth =
+                    rowWidth + (if (row.isEmpty()) 0 else gapPx) + placeable.width
+                if (row.isNotEmpty() && candidateWidth > maxWidth) break
+                row += nextTool
+                rowWidth = candidateWidth
+                nextTool++
+                // 单颗按钮理论上比整个窗口还宽时仍保持固有宽度，只独占一行。
+                if (rowWidth > maxWidth) break
+            }
+            rows += row
+        }
+
+        val rowHeights = rows.map { row ->
+            row.maxOfOrNull { placeables[it].height } ?: 0
+        }
+        val naturalHeight = rowHeights.sum() + rowGapPx * (rows.size - 1).coerceAtLeast(0)
+        val layoutHeight = naturalHeight.coerceIn(constraints.minHeight, constraints.maxHeight)
+
+        layout(maxWidth, layoutHeight) {
+            var y = 0
+            rows.forEachIndexed { rowIndex, row ->
+                val rowHeight = rowHeights[rowIndex]
+                var x = 0
+                row.forEach { index ->
+                    val placeable = placeables[index]
+                    placeable.placeRelative(x, y + (rowHeight - placeable.height) / 2)
+                    x += placeable.width + gapPx
+                }
+                y += rowHeight + rowGapPx
+            }
+        }
+    }
+}
+
+/** 顶栏紧凑切换按钮：保持最小点击尺寸，文字类标记可按固有宽度自然扩展。 */
 @Composable
 private fun TopIconToggle(
     active: Boolean,
@@ -3697,15 +3724,15 @@ private fun TopIconToggle(
         showSheen = false,
         shadowElevation = 0.dp,
         contentPadding = PaddingValues(8.dp),
-        modifier = Modifier.size(36.dp).semantics {
-            this.contentDescription = contentDescription
-        }
+        modifier = Modifier
+            .defaultMinSize(minWidth = 36.dp, minHeight = 36.dp)
+            .semantics { this.contentDescription = contentDescription }
     ) {
         CompositionLocalProvider(
             LocalContentColor provides if (active) colors.accentBlue else colors.onSurfaceVariant
         ) {
             Box(
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp),
                 contentAlignment = Alignment.Center
             ) {
                 content()
