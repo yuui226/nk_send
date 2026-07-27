@@ -62,7 +62,7 @@ fun ZTransferTheme(
     }
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
     val appColors = skinAppColors(skinPreset, darkTheme)
-    // 皮肤按钮纹理：皮革/木纹返回稳定变体组，毛玻璃为 null；只有 GlassButton 消费。
+    // 三种按钮材质都返回稳定纹理变体组；只有 GlassButton 消费。
     val buttonTexturePalette = rememberButtonTexturePalette(skinPreset, darkTheme)
     val view = LocalView.current
 

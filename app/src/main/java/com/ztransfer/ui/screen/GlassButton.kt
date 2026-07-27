@@ -21,17 +21,107 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
 import com.ztransfer.ui.theme.Motion
+import com.ztransfer.ui.theme.SkinPreset
+import kotlin.math.max
+
+/**
+ * 轻量液态玻璃光场。所有 Brush 都缓存在 DrawModifier 中，静止时没有状态循环或 CPU 运算；
+ * 按下/激活只改变少量渐变参数。完整轮廓由外层 shape 裁切，这里不画任何闭合描边。
+ */
+private fun Modifier.liquidGlassOptics(
+    enabled: Boolean,
+    dark: Boolean,
+    showSheen: Boolean,
+    panel: Boolean,
+    activeColor: Color,
+    activeProgress: Float,
+    pressProgress: Float
+): Modifier {
+    if (!enabled) return this
+    return drawWithCache {
+        val width = size.width.coerceAtLeast(1f)
+        val height = size.height.coerceAtLeast(1f)
+        val longest = max(width, height)
+        val press = pressProgress.coerceIn(0f, 1f)
+        val active = activeProgress.coerceIn(0f, 1f)
+        val panelFactor = if (panel) 0.68f else 1f
+        val ambientAlpha = (
+            if (showSheen) 0.15f else 0.075f
+            ) * panelFactor + 0.035f * press
+        val depthAlpha = (if (dark) 0.12f else 0.075f) * panelFactor
+
+        // 左上方宽阔环境光，让透明底不再像一块平塑料。
+        val ambient = Brush.radialGradient(
+            colors = listOf(
+                Color.White.copy(alpha = ambientAlpha),
+                Color.White.copy(alpha = ambientAlpha * 0.28f),
+                Color.Transparent
+            ),
+            center = Offset(
+                x = width * (0.10f + 0.09f * press),
+                y = height * (0.03f + 0.07f * press)
+            ),
+            radius = longest * 0.92f
+        )
+
+        // 右下方极轻的厚度阴影；它只占局部，不形成圆环或外框。
+        val depth = Brush.radialGradient(
+            colors = listOf(
+                (if (dark) Color.Black else Color(0xFF6D7D8D)).copy(alpha = depthAlpha),
+                Color.Transparent
+            ),
+            center = Offset(width * 1.04f, height * 1.06f),
+            radius = longest * 0.88f
+        )
+
+        // 极弱 RGB 分离与镜面窄光带。按下时光带向右下滑动并增强，松开后自然淡回。
+        val bandAlpha = (if (showSheen) 0.055f else 0.028f) + 0.10f * press
+        val specular = Brush.linearGradient(
+            colorStops = arrayOf(
+                0.00f to Color.Transparent,
+                0.36f to Color.Transparent,
+                0.455f to Color(0xFFBDEFFF).copy(alpha = bandAlpha * 0.46f),
+                0.505f to Color.White.copy(alpha = bandAlpha),
+                0.555f to Color(0xFFFFD9F2).copy(alpha = bandAlpha * 0.34f),
+                0.66f to Color.Transparent,
+                1.00f to Color.Transparent
+            ),
+            start = Offset(-width * (0.72f - 0.20f * press), -height * 0.10f),
+            end = Offset(width * (0.92f + 0.20f * press), height * 1.12f)
+        )
+
+        val activeBloom = Brush.radialGradient(
+            colors = listOf(
+                activeColor.copy(alpha = 0.22f * active),
+                activeColor.copy(alpha = 0.07f * active),
+                Color.Transparent
+            ),
+            center = Offset(width * 0.18f, height * 0.94f),
+            radius = longest * 0.96f
+        )
+
+        onDrawBehind {
+            drawRect(ambient)
+            drawRect(depth)
+            if (active > 0.001f) drawRect(activeBloom)
+            drawRect(specular)
+        }
+    }
+}
 
 /**
  * 全局毛玻璃容器。按钮、卡片等浮层只负责传入形状和状态色，玻璃底、高光、描边与投影
@@ -50,6 +140,7 @@ fun GlassSurface(
     content: @Composable BoxScope.() -> Unit
 ) {
     val colors = AppTheme.colors
+    val dark = colors.background.luminance() < 0.5f
     val resolvedActiveColor = activeColor ?: colors.accentBlue
     val activeProgress by animateFloatAsState(
         targetValue = if (active && !panel) 1f else 0f,
@@ -70,6 +161,15 @@ fun GlassSurface(
         .background(if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.glassSurface)
         .background(Brush.verticalGradient(listOf(highlightTop, highlightBottom)))
         .background(tint)
+        .liquidGlassOptics(
+            enabled = true,
+            dark = dark,
+            showSheen = showSheen,
+            panel = panel,
+            activeColor = resolvedActiveColor,
+            activeProgress = activeProgress,
+            pressProgress = 0f
+        )
         .then(
             // 描边只保留两类"定义面板边缘"的用法：panel 的细 hairline 与调用方显式
             // 指定语义色的 borderColor（如已连接徽标的绿圈）。普通玻璃表面不再画
@@ -88,8 +188,8 @@ fun GlassSurface(
 }
 
 /**
- * 统一的"毛玻璃"悬浮按钮：半透明底 + 自上而下白色高光渐变，不画外沿描边——
- * 玻璃感全部来自底色与高光，按钮任何状态（含激活态）都不出现描边亮框。
+ * 统一的液态毛玻璃悬浮按钮：半透明冷色底、稳定微霜、局部体积光与交互镜面光带。
+ * 不画外沿描边，按钮任何状态（含激活态）都不会出现闭合亮框。
  * 与 "Z传" 悬浮按钮同款视觉。全局悬浮控件（返回/标题/清空/重试等）复用，保证设计语言一致。
  *
  * 按压微缩放：按下快速下沉到 0.95、松开弹性回弹——全 App 玻璃按钮统一的"手感"，
@@ -123,6 +223,7 @@ fun GlassButton(
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = AppTheme.colors
+    val dark = colors.background.luminance() < 0.5f
     val resolvedActiveColor = activeColor ?: colors.accentBlue
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -131,6 +232,11 @@ fun GlassButton(
         targetValue = if (pressed && enabled) 0.95f else 1f,
         animationSpec = if (pressed) tween(80) else Motion.bouncy(),
         label = "glassPress"
+    )
+    val pressLight by animateFloatAsState(
+        targetValue = if (pressed && enabled) 1f else 0f,
+        animationSpec = tween(if (pressed) 90 else 220),
+        label = "glassPressLight"
     )
     // 保持原有 Surface → Row 测量层级；照片列表、续费等既有按钮依赖这套布局。
     val activeProgress by animateFloatAsState(
@@ -147,13 +253,14 @@ fun GlassButton(
     val highlightTop = lerp(normalHighlightTop, resolvedActiveColor.copy(alpha = 0.30f), activeProgress)
     val highlightBottom = lerp(normalHighlightBottom, resolvedActiveColor.copy(alpha = 0.12f), activeProgress)
     val elevation = shadowElevation ?: if (panel) 0.dp else (4f + 3f * activeProgress).dp
-    // 皮肤纹理（皮革/木纹为可平铺画刷，毛玻璃为 null）：叠在底色之上、高光之下。
+    // 三种皮肤都使用可平铺画刷；毛玻璃是最轻的微霜颗粒，叠在底色之上、高光之下。
     // 强度已烘焙进 tile 像素（见 SkinTexture.kt），这里按原样平铺即可。
     val texturePalette = LocalButtonTexturePalette.current
     val compositionTextureSeed = currentCompositeKeyHash
     val skinTexture = remember(texturePalette, textureSeed, compositionTextureSeed) {
         texturePalette?.brushFor(textureSeed ?: compositionTextureSeed)
     }
+    val isFrostedGlass = texturePalette?.skin == SkinPreset.FROSTED_GLASS
     Surface(
         onClick = onClick,
         enabled = enabled,
@@ -172,11 +279,24 @@ fun GlassButton(
     ) {
         Row(
             modifier = Modifier
+                .graphicsLayer {
+                    this.shape = shape
+                    clip = true
+                }
                 // 纹理层夹在 Surface 底色与高光渐变之间，随 Surface 的 shape 一起被裁剪；
                 // 低透明度平铺，不影响其上文字/图标的可读性。
                 .then(if (skinTexture != null) Modifier.background(skinTexture) else Modifier)
                 .background(
                     brush = Brush.verticalGradient(listOf(highlightTop, highlightBottom))
+                )
+                .liquidGlassOptics(
+                    enabled = isFrostedGlass,
+                    dark = dark,
+                    showSheen = showSheen,
+                    panel = panel,
+                    activeColor = resolvedActiveColor,
+                    activeProgress = activeProgress,
+                    pressProgress = pressLight
                 )
                 .padding(contentPadding),
             verticalAlignment = Alignment.CenterVertically,

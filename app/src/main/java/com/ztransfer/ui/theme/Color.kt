@@ -102,7 +102,7 @@ data class AppColors(
     val glassSheen: Color,
     // ---- 按钮专属材质 token：皮肤（皮革/木纹）只覆写下面这 4 个字段 ----
     // GlassButton 读 button*，面板/弹窗/提示条读 glass*，因此换皮肤只换按钮，
-    // 面板在三款皮肤下逐字节一致。默认皮肤下 button* 与对应的 glass* 同值。
+    // 面板在三款皮肤下逐字节一致；默认毛玻璃按钮也可单独调出更轻、更透的光学质感。
     /** 玻璃按钮底色（非 panel 变体的基底填充）。 */
     val buttonSurface: Color,
     /** 玻璃按钮高光渐变（自上而下，上亮下淡）。 */
@@ -142,11 +142,11 @@ val DarkAppColors = AppColors(
     glassBorderBottom = Color.White.copy(alpha = 0.1f),
     glassPanelBorder = Color.White.copy(alpha = 0.15f),
     glassSheen = Color.White.copy(alpha = 0.08f),
-    // 按钮 token 与 glass token 同值：默认皮肤下按钮视觉与拆分前逐字节一致。
-    buttonSurface = DarkSurface.copy(alpha = 0.45f),
-    buttonHighlightTop = Color.White.copy(alpha = 0.16f),
-    buttonHighlightBottom = Color.White.copy(alpha = 0.04f),
-    buttonSheen = Color.White.copy(alpha = 0.08f),
+    // 液态玻璃按钮比面板更轻、更透；体积与亮度主要由 GlassButton 的局部光场提供。
+    buttonSurface = Color(0xFF25313B).copy(alpha = 0.38f),
+    buttonHighlightTop = Color.White.copy(alpha = 0.11f),
+    buttonHighlightBottom = Color.White.copy(alpha = 0.015f),
+    buttonSheen = Color.White.copy(alpha = 0.07f),
     scrim = Color.Black.copy(alpha = 0.4f),
     thumbPlaceholder = DarkSurface,
     cardHairline = Color.Transparent,
@@ -180,11 +180,11 @@ val LightAppColors = AppColors(
     glassBorderBottom = Color.Black.copy(alpha = 0.08f),
     glassPanelBorder = Color.Black.copy(alpha = 0.10f),
     glassSheen = Color.White.copy(alpha = 0.55f),
-    // 按钮 token 与 glass token 同值：默认皮肤下按钮视觉与拆分前逐字节一致。
-    buttonSurface = Color.White.copy(alpha = 0.85f),
-    buttonHighlightTop = Color.White.copy(alpha = 0.60f),
-    buttonHighlightBottom = Color.White.copy(alpha = 0.10f),
-    buttonSheen = Color.White.copy(alpha = 0.55f),
+    // 浅色液态玻璃保留足够透底感，同时以冷白轻染色避免内容穿透后显脏。
+    buttonSurface = Color(0xFFF7FBFF).copy(alpha = 0.80f),
+    buttonHighlightTop = Color.White.copy(alpha = 0.28f),
+    buttonHighlightBottom = Color.White.copy(alpha = 0.035f),
+    buttonSheen = Color.White.copy(alpha = 0.22f),
     scrim = Color.Black.copy(alpha = 0.32f),
     thumbPlaceholder = Color(0xFFE6E6EB),
     cardHairline = Color.Black.copy(alpha = 0.06f),

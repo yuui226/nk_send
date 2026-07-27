@@ -24,13 +24,15 @@ import kotlin.math.sqrt
  * 同一按钮在重组和动画期间不会跳纹，相邻按钮也不再从同一块纹理左上角开始绘制。
  */
 class ButtonTexturePalette internal constructor(
-    private val skin: SkinPreset,
+    internal val skin: SkinPreset,
     private val dark: Boolean
 ) {
     private val brushes = arrayOfNulls<Brush>(TEXTURE_VARIANTS)
 
     fun brushFor(seed: Int): Brush {
-        val variant = Math.floorMod(mixSeed(seed), TEXTURE_VARIANTS)
+        val variantCount = if (skin == SkinPreset.FROSTED_GLASS) FROST_TEXTURE_VARIANTS
+        else TEXTURE_VARIANTS
+        val variant = Math.floorMod(mixSeed(seed), variantCount)
         return brushes[variant] ?: ShaderBrush(
             ImageShader(
                 image = buttonTextureTile(skin, dark, variant),
@@ -41,11 +43,11 @@ class ButtonTexturePalette internal constructor(
     }
 }
 
-/** 毛玻璃为 null；皮革和木纹由 [GlassButton][com.ztransfer.ui.screen.GlassButton] 消费。 */
+/** 三种按钮材质都在这里提供稳定纹理；毛玻璃使用更轻的微霜噪点。 */
 val LocalButtonTexturePalette = staticCompositionLocalOf<ButtonTexturePalette?> { null }
 
 /**
- * 皮革/木纹均使用 8 个确定性变体。纹理只在变体第一次被按钮选中时生成，之后进程级缓存；
+ * 三种材质均使用 8 个确定性变体。纹理只在变体第一次被按钮选中时生成，之后进程级缓存；
  * 避免切换主题时一次性生成整套纹理造成卡顿。
  */
 @Composable
@@ -53,17 +55,16 @@ fun rememberButtonTexturePalette(
     skin: SkinPreset,
     dark: Boolean
 ): ButtonTexturePalette? = remember(skin, dark) {
-    when (skin) {
-        SkinPreset.FROSTED_GLASS -> null
-        SkinPreset.LEATHER, SkinPreset.WOOD -> ButtonTexturePalette(skin, dark)
-    }
+    ButtonTexturePalette(skin, dark)
 }
 
 private const val TILE = 128
+private const val FROST_TILE = 96
 private const val TEXTURE_VARIANTS = 8
+private const val FROST_TEXTURE_VARIANTS = 4
 private const val TAU = (2 * PI).toFloat()
 
-/** 最多 2 种材质 × 2 种明暗 × 8 个变体，共约 2 MiB ARGB 像素。 */
+/** 皮革/木纹各 8 张 128px，微霜各 4 张 96px；全部缓存仍低于 2.5 MiB。 */
 private val tileCache = HashMap<Int, ImageBitmap>()
 
 private fun buttonTextureTile(
@@ -74,12 +75,57 @@ private fun buttonTextureTile(
     val key = (skin.ordinal * 2 + if (dark) 1 else 0) * TEXTURE_VARIANTS + variant
     return tileCache.getOrPut(key) {
         val seed = mixSeed(0x5F3759DF xor (skin.ordinal * 0x45D9F3B) xor variant)
+        val tileSize = if (skin == SkinPreset.FROSTED_GLASS) FROST_TILE else TILE
         val pixels = when (skin) {
+            SkinPreset.FROSTED_GLASS -> frostedGlassTilePixels(dark, seed, tileSize)
+            SkinPreset.LEATHER -> leatherTilePixels(dark, seed)
             SkinPreset.WOOD -> woodTilePixels(dark, seed)
-            else -> leatherTilePixels(dark, seed)
         }
-        Bitmap.createBitmap(pixels, TILE, TILE, Bitmap.Config.ARGB_8888).asImageBitmap()
+        Bitmap.createBitmap(pixels, tileSize, tileSize, Bitmap.Config.ARGB_8888).asImageBitmap()
     }
+}
+
+// =================================================================================================
+// 毛玻璃：低频雾化起伏 + 中频冰晶散射 + 极细颗粒。
+// 只生成透明明暗扰动，不画闭合边缘；按钮的体积光与交互高光由 GlassButton 实时绘制。
+// =================================================================================================
+
+private fun frostedGlassTilePixels(dark: Boolean, seed: Int, tileSize: Int): IntArray {
+    val out = IntArray(tileSize * tileSize)
+    val maxAlpha = if (dark) 0.105f else 0.072f
+    val lightRgb = if (dark) 0xE8FAFF else 0xFFFFFF
+    val darkRgb = if (dark) 0x07131C else 0x708090
+
+    for (y in 0 until tileSize) {
+        val v = y.toFloat() / tileSize
+        for (x in 0 until tileSize) {
+            val u = x.toFloat() / tileSize
+            val macro = periodicValueNoise(u, v, 3, 3, seed + 101)
+            val mist = periodicValueNoise(
+                u + macro * 0.018f,
+                v - macro * 0.014f,
+                11,
+                9,
+                seed + 211
+            )
+            val crystal = periodicValueNoise(
+                u - mist * 0.012f,
+                v + mist * 0.012f,
+                29,
+                31,
+                seed + 307
+            )
+            val grain = cellHash(x, y, seed + 401) * 2f - 1f
+
+            // 宏观雾感必须非常轻，主要由细小明暗散射打破塑料般的纯渐变。
+            val texture = 0.16f * macro +
+                0.28f * mist +
+                0.32f * crystal +
+                0.16f * grain
+            out[y * tileSize + x] = packSigned(texture, maxAlpha, lightRgb, darkRgb)
+        }
+    }
+    return out
 }
 
 /** 把带符号强度打包为透明明/暗叠色；底色仍由主题的 buttonSurface 决定。 */
