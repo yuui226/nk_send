@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.currentCompositeKeyHash
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -27,8 +28,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.ztransfer.ui.theme.AppTheme
-import com.ztransfer.ui.theme.LocalButtonTexture
+import com.ztransfer.ui.theme.LocalButtonTexturePalette
 import com.ztransfer.ui.theme.Motion
 
 /**
@@ -116,6 +118,8 @@ fun GlassButton(
     active: Boolean = false,
     activeColor: Color? = null,
     showSheen: Boolean = true,
+    shadowElevation: Dp? = null,
+    textureSeed: Int? = null,
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = AppTheme.colors
@@ -142,15 +146,20 @@ fun GlassButton(
         else colors.buttonHighlightBottom
     val highlightTop = lerp(normalHighlightTop, resolvedActiveColor.copy(alpha = 0.30f), activeProgress)
     val highlightBottom = lerp(normalHighlightBottom, resolvedActiveColor.copy(alpha = 0.12f), activeProgress)
-    val elevation = if (panel) 0.dp else (4f + 3f * activeProgress).dp
+    val elevation = shadowElevation ?: if (panel) 0.dp else (4f + 3f * activeProgress).dp
     // 皮肤纹理（皮革/木纹为可平铺画刷，毛玻璃为 null）：叠在底色之上、高光之下。
     // 强度已烘焙进 tile 像素（见 SkinTexture.kt），这里按原样平铺即可。
-    val skinTexture = LocalButtonTexture.current
+    val texturePalette = LocalButtonTexturePalette.current
+    val compositionTextureSeed = currentCompositeKeyHash
+    val skinTexture = remember(texturePalette, textureSeed, compositionTextureSeed) {
+        texturePalette?.brushFor(textureSeed ?: compositionTextureSeed)
+    }
     Surface(
         onClick = onClick,
         enabled = enabled,
         shape = shape,
         color = if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.buttonSurface,
+        border = null,
         shadowElevation = elevation,
         interactionSource = interactionSource,
         modifier = modifier.graphicsLayer {

@@ -8,11 +8,13 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.DocumentsContract
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
@@ -245,7 +247,9 @@ fun RemoteScreen(
     val rotationTransition = remember { Animatable(1f) }
     // Activity 始终保持竖屏。内部顺时针旋转后，系统顶部/底部 inset 分别映射为
     // 横屏内容的左/右安全边；背景不避让，继续铺到系统控制条后面。
-    val rotationLeftInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val rotationStatusInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val rotationCutoutInset = WindowInsets.displayCutout.asPaddingValues().calculateTopPadding()
+    val rotationLeftInset = maxOf(rotationStatusInset, rotationCutoutInset, 6.dp)
     val rotationRightInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     DisposableEffect(activity) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -432,18 +436,24 @@ private fun RemoteContent(
     // 相机机身的滚转角（0xD067），null=还没读到/机身不支持，此时水平仪一笔都不画
     var levelRoll by remember { mutableStateOf<Float?>(null) }
     var probing by remember { mutableStateOf(false) }
-    // 全屏监看——只显示取景器与小工具，隐藏顶栏/参数/快门
+    // 全屏监看：沿用同一个取景器实例做边界动画，只保留右上角返回。
     var immersiveFullscreen by remember { mutableStateOf(false) }
-    // 全屏方向：恒为横屏，1=顺时针90°，2=顺时针270°（两种握持方向）。
-    // 进入时继承当前页面方向：竖屏与横屏1 → 1；横屏2 → 2。
-    var immersiveDirection by remember { mutableIntStateOf(1) }
     fun enterFullscreen() {
-        immersiveDirection = if (rotation == 2) 2 else 1
+        // 竖屏入口先沿用页面现有的转屏动画进入横屏；退出全屏后停留在横屏常规布局。
+        if (rotation == 0) onCycleRotation()
+        listProp = null
+        devPanel = false
         immersiveFullscreen = true
+    }
+    BackHandler(enabled = immersiveFullscreen) {
+        immersiveFullscreen = false
     }
     var viewfinderRecorder by remember { mutableStateOf<ViewfinderRecorder?>(null) }
     var recElapsed by remember { mutableIntStateOf(0) }
     var recJob by remember { mutableStateOf<Job?>(null) }
+    var recFinalizing by remember { mutableStateOf(false) }
+    var recSaveSuccess by remember { mutableStateOf(false) }
+    var recSaveFeedbackJob by remember { mutableStateOf<Job?>(null) }
     // 暂停态用 Compose 状态镜像：recorder.isPaused 是普通 @Volatile 字段，
     // 直接读它不会触发重组，暂停/继续按钮图标会卡住不切换。
     var recPaused by remember { mutableStateOf(false) }
@@ -1553,17 +1563,26 @@ private fun RemoteContent(
         recElapsed = 0
         recJob?.cancel()
         recJob = null
+        recFinalizing = true
         scope.launch {
             // NonCancellable：用户停录后立刻退出页面时也要把 muxer 收尾写完，
             // 否则 mp4 缺 moov 无法播放。
-            val name = withContext(Dispatchers.IO + NonCancellable) { r.stop() }
+            val name = withContext(Dispatchers.IO + NonCancellable) {
+                runCatching { r.stop() }.getOrNull()
+            }
+            recFinalizing = false
             if (name != null) {
-                android.widget.Toast.makeText(
-                    context,
-                    context.getString(R.string.cd_remote_rec_toast_saved, name),
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
+                // 保存成功不再弹系统 Toast：让反馈留在用户刚操作的录制按钮上，
+                // 短暂显示对号后自动恢复，既确认落盘又不遮挡监看画面。
+                recSaveFeedbackJob?.cancel()
+                recSaveSuccess = true
+                recSaveFeedbackJob = scope.launch {
+                    delay(1_250)
+                    recSaveSuccess = false
+                }
             } else {
+                recSaveFeedbackJob?.cancel()
+                recSaveSuccess = false
                 android.widget.Toast.makeText(
                     context,
                     context.getString(R.string.cd_remote_rec_toast_failed),
@@ -1629,6 +1648,9 @@ private fun RemoteContent(
             showHint(context.getString(R.string.remote_rec_start_failed), durationMs = 3000L)
             return
         }
+        recSaveFeedbackJob?.cancel()
+        recFinalizing = false
+        recSaveSuccess = false
         viewfinderRecorder = recorder
         recPaused = false
         recElapsed = 0
@@ -1716,145 +1738,8 @@ private fun RemoteContent(
         }
     }
 
-    // ---------- 全屏监看（画面尽可能大；只留「退出 / 转屏」两颗悬浮按钮）----------
-    @Composable
-    fun ImmersiveFullscreenLayer() {
-        // 系统栏让避与照片列表页同一套：MainActivity 已 enableEdgeToEdge、Scaffold 不消费
-        // inset，各屏自取 WindowInsets.statusBars / navigationBars 自行让避。
-        // 这里内容整体顺时针旋转，纵向 inset 因此映射成横向：
-        // 方向 1（90°）状态栏落在左、导航栏落在右；方向 2（270°）左右互换。
-        val statusInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        // 挖孔（刘海 / 打孔）一侧要多让一点：优先取平台上报的 displayCutout——它比状态栏
-        // 高度更贴近真实挖孔尺寸；平台不报挖孔时才退到 6dp 兜底，避免画面贴上屏幕圆角。
-        val cutoutInset = WindowInsets.displayCutout.asPaddingValues().calculateTopPadding()
-        val cutoutFallback = 6.dp
-        val statusSide = maxOf(statusInset, cutoutInset, cutoutFallback)
-        BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color(0xFF0D0D0D))) {
-            // 旋转后的画布：宽 = 屏幕高，高 = 屏幕宽（Activity 恒为竖屏，靠内部旋转出横屏）
-            val canvasWidth = maxHeight
-            val canvasHeight = maxWidth
-            // 全屏中切换方向也要有过渡，不能硬跳；节奏与本页 rotationTransition 对齐。
-            AnimatedContent(
-                targetState = immersiveDirection,
-                transitionSpec = {
-                    (fadeIn(tween(durationMillis = 190, delayMillis = 40)) +
-                        scaleIn(initialScale = 0.96f, animationSpec = tween(220)))
-                        .togetherWith(
-                            fadeOut(tween(130)) +
-                                scaleOut(targetScale = 1.02f, animationSpec = tween(150))
-                        )
-                },
-                contentAlignment = Alignment.Center,
-                label = "immersiveDirection",
-                modifier = Modifier.fillMaxSize()
-            ) { direction ->
-                Box(
-                    modifier = Modifier
-                        .requiredSize(width = canvasWidth, height = canvasHeight)
-                        .graphicsLayer { rotationZ = if (direction == 2) 270f else 90f }
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .absolutePadding(
-                                left = if (direction == 2) navInset else statusSide,
-                                right = if (direction == 2) statusSide else navInset
-                            )
-                    ) {
-                        // 画面锚左上、尽可能大：aspectRatio 先试"占满宽"，超高则退到"占满高"，
-                        // 宽高谁先到限谁定尺——画面永不变形，容器里也不留 Fit 的黑边。
-                        // 圆角与深色底沿用横屏布局那份（RemoteViewfinderPanel 内部
-                        // RoundedCornerShape(14.dp) + 0xFF0D0D0D），两处看起来是同一个部件。
-                        RemoteViewfinderPanel(
-                            frameProvider = { frame },
-                            grid = framingGrid,
-                            showHistogram = showHistogram,
-                            modeText = modeText,
-                            focusModeText = focusModeText,
-                            recording = recording,
-                            recSeconds = recSeconds,
-                            afHeld = afHeld,
-                            afLocked = afLocked,
-                            afFocusPoint = focusAreaPoint,
-                            tapFocusFeedback = tapFocusFeedback,
-                            tapFocusPoint = tapFocusPoint,
-                            tapFocusNonce = tapFocusNonce,
-                            confirmedFocusMarker = confirmedFocusMarker,
-                            onTapFocus = { focusAt(it) },
-                            showFps = showFps,
-                            fps = fps,
-                            connected = connected,
-                            showZebra = showZebra,
-                            showLevel = showLevel,
-                            levelRoll = levelRoll,
-                            trialLeftSeconds = trialLeftSeconds,
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .aspectRatio(viewfinderAspect)
-                        )
-                        // 悬浮控件只两颗，压在画面之上、锚右上：退出全屏 + 转屏。
-                        // 尺寸靠 contentPadding 撑成 40×40（不写 size，图标才真正居中）：
-                        // ArrowForward 18dp + 11dp 内边距、RotateMark 20dp + 10dp 内边距——
-                        // Material 实心箭头比 1.5dp 线宽的 RotateMark 显重，故给它小 2dp，
-                        // 两颗按钮外径一致、图标视觉重量也一致。
-                        Row(
-                            modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            GlassButton(
-                                onClick = { immersiveFullscreen = false },
-                                shape = RoundedCornerShape(22.dp),
-                                showSheen = false,
-                                contentPadding = PaddingValues(11.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.ArrowForward,
-                                    contentDescription =
-                                        stringResource(R.string.cd_remote_fullscreen_exit),
-                                    tint = colors.onBackground,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            val rotateDesc =
-                                stringResource(R.string.cd_remote_fullscreen_direction)
-                            GlassButton(
-                                onClick = {
-                                    immersiveDirection = if (immersiveDirection == 2) 1 else 2
-                                },
-                                shape = RoundedCornerShape(22.dp),
-                                showSheen = false,
-                                contentPadding = PaddingValues(10.dp),
-                                modifier = Modifier.semantics { contentDescription = rotateDesc }
-                            ) { RotateMark(Modifier.size(20.dp)) }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // ---------- 布局 ----------
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
-        // 进/出全屏都走同一条淡入淡出 + 微缩放的转场，不硬切；与横竖屏切换同一节奏。
-        AnimatedContent(
-            targetState = immersiveFullscreen,
-            transitionSpec = {
-                (fadeIn(tween(durationMillis = 200, delayMillis = 40)) +
-                    scaleIn(initialScale = 0.96f, animationSpec = tween(240)))
-                    .togetherWith(
-                        fadeOut(tween(140)) +
-                            scaleOut(targetScale = 1.02f, animationSpec = tween(160))
-                    )
-            },
-            contentAlignment = Alignment.Center,
-            label = "remoteImmersiveFullscreen",
-            modifier = Modifier.fillMaxSize()
-        ) { fullscreen ->
-        if (fullscreen) {
-            ImmersiveFullscreenLayer()
-        } else {
         AnimatedContent(
             targetState = rotation != 0,  // landscape when rotated
             transitionSpec = {
@@ -1876,16 +1761,28 @@ private fun RemoteContent(
                 .systemBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-            // 顶栏只保留信号与返回；监看工具统一放到取景器下方。
+            // 顶栏返回常驻；信号随其他工具淡变，监看工具统一放到取景器下方。
             Row(verticalAlignment = Alignment.CenterVertically) {
-                SignalPill(
-                    rssi = camState.wifiRssi,
-                    connected = connected,
-                    connectionType = camState.connectionType
-                )
+                AnimatedVisibility(
+                    visible = !immersiveFullscreen,
+                    enter = fadeIn(tween(260, easing = FastOutSlowInEasing)),
+                    exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
+                ) {
+                    SignalPill(
+                        rssi = camState.wifiRssi,
+                        connected = connected,
+                        connectionType = camState.connectionType
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 GlassButton(
-                    onClick = onNavigateBack,
+                    onClick = {
+                        if (immersiveFullscreen) {
+                            immersiveFullscreen = false
+                        } else {
+                            onNavigateBack()
+                        }
+                    },
                     shape = RoundedCornerShape(22.dp),
                     showSheen = false,
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
@@ -1893,7 +1790,13 @@ private fun RemoteContent(
                 ) {
                     Icon(
                         Icons.Default.ArrowForward,
-                        contentDescription = stringResource(R.string.cd_back),
+                        contentDescription = stringResource(
+                            if (immersiveFullscreen) {
+                                R.string.cd_remote_fullscreen_exit
+                            } else {
+                                R.string.cd_back
+                            }
+                        ),
                         tint = colors.onBackground, modifier = Modifier.size(18.dp)
                     )
                 }
@@ -1998,6 +1901,20 @@ private fun RemoteContent(
                         onClick = { showLevel = !showLevel }
                     ) { LevelMark(Modifier.size(18.dp)) }
                 })
+                add(@Composable {
+                    RecControlBar(
+                        isRecording = viewfinderRecorder != null,
+                        isPaused = recPaused,
+                        elapsedSeconds = recElapsed,
+                        onStart = { startRecorder() },
+                        onPauseResume = { togglePauseRecorder() },
+                        onStop = { stopRecorder() },
+                        modifier = Modifier.height(36.dp),
+                        enabled = isPro,
+                        isFinalizing = recFinalizing,
+                        showDone = recSaveSuccess
+                    )
+                })
             }
             // 自定义两行布局：先无约束测出每个孩子的真实固有尺寸，再贪心分行。
             // 末两个孩子固定是【进全屏 / 转屏】，贴第一行最右；其余监看工具从左
@@ -2027,7 +1944,7 @@ private fun RemoteContent(
                 // 下限、字体缩放后的 HD/FPS 文字宽），不再依赖任何估宽表。
                 val placeables = measurables.map { it.measure(Constraints()) }
                 val pinned = placeables.takeLast(2)   // 进全屏 + 转屏
-                val tools = placeables.dropLast(2)    // 监看工具组
+                val tools = placeables.dropLast(2)    // 监看工具组（含动态宽度录制胶囊）
                 val pinnedWidth = pinned.sumOf { it.width } + gapPx
                 // 贪心装填第一行：工具间距 + 与右端固定组之间至少留一档间距。
                 var firstRowCount = 0
@@ -2065,19 +1982,6 @@ private fun RemoteContent(
                     }
                 }
             }
-            Spacer(Modifier.height(4.dp))
-            // Row 2: recording control bar
-            RecControlBar(
-                isRecording = viewfinderRecorder != null,
-                isPaused = recPaused,
-                elapsedSeconds = recElapsed,
-                onStart = { startRecorder() },
-                onPauseResume = { togglePauseRecorder() },
-                onStop = { stopRecorder() },
-                modifier = Modifier.height(36.dp),
-                enabled = isPro,
-                onLockedTap = { showHint(context.getString(R.string.remote_rec_pro_only)) }
-            )
             Spacer(Modifier.height(12.dp))
 
             // 2×2 数值拨轮微调：读数即控件——在数值上【上下拖动】，数值列随手指 1:1
@@ -2137,206 +2041,333 @@ private fun RemoteContent(
             Spacer(Modifier.weight(1f))
         }
         } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
-            ) {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Left: viewfinder + tools
-                Column(
-                    modifier = Modifier.weight(1f).fillMaxHeight()
-                ) {
-                    // 横屏：可用区域（宽 = 左栏、高 = 减掉工具行后的剩余）远比画面更宽，
-                    // 若让取景器铺满整块，ContentScale.Fit 会在左右各留一条黑带。
-                    // 改成：外层 Box 占位并居中，取景器容器只按帧的真实宽高比取尺寸——
-                    // aspectRatio 先试"占满宽"，超高则退到"占满高"，宽高谁先到限谁定尺，
-                    // 于是画面正好铺满容器（含圆角与深色底），四周不再有空黑带。
-                    Box(
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        RemoteViewfinderPanel(
-                            frameProvider = { frame },
-                            grid = framingGrid,
-                            showHistogram = showHistogram,
-                            modeText = modeText,
-                            focusModeText = focusModeText,
-                            recording = recording,
-                            recSeconds = recSeconds,
-                            afHeld = afHeld,
-                            afLocked = afLocked,
-                            afFocusPoint = focusAreaPoint,
-                            tapFocusFeedback = tapFocusFeedback,
-                            tapFocusPoint = tapFocusPoint,
-                            tapFocusNonce = tapFocusNonce,
-                            confirmedFocusMarker = confirmedFocusMarker,
-                            onTapFocus = { focusAt(it) },
-                            showFps = showFps,
-                            fps = fps,
-                            connected = connected,
-                            showZebra = showZebra,
-                            showLevel = showLevel,
-                            levelRoll = levelRoll,
-                            trialLeftSeconds = trialLeftSeconds,
-                            modifier = Modifier.aspectRatio(viewfinderAspect)
-                        )
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val normalHorizontalPadding = 10.dp
+                val normalVerticalPadding = 8.dp
+                val controlsGap = 8.dp
+                val parameterPanelWidth = 170.dp
+                val toolRowHeight = 40.dp
+                val toolRowGap = 4.dp
+                val fullscreenVerticalBreathingRoom = 4.dp
+
+                fun fitWithin(
+                    availableWidth: androidx.compose.ui.unit.Dp,
+                    availableHeight: androidx.compose.ui.unit.Dp
+                ): Pair<androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp> {
+                    val width = availableWidth.coerceAtLeast(0.dp)
+                    val height = availableHeight.coerceAtLeast(0.dp)
+                    if (width == 0.dp || height == 0.dp) return 0.dp to 0.dp
+                    val heightAtFullWidth = width / viewfinderAspect
+                    return if (heightAtFullWidth <= height) {
+                        width to heightAtFullWidth
+                    } else {
+                        (height * viewfinderAspect) to height
                     }
-                    Spacer(Modifier.height(4.dp))
-                    // Tool row: overlay tools + RecControlBar + screen actions
+                }
+
+                // 常规横屏中，取景器位于左栏、工具行上方；全屏时用同一个实例扩展到整个
+                // 安全区域。外层 RemoteScreen 已把状态栏、导航栏和挖孔映射成左右 inset，
+                // 所以这里的 maxWidth/maxHeight 正是可以安全使用的最大画布。
+                val normalLeftWidth = (
+                    maxWidth -
+                        normalHorizontalPadding * 2 -
+                        parameterPanelWidth -
+                        controlsGap
+                    ).coerceAtLeast(0.dp)
+                val normalViewfinderHeight = (
+                    maxHeight -
+                        normalVerticalPadding * 2 -
+                        toolRowHeight -
+                        toolRowGap
+                    ).coerceAtLeast(0.dp)
+                val (normalImageWidth, normalImageHeight) =
+                    fitWithin(normalLeftWidth, normalViewfinderHeight)
+                val normalImageX =
+                    normalHorizontalPadding + (normalLeftWidth - normalImageWidth) / 2
+                val normalImageY =
+                    normalVerticalPadding + (normalViewfinderHeight - normalImageHeight) / 2
+
+                val fullscreenAvailableHeight =
+                    (maxHeight - fullscreenVerticalBreathingRoom * 2).coerceAtLeast(0.dp)
+                val (fullscreenImageWidth, fullscreenImageHeight) =
+                    fitWithin(maxWidth, fullscreenAvailableHeight)
+                val targetImageX = if (immersiveFullscreen) 0.dp else normalImageX
+                val targetImageY = if (immersiveFullscreen) {
+                    fullscreenVerticalBreathingRoom +
+                        (fullscreenAvailableHeight - fullscreenImageHeight) / 2
+                } else {
+                    normalImageY
+                }
+                val targetImageWidth =
+                    if (immersiveFullscreen) fullscreenImageWidth else normalImageWidth
+                val targetImageHeight =
+                    if (immersiveFullscreen) fullscreenImageHeight else normalImageHeight
+                val boundsDuration = if (immersiveFullscreen) 360 else 300
+                val imageX by animateDpAsState(
+                    targetValue = targetImageX,
+                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
+                    label = "fullscreenViewfinderX"
+                )
+                val imageY by animateDpAsState(
+                    targetValue = targetImageY,
+                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
+                    label = "fullscreenViewfinderY"
+                )
+                val imageWidth by animateDpAsState(
+                    targetValue = targetImageWidth,
+                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
+                    label = "fullscreenViewfinderWidth"
+                )
+                val imageHeight by animateDpAsState(
+                    targetValue = targetImageHeight,
+                    animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
+                    label = "fullscreenViewfinderHeight"
+                )
+
+                RemoteViewfinderPanel(
+                    frameProvider = { frame },
+                    grid = framingGrid,
+                    showHistogram = showHistogram,
+                    modeText = modeText,
+                    focusModeText = focusModeText,
+                    recording = recording,
+                    recSeconds = recSeconds,
+                    afHeld = afHeld,
+                    afLocked = afLocked,
+                    afFocusPoint = focusAreaPoint,
+                    tapFocusFeedback = tapFocusFeedback,
+                    tapFocusPoint = tapFocusPoint,
+                    tapFocusNonce = tapFocusNonce,
+                    confirmedFocusMarker = confirmedFocusMarker,
+                    onTapFocus = { focusAt(it) },
+                    showFps = showFps,
+                    fps = fps,
+                    connected = connected,
+                    showZebra = showZebra,
+                    showLevel = showLevel,
+                    levelRoll = levelRoll,
+                    trialLeftSeconds = trialLeftSeconds,
+                    modifier = Modifier
+                        .offset(x = imageX, y = imageY)
+                        .size(width = imageWidth, height = imageHeight)
+                )
+
+                // 操作区独立淡出/淡入，取景器尺寸动画不会重建或交叉切换帧画面。
+                AnimatedVisibility(
+                    visible = !immersiveFullscreen,
+                    enter = fadeIn(
+                        animationSpec = tween(
+                            durationMillis = 260,
+                            delayMillis = 70,
+                            easing = FastOutSlowInEasing
+                        )
+                    ),
+                    exit = fadeOut(
+                        animationSpec = tween(
+                            durationMillis = 180,
+                            easing = FastOutSlowInEasing
+                        )
+                    ),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(
+                            horizontal = normalHorizontalPadding,
+                            vertical = normalVerticalPadding
+                        )
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().height(40.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.spacedBy(controlsGap)
                     ) {
-                        if (devUnlocked) {
-                            TopIconToggle(
-                                active = false,
-                                contentDescription = stringResource(R.string.cd_dev_panel),
-                                onClick = { devPanel = true }
+                        Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                            Spacer(Modifier.weight(1f))
+                            Spacer(Modifier.height(toolRowGap))
+                            Row(
+                                modifier = Modifier.fillMaxWidth().height(toolRowHeight),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
-                                Icon(
-                                    Icons.Default.BugReport,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
+                                if (devUnlocked) {
+                                    TopIconToggle(
+                                        active = false,
+                                        contentDescription = stringResource(R.string.cd_dev_panel),
+                                        onClick = { devPanel = true }
+                                    ) {
+                                        Icon(
+                                            Icons.Default.BugReport,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                TopIconToggle(
+                                    active = hdLiveView,
+                                    contentDescription = stringResource(R.string.dev_hd_liveview),
+                                    onClick = {
+                                        hdLiveView = !hdLiveView
+                                        startSession(hdLiveView)
+                                    }
+                                ) { HdMark(Modifier.size(20.dp)) }
+                                TopIconToggle(
+                                    active = showFps,
+                                    contentDescription = stringResource(R.string.dev_fps_overlay),
+                                    onClick = { toggleFpsControl() }
+                                ) { FpsMark(Modifier.size(20.dp)) }
+                                TopIconToggle(
+                                    active = showHistogram,
+                                    contentDescription = stringResource(R.string.cd_remote_histogram),
+                                    onClick = { showHistogram = !showHistogram }
+                                ) { HistogramMark(Modifier.size(19.dp)) }
+                                TopIconToggle(
+                                    active = framingGrid != ViewfinderGrid.OFF,
+                                    contentDescription = stringResource(R.string.cd_remote_grid),
+                                    onClick = { framingGrid = framingGrid.next() }
+                                ) { GridMark(Modifier.size(18.dp)) }
+                                TopIconToggle(
+                                    active = showZebra,
+                                    contentDescription = stringResource(R.string.cd_remote_zebra),
+                                    onClick = { showZebra = !showZebra }
+                                ) { ZebraMark(Modifier.size(18.dp)) }
+                                TopIconToggle(
+                                    active = showLevel,
+                                    contentDescription = stringResource(R.string.cd_remote_level),
+                                    onClick = { showLevel = !showLevel }
+                                ) { LevelMark(Modifier.size(18.dp)) }
+                                RecControlBar(
+                                    isRecording = viewfinderRecorder != null,
+                                    isPaused = recPaused,
+                                    elapsedSeconds = recElapsed,
+                                    onStart = { startRecorder() },
+                                    onPauseResume = { togglePauseRecorder() },
+                                    onStop = { stopRecorder() },
+                                    modifier = Modifier.height(36.dp),
+                                    enabled = isPro,
+                                    isFinalizing = recFinalizing,
+                                    showDone = recSaveSuccess
+                                )
+                                Spacer(Modifier.weight(1f))
+                                TopIconToggle(
+                                    active = false,
+                                    contentDescription =
+                                        stringResource(R.string.cd_remote_fullscreen_enter),
+                                    onClick = { enterFullscreen() }
+                                ) { FullscreenEnterMark(Modifier.size(17.dp)) }
+                                TopIconToggle(
+                                    active = false,
+                                    contentDescription = stringResource(R.string.cd_remote_rotate),
+                                    onClick = onCycleRotation
+                                ) { RotateMark(Modifier.size(20.dp)) }
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier
+                                .width(parameterPanelWidth)
+                                .fillMaxHeight(),
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            val activeProps =
+                                if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                activeProps.chunked(2).forEach { rowProps ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        rowProps.forEach { prop ->
+                                            val hasAutoIso =
+                                                !movieMode &&
+                                                    prop == Lab.PROP_ISO &&
+                                                    autoIsoAvailable
+                                            ParamTile(
+                                                label = paramLabel(prop),
+                                                param = params[prop],
+                                                autoIsoEnabled =
+                                                    if (hasAutoIso) autoIsoEnabled else null,
+                                                autoIsoValue =
+                                                    if (hasAutoIso) effectiveAutoIsoValue else null,
+                                                autoIsoBusy = hasAutoIso && autoIsoBusy,
+                                                onAutoIsoToggle =
+                                                    if (hasAutoIso) ::setAutoIso else null,
+                                                modifier = Modifier.weight(1f),
+                                                onStep = { delta -> stepParam(prop, delta) },
+                                                onOpenList = {
+                                                    if (
+                                                        params[prop]?.values?.isNotEmpty() == true
+                                                    ) {
+                                                        listProp = prop
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(18.dp))
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                ShutterButton(
+                                    capturing = capturing,
+                                    focusing = afHeld,
+                                    enabled = connected && !probing,
+                                    movie = movieMode,
+                                    recording = recording,
+                                    onFocusStart = { startFocus() },
+                                    onRelease = ::finishShutterGesture,
+                                    onQuickTap = {
+                                        if (movieMode) toggleRecord() else shoot()
+                                    }
                                 )
                             }
                         }
-                        TopIconToggle(
-                            active = hdLiveView,
-                            contentDescription = stringResource(R.string.dev_hd_liveview),
-                            onClick = {
-                                hdLiveView = !hdLiveView
-                                startSession(hdLiveView)
-                            }
-                        ) { HdMark(Modifier.size(20.dp)) }
-                        TopIconToggle(
-                            active = showFps,
-                            contentDescription = stringResource(R.string.dev_fps_overlay),
-                            onClick = { toggleFpsControl() }
-                        ) { FpsMark(Modifier.size(20.dp)) }
-                        TopIconToggle(
-                            active = showHistogram,
-                            contentDescription = stringResource(R.string.cd_remote_histogram),
-                            onClick = { showHistogram = !showHistogram }
-                        ) { HistogramMark(Modifier.size(19.dp)) }
-                        TopIconToggle(
-                            active = framingGrid != ViewfinderGrid.OFF,
-                            contentDescription = stringResource(R.string.cd_remote_grid),
-                            onClick = { framingGrid = framingGrid.next() }
-                        ) {
-                            GridMark(Modifier.size(18.dp))
-                        }
-                        TopIconToggle(
-                            active = showZebra,
-                            contentDescription = stringResource(R.string.cd_remote_zebra),
-                            onClick = { showZebra = !showZebra }
-                        ) { ZebraMark(Modifier.size(18.dp)) }
-                        TopIconToggle(
-                            active = showLevel,
-                            contentDescription = stringResource(R.string.cd_remote_level),
-                            onClick = { showLevel = !showLevel }
-                        ) { LevelMark(Modifier.size(18.dp)) }
-                        RecControlBar(
-                            isRecording = viewfinderRecorder != null,
-                            isPaused = recPaused,
-                            elapsedSeconds = recElapsed,
-                            onStart = { startRecorder() },
-                            onPauseResume = { togglePauseRecorder() },
-                            onStop = { stopRecorder() },
-                            modifier = Modifier.height(36.dp),
-                            enabled = isPro,
-                            onLockedTap = { showHint(context.getString(R.string.remote_rec_pro_only)) }
-                        )
-                        Spacer(Modifier.weight(1f))
-                        TopIconToggle(
-                            active = false,
-                            contentDescription = stringResource(R.string.cd_remote_fullscreen_enter),
-                            onClick = { enterFullscreen() }
-                        ) { FullscreenEnterMark(Modifier.size(17.dp)) }
-                        TopIconToggle(
-                            active = false,
-                            contentDescription = stringResource(R.string.cd_remote_rotate),
-                            onClick = onCycleRotation
-                        ) { RotateMark(Modifier.size(20.dp)) }
                     }
                 }
-                // Right: params + shutter
-                Column(
+
+                // 返回始终固定在右上角；信号随工具区淡变，全屏时返回只恢复常规横屏布局。
+                Row(
                     modifier = Modifier
-                        .width(170.dp)
-                        .fillMaxHeight(),
-                    verticalArrangement = Arrangement.Center
+                        .align(Alignment.TopEnd)
+                        .padding(
+                            horizontal = normalHorizontalPadding,
+                            vertical = normalVerticalPadding
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    val activeProps = if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        activeProps.chunked(2).forEach { rowProps ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                rowProps.forEach { prop ->
-                                    val hasAutoIso =
-                                        !movieMode && prop == Lab.PROP_ISO && autoIsoAvailable
-                                    ParamTile(
-                                        label = paramLabel(prop),
-                                        param = params[prop],
-                                        autoIsoEnabled = if (hasAutoIso) autoIsoEnabled else null,
-                                        autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
-                                        autoIsoBusy = hasAutoIso && autoIsoBusy,
-                                        onAutoIsoToggle = if (hasAutoIso) ::setAutoIso else null,
-                                        modifier = Modifier.weight(1f),
-                                        onStep = { delta -> stepParam(prop, delta) },
-                                        onOpenList = {
-                                            if (params[prop]?.values?.isNotEmpty() == true) listProp = prop
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                    AnimatedVisibility(
+                        visible = !immersiveFullscreen,
+                        enter = fadeIn(tween(260, easing = FastOutSlowInEasing)),
+                        exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
+                    ) {
+                        SignalPill(
+                            rssi = camState.wifiRssi,
+                            connected = connected,
+                            connectionType = camState.connectionType
+                        )
                     }
-                    Spacer(Modifier.height(18.dp))
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        ShutterButton(
-                            capturing = capturing,
-                            focusing = afHeld,
-                            enabled = connected && !probing,
-                            movie = movieMode,
-                            recording = recording,
-                            onFocusStart = { startFocus() },
-                            onRelease = ::finishShutterGesture,
-                            onQuickTap = {
-                                if (movieMode) toggleRecord() else shoot()
+                    GlassButton(
+                        onClick = {
+                            if (immersiveFullscreen) {
+                                immersiveFullscreen = false
+                            } else {
+                                onNavigateBack()
                             }
+                        },
+                        shape = RoundedCornerShape(22.dp),
+                        showSheen = false,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.ArrowForward,
+                            contentDescription = stringResource(
+                                if (immersiveFullscreen) {
+                                    R.string.cd_remote_fullscreen_exit
+                                } else {
+                                    R.string.cd_back
+                                }
+                            ),
+                            tint = colors.onBackground,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
-            }
-            Row(
-                modifier = Modifier.align(Alignment.TopEnd),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                SignalPill(
-                    rssi = camState.wifiRssi,
-                    connected = connected,
-                    connectionType = camState.connectionType
-                )
-                GlassButton(
-                    onClick = onNavigateBack,
-                    shape = RoundedCornerShape(22.dp),
-                    showSheen = false,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    Icon(
-                        Icons.Default.ArrowForward,
-                        contentDescription = stringResource(R.string.cd_back),
-                        tint = colors.onBackground,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
             }
         }
         }
@@ -2344,7 +2375,7 @@ private fun RemoteContent(
         // 顶部提示条：视觉与照片列表页的底部玻璃提示条同款（22dp 玻璃 Surface + 投影 +
         // labelLarge）；位置留在顶部——本页底部是快门键，提示不能压它。
         AnimatedVisibility(
-            visible = hintVisible,
+            visible = hintVisible && !immersiveFullscreen,
             enter = fadeIn(tween(200)) + slideInVertically(tween(200)) { -it / 2 },
             exit = fadeOut(tween(300)),
             modifier = Modifier
@@ -2565,10 +2596,8 @@ private fun RemoteContent(
                 }
             }
             }
-        } // close else (fullscreen)
-        } // close AnimatedContent(immersiveFullscreen)
+        }
     }
-}
 
 @Composable
 private fun ViewfinderStatusBadge(text: String, weight: FontWeight) {
@@ -3037,16 +3066,11 @@ private fun ParamTile(
                 if (!writable) return@pointerInput
                 var raw = 0f        // 未加阻尼的手指位置（索引空间），越界阻尼只作用于显示
                 var lastDetent = 0
-                var startedOnAuto = false
-                val autoTouchLeft = size.width - 44.dp.toPx()
-                val autoTouchBottom = 30.dp.toPx()
                 try {
                     detectVerticalDragGestures(
-                        onDragStart = { start ->
-                            // AUTO 有独立触控区。从按钮附近起手的纵向移动不得顺带调整 ISO。
-                            startedOnAuto = hasAutoIsoControl &&
-                                start.x >= autoTouchLeft && start.y <= autoTouchBottom
-                            if (startedOnAuto) return@detectVerticalDragGestures
+                        onDragStart = {
+                            // AUTO 角标只保留轻点切换；从其触控区起手并超过系统拖动阈值后，
+                            // 与参数卡其他区域完全一样交给拨轮，避免右上区域拖动无响应。
                             dragging = true
                             // 锚定到当前真值索引而非 pos：半路抓住滚动中的拨轮时，
                             // 步进基点与 stepParam 的 current 起点保持一致，不会错档。
@@ -3057,8 +3081,10 @@ private fun ParamTile(
                         },
                         onDragEnd = { dragging = false },
                         onDragCancel = { dragging = false }
-                    ) { _, dy ->
-                        if (startedOnAuto) return@detectVerticalDragGestures
+                    ) { change, dy ->
+                        // 明确消费已成立的拖动，让 AUTO 的 toggleable 取消本次点击，
+                        // 避免调完 ISO 松手时又顺带切换自动 ISO。
+                        change.consume()
                         val last = valueCount.value - 1
                         if (last < 0) return@detectVerticalDragGestures   // 值域中途清空
                         // 值域中途收窄（模式切换）：把游标拉回新范围，不发巨幅补差步进
@@ -3510,15 +3536,23 @@ private fun TopIconToggle(
     GlassButton(
         onClick = onClick,
         active = active,
-        shape = RoundedCornerShape(22.dp),
+        shape = CircleShape,
         showSheen = false,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        modifier = Modifier.height(36.dp).semantics { this.contentDescription = contentDescription }
+        shadowElevation = 0.dp,
+        contentPadding = PaddingValues(8.dp),
+        modifier = Modifier.size(36.dp).semantics {
+            this.contentDescription = contentDescription
+        }
     ) {
         CompositionLocalProvider(
             LocalContentColor provides if (active) colors.accentBlue else colors.onSurfaceVariant
         ) {
-            content()
+            Box(
+                modifier = Modifier.size(20.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                content()
+            }
         }
     }
 }

@@ -19,6 +19,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -293,8 +294,13 @@ internal fun GridMark(modifier: Modifier = Modifier) {
 internal fun HdMark(modifier: Modifier = Modifier) {
     val color = LocalContentColor.current
     Box(modifier, contentAlignment = Alignment.Center) {
-        Text(text = "HD", color = color, fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold, lineHeight = 11.sp)
+        Text(
+            text = "HD",
+            color = color,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            lineHeight = 13.sp
+        )
     }
 }
 
@@ -303,8 +309,13 @@ internal fun HdMark(modifier: Modifier = Modifier) {
 internal fun FpsMark(modifier: Modifier = Modifier) {
     val color = LocalContentColor.current
     Box(modifier, contentAlignment = Alignment.Center) {
-        Text(text = "FPS", color = color, fontSize = 9.5.sp,
-            fontWeight = FontWeight.SemiBold, lineHeight = 10.sp)
+        Text(
+            text = "FPS",
+            color = color,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Bold,
+            lineHeight = 11.sp
+        )
     }
 }
 
@@ -365,41 +376,81 @@ internal fun RotateMark(modifier: Modifier = Modifier) {
     }
 }
 
-/** 斑马纹——5 条等间距斜线，纯粹条纹无需外框。 */
+/** 斑马纹——5 条等间距短斜线，纯粹条纹无需外框。 */
 @Composable
 internal fun ZebraMark(modifier: Modifier = Modifier) {
     val c = LocalContentColor.current
     Canvas(modifier) {
         val sw = ToolMarkStrokeWidth.toPx()
         val h = size.height
-        // 5 条 45° 等间距短斜线，居中排布
+        // 缩短线段并保留充分留白，避免圆形按钮内显得比其他图标拥挤。
         for (i in 0..4) {
             val frac = (i + 1f) / 6f
             val cx = size.width * frac
-            val d = h * 0.35f
+            val d = h * 0.24f
             drawLine(c, Offset(cx - d, h / 2 - d), Offset(cx + d, h / 2 + d),
                 sw, StrokeCap.Round)
         }
     }
 }
 
-/** 水平仪——气泡水平尺：水平线 + 中心圆气泡 + 两端短参考线。 */
+/** 水平仪——实体水平尺轮廓：左右端仓，以及嵌入尺身上沿的 U 形水准槽。 */
 @Composable
 internal fun LevelMark(modifier: Modifier = Modifier) {
     val c = LocalContentColor.current
     Canvas(modifier) {
-        val sw = ToolMarkStrokeWidth.toPx()
-        val l = 2.5.dp.toPx(); val r = size.width - l
-        val y = size.height * 0.65f
-        // 水平线
-        drawLine(c, Offset(l, y), Offset(r, y), sw, StrokeCap.Round)
-        // 两端参考短线
-        val tick = 2.5.dp.toPx()
-        drawLine(c, Offset(l, y - tick), Offset(l, y + tick), sw, StrokeCap.Round)
-        drawLine(c, Offset(r, y - tick), Offset(r, y + tick), sw, StrokeCap.Round)
-        // 中心气泡（空心小圆）
-        val cx = size.width / 2f; val bubbleR = 2.dp.toPx()
-        drawCircle(c, bubbleR, Offset(cx, y - bubbleR - 1.dp.toPx()), style = Stroke(sw))
+        val sw = 1.65.dp.toPx()
+        val left = size.width * 0.08f
+        val right = size.width * 0.92f
+        val top = size.height * 0.24f
+        val bottom = size.height * 0.78f
+        val corner = size.minDimension * 0.09f
+        val leftDivider = size.width * 0.27f
+        val rightDivider = size.width * 0.73f
+        val vialLeft = size.width * 0.34f
+        val vialRight = size.width * 0.66f
+        val vialBottom = size.height * 0.49f
+
+        // U 形槽是尺身上沿的一部分，最高点与外轮廓齐平，避免出现向上冒出的尖角。
+        val body = Path().apply {
+            moveTo(left + corner, top)
+            lineTo(vialLeft, top)
+            cubicTo(
+                vialLeft,
+                vialBottom,
+                vialRight,
+                vialBottom,
+                vialRight,
+                top
+            )
+            lineTo(right - corner, top)
+            quadraticTo(right, top, right, top + corner)
+            lineTo(right, bottom - corner)
+            quadraticTo(right, bottom, right - corner, bottom)
+            lineTo(left + corner, bottom)
+            quadraticTo(left, bottom, left, bottom - corner)
+            lineTo(left, top + corner)
+            quadraticTo(left, top, left + corner, top)
+            close()
+        }
+        drawPath(body, c, style = Stroke(sw, cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+        // 参考图中的左右独立端仓。
+        drawLine(
+            c,
+            Offset(leftDivider, top),
+            Offset(leftDivider, bottom),
+            sw,
+            StrokeCap.Round
+        )
+        drawLine(
+            c,
+            Offset(rightDivider, top),
+            Offset(rightDivider, bottom),
+            sw,
+            StrokeCap.Round
+        )
+
     }
 }
 

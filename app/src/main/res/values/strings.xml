@@ -158,7 +158,6 @@
     <string name="cd_remote_rotate">Rotate screen</string>
     <string name="cd_remote_fullscreen_enter">Fullscreen monitor</string>
     <string name="cd_remote_fullscreen_exit">Exit fullscreen</string>
-    <string name="cd_remote_fullscreen_direction">Switch direction</string>
     <string name="dev_fps_overlay">FPS overlay</string>
     <string name="lab_run_probe">Probe</string>
     <string name="lab_copy_log">Copy log</string>
@@ -168,7 +167,7 @@
     <string name="cd_remote_rec_pause">Pause recording</string>
     <string name="cd_remote_rec_resume">Resume recording</string>
     <string name="cd_remote_rec_stop">Stop recording</string>
-    <string name="cd_remote_rec_toast_saved">Recording saved: %1$s</string>
+    <string name="cd_remote_rec_saved">Recording saved</string>
     <string name="cd_remote_rec_toast_failed">Recording failed</string>
 
     <!-- License / activation -->

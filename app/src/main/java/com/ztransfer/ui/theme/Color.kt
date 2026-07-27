@@ -236,75 +236,72 @@ fun rememberAppBackgroundBrush(): Brush {
 // 底色 → 纹理 → 纵向高光渐变）：
 //
 //   1) 底色不透明度（透出多少背景）：毛玻璃 < 木纹 < 皮革
-//      毛玻璃 0.45/0.85（深/浅），木纹 0.62/0.89，皮革 0.82/0.94。
+//      毛玻璃 0.45/0.85（深/浅），木纹 0.82/0.94，皮革 0.88/0.95。
 //   2) 高光对比（多亮）：皮革（哑光） < 木纹（半光/缎面） < 毛玻璃（高光）
 //      皮革高光压到毛玻璃的 1/3、sheen 几乎归零——皮革一旦发亮就像塑料。
 // ================================================================================================
 
-// 皮革材质色：暖而低饱和的棕（深色底）+ 暖奶油（高光）。
-private val LeatherHideDark = Color(0xFF2C231A)
-private val LeatherTanLight = Color(0xFFE8DAC2)
-private val LeatherCream = Color(0xFFEFE0C8)
-private val LeatherCreamLight = Color(0xFFFFF3E2)
+// 皮革材质色：牛血红深棕 / 干邑红棕，保持真实牛皮的暖红底调与哑光。
+private val LeatherHideDark = Color(0xFF491D19)
+private val LeatherTanLight = Color(0xFFC98268)
+private val LeatherCream = Color(0xFFE6A58D)
+private val LeatherCreamLight = Color(0xFFFFD4BF)
 
-// 木纹材质色：琥珀/蜜色，比皮革再饱和一档，高光偏暖金。
-private val WoodAmberDark = Color(0xFF33270F)
-private val WoodHoneyLight = Color(0xFFF0DFB8)
-private val WoodGold = Color(0xFFFFE1A6)
-private val WoodGoldLight = Color(0xFFFFF6DC)
+// 木纹材质色：胡桃棕 / 蜂蜜橡木，底色更实、高光为克制的木蜡缎光。
+private val WoodAmberDark = Color(0xFF482C15)
+private val WoodHoneyLight = Color(0xFFD9AD70)
+private val WoodGold = Color(0xFFE3B467)
+private val WoodGoldLight = Color(0xFFFFE1AC)
 
 // ================================================================================================
-// 皮肤系统：皮革 (LEATHER) — 暖棕、最不透、哑光（只覆写按钮 token）
+// 皮肤系统：皮革 (LEATHER) — 牛血红棕、最不透、哑光（只覆写按钮 token）
 // ================================================================================================
 
 /**
- * 皮革·深色：按钮是一整块暖棕硬皮。底色不透明度最高（0.82），按钮后面的内容基本被挡住，
+ * 皮革·深色：按钮是一整块牛血红棕硬皮。底色不透明度最高（0.88），背景基本被挡住，
  * 手感上是"实心的一张皮"而不是一层玻璃。
- * 高光只留 0.06（毛玻璃是 0.16）——光只在上沿擦一下，把哑光的"厚"做出来。
+ * 高光只留 0.055（毛玻璃是 0.16）——光只在上沿擦一下，把哑光的"厚"做出来。
  */
 val DarkLeatherColors = DarkAppColors.copy(
-    buttonSurface = LeatherHideDark.copy(alpha = 0.82f),
-    buttonHighlightTop = LeatherCream.copy(alpha = 0.06f),
-    buttonHighlightBottom = LeatherCream.copy(alpha = 0.015f),
-    buttonSheen = LeatherCream.copy(alpha = 0.025f),
+    buttonSurface = LeatherHideDark.copy(alpha = 0.88f),
+    buttonHighlightTop = LeatherCream.copy(alpha = 0.055f),
+    buttonHighlightBottom = LeatherCream.copy(alpha = 0.012f),
+    buttonSheen = LeatherCream.copy(alpha = 0.020f),
 )
 
 /**
- * 皮革·浅色：浅褐/羊皮纸色按钮。浅色页面上放深棕按钮会压得过重，所以改成高不透明度的淡棕，
- * 与 [LightOnBackground] (#1C1C1E) 对比约 12:1，文字依然清楚。
- * 顶部高光只有毛玻璃版的一半（0.30 vs 0.60）、sheen 0.20 vs 0.55，缎光被抹掉。
+ * 皮革·浅色：高不透明度的干邑红棕按钮，深色文字仍保持清楚。
+ * 顶部高光与 sheen 都显著低于毛玻璃，避免牛皮表面产生塑料亮膜。
  */
 val LightLeatherColors = LightAppColors.copy(
-    buttonSurface = LeatherTanLight.copy(alpha = 0.94f),
-    buttonHighlightTop = LeatherCreamLight.copy(alpha = 0.30f),
-    buttonHighlightBottom = LeatherCreamLight.copy(alpha = 0.05f),
-    buttonSheen = LeatherCreamLight.copy(alpha = 0.20f),
+    buttonSurface = LeatherTanLight.copy(alpha = 0.95f),
+    buttonHighlightTop = LeatherCreamLight.copy(alpha = 0.20f),
+    buttonHighlightBottom = LeatherCreamLight.copy(alpha = 0.035f),
+    buttonSheen = LeatherCreamLight.copy(alpha = 0.12f),
 )
 
 // ================================================================================================
-// 皮肤系统：木纹 (WOOD) — 琥珀/蜜色，半透，缎面半光（只覆写按钮 token）
+// 皮肤系统：木纹 (WOOD) — 胡桃/蜜色，实木感，克制缎光（只覆写按钮 token）
 // ================================================================================================
 
 /**
- * 木纹·深色：琥珀深木按钮。底色 0.62 介于毛玻璃 0.45 与皮革 0.82 之间——木头是实心的，
- * 但这里只是一层薄板，还透一点底。
- * 高光取毛玻璃与皮革的中间值（0.11），呈缎面而非镜面；sheen 0.055 是一层淡淡的木蜡光。
+ * 木纹·深色：胡桃深木按钮。底色提高到 0.82，避免纹理像贴在透明玻璃上。
+ * 高光 0.09、sheen 0.045，只保留一层淡淡的木蜡缎光。
  */
 val DarkWoodColors = DarkAppColors.copy(
-    buttonSurface = WoodAmberDark.copy(alpha = 0.62f),
-    buttonHighlightTop = WoodGold.copy(alpha = 0.11f),
-    buttonHighlightBottom = WoodGold.copy(alpha = 0.03f),
-    buttonSheen = WoodGold.copy(alpha = 0.055f),
+    buttonSurface = WoodAmberDark.copy(alpha = 0.82f),
+    buttonHighlightTop = WoodGold.copy(alpha = 0.09f),
+    buttonHighlightBottom = WoodGold.copy(alpha = 0.02f),
+    buttonSheen = WoodGold.copy(alpha = 0.045f),
 )
 
 /**
- * 木纹·浅色：淡蜜色浅木按钮。比浅色皮革略透（0.89 vs 0.94）、略黄一点，
- * 与 [LightOnBackground] 对比约 13:1。
- * 高光 0.44、sheen 0.38，都落在毛玻璃（0.60 / 0.55）与皮革（0.30 / 0.20）之间。
+ * 木纹·浅色：高不透明度的蜂蜜橡木按钮。高光 0.28、sheen 0.20，
+ * 有轻微木蜡质感，但不会出现镜面亮边。
  */
 val LightWoodColors = LightAppColors.copy(
-    buttonSurface = WoodHoneyLight.copy(alpha = 0.89f),
-    buttonHighlightTop = WoodGoldLight.copy(alpha = 0.44f),
-    buttonHighlightBottom = WoodGoldLight.copy(alpha = 0.07f),
-    buttonSheen = WoodGoldLight.copy(alpha = 0.38f),
+    buttonSurface = WoodHoneyLight.copy(alpha = 0.94f),
+    buttonHighlightTop = WoodGoldLight.copy(alpha = 0.28f),
+    buttonHighlightBottom = WoodGoldLight.copy(alpha = 0.045f),
+    buttonSheen = WoodGoldLight.copy(alpha = 0.20f),
 )

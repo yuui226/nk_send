@@ -158,7 +158,6 @@
     <string name="cd_remote_rotate">旋转屏幕</string>
     <string name="cd_remote_fullscreen_enter">全屏监看</string>
     <string name="cd_remote_fullscreen_exit">退出全屏</string>
-    <string name="cd_remote_fullscreen_direction">切换方向</string>
     <string name="dev_fps_overlay">帧率显示</string>
     <string name="lab_run_probe">完整探测</string>
     <string name="lab_copy_log">复制日志</string>
@@ -168,7 +167,7 @@
     <string name="cd_remote_rec_pause">暂停录制</string>
     <string name="cd_remote_rec_resume">恢复录制</string>
     <string name="cd_remote_rec_stop">停止录制</string>
-    <string name="cd_remote_rec_toast_saved">已保存录制: %1$s</string>
+    <string name="cd_remote_rec_saved">录制已保存</string>
     <string name="cd_remote_rec_toast_failed">录制失败</string>
 
     <!-- 授权/激活 -->
