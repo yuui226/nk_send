@@ -489,7 +489,9 @@ private fun RemoteContent(
     var recPaused by remember { mutableStateOf(false) }
     fun devLog(line: String) {
         logLines.add(line)
-        if (logLines.size > 300) logLines.removeAt(0)
+        // 全量能力探测会为每个属性保留 DESC/VALUE 原始载荷，通常有数百行。
+        // 留足容量，确保用户点“复制日志”时开头的机型与完整码表没有被环形淘汰。
+        if (logLines.size > 5_000) logLines.removeAt(0)
     }
 
     // 事件总线：单一轮询协程独占 GetEvent（事件是取走即消费的，多处轮询会互相偷事件），
@@ -1353,6 +1355,8 @@ private fun RemoteContent(
         val cam = cameraViewModel.getCamera() ?: return
         scope.launch {
             probing = true
+            // 一次探测对应一份可直接回传的完整报告，避免混入旧会话日志。
+            logLines.clear()
             try {
                 lvJob?.cancelAndJoin()   // 探测自带 LV 测试，先停会话
                 cam.runLabProbe({ devLog(it) }, { bytes -> decode(bytes)?.let { frame = it } })

@@ -38,6 +38,7 @@ object Lab {
     const val NK_GET_VENDOR_PROP_CODES = 0x90CA
     const val NK_GET_VENDOR_CODES = 0x9439      // Z8/Z9 世代
     const val NK_GET_EVENT_EX = 0x941C
+    const val NK_POWER_ZOOM_BY_FOCAL_LENGTH = 0x941E
     const val NK_GET_DEVICE_PROP_VALUE_EX = 0x943B
 
     const val NK_START_MOVIE_REC = 0x920A   // StartMovieRecInCard
@@ -109,6 +110,7 @@ object Lab {
         0x920B to "EndMovieRec",
         NK_GET_EVENT to "GetEvent",
         NK_GET_EVENT_EX to "GetEventEx",
+        NK_POWER_ZOOM_BY_FOCAL_LENGTH to "PowerZoomByFocalLength",
         NK_DEVICE_READY to "DeviceReady",
         NK_SET_CONTROL_MODE to "SetControlMode",
         0x9435 to "ChangeApplicationMode",
@@ -153,6 +155,43 @@ object Lab {
 
 private fun hex4(v: Int) = "0x%04X".format(v and 0xFFFF)
 private fun hex8(v: Long) = "0x%08X".format(v)
+
+private const val PROBE_CODES_PER_LINE = 16
+
+/**
+ * 将完整码表拆成适合界面显示/复制的稳定文本。探测日志要由用户直接回传，
+ * 所以不省略未知码，也不依赖 Set 的原始顺序。
+ */
+internal fun formatProbeCodeLines(
+    label: String,
+    codes: Collection<Int>,
+    names: Map<Int, String> = emptyMap(),
+): List<String> {
+    val sorted = codes.map { it and 0xFFFF }.distinct().sorted()
+    if (sorted.isEmpty()) return listOf("$label (0): <none>")
+    return sorted.chunked(PROBE_CODES_PER_LINE).mapIndexed { index, chunk ->
+        val from = index * PROBE_CODES_PER_LINE + 1
+        val to = from + chunk.size - 1
+        "$label (${sorted.size}) [$from-$to]: " + chunk.joinToString(" ") { code ->
+            names[code]?.let { "${hex4(code)}($it)" } ?: hex4(code)
+        }
+    }
+}
+
+/** 完整保留相机返回的二进制，未知/新属性可在拿不到真机时离线重新解析。 */
+internal fun probeHex(data: ByteArray?): String =
+    if (data == null) "<none>"
+    else if (data.isEmpty()) "<empty>"
+    else data.joinToString(separator = "") { "%02X".format(it.toInt() and 0xFF) }
+
+private suspend fun logProbeCodes(
+    log: suspend (String) -> Unit,
+    label: String,
+    codes: Collection<Int>,
+    names: Map<Int, String> = emptyMap(),
+) {
+    formatProbeCodeLines(label, codes, names).forEach { log(it) }
+}
 
 /** 单条无 data-out 事务：发命令、收响应码+数据载荷。与正式操作共用互斥锁。 */
 suspend fun NikonCamera.labCommand(code: Int, vararg params: Int): Pair<Int, ByteArray?> =
@@ -1182,9 +1221,15 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
 // ============================ 一次性完整探测 ============================
 
 /**
- * 完整探测：DeviceInfo → 操作码勾选表 → 厂商属性码 → 关键属性 desc/读 → 写回读测试
- * （写入与当前值相同的值，零副作用验证 SetDevicePropValue 通路）→ 事件轮询 → Live View
- * 试取 8 帧（经 [onFrame] 回显）→ 收尾 EndLiveView。全程只读 + 无副作用写。
+ * 完整探测：DeviceInfo 全量码表 → Nikon 厂商扩展码表 → 所有已广告属性的描述与当前值
+ * （包含完整原始十六进制，便于离线分析未知属性）→ 事件轮询 → Live View 试取 8 帧
+ * （经 [onFrame] 回显）→ 收尾 EndLiveView。
+ *
+ * 安全边界：
+ * - 不调用未知操作码；只列出相机广告的操作码。
+ * - 不调用 SetDevicePropValue，也不向相机写入任何属性。
+ * - 不把机身序列号写进可分享日志。
+ * - 除相机广告的属性外，只额外只读查询 App 已知的兼容属性。
  *
  * IO 异常向上抛（socket 已死，继续无意义）；协议级失败（非 OK 响应码）逐条记录后继续。
  */
@@ -1193,7 +1238,8 @@ suspend fun NikonCamera.runLabProbe(
     onFrame: suspend (ByteArray) -> Unit
 ) {
     val t0 = System.currentTimeMillis()
-    log("=== ZTransfer remote-control probe ===")
+    log("=== ZTransfer capability probe v2 ===")
+    log("scope=advertised-codes+advertised-properties mode=no-property-writes")
 
     // ---- 1. DeviceInfo ----
     val (dirc, did) = labCommand(Lab.GET_DEVICE_INFO)
@@ -1205,12 +1251,17 @@ suspend fun NikonCamera.runLabProbe(
         log("!! GetDeviceInfo resp=${hex4(dirc)}")
     }
     val ops = info?.operations ?: emptySet()
-    // 输出保持紧凑（日志要靠剪贴板带出来）：全量操作码/事件码/属性码清单不打印，
-    // 只打印总数 + 遥控关注码的命中/缺失两行。
     info?.let {
         log("Model: ${it.manufacturer} ${it.model}  fw=${it.deviceVersion}")
-        log("VendorExt: id=${hex8(it.vendorExtId)} ver=${it.vendorExtVersion}")
+        log(
+            "VendorExt: id=${hex8(it.vendorExtId)} ver=${it.vendorExtVersion}" +
+                if (it.vendorExtDesc.isBlank()) "" else " desc=${it.vendorExtDesc.replace('\n', ' ')}"
+        )
+        log("Serial: <omitted for privacy>")
         log("ops=${it.operations.size} events=${it.events.size} props=${it.props.size}")
+        logProbeCodes(log, "DeviceInfo.operations", it.operations, Lab.INTEREST_OPS)
+        logProbeCodes(log, "DeviceInfo.events", it.events)
+        logProbeCodes(log, "DeviceInfo.properties", it.props, Lab.INTEREST_PROPS)
         val present = Lab.INTEREST_OPS.keys.filter { op -> op in it.operations }
         val missing = Lab.INTEREST_OPS.filterKeys { op -> op !in it.operations }
         log("remote ops OK: " + present.joinToString(" ") { op -> hex4(op) })
@@ -1221,52 +1272,111 @@ suspend fun NikonCamera.runLabProbe(
     }
 
     // ---- 2. 厂商属性码 ----
-    var vendorProps: Set<Int> = emptySet()
+    var vendorProps90ca: Set<Int> = emptySet()
     if (Lab.NK_GET_VENDOR_PROP_CODES in ops) {
         val (rc, d) = labCommand(Lab.NK_GET_VENDOR_PROP_CODES)
         if (rc == Lab.OK && d != null) {
-            vendorProps = runCatching { Cur(d).u16Array().toSet() }.getOrDefault(emptySet())
-            log("GetVendorPropCodes(0x90CA): ${vendorProps.size} codes")
+            val parsed = runCatching { Cur(d).u16Array().toSet() }
+            parsed.onSuccess {
+                vendorProps90ca = it
+                logProbeCodes(log, "GetVendorPropCodes(0x90CA).properties", it, Lab.INTEREST_PROPS)
+            }.onFailure {
+                log(
+                    "!! GetVendorPropCodes(0x90CA) parse failed: ${it.message}; " +
+                        "raw=${probeHex(d)}"
+                )
+            }
         } else log("GetVendorPropCodes(0x90CA) resp=${hex4(rc)}")
+    } else {
+        log("GetVendorPropCodes(0x90CA): not advertised")
     }
 
     // ---- 3. Z8/Z9 世代 GetVendorCodes（0x9439）----
+    var vendorOps9439: Set<Int> = emptySet()
+    var vendorProps9439: Set<Int> = emptySet()
     if (Lab.NK_GET_VENDOR_CODES in ops) {
         for (kind in intArrayOf(0x09, 0x0D)) {   // 0x09=操作码 0x0D=属性码（ptpwebcam 用法）
             val (rc, d) = labCommand(Lab.NK_GET_VENDOR_CODES, kind)
             if (rc == Lab.OK && d != null) {
-                val parsed = runCatching { Cur(d).u16Array() }.getOrNull()
-                if (parsed != null) {
-                    log("GetVendorCodes(0x9439, $kind) (${parsed.size}): " +
-                            parsed.sorted().joinToString(" ") { v -> hex4(v) })
-                } else {
-                    val dump = d.take(96).joinToString("") { b -> "%02X".format(b) }
-                    log("GetVendorCodes(0x9439, $kind) ${d.size}B raw: $dump")
+                val parsed = runCatching { Cur(d).u16Array().toSet() }
+                parsed.onSuccess {
+                    if (kind == 0x09) vendorOps9439 = it else vendorProps9439 = it
+                    val suffix = if (kind == 0x09) "operations" else "properties"
+                    val names = if (kind == 0x09) Lab.INTEREST_OPS else Lab.INTEREST_PROPS
+                    logProbeCodes(log, "GetVendorCodes(0x9439,$kind).$suffix", it, names)
+                }.onFailure {
+                    log(
+                        "!! GetVendorCodes(0x9439,$kind) parse failed: ${it.message}; " +
+                            "raw=${probeHex(d)}"
+                    )
                 }
             } else log("GetVendorCodes(0x9439, $kind) resp=${hex4(rc)}")
         }
+    } else {
+        log("GetVendorCodes(0x9439): not advertised")
     }
 
-    // ---- 4. 关键属性 GetDevicePropDesc ----
-    log("--- device property descriptors ---")
-    val advertised = (info?.props ?: emptySet()) + vendorProps
-    for ((prop, name) in Lab.INTEREST_PROPS) {
+    val allAdvertisedOps = ops + vendorOps9439
+    val advertised = (info?.props ?: emptySet()) + vendorProps90ca + vendorProps9439
+    logProbeCodes(log, "Merged.operations", allAdvertisedOps, Lab.INTEREST_OPS)
+    logProbeCodes(log, "Merged.properties", advertised, Lab.INTEREST_PROPS)
+    log(
+        "PowerZoom opcode ${hex4(Lab.NK_POWER_ZOOM_BY_FOCAL_LENGTH)}: " +
+            if (Lab.NK_POWER_ZOOM_BY_FOCAL_LENGTH in allAdvertisedOps) "ADVERTISED"
+            else "NOT_ADVERTISED"
+    )
+
+    // ---- 4. 所有已广告属性 + App 已知隐藏属性的 GetDevicePropDesc/GetDevicePropValue ----
+    val probeProps = (advertised + Lab.INTEREST_PROPS.keys).sorted()
+    var descOkCount = 0
+    var valueOkCount = 0
+    log("--- property survey (${probeProps.size}) ---")
+    log("Each DESC/VALUE raw field is complete little-endian payload; unknown codes are intentional.")
+    for ((index, prop) in probeProps.withIndex()) {
+        val name = Lab.INTEREST_PROPS[prop] ?: "Unknown"
+        val sources = buildList {
+            if (prop in (info?.props ?: emptySet())) add("device")
+            if (prop in vendorProps90ca) add("90CA")
+            if (prop in vendorProps9439) add("9439")
+            if (prop in Lab.INTEREST_PROPS && prop !in advertised) add("known-fallback")
+        }.joinToString("+").ifEmpty { "unknown" }
+
         val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
-        val adv = if (prop in advertised) "" else " (not advertised)"
         if (rc == Lab.OK && d != null) {
-            val txt = runCatching { parsePropDesc(prop, d) }
-                .getOrElse { "parse failed, ${d.size}B" }
-            log("${hex4(prop)} $name: $txt$adv")
+            descOkCount++
+            val parsed = runCatching { parsePropDesc(prop, d) }
+            val txt = parsed.getOrElse { "parse failed: ${it.message}" }
+            log(
+                "PROP ${index + 1}/${probeProps.size} ${hex4(prop)} $name " +
+                    "src=$sources DESC resp=${hex4(rc)} bytes=${d.size} $txt raw=${probeHex(d)}"
+            )
         } else {
-            log("${hex4(prop)} $name: resp=${hex4(rc)}$adv")
+            log(
+                "PROP ${index + 1}/${probeProps.size} ${hex4(prop)} $name " +
+                    "src=$sources DESC resp=${hex4(rc)} bytes=${d?.size ?: 0} raw=${probeHex(d)}"
+            )
+        }
+
+        if (Lab.GET_DEVICE_PROP_VALUE in allAdvertisedOps) {
+            val (vrc, vd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, prop)
+            if (vrc == Lab.OK && vd != null) valueOkCount++
+            log(
+                "PROP ${index + 1}/${probeProps.size} ${hex4(prop)} $name " +
+                    "VALUE resp=${hex4(vrc)} bytes=${vd?.size ?: 0} raw=${probeHex(vd)}"
+            )
+        } else if (index == 0) {
+            log("GetDevicePropValue(0x1015): not advertised; VALUE survey skipped")
+        }
+
+        if ((index + 1) % 20 == 0 || index == probeProps.lastIndex) {
+            log(
+                "property progress=${index + 1}/${probeProps.size} " +
+                    "descOK=$descOkCount valueOK=$valueOkCount"
+            )
         }
     }
 
-    // ---- 5. GetDevicePropValue 通路交叉验证（Z8 上 desc 与 value 行为可能不同）----
-    val (vrc, vd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_F_NUMBER)
-    log("GetDevicePropValue(FNumber) resp=${hex4(vrc)} ${vd?.size ?: 0}B")
-
-    // ---- 5b. 电子水平仪 AngleLevel (0xD067) 专检 ----
+    // ---- 5. 电子水平仪 AngleLevel (0xD067) 专检 ----
     // Z 30 为首要目标机身，此属性是水平仪唯一数据源（libgphoto2 ptp.h 定义
     // PTP_DPC_NIKON_AngleLevel = 0xD067，Z 30/Z 50/Z 8/Z 9/Z 6iii 全世代共用）。
     // 属性不支持 = toggle 拒绝锁存 + devLog，不画假角度。
@@ -1281,17 +1391,7 @@ suspend fun NikonCamera.runLabProbe(
         log("!! AngleLevel(0xD067) resp=${hex4(alrc)} — level NOT available on this body")
     }
 
-    // ---- 6. SetDevicePropValue 零副作用测试：曝光补偿原值写回 ----
-    val (crc, cd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_EXP_COMPENSATION)
-    if (crc == Lab.OK && cd != null && cd.isNotEmpty()) {
-        val src = labSetProp(Lab.PROP_EXP_COMPENSATION, cd)
-        log("SetDevicePropValue(ExpComp, unchanged value) resp=${hex4(src)}" +
-                if (src == Lab.OK) "  << property write path WORKS" else "")
-    } else {
-        log("SetDevicePropValue test skipped (read resp=${hex4(crc)})")
-    }
-
-    // ---- 7. 事件轮询 ----
+    // ---- 6. 事件轮询 ----
     if (Lab.NK_GET_EVENT in ops) {
         val (rc, d) = labCommand(Lab.NK_GET_EVENT)
         if (rc == Lab.OK && d != null) {
@@ -1301,7 +1401,7 @@ suspend fun NikonCamera.runLabProbe(
         } else log("GetEvent(0x90C7) resp=${hex4(rc)}")
     }
 
-    // ---- 8. Live View 试取帧 ----
+    // ---- 7. Live View 试取帧 ----
     log("--- live view test ---")
     if (Lab.NK_START_LIVE_VIEW !in ops) log("StartLiveView not advertised - trying anyway")
     var lvOk = false
@@ -1334,8 +1434,17 @@ suspend fun NikonCamera.runLabProbe(
         log("EndLiveView(0x9202) resp=${hex4(labEndLiveView())}")
     }
 
-    // ---- 9. 结论 ----
+    // ---- 8. 结论 ----
     log("--- verdict ---")
+    log("property survey: $descOkCount/${probeProps.size} desc, $valueOkCount/${probeProps.size} value")
+    log(
+        "power zoom op:   " +
+            if (Lab.NK_POWER_ZOOM_BY_FOCAL_LENGTH in allAdvertisedOps) {
+                "${hex4(Lab.NK_POWER_ZOOM_BY_FOCAL_LENGTH)} ADVERTISED"
+            } else {
+                "NOT ADVERTISED"
+            }
+    )
     log("live view:      ${if (lvOk) "YES" else "NO"}")
     log("angle level:    ${if (alrc == Lab.OK && ald != null && ald.size >= 4) "0xD067 OK" else "UNAVAILABLE"}")
     log("capture opcode: ${if (Lab.NK_CAPTURE_REC_IN_MEDIA in ops || Lab.NK_CAPTURE_REC_IN_SDRAM in ops) "advertised" else "MISSING"}")
