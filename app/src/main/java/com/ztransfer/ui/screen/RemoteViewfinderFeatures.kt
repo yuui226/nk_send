@@ -345,20 +345,21 @@ internal fun FullscreenEnterMark(modifier: Modifier = Modifier) {
     }
 }
 
-/** 旋转：右侧为视觉主体的开放圆弧，末端用轻量线性箭头延续切线方向。 */
+/** 旋转：沿用工具栏的细线风格，以开放圆弧接一个紧凑的切线箭头。 */
 @Composable
 internal fun RotateMark(modifier: Modifier = Modifier) {
     val c = LocalContentColor.current
     Canvas(modifier) {
         val sw = ToolMarkStrokeWidth.toPx()
         val s = size.minDimension
-        val cx = size.width * 0.50f
+        val cx = size.width * 0.51f
         val cy = size.height * 0.49f
-        val r = s * 0.29f
-        val startAngle = -125f
-        val sweepAngle = 225f
+        val r = s * 0.285f
+        val startAngle = -135f
+        val sweepAngle = 240f
+        val endAngle = startAngle + sweepAngle
 
-        // 略多于半圈，让右侧圆弧完整、左侧保持开放，避免看起来像“刷新”图标。
+        // 与预览页 RotateLeft 相同的轮廓节奏：左侧留出明确缺口，圆弧主体环绕右侧。
         drawArc(
             color = c,
             startAngle = startAngle,
@@ -369,28 +370,32 @@ internal fun RotateMark(modifier: Modifier = Modifier) {
             style = Stroke(sw, cap = StrokeCap.Round)
         )
 
-        // 箭头沿弧线末端的顺时针切线展开。使用两根圆头细线，不再用醒目的实心三角形。
-        val endAngle = startAngle + sweepAngle
-        fun pointAt(angle: Float, distance: Float): Offset {
-            val radians = Math.toRadians(angle.toDouble())
-            return Offset(
-                x = cx + cos(radians).toFloat() * distance,
-                y = cy + sin(radians).toFloat() * distance
+        val radians = Math.toRadians(endAngle.toDouble())
+        val radialX = cos(radians).toFloat()
+        val radialY = sin(radians).toFloat()
+        val tangentX = -radialY
+        val tangentY = radialX
+        val arcEnd = Offset(cx + radialX * r, cy + radialY * r)
+        val arrowLength = s * 0.14f
+        val arrowHalfWidth = s * 0.072f
+
+        // 底边骑在弧线末端，尖端继续沿顺时针切线前进，不再出现分叉的 V 形。
+        val arrow = Path().apply {
+            moveTo(
+                arcEnd.x + tangentX * arrowLength,
+                arcEnd.y + tangentY * arrowLength
             )
+            lineTo(
+                arcEnd.x + radialX * arrowHalfWidth,
+                arcEnd.y + radialY * arrowHalfWidth
+            )
+            lineTo(
+                arcEnd.x - radialX * arrowHalfWidth,
+                arcEnd.y - radialY * arrowHalfWidth
+            )
+            close()
         }
-        val tip = pointAt(endAngle, r)
-        val tangentAngle = endAngle + 90f
-        val arrowLength = s * 0.16f
-        val wingSpread = 32f
-        listOf(tangentAngle + 180f - wingSpread, tangentAngle + 180f + wingSpread)
-            .forEach { wingAngle ->
-                val radians = Math.toRadians(wingAngle.toDouble())
-                val wingEnd = Offset(
-                    x = tip.x + cos(radians).toFloat() * arrowLength,
-                    y = tip.y + sin(radians).toFloat() * arrowLength
-                )
-                drawLine(c, tip, wingEnd, sw, StrokeCap.Round)
-            }
+        drawPath(arrow, c)
     }
 }
 

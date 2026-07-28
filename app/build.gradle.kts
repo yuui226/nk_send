@@ -16,7 +16,7 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "com.ztransfer"
-    compileSdk = 35
+    compileSdk = 36
 
     signingConfigs {
         if (hasReleaseKeystore) {
@@ -32,17 +32,30 @@ android {
     defaultConfig {
         applicationId = "com.ztransfer"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 19
         versionName = "1.50"
     }
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("direct") {
+            dimension = "distribution"
+            buildConfigField("String", "DISTRIBUTION_CHANNEL", "\"direct\"")
+            buildConfigField("boolean", "ENABLE_SELF_UPDATE", "true")
+        }
+        create("play") {
+            dimension = "distribution"
+            applicationIdSuffix = ".play"
+            buildConfigField("String", "DISTRIBUTION_CHANNEL", "\"play\"")
+            buildConfigField("boolean", "ENABLE_SELF_UPDATE", "false")
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = if (hasReleaseKeystore) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
             }
             isMinifyEnabled = true
             isShrinkResources = true
@@ -95,7 +108,10 @@ dependencies {
 
     // 二维码生成:把虎皮椒手机端支付链接画成码,自己排版 + 存相册,不塞它的页面。
     // 只用 core（纯 Java 编码器,约 500KB,不含安卓摄像头扫码那套）。
-    implementation("com.google.zxing:core:3.5.3")
+    add("directImplementation", "com.google.zxing:core:3.5.3")
+    // 现有工程使用 Kotlin 1.9；Billing KTX 9.1 由 Kotlin 2.x 编译。
+    // 当前实现只调用 Java API，因此依赖同版本 Java artifact，避免抬升国内版的 Kotlin 工具链。
+    add("playImplementation", "com.android.billingclient:billing:9.1.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
@@ -106,7 +122,7 @@ dependencies {
 // 不再自动挂到 assembleRelease，避免 CI/无设备环境构建失败）。
 tasks.register("installToDevice") {
     doLast {
-        val apk = file("build/outputs/apk/release/app-release.apk")
+        val apk = file("build/outputs/apk/direct/release/app-direct-release.apk")
         println("Installing ${apk.absolutePath} ...")
         val result = project.exec {
             commandLine("adb", "install", "-r", apk.absolutePath)

@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=ztlicense
 WorkingDirectory=/opt/ztransfer-license
+EnvironmentFile=-/opt/ztransfer-license/google-play.env
 ExecStart=/opt/node/bin/node /opt/ztransfer-license/license-server.js /opt/ztransfer-license/config.json
 Restart=always
 RestartSec=3

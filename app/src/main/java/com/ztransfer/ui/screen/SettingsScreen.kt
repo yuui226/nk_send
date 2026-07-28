@@ -37,11 +37,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,14 +49,10 @@ import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
-import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
-// 客服/购买 QQ 号（用户使用场景多为连着相机 Wi-Fi 无外网，只能靠复制号码离线联系）。
-internal const val QQ_NUMBER = "953000922"
 // 定价不在这里了:由服务端下发(LicenseManager.pricing),改价改服务器的 pricing.json 即可,
 // 不用发版。兜底常量见 LicenseManager.FALLBACK_PRICE_FEN。
 
@@ -111,7 +105,6 @@ fun SettingsOverlay(
 
     // 页脚底部玻璃提示（反馈复制确认 / 隐藏入口的恢复免费版确认共用）；
     // 文案与可见性分开存，消失动画期间仍有文字可渲染；nonce 保证连续触发重启计时。
-    val clipboard = LocalClipboardManager.current
     var footerHintText by remember { mutableStateOf("") }
     var footerHintVisible by remember { mutableStateOf(false) }
     var footerHintNonce by remember { mutableStateOf(0) }
@@ -484,14 +477,8 @@ fun SettingsOverlay(
             var versionTaps by remember { mutableStateOf(0) }
             var lastVersionTapAt by remember { mutableStateOf(0L) }
             val revertedHint = stringResource(R.string.revert_free)
-            val qqCopiedHint = stringResource(R.string.feedback_qq_copied, QQ_NUMBER)
             // 手动检查会绕过自动检查间隔和“忽略此版本”。有新版直接显示更新弹窗；
             // 无新版或检查失败才在页脚显示短提示。
-            var checkingUpdate by remember { mutableStateOf(false) }
-            val updateScope = rememberCoroutineScope()
-            val latestHint = stringResource(R.string.update_latest)
-            val checkFailedHint = stringResource(R.string.update_check_failed)
-            val internetRequiredHint = stringResource(R.string.err_purchase_no_network)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stringResource(R.string.version_label, BuildConfig.VERSION_NAME),
@@ -512,33 +499,10 @@ fun SettingsOverlay(
                     }
                 )
                 Spacer(Modifier.weight(1f))
-                GlassButton(
-                    onClick = {
-                        if (cameraUsesWifi) {
-                            showFooterHint(internetRequiredHint)
-                        } else if (!checkingUpdate) {
-                            checkingUpdate = true
-                            updateScope.launch {
-                                when (AppUpdateManager.check(force = true)) {
-                                    is LicenseManager.UpdateResult.Available -> Unit
-                                    LicenseManager.UpdateResult.UpToDate -> showFooterHint(latestHint)
-                                    LicenseManager.UpdateResult.Unreachable -> showFooterHint(checkFailedHint)
-                                }
-                                checkingUpdate = false
-                            }
-                        }
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp),
-                    modifier = Modifier.height(28.dp)
-                ) {
-                    Text(
-                        stringResource(if (checkingUpdate) R.string.checking_update else R.string.check_update),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.onBackground
-                    )
-                }
-                Spacer(Modifier.width(8.dp))
+                DistributionUpdateButton(
+                    cameraUsesWifi = cameraUsesWifi,
+                    onHint = { showFooterHint(it) }
+                )
                 // 高级版专属"我要换机":与"反馈"并列在页脚——都是不常用的出口动作,
                 // 一年用一次的东西不该占正文位置。取码与换机后果都在弹窗里说。
                 if (isPro) {
@@ -556,21 +520,7 @@ fun SettingsOverlay(
                     }
                     Spacer(Modifier.width(8.dp))
                 }
-                GlassButton(
-                    onClick = {
-                        clipboard.setText(AnnotatedString(QQ_NUMBER))
-                        showFooterHint(qqCopiedHint)
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 14.dp),
-                    modifier = Modifier.height(28.dp)
-                ) {
-                    Text(
-                        stringResource(R.string.feedback),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.onBackground
-                    )
-                }
+                DistributionSupportButton(onHint = { showFooterHint(it) })
             }
             if (showSwitchDevice) {
                 SwitchDeviceDialog(onDismiss = { showSwitchDevice = false })

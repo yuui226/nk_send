@@ -13,7 +13,6 @@
     <!-- 取景器录像的麦克风音轨；拒绝授权时自动降级为无声录像，不阻断功能 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 用户确认后交给系统安装器更新本 App；Android 8+ 首次使用还会要求允许此来源。 -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <application
@@ -39,14 +38,5 @@
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.update-files"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/update_file_paths" />
-        </provider>
     </application>
 </manifest>

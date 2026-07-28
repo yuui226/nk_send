@@ -80,6 +80,9 @@ import kotlin.math.ceil
 // 到期预警的两道门槛:设置页进 30 天转橙提醒,首页进 7 天才值得占一条提示条。
 internal const val SUB_WARN_DAYS = 30
 internal const val SUB_ALERT_DAYS = 7
+private const val QQ_NUMBER = "953000922"
+private val isPlayDistribution: Boolean
+    get() = BuildConfig.DISTRIBUTION_CHANNEL == "play"
 
 /** 订阅到期日(Unix 秒 → yyyy-MM-dd)。数字日期无歧义,不随界面语言换写法。 */
 internal fun formatSubDate(sec: Long): String =
@@ -121,7 +124,9 @@ fun ProDialog(
     // 服务端下发的定价。启动时拉过一次,这里再拉一次:启动那次多半没赶上(用户开 App 时
     // 可能已经连着相机热点,没外网),而他现在正看着价格准备掏钱。先用缓存画出来,
     // 拉到再静默换掉——不阻塞开窗;只有价格真变了才会跳,那正是该跳的时候。
-    LaunchedEffect(Unit) { LicenseManager.refreshPricingOnOpen() }
+    LaunchedEffect(Unit) {
+        if (!isPlayDistribution) LicenseManager.refreshPricingOnOpen()
+    }
     val price by LicenseManager.pricing.collectAsState()
     var selectedProduct by remember { mutableStateOf(LicenseManager.ProductId.ANNUAL) }
     var copied by remember { mutableStateOf(false) }
@@ -332,7 +337,8 @@ fun ProDialog(
                             onClick = { showPurchase = true },
                             modifier = Modifier.fillMaxWidth(),
                             big = true,
-                            enabled = selectedPrice.available && selectedPrice.priceFen > 0,
+                            enabled = isPlayDistribution ||
+                                selectedPrice.available && selectedPrice.priceFen > 0,
                         )
 
                         // ---- 次级：一排玻璃小按钮,三个平分整行,整排仅连接页给(showEnterCode):
@@ -383,17 +389,19 @@ fun ProDialog(
                                         )
                                     )
                                 }
-                                GlassButton(
-                                    onClick = {
-                                        clipboard.setText(AnnotatedString(QQ_NUMBER))
-                                        copied = true; restoreMsg = null
-                                    },
-                                    shape = subShape,
-                                    panel = true,
-                                    contentPadding = subPadding,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    SubActionLabel(stringResource(R.string.contact_support))
+                                if (!isPlayDistribution) {
+                                    GlassButton(
+                                        onClick = {
+                                            clipboard.setText(AnnotatedString(QQ_NUMBER))
+                                            copied = true; restoreMsg = null
+                                        },
+                                        shape = subShape,
+                                        panel = true,
+                                        contentPadding = subPadding,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        SubActionLabel(stringResource(R.string.contact_support))
+                                    }
                                 }
                             }
                             // 按钮反馈共用一行位置:复制客服 QQ(绿)与恢复结果(橙),后点的顶掉先点的。
@@ -508,7 +516,9 @@ fun RenewDialog(
 ) {
     val colors = AppTheme.colors
     // 同 ProDialog:他正看着价格准备掏钱,开窗时再拉一次展示定价(先画缓存,拉到静默换)。
-    LaunchedEffect(Unit) { LicenseManager.refreshPricingOnOpen() }
+    LaunchedEffect(Unit) {
+        if (!isPlayDistribution) LicenseManager.refreshPricingOnOpen()
+    }
     val price by LicenseManager.pricing.collectAsState()
     var selectedProduct by remember { mutableStateOf(LicenseManager.ProductId.ANNUAL) }
     var showPurchase by remember { mutableStateOf(false) }
@@ -630,7 +640,8 @@ fun RenewDialog(
                         onClick = { showPurchase = true },
                         modifier = Modifier.fillMaxWidth(),
                         big = true,
-                        enabled = selectedPrice.available && selectedPrice.priceFen > 0,
+                        enabled = isPlayDistribution ||
+                            selectedPrice.available && selectedPrice.priceFen > 0,
                     )
                 }
             }
@@ -877,7 +888,7 @@ private fun ProductPlanCard(
     onSelect: (LicenseManager.ProductId) -> Unit,
 ) {
     val colors = AppTheme.colors
-    val enabled = price.available && price.priceFen > 0
+    val enabled = isPlayDistribution || price.available && price.priceFen > 0
     val shape = RoundedCornerShape(14.dp)
     Row(
         modifier = Modifier
@@ -943,7 +954,7 @@ private fun ProductPlanCard(
                     FontWeight.Normal
                 },
             )
-            if (product == LicenseManager.ProductId.ANNUAL) {
+            if (!isPlayDistribution && product == LicenseManager.ProductId.ANNUAL) {
                 val perDayFen = LicenseManager.perDayFen(price)
                 if (perDayFen > 0) {
                     Text(
@@ -957,7 +968,7 @@ private fun ProductPlanCard(
                 }
             }
         }
-        if (enabled) {
+        if (enabled && !isPlayDistribution) {
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     LicenseManager.formatPrice(price.priceFen),
@@ -983,6 +994,7 @@ private fun purchaseCta(
     product: LicenseManager.ProductId,
     price: LicenseManager.ProductPricing,
 ): String {
+    if (isPlayDistribution) return stringResource(R.string.store_purchase_cta)
     if (!price.available || price.priceFen <= 0) {
         return stringResource(
             if (product == LicenseManager.ProductId.LIFETIME) {

@@ -100,11 +100,13 @@ object LicenseManager {
         _isPro.value = verifyToken(prefs.getString("token", null)) != null
         _subExpired.value = prefs.getBoolean("sub_expired", false)
         _quotaLeft.value = quotaRemaining()
-        loadCachedPricing()
-        registerPurchaseNetworkRecovery(app)
         scope.launch { renewIfDue() }
-        scope.launch { reconcilePendingPurchaseWithRetry() }
-        scope.launch { fetchPricing(PRICE_REFRESH_MS) }
+        if (BuildConfig.DISTRIBUTION_CHANNEL == "direct") {
+            loadCachedPricing()
+            registerPurchaseNetworkRecovery(app)
+            scope.launch { reconcilePendingPurchaseWithRetry() }
+            scope.launch { fetchPricing(PRICE_REFRESH_MS) }
+        }
     }
 
     /**
@@ -112,7 +114,9 @@ object LicenseManager {
      * 不依赖购买弹窗是否仍在组合中；进程被杀也没关系，pending_order 会在下次启动继续。
      */
     fun onAppForeground() {
-        if (::prefs.isInitialized) scope.launch { reconcilePendingPurchaseWithRetry() }
+        if (::prefs.isInitialized && BuildConfig.DISTRIBUTION_CHANNEL == "direct") {
+            scope.launch { reconcilePendingPurchaseWithRetry() }
+        }
     }
 
     /**
@@ -372,6 +376,83 @@ object LicenseManager {
     }
 
     /** 当前高级版用户的激活码(供设置页"查看我的激活码"与自助换机);非 PRO 返回 null。 */
+    sealed class GooglePlayVerificationResult {
+        data class Success(
+            val product: ProductId,
+            val code: String,
+        ) : GooglePlayVerificationResult()
+
+        object Unreachable : GooglePlayVerificationResult()
+        data class Rejected(val err: String) : GooglePlayVerificationResult()
+    }
+
+    /**
+     * Sends an opaque Play purchase token to our backend. The app never trusts
+     * purchase fields by themselves: the backend verifies ownership with Google,
+     * binds the entitlement to this device, and returns our signed license token.
+     *
+     * A legacy-compatible activation call is used only when a successful backend
+     * response omits the signed token. A present but invalid token is never accepted.
+     */
+    suspend fun verifyGooglePlayPurchase(
+        packageName: String,
+        googleProductId: String,
+        purchaseToken: String,
+        appVersion: String = BuildConfig.VERSION_NAME,
+    ): GooglePlayVerificationResult = withContext(Dispatchers.IO) {
+        if (packageName.isBlank() || purchaseToken.isBlank() || googleProductId !in setOf(
+                "ztransfer_pro_lifetime",
+                "ztransfer_pro_annual",
+            )
+        ) {
+            return@withContext GooglePlayVerificationResult.Rejected("BAD_REQUEST")
+        }
+        val resp = post("/v1/google-play/verify", JSONObject().apply {
+            put("fp", fingerprint)
+            put("package_name", packageName)
+            put("product_id", googleProductId)
+            put("purchase_token", purchaseToken)
+            put("app_ver", appVersion)
+        }) ?: return@withContext GooglePlayVerificationResult.Unreachable
+
+        if (!resp.optBoolean("ok")) {
+            return@withContext GooglePlayVerificationResult.Rejected(
+                resp.optString("err", "BAD_RESPONSE")
+            )
+        }
+        val expectedProduct = when (googleProductId) {
+            "ztransfer_pro_lifetime" -> ProductId.LIFETIME
+            "ztransfer_pro_annual" -> ProductId.ANNUAL
+            else -> return@withContext GooglePlayVerificationResult.Rejected("BAD_PRODUCT")
+        }
+        val responseProduct = ProductId.fromWire(resp.optString("product"))
+            ?: return@withContext GooglePlayVerificationResult.Rejected("BAD_PRODUCT")
+        if (responseProduct != expectedProduct) {
+            return@withContext GooglePlayVerificationResult.Rejected("PRODUCT_MISMATCH")
+        }
+        val code = resp.optString("code")
+        if (code.isBlank()) {
+            return@withContext GooglePlayVerificationResult.Rejected("BAD_RESPONSE")
+        }
+        val token = resp.optString("token").takeIf { it.isNotBlank() }
+        if (token != null) {
+            if (verifyToken(token) == null) {
+                return@withContext GooglePlayVerificationResult.Rejected("BAD_TOKEN")
+            }
+            saveToken(token, code)
+            return@withContext GooglePlayVerificationResult.Success(responseProduct, code)
+        }
+
+        when (val activation = activate(code, appVersion)) {
+            ActivationResult.Success ->
+                GooglePlayVerificationResult.Success(responseProduct, code)
+            ActivationResult.Unreachable ->
+                GooglePlayVerificationResult.Unreachable
+            is ActivationResult.Rejected ->
+                GooglePlayVerificationResult.Rejected(activation.code)
+        }
+    }
+
     fun purchasedCode(): String? = if (_isPro.value) prefs.getString("code", null) else null
 
     // ---------------------------------------------------------------- 定价
@@ -515,7 +596,9 @@ object LicenseManager {
 
     /** 高级版弹窗打开时调:他正要花钱,别让他看着隔夜的价。挂在 IO 上,不阻塞开窗。 */
     fun refreshPricingOnOpen() {
-        scope.launch { fetchPricing(PRICE_REFRESH_OPEN_MS) }
+        if (BuildConfig.DISTRIBUTION_CHANNEL == "direct") {
+            scope.launch { fetchPricing(PRICE_REFRESH_OPEN_MS) }
+        }
     }
 
     /** 分 → 展示价:1990→"¥19.9",2000→"¥20",1999→"¥19.99"(尾随 0 不显示)。 */

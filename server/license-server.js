@@ -9,6 +9,7 @@ const path = require('node:path');
 const https = require('node:https');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const { createGooglePlayClient } = require('./google-play');
 const MAX_PRICE_FEN = 10_000_000; // ¥100,000，远高于会员商品合理区间
 
 // ---------------------------------------------------------------- 配置
@@ -50,6 +51,11 @@ const SUB_PERIOD_DAYS = 365;
 const PRODUCT_ANNUAL = 'annual';
 const PRODUCT_LIFETIME = 'lifetime';
 const PRODUCTS = new Set([PRODUCT_ANNUAL, PRODUCT_LIFETIME]);
+const GOOGLE_PRODUCTS = new Map([
+    ['ztransfer_pro_lifetime', { product: PRODUCT_LIFETIME, kind: 'inapp' }],
+    ['ztransfer_pro_annual', { product: PRODUCT_ANNUAL, kind: 'subs' }],
+]);
+const GOOGLE_PLAY_ENABLED = Boolean(cfg.googlePlay?.packageName);
 // 用户确认的新品默认价；年费仍完全沿用现有 config/pricing，不在代码中改价。
 // 一旦 pricing v2 明确配置 lifetime，始终以文件中的价格为准。
 const DEFAULT_LIFETIME_PRICE_FEN = 5990;
@@ -293,6 +299,24 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE INDEX IF NOT EXISTS idx_orders_fp ON orders(device_fp);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_creating_fp
   ON orders(device_fp) WHERE status = 'creating';
+CREATE TABLE IF NOT EXISTS google_play_purchases (
+  token_hash      TEXT PRIMARY KEY,
+  package_name    TEXT NOT NULL,
+  product_id      TEXT NOT NULL,
+  product         TEXT NOT NULL,
+  device_fp       TEXT NOT NULL,
+  status          TEXT NOT NULL,
+  google_order_id TEXT,
+  code            TEXT,
+  expires_at      TEXT,
+  raw_state       TEXT,
+  acknowledged    INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL,
+  last_verified_at TEXT NOT NULL,
+  revoked_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_google_play_code ON google_play_purchases(code);
+CREATE INDEX IF NOT EXISTS idx_google_play_order ON google_play_purchases(google_order_id);
 CREATE TABLE IF NOT EXISTS update_stats (
   source_version_code   INTEGER NOT NULL,
   source_version_name   TEXT NOT NULL DEFAULT '',
@@ -1368,6 +1392,333 @@ async function apiPayNotify(params) {
     return { ack: true };
 }
 
+// ---------------------------------------------------------------- Google Play Billing
+
+let googlePlayClient = null;
+let googlePlayClientFactory = createGooglePlayClient;
+
+function getGooglePlayClient() {
+    if (!GOOGLE_PLAY_ENABLED) throw new Error('GOOGLE_PLAY_DISABLED');
+    if (!googlePlayClient) googlePlayClient = googlePlayClientFactory(cfg.googlePlay);
+    return googlePlayClient;
+}
+
+function googleTokenHash(token) {
+    return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+function revokeGooglePurchase(tokenHash, reason, rawState = reason) {
+    const at = now();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+        const row = db.prepare('SELECT code FROM google_play_purchases WHERE token_hash = ?')
+            .get(tokenHash);
+        if (!row) {
+            db.exec('COMMIT');
+            return false;
+        }
+        db.prepare(`UPDATE google_play_purchases
+                       SET status = 'revoked', raw_state = ?, revoked_at = ?,
+                           last_verified_at = ?
+                     WHERE token_hash = ?`)
+            .run(rawState, at, at, tokenHash);
+        // 只吊销由 google_play_purchases 明确拥有的码。国内 orders/codes 没有任何
+        // 外键或状态改动，因此退款同步不可能误伤微信订单。
+        if (row.code) {
+            db.prepare(`UPDATE codes
+                           SET status = 'revoked', revoked_at = ?, revoke_reason = ?
+                         WHERE code = ? AND status = 'active'
+                           AND EXISTS (
+                               SELECT 1 FROM google_play_purchases
+                                WHERE token_hash = ? AND code = codes.code
+                           )
+                           AND NOT EXISTS (
+                               SELECT 1 FROM google_play_purchases
+                                WHERE code = codes.code AND token_hash <> ?
+                                  AND status = 'active'
+                           )`)
+                .run(at, `google_play:${reason}`, row.code, tokenHash, tokenHash);
+        }
+        db.exec('COMMIT');
+        log(`GOOGLE_PLAY_REVOKE token=${tokenHash.slice(0, 12)} reason=${reason}`);
+        return true;
+    } catch (e) {
+        try { db.exec('ROLLBACK'); } catch { /* no active transaction */ }
+        throw e;
+    }
+}
+
+function fulfillGooglePurchase(purchase, fp, appVer) {
+    const tokenHash = googleTokenHash(purchase.purchaseToken);
+    const productConfig = GOOGLE_PRODUCTS.get(purchase.productId);
+    if (!productConfig) throw new Error('GOOGLE_PRODUCT_NOT_CONFIGURED');
+    const at = now();
+    let code;
+    let expiresAt = productConfig.product === PRODUCT_LIFETIME ? null : purchase.expiresAt;
+    if (productConfig.product === PRODUCT_ANNUAL
+        && (!expiresAt || !Number.isFinite(Date.parse(expiresAt)))) {
+        throw new Error('GOOGLE_EXPIRY_INVALID');
+    }
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+        const old = db.prepare('SELECT * FROM google_play_purchases WHERE token_hash = ?')
+            .get(tokenHash);
+        if (old && (old.package_name !== cfg.googlePlay.packageName
+            || old.product_id !== purchase.productId
+            || old.product !== productConfig.product)) {
+            throw new Error('GOOGLE_TOKEN_CONFLICT');
+        }
+        // Refunded/voided purchases are terminal for this purchaseToken. A delayed
+        // Publisher GET must not be able to reactivate an entitlement that the
+        // authoritative Voided Purchases feed has already revoked.
+        if (old?.status === 'revoked') throw new Error('GOOGLE_PURCHASE_REVOKED');
+
+        const linkedHash = purchase.linkedPurchaseToken
+            ? googleTokenHash(purchase.linkedPurchaseToken) : null;
+        const linked = linkedHash
+            ? db.prepare(`SELECT code FROM google_play_purchases
+                           WHERE token_hash = ? AND status <> 'revoked'`)
+                .get(linkedHash)
+            : null;
+        code = old?.code || linked?.code || null;
+        if (!code) {
+            const insert = db.prepare(
+                'INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)'
+            );
+            for (;;) {
+                code = newCode();
+                try {
+                    insert.run(code, `google:${tokenHash.slice(0, 20)}`, at, expiresAt);
+                    break;
+                } catch (e) {
+                    if (!String(e.message).includes('UNIQUE')) throw e;
+                }
+            }
+        } else {
+            const ownedCode = db.prepare('SELECT status, revoke_reason FROM codes WHERE code = ?')
+                .get(code);
+            if (!ownedCode) throw new Error('GOOGLE_CODE_MISSING');
+            if (ownedCode.status !== 'active') {
+                throw new Error('GOOGLE_CODE_ADMIN_REVOKED');
+            }
+            db.prepare(`UPDATE codes
+                           SET status = 'active', expires_at = ?, revoked_at = NULL,
+                               revoke_reason = NULL
+                         WHERE code = ?`)
+                .run(expiresAt, code);
+        }
+
+        db.prepare(`INSERT INTO google_play_purchases
+                    (token_hash, package_name, product_id, product, device_fp, status,
+                     google_order_id, code, expires_at, raw_state, acknowledged,
+                     created_at, last_verified_at, revoked_at)
+                    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, NULL)
+                    ON CONFLICT(token_hash) DO UPDATE SET
+                      device_fp = excluded.device_fp,
+                      status = 'active',
+                      google_order_id = excluded.google_order_id,
+                      code = excluded.code,
+                      expires_at = excluded.expires_at,
+                      raw_state = excluded.raw_state,
+                      acknowledged = MAX(google_play_purchases.acknowledged,
+                                         excluded.acknowledged),
+                      last_verified_at = excluded.last_verified_at,
+                      revoked_at = NULL`)
+            .run(
+                tokenHash,
+                cfg.googlePlay.packageName,
+                purchase.productId,
+                productConfig.product,
+                fp,
+                purchase.orderId || null,
+                code,
+                expiresAt,
+                purchase.rawState,
+                purchase.acknowledged ? 1 : 0,
+                old?.created_at || at,
+                at,
+            );
+        if (linkedHash && linkedHash !== tokenHash) {
+            db.prepare(`UPDATE google_play_purchases
+                           SET status = 'replaced', last_verified_at = ?
+                         WHERE token_hash = ? AND code = ? AND status <> 'revoked'`)
+                .run(at, linkedHash, code);
+        }
+
+        const previousBinding = db.prepare(
+            'SELECT device_fp FROM bindings WHERE code = ? ORDER BY activated_at DESC LIMIT 1'
+        ).get(code);
+        // Google 的“恢复购买”本身证明用户仍持有 purchaseToken。同一 token 换机时
+        // 延续现有单设备授权语义：踢掉旧绑定，国内激活码不参与这次操作。
+        db.prepare('DELETE FROM bindings WHERE code = ? AND device_fp <> ?').run(code, fp);
+        db.prepare(`INSERT INTO bindings
+                    (code, device_fp, device_model, app_ver, activated_at, last_renew_at)
+                    VALUES (?, ?, '', ?, ?, ?)
+                    ON CONFLICT(code, device_fp) DO UPDATE SET
+                      app_ver = CASE WHEN excluded.app_ver <> '' THEN excluded.app_ver
+                                     ELSE bindings.app_ver END,
+                      last_renew_at = excluded.last_renew_at`)
+            .run(code, fp, appVer, at, at);
+        if (!previousBinding || previousBinding.device_fp !== fp) {
+            db.prepare(`INSERT INTO activations
+                        (code, device_fp, device_model, app_ver, at)
+                        VALUES (?, ?, '', ?, ?)`)
+                .run(code, fp, appVer, at);
+        }
+        db.exec('COMMIT');
+    } catch (e) {
+        try { db.exec('ROLLBACK'); } catch { /* no active transaction */ }
+        throw e;
+    }
+    return { code, expiresAt, tokenHash };
+}
+
+async function apiGooglePlayVerify(body) {
+    if (!GOOGLE_PLAY_ENABLED) return { ok: false, err: 'GOOGLE_PLAY_DISABLED' };
+    const fp = String(body.fp || '').toLowerCase();
+    const packageName = String(body.package_name || '');
+    const productId = String(body.product_id || '');
+    const purchaseToken = String(body.purchase_token || '');
+    const appVer = String(body.app_ver || '').slice(0, 80);
+    const productConfig = GOOGLE_PRODUCTS.get(productId);
+    if (!FP_RE.test(fp) || packageName !== cfg.googlePlay.packageName || !productConfig
+        || purchaseToken.length < 16 || purchaseToken.length > 4096) {
+        return { ok: false, err: 'BAD_REQUEST' };
+    }
+
+    let purchase;
+    try {
+        const client = getGooglePlayClient();
+        purchase = productConfig.kind === 'subs'
+            ? await client.verifySubscription(productId, purchaseToken)
+            : await client.verifyProduct(productId, purchaseToken);
+    } catch (e) {
+        log(`GOOGLE_PLAY_VERIFY_FAILED product=${productId} err=${e.message}`);
+        const mismatch = String(e.message).includes('PRODUCT_MISMATCH');
+        return { ok: false, err: mismatch ? 'PURCHASE_MISMATCH' : 'VERIFY_UNAVAILABLE' };
+    }
+
+    if (!purchase.purchased) {
+        const tokenHash = googleTokenHash(purchaseToken);
+        const revoke = productConfig.kind === 'inapp'
+            || String(purchase.rawState).includes('REVOKED');
+        if (revoke) revokeGooglePurchase(tokenHash, 'not_purchased', purchase.rawState);
+        else {
+            db.prepare(`UPDATE google_play_purchases
+                           SET status = 'inactive', raw_state = ?, expires_at = ?,
+                               last_verified_at = ?
+                         WHERE token_hash = ?`)
+                .run(purchase.rawState, purchase.expiresAt, now(), tokenHash);
+        }
+        return { ok: false, err: 'PURCHASE_NOT_ACTIVE' };
+    }
+
+    try {
+        const fulfilled = fulfillGooglePurchase(purchase, fp, appVer);
+        if (!purchase.acknowledged) {
+            try {
+                await getGooglePlayClient().acknowledge(purchase);
+                db.prepare(`UPDATE google_play_purchases SET acknowledged = 1
+                             WHERE token_hash = ?`).run(fulfilled.tokenHash);
+            } catch (e) {
+                // Entitlement must be granted before acknowledge. A transient acknowledge
+                // failure is retried by the next restore/RTDN call and is never reported as
+                // an unpaid purchase to the user after fulfillment already committed.
+                log(`GOOGLE_PLAY_ACK_PENDING token=${fulfilled.tokenHash.slice(0, 12)} err=${e.message}`);
+            }
+        }
+        return {
+            ok: true,
+            code: fulfilled.code,
+            product: productConfig.product,
+            token: issueToken(fulfilled.code, fp, fulfilled.expiresAt),
+            ...(fulfilled.expiresAt ? { expires_at: fulfilled.expiresAt } : {}),
+        };
+    } catch (e) {
+        log(`GOOGLE_PLAY_FULFILL_FAILED product=${productId} err=${e.message}`);
+        return {
+            ok: false,
+            err: e.message === 'GOOGLE_PURCHASE_REVOKED'
+                ? 'PURCHASE_NOT_ACTIVE' : 'FULFILL_FAILED',
+        };
+    }
+}
+
+async function apiGooglePlayRtdn(authHeader, body) {
+    if (!GOOGLE_PLAY_ENABLED) return { status: 404, ack: false };
+    const bearer = /^Bearer (.+)$/i.exec(String(authHeader || ''))?.[1];
+    try {
+        await getGooglePlayClient().pubsubIdentity(bearer);
+    } catch (e) {
+        log(`GOOGLE_PLAY_RTDN_UNAUTHORIZED err=${e.message}`);
+        return { status: 401, ack: false };
+    }
+    let event;
+    try {
+        event = JSON.parse(Buffer.from(String(body?.message?.data || ''), 'base64').toString('utf8'));
+    } catch {
+        return { status: 400, ack: false };
+    }
+    if (event.packageName !== cfg.googlePlay.packageName) return { status: 204, ack: true };
+    const notification = event.subscriptionNotification || event.oneTimeProductNotification;
+    const purchaseToken = String(notification?.purchaseToken || '');
+    const productId = String(notification?.subscriptionId || notification?.sku || '');
+    const tokenHash = googleTokenHash(purchaseToken);
+    const known = db.prepare(
+        'SELECT device_fp FROM google_play_purchases WHERE token_hash = ?'
+    ).get(tokenHash);
+    if (!known || !GOOGLE_PRODUCTS.has(productId)) return { status: 204, ack: true };
+    const result = await apiGooglePlayVerify({
+        fp: known.device_fp,
+        package_name: cfg.googlePlay.packageName,
+        product_id: productId,
+        purchase_token: purchaseToken,
+        app_ver: '',
+    });
+    // Google retries only transient verification failures. Permanent inactive/refunded
+    // states have already been persisted and should be acknowledged.
+    return result.err === 'VERIFY_UNAVAILABLE'
+        ? { status: 503, ack: false }
+        : { status: 204, ack: true };
+}
+
+async function adminGooglePlayReconcileVoided() {
+    if (!GOOGLE_PLAY_ENABLED) return { ok: false, err: 'GOOGLE_PLAY_DISABLED' };
+    const days = Math.min(30, Math.max(1, Number(cfg.googlePlay.voidedLookbackDays) || 30));
+    const start = Date.now() - days * 24 * 3600_000;
+    let pageToken = null;
+    let checked = 0;
+    let revoked = 0;
+    do {
+        const page = await getGooglePlayClient().listVoided(start, pageToken);
+        for (const item of page.voidedPurchases || []) {
+            checked++;
+            if (!item.purchaseToken) continue;
+            const tokenHash = googleTokenHash(item.purchaseToken);
+            const local = db.prepare(`SELECT product, google_order_id
+                                        FROM google_play_purchases
+                                       WHERE token_hash = ?`).get(tokenHash);
+            // Subscription renewals share a purchaseToken. A refund for an older
+            // renewal must not revoke a newer, successfully paid renewal.
+            if (local?.product === PRODUCT_ANNUAL && item.orderId && local.google_order_id
+                && item.orderId !== local.google_order_id) {
+                log(`GOOGLE_PLAY_VOIDED_OLD_RENEWAL token=${tokenHash.slice(0, 12)}`
+                    + ` voided=${item.orderId} current=${local.google_order_id}`);
+                continue;
+            }
+            if (revokeGooglePurchase(
+                tokenHash,
+                `voided:${item.voidedReason ?? 'unknown'}`,
+            )) {
+                revoked++;
+            }
+        }
+        pageToken = page.tokenPagination?.nextPageToken || null;
+    } while (pageToken);
+    return { ok: true, checked, revoked };
+}
+
 // ---------------------------------------------------------------- HTTP
 
 function readRaw(req) {
@@ -1800,6 +2151,9 @@ function createServer() {
                 if (route === 'POST /admin/update/apk') return adminDownloadUpdateApk(res, await readBody(req));
                 if (route === 'POST /admin/update/publish') return send(res, 200, adminPublishUpdate(await readBody(req)));
                 if (route === 'POST /admin/update/policy') return send(res, 200, adminSetUpdatePolicy(await readBody(req)));
+                if (route === 'POST /admin/google-play/reconcile-voided') {
+                    return send(res, 200, await adminGooglePlayReconcileVoided());
+                }
                 return send(res, 404, { ok: false, err: 'NOT_FOUND' });
             }
 
@@ -1827,6 +2181,19 @@ function createServer() {
             if (route === 'POST /v1/order/status') {
                 if (limit('poll')) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
                 return send(res, 200, await apiOrderStatus(await readBody(req)));
+            }
+            if (route === 'POST /v1/google-play/verify') {
+                if (limit('write')) return send(res, 200, { ok: false, err: 'RATE_LIMITED' });
+                return send(res, 200, await apiGooglePlayVerify(await readBody(req)));
+            }
+            if (route === 'POST /google-play/rtdn') {
+                if (limit('read')) return send(res, 429, { ok: false, err: 'RATE_LIMITED' });
+                const result = await apiGooglePlayRtdn(
+                    req.headers.authorization,
+                    await readBody(req),
+                );
+                res.writeHead(result.status);
+                return res.end();
             }
             if (route === 'POST /pay/notify') {
                 // 虎皮椒回调是表单编码；只有权益已经落库或请求本身非法时才确认。
@@ -1869,7 +2236,8 @@ if (require.main === module) {
         const paymentState = !PAY_ENABLED ? 'pay=disabled'
             : currentPricing ? `pay=xh annual=¥${currentPricing.annual.priceFen / 100}`
                 : `pay=blocked pricing=${pricingUnavailableReason || 'unavailable'}`;
-        log(`license server listening on :${cfg.port}, db=${cfg.dbPath}, ${paymentState}`);
+        log(`license server listening on :${cfg.port}, db=${cfg.dbPath}, ${paymentState},`
+            + ` google=${GOOGLE_PLAY_ENABLED ? cfg.googlePlay.packageName : 'disabled'}`);
     });
 }
 
@@ -1886,6 +2254,10 @@ module.exports = {
         apiOrderCreate,
         apiOrderStatus,
         apiPayNotify,
+        apiGooglePlayVerify,
+        apiGooglePlayRtdn,
+        adminGooglePlayReconcileVoided,
+        revokeGooglePurchase,
         isOssReleaseUrl,
         resolveReleaseDownload,
         confirmPaid,
@@ -1895,6 +2267,12 @@ module.exports = {
         parseFeeFen,
         setPaymentPost(fn) { paymentPost = fn; },
         resetPaymentPost() { paymentPost = xhPost; },
+        setGooglePlayClient(client) { googlePlayClient = client; },
+        resetGooglePlayClient() { googlePlayClient = null; },
+        setGooglePlayClientFactory(factory) {
+            googlePlayClientFactory = factory;
+            googlePlayClient = null;
+        },
         resetOrderThrottle() { orderCheckAt.clear(); },
         constants: {
             PENDING_REUSE_MS,

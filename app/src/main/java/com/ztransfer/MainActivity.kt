@@ -36,8 +36,8 @@ import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.ZTransferTheme
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.protocol.CameraConnectionType
-import com.ztransfer.update.AppUpdateHost
-import com.ztransfer.update.AppUpdateManager
+import com.ztransfer.distribution.DistributionUpdateHost
+import com.ztransfer.distribution.DistributionUpdates
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
         // 恢复授权状态（本地验签，毫秒级）并在后台触发静默续签（≥7 天且有网时）。
         com.ztransfer.license.LicenseManager.init(applicationContext)
         // 每 6 小时至多检查一次；软更新每日最多提示一次，硬更新始终阻止继续使用。
-        AppUpdateManager.init(applicationContext)
+        DistributionUpdates.init(applicationContext)
         enableEdgeToEdge()   // 内容延伸到系统栏后面，各屏自行处理 inset
         requestNotificationPermissionIfNeeded()
         setContent {
@@ -220,7 +220,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                 }
             }
         }
-        AppUpdateHost(
+        DistributionUpdateHost(
             cameraUsesWifi = cameraState.connectionType == CameraConnectionType.WIFI
         )
     }

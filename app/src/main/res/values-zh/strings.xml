@@ -306,4 +306,7 @@
     <string name="update_manual_copied">请手动更新，已复制到剪贴板</string>
     <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">打开下载页</string>
+    <string name="privacy_policy">隐私政策</string>
+    <string name="privacy_open_failed">无法打开隐私政策</string>
+    <string name="store_purchase_cta">前往 Google Play</string>
 </resources>

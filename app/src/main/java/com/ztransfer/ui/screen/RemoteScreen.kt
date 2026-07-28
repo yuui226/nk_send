@@ -2030,7 +2030,7 @@ private fun RemoteContent(
             val toolGap = 6.dp
             val overlayTools: List<@Composable () -> Unit> = buildList {
                 if (devUnlocked) {
-                    add(@Composable {
+                    add {
                         TopIconToggle(
                             active = false,
                             contentDescription = stringResource(R.string.cd_dev_panel),
@@ -2042,9 +2042,9 @@ private fun RemoteContent(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                    })
+                    }
                 }
-                add(@Composable {
+                add {
                     TopIconToggle(
                         active = hdLiveView,
                         contentDescription = stringResource(R.string.dev_hd_liveview),
@@ -2053,22 +2053,22 @@ private fun RemoteContent(
                             startSession(hdLiveView)
                         }
                     ) { HdMark() }
-                })
-                add(@Composable {
+                }
+                add {
                     TopIconToggle(
                         active = showFps,
                         contentDescription = stringResource(R.string.dev_fps_overlay),
                         onClick = { toggleFpsControl() }
                     ) { FpsMark() }
-                })
-                add(@Composable {
+                }
+                add {
                     TopIconToggle(
                         active = showHistogram,
                         contentDescription = stringResource(R.string.cd_remote_histogram),
                         onClick = { showHistogram = !showHistogram }
                     ) { HistogramMark(Modifier.size(19.dp)) }
-                })
-                add(@Composable {
+                }
+                add {
                     TopIconToggle(
                         active = framingGrid != ViewfinderGrid.OFF,
                         contentDescription = stringResource(R.string.cd_remote_grid),
@@ -2076,22 +2076,22 @@ private fun RemoteContent(
                     ) {
                         GridMark(Modifier.size(18.dp))
                     }
-                })
-                add(@Composable {
+                }
+                add {
                     TopIconToggle(
                         active = showZebra,
                         contentDescription = stringResource(R.string.cd_remote_zebra),
                         onClick = { showZebra = !showZebra }
                     ) { ZebraMark(Modifier.size(18.dp)) }
-                })
-                add(@Composable {
+                }
+                add {
                     TopIconToggle(
                         active = showLevel,
                         contentDescription = stringResource(R.string.cd_remote_level),
                         onClick = { showLevel = !showLevel }
                     ) { LevelMark(Modifier.size(18.dp)) }
-                })
-                add(@Composable {
+                }
+                add {
                     RecControlBar(
                         isRecording = viewfinderRecorder != null,
                         isPaused = recPaused,
@@ -2104,7 +2104,7 @@ private fun RemoteContent(
                         isFinalizing = recFinalizing,
                         showDone = recSaveSuccess
                     )
-                })
+                }
             }
             // 所有按钮按真实固有宽度顺序折行；窄屏/大字体下宁可增加一行，
             // 也绝不压窄按钮或让文字换行。
@@ -2337,7 +2337,10 @@ private fun RemoteContent(
                             Spacer(Modifier.height(toolRowGap))
                             AdaptiveRemoteToolBar(
                                 modifier = Modifier
-                                    .fillMaxWidth()
+                                    // 横屏左侧控制列可能比实际取景器更宽；工具栏必须跟随
+                                    // 取景器的真实宽度居中，右端才会准确落在画面右边界。
+                                    .width(normalImageWidth)
+                                    .align(Alignment.CenterHorizontally)
                                     .onSizeChanged {
                                         if (landscapeToolBarHeightPx != it.height) {
                                             landscapeToolBarHeightPx = it.height
@@ -3712,9 +3715,9 @@ private fun AdaptiveRemoteToolBar(
         val pinnedWidth = pinnedIndices.sumOf { placeables[it].width } +
             gapPx * (pinnedIndices.size - 1).coerceAtLeast(0)
 
-        // 第一行先为尾部固定项预留真实宽度，因此全屏和旋转永远处在第一行按钮组的
-        // 最右端。这里是“紧跟普通工具后的行内尾部”，不是用空白把按钮撑到屏幕右缘。
-        // 普通工具只使用剩余空间，放不下就整颗移到后续行。
+        // 第一行先为尾部固定项预留真实宽度；普通工具只使用左侧剩余空间，
+        // 放不下就整颗移到后续行。尾部固定项最终锚定在整个工具栏右边界——
+        // 该工具栏在横竖屏中都与取景器同宽，所以基准始终是监看画面的最右侧。
         val firstRowCapacity = if (pinnedIndices.isEmpty()) {
             maxWidth
         } else {
@@ -3769,7 +3772,7 @@ private fun AdaptiveRemoteToolBar(
                     x += placeable.width + gapPx
                 }
                 if (rowIndex == 0 && pinnedIndices.isNotEmpty()) {
-                    var pinnedX = if (row.isEmpty()) 0 else x
+                    var pinnedX = (maxWidth - pinnedWidth).coerceAtLeast(0)
                     pinnedIndices.forEach { index ->
                         val placeable = placeables[index]
                         placeable.placeRelative(

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="play_purchase_lifetime_title">Lifetime Pro</string>
+    <string name="play_purchase_annual_title">Annual Pro</string>
+    <string name="play_purchase_loading">Loading Google Play price…</string>
+    <string name="play_purchase_one_time_price">%1$s · one-time purchase</string>
+    <string name="play_purchase_subscription_price">%1$s · annual subscription</string>
+    <string name="play_purchase_google_managed">Payment, cancellation and refunds are managed securely by Google Play.</string>
+    <string name="play_purchase_buy_button">Buy with Google Play</string>
+    <string name="play_purchase_restore">Restore</string>
+    <string name="play_purchase_retry">Retry</string>
+    <string name="play_purchase_close">Close</string>
+    <string name="play_purchase_completed">Pro unlocked.</string>
+    <string name="play_purchase_restored">Your Google Play purchase was restored.</string>
+    <string name="play_purchase_pending">Payment is pending in Google Play. Pro will unlock after payment completes.</string>
+    <string name="play_purchase_cancelled">Purchase cancelled. You were not charged.</string>
+    <string name="play_purchase_none">No active Google Play purchase was found for this account.</string>
+    <string name="play_purchase_not_configured">This product has not been made available in Google Play yet.</string>
+    <string name="play_purchase_not_available">This product is not available for this Google Play account.</string>
+    <string name="play_purchase_network_error">Couldn’t verify the purchase. It remains safe in Google Play; reconnect and tap Restore.</string>
+    <string name="play_purchase_server_not_ready">Google Play purchase verification is not configured on the server yet.</string>
+    <string name="play_purchase_error">Google Play purchase failed: %1$s</string>
+</resources>
