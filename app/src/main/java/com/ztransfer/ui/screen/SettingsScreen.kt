@@ -50,10 +50,12 @@ import androidx.compose.ui.unit.dp
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.viewmodel.photoFrameBrandingVisible
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -312,6 +314,81 @@ fun SettingsOverlay(
                         checked = state.collapseBurstPhotos,
                         onCheckedChange = { viewModel.setCollapseBurstPhotos(it) }
                     )
+                }
+
+                CardDivider()
+
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        SectionLabel(
+                            stringResource(R.string.photo_frame_watermark),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Switch(
+                            checked = state.photoFrameEnabled,
+                            onCheckedChange = { viewModel.setPhotoFrameEnabled(it) }
+                        )
+                    }
+                    AnimatedVisibility(
+                        visible = state.photoFrameEnabled,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(top = 10.dp)
+                        ) {
+                            PhotoFramePreset.entries.chunked(2).forEachIndexed { rowIndex, presets ->
+                                if (rowIndex > 0) Spacer(Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    presets.forEach { preset ->
+                                        val label = stringResource(
+                                            when (preset) {
+                                                PhotoFramePreset.MIST -> R.string.photo_frame_mist
+                                                PhotoFramePreset.CINEMA -> R.string.photo_frame_cinema
+                                                PhotoFramePreset.MINIMAL -> R.string.photo_frame_minimal
+                                                PhotoFramePreset.FROSTED -> R.string.photo_frame_frosted
+                                            }
+                                        )
+                                        SelectionChip(
+                                            label = label,
+                                            selected = state.photoFramePreset == preset,
+                                            onClick = { viewModel.setPhotoFramePreset(preset) },
+                                            compact = true,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 10.dp)
+                            ) {
+                                SectionLabel(
+                                    stringResource(R.string.photo_frame_branding),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (!isPro) {
+                                    Text(
+                                        stringResource(R.string.photo_frame_branding_pro_hint),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    )
+                                }
+                                Switch(
+                                    checked = photoFrameBrandingVisible(
+                                        isPro = isPro,
+                                        preferenceEnabled = state.photoFrameBrandingEnabled,
+                                    ),
+                                    enabled = isPro,
+                                    onCheckedChange = viewModel::setPhotoFrameBrandingEnabled
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

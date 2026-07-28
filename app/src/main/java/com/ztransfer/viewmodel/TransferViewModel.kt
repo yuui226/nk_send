@@ -10,6 +10,13 @@ import androidx.lifecycle.viewModelScope
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.frame.PhotoFrameDestination
+import com.ztransfer.frame.PhotoFrameExporter
+import com.ztransfer.frame.PhotoFramePreset
+import com.ztransfer.frame.PHOTO_FRAME_OUTPUT_DIRECTORY
+import com.ztransfer.frame.PHOTO_FRAME_PART_PREFIX
+import com.ztransfer.frame.isCurrentPhotoFrameTempName
+import com.ztransfer.frame.isPhotoFrameOutputName
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
@@ -22,12 +29,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 enum class TransferStatus {
     WAITING, TRANSFERING, COMPLETED, FAILED, CANCELLED
@@ -44,7 +55,9 @@ data class TransferTask(
     // 单文件下载速度（MB/s），完成后填入，显示在卡片上。
     val downloadMBps: Float = 0f,
     // 本次传输耗时（毫秒），完成后填入并显示在卡片上；跳过/未传的为 null。
-    val elapsedMs: Long? = null
+    val elapsedMs: Long? = null,
+    // 原片已成功落盘后的派生步骤；失败不改变 COMPLETED，原片始终保留。
+    val isGeneratingFrame: Boolean = false,
 )
 
 data class TransferState(
@@ -78,6 +91,12 @@ data class TransferState(
     val filterUntransferredOnly: Boolean = false,
     // 预览大图的全局逆时针旋转方向（0..3 个 90°）。跨照片、跨会话持久化。
     val previewRotationQuarterTurns: Int = 0,
+    // 开启后：JPG 原片传输落盘成功，再由该原片派生一张带边框的分享图。
+    val photoFrameEnabled: Boolean = false,
+    // 已传输 JPG 生成分享边框图时采用的默认预设。渲染只另存新文件，不覆盖原片。
+    val photoFramePreset: PhotoFramePreset = PhotoFramePreset.MIST,
+    // 右下角 ZTransfer 品牌标记。免费版渲染时强制开启；高级版可关闭并记住选择。
+    val photoFrameBrandingEnabled: Boolean = true,
     // 监看页是否使用应用内横屏全屏布局。跨进页、跨应用重启持久化。
     val remoteRotation: Int = 0,  // 0=竖屏, 1=横90°, 2=横270°
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
@@ -85,13 +104,30 @@ data class TransferState(
     val appLanguage: String = AppLocale.SYSTEM
 )
 
-/** 队列剩余待处理数量（正在传 + 等待传）。供顶栏药丸等复用。 */
+/** 队列剩余待处理数量（正在传、等待传或正在生成派生图）。供顶栏药丸等复用。 */
 val TransferState.remainingCount: Int
-    get() = tasks.count { it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING }
+    get() = tasks.count {
+        it.status == TransferStatus.WAITING ||
+            it.status == TransferStatus.TRANSFERING ||
+            it.isGeneratingFrame
+    }
 
-/** 当前正在传输文件的进度（0..1）；没有正在传的返回 0。供顶栏药丸复用传输页的单文件进度语义。 */
+/**
+ * 当前处理项的进度（0..1）。派生图没有廉价而准确的分段进度，原片已完整落盘后保持满格，
+ * 直到派生完成；这样顶栏不会在最后一步从 100% 倒退到 0%。
+ */
 val TransferState.currentFileProgress: Float
-    get() = tasks.firstOrNull { it.status == TransferStatus.TRANSFERING }?.progress ?: 0f
+    get() = tasks.firstOrNull { it.status == TransferStatus.TRANSFERING }?.progress
+        ?: if (tasks.any { it.isGeneratingFrame }) 1f else 0f
+
+/** 免费版始终显示品牌；高级版遵从用户开关。渲染层和设置 UI 共用，避免授权规则分叉。 */
+internal fun photoFrameBrandingVisible(isPro: Boolean, preferenceEnabled: Boolean): Boolean =
+    !isPro || preferenceEnabled
+
+/** 只允许 JPG/JPEG 派生分享图；视频、RAW 和未知类型始终保持原样传输。 */
+internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Boolean =
+    enabled && (extension.equals(".jpg", ignoreCase = true) ||
+        extension.equals(".jpeg", ignoreCase = true))
 
 class TransferViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(TransferState())
@@ -100,6 +136,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private var transferJob: Job? = null
     private val prefs = application.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
     private val contentResolver = application.contentResolver
+    /**
+     * 边框渲染使用独立、低优先级、单并发线程：与下一张相机传输并行，但不会同时展开
+     * 多张 3200px 位图争抢内存。相机网络/USB 传输仍留在原来的高优先级通道。
+     */
+    private val photoFrameDispatcher = Executors.newSingleThreadExecutor { task ->
+        Thread(
+            {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                task.run()
+            },
+            "photo-frame-export",
+        )
+    }.asCoroutineDispatcher()
+    private val activePhotoFrameExports = AtomicInteger(0)
+    // 第一张边框图才创建/扫描专用子目录；同一根目录后续任务复用，避免逐张遍历文件夹。
+    private val photoFrameDestinations =
+        ConcurrentHashMap<String, PhotoFrameDestination>()
 
     /** 用户可见文案（错误信息等）统一走字符串资源；经 AppLocale.wrap 与应用内语言一致。 */
     private fun str(resId: Int, vararg args: Any?): String =
@@ -174,6 +227,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 previewRotationQuarterTurns = Math.floorMod(
                     prefs.getInt("preview_rotation_quarter_turns", 0), 4
                 ),
+                photoFrameEnabled = prefs.getBoolean("photo_frame_enabled", false),
+                photoFramePreset = runCatching {
+                    PhotoFramePreset.valueOf(
+                        prefs.getString("photo_frame_preset", PhotoFramePreset.MIST.name)
+                            ?: PhotoFramePreset.MIST.name
+                    )
+                }.getOrDefault(PhotoFramePreset.MIST),
+                photoFrameBrandingEnabled =
+                    prefs.getBoolean("photo_frame_branding_enabled", true),
                 remoteRotation = prefs.getInt("remote_rotation", 0),
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
@@ -222,6 +284,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val normalized = Math.floorMod(turns, 4)
         prefs.edit().putInt("preview_rotation_quarter_turns", normalized).apply()
         _state.update { it.copy(previewRotationQuarterTurns = normalized) }
+    }
+
+    fun setPhotoFramePreset(preset: PhotoFramePreset) {
+        prefs.edit().putString("photo_frame_preset", preset.name).apply()
+        _state.update { it.copy(photoFramePreset = preset) }
+    }
+
+    fun setPhotoFrameEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("photo_frame_enabled", enabled).apply()
+        _state.update { it.copy(photoFrameEnabled = enabled) }
+    }
+
+    fun setPhotoFrameBrandingEnabled(enabled: Boolean) {
+        // 免费版不能关闭。即使 UI 发生竞态或未来增加其它入口，业务层仍是最终防线。
+        if (!enabled && !LicenseManager.isPro.value) return
+        prefs.edit().putBoolean("photo_frame_branding_enabled", enabled).apply()
+        _state.update { it.copy(photoFrameBrandingEnabled = enabled) }
     }
 
     /** 保存监看页的应用内横屏状态；不改变 Android Activity 的系统方向。 */
@@ -275,7 +354,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             val (existing, _) = sweepAndListExisting(uri, deleteParts)
             val normalized = HashMap<String, MutableSet<Long>>()
             existing.forEach { (name, size) ->
-                normalized.getOrPut(baseName(name)) { HashSet() }.add(size)
+                // 派生图只参与边框输出的文件名防冲突，不参与“相机原片已传”状态。
+                // 否则每传一张 JPG 都会让 Compose 持有的索引多一项，目录越大越浪费。
+                if (
+                    !isPhotoFrameOutputName(name) &&
+                    !name.equals(PHOTO_FRAME_OUTPUT_DIRECTORY, ignoreCase = true)
+                ) {
+                    normalized.getOrPut(baseName(name)) { HashSet() }.add(size)
+                }
             }
             _state.update { state ->
                 if (state.transferDirUri == uri.toString()) {
@@ -625,6 +711,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     existing[savedName] = stats.bytes
                                     existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(stats.bytes)
                                     recordExistingExport(uri, savedName, stats.bytes)
+                                    val frameSettings = _state.value
+                                    val shouldGenerateFrame = shouldGeneratePhotoFrame(
+                                        enabled = frameSettings.photoFrameEnabled,
+                                        extension = task.file.extension,
+                                    )
                                     // 起点由协议层在取得相机 IO 独占权后记录；这里仍是正式文件
                                     // 已落盘并完成改名/复制后的完成点。
                                     val elapsed = android.os.SystemClock.elapsedRealtime() -
@@ -637,7 +728,22 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             status = TransferStatus.COMPLETED, progress = 1f,
                                             downloaded = stats.bytes, speed = 0,
                                             downloadMBps = stats.mbps,
-                                            elapsedMs = elapsed
+                                            elapsedMs = elapsed,
+                                            isGeneratingFrame = shouldGenerateFrame,
+                                        )
+                                    }
+                                    if (shouldGenerateFrame) {
+                                        // 派生严格发生在正式原片落盘之后。导出器只读取原片并创建
+                                        // 新文件；独立低优先级线程立即接管，传输循环直接处理下一张。
+                                        // 无论解码/写入是否失败，都不回滚、不删除原片。
+                                        launchPhotoFrameExport(
+                                            handle = handle,
+                                            treeUri = uri,
+                                            sourceUri = renamedUri,
+                                            sourceName = savedName,
+                                            preset = frameSettings.photoFramePreset,
+                                            brandingRequested =
+                                                frameSettings.photoFrameBrandingEnabled,
                                         )
                                     }
                                 } else {
@@ -694,7 +800,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 // 状态（旧队列收尾期间新队列可能已启动并接管 transferJob）。
                 if (transferJob === self) {
                     _state.update { it.copy(isTransferring = false, currentSpeed = 0) }
-                    TransferService.stop(getApplication())
+                    stopTransferServiceIfIdle()
                 }
             }
         }
@@ -703,6 +809,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     /**
      * 单次遍历目标目录：
      * 1) 当 [deleteParts]=true 时删除遗留的半成品（[PART_PREFIX] 开头的临时文件，上次崩溃/被杀留下）；
+     *    同时删除旧进程遗留的边框临时文件；当前进程会话的边框任务始终保留；
      * 2) 返回完整文件的 显示名->大小（字节，未知记 -1），用于"已存在则跳过"；
      * 3) 收集半成品文件信息到 parts 映射（原文件名 -> PartInfo），用于断点续传。
      * 合并清扫与列举，避免两次全目录扫描；正常完成的文件已改真名，不会被误删。
@@ -736,7 +843,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 if (nameIdx >= 0) {
                     while (c.moveToNext()) {
                         val name = c.getString(nameIdx) ?: continue
-                        if (name.startsWith(PART_PREFIX)) {
+                        if (name.startsWith(PHOTO_FRAME_PART_PREFIX)) {
+                            // 边框派生临时文件不可续传：App 启动时清理；队列运行期间
+                            // 只忽略不删除，避免新队列扫描误删仍在后台写入的旧队列任务。
+                            if (
+                                deleteParts &&
+                                !isCurrentPhotoFrameTempName(name) &&
+                                idIdx >= 0
+                            ) {
+                                val docId = c.getString(idIdx) ?: continue
+                                runCatching {
+                                    DocumentsContract.deleteDocument(
+                                        contentResolver,
+                                        DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
+                                    )
+                                }
+                            }
+                        } else if (name.startsWith(PART_PREFIX)) {
                             if (deleteParts && idIdx >= 0) {
                                 val docId = c.getString(idIdx) ?: continue
                                 try {
@@ -863,6 +986,78 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         return if (dot <= 0) "$name ($n)" else "${name.substring(0, dot)} ($n)${name.substring(dot)}"
     }
 
+    /**
+     * 把原片派生移出相机传输协程。单线程调度器保证位图内存峰值可控，低线程优先级让
+     * 相机 IO 优先；任务数单独计数，使最后一张边框完成前前台服务不会被提前停止。
+     */
+    private fun launchPhotoFrameExport(
+        handle: Int,
+        treeUri: Uri,
+        sourceUri: Uri,
+        sourceName: String,
+        preset: PhotoFramePreset,
+        brandingRequested: Boolean,
+    ) {
+        activePhotoFrameExports.incrementAndGet()
+        val job = viewModelScope.launch(photoFrameDispatcher) {
+            val destinationKey = treeUri.toString()
+            val exportResult = try {
+                val destination = photoFrameDestinations[destinationKey]
+                    ?: PhotoFrameExporter.prepareDestination(
+                        resolver = contentResolver,
+                        treeUri = treeUri,
+                    ).let { prepared ->
+                        photoFrameDestinations.putIfAbsent(destinationKey, prepared) ?: prepared
+                    }
+                PhotoFrameExporter.export(
+                    resolver = contentResolver,
+                    destination = destination,
+                    sourceUri = sourceUri,
+                    sourceName = sourceName,
+                    preset = preset,
+                    // 在真正轮到渲染时重新判定授权：排队期间若高级版到期，免费版水印
+                    // 立即恢复；不能只依赖入队瞬间的 UI 状态。
+                    showBranding = photoFrameBrandingVisible(
+                        isPro = LicenseManager.isPro.value,
+                        preferenceEnabled = brandingRequested,
+                    ),
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Result.failure(error)
+            }
+            exportResult.fold(
+                onSuccess = { framed ->
+                    log { "FRAME_SAVE: $sourceName -> ${framed.displayName}" }
+                },
+                onFailure = { error ->
+                    // 子目录若被用户在运行期间删除，下一个任务重新查找/创建。
+                    photoFrameDestinations.remove(destinationKey)
+                    log {
+                        "FRAME_FAILED: $sourceName " +
+                            "${error.javaClass.simpleName}: ${error.message}"
+                    }
+                },
+            )
+        }
+        // invokeOnCompletion 即使任务排队期间就被取消也必定执行，计数和 UI 不会泄漏。
+        job.invokeOnCompletion {
+            updateTask(handle) { task ->
+                if (task.isGeneratingFrame) task.copy(isGeneratingFrame = false) else task
+            }
+            if (activePhotoFrameExports.decrementAndGet() == 0) {
+                stopTransferServiceIfIdle()
+            }
+        }
+    }
+
+    private fun stopTransferServiceIfIdle() {
+        if (!_state.value.isTransferring && activePhotoFrameExports.get() == 0) {
+            TransferService.stop(getApplication())
+        }
+    }
+
     /** 按 handle 就地更新任务；handle 不存在时保持列表不变。用 update 保证跨线程原子读改写。 */
     private fun updateTask(handle: Int, transform: (TransferTask) -> TransferTask) {
         _state.update { state ->
@@ -920,13 +1115,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      * 清空收尾：一次性移除所有已终结的任务（CANCELLED/COMPLETED/FAILED）。
      * "清空队列"的兜底——LazyColumn 只组合可见卡片，屏幕外的卡没有条目协程替它做
      * "动画后移除"，由本方法在可见卡片收合动画播完后统一清掉。
-     * 与 [removeTask] 同规则：TRANSFERING/WAITING 一律保留。
+     * 与 [removeTask] 同规则：TRANSFERING/WAITING/正在生成派生图的一律保留。
      */
     fun removeCleared() {
         _state.update { state ->
             state.copy(
                 tasks = state.tasks.filter {
-                    it.status == TransferStatus.TRANSFERING || it.status == TransferStatus.WAITING
+                    it.status == TransferStatus.TRANSFERING ||
+                        it.status == TransferStatus.WAITING ||
+                        it.isGeneratingFrame
                 }
             )
         }
@@ -935,7 +1132,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     /**
      * 把任务卡片从队列移除（移除动画结束后调用），返回是否真的移除了。
      * 拒绝移除 TRANSFERING（正在传输）与 WAITING（动画期间被"重试"重置回等待，
-     * 说明用户想要它了）——两种竞态下调用方把卡片弹回原高即可。
+     * 说明用户想要它了），以及正在生成派生图的任务——竞态下调用方把卡片弹回原高即可。
      * 合法移除路径上任务必为 CANCELLED/COMPLETED/FAILED（等待中的在标记时已 withdraw）。
      */
     fun removeTask(handle: Int): Boolean {
@@ -944,7 +1141,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             val kept = state.tasks.filterNot {
                 it.file.handle == handle &&
                         it.status != TransferStatus.TRANSFERING &&
-                        it.status != TransferStatus.WAITING
+                        it.status != TransferStatus.WAITING &&
+                        !it.isGeneratingFrame
             }
             removed = kept.size != state.tasks.size
             state.copy(tasks = kept)
@@ -979,6 +1177,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         transferJob?.cancel()
+        photoFrameDispatcher.close()
         // 兜底停止前台服务，防止 VM 销毁后通知残留。
         TransferService.stop(getApplication())
     }

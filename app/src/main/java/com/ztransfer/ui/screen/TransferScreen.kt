@@ -104,7 +104,9 @@ fun TransferScreen(
     }
     // 清空队列只作用于"不在传输中"的任务（正在传的文件会传完，中途打断会让相机关 Wi-Fi）：
     // 有可清的卡片才显示扫帚 FAB；确认后卡片集体收合退场、FAB 随之消失。
-    val hasClearable = transferState.tasks.any { it.status != TransferStatus.TRANSFERING }
+    val hasClearable = transferState.tasks.any {
+        it.status != TransferStatus.TRANSFERING && !it.isGeneratingFrame
+    }
 
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -286,8 +288,8 @@ fun TransferScreen(
                                             }
                                             (if (task.speed > 0) "$base · ${formatSpeed(task.speed)}" else base) to colors.accentBlue
                                         }
-                                        TransferStatus.COMPLETED ->
-                                            (when {
+                                        TransferStatus.COMPLETED -> {
+                                            val completedText = when {
                                                 task.skipped -> stringResource(R.string.status_skipped)
                                                 // 大小 · 速度 · 耗时：一眼看出快慢与用时。大小取真实落盘字节数
                                                 //（>4GB 对象的 file.size 只是哨兵值）；耗时完成后填入。
@@ -296,7 +298,9 @@ fun TransferScreen(
                                                     if (task.downloadMBps > 0f) append(" · %.1f MB/s".format(task.downloadMBps))
                                                     task.elapsedMs?.let { append(" · ${formatDuration(it)}") }
                                                 }
-                                            }) to colors.statusConnected
+                                            }
+                                            completedText to colors.statusConnected
+                                        }
                                         TransferStatus.FAILED -> (task.error ?: stringResource(R.string.transfer_failed)) to colors.statusError
                                         TransferStatus.CANCELLED -> stringResource(R.string.status_cancelled) to colors.onSurfaceVariant
                                     }
@@ -341,7 +345,9 @@ fun TransferScreen(
                                 // 最尾：毛玻璃移除按钮——把本卡从队列移除。正在传输的
                                 // 不可移除（中途打断会让相机关 Wi-Fi），传完变可移除时淡入。
                                 AnimatedVisibility(
-                                    visible = task.status != TransferStatus.TRANSFERING,
+                                    visible =
+                                        task.status != TransferStatus.TRANSFERING &&
+                                            !task.isGeneratingFrame,
                                     // 水平展开/收起：出现消失时行内其它内容平滑让位，不硬跳。
                                     enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
                                     exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start)
@@ -546,7 +552,7 @@ fun TransferScreen(
                         // 再给所有非传输中卡片打移除标记——可见卡片集体播放收合动画。
                         transferViewModel.withdrawPending()
                         transferState.tasks.forEach {
-                            if (it.status != TransferStatus.TRANSFERING) {
+                            if (it.status != TransferStatus.TRANSFERING && !it.isGeneratingFrame) {
                                 removingHandles[it.file.handle] = Unit
                             }
                         }

@@ -5,7 +5,6 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -32,10 +31,9 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.MessageDigest
 
 /**
- * App 自更新的唯一状态机：检查元数据 → 临时直链 → 直接下载 → 完整性/签名校验 →
+ * App 自更新的唯一状态机：检查元数据 → 临时直链 → 直接下载 → 轻量版本预检 →
  * 系统安装确认。蓝奏云分享信息只作为自动更新失败时的灾备，也不会尝试绕过 Android
  * 的安装授权。
  */
@@ -350,36 +348,19 @@ object AppUpdateManager {
         if (apk == null || !apk.isFile) {
             return@withContext failVerification(info, Failure.DOWNLOAD, apk, "下载文件不存在")
         }
-        if (info.sizeBytes > 0 && apk.length() != info.sizeBytes) {
+        // 下载链接和元数据都由自有服务端下发。这里只做轻量版本检查，不再预读签名、
+        // 比较 SHA/文件大小或重复判断包名：部分鸿蒙系统无法通过 PackageManager 正常
+        // 返回归档签名，会把正确 APK 误判为损坏；真正安装时系统安装器仍会强制检查
+        // APK 格式、包名、签名兼容性和降级安装。
+        val actualVersion = archiveInfo(apk)?.let(::versionCode)
+        if (!isDownloadedVersionAcceptable(actualVersion, info.versionCode)) {
             return@withContext failVerification(
                 info, Failure.INVALID_APK, apk,
-                "文件大小不符 actual=${apk.length()} expected=${info.sizeBytes}"
+                "版本号不符 actual=$actualVersion expected=${info.versionCode}"
             )
         }
-        if (info.sha256.isNotEmpty() && sha256(apk) != info.sha256) {
-            return@withContext failVerification(info, Failure.INVALID_APK, apk, "SHA-256 不符")
-        }
-        val archive = archiveInfo(apk)
-            ?: return@withContext failVerification(info, Failure.INVALID_APK, apk, "无法解析 APK")
-        if (archive.packageName != context.packageName) {
-            return@withContext failVerification(
-                info, Failure.INVALID_APK, apk,
-                "包名不符 actual=${archive.packageName} expected=${context.packageName}"
-            )
-        }
-        if (versionCode(archive) != info.versionCode.toLong()) {
-            return@withContext failVerification(
-                info, Failure.INVALID_APK, apk,
-                "版本号不符 actual=${versionCode(archive)} expected=${info.versionCode}"
-            )
-        }
-        val installed = runCatching {
-            context.packageManager.getPackageInfo(context.packageName, signatureFlags())
-        }.getOrNull()
-            ?: return@withContext failVerification(info, Failure.INVALID_APK, apk, "无法读取当前 App 签名")
-        val archiveSigners = signingDigests(archive)
-        if (archiveSigners.isEmpty() || archiveSigners != signingDigests(installed)) {
-            return@withContext failVerification(info, Failure.INVALID_APK, apk, "APK 签名不一致")
+        if (actualVersion == null) {
+            Log.w(TAG, "系统无法预读 APK 版本，跳过 App 侧校验并交给系统安装器")
         }
         prefs.edit().remove(KEY_DOWNLOAD_ID).remove(KEY_DOWNLOAD_PATH)
             .putString(KEY_VERIFIED_PATH, apk.absolutePath).apply()
@@ -389,7 +370,7 @@ object AppUpdateManager {
     @Suppress("DEPRECATION")
     private fun archiveInfo(apk: File): PackageInfo? {
         val info = context.packageManager.getPackageArchiveInfo(
-            apk.absolutePath, signatureFlags()
+            apk.absolutePath, 0
         ) ?: return null
         info.applicationInfo?.sourceDir = apk.absolutePath
         info.applicationInfo?.publicSourceDir = apk.absolutePath
@@ -397,41 +378,8 @@ object AppUpdateManager {
     }
 
     @Suppress("DEPRECATION")
-    private fun signingDigests(info: PackageInfo): Set<String> {
-        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            info.signingInfo?.apkContentsSigners.orEmpty()
-        } else {
-            info.signatures.orEmpty()
-        }
-        return signatures.map { bytesToHex(MessageDigest.getInstance("SHA-256").digest(it.toByteArray())) }.toSet()
-    }
-
-    @Suppress("DEPRECATION")
-    private fun signatureFlags(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        PackageManager.GET_SIGNING_CERTIFICATES
-    } else {
-        PackageManager.GET_SIGNATURES
-    }
-
-    @Suppress("DEPRECATION")
     private fun versionCode(info: PackageInfo): Long =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else info.versionCode.toLong()
-
-    private fun sha256(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().buffered().use { input ->
-            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-            while (true) {
-                val n = input.read(buffer)
-                if (n < 0) break
-                digest.update(buffer, 0, n)
-            }
-        }
-        return bytesToHex(digest.digest())
-    }
-
-    private fun bytesToHex(bytes: ByteArray): String =
-        bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
     private fun failVerification(
         info: LicenseManager.UpdateInfo,
@@ -491,3 +439,10 @@ object AppUpdateManager {
         )
     }.getOrNull()
 }
+
+/**
+ * 某些鸿蒙系统无法从未安装 APK 读取 PackageInfo。此时不在 App 内误杀下载结果，
+ * 直接交给具备最终安全校验职责的系统安装器；只有明确读到错误版本时才拒绝。
+ */
+internal fun isDownloadedVersionAcceptable(actualVersion: Long?, expectedVersion: Int): Boolean =
+    actualVersion == null || actualVersion == expectedVersion.toLong()

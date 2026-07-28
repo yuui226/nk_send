@@ -94,6 +94,13 @@
     <!-- Photo preview -->
     <string name="no_preview">No preview</string>
     <string name="video_no_preview">Video · preview not supported</string>
+    <string name="photo_frame_watermark">Frame watermark</string>
+    <string name="photo_frame_mist">Mist</string>
+    <string name="photo_frame_cinema">Cinema</string>
+    <string name="photo_frame_minimal">Minimal</string>
+    <string name="photo_frame_frosted">Frosted</string>
+    <string name="photo_frame_branding">ZTransfer watermark</string>
+    <string name="photo_frame_branding_pro_hint">Pro can turn off</string>
 
     <!-- Transfer errors -->
     <string name="error_dir_invalid">Transfer folder is no longer valid. Please choose it again</string>
@@ -303,7 +310,7 @@
     <string name="update_later">Later</string>
     <string name="update_error_resolve">Couldn\'t get download link</string>
     <string name="update_error_download">Download failed</string>
-    <string name="update_error_invalid_apk">Update verification failed. File deleted.</string>
+    <string name="update_error_invalid_apk">Update version mismatch. File deleted.</string>
     <string name="update_error_installer">Couldn\'t open installer</string>
     <string name="update_manual_copied">Update manually. Copied to clipboard</string>
     <string name="update_failure_manual">%1$s. %2$s</string>

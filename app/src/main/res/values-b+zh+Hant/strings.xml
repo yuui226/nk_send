@@ -94,6 +94,13 @@
     <!-- 照片預覽 -->
     <string name="no_preview">無預覽</string>
     <string name="video_no_preview">影片 · 暫不支援預覽</string>
+    <string name="photo_frame_watermark">邊框浮水印</string>
+    <string name="photo_frame_mist">霧白</string>
+    <string name="photo_frame_cinema">暗夜</string>
+    <string name="photo_frame_minimal">簡白</string>
+    <string name="photo_frame_frosted">毛玻璃</string>
+    <string name="photo_frame_branding">ZTransfer 浮水印</string>
+    <string name="photo_frame_branding_pro_hint">高級版可關閉</string>
 
     <!-- 傳輸錯誤 -->
     <string name="error_dir_invalid">傳輸目錄已失效，請重新選擇</string>
@@ -301,7 +308,7 @@
     <string name="update_later">稍後</string>
     <string name="update_error_resolve">取得下載連結失敗</string>
     <string name="update_error_download">下載失敗</string>
-    <string name="update_error_invalid_apk">安裝套件驗證失敗，已刪除</string>
+    <string name="update_error_invalid_apk">安裝套件版本不相符，已刪除</string>
     <string name="update_error_installer">無法開啟安裝程式</string>
     <string name="update_manual_copied">請手動更新，已複製到剪貼簿</string>
     <string name="update_failure_manual">%1$s，%2$s</string>

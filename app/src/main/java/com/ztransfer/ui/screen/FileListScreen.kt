@@ -1126,7 +1126,9 @@ fun QueuePill(
     val remaining = (transferState.remainingCount - heldCount).coerceAtLeast(0)
     val allDone = remaining == 0
     val transferring = transferState.isTransferring
-    val hasActive = transferState.tasks.any { it.status == TransferStatus.TRANSFERING }
+    val hasActive = transferState.tasks.any {
+        it.status == TransferStatus.TRANSFERING || it.isGeneratingFrame
+    }
     // 数字延迟显现：刚入队的任务可能马上被"已存在"跳过（remaining 1→0 一闪而过），
     // 那种情况只播 done→图标转场、不闪数字。真正开始下载(TRANSFERING)立即显示数字；
     // 纯等待超过宽限期（说明确实在排队，如目录扫描慢）也显示。
