@@ -8,6 +8,28 @@ class PhotoFrameExporterTest {
     @Test
     fun frostedPresetKeepsItsStablePersistenceKey() {
         assertEquals(PhotoFramePreset.FROSTED, PhotoFramePreset.valueOf("FROSTED"))
+        assertEquals(PhotoFramePreset.PLAQUE, PhotoFramePreset.valueOf("PLAQUE"))
+    }
+
+    @Test
+    fun plaquePresetKeepsPhotoFullBleedAndUsesAWidthBasedInfoBand() {
+        val landscape = calculatePlaqueFrameLayout(6000, 4000)
+        val portrait = calculatePlaqueFrameLayout(4000, 6000)
+
+        listOf(landscape, portrait).forEach { layout ->
+            assertEquals(0f, layout.photoLeft, 0.001f)
+            assertEquals(0f, layout.photoTop, 0.001f)
+            assertEquals(layout.canvasWidth.toFloat(), layout.photoRight, 0.001f)
+            assertEquals(layout.metadataTop, layout.photoBottom, 0.001f)
+            assertEquals(
+                0.12f,
+                (layout.canvasHeight - layout.metadataTop) / layout.canvasWidth,
+                0.001f,
+            )
+            assertTrue(maxOf(layout.canvasWidth, layout.canvasHeight) <= 3200)
+        }
+        assertEquals(3200, landscape.canvasWidth)
+        assertEquals(3200, portrait.canvasHeight)
     }
 
     @Test
@@ -63,34 +85,95 @@ class PhotoFrameExporterTest {
     }
 
     @Test
-    fun disablingBrandingRecentersTwoRowsInsteadOfLeavingAThirdRowGap() {
-        val threeRows = photoFrameTextRows(
-            hasTitle = true,
-            hasDetails = true,
-            showBranding = true,
-        )
-        val twoRows = photoFrameTextRows(
-            hasTitle = true,
-            hasDetails = true,
-            showBranding = false,
-        )
+    fun visibleTextBoundsAreCenteredWithAndWithoutBranding() {
+        val title = FrameTextVisualBounds(top = -30f, bottom = 7f)
+        val details = FrameTextVisualBounds(top = -18f, bottom = 4f)
+        val branding = FrameTextVisualBounds(top = -11f, bottom = 3f)
 
-        assertEquals(0.84f, threeRows.branding!!, 0.001f)
-        assertEquals(null, twoRows.branding)
-        assertEquals(0.46f, twoRows.title!!, 0.001f)
-        assertEquals(0.70f, twoRows.details!!, 0.001f)
+        listOf(
+            listOf(title, details, branding),
+            listOf(title, details),
+        ).forEach { rows ->
+            val baselines = centeredFrameTextBaselines(
+                areaTop = 100f,
+                areaBottom = 300f,
+                rows = rows,
+                preferredGap = 14f,
+            )
+            val visibleTop = baselines.first() + rows.first().top
+            val visibleBottom = baselines.last() + rows.last().bottom
+
+            assertEquals(200f, (visibleTop + visibleBottom) / 2f, 0.001f)
+        }
     }
 
     @Test
-    fun missingMetadataRowsCollapseWithoutBlankPlaceholders() {
-        assertEquals(
-            PhotoFrameTextRows(title = 0.58f, details = null, branding = null),
-            photoFrameTextRows(hasTitle = true, hasDetails = false, showBranding = false),
+    fun plaqueColumnsCenterIndependentlySoLeftBrandingCannotShiftRightDetails() {
+        val title = FrameTextVisualBounds(top = -30f, bottom = 7f)
+        val subtitle = FrameTextVisualBounds(top = -18f, bottom = 4f)
+        val branding = FrameTextVisualBounds(top = -11f, bottom = 3f)
+        val rightRows = listOf(title, subtitle)
+
+        val leftBaselines = centeredFrameTextBaselines(
+            areaTop = 100f,
+            areaBottom = 300f,
+            rows = listOf(title, subtitle, branding),
+            preferredGap = 14f,
         )
-        assertEquals(
-            PhotoFrameTextRows(title = null, details = null, branding = 0.58f),
-            photoFrameTextRows(hasTitle = false, hasDetails = false, showBranding = true),
+        val rightBaselines = centeredFrameTextBaselines(
+            areaTop = 100f,
+            areaBottom = 300f,
+            rows = rightRows,
+            preferredGap = 14f,
         )
+        val rightBaselinesWithoutBranding = centeredFrameTextBaselines(
+            areaTop = 100f,
+            areaBottom = 300f,
+            rows = rightRows,
+            preferredGap = 14f,
+        )
+
+        val leftCenter =
+            (leftBaselines.first() + title.top + leftBaselines.last() + branding.bottom) / 2f
+        val rightCenter =
+            (rightBaselines.first() + title.top + rightBaselines.last() + subtitle.bottom) / 2f
+        assertEquals(200f, leftCenter, 0.001f)
+        assertEquals(200f, rightCenter, 0.001f)
+        assertEquals(rightBaselinesWithoutBranding, rightBaselines)
+    }
+
+    @Test
+    fun missingMetadataRowsCollapseAndSingleRemainingLineStaysCentered() {
+        val row = FrameTextVisualBounds(top = -24f, bottom = 6f)
+        val baselines = centeredFrameTextBaselines(
+            areaTop = 80f,
+            areaBottom = 220f,
+            rows = listOf(row),
+            preferredGap = 12f,
+        )
+
+        assertEquals(159f, baselines.single(), 0.001f)
+        assertEquals(150f, (baselines.single() + row.top + baselines.single() + row.bottom) / 2f, 0.001f)
+        assertTrue(centeredFrameTextBaselines(0f, 100f, emptyList(), 10f).isEmpty())
+    }
+
+    @Test
+    fun crampedMetadataAreaReducesOnlyTheGapAndKeepsOrder() {
+        val rows = listOf(
+            FrameTextVisualBounds(top = -30f, bottom = 10f),
+            FrameTextVisualBounds(top = -20f, bottom = 10f),
+            FrameTextVisualBounds(top = -10f, bottom = 10f),
+        )
+        val baselines = centeredFrameTextBaselines(
+            areaTop = 0f,
+            areaBottom = 100f,
+            rows = rows,
+            preferredGap = 20f,
+        )
+
+        assertEquals(30f, baselines[0], 0.001f)
+        assertEquals(65f, baselines[1], 0.001f)
+        assertEquals(90f, baselines[2], 0.001f)
     }
 
     @Test
@@ -198,6 +281,17 @@ class PhotoFrameExporterTest {
     }
 
     @Test
+    fun exifCaptureDateUsesReadableSeparatorsWithoutInventingMissingValues() {
+        assertEquals(
+            "2025-11-09 16:32:35",
+            normalizeCaptureDateTime("2025:11:09 16:32:35"),
+        )
+        assertEquals("2025-11-09", normalizeCaptureDateTime("2025-11-09"))
+        assertEquals(null, normalizeCaptureDateTime("  "))
+        assertEquals(null, normalizeCaptureDateTime(null))
+    }
+
+    @Test
     fun incompleteFrameUsesAHiddenTemporaryName() {
         val name = photoFrameTempName(12345L)
 
@@ -212,6 +306,7 @@ class PhotoFrameExporterTest {
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_mist.jpg"))
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_glass (2).JPG"))
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_dark_123456.jpeg"))
+        assertTrue(isPhotoFrameOutputName("DSC_0123_frame_plaque.jpg"))
         assertTrue(!isPhotoFrameOutputName("DSC_0123.JPG"))
     }
 }

@@ -11,6 +11,7 @@ import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -36,6 +37,7 @@ internal const val PHOTO_FRAME_PART_PREFIX = ".nkframe_"
 internal const val PHOTO_FRAME_OUTPUT_DIRECTORY = "ZTFrames"
 private val PHOTO_FRAME_SESSION_PREFIX =
     "$PHOTO_FRAME_PART_PREFIX${UUID.randomUUID().toString().take(8)}_"
+private const val PLAQUE_BAND_TO_WIDTH = 0.12f
 
 /** 设置页可选的成片样式。名称是持久化键，不要随意改名。 */
 enum class PhotoFramePreset(internal val fileSuffix: String) {
@@ -43,6 +45,7 @@ enum class PhotoFramePreset(internal val fileSuffix: String) {
     CINEMA("dark"),
     MINIMAL("clean"),
     FROSTED("glass"),
+    PLAQUE("plaque"),
 }
 
 data class PhotoFrameExportResult(
@@ -71,12 +74,14 @@ internal data class PhotoFrameMetadata(
     val shutter: String?,
     val iso: String?,
     val focalLength: String?,
+    val dateTime: String? = null,
 )
 
-internal data class PhotoFrameTextRows(
-    val title: Float?,
-    val details: Float?,
-    val branding: Float?,
+internal data class FrameTextVisualBounds(
+    /** 相对基线的顶部坐标，通常为负数。 */
+    val top: Float,
+    /** 相对基线的底部坐标，通常为零或正数。 */
+    val bottom: Float,
 )
 
 /**
@@ -305,6 +310,13 @@ object PhotoFrameExporter {
                 Double.NaN,
             ).takeIf { it.isFinite() && it > 0.0 }
                 ?.let { String.format(Locale.US, "%.0fmm", it) },
+            dateTime = sequenceOf(
+                ExifInterface.TAG_DATETIME_ORIGINAL,
+                ExifInterface.TAG_DATETIME_DIGITIZED,
+                ExifInterface.TAG_DATETIME,
+            ).mapNotNull(exif::getAttribute)
+                .mapNotNull(::normalizeCaptureDateTime)
+                .firstOrNull(),
         )
     }
 
@@ -398,7 +410,11 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         showBranding: Boolean,
     ): Bitmap {
-        val layout = calculatePhotoFrameLayout(source.width, source.height)
+        val layout = if (preset == PhotoFramePreset.PLAQUE) {
+            calculatePlaqueFrameLayout(source.width, source.height)
+        } else {
+            calculatePhotoFrameLayout(source.width, source.height)
+        }
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
             layout.canvasHeight,
@@ -406,6 +422,10 @@ object PhotoFrameExporter {
         )
         try {
             val canvas = Canvas(output)
+            if (preset == PhotoFramePreset.PLAQUE) {
+                drawPlaqueFrame(canvas, source, layout, metadata, showBranding)
+                return output
+            }
             drawBackdrop(canvas, source, preset)
 
             val photoRect = RectF(
@@ -463,6 +483,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.CINEMA -> 1.15f
             PhotoFramePreset.MINIMAL -> 0.78f
             PhotoFramePreset.MIST, PhotoFramePreset.FROSTED -> 1f
+            PhotoFramePreset.PLAQUE -> 0f
         }
         // ShadowLayer 在 3200px 画布上直接做两次软件模糊代价很高。阴影本身没有
         // 高频细节，先在 1/4 尺寸透明代理图渲染，再双线性放大，视觉一致而参与
@@ -638,8 +659,10 @@ object PhotoFrameExporter {
                         }
                     }
                     PhotoFramePreset.MINIMAL -> Unit
+                    PhotoFramePreset.PLAQUE -> Unit
                 }
             }
+            PhotoFramePreset.PLAQUE -> canvas.drawColor(Color.WHITE)
         }
     }
 
@@ -740,16 +763,7 @@ object PhotoFrameExporter {
         val details = frameDetailLine(metadata)
         val hasTitle = brand.isNotEmpty() || model.isNotEmpty()
         val hasDetails = details.isNotBlank()
-        val rows = photoFrameTextRows(hasTitle, hasDetails, showBranding)
         val centerX = layout.canvasWidth / 2f
-        val bandHeight = layout.canvasHeight - layout.metadataTop
-        val brandBaseline = rows.title?.let { layout.metadataTop + bandHeight * it }
-        if (
-            preset == PhotoFramePreset.FROSTED &&
-            (hasTitle || hasDetails || showBranding)
-        ) {
-            drawFrostedMetadataPanel(canvas, layout, bandHeight)
-        }
 
         val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = textColor
@@ -775,18 +789,9 @@ object PhotoFrameExporter {
             modelPaint.textSize *= scale
             gap *= scale
         }
-        val totalWidth = brandPaint.measureText(brand) + gap + modelPaint.measureText(model)
-        var x = centerX - totalWidth / 2f
-        if (brand.isNotEmpty() && brandBaseline != null) {
-            canvas.drawText(brand, x, brandBaseline, brandPaint)
-            x += brandPaint.measureText(brand) + gap
-        }
-        if (model.isNotEmpty() && brandBaseline != null) {
-            canvas.drawText(model, x, brandBaseline, modelPaint)
-        }
 
-        if (hasDetails && rows.details != null) {
-            val detailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val detailPaint = if (hasDetails) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = mutedColor
                 textSize = layout.canvasWidth * 0.020f
                 typeface = Typeface.create("sans-serif", Typeface.NORMAL)
@@ -794,34 +799,86 @@ object PhotoFrameExporter {
             }
             val maxDetailWidth = layout.canvasWidth *
                 if (preset == PhotoFramePreset.FROSTED) 0.76f else 0.82f
-            val detailWidth = detailPaint.measureText(details)
+            val detailWidth = paint.measureText(details)
             if (detailWidth > maxDetailWidth) {
-                detailPaint.textSize *= maxDetailWidth / detailWidth
+                paint.textSize *= maxDetailWidth / detailWidth
             }
-            val detailBaseline = layout.metadataTop + bandHeight * rows.details
+            paint
+        } else {
+            null
+        }
+        val brandingPaint = if (showBranding) createBrandingPaint(canvas, preset) else null
+
+        val titleBounds = if (hasTitle) {
+            listOfNotNull(
+                brand.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, brandPaint) },
+                model.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, modelPaint) },
+            ).reduce(::mergeTextVisualBounds)
+        } else {
+            null
+        }
+        val detailBounds = detailPaint?.let { textVisualBounds(details, it) }
+        val brandingBounds = brandingPaint?.let { textVisualBounds("ZTransfer", it) }
+        val rowBounds = listOfNotNull(titleBounds, detailBounds, brandingBounds)
+
+        if (rowBounds.isEmpty()) return
+        val contentArea = if (preset == PhotoFramePreset.FROSTED) {
+            drawFrostedMetadataPanel(canvas, layout)
+        } else {
+            // 真正可见的下边框从照片底边开始；metadataTop 只是排版预留线，在部分长宽比
+            // 下会比照片底边更低，用它居中正是旧版文字看起来整体偏下的根源。
+            RectF(
+                0f,
+                layout.photoBottom,
+                layout.canvasWidth.toFloat(),
+                layout.canvasHeight.toFloat(),
+            )
+        }
+        val preferredGap = min(
+            layout.canvasWidth * 0.0105f,
+            contentArea.height() * 0.075f,
+        )
+        val baselines = centeredFrameTextBaselines(
+            areaTop = contentArea.top,
+            areaBottom = contentArea.bottom,
+            rows = rowBounds,
+            preferredGap = preferredGap,
+        )
+        var rowIndex = 0
+        val titleBaseline = if (titleBounds != null) baselines[rowIndex++] else null
+        val detailBaseline = if (detailBounds != null) baselines[rowIndex++] else null
+        val brandingBaseline = if (brandingBounds != null) baselines[rowIndex] else null
+
+        titleBaseline?.let { baseline ->
+            val totalWidth =
+                brandPaint.measureText(brand) + gap + modelPaint.measureText(model)
+            var x = centerX - totalWidth / 2f
+            if (brand.isNotEmpty()) {
+                canvas.drawText(brand, x, baseline, brandPaint)
+                x += brandPaint.measureText(brand) + gap
+            }
+            if (model.isNotEmpty()) {
+                canvas.drawText(model, x, baseline, modelPaint)
+            }
+        }
+        if (detailPaint != null && detailBaseline != null) {
             canvas.drawText(details, centerX, detailBaseline, detailPaint)
         }
-
-        rows.branding?.let { brandingRow ->
-            drawBranding(
-                canvas = canvas,
-                centerX = centerX,
-                baseline = layout.metadataTop + bandHeight * brandingRow,
-                preset = preset,
-            )
+        if (brandingPaint != null && brandingBaseline != null) {
+            canvas.drawText("ZTransfer", centerX, brandingBaseline, brandingPaint)
         }
     }
 
     private fun drawFrostedMetadataPanel(
         canvas: Canvas,
         layout: PhotoFrameLayout,
-        bandHeight: Float,
-    ) {
+    ): RectF {
+        val bandHeight = layout.canvasHeight - layout.photoBottom
         val horizontalInset = layout.canvasWidth * 0.072f
         val verticalInset = bandHeight * 0.08f
         val panel = RectF(
             horizontalInset,
-            layout.metadataTop + verticalInset,
+            layout.photoBottom + verticalInset,
             layout.canvasWidth - horizontalInset,
             layout.canvasHeight - verticalInset,
         )
@@ -843,34 +900,271 @@ object PhotoFrameExporter {
             color = Color.argb(178, 255, 255, 255)
             canvas.drawRoundRect(panel, radius, radius, this)
         }
+        return panel
     }
 
-    private fun drawBranding(
+    private fun createBrandingPaint(
         canvas: Canvas,
-        centerX: Float,
-        baseline: Float,
         preset: PhotoFramePreset,
-    ) {
+    ): Paint {
         val shortEdge = min(canvas.width, canvas.height).toFloat()
-        Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+        return Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
             color = when (preset) {
                 PhotoFramePreset.MIST,
                 PhotoFramePreset.CINEMA -> Color.argb(108, 250, 252, 253)
                 PhotoFramePreset.MINIMAL,
                 PhotoFramePreset.FROSTED -> Color.argb(82, 24, 31, 38)
+                PhotoFramePreset.PLAQUE -> Color.argb(72, 24, 31, 38)
             }
             textSize = shortEdge * 0.0135f
             // 保留紧凑完整的品牌名，只用轻盈的衬线斜体增加摄影签名感。
             typeface = Typeface.create("serif", Typeface.ITALIC)
             textAlign = Paint.Align.CENTER
-            canvas.drawText(
-                "ZTransfer",
-                centerX,
-                baseline,
+        }
+    }
+
+    private fun textVisualBounds(text: String, paint: Paint): FrameTextVisualBounds {
+        val bounds = Rect()
+        paint.getTextBounds(text, 0, text.length, bounds)
+        return FrameTextVisualBounds(bounds.top.toFloat(), bounds.bottom.toFloat())
+    }
+
+    private fun mergeTextVisualBounds(
+        first: FrameTextVisualBounds,
+        second: FrameTextVisualBounds,
+    ): FrameTextVisualBounds = FrameTextVisualBounds(
+        top = min(first.top, second.top),
+        bottom = maxOf(first.bottom, second.bottom),
+    )
+
+    /**
+     * “铭牌”预设严格沿用参考图的结构：照片无裁切铺满宽度，底部接一整条白色信息带。
+     * 横图查看时出现的上下黑区属于图库查看器，不写进导出文件。
+     */
+    private fun drawPlaqueFrame(
+        canvas: Canvas,
+        source: Bitmap,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        showBranding: Boolean,
+    ) {
+        canvas.drawColor(Color.WHITE)
+        val photoRect = RectF(
+            layout.photoLeft,
+            layout.photoTop,
+            layout.photoRight,
+            layout.photoBottom,
+        )
+        canvas.drawBitmap(
+            source,
+            null,
+            photoRect,
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+        )
+
+        val width = layout.canvasWidth.toFloat()
+        val bandTop = layout.metadataTop
+        val bandHeight = layout.canvasHeight - bandTop
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(253, 253, 252)
+            canvas.drawRect(0f, bandTop, width, layout.canvasHeight.toFloat(), this)
+            color = Color.rgb(232, 233, 231)
+            canvas.drawRect(
+                0f,
+                bandTop,
+                width,
+                bandTop + maxOf(1f, width * 0.0008f),
                 this,
             )
         }
+
+        val make = metadata.make?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?.uppercase(Locale.ROOT)
+        val model = metadata.model?.trim()?.takeIf(String::isNotEmpty)
+        val details = frameDetailLine(metadata)
+            .replace("  ", " ")
+            .takeIf(String::isNotEmpty)
+        val date = metadata.dateTime?.takeIf(String::isNotEmpty)
+        val leftPrimary = make ?: model
+        val leftSecondary = model?.takeIf { make != null && !it.equals(make, ignoreCase = true) }
+        val rightPrimary = details ?: date
+        val rightSecondary = date?.takeIf { details != null }
+        val hasLeft = leftPrimary != null
+        val hasRight = rightPrimary != null
+        val hasLeftBlock = hasLeft || showBranding
+
+        val leftX = width * 0.058f
+        val leftMaxWidth = width * if (hasRight) 0.40f else 0.884f
+        val rightX = width * if (hasLeftBlock) 0.648f else 0.058f
+        val rightMaxWidth = width * if (hasLeftBlock) 0.305f else 0.884f
+        val leftPrimaryPaint = leftPrimary?.let {
+            createPlaqueTextPaint(
+                text = it,
+                preferredSize = width * 0.027f,
+                maxWidth = leftMaxWidth,
+                color = Color.rgb(18, 20, 21),
+                typeface = Typeface.create("sans-serif", Typeface.BOLD),
+            )
+        }
+        val leftSecondaryPaint = leftSecondary?.let {
+            createPlaqueTextPaint(
+                text = it,
+                preferredSize = width * 0.0165f,
+                maxWidth = leftMaxWidth,
+                color = Color.rgb(103, 106, 106),
+                typeface = Typeface.create("sans-serif", Typeface.NORMAL),
+            )
+        }
+        val rightPrimaryPaint = rightPrimary?.let {
+            createPlaqueTextPaint(
+                text = it,
+                preferredSize = width * 0.0245f,
+                maxWidth = rightMaxWidth,
+                color = Color.rgb(18, 20, 21),
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL),
+            )
+        }
+        val rightSecondaryPaint = rightSecondary?.let {
+            createPlaqueTextPaint(
+                text = it,
+                preferredSize = width * 0.018f,
+                maxWidth = rightMaxWidth,
+                color = Color.rgb(103, 106, 106),
+                typeface = Typeface.create("sans-serif", Typeface.NORMAL),
+            )
+        }
+        val brandingPaint = if (showBranding) {
+            createBrandingPaint(canvas, PhotoFramePreset.PLAQUE).apply {
+                textAlign = Paint.Align.LEFT
+            }
+        } else {
+            null
+        }
+        val leftPrimaryBounds =
+            if (leftPrimary != null && leftPrimaryPaint != null) {
+                textVisualBounds(leftPrimary, leftPrimaryPaint)
+            } else {
+                null
+            }
+        val leftSecondaryBounds =
+            if (leftSecondary != null && leftSecondaryPaint != null) {
+                textVisualBounds(leftSecondary, leftSecondaryPaint)
+            } else {
+                null
+            }
+        val rightPrimaryBounds =
+            if (rightPrimary != null && rightPrimaryPaint != null) {
+                textVisualBounds(rightPrimary, rightPrimaryPaint)
+            } else {
+                null
+            }
+        val rightSecondaryBounds =
+            if (rightSecondary != null && rightSecondaryPaint != null) {
+                textVisualBounds(rightSecondary, rightSecondaryPaint)
+            } else {
+                null
+            }
+        val brandingBounds = brandingPaint?.let { textVisualBounds("ZTransfer", it) }
+        val leftRows = listOfNotNull(
+            leftPrimaryBounds,
+            leftSecondaryBounds,
+            brandingBounds,
+        )
+        val rightRows = listOfNotNull(rightPrimaryBounds, rightSecondaryBounds)
+        if (leftRows.isEmpty() && rightRows.isEmpty()) return
+        val preferredGap = min(width * 0.009f, bandHeight * 0.075f)
+        val leftBaselines = centeredFrameTextBaselines(
+            areaTop = bandTop,
+            areaBottom = layout.canvasHeight.toFloat(),
+            rows = leftRows,
+            preferredGap = preferredGap,
+        )
+        val rightBaselines = centeredFrameTextBaselines(
+            areaTop = bandTop,
+            areaBottom = layout.canvasHeight.toFloat(),
+            rows = rightRows,
+            preferredGap = preferredGap,
+        )
+        var leftIndex = 0
+        val leftPrimaryBaseline =
+            if (leftPrimaryBounds != null) leftBaselines[leftIndex++] else null
+        val leftSecondaryBaseline =
+            if (leftSecondaryBounds != null) leftBaselines[leftIndex++] else null
+        val brandingBaseline =
+            if (brandingBounds != null) leftBaselines[leftIndex] else null
+        var rightIndex = 0
+        val rightPrimaryBaseline =
+            if (rightPrimaryBounds != null) rightBaselines[rightIndex++] else null
+        val rightSecondaryBaseline =
+            if (rightSecondaryBounds != null) rightBaselines[rightIndex] else null
+
+        if (hasLeftBlock && hasRight) {
+            val visualExtents = buildList {
+                plaqueVisualExtent(leftRows, leftBaselines)?.let(::add)
+                plaqueVisualExtent(rightRows, rightBaselines)?.let(::add)
+            }
+            val infoTop = visualExtents.minOf { it.first }
+            val infoBottom = visualExtents.maxOf { it.second }
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(222, 224, 222)
+                strokeWidth = maxOf(1f, width * 0.001f)
+                val dividerPadding = bandHeight * 0.075f
+                canvas.drawLine(
+                    width * 0.625f,
+                    (infoTop - dividerPadding).coerceAtLeast(bandTop + dividerPadding),
+                    width * 0.625f,
+                    (infoBottom + dividerPadding)
+                        .coerceAtMost(layout.canvasHeight - dividerPadding),
+                    this,
+                )
+            }
+        }
+        if (leftPrimary != null && leftPrimaryPaint != null && leftPrimaryBaseline != null) {
+            canvas.drawText(leftPrimary, leftX, leftPrimaryBaseline, leftPrimaryPaint)
+        }
+        if (leftSecondary != null && leftSecondaryPaint != null && leftSecondaryBaseline != null) {
+            canvas.drawText(leftSecondary, leftX, leftSecondaryBaseline, leftSecondaryPaint)
+        }
+        if (brandingPaint != null && brandingBaseline != null) {
+            canvas.drawText("ZTransfer", leftX, brandingBaseline, brandingPaint)
+        }
+        if (rightPrimary != null && rightPrimaryPaint != null && rightPrimaryBaseline != null) {
+            canvas.drawText(rightPrimary, rightX, rightPrimaryBaseline, rightPrimaryPaint)
+        }
+        if (
+            rightSecondary != null &&
+            rightSecondaryPaint != null &&
+            rightSecondaryBaseline != null
+        ) {
+            canvas.drawText(rightSecondary, rightX, rightSecondaryBaseline, rightSecondaryPaint)
+        }
     }
+
+    private fun plaqueVisualExtent(
+        rows: List<FrameTextVisualBounds>,
+        baselines: List<Float>,
+    ): Pair<Float, Float>? {
+        if (rows.isEmpty()) return null
+        require(rows.size == baselines.size)
+        return rows.indices.minOf { baselines[it] + rows[it].top } to
+            rows.indices.maxOf { baselines[it] + rows[it].bottom }
+    }
+
+    private fun createPlaqueTextPaint(
+        text: String,
+        preferredSize: Float,
+        maxWidth: Float,
+        color: Int,
+        typeface: Typeface,
+    ): Paint =
+        Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+            this.color = color
+            textSize = preferredSize
+            this.typeface = typeface
+            val measured = measureText(text)
+            if (measured > maxWidth) textSize *= maxWidth / measured
+        }
 
     private suspend fun saveRendered(
         resolver: ContentResolver,
@@ -1066,35 +1360,76 @@ internal fun calculatePhotoFrameLayout(
     )
 }
 
+/**
+ * “铭牌”不建立固定比例的装饰画布，只在原片下方增加宽度约 12% 的信息带。
+ * 最终长边仍限制在 [longEdge] 内，竖图会连同信息带一起缩放，避免输出意外超过 3200px。
+ */
+internal fun calculatePlaqueFrameLayout(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    longEdge: Int = 3200,
+): PhotoFrameLayout {
+    require(sourceWidth > 0 && sourceHeight > 0)
+    require(longEdge > 0)
+    val compositeHeight = sourceHeight + sourceWidth * PLAQUE_BAND_TO_WIDTH
+    val scale = min(
+        longEdge.toFloat() / sourceWidth,
+        longEdge.toFloat() / compositeHeight,
+    )
+    val canvasWidth = (sourceWidth * scale).roundToInt().coerceAtLeast(1)
+    val preferredBandHeight =
+        (canvasWidth * PLAQUE_BAND_TO_WIDTH).roundToInt().coerceAtLeast(1)
+    val photoHeight = (sourceHeight * scale).roundToInt()
+        .coerceIn(1, maxOf(1, longEdge - preferredBandHeight))
+    val canvasHeight = photoHeight + preferredBandHeight
+    return PhotoFrameLayout(
+        canvasWidth = canvasWidth,
+        canvasHeight = canvasHeight,
+        photoLeft = 0f,
+        photoTop = 0f,
+        photoRight = canvasWidth.toFloat(),
+        photoBottom = photoHeight.toFloat(),
+        metadataTop = photoHeight.toFloat(),
+    )
+}
+
 /** 照片与毛玻璃参数卡共用的圆角，随底部信息区高度等比缩放。 */
 internal fun photoFrameCornerRadius(layout: PhotoFrameLayout): Float =
     (layout.canvasHeight - layout.metadataTop) * 0.26f
 
 /**
- * 完整信息时排成三行；高级版关闭品牌后自动把两行内容重新居中。
- * 元数据缺项时也会收拢现有行，避免为不存在的行预留空位。
+ * 按每行文字的真实可见边界计算基线，使整组文字在指定区域内视觉上下居中。
+ *
+ * [FrameTextVisualBounds] 来自 Paint.getTextBounds，而不是字体抽象行高，因此大写品牌、
+ * 数字参数和斜体 ZTransfer 混排时仍以实际墨迹边界为准。空间不足时只压缩行间距，
+ * 不改变字号或顺序。
  */
-internal fun photoFrameTextRows(
-    hasTitle: Boolean,
-    hasDetails: Boolean,
-    showBranding: Boolean,
-): PhotoFrameTextRows = when {
-    showBranding && hasTitle && hasDetails ->
-        PhotoFrameTextRows(title = 0.41f, details = 0.65f, branding = 0.84f)
-    showBranding && hasTitle ->
-        PhotoFrameTextRows(title = 0.48f, details = null, branding = 0.78f)
-    showBranding && hasDetails ->
-        PhotoFrameTextRows(title = null, details = 0.48f, branding = 0.78f)
-    showBranding ->
-        PhotoFrameTextRows(title = null, details = null, branding = 0.58f)
-    hasTitle && hasDetails ->
-        PhotoFrameTextRows(title = 0.46f, details = 0.70f, branding = null)
-    hasTitle ->
-        PhotoFrameTextRows(title = 0.58f, details = null, branding = null)
-    hasDetails ->
-        PhotoFrameTextRows(title = null, details = 0.58f, branding = null)
-    else ->
-        PhotoFrameTextRows(title = null, details = null, branding = null)
+internal fun centeredFrameTextBaselines(
+    areaTop: Float,
+    areaBottom: Float,
+    rows: List<FrameTextVisualBounds>,
+    preferredGap: Float,
+): List<Float> {
+    require(areaBottom >= areaTop)
+    require(preferredGap >= 0f)
+    if (rows.isEmpty()) return emptyList()
+    rows.forEach { require(it.bottom >= it.top) }
+
+    val areaHeight = areaBottom - areaTop
+    val textHeight = rows.sumOf { (it.bottom - it.top).toDouble() }.toFloat()
+    val gapCount = rows.size - 1
+    val gap = if (gapCount > 0) {
+        min(preferredGap, ((areaHeight - textHeight) / gapCount).coerceAtLeast(0f))
+    } else {
+        0f
+    }
+    val groupHeight = textHeight + gap * gapCount
+    var cursor = areaTop + (areaHeight - groupHeight).coerceAtLeast(0f) / 2f
+    return rows.map { row ->
+        val baseline = cursor - row.top
+        cursor += row.bottom - row.top + gap
+        baseline
+    }
 }
 
 internal fun normalizeCameraMake(make: String?): String {
@@ -1135,6 +1470,28 @@ internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
         metadata.shutter?.let { if (it.endsWith("s", ignoreCase = true)) it else "${it}s" },
         metadata.iso,
     ).joinToString("  ")
+
+internal fun normalizeCaptureDateTime(value: String?): String? {
+    val trimmed = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    val isExifDate =
+        trimmed.length >= 10 &&
+            trimmed[4] == ':' &&
+            trimmed[7] == ':' &&
+            trimmed.substring(0, 4).all(Char::isDigit) &&
+            trimmed.substring(5, 7).all(Char::isDigit) &&
+            trimmed.substring(8, 10).all(Char::isDigit)
+    return if (isExifDate) {
+        buildString(trimmed.length) {
+            append(trimmed, 0, 4)
+            append('-')
+            append(trimmed, 5, 7)
+            append('-')
+            append(trimmed.substring(8))
+        }
+    } else {
+        trimmed
+    }
+}
 
 internal fun normalizeIso(value: String?): String? {
     val firstValue = value?.substringBefore(',')?.trim().orEmpty()

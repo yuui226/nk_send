@@ -99,6 +99,7 @@
     <string name="photo_frame_cinema">Cinema</string>
     <string name="photo_frame_minimal">Minimal</string>
     <string name="photo_frame_frosted">Frosted</string>
+    <string name="photo_frame_plaque">Plaque</string>
     <string name="photo_frame_branding">ZTransfer watermark</string>
     <string name="photo_frame_branding_pro_hint">Pro can turn off</string>
 

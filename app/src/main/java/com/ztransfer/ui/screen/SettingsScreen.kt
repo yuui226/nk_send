@@ -348,6 +348,7 @@ fun SettingsOverlay(
                                                 PhotoFramePreset.CINEMA -> R.string.photo_frame_cinema
                                                 PhotoFramePreset.MINIMAL -> R.string.photo_frame_minimal
                                                 PhotoFramePreset.FROSTED -> R.string.photo_frame_frosted
+                                                PhotoFramePreset.PLAQUE -> R.string.photo_frame_plaque
                                             }
                                         )
                                         SelectionChip(
@@ -357,6 +358,9 @@ fun SettingsOverlay(
                                             compact = true,
                                             modifier = Modifier.weight(1f)
                                         )
+                                    }
+                                    if (presets.size < 2) {
+                                        Spacer(Modifier.weight(1f))
                                     }
                                 }
                             }

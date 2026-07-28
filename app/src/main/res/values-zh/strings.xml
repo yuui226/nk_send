@@ -99,6 +99,7 @@
     <string name="photo_frame_cinema">暗夜</string>
     <string name="photo_frame_minimal">简白</string>
     <string name="photo_frame_frosted">毛玻璃</string>
+    <string name="photo_frame_plaque">铭牌</string>
     <string name="photo_frame_branding">ZTransfer 水印</string>
     <string name="photo_frame_branding_pro_hint">高级版可关闭</string>
 

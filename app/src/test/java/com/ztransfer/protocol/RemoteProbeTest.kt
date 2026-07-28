@@ -39,4 +39,20 @@ class RemoteProbeTest {
         assertEquals("<none>", probeHex(null))
         assertFalse(probeHex(byteArrayOf(0xFF.toByte())).contains("FFFFFF"))
     }
+
+    @Test
+    fun digitalZoomCandidatesAreAlwaysPartOfKnownFallbackSurvey() {
+        assertEquals(
+            "NikonLiveViewImageZoomRatio",
+            Lab.INTEREST_PROPS[Lab.PROP_NK_LV_IMAGE_ZOOM_RATIO],
+        )
+        assertEquals(
+            "DigitalZoom(std)",
+            Lab.INTEREST_PROPS[Lab.PROP_DIGITAL_ZOOM],
+        )
+        assertEquals(
+            setOf(Lab.PROP_NK_LV_IMAGE_ZOOM_RATIO, Lab.PROP_DIGITAL_ZOOM),
+            Lab.DIGITAL_ZOOM_PROPS.keys.toSet(),
+        )
+    }
 }

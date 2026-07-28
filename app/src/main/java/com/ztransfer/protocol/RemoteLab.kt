@@ -69,11 +69,13 @@ object Lab {
     const val PROP_EXPOSURE_PROGRAM = 0x500E
     const val PROP_ISO = 0x500F
     const val PROP_EXP_COMPENSATION = 0x5010
+    const val PROP_DIGITAL_ZOOM = 0x5016             // 标准 PTP DigitalZoom
     const val PROP_NK_EXP_COMPENSATION = 0xD058
     const val PROP_NK_AUTO_ISO = 0xD054
     const val PROP_NK_SHUTTER = 0xD100
     const val PROP_NK_RECORDING_MEDIA = 0xD10B
     const val PROP_NK_LV_STATUS = 0xD1A2
+    const val PROP_NK_LV_IMAGE_ZOOM_RATIO = 0xD1A3  // Nikon 实时取景画面放大倍率
     const val PROP_NK_LV_PROHIBIT = 0xD1A4
     const val PROP_NK_LV_IMAGE_SIZE = 0xD1AC
     const val PROP_NK_MOVIE_AUTO_ISO = 0xD0AD
@@ -93,6 +95,18 @@ object Lab {
     const val PROP_NK_MOVIE_F_NUMBER = 0xD1A9
     const val PROP_NK_MOVIE_ISO = 0xD1AA
     const val PROP_NK_MOVIE_EXP_COMP = 0xD1AB
+
+    /**
+     * 两类“数字变焦”必须分开探测：
+     * - 0xD1A3 只放大实时取景，最接近监看页 +/- 对焦辅助；
+     * - 0x5016 是标准 PTP 数字变焦，可能影响相机实际输出。
+     *
+     * 两者都只加入只读能力探测；在没有真机日志确认类型、可写性和值域前不用于正式控制。
+     */
+    val DIGITAL_ZOOM_PROPS = linkedMapOf(
+        PROP_NK_LV_IMAGE_ZOOM_RATIO to "NikonLiveViewImageZoomRatio",
+        PROP_DIGITAL_ZOOM to "DigitalZoom(std)",
+    )
 
     /** 探测清单：操作码 -> 可读名称（勾选表用）。 */
     val INTEREST_OPS = linkedMapOf(
@@ -133,6 +147,7 @@ object Lab {
         PROP_NK_AUTO_ISO_ALT to "AutoISOAlt",
         PROP_EXP_COMPENSATION to "ExpCompensation",
         PROP_NK_EXP_COMPENSATION to "NikonExpCompensation",
+        PROP_DIGITAL_ZOOM to "DigitalZoom(std)",
         PROP_EXPOSURE_PROGRAM to "ExposureProgram",
         PROP_WHITE_BALANCE to "WhiteBalance",
         PROP_FOCUS_MODE to "FocusMode",
@@ -140,6 +155,7 @@ object Lab {
         PROP_NK_ANGLE_LEVEL to "AngleLevel",
         PROP_NK_RECORDING_MEDIA to "RecordingMedia",
         PROP_NK_LV_STATUS to "LiveViewStatus",
+        PROP_NK_LV_IMAGE_ZOOM_RATIO to "NikonLiveViewImageZoomRatio",
         PROP_NK_LV_PROHIBIT to "LiveViewProhibit",
         PROP_NK_LV_IMAGE_SIZE to "LiveViewImageSize",
         PROP_NK_LV_SELECTOR to "LiveViewSelector",
@@ -382,8 +398,11 @@ private fun parsePropDesc(prop: Int, d: ByteArray): String {
         2 -> {
             val n = c.u16()
             val values = (0 until n).map { c.typed(dataType).first }
-            val shown = values.take(12).joinToString(",") { fmtVal(prop, it) }
-            "enum(${n})[${shown}${if (n > 12) ",…" else ""}]"
+            // 数字变焦的全部档位正是这次探测要回收的核心信息，即使超过 12 档也不截断。
+            // 其他属性仍保持紧凑展示；它们的完整二进制始终另行写入 raw 字段。
+            val displayLimit = if (prop in Lab.DIGITAL_ZOOM_PROPS) Int.MAX_VALUE else 12
+            val shown = values.take(displayLimit).joinToString(",") { fmtVal(prop, it) }
+            "enum(${n})[${shown}${if (n > displayLimit) ",…" else ""}]"
         }
         else -> "none"
     }
@@ -1238,8 +1257,8 @@ suspend fun NikonCamera.runLabProbe(
     onFrame: suspend (ByteArray) -> Unit
 ) {
     val t0 = System.currentTimeMillis()
-    log("=== ZTransfer capability probe v2 ===")
-    log("scope=advertised-codes+advertised-properties mode=no-property-writes")
+    log("=== ZTransfer capability probe v3 ===")
+    log("scope=advertised-codes+advertised-properties+digital-zoom-fallbacks mode=no-property-writes")
 
     // ---- 1. DeviceInfo ----
     val (dirc, did) = labCommand(Lab.GET_DEVICE_INFO)
@@ -1330,6 +1349,8 @@ suspend fun NikonCamera.runLabProbe(
     val probeProps = (advertised + Lab.INTEREST_PROPS.keys).sorted()
     var descOkCount = 0
     var valueOkCount = 0
+    val digitalZoomDesc = mutableMapOf<Int, String>()
+    val digitalZoomValue = mutableMapOf<Int, String>()
     log("--- property survey (${probeProps.size}) ---")
     log("Each DESC/VALUE raw field is complete little-endian payload; unknown codes are intentional.")
     for ((index, prop) in probeProps.withIndex()) {
@@ -1350,20 +1371,34 @@ suspend fun NikonCamera.runLabProbe(
                 "PROP ${index + 1}/${probeProps.size} ${hex4(prop)} $name " +
                     "src=$sources DESC resp=${hex4(rc)} bytes=${d.size} $txt raw=${probeHex(d)}"
             )
+            if (prop in Lab.DIGITAL_ZOOM_PROPS) {
+                digitalZoomDesc[prop] = "OK $txt"
+            }
         } else {
             log(
                 "PROP ${index + 1}/${probeProps.size} ${hex4(prop)} $name " +
                     "src=$sources DESC resp=${hex4(rc)} bytes=${d?.size ?: 0} raw=${probeHex(d)}"
             )
+            if (prop in Lab.DIGITAL_ZOOM_PROPS) {
+                digitalZoomDesc[prop] = "resp=${hex4(rc)}"
+            }
         }
 
-        if (Lab.GET_DEVICE_PROP_VALUE in allAdvertisedOps) {
+        // 两个数字变焦候选即使没有出现在 DeviceInfo 中也强制只读查询。Nikon 的隐藏厂商
+        // 属性经常可用却不广告；失败只会返回响应码，不会改变相机状态。
+        val readValue = Lab.GET_DEVICE_PROP_VALUE in allAdvertisedOps ||
+            prop in Lab.DIGITAL_ZOOM_PROPS
+        if (readValue) {
             val (vrc, vd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, prop)
             if (vrc == Lab.OK && vd != null) valueOkCount++
             log(
                 "PROP ${index + 1}/${probeProps.size} ${hex4(prop)} $name " +
                     "VALUE resp=${hex4(vrc)} bytes=${vd?.size ?: 0} raw=${probeHex(vd)}"
             )
+            if (prop in Lab.DIGITAL_ZOOM_PROPS) {
+                digitalZoomValue[prop] =
+                    "resp=${hex4(vrc)} bytes=${vd?.size ?: 0} raw=${probeHex(vd)}"
+            }
         } else if (index == 0) {
             log("GetDevicePropValue(0x1015): not advertised; VALUE survey skipped")
         }
@@ -1376,7 +1411,26 @@ suspend fun NikonCamera.runLabProbe(
         }
     }
 
-    // ---- 5. 电子水平仪 AngleLevel (0xD067) 专检 ----
+    // ---- 5. 数字变焦专检汇总 ----
+    // DESC 中 RW/RO 决定能否控制，enum/range 给出完整档位；VALUE 保留当前值原始编码。
+    // 这里只汇总上面的只读结果，不重复发命令。
+    log("--- digital zoom focus ---")
+    Lab.DIGITAL_ZOOM_PROPS.forEach { (prop, name) ->
+        val meaning = if (prop == Lab.PROP_NK_LV_IMAGE_ZOOM_RATIO) {
+            "live-view-magnification"
+        } else {
+            "captured-output-digital-zoom"
+        }
+        log(
+            "DIGITAL_ZOOM ${hex4(prop)} $name meaning=$meaning " +
+                "advertised=${if (prop in advertised) "YES" else "NO"} " +
+                "DESC ${digitalZoomDesc[prop] ?: "NOT_QUERIED"} " +
+                "VALUE ${digitalZoomValue[prop] ?: "NOT_QUERIED"}"
+        )
+    }
+    log("DIGITAL_ZOOM note: DESC=OK+RW means controllable; enum/range contains usable levels.")
+
+    // ---- 6. 电子水平仪 AngleLevel (0xD067) 专检 ----
     // Z 30 为首要目标机身，此属性是水平仪唯一数据源（libgphoto2 ptp.h 定义
     // PTP_DPC_NIKON_AngleLevel = 0xD067，Z 30/Z 50/Z 8/Z 9/Z 6iii 全世代共用）。
     // 属性不支持 = toggle 拒绝锁存 + devLog，不画假角度。
@@ -1391,7 +1445,7 @@ suspend fun NikonCamera.runLabProbe(
         log("!! AngleLevel(0xD067) resp=${hex4(alrc)} — level NOT available on this body")
     }
 
-    // ---- 6. 事件轮询 ----
+    // ---- 7. 事件轮询 ----
     if (Lab.NK_GET_EVENT in ops) {
         val (rc, d) = labCommand(Lab.NK_GET_EVENT)
         if (rc == Lab.OK && d != null) {
@@ -1401,7 +1455,7 @@ suspend fun NikonCamera.runLabProbe(
         } else log("GetEvent(0x90C7) resp=${hex4(rc)}")
     }
 
-    // ---- 7. Live View 试取帧 ----
+    // ---- 8. Live View 试取帧 ----
     log("--- live view test ---")
     if (Lab.NK_START_LIVE_VIEW !in ops) log("StartLiveView not advertised - trying anyway")
     var lvOk = false
@@ -1434,7 +1488,7 @@ suspend fun NikonCamera.runLabProbe(
         log("EndLiveView(0x9202) resp=${hex4(labEndLiveView())}")
     }
 
-    // ---- 8. 结论 ----
+    // ---- 9. 结论 ----
     log("--- verdict ---")
     log("property survey: $descOkCount/${probeProps.size} desc, $valueOkCount/${probeProps.size} value")
     log(
@@ -1446,6 +1500,22 @@ suspend fun NikonCamera.runLabProbe(
             }
     )
     log("live view:      ${if (lvOk) "YES" else "NO"}")
+    log(
+        "live-view zoom: " +
+            if (digitalZoomDesc[Lab.PROP_NK_LV_IMAGE_ZOOM_RATIO]?.startsWith("OK ") == true) {
+                "0xD1A3 DESC_OK (inspect RW/RO and levels above)"
+            } else {
+                "0xD1A3 UNAVAILABLE"
+            }
+    )
+    log(
+        "digital zoom:   " +
+            if (digitalZoomDesc[Lab.PROP_DIGITAL_ZOOM]?.startsWith("OK ") == true) {
+                "0x5016 DESC_OK (inspect RW/RO and levels above)"
+            } else {
+                "0x5016 UNAVAILABLE"
+            }
+    )
     log("angle level:    ${if (alrc == Lab.OK && ald != null && ald.size >= 4) "0xD067 OK" else "UNAVAILABLE"}")
     log("capture opcode: ${if (Lab.NK_CAPTURE_REC_IN_MEDIA in ops || Lab.NK_CAPTURE_REC_IN_SDRAM in ops) "advertised" else "MISSING"}")
     log("event polling:  ${if (Lab.NK_GET_EVENT in ops || Lab.NK_GET_EVENT_EX in ops) "advertised" else "MISSING"}")
