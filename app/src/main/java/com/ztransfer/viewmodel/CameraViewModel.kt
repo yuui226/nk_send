@@ -29,6 +29,7 @@ import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.UsbPtpConnection
 import com.ztransfer.protocol.rcPollEvents
+import com.ztransfer.service.CameraSessionService
 import java.io.ByteArrayInputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -374,6 +375,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 camera = null
                 previous?.close()
                 releaseSessionWifiLock()
+                CameraSessionService.stop(getApplication())
 
                 val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
                 val cam = NikonCamera(localizedContext)
@@ -404,6 +406,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                     wifiRssi = null
                                 )
                             }
+                            // connectedDevice 前台保活只覆盖无线 PTP 会话。有线连接由物理 USB
+                            // 链路维持，不额外常驻“相机已连接”通知。
+                            CameraSessionService.stop(getApplication())
                             startKeepalive()
                             loadFiles()
                             startEventPolling()
@@ -449,6 +454,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         log { "USB_CONNECT paused; waiting for cable reattach" }
+        CameraSessionService.stop(getApplication())
         usbRetryPaused = true
         val localized = com.ztransfer.AppLocale.wrap(getApplication())
         _state.update {
@@ -475,6 +481,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             pendingUsbPermissionDeviceId = null
         }
         usbRetryPaused = true
+        CameraSessionService.stop(getApplication())
         _state.update {
             it.copy(
                 isConnecting = false,
@@ -512,6 +519,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         activeUsbDeviceId = null
+        CameraSessionService.stop(getApplication())
         keepaliveJob?.cancel()
         eventPollJob?.cancel()
         val cam = camera
@@ -717,6 +725,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             registerNetworkCallback()
             return
         }
+        CameraSessionService.stop(getApplication())
         keepaliveJob?.cancel()
         eventPollJob?.cancel()
         releaseSessionWifiLock()
@@ -817,6 +826,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 connectionType = CameraConnectionType.WIFI
                             )
                         }
+                        CameraSessionService.start(getApplication())
                         startKeepalive()
                         loadFiles()
                         startEventPolling()
@@ -838,6 +848,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         // 已离开相机 Wi-Fi（或已连上）；清除“连接中”状态，等待下次网络变化再触发。
         _state.update { it.copy(isConnecting = false) }
+        if (camera == null) CameraSessionService.stop(getApplication())
         if (_state.value.connectionType == CameraConnectionType.USB) {
             attachedUsbDevice?.let(::connectUsbDevice)
         }
@@ -1444,6 +1455,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     override fun onCleared() {
         super.onCleared()
+        CameraSessionService.stop(getApplication())
         releaseSessionWifiLock()
         keepaliveJob?.cancel()
         watcherJob?.cancel()

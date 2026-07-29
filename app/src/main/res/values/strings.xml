@@ -10,6 +10,9 @@
     <string name="transfer_channel_name">File transfer</string>
     <string name="transfer_notification_title">ZTransfer</string>
     <string name="transfer_notification_text">Transferring files…</string>
+    <string name="camera_session_channel_name">Wireless camera connection</string>
+    <string name="camera_session_notification_title">Wireless camera connected</string>
+    <string name="camera_session_notification_text">ZTransfer is keeping the wireless camera session active</string>
 
     <!-- Home / connection -->
     <string name="usb_unknown_error">Unknown USB error</string>

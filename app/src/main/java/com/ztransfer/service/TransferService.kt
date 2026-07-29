@@ -70,6 +70,18 @@ class TransferService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Android 15+ 对后台 dataSync 前台服务设有累计六小时上限。超时后若不在数秒内停止，
+     * 系统会抛 RemoteServiceException 杀掉整个进程；这里宁可结束保活服务，也不能让 App
+     * 因未响应系统期限而崩溃。传输半成品仍由既有断点续传逻辑保留。
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        foregroundReady = false
+        releaseWakeLock()
+        releaseWifiLock()
+        stopSelf()
+    }
+
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -134,7 +146,9 @@ class TransferService : Service() {
         val contentIntent = android.app.PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            },
             android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
         )
         // 通知文案经 AppLocale.wrap，与应用内语言一致（服务 Context 本身只跟系统语言）。
@@ -155,7 +169,8 @@ class TransferService : Service() {
         private const val WAKELOCK_TAG = "ZTransfer:transfer"
         private const val WIFILOCK_TAG = "ZTransfer:wifi"
         private const val EXTRA_USE_WIFI = "use_wifi"
-        private const val MAX_WAKELOCK_MS = 60L * 60L * 1000L // 兜底超时，防止异常时唤醒锁泄露
+        // 与 Android 15 dataSync 前台服务的最长后台窗口一致；正常任务结束会提前释放。
+        private const val MAX_WAKELOCK_MS = 6L * 60L * 60L * 1000L
         @Volatile private var foregroundReady = false
         @Volatile private var stopRequested = false
 

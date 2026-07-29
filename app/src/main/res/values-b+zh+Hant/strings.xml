@@ -10,6 +10,9 @@
     <string name="transfer_channel_name">檔案傳輸</string>
     <string name="transfer_notification_title">Z傳</string>
     <string name="transfer_notification_text">正在傳輸檔案…</string>
+    <string name="camera_session_channel_name">相機無線連線</string>
+    <string name="camera_session_notification_title">無線相機已連線</string>
+    <string name="camera_session_notification_text">Z傳正在保持無線相機工作階段</string>
 
     <!-- 連線頁 -->
     <string name="usb_unknown_error">未知 USB 錯誤</string>
