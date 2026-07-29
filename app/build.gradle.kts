@@ -35,6 +35,11 @@ android {
         targetSdk = 35
         versionCode = 22
         versionName = "1.52"
+
+        // The app exposes exactly English, Simplified Chinese and Traditional
+        // Chinese. Do not package translations contributed by AndroidX for
+        // languages the app itself does not support.
+        resourceConfigurations += listOf("en", "zh", "zh-rCN", "zh-rHK", "zh-rTW")
     }
 
     buildTypes {
@@ -69,6 +74,13 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+    bundle {
+        // AppLocale can switch languages independently of the device locale,
+        // so every installed split must contain all three supported languages.
+        language {
+            enableSplit = false
         }
     }
 }
