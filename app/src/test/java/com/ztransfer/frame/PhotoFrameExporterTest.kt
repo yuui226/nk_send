@@ -194,7 +194,7 @@ class PhotoFrameExporterTest {
     }
 
     @Test
-    fun detailLineMatchesCameraWatermarkStyle() {
+    fun detailLineKeepsComfortableSpacingBetweenCameraParameters() {
         val detail = frameDetailLine(
             PhotoFrameMetadata(
                 make = "NIKON CORPORATION",
@@ -206,7 +206,7 @@ class PhotoFrameExporterTest {
             )
         )
 
-        assertEquals("26mm  F4.2  1/125s  ISO400", detail)
+        assertEquals("26mm   F4.2   1/125s   ISO400", detail)
         assertEquals("Nikon", normalizeCameraMake("NIKON CORPORATION"))
         assertEquals(
             "Z 5",
@@ -308,5 +308,41 @@ class PhotoFrameExporterTest {
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_dark_123456.jpeg"))
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_plaque.jpg"))
         assertTrue(!isPhotoFrameOutputName("DSC_0123.JPG"))
+    }
+
+    @Test
+    fun existingFrameLookupMatchesOnlyTheSameSourceAndPreset() {
+        assertEquals(
+            "DSC_0123_frame_mist.jpg",
+            photoFrameOutputName("DSC_0123.JPG", PhotoFramePreset.MIST),
+        )
+        assertTrue(
+            isPhotoFrameOutputFor(
+                "DSC_0123_frame_mist (2).JPG",
+                "DSC_0123.JPG",
+                PhotoFramePreset.MIST,
+            ),
+        )
+        assertTrue(
+            isPhotoFrameOutputFor(
+                "DSC_0123 (1)_frame_plaque_123456.jpg",
+                "DSC_0123 (1).JPG",
+                PhotoFramePreset.PLAQUE,
+            ),
+        )
+        assertTrue(
+            !isPhotoFrameOutputFor(
+                "DSC_0123_frame_dark.jpg",
+                "DSC_0123.JPG",
+                PhotoFramePreset.MIST,
+            ),
+        )
+        assertTrue(
+            !isPhotoFrameOutputFor(
+                "DSC_9999_frame_mist.jpg",
+                "DSC_0123.JPG",
+                PhotoFramePreset.MIST,
+            ),
+        )
     }
 }

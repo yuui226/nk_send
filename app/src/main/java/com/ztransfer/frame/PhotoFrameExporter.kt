@@ -835,8 +835,8 @@ object PhotoFrameExporter {
             )
         }
         val preferredGap = min(
-            layout.canvasWidth * 0.0105f,
-            contentArea.height() * 0.075f,
+            layout.canvasWidth * 0.0125f,
+            contentArea.height() * 0.09f,
         )
         val baselines = centeredFrameTextBaselines(
             areaTop = contentArea.top,
@@ -982,9 +982,7 @@ object PhotoFrameExporter {
             ?.takeIf(String::isNotEmpty)
             ?.uppercase(Locale.ROOT)
         val model = metadata.model?.trim()?.takeIf(String::isNotEmpty)
-        val details = frameDetailLine(metadata)
-            .replace("  ", " ")
-            .takeIf(String::isNotEmpty)
+        val details = frameDetailLine(metadata).takeIf(String::isNotEmpty)
         val date = metadata.dateTime?.takeIf(String::isNotEmpty)
         val leftPrimary = make ?: model
         val leftSecondary = model?.takeIf { make != null && !it.equals(make, ignoreCase = true) }
@@ -995,16 +993,16 @@ object PhotoFrameExporter {
         val hasLeftBlock = hasLeft || showBranding
 
         val leftX = width * 0.058f
-        val leftMaxWidth = width * if (hasRight) 0.40f else 0.884f
-        val rightX = width * if (hasLeftBlock) 0.648f else 0.058f
-        val rightMaxWidth = width * if (hasLeftBlock) 0.305f else 0.884f
+        val leftMaxWidth = width * if (hasRight) 0.46f else 0.884f
+        val rightX = width * if (hasLeftBlock) 0.60f else 0.058f
+        val rightMaxWidth = width * if (hasLeftBlock) 0.35f else 0.884f
         val leftPrimaryPaint = leftPrimary?.let {
             createPlaqueTextPaint(
                 text = it,
                 preferredSize = width * 0.027f,
                 maxWidth = leftMaxWidth,
                 color = Color.rgb(18, 20, 21),
-                typeface = Typeface.create("sans-serif", Typeface.BOLD),
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL),
             )
         }
         val leftSecondaryPaint = leftSecondary?.let {
@@ -1022,7 +1020,7 @@ object PhotoFrameExporter {
                 preferredSize = width * 0.0245f,
                 maxWidth = rightMaxWidth,
                 color = Color.rgb(18, 20, 21),
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL),
+                typeface = Typeface.create("sans-serif", Typeface.NORMAL),
             )
         }
         val rightSecondaryPaint = rightSecondary?.let {
@@ -1073,7 +1071,7 @@ object PhotoFrameExporter {
         )
         val rightRows = listOfNotNull(rightPrimaryBounds, rightSecondaryBounds)
         if (leftRows.isEmpty() && rightRows.isEmpty()) return
-        val preferredGap = min(width * 0.009f, bandHeight * 0.075f)
+        val preferredGap = min(width * 0.0115f, bandHeight * 0.095f)
         val leftBaselines = centeredFrameTextBaselines(
             areaTop = bandTop,
             areaBottom = layout.canvasHeight.toFloat(),
@@ -1111,9 +1109,9 @@ object PhotoFrameExporter {
                 strokeWidth = maxOf(1f, width * 0.001f)
                 val dividerPadding = bandHeight * 0.075f
                 canvas.drawLine(
-                    width * 0.625f,
+                    width * 0.575f,
                     (infoTop - dividerPadding).coerceAtLeast(bandTop + dividerPadding),
-                    width * 0.625f,
+                    width * 0.575f,
                     (infoBottom + dividerPadding)
                         .coerceAtMost(layout.canvasHeight - dividerPadding),
                     this,
@@ -1174,8 +1172,7 @@ object PhotoFrameExporter {
         bitmap: Bitmap,
     ): PhotoFrameExportResult {
         val parentUri = destination.directoryUri
-        val stem = File(sourceName).nameWithoutExtension
-        val preferred = "${stem}_frame_${preset.fileSuffix}.jpg"
+        val preferred = photoFrameOutputName(sourceName, preset)
         val name = uniqueName(preferred, destination.occupiedNames)
         val tempName = photoFrameTempName(System.nanoTime())
         val temp = DocumentsContract.createDocument(
@@ -1469,7 +1466,7 @@ internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
         metadata.aperture?.replace("f/", "F", ignoreCase = true),
         metadata.shutter?.let { if (it.endsWith("s", ignoreCase = true)) it else "${it}s" },
         metadata.iso,
-    ).joinToString("  ")
+    ).joinToString("   ")
 
 internal fun normalizeCaptureDateTime(value: String?): String? {
     val trimmed = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
@@ -1519,6 +1516,47 @@ private val PHOTO_FRAME_OUTPUT_PATTERN = Regex(
 
 internal fun isPhotoFrameOutputName(name: String): Boolean =
     PHOTO_FRAME_OUTPUT_PATTERN.containsMatchIn(name)
+
+/** 同一张本地原片、同一预设对应的首选输出名。 */
+internal fun photoFrameOutputName(
+    sourceName: String,
+    preset: PhotoFramePreset,
+): String = "${File(sourceName).nameWithoutExtension}_frame_${preset.fileSuffix}.jpg"
+
+/**
+ * 判断目标目录中是否已经有该原片按指定预设生成的成片。
+ *
+ * 除首选名外也识别导出器为重名冲突生成的 " (n)" / 时间戳副本，避免用户重新点击
+ * 已传照片时继续制造同款副本。原片名和扩展名均按 DocumentsProvider 的常见行为
+ * 做大小写不敏感比较。
+ */
+internal fun PhotoFrameDestination.hasFrameFor(
+    sourceName: String,
+    preset: PhotoFramePreset,
+): Boolean {
+    val pattern = photoFrameOutputPattern(sourceName, preset)
+    return occupiedNames.any(pattern::matches)
+}
+
+internal fun isPhotoFrameOutputFor(
+    name: String,
+    sourceName: String,
+    preset: PhotoFramePreset,
+): Boolean = photoFrameOutputPattern(sourceName, preset).matches(name)
+
+private fun photoFrameOutputPattern(
+    sourceName: String,
+    preset: PhotoFramePreset,
+): Regex {
+    val preferred = photoFrameOutputName(sourceName, preset)
+    val dot = preferred.lastIndexOf('.')
+    val stem = if (dot >= 0) preferred.substring(0, dot) else preferred
+    val extension = if (dot >= 0) preferred.substring(dot) else ""
+    return Regex(
+        "^${Regex.escape(stem)}(?: \\(\\d+\\)|_\\d+)?${Regex.escape(extension)}$",
+        RegexOption.IGNORE_CASE,
+    )
+}
 
 internal fun uniqueName(preferred: String, occupied: Set<String>): String {
     val normalizedOccupied = occupied.asSequence()

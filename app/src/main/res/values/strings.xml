@@ -73,8 +73,10 @@
     <string name="change_directory">Change folder</string>
     <string name="choose_directory">Choose folder</string>
     <string name="columns">Columns</string>
-    <string name="collapse_burst_photos">Show bursts as collections</string>
+    <string name="collapse_burst_photos">Group bursts</string>
     <string name="appearance">Appearance</string>
+    <string name="light_dark_mode">Light &amp; dark</string>
+    <string name="button_style">Button style</string>
     <string name="theme_system">System</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>
@@ -95,6 +97,8 @@
     <string name="no_preview">No preview</string>
     <string name="video_no_preview">Video · preview not supported</string>
     <string name="photo_frame_watermark">Frame watermark</string>
+    <string name="photo_frame_off">Off</string>
+    <string name="photo_frame_export_copy_description">Save a framed copy after export</string>
     <string name="photo_frame_mist">Mist</string>
     <string name="photo_frame_cinema">Cinema</string>
     <string name="photo_frame_minimal">Minimal</string>
@@ -108,6 +112,7 @@
     <string name="error_camera_connection_lost">Camera connection lost — retry to resume after reconnecting</string>
     <string name="error_create_file">Couldn\'t create file</string>
     <string name="error_open_file">Couldn\'t open file</string>
+    <string name="error_local_original_missing">The saved original could not be found. Transfer it again first.</string>
     <string name="error_rename_copy_refused">System refused to rename or copy the file</string>
     <string name="error_save_failed">Save failed: %1$s</string>
     <string name="error_copy_incomplete">Copy incomplete %1$d/%2$d</string>

@@ -70,4 +70,58 @@ class TransferStateTest {
         assertEquals(false, shouldGeneratePhotoFrame(enabled = false, extension = ".jpg"))
     }
 
+    @Test
+    fun onlyAnAlreadyTransferredJpegBecomesAFrameOnlyTask() {
+        val jpeg = file(1)
+        val video = NikonCamera.FileInfo(
+            handle = 2,
+            size = 100L,
+            fileName = "DSC_2.MP4",
+            captureDate = null,
+        )
+        val existing = mapOf(jpeg.fileName to setOf(jpeg.size), video.fileName to setOf(video.size))
+
+        assertEquals(
+            TransferTaskMode.FRAME_ONLY,
+            transferTaskModeFor(
+                jpeg,
+                photoFrameEnabled = true,
+                existingExportFiles = existing,
+            ),
+        )
+        assertEquals(
+            TransferTaskMode.DOWNLOAD,
+            transferTaskModeFor(
+                jpeg,
+                photoFrameEnabled = false,
+                existingExportFiles = existing,
+            ),
+        )
+        assertEquals(
+            TransferTaskMode.DOWNLOAD,
+            transferTaskModeFor(
+                jpeg,
+                photoFrameEnabled = true,
+                existingExportFiles = emptyMap(),
+            ),
+        )
+        assertEquals(
+            TransferTaskMode.DOWNLOAD,
+            transferTaskModeFor(
+                video,
+                photoFrameEnabled = true,
+                existingExportFiles = existing,
+            ),
+        )
+    }
+
+    @Test
+    fun thumbnailColumnsUseOnlyTheSupportedTwoToFourRange() {
+        assertEquals(2, normalizeThumbnailColumns(1))
+        assertEquals(2, normalizeThumbnailColumns(2))
+        assertEquals(3, normalizeThumbnailColumns(3))
+        assertEquals(4, normalizeThumbnailColumns(4))
+        assertEquals(4, normalizeThumbnailColumns(9))
+    }
+
 }

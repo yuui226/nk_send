@@ -3303,13 +3303,11 @@ private fun ParamTile(
         ).sp
         // 左上短标
         if (label.isNotEmpty()) {
-            Text(
-                label,
+            ControlTileFieldLabel(
+                text = label,
                 color = colors.onSurfaceVariant.copy(
                     alpha = if (valueWritable || hasAutoIsoControl) 0.85f else 0.4f
                 ),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = 6.dp)
             )
         }
@@ -3336,30 +3334,21 @@ private fun ParamTile(
                     ),
                 contentAlignment = Alignment.TopEnd
             ) {
-                Box(
+                ControlTileCornerBadge(
+                    text = "AUTO",
+                    textColor = if (autoIsoOn) Color.Black.copy(alpha = 0.75f)
+                    else colors.onSurfaceVariant,
+                    backgroundColor = if (autoIsoOn) ProtectBadgeColor.copy(alpha = 0.90f)
+                    else colors.surfaceVariant.copy(alpha = 0.85f),
+                    borderColor = colors.glassPanelBorder,
+                    shape = badgeShape,
                     modifier = Modifier
                         .width(autoBadgeWidth)
                         .height(autoBadgeHeight)
-                        .graphicsLayer { alpha = if (autoIsoBusy) 0.5f else 1f }
-                        .clip(badgeShape)
-                        .background(
-                            if (autoIsoOn) ProtectBadgeColor.copy(alpha = 0.90f)
-                            else colors.surfaceVariant.copy(alpha = 0.85f)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "AUTO",
-                        color = if (autoIsoOn) Color.Black.copy(alpha = 0.75f)
-                        else colors.onSurfaceVariant,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = autoBadgeFontSize,
-                            lineHeight = (autoBadgeFontSize.value + 1f).sp
-                        ),
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1
-                    )
-                }
+                        .graphicsLayer { alpha = if (autoIsoBusy) 0.5f else 1f },
+                    fontSize = autoBadgeFontSize,
+                    contentPadding = PaddingValues(0.dp),
+                )
             }
         }
         // 只读锁（右上）

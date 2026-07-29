@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.dp
+import com.ztransfer.ui.util.rememberHaptics
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -44,9 +45,19 @@ fun rememberFireworksState(): FireworksState = remember { FireworksState() }
  * 渲染当前所有活跃烟花（各自全屏 Canvas、不拦截触摸）。放在页面最上层,不加暗幕,直接放。
  */
 @Composable
-fun FireworksOverlay(state: FireworksState) {
+fun FireworksOverlay(
+    state: FireworksState,
+    hapticsEnabled: Boolean,
+) {
+    val haptics = rememberHaptics(hapticsEnabled)
     state.active.forEach { id ->
-        key(id) { Firework(seed = id, onFinished = { state.active.remove(id) }) }
+        key(id) {
+            Firework(
+                seed = id,
+                onExploded = haptics::tick,
+                onFinished = { state.active.remove(id) },
+            )
+        }
     }
 }
 
@@ -75,11 +86,18 @@ private class FireworkSpec(
  * 父层据此把本发从活跃列表移除。
  */
 @Composable
-private fun Firework(seed: Int, onFinished: () -> Unit) {
+private fun Firework(
+    seed: Int,
+    onExploded: () -> Unit,
+    onFinished: () -> Unit,
+) {
     val t = remember { Animatable(0f) }
+    val explode by rememberUpdatedState(onExploded)
     val done by rememberUpdatedState(onFinished)
     LaunchedEffect(Unit) {
-        t.animateTo(1f, tween(2000, easing = LinearEasing))
+        t.animateTo(LAUNCH_PROGRESS, tween(LAUNCH_DURATION_MS, easing = LinearEasing))
+        explode()
+        t.animateTo(1f, tween(BURST_DURATION_MS, easing = LinearEasing))
         done()
     }
     val spec = remember(seed) {
@@ -119,7 +137,7 @@ private fun Firework(seed: Int, onFinished: () -> Unit) {
     }
     Canvas(modifier = Modifier.fillMaxSize()) {
         val prog = t.value
-        val launch = 0.2f
+        val launch = LAUNCH_PROGRESS
         val cx = spec.x * size.width
         val cy = spec.y * size.height
         if (prog < launch) {
@@ -233,3 +251,7 @@ private fun Firework(seed: Int, onFinished: () -> Unit) {
         }
     }
 }
+
+private const val LAUNCH_PROGRESS = 0.2f
+private const val LAUNCH_DURATION_MS = 400
+private const val BURST_DURATION_MS = 1_600

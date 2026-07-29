@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -60,6 +61,7 @@ fun AnchorPopup(
     var panelBounds by remember { mutableStateOf<Rect?>(null) }
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
+    val currentOnDismiss by rememberUpdatedState(onDismiss)
 
     // 面板测量完成即入场展开。
     LaunchedEffect(panelBounds, closing) {
@@ -71,7 +73,9 @@ fun AnchorPopup(
     LaunchedEffect(closing) {
         if (closing) {
             progress.animateTo(0f, Motion.overlayCollapse)
-            onDismiss()
+            // 收起期间调用方状态仍可能更新（例如语言选择标记“动画后重建”），始终执行
+            // 最新回调，避免捕获关闭开始前的旧闭包。
+            currentOnDismiss()
         }
     }
     val startClose: () -> Unit = { closing = true }

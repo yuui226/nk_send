@@ -7,7 +7,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -54,6 +53,7 @@ import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
+import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.photoFrameBrandingVisible
 import kotlinx.coroutines.delay
@@ -84,6 +84,14 @@ fun SettingsOverlay(
     val state by viewModel.state.collectAsState()
     val colors = AppTheme.colors
     val isPro by LicenseManager.isPro.collectAsState()
+    val haptics = rememberHaptics(state.hapticsEnabled)
+    val activity = LocalContext.current.findActivity()
+    // 当前语言依赖 attachBaseContext，在 Activity 重建后才会全局生效。拨轮提交后走弹窗
+    // 自己的 close 动画；此标记让动画完成回调知道随后需要重建，而不是当场硬切页面。
+    var recreateAfterDismiss by remember { mutableStateOf(false) }
+    // 弹窗打开后锁定入口位置。按钮风格切换会让外部 GlassButton 更换实现并重新测量；
+    // 若继续跟踪实时 anchor，面板会在用户眼前上下跳动，关闭动画的归宿也会漂移。
+    val openingAnchorBounds = remember { anchorBounds }
 
     val directoryPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -132,13 +140,18 @@ fun SettingsOverlay(
 
     // 面板顶边贴按钮下缘 + 8dp；按钮尚未测量时按顶栏下方近似定位。
     val density = LocalDensity.current
-    val panelTop = if (anchorBounds != null) {
-        with(density) { anchorBounds.bottom.toDp() } + 8.dp
+    val panelTop = if (openingAnchorBounds != null) {
+        with(density) { openingAnchorBounds.bottom.toDp() } + 8.dp
     } else 76.dp
 
     AnchorPopup(
-        anchorBounds = anchorBounds,
-        onDismiss = onDismiss,
+        anchorBounds = openingAnchorBounds,
+        onDismiss = {
+            // AnchorPopup 只会在收起动画 animateTo(0f) 完成后调用这里，因此语言切换不会
+            // 再硬切掉弹窗；关闭按钮、返回键和点遮罩三条路径都共用这一时序。
+            onDismiss()
+            if (recreateAfterDismiss) activity?.recreate()
+        },
         panelModifier = Modifier
             .padding(start = 12.dp, end = 12.dp, top = panelTop)
             .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
@@ -226,24 +239,35 @@ fun SettingsOverlay(
 
             Spacer(Modifier.height(14.dp))
 
-            // ---------- 卡片一：传输目录（标题行右上放"更改"按钮，路径独占下方整行）----------
-            // "更改"按钮上移到标题行：长路径在下方整行展示、最多两行省略，不再被按钮抢宽度遮挡。
-            // 未设目录时橙色描边强调：因点图未设目录被弹到这里的新用户能立刻明白来意。
+            // ---------- 传输目录：标题、单行路径与更改按钮并排；未设置时保留橙色强调 ----------
             SettingsCard(
                 borderColor = if (dirText == null) colors.accentOrange.copy(alpha = 0.8f) else colors.glassPanelBorder
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.weight(1f)) {
+                    Icon(
+                        Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = if (dirText != null) colors.statusConnected else colors.accentOrange,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
                         SectionLabel(stringResource(R.string.transfer_directory))
+                        Text(
+                            text = dirText ?: stringResource(R.string.dir_not_set),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (dirText != null) colors.onSurfaceVariant else colors.accentOrange,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                     Spacer(Modifier.width(10.dp))
                     GlassButton(
                         onClick = { directoryPicker.launch(null) },
                         shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
                         modifier = Modifier.height(30.dp)
                     ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, tint = colors.accentBlue, modifier = Modifier.size(14.dp))
                         Text(
                             stringResource(if (dirText != null) R.string.change_directory else R.string.choose_directory),
                             style = MaterialTheme.typography.labelMedium,
@@ -252,306 +276,261 @@ fun SettingsOverlay(
                         )
                     }
                 }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = if (dirText != null) colors.statusConnected else colors.accentOrange,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = dirText ?: stringResource(R.string.dir_not_set),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (dirText != null) colors.onBackground else colors.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
             }
 
             Spacer(Modifier.height(8.dp))
 
-            // ---------- 卡片二：照片列表（列数 / 连拍合集）----------
+            // ---------- 高频开关：固定 2×2，去掉解释文字以压缩高度 ----------
             SettingsCard {
-                // 每行列数：标题与选项并排，节省一整行高度。
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionLabel(
-                        stringResource(R.string.columns),
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(12.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.heightIn(min = 44.dp),
+                ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.weight(1.45f)
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f),
                     ) {
-                        (1..4).forEach { col ->
-                            SelectionChip(
-                                label = "$col",
-                                selected = state.thumbnailColumns == col,
-                                onClick = { viewModel.setThumbnailColumns(col) },
-                                textStyle = MaterialTheme.typography.titleSmall,
-                                compact = true,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-
-                CardDivider()
-
-                // 连拍合集：默认关闭，开启后仅改变照片列表的呈现方式，不改原始文件、
-                // 筛选或传输队列语义。
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionLabel(
-                        stringResource(R.string.collapse_burst_photos),
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Switch(
-                        checked = state.collapseBurstPhotos,
-                        onCheckedChange = { viewModel.setCollapseBurstPhotos(it) }
-                    )
-                }
-
-                CardDivider()
-
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
                         SectionLabel(
-                            stringResource(R.string.photo_frame_watermark),
+                            stringResource(R.string.columns),
                             modifier = Modifier.weight(1f)
                         )
-                        Spacer(Modifier.width(12.dp))
-                        Switch(
-                            checked = state.photoFrameEnabled,
-                            onCheckedChange = { viewModel.setPhotoFrameEnabled(it) }
-                        )
-                    }
-                    AnimatedVisibility(
-                        visible = state.photoFrameEnabled,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(top = 10.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.width(88.dp),
                         ) {
-                            PhotoFramePreset.entries.chunked(2).forEachIndexed { rowIndex, presets ->
-                                if (rowIndex > 0) Spacer(Modifier.height(6.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    presets.forEach { preset ->
-                                        val label = stringResource(
-                                            when (preset) {
-                                                PhotoFramePreset.MIST -> R.string.photo_frame_mist
-                                                PhotoFramePreset.CINEMA -> R.string.photo_frame_cinema
-                                                PhotoFramePreset.MINIMAL -> R.string.photo_frame_minimal
-                                                PhotoFramePreset.FROSTED -> R.string.photo_frame_frosted
-                                                PhotoFramePreset.PLAQUE -> R.string.photo_frame_plaque
-                                            }
-                                        )
-                                        SelectionChip(
-                                            label = label,
-                                            selected = state.photoFramePreset == preset,
-                                            onClick = { viewModel.setPhotoFramePreset(preset) },
-                                            compact = true,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                    if (presets.size < 2) {
-                                        Spacer(Modifier.weight(1f))
-                                    }
-                                }
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 10.dp)
-                            ) {
-                                SectionLabel(
-                                    stringResource(R.string.photo_frame_branding),
+                            (2..4).forEach { col ->
+                                SelectionChip(
+                                    label = "$col",
+                                    selected = state.thumbnailColumns == col,
+                                    onClick = { viewModel.setThumbnailColumns(col) },
+                                    textStyle = MaterialTheme.typography.labelLarge,
+                                    compact = true,
                                     modifier = Modifier.weight(1f)
                                 )
-                                if (!isPro) {
-                                    Text(
-                                        stringResource(R.string.photo_frame_branding_pro_hint),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = colors.onSurfaceVariant,
-                                        modifier = Modifier.padding(end = 8.dp)
-                                    )
-                                }
-                                Switch(
-                                    checked = photoFrameBrandingVisible(
-                                        isPro = isPro,
-                                        preferenceEnabled = state.photoFrameBrandingEnabled,
-                                    ),
-                                    enabled = isPro,
-                                    onCheckedChange = viewModel::setPhotoFrameBrandingEnabled
-                                )
                             }
                         }
                     }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ---------- 卡片三：通用（触感反馈 / 屏幕常亮）----------
-            SettingsCard {
-                // 触感反馈
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        SectionLabel(stringResource(R.string.haptic_feedback))
+                    CompactVerticalDivider()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp),
+                    ) {
+                        SectionLabel(
+                            stringResource(R.string.collapse_burst_photos),
+                            modifier = Modifier.weight(1f)
+                        )
+                        SettingsSwitch(
+                            checked = state.collapseBurstPhotos,
+                            onCheckedChange = viewModel::setCollapseBurstPhotos,
+                            hapticsEnabled = state.hapticsEnabled,
+                        )
                     }
-                    Switch(
-                        checked = state.hapticsEnabled,
-                        onCheckedChange = { viewModel.setHapticsEnabled(it) }
-                    )
                 }
 
                 CardDivider()
 
-                // 屏幕常亮（默认开）：前台不熄屏，防系统冻结进程/Wi-Fi 打盹断连。
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionLabel(
-                        stringResource(R.string.keep_screen_on),
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    Switch(
-                        checked = state.keepScreenOn,
-                        onCheckedChange = { viewModel.setKeepScreenOn(it) }
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.heightIn(min = 44.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        SectionLabel(
+                            stringResource(R.string.haptic_feedback),
+                            modifier = Modifier.weight(1f)
+                        )
+                        SettingsSwitch(
+                            checked = state.hapticsEnabled,
+                            onCheckedChange = viewModel::setHapticsEnabled,
+                            hapticsEnabled = state.hapticsEnabled,
+                            isHapticsPreference = true,
+                        )
+                    }
+                    CompactVerticalDivider()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp),
+                    ) {
+                        SectionLabel(
+                            stringResource(R.string.keep_screen_on),
+                            modifier = Modifier.weight(1f)
+                        )
+                        SettingsSwitch(
+                            checked = state.keepScreenOn,
+                            onCheckedChange = viewModel::setKeepScreenOn,
+                            hapticsEnabled = state.hapticsEnabled,
+                        )
+                    }
                 }
             }
 
             Spacer(Modifier.height(8.dp))
 
-            // ---------- 卡片四：界面（外观 / 语言），作为最后一个设置分组 ----------
+            // ---------- 边框水印：关闭也作为第一档，拨轮松手后再显隐子项 ----------
+            val frameChoices = listOf<Pair<PhotoFramePreset?, String>>(
+                null to stringResource(R.string.photo_frame_off),
+                PhotoFramePreset.MIST to stringResource(R.string.photo_frame_mist),
+                PhotoFramePreset.CINEMA to stringResource(R.string.photo_frame_cinema),
+                PhotoFramePreset.MINIMAL to stringResource(R.string.photo_frame_minimal),
+                PhotoFramePreset.FROSTED to stringResource(R.string.photo_frame_frosted),
+                PhotoFramePreset.PLAQUE to stringResource(R.string.photo_frame_plaque),
+            )
+            val selectedFrameChoice = if (state.photoFrameEnabled) {
+                frameChoices.first { it.first == state.photoFramePreset }
+            } else {
+                frameChoices.first()
+            }
+            val brandingProHint = stringResource(R.string.photo_frame_branding_pro_hint)
             SettingsCard {
-                // 外观：标题与主题选项并排。
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionLabel(
-                        stringResource(R.string.appearance),
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(12.dp))
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val wheelWidth = (maxWidth - 16.dp) / 3f
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.weight(2.4f)
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        ThemeMode.entries.forEach { mode ->
-                            SelectionChip(
-                                label = stringResource(when (mode) {
-                                    ThemeMode.SYSTEM -> R.string.theme_system
-                                    ThemeMode.DARK -> R.string.theme_dark
-                                    ThemeMode.LIGHT -> R.string.theme_light
-                                }),
-                                selected = state.themeMode == mode,
-                                onClick = { viewModel.setThemeMode(mode) },
-                                compact = true,
-                                modifier = Modifier.weight(1f)
+                        Column(modifier = Modifier.weight(1f)) {
+                            SectionLabel(stringResource(R.string.photo_frame_watermark))
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                stringResource(R.string.photo_frame_export_copy_description),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                    }
-                }
-
-                CardDivider()
-
-                // 语言：收起时只占一行（标签 + 当前语言小玻璃按钮），点按钮向下展开选项。
-                // 语言名一律用其自身语言书写（国际惯例，不随界面语言翻译），仅"跟随系统"本地化。
-                val languages = listOf(
-                    AppLocale.SYSTEM to stringResource(R.string.language_system),
-                    "en" to "English",
-                    "zh-Hans" to "简体中文",
-                    "zh-Hant" to "繁體中文"
-                )
-                val activity = LocalContext.current.findActivity()
-                var languageExpanded by remember { mutableStateOf(false) }
-                val chevron by animateFloatAsState(
-                    targetValue = if (languageExpanded) 180f else 0f,
-                    label = "langChevron"
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        SectionLabel(stringResource(R.string.language))
-                    }
-                    GlassButton(
-                        onClick = { languageExpanded = !languageExpanded },
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(start = 14.dp, end = 8.dp),
-                        modifier = Modifier.height(28.dp)
-                    ) {
-                        Text(
-                            languages.firstOrNull { it.first == state.appLanguage }?.second
-                                ?: languages.first().second,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.onBackground
-                        )
-                        Icon(
-                            Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = colors.onSurfaceVariant,
-                            modifier = Modifier
-                                .size(16.dp)
-                                .graphicsLayer { rotationZ = chevron }
+                        Spacer(Modifier.width(12.dp))
+                        ReleaseCommitWheel(
+                            options = frameChoices,
+                            selected = selectedFrameChoice,
+                            optionLabel = { it.second },
+                            onValueCommitted = { viewModel.setPhotoFrameSelection(it.first) },
+                            onDetent = haptics::tick,
+                            modifier = Modifier.width(wheelWidth),
                         )
                     }
                 }
+
                 AnimatedVisibility(
-                    visible = languageExpanded,
+                    visible = state.photoFrameEnabled,
                     enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
+                    exit = fadeOut() + shrinkVertically(),
                 ) {
                     Column {
-                        Spacer(Modifier.height(8.dp))
-                        languages.chunked(2).forEachIndexed { rowIndex, rowItems ->
-                            if (rowIndex > 0) Spacer(Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                rowItems.forEach { (tag, label) ->
-                                    val selected = state.appLanguage == tag
-                                    SelectionChip(
-                                        label = label,
-                                        selected = selected,
-                                        onClick = {
-                                            if (!selected) {
-                                                viewModel.setAppLanguage(tag)
-                                                // attachBaseContext 在重建时重读偏好，语言即刻生效。
-                                                activity?.recreate()
-                                            }
-                                        },
-                                        modifier = Modifier.weight(1f)
+                        CardDivider()
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (isPro) Modifier
+                                    else Modifier.clickable { showFooterHint(brandingProHint) }
+                                ),
+                        ) {
+                            SectionLabel(
+                                stringResource(R.string.photo_frame_branding),
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (!isPro) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = colors.accentOrange.copy(alpha = 0.14f),
+                                ) {
+                                    Text(
+                                        stringResource(R.string.pro_label),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.accentOrange,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
                                     )
                                 }
+                                Spacer(Modifier.width(8.dp))
                             }
+                            SettingsSwitch(
+                                checked = photoFrameBrandingVisible(
+                                    isPro = isPro,
+                                    preferenceEnabled = state.photoFrameBrandingEnabled,
+                                ),
+                                enabled = isPro,
+                                onCheckedChange = viewModel::setPhotoFrameBrandingEnabled,
+                                hapticsEnabled = state.hapticsEnabled,
+                            )
                         }
                     }
                 }
+            }
 
-                CardDivider()
+            Spacer(Modifier.height(8.dp))
 
-                // UI 皮肤
-                SectionLabel(
-                    stringResource(R.string.cd_skin),
-                    modifier = Modifier.padding(bottom = 8.dp)
+            // ---------- 明暗、语言、按钮材质：同款拨轮，全部只在松手后提交 ----------
+            val themeChoices = ThemeMode.entries.map { mode ->
+                mode to stringResource(
+                    when (mode) {
+                        ThemeMode.SYSTEM -> R.string.theme_system
+                        ThemeMode.DARK -> R.string.theme_dark
+                        ThemeMode.LIGHT -> R.string.theme_light
+                    }
                 )
-                SkinPreset.entries.chunked(3).forEachIndexed { rowIndex, rowItems ->
-                    if (rowIndex > 0) Spacer(Modifier.height(8.dp))
+            }
+            val selectedTheme = themeChoices.first { it.first == state.themeMode }
+            val languages = listOf(
+                AppLocale.SYSTEM to stringResource(R.string.language_system),
+                "en" to "English",
+                "zh-Hans" to "简体中文",
+                "zh-Hant" to "繁體中文",
+            )
+            val selectedLanguage = languages.firstOrNull { it.first == state.appLanguage }
+                ?: languages.first()
+            val skinChoices = SkinPreset.entries.map { skin ->
+                skin to stringResource(skin.displayNameResId)
+            }
+            val selectedSkin = skinChoices.first { it.first == state.skinPreset }
+            SettingsCard {
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val wheelWidth = (maxWidth - 16.dp) / 3f
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        rowItems.forEach { skin ->
-                            SelectionChip(
-                                label = stringResource(skin.displayNameResId),
-                                selected = state.skinPreset == skin,
-                                onClick = { viewModel.setSkinPreset(skin) },
-                                compact = true,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
+                        ReleaseCommitWheel(
+                            options = themeChoices,
+                            selected = selectedTheme,
+                            optionLabel = { it.second },
+                            onValueCommitted = { viewModel.setThemeMode(it.first) },
+                            onDetent = haptics::tick,
+                            label = stringResource(R.string.light_dark_mode),
+                            modifier = Modifier.width(wheelWidth),
+                        )
+                        ReleaseCommitWheel(
+                            options = languages,
+                            selected = selectedLanguage,
+                            optionLabel = { it.second },
+                            onValueCommitted = { language ->
+                                if (language.first != state.appLanguage) {
+                                    viewModel.setAppLanguage(language.first)
+                                    recreateAfterDismiss = true
+                                    close()
+                                }
+                            },
+                            onDetent = haptics::tick,
+                            label = stringResource(R.string.language),
+                            modifier = Modifier.width(wheelWidth),
+                        )
+                        ReleaseCommitWheel(
+                            options = skinChoices,
+                            selected = selectedSkin,
+                            optionLabel = { it.second },
+                            onValueCommitted = { viewModel.setSkinPreset(it.first) },
+                            onDetent = haptics::tick,
+                            label = stringResource(R.string.button_style),
+                            modifier = Modifier.width(wheelWidth),
+                        )
                     }
                 }
             }
@@ -574,14 +553,9 @@ fun SettingsOverlay(
             val checkFailedHint = stringResource(R.string.update_check_failed)
             val internetRequiredHint = stringResource(R.string.err_purchase_no_network)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
+                VersionPlaque(
                     text = stringResource(R.string.version_label, BuildConfig.VERSION_NAME),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant.copy(alpha = 0.7f),
-                    modifier = Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
+                    onClick = {
                         val now = System.currentTimeMillis()
                         versionTaps = if (now - lastVersionTapAt < 1500) versionTaps + 1 else 1
                         lastVersionTapAt = now
@@ -590,7 +564,7 @@ fun SettingsOverlay(
                             LicenseManager.revertToFree()
                             showFooterHint(revertedHint)
                         }
-                    }
+                    },
                 )
                 Spacer(Modifier.weight(1f))
                 GlassButton(
@@ -661,6 +635,35 @@ fun SettingsOverlay(
 }
 
 /**
+ * 设置页开关统一入口：开关值真正改变时才触发轻触反馈。
+ *
+ * 触感反馈开关本身始终允许播放这一次确认反馈，这样从关闭切到开启时，
+ * 用户能够立即知道设置已经生效；其余开关严格受全局触感偏好控制。
+ */
+@Composable
+private fun SettingsSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    hapticsEnabled: Boolean,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    isHapticsPreference: Boolean = false,
+) {
+    val switchHaptics = rememberHaptics(hapticsEnabled || isHapticsPreference)
+    Switch(
+        checked = checked,
+        onCheckedChange = { newValue ->
+            if (newValue != checked) {
+                switchHaptics.tick()
+                onCheckedChange(newValue)
+            }
+        },
+        modifier = modifier,
+        enabled = enabled,
+    )
+}
+
+/**
  * 设置分区卡片：面板内的一块玻璃子容器——极淡的内嵌底色 + 细描边圆角，
  * 把相关设置聚成一个视觉区域。[borderColor] 可覆盖描边（如目录未设时橙色强调）。
  */
@@ -693,6 +696,68 @@ private fun CardDivider() {
             .height(1.dp)
             .background(AppTheme.colors.glassPanelBorder)
     )
+}
+
+@Composable
+private fun CompactVerticalDivider() {
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 12.dp)
+            .width(1.dp)
+            .height(30.dp)
+            .background(AppTheme.colors.glassPanelBorder)
+    )
+}
+
+/**
+ * 页脚版本铭牌。点击区域仍完整承载原来的七连击调试入口，只改变视觉，不改变页脚布局。
+ */
+@Composable
+private fun VersionPlaque(
+    text: String,
+    onClick: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val shape = RoundedCornerShape(7.dp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier
+            .clip(shape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        colors.onBackground.copy(alpha = 0.10f),
+                        colors.onBackground.copy(alpha = 0.035f),
+                    )
+                )
+            )
+            .border(1.dp, colors.glassPanelBorder, shape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+    ) {
+        Box(
+            Modifier
+                .size(3.dp)
+                .background(colors.onSurfaceVariant.copy(alpha = 0.42f), RoundedCornerShape(50))
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = colors.onSurfaceVariant.copy(alpha = 0.82f),
+            maxLines = 1,
+        )
+        Box(
+            Modifier
+                .size(3.dp)
+                .background(colors.onSurfaceVariant.copy(alpha = 0.42f), RoundedCornerShape(50))
+        )
+    }
 }
 
 /**

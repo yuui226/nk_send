@@ -180,11 +180,12 @@ val LightAppColors = AppColors(
     glassBorderBottom = Color.Black.copy(alpha = 0.08f),
     glassPanelBorder = Color.Black.copy(alpha = 0.10f),
     glassSheen = Color.White.copy(alpha = 0.55f),
-    // 浅色液态玻璃保留足够透底感，同时以冷白轻染色避免内容穿透后显脏。
-    buttonSurface = Color(0xFFF7FBFF).copy(alpha = 0.80f),
-    buttonHighlightTop = Color.White.copy(alpha = 0.28f),
-    buttonHighlightBottom = Color.White.copy(alpha = 0.035f),
-    buttonSheen = Color.White.copy(alpha = 0.22f),
+    // 浅色液态玻璃增加冷雾蓝密度与顶部散射：在浅灰页面上仍能明确看出一层磨砂玻璃，
+    // 但保持半透明，不退化成不透明的白色塑料按钮。
+    buttonSurface = Color(0xFFEAF4FA).copy(alpha = 0.86f),
+    buttonHighlightTop = Color.White.copy(alpha = 0.48f),
+    buttonHighlightBottom = Color(0xFFB8D5E5).copy(alpha = 0.075f),
+    buttonSheen = Color.White.copy(alpha = 0.34f),
     scrim = Color.Black.copy(alpha = 0.32f),
     thumbPlaceholder = Color(0xFFE6E6EB),
     cardHairline = Color.Black.copy(alpha = 0.06f),

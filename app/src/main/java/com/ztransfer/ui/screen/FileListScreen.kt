@@ -110,7 +110,6 @@ import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
-import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.Haptics
 import com.ztransfer.ui.util.formatSpeed
@@ -118,9 +117,12 @@ import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
+import com.ztransfer.viewmodel.TransferTaskMode
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.currentFileProgress
+import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.remainingCount
+import com.ztransfer.viewmodel.transferTaskModeFor
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
@@ -403,10 +405,11 @@ fun FileListScreen(
     // 已传对号与“未传输”筛选必须共用这一个判定，避免界面同时出现
     // “带对号却仍在未传输列表”的自相矛盾。
     val exportedHandles: Set<Int> = remember(state.files, transferState.existingExportFiles) {
-        state.files.asSequence().filter { file ->
-            val sizes = transferState.existingExportFiles[file.fileName] ?: return@filter false
-            sizes.any { it < 0L || it == file.size } || file.size == PtpConstants.SIZE_UNKNOWN
-        }.mapTo(HashSet()) { it.handle }
+        state.files.asSequence()
+            .filter { file ->
+                isTransferredOriginal(file, transferState.existingExportFiles)
+            }
+            .mapTo(HashSet()) { it.handle }
     }
     // “未传输”筛选下，本次队列刚完成的照片先留在网格中播放单格退场，再真正加入过滤集合。
     // 导出目录扫描发现的历史文件不需要动画，仍然同步过滤，避免列表初次加载时闪现旧照片。
@@ -562,6 +565,13 @@ fun FileListScreen(
     val queuedByHandle = remember(transferState.tasks) {
         transferState.tasks.associateBy { it.file.handle }
     }
+    val canFrameLocally: (NikonCamera.FileInfo) -> Boolean = { file ->
+        transferTaskModeFor(
+            file = file,
+            photoFrameEnabled = transferState.photoFrameEnabled,
+            existingExportFiles = transferState.existingExportFiles,
+        ) == TransferTaskMode.FRAME_ONLY
+    }
     // 单文件入队：列表轻触 + 预览页传输按钮共用。gating 与整组传输一致。
     val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
         if (transferState.transferDirUri == null) {
@@ -571,7 +581,7 @@ fun FileListScreen(
             previewSourceAtOpen = null
             showSettings = true; return@onTapFile
         }
-        if (!state.isConnectedToCamera) {
+        if (!state.isConnectedToCamera && !canFrameLocally(file)) {
             signalPulse++
             showHint(notConnectedHint)
         } else {
@@ -605,7 +615,7 @@ fun FileListScreen(
                 showSettings = true
                 return@onTransferBurstPreview
             }
-            if (!state.isConnectedToCamera) {
+            if (!state.isConnectedToCamera && remaining.any { !canFrameLocally(it) }) {
                 signalPulse++
                 showHint(notConnectedHint)
                 return@onTransferBurstPreview
@@ -698,7 +708,7 @@ fun FileListScreen(
                 if (transferState.transferDirUri == null) {
                     showSettings = true; return@onTransferGroup
                 }
-                if (!state.isConnectedToCamera) {
+                if (!state.isConnectedToCamera && remaining.any { !canFrameLocally(it) }) {
                     // 未连接：信号按钮放大强调 + 提示，而不是静默无响应。
                     signalPulse++
                     showHint(notConnectedHint)
@@ -1109,7 +1119,10 @@ fun FileListScreen(
         }
 
         // 高级版烟花彩蛋（最上层，含设置面板与预览层之上）：不拦截触摸，播完自行移除。
-        FireworksOverlay(fireworks)
+        FireworksOverlay(
+            state = fireworks,
+            hapticsEnabled = transferState.hapticsEnabled,
+        )
     }
 }
 

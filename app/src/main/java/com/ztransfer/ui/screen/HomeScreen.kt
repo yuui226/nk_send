@@ -84,6 +84,7 @@ fun HomeScreen(
     transferViewModel: TransferViewModel
 ) {
     val state by viewModel.state.collectAsState()
+    val transferState by transferViewModel.state.collectAsState()
     val context = LocalContext.current
     // 右上角"解锁高级版"入口的显隐 + 成功爆发的金色粒子彩蛋都依赖它。
     val isPro by LicenseManager.isPro.collectAsState()
@@ -449,7 +450,10 @@ fun HomeScreen(
         }
 
         // ---------- 高级版烟花彩蛋：放在最上层（含设置面板之上），不拦截触摸，播完自行移除 ----------
-        FireworksOverlay(fireworks)
+        FireworksOverlay(
+            state = fireworks,
+            hapticsEnabled = transferState.hapticsEnabled,
+        )
     }
 }
 

@@ -15,6 +15,7 @@ import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PHOTO_FRAME_OUTPUT_DIRECTORY
 import com.ztransfer.frame.PHOTO_FRAME_PART_PREFIX
+import com.ztransfer.frame.hasFrameFor
 import com.ztransfer.frame.isCurrentPhotoFrameTempName
 import com.ztransfer.frame.isPhotoFrameOutputName
 import com.ztransfer.license.LicenseManager
@@ -44,8 +45,14 @@ enum class TransferStatus {
     WAITING, TRANSFERING, COMPLETED, FAILED, CANCELLED
 }
 
+enum class TransferTaskMode {
+    DOWNLOAD,
+    FRAME_ONLY,
+}
+
 data class TransferTask(
     val file: NikonCamera.FileInfo,
+    val mode: TransferTaskMode = TransferTaskMode.DOWNLOAD,
     val status: TransferStatus = TransferStatus.WAITING,
     val progress: Float = 0f,
     val speed: Long = 0,
@@ -104,6 +111,8 @@ data class TransferState(
     val appLanguage: String = AppLocale.SYSTEM
 )
 
+internal fun normalizeThumbnailColumns(columns: Int): Int = columns.coerceIn(2, 4)
+
 /** 队列剩余待处理数量（正在传、等待传或正在生成派生图）。供顶栏药丸等复用。 */
 val TransferState.remainingCount: Int
     get() = tasks.count {
@@ -128,6 +137,30 @@ internal fun photoFrameBrandingVisible(isPro: Boolean, preferenceEnabled: Boolea
 internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Boolean =
     enabled && (extension.equals(".jpg", ignoreCase = true) ||
         extension.equals(".jpeg", ignoreCase = true))
+
+/** 相机文件是否已在当前保存目录中落盘；列表对号、筛选和任务模式必须共用该判定。 */
+internal fun isTransferredOriginal(
+    file: NikonCamera.FileInfo,
+    existingExportFiles: Map<String, Set<Long>>,
+): Boolean {
+    val sizes = existingExportFiles[file.fileName] ?: return false
+    return sizes.any { it < 0L || it == file.size } ||
+        file.size == PtpConstants.SIZE_UNKNOWN
+}
+
+internal fun transferTaskModeFor(
+    file: NikonCamera.FileInfo,
+    photoFrameEnabled: Boolean,
+    existingExportFiles: Map<String, Set<Long>>,
+): TransferTaskMode =
+    if (
+        shouldGeneratePhotoFrame(photoFrameEnabled, file.extension) &&
+        isTransferredOriginal(file, existingExportFiles)
+    ) {
+        TransferTaskMode.FRAME_ONLY
+    } else {
+        TransferTaskMode.DOWNLOAD
+    }
 
 class TransferViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(TransferState())
@@ -198,6 +231,24 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      *  防止同名不同文件（DSC 编号跨文件夹回卷）续传时张冠李戴、把两份数据拼接成损坏文件。 */
     private data class PartInfo(val uri: Uri, val size: Long, val token: String)
 
+    private data class ExistingDirectoryScan(
+        val sizes: MutableMap<String, Long>,
+        val uris: MutableMap<String, Uri>,
+        val parts: Map<String, PartInfo>,
+    )
+
+    private data class LocalOriginal(
+        val displayName: String,
+        val size: Long,
+        val uri: Uri,
+    )
+
+    private sealed interface FrameExportOutcome {
+        data class Saved(val displayName: String) : FrameExportOutcome
+        data class Failed(val error: Throwable) : FrameExportOutcome
+        object AlreadyExists : FrameExportOutcome
+    }
+
     /** 文件内容身份令牌：大小+拍摄时间，仅留字母数字与点（内嵌半成品名，不含下划线分隔符）。 */
     private fun identityToken(file: NikonCamera.FileInfo): String =
         "${file.size}.${file.captureDate ?: "0"}".replace(Regex("[^A-Za-z0-9.]"), "")
@@ -211,7 +262,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update {
             it.copy(
                 transferDirUri = dir,
-                thumbnailColumns = prefs.getInt("thumbnail_columns", 3).coerceIn(1, 4),
+                thumbnailColumns = normalizeThumbnailColumns(
+                    prefs.getInt("thumbnail_columns", 3)
+                ),
                 collapseBurstPhotos = prefs.getBoolean("collapse_burst_photos", true),
                 hapticsEnabled = prefs.getBoolean("haptics_enabled", true),
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
@@ -249,7 +302,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setThumbnailColumns(columns: Int) {
-        val c = columns.coerceIn(1, 4)
+        val c = normalizeThumbnailColumns(columns)
         prefs.edit().putInt("thumbnail_columns", c).apply()
         _state.update { it.copy(thumbnailColumns = c) }
     }
@@ -294,6 +347,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setPhotoFrameEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("photo_frame_enabled", enabled).apply()
         _state.update { it.copy(photoFrameEnabled = enabled) }
+    }
+
+    /**
+     * 设置页拨轮的原子提交入口：null 表示关闭且不清空上次预设，非空值同时开启并更新预设。
+     * 只在拨轮松手后调用，避免拖动预览过程中连续写 SharedPreferences。
+     */
+    fun setPhotoFrameSelection(preset: PhotoFramePreset?) {
+        prefs.edit().apply {
+            putBoolean("photo_frame_enabled", preset != null)
+            if (preset != null) putString("photo_frame_preset", preset.name)
+        }.apply()
+        _state.update {
+            it.copy(
+                photoFrameEnabled = preset != null,
+                photoFramePreset = preset ?: it.photoFramePreset,
+            )
+        }
     }
 
     fun setPhotoFrameBrandingEnabled(enabled: Boolean) {
@@ -351,7 +421,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     private fun refreshExistingExportFiles(uri: Uri, deleteParts: Boolean) {
         try {
-            val (existing, _) = sweepAndListExisting(uri, deleteParts)
+            val existing = sweepAndListExisting(uri, deleteParts).sizes
             val normalized = HashMap<String, MutableSet<Long>>()
             existing.forEach { (name, size) ->
                 // 派生图只参与边框输出的文件名防冲突，不参与“相机原片已传”状态。
@@ -390,15 +460,25 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     fun addToQueue(files: List<NikonCamera.FileInfo>, cameraProvider: () -> NikonCamera?) {
         // 未设置传输目录时禁止入队（UI 层会把用户引导到设置页）。
-        val dirUri = _state.value.transferDirUri ?: return
+        val snapshot = _state.value
+        val dirUri = snapshot.transferDirUri ?: return
 
         // 按 handle 去重：已在队列（任意状态）的不重复入队。这是防御底线——
         // 一旦出现重复 handle，任务列表/缩略图网格的 LazyColumn key 冲突会直接崩溃。
-        val queued = _state.value.tasks.mapTo(HashSet()) { it.file.handle }
+        val queued = snapshot.tasks.mapTo(HashSet()) { it.file.handle }
         val newTasks = files.asSequence()
             .filter { it.handle !in queued }
             .distinctBy { it.handle }
-            .map { TransferTask(file = it) }
+            .map { file ->
+                TransferTask(
+                    file = file,
+                    mode = transferTaskModeFor(
+                        file = file,
+                        photoFrameEnabled = snapshot.photoFrameEnabled,
+                        existingExportFiles = snapshot.existingExportFiles,
+                    ),
+                )
+            }
             .toList()
         if (newTasks.isEmpty()) return
         _state.update { it.copy(tasks = it.tasks + newTasks) }
@@ -457,9 +537,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 }
 
                 // 单次遍历：保留半成品(.nkpart_)供断点续传 + 建立"已存在(名称->大小)"去重表。
-                val (existing, partFiles) = withContext(Dispatchers.IO) {
+                val directoryScan = withContext(Dispatchers.IO) {
                     sweepAndListExisting(uri, deleteParts = false)
                 }
+                val existing = directoryScan.sizes
+                val existingUris = directoryScan.uris
+                val partFiles = directoryScan.parts
                 // 归一化名 -> 大小集合：把重名冲突时落盘的 "DSC_0001 (1).NEF" 副本也归到
                 // "DSC_0001.NEF" 名下参与"已存在则跳过"，跨会话不再重复下载这些副本。
                 val existingSizes = HashMap<String, MutableSet<Long>>()
@@ -471,6 +554,54 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 以 handle（稳定唯一键）定位任务，避免增删任务导致下标串位。
                     val task = _state.value.tasks.firstOrNull { it.status == TransferStatus.WAITING } ?: break
                     val handle = task.file.handle
+
+                    if (task.mode == TransferTaskMode.FRAME_ONLY) {
+                        val localOriginal = findLocalOriginal(
+                            file = task.file,
+                            existingSizes = existing,
+                            existingUris = existingUris,
+                        )
+                        if (localOriginal == null) {
+                            // 入队依据来自页面的目录索引；用户可能在点击后、任务执行前从文件管理器
+                            // 删除/移动原片。仅边框任务绝不悄悄回退成相机下载，避免意外占用流量和额度。
+                            updateTask(handle) {
+                                it.copy(
+                                    status = TransferStatus.FAILED,
+                                    error = str(R.string.error_local_original_missing),
+                                    speed = 0,
+                                )
+                            }
+                            continue
+                        }
+
+                        val frameSettings = _state.value
+                        updateTask(handle) {
+                            it.copy(
+                                status = TransferStatus.COMPLETED,
+                                progress = 1f,
+                                downloaded = localOriginal.size.takeIf { size -> size >= 0L }
+                                    ?: task.file.size,
+                                speed = 0,
+                                isGeneratingFrame = true,
+                            )
+                        }
+                        // 纯本地派生也使用保活服务，但不持有 Wi-Fi 锁；锁屏或切后台时仍能完成。
+                        if (!serviceStarted) {
+                            TransferService.start(getApplication(), useWifi = false)
+                            serviceStarted = true
+                        }
+                        launchPhotoFrameExport(
+                            handle = handle,
+                            treeUri = uri,
+                            sourceUri = localOriginal.uri,
+                            sourceName = localOriginal.displayName,
+                            preset = frameSettings.photoFramePreset,
+                            brandingRequested = frameSettings.photoFrameBrandingEnabled,
+                            skipIfExisting = true,
+                            failTaskOnError = true,
+                        )
+                        continue
+                    }
 
                     // 目标目录已存在同名文件（大小一致或任一侧大小未知），或已有同大小的重名副本 → 跳过，不重复下载。
                     // 相机对 >4GB 对象报不出真实大小（SIZE_UNKNOWN 哨兵），与磁盘大小必然不等，
@@ -573,9 +704,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                             }
                             if (renamed != null) {
-                                existing[finalName] = partSize
-                                existingSizes.getOrPut(baseName(finalName)) { HashSet() }.add(partSize)
-                                recordExistingExport(uri, finalName, partSize)
+                                val savedName = displayNameOf(renamed) ?: finalName
+                                existing[savedName] = partSize
+                                existingUris[savedName] = renamed
+                                existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(partSize)
+                                recordExistingExport(uri, savedName, partSize)
                                 updateTask(handle) {
                                     it.copy(status = TransferStatus.COMPLETED, skipped = true,
                                         progress = 1f, downloaded = partSize, speed = 0)
@@ -709,6 +842,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                                 if (renamedUri != null) {
                                     existing[savedName] = stats.bytes
+                                    existingUris[savedName] = renamedUri
                                     existingSizes.getOrPut(baseName(savedName)) { HashSet() }.add(stats.bytes)
                                     recordExistingExport(uri, savedName, stats.bytes)
                                     val frameSettings = _state.value
@@ -810,18 +944,19 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      * 单次遍历目标目录：
      * 1) 当 [deleteParts]=true 时删除遗留的半成品（[PART_PREFIX] 开头的临时文件，上次崩溃/被杀留下）；
      *    同时删除旧进程遗留的边框临时文件；当前进程会话的边框任务始终保留；
-     * 2) 返回完整文件的 显示名->大小（字节，未知记 -1），用于"已存在则跳过"；
+     * 2) 返回完整文件的 显示名->大小/Uri，用于"已存在则跳过"及已传原片的本地派生；
      * 3) 收集半成品文件信息到 parts 映射（原文件名 -> PartInfo），用于断点续传。
      * 合并清扫与列举，避免两次全目录扫描；正常完成的文件已改真名，不会被误删。
      *
      * @param deleteParts true=清空半成品（App 启动/新队列）, false=保留半成品供续传（队列启动重试）
-     * @return Pair(完整文件映射, 半成品映射: 去掉前缀后的原文件名 -> PartInfo)
+     * @return 完整文件大小、Uri 与半成品映射的一致快照
      */
     private fun sweepAndListExisting(
         treeUri: Uri,
         deleteParts: Boolean = true
-    ): Pair<MutableMap<String, Long>, Map<String, PartInfo>> {
+    ): ExistingDirectoryScan {
         val map = HashMap<String, Long>()
+        val uris = HashMap<String, Uri>()
         val parts = HashMap<String, PartInfo>()
         try {
             val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
@@ -889,12 +1024,21 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         } else {
                             val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else -1L
                             map[name] = size
+                            if (idIdx >= 0) {
+                                val docId = c.getString(idIdx)
+                                if (docId != null) {
+                                    uris[name] = DocumentsContract.buildDocumentUriUsingTree(
+                                        treeUri,
+                                        docId,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         } catch (_: Exception) {}
-        return map to parts
+        return ExistingDirectoryScan(sizes = map, uris = uris, parts = parts)
     }
 
     /**
@@ -980,6 +1124,33 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     /** 剥掉重名副本后缀："DSC_0001 (2).NEF" -> "DSC_0001.NEF"，用于与相机文件名归一化匹配。 */
     private fun baseName(name: String): String = name.replace(COPY_SUFFIX_REGEX, "")
 
+    /** 从本次目录快照中找到已传原片；优先精确文件名，其次接受同大小的重名副本。 */
+    private fun findLocalOriginal(
+        file: NikonCamera.FileInfo,
+        existingSizes: Map<String, Long>,
+        existingUris: Map<String, Uri>,
+    ): LocalOriginal? {
+        fun sizeMatches(localSize: Long): Boolean =
+            localSize < 0L ||
+                file.size == PtpConstants.SIZE_UNKNOWN ||
+                localSize == file.size
+
+        val exactSize = existingSizes[file.fileName]
+        val exactUri = existingUris[file.fileName]
+        if (exactSize != null && exactUri != null && sizeMatches(exactSize)) {
+            return LocalOriginal(file.fileName, exactSize, exactUri)
+        }
+
+        return existingSizes.entries.firstNotNullOfOrNull { (displayName, size) ->
+            val localUri = existingUris[displayName] ?: return@firstNotNullOfOrNull null
+            if (baseName(displayName).equals(file.fileName, ignoreCase = true) && sizeMatches(size)) {
+                LocalOriginal(displayName, size, localUri)
+            } else {
+                null
+            }
+        }
+    }
+
     /** 生成重名副本名："DSC_0001.NEF" + 2 -> "DSC_0001 (2).NEF"；无扩展名则直接追加。 */
     private fun suffixedName(name: String, n: Int): String {
         val dot = name.lastIndexOf('.')
@@ -997,11 +1168,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         sourceName: String,
         preset: PhotoFramePreset,
         brandingRequested: Boolean,
+        skipIfExisting: Boolean = false,
+        failTaskOnError: Boolean = false,
     ) {
         activePhotoFrameExports.incrementAndGet()
         val job = viewModelScope.launch(photoFrameDispatcher) {
             val destinationKey = treeUri.toString()
-            val exportResult = try {
+            val outcome = try {
                 val destination = photoFrameDestinations[destinationKey]
                     ?: PhotoFrameExporter.prepareDestination(
                         resolver = contentResolver,
@@ -1009,37 +1182,63 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     ).let { prepared ->
                         photoFrameDestinations.putIfAbsent(destinationKey, prepared) ?: prepared
                     }
-                PhotoFrameExporter.export(
-                    resolver = contentResolver,
-                    destination = destination,
-                    sourceUri = sourceUri,
-                    sourceName = sourceName,
-                    preset = preset,
-                    // 在真正轮到渲染时重新判定授权：排队期间若高级版到期，免费版水印
-                    // 立即恢复；不能只依赖入队瞬间的 UI 状态。
-                    showBranding = photoFrameBrandingVisible(
-                        isPro = LicenseManager.isPro.value,
-                        preferenceEnabled = brandingRequested,
-                    ),
-                )
+                if (skipIfExisting && destination.hasFrameFor(sourceName, preset)) {
+                    FrameExportOutcome.AlreadyExists
+                } else {
+                    PhotoFrameExporter.export(
+                        resolver = contentResolver,
+                        destination = destination,
+                        sourceUri = sourceUri,
+                        sourceName = sourceName,
+                        preset = preset,
+                        // 在真正轮到渲染时重新判定授权：排队期间若高级版到期，免费版水印
+                        // 立即恢复；不能只依赖入队瞬间的 UI 状态。
+                        showBranding = photoFrameBrandingVisible(
+                            isPro = LicenseManager.isPro.value,
+                            preferenceEnabled = brandingRequested,
+                        ),
+                    ).fold(
+                        onSuccess = { FrameExportOutcome.Saved(it.displayName) },
+                        onFailure = { FrameExportOutcome.Failed(it) },
+                    )
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                Result.failure(error)
+                FrameExportOutcome.Failed(error)
             }
-            exportResult.fold(
-                onSuccess = { framed ->
-                    log { "FRAME_SAVE: $sourceName -> ${framed.displayName}" }
-                },
-                onFailure = { error ->
+            when (outcome) {
+                is FrameExportOutcome.Saved -> {
+                    log { "FRAME_SAVE: $sourceName -> ${outcome.displayName}" }
+                }
+                FrameExportOutcome.AlreadyExists -> {
+                    log { "FRAME_SKIP existing: $sourceName preset=${preset.name}" }
+                    updateTask(handle) { task ->
+                        task.copy(
+                            status = TransferStatus.COMPLETED,
+                            skipped = true,
+                            error = null,
+                        )
+                    }
+                }
+                is FrameExportOutcome.Failed -> {
                     // 子目录若被用户在运行期间删除，下一个任务重新查找/创建。
                     photoFrameDestinations.remove(destinationKey)
                     log {
                         "FRAME_FAILED: $sourceName " +
-                            "${error.javaClass.simpleName}: ${error.message}"
+                            "${outcome.error.javaClass.simpleName}: ${outcome.error.message}"
                     }
-                },
-            )
+                    if (failTaskOnError) {
+                        updateTask(handle) { task ->
+                            task.copy(
+                                status = TransferStatus.FAILED,
+                                error = friendlyError(outcome.error),
+                                speed = 0,
+                            )
+                        }
+                    }
+                }
+            }
         }
         // invokeOnCompletion 即使任务排队期间就被取消也必定执行，计数和 UI 不会泄漏。
         job.invokeOnCompletion {

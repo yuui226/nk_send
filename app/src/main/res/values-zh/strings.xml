@@ -73,8 +73,10 @@
     <string name="change_directory">更改目录</string>
     <string name="choose_directory">选择目录</string>
     <string name="columns">列数</string>
-    <string name="collapse_burst_photos">连拍展示为合集</string>
+    <string name="collapse_burst_photos">连拍成组</string>
     <string name="appearance">外观</string>
+    <string name="light_dark_mode">明暗模式</string>
+    <string name="button_style">按钮风格</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_dark">深色</string>
     <string name="theme_light">浅色</string>
@@ -95,6 +97,8 @@
     <string name="no_preview">无预览</string>
     <string name="video_no_preview">视频 · 暂不支持预览</string>
     <string name="photo_frame_watermark">边框水印</string>
+    <string name="photo_frame_off">关闭</string>
+    <string name="photo_frame_export_copy_description">导出后另存边框图</string>
     <string name="photo_frame_mist">雾白</string>
     <string name="photo_frame_cinema">暗夜</string>
     <string name="photo_frame_minimal">简白</string>
@@ -108,6 +112,7 @@
     <string name="error_camera_connection_lost">相机连接中断，重连后重试可续传</string>
     <string name="error_create_file">无法创建文件</string>
     <string name="error_open_file">无法打开文件</string>
+    <string name="error_local_original_missing">找不到已保存的原片，请先重新传输</string>
     <string name="error_rename_copy_refused">系统拒绝改名与复制</string>
     <string name="error_save_failed">保存失败：%1$s</string>
     <string name="error_copy_incomplete">复制不完整 %1$d/%2$d</string>
