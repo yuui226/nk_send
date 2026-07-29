@@ -117,12 +117,10 @@ import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
-import com.ztransfer.viewmodel.TransferTaskMode
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.currentFileProgress
 import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.remainingCount
-import com.ztransfer.viewmodel.transferTaskModeFor
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
@@ -561,16 +559,12 @@ fun FileListScreen(
             }
         }
 
-    // 队列 handle → 任务：列表角标与预览页"已入队"态共用。
+    // 队列 handle → 最新任务，仅用于列表角标；是否允许再次入队不再由队列状态决定。
     val queuedByHandle = remember(transferState.tasks) {
         transferState.tasks.associateBy { it.file.handle }
     }
-    val canFrameLocally: (NikonCamera.FileInfo) -> Boolean = { file ->
-        transferTaskModeFor(
-            file = file,
-            photoFrameEnabled = transferState.photoFrameEnabled,
-            existingExportFiles = transferState.existingExportFiles,
-        ) == TransferTaskMode.FRAME_ONLY
+    val hasLocalOriginal: (NikonCamera.FileInfo) -> Boolean = { file ->
+        isTransferredOriginal(file, transferState.existingExportFiles)
     }
     // 单文件入队：列表轻触 + 预览页传输按钮共用。gating 与整组传输一致。
     val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
@@ -581,7 +575,7 @@ fun FileListScreen(
             previewSourceAtOpen = null
             showSettings = true; return@onTapFile
         }
-        if (!state.isConnectedToCamera && !canFrameLocally(file)) {
+        if (!state.isConnectedToCamera && !hasLocalOriginal(file)) {
             signalPulse++
             showHint(notConnectedHint)
         } else {
@@ -606,7 +600,7 @@ fun FileListScreen(
 
     val onTransferBurstPreview: (List<NikonCamera.FileInfo>) -> Unit =
         onTransferBurstPreview@{ files ->
-            val remaining = files.filter { it.handle !in queuedByHandle }
+            val remaining = files
             if (remaining.isEmpty()) return@onTransferBurstPreview
             if (transferState.transferDirUri == null) {
                 previewIndex = null
@@ -615,7 +609,7 @@ fun FileListScreen(
                 showSettings = true
                 return@onTransferBurstPreview
             }
-            if (!state.isConnectedToCamera && remaining.any { !canFrameLocally(it) }) {
+            if (!state.isConnectedToCamera && remaining.any { !hasLocalOriginal(it) }) {
                 signalPulse++
                 showHint(notConnectedHint)
                 return@onTransferBurstPreview
@@ -708,7 +702,7 @@ fun FileListScreen(
                 if (transferState.transferDirUri == null) {
                     showSettings = true; return@onTransferGroup
                 }
-                if (!state.isConnectedToCamera && remaining.any { !canFrameLocally(it) }) {
+                if (!state.isConnectedToCamera && remaining.any { !hasLocalOriginal(it) }) {
                     // 未连接：信号按钮放大强调 + 提示，而不是静默无响应。
                     signalPulse++
                     showHint(notConnectedHint)
@@ -1075,7 +1069,6 @@ fun FileListScreen(
                     hapticsEnabled = transferState.hapticsEnabled,
                     initialRotationQuarterTurns = transferState.previewRotationQuarterTurns,
                     burstHandles = burstHandles,
-                    queuedHandles = queuedByHandle.keys,
                     onTransfer = onTapFile,
                     onTransferBurst = onTransferBurstPreview,
                     onBurstExpandedChange = { id, expanded ->
@@ -1519,7 +1512,6 @@ fun SignalPill(
 @Composable
 private fun GroupHeader(
     group: FileGroup,
-    queuedByHandle: Map<Int, TransferTask>,
     collapsed: Boolean,
     onToggleCollapse: () -> Unit,
     onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit
@@ -1565,13 +1557,12 @@ private fun GroupHeader(
             )
         }
         Spacer(modifier = Modifier.weight(1f))
-        val remainingGroupFiles = group.files.filter { it.handle !in queuedByHandle }
-        // 整组传输：图标化（+ 加入队列 / ✓ 已全部加入），无文字更简约；与日期胶囊同规格。
+        // 整组传输始终允许再次加入；任务执行时分别检查原片和边框是否已经存在。
         // 按钮在根坐标系的 bounds 供"整组吸入"动画定位起飞点。
         var plusBounds by remember { mutableStateOf<Rect?>(null) }
         GlassButton(
-            onClick = { onTransferGroup(remainingGroupFiles, plusBounds) },
-            enabled = remainingGroupFiles.isNotEmpty(),
+            onClick = { onTransferGroup(group.files, plusBounds) },
+            enabled = group.files.isNotEmpty(),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .height(28.dp)
@@ -1584,11 +1575,10 @@ private fun GroupHeader(
                 },
             contentPadding = PaddingValues(horizontal = 12.dp)
         ) {
-            val allQueued = remainingGroupFiles.isEmpty()
             Icon(
-                if (allQueued) Icons.Default.Check else Icons.Default.Add,
-                contentDescription = stringResource(if (allQueued) R.string.cd_all_queued else R.string.cd_transfer_group),
-                tint = if (allQueued) colors.statusConnected else colors.accentBlue,
+                Icons.Default.Add,
+                contentDescription = stringResource(R.string.cd_transfer_group),
+                tint = colors.accentBlue,
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -1813,7 +1803,6 @@ private fun ThumbnailGrid(
                     Spacer(modifier = Modifier.height(4.dp))
                     GroupHeader(
                         group = group,
-                        queuedByHandle = queuedByHandle,
                         // 收合动画进行中箭头即刻转向，不等动画结束。
                         collapsed = collapsed || collapsingThis,
                         onToggleCollapse = {
@@ -1906,7 +1895,6 @@ private fun ThumbnailGrid(
                                 BurstCollectionCell(
                                     files = item.files,
                                     expanded = expanded,
-                                    queuedByHandle = queuedByHandle,
                                     transfersBusy = transfersBusy,
                                     cameraViewModel = cameraViewModel,
                                     onTransferGroup = onTransferGroup,
@@ -1959,7 +1947,6 @@ private fun ThumbnailGrid(
 private fun BurstCollectionCell(
     files: List<NikonCamera.FileInfo>,
     expanded: Boolean,
-    queuedByHandle: Map<Int, TransferTask>,
     transfersBusy: Boolean,
     cameraViewModel: CameraViewModel,
     onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
@@ -1969,8 +1956,6 @@ private fun BurstCollectionCell(
 ) {
     val colors = AppTheme.colors
     val a11y = stringResource(R.string.burst_collection_a11y, files.size)
-    val remainingFiles = files.filter { it.handle !in queuedByHandle }
-    val allQueued = remainingFiles.isEmpty()
     var plusBounds by remember { mutableStateOf<Rect?>(null) }
     var collectionBounds by remember { mutableStateOf<Rect?>(null) }
     val latestExpanded by rememberUpdatedState(expanded)
@@ -2084,8 +2069,8 @@ private fun BurstCollectionCell(
         // 用户指定的位置：左下整组入队，右下展开/收起。按钮直接复用全局 GlassButton；
         // 只有在 4 列极窄格子下按比例缩小，避免两颗触点互相覆盖。
         GlassButton(
-            onClick = { onTransferGroup(remainingFiles, plusBounds) },
-            enabled = !allQueued,
+            onClick = { onTransferGroup(files, plusBounds) },
+            enabled = files.isNotEmpty(),
             shape = CircleShape,
             contentPadding = PaddingValues(0.dp),
             showSheen = false,
@@ -2103,11 +2088,9 @@ private fun BurstCollectionCell(
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(
-                    imageVector = if (allQueued) Icons.Default.Check else Icons.Default.Add,
-                    contentDescription = stringResource(
-                        if (allQueued) R.string.cd_all_queued else R.string.cd_transfer_group
-                    ),
-                    tint = if (allQueued) colors.statusConnected else colors.accentBlue,
+                    imageVector = Icons.Default.Add,
+                    contentDescription = stringResource(R.string.cd_transfer_group),
+                    tint = colors.accentBlue,
                     modifier = Modifier.size(actionSize * 0.54f)
                 )
             }
@@ -2288,10 +2271,12 @@ private fun ThumbnailCell(
                     }
                 }
             }
-            // 轻触加入队列（已入队则无操作），长按预览大图（任何状态都可预览）。
+            // 轻触加入队列；普通下载已入队时父层忽略，已落盘或正在下载的 JPG
+            // 可按新边框预设追加独立任务。
+            // 长按预览大图在任何状态下都可用。
             .combinedClickable(
                 enabled = !exiting,
-                onClick = { if (task == null) onTapFile(file) },
+                onClick = { onTapFile(file) },
                 onLongClick = { cellBounds?.let { onPreview(file, it) } }
             )
     ) {

@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
+import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
@@ -67,6 +68,7 @@ import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.viewmodel.isTransferredOriginal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -86,7 +88,7 @@ fun TransferScreen(
     var showRetryConfirm by remember { mutableStateOf(false) }
     // 正在播放移除动画的任务：卡片收合完毕后才真正从队列删除。
     // 等待中的任务在标记的同时已被 withdraw（置 CANCELLED），动画期间队列不会开始传它。
-    val removingHandles = remember { mutableStateMapOf<Int, Unit>() }
+    val removingTaskIds = remember { mutableStateMapOf<Long, Unit>() }
     val clearScope = rememberCoroutineScope()
     // 触感反馈（与"Z传"页同一开关）；本页胶囊负责传输全部完成时的成功震动。
     val haptics = rememberHaptics(transferState.hapticsEnabled)
@@ -101,6 +103,10 @@ fun TransferScreen(
     // 存在可重试任务（失败/取消）且未在传输：右下角显示"重试全部"FAB。
     val hasRetryable = !transferState.isTransferring && transferState.tasks.any {
         it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
+    }
+    val retryNeedsCamera = transferState.tasks.any {
+        (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED) &&
+            !isTransferredOriginal(it.file, transferState.existingExportFiles)
     }
     // 清空队列只作用于"不在传输中"的任务（正在传的文件会传完，中途打断会让相机关 Wi-Fi）：
     // 有可清的卡片才显示扫帚 FAB；确认后卡片集体收合退场、FAB 随之消失。
@@ -172,18 +178,18 @@ fun TransferScreen(
                 // 用 spacedBy 的话卡片收合到 0 后仍残留间距，真正删除瞬间会跳一下。
             ) {
                 // 倒序显示：最新加入队列的排在最上方（asReversed 是视图，不复制列表）。
-                items(transferState.tasks.asReversed(), key = { it.file.handle }) { task ->
-                    val handle = task.file.handle
-                    val removing = removingHandles.containsKey(handle)
+                items(transferState.tasks.asReversed(), key = { it.taskId }) { task ->
+                    val taskId = task.taskId
+                    val removing = removingTaskIds.containsKey(taskId)
                     // 移除动画：真实高度收合 + 淡出（collapseHeight，与列表页分组收合同款），
                     // 收合完毕才从队列删除，下方卡片随布局逐帧上移，无跳变。
-                    val removeProgress = remember(handle) { Animatable(1f) }
+                    val removeProgress = remember(taskId) { Animatable(1f) }
                     LaunchedEffect(removing) {
                         if (removing) {
                             removeProgress.animateTo(0f, tween(280, easing = FastOutSlowInEasing))
-                            // 先清标记再删数据：同 handle 之后重新入队时不会误播移除动画。
-                            removingHandles.remove(handle)
-                            if (!transferViewModel.removeTask(handle)) {
+                            // 先清标记再删数据：同一照片的其它边框任务不受影响。
+                            removingTaskIds.remove(taskId)
+                            if (!transferViewModel.removeTask(taskId)) {
                                 // 竞态兜底：动画期间任务已开始传输/被重试回等待，不可移除——
                                 // 卡片弹回原高继续显示（成功移除时本条目已随删除离场，走不到这）。
                                 removeProgress.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
@@ -192,8 +198,8 @@ fun TransferScreen(
                     }
                     // 动画中途条目被外因移出组合（如同时点了重试）：清掉标记，
                     // 该任务保留在队列里（安全侧），用户可再操作。
-                    DisposableEffect(handle) {
-                        onDispose { removingHandles.remove(handle) }
+                    DisposableEffect(taskId) {
+                        onDispose { removingTaskIds.remove(taskId) }
                     }
                     Box(
                         modifier = Modifier
@@ -234,8 +240,8 @@ fun TransferScreen(
                                 // 两端——状态归状态、操作归操作。换状态交叉淡化不硬切；
                                 // 传输→完成的瞬间弹一下（事件驱动、只在真在传时触发——
                                 // 已完成卡片滚回屏幕不会重播），与全局"确认"手感一致。
-                                val iconPop = remember(handle) { Animatable(1f) }
-                                var prevStatus by remember(handle) { mutableStateOf(task.status) }
+                                val iconPop = remember(taskId) { Animatable(1f) }
+                                var prevStatus by remember(taskId) { mutableStateOf(task.status) }
                                 LaunchedEffect(task.status) {
                                     val was = prevStatus
                                     prevStatus = task.status
@@ -313,6 +319,19 @@ fun TransferScreen(
                                         maxLines = if (task.status == TransferStatus.FAILED) 2 else 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                    task.framePreset?.let { preset ->
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = stringResource(
+                                                R.string.photo_frame_task_label,
+                                                photoFramePresetLabel(preset),
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colors.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                 }
 
                                 // 尾部操作列：重试(仅失败时,断开置灰) + 移除,同规格图标圆钮
@@ -326,8 +345,11 @@ fun TransferScreen(
                                         Spacer(modifier = Modifier.width(10.dp))
                                         val connected = cameraState.isConnectedToCamera
                                         GlassButton(
-                                            onClick = { transferViewModel.retrySingleTask(task.file.handle, cameraViewModel::getCamera) },
-                                            enabled = connected,
+                                            onClick = { transferViewModel.retrySingleTask(taskId, cameraViewModel::getCamera) },
+                                            enabled = connected || isTransferredOriginal(
+                                                task.file,
+                                                transferState.existingExportFiles,
+                                            ),
                                             shape = CircleShape,
                                             contentPadding = PaddingValues(6.dp)
                                         ) {
@@ -357,8 +379,8 @@ fun TransferScreen(
                                         GlassButton(
                                             onClick = {
                                                 // 等待中的先撤下（置 CANCELLED），动画期间队列不会开始传它。
-                                                transferViewModel.withdrawTask(handle)
-                                                removingHandles[handle] = Unit
+                                                transferViewModel.withdrawTask(taskId)
+                                                removingTaskIds[taskId] = Unit
                                             },
                                             shape = CircleShape,
                                             contentPadding = PaddingValues(6.dp)
@@ -511,7 +533,7 @@ fun TransferScreen(
                     title = stringResource(R.string.retry_failed_title),
                     confirmText = stringResource(R.string.retry),
                     confirmColor = colors.accentBlue,
-                    enabled = connected,
+                    enabled = connected || !retryNeedsCamera,
                     onToggle = {
                         showRetryConfirm = !showRetryConfirm
                         showClearConfirm = false   // 两张确认卡互斥
@@ -553,7 +575,7 @@ fun TransferScreen(
                         transferViewModel.withdrawPending()
                         transferState.tasks.forEach {
                             if (it.status != TransferStatus.TRANSFERING && !it.isGeneratingFrame) {
-                                removingHandles[it.file.handle] = Unit
+                                removingTaskIds[it.taskId] = Unit
                             }
                         }
                         // 兜底：LazyColumn 只组合可见卡片，屏幕外的卡没有条目协程替它做
@@ -563,9 +585,9 @@ fun TransferScreen(
                             delay(320)
                             transferViewModel.removeCleared()
                             val alive = transferViewModel.state.value.tasks
-                                .mapTo(HashSet()) { it.file.handle }
-                            removingHandles.keys.toList().forEach {
-                                if (it !in alive) removingHandles.remove(it)
+                                .mapTo(HashSet()) { it.taskId }
+                            removingTaskIds.keys.toList().forEach {
+                                if (it !in alive) removingTaskIds.remove(it)
                             }
                         }
                     },
@@ -575,6 +597,17 @@ fun TransferScreen(
         }
     }
 }
+
+@Composable
+private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringResource(
+    when (preset) {
+        PhotoFramePreset.MIST -> R.string.photo_frame_mist
+        PhotoFramePreset.CINEMA -> R.string.photo_frame_cinema
+        PhotoFramePreset.MINIMAL -> R.string.photo_frame_minimal
+        PhotoFramePreset.FROSTED -> R.string.photo_frame_frosted
+        PhotoFramePreset.PLAQUE -> R.string.photo_frame_plaque
+    }
+)
 
 /**
  * 右下角悬浮的"图标 FAB + 二次确认"控件（清空/重试全部共用）：毛玻璃圆形按钮，

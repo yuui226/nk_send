@@ -32,6 +32,14 @@ class TransferService : Service() {
         createChannel()
         try {
             startForeground(NOTIFICATION_ID, buildNotification())
+            foregroundReady = true
+            // startForegroundService() 之后任务可能瞬间跳过/失败。若停止请求先到，
+            // 也必须先完成 startForeground()，否则系统会用
+            // ForegroundServiceDidNotStartInTimeException 杀掉整个 App。
+            if (stopRequested) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
             acquireWakeLock()
             val useWifi = intent?.getBooleanExtra(EXTRA_USE_WIFI, true) ?: true
             if (useWifi) {
@@ -43,6 +51,7 @@ class TransferService : Service() {
                 android.util.Log.d("ZTransfer", "TransferService foreground started, notification posted")
             }
         } catch (e: Exception) {
+            foregroundReady = false
             // 某些系统状态下 startForeground 可能被拒绝；此时放弃保活但不崩溃，
             // 传输仍会在前台继续进行。留日志：排查"传输中通知栏没有通知"时先看这里。
             if (com.ztransfer.BuildConfig.DEBUG) {
@@ -55,6 +64,7 @@ class TransferService : Service() {
     }
 
     override fun onDestroy() {
+        foregroundReady = false
         releaseWakeLock()
         releaseWifiLock()
         super.onDestroy()
@@ -146,14 +156,18 @@ class TransferService : Service() {
         private const val WIFILOCK_TAG = "ZTransfer:wifi"
         private const val EXTRA_USE_WIFI = "use_wifi"
         private const val MAX_WAKELOCK_MS = 60L * 60L * 1000L // 兜底超时，防止异常时唤醒锁泄露
+        @Volatile private var foregroundReady = false
+        @Volatile private var stopRequested = false
 
         fun start(context: Context, useWifi: Boolean = true) {
+            stopRequested = false
             val intent = Intent(context, TransferService::class.java)
                 .putExtra(EXTRA_USE_WIFI, useWifi)
             try {
                 // minSdk 26 = O，直接走前台服务启动路径。
                 context.startForegroundService(intent)
             } catch (e: Exception) {
+                foregroundReady = false
                 // Android 12+ 后台启动前台服务会抛 ForegroundServiceStartNotAllowedException，
                 // 吞掉以免崩溃；传输在前台时不会触发，后台场景下服务已在运行。
                 if (com.ztransfer.BuildConfig.DEBUG) {
@@ -163,9 +177,14 @@ class TransferService : Service() {
         }
 
         fun stop(context: Context) {
-            try {
-                context.stopService(Intent(context, TransferService::class.java))
-            } catch (_: Exception) {}
+            stopRequested = true
+            // 尚未进入 onStartCommand 时不能直接 stopService；让 onStartCommand 先调用
+            // startForeground()，随后读取 stopRequested 自行退出。
+            if (foregroundReady) {
+                try {
+                    context.stopService(Intent(context, TransferService::class.java))
+                } catch (_: Exception) {}
+            }
         }
     }
 }

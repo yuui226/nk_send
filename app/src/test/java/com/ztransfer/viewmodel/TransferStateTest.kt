@@ -1,7 +1,9 @@
 package com.ztransfer.viewmodel
 
+import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.protocol.NikonCamera
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class TransferStateTest {
@@ -71,48 +73,61 @@ class TransferStateTest {
     }
 
     @Test
-    fun onlyAnAlreadyTransferredJpegBecomesAFrameOnlyTask() {
+    fun queueTaskSnapshotsFrameSettingsAtClickTime() {
         val jpeg = file(1)
-        val video = NikonCamera.FileInfo(
-            handle = 2,
-            size = 100L,
-            fileName = "DSC_2.MP4",
-            captureDate = null,
-        )
-        val existing = mapOf(jpeg.fileName to setOf(jpeg.size), video.fileName to setOf(video.size))
+        val mist = createQueueTasks(
+            files = listOf(jpeg),
+            photoFrameEnabled = true,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameBrandingEnabled = true,
+        ).single()
+        val cinema = createQueueTasks(
+            files = listOf(jpeg),
+            photoFrameEnabled = true,
+            photoFramePreset = PhotoFramePreset.CINEMA,
+            photoFrameBrandingEnabled = false,
+        ).single()
 
-        assertEquals(
-            TransferTaskMode.FRAME_ONLY,
-            transferTaskModeFor(
-                jpeg,
-                photoFrameEnabled = true,
-                existingExportFiles = existing,
-            ),
+        assertEquals(PhotoFramePreset.MIST, mist.framePreset)
+        assertEquals(PhotoFramePreset.CINEMA, cinema.framePreset)
+        assertEquals(true, mist.frameBrandingRequested)
+        assertEquals(false, cinema.frameBrandingRequested)
+        assertNotEquals(mist.taskId, cinema.taskId)
+    }
+
+    @Test
+    fun repeatedClickAlwaysCreatesAnIndependentTask() {
+        val jpeg = file(1)
+        val first = createQueueTasks(
+            files = listOf(jpeg),
+            photoFrameEnabled = true,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameBrandingEnabled = true,
+        ).single()
+        val repeated = createQueueTasks(
+            files = listOf(jpeg),
+            photoFrameEnabled = true,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameBrandingEnabled = true,
+        ).single()
+
+        assertEquals(PhotoFramePreset.MIST, first.framePreset)
+        assertEquals(PhotoFramePreset.MIST, repeated.framePreset)
+        assertNotEquals(first.taskId, repeated.taskId)
+    }
+
+    @Test
+    fun oneBatchStillContainsEachCameraFileOnlyOnce() {
+        val jpeg = file(1)
+        val tasks = createQueueTasks(
+            files = listOf(jpeg, jpeg),
+            photoFrameEnabled = false,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameBrandingEnabled = true,
         )
-        assertEquals(
-            TransferTaskMode.DOWNLOAD,
-            transferTaskModeFor(
-                jpeg,
-                photoFrameEnabled = false,
-                existingExportFiles = existing,
-            ),
-        )
-        assertEquals(
-            TransferTaskMode.DOWNLOAD,
-            transferTaskModeFor(
-                jpeg,
-                photoFrameEnabled = true,
-                existingExportFiles = emptyMap(),
-            ),
-        )
-        assertEquals(
-            TransferTaskMode.DOWNLOAD,
-            transferTaskModeFor(
-                video,
-                photoFrameEnabled = true,
-                existingExportFiles = existing,
-            ),
-        )
+
+        assertEquals(1, tasks.size)
+        assertEquals(null, tasks.single().framePreset)
     }
 
     @Test

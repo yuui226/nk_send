@@ -98,12 +98,13 @@
     <string name="video_no_preview">影片 · 暫不支援預覽</string>
     <string name="photo_frame_watermark">邊框浮水印</string>
     <string name="photo_frame_off">關閉</string>
-    <string name="photo_frame_export_copy_description">匯出後另存邊框圖</string>
+    <string name="photo_frame_export_copy_description">僅支援 JPG/JPEG，匯出後另存邊框圖</string>
     <string name="photo_frame_mist">霧白</string>
     <string name="photo_frame_cinema">暗夜</string>
     <string name="photo_frame_minimal">簡白</string>
     <string name="photo_frame_frosted">毛玻璃</string>
     <string name="photo_frame_plaque">銘牌</string>
+    <string name="photo_frame_task_label">邊框：%1$s</string>
     <string name="photo_frame_branding">ZTransfer 浮水印</string>
     <string name="photo_frame_branding_pro_hint">高級版可關閉</string>
 

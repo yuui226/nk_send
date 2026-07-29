@@ -159,8 +159,6 @@ internal fun PhotoPreviewOverlay(
     initialRotationQuarterTurns: Int = 0,
     // 连拍成员 handle 集(列表页的检测结果):预览左上角展示连拍角标用;空集即不展示。
     burstHandles: Set<Int> = emptySet(),
-    // 已在传输队列中的 handle（任意状态）：当前页据此切换"加入 / 已入队"按钮。
-    queuedHandles: Set<Int> = emptySet(),
     // 把当前预览文件加入传输队列（父层负责目录校验、连接状态、入队与吸入动画）。
     onTransfer: (NikonCamera.FileInfo) -> Unit = {},
     // 合集页整组入队；预览没有列表格子锚点，因此只执行入队，不播放错误起点的飞行动画。
@@ -534,7 +532,6 @@ internal fun PhotoPreviewOverlay(
         when (val item = currentItem) {
             is PhotoPreviewItem.Photo -> {
                 val current = item.file
-                val curQueued = current.handle in queuedHandles
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -554,14 +551,12 @@ internal fun PhotoPreviewOverlay(
                         })
                     }
                     TransferQueueButton(
-                        queued = curQueued,
                         onClick = { onTransfer(current) }
                     )
                 }
             }
             is PhotoPreviewItem.BurstCollection -> {
                 val expanded = collectionExpandedAt(pagerState.currentPage, item.id)
-                val allQueued = item.files.all { it.handle in queuedHandles }
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -572,7 +567,6 @@ internal fun PhotoPreviewOverlay(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TransferQueueButton(
-                        queued = allQueued,
                         onClick = { onTransferBurst(item.files) },
                         buttonSize = 48.dp
                     )
@@ -730,30 +724,26 @@ private fun ExifMetadataBar(
 
 /**
  * 预览页"加入传输队列"按钮：使用全局统一的玻璃圆钮。
- * 未入队显示 +（蓝），点击把当前页加入队列；已入队显示 ✓（绿）且不可再点——
- * 与列表页格子"已入队不可重复点"语义一致。
+ * 始终允许再次加入；任务执行时检查原片与当前任务对应的边框文件是否存在。
  */
 @Composable
 private fun TransferQueueButton(
-    queued: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     buttonSize: Dp = 44.dp
 ) {
     val colors = AppTheme.colors
     GlassButton(
-        onClick = { if (!queued) onClick() },
+        onClick = onClick,
         modifier = modifier.size(buttonSize),
         shape = CircleShape,
         contentPadding = PaddingValues(0.dp)
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Icon(
-                imageVector = if (queued) Icons.Default.Check else Icons.Default.Add,
-                contentDescription = stringResource(
-                    if (queued) R.string.cd_queued else R.string.cd_transfer
-                ),
-                tint = if (queued) colors.statusConnected else colors.accentBlue,
+                imageVector = Icons.Default.Add,
+                contentDescription = stringResource(R.string.cd_transfer),
+                tint = colors.accentBlue,
                 modifier = Modifier.size(buttonSize * 0.5f)
             )
         }
