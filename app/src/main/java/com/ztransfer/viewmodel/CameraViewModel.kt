@@ -23,14 +23,19 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
-import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.CameraEndpointOverride
+import com.ztransfer.protocol.CameraRefusedException
+import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.UsbPtpConnection
 import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.service.CameraSessionService
 import java.io.ByteArrayInputStream
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -53,15 +58,34 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 
+enum class WifiConnectionStatus {
+    IDLE,
+    PROBING,
+    NOT_FOUND,
+    REFUSED,
+    FAILED,
+    RECONNECTING
+}
+
+internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStatus = when (error) {
+    is CameraRefusedException -> WifiConnectionStatus.REFUSED
+    is ConnectException,
+    is NoRouteToHostException,
+    is SocketTimeoutException -> WifiConnectionStatus.NOT_FOUND
+    else -> WifiConnectionStatus.FAILED
+}
+
 data class CameraState(
-    val isWifiConnected: Boolean = false,
+    /** 网关特征只表示“值得探测”，不能作为已经连上相机的依据。 */
+    val isWifiCandidate: Boolean = false,
     val isConnectedToCamera: Boolean = false,
     val isConnecting: Boolean = false,
     val connectionType: CameraConnectionType? = null,
     val usbConnectionError: String? = null,
+    val wifiConnectionStatus: WifiConnectionStatus = WifiConnectionStatus.IDLE,
     val files: List<NikonCamera.FileInfo> = emptyList(),
     val isLoadingFiles: Boolean = false,
-    // 当前相机 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；未在相机 Wi-Fi 上时为 null。
+    // 当前候选 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；无候选链路时为 null。
     val wifiRssi: Int? = null
 )
 
@@ -638,10 +662,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * 连接看护：只要未连上相机，就周期性检测手机是否已在相机 Wi-Fi 上，一旦在就立即发起连接。
+     * 连接看护：只要未连上相机，就周期性检测手机是否进入候选网段，一旦命中就立即发起连接。
      * 作为系统网络回调的兜底——部分机型回调触发晚或不稳定（DHCP 时序），此循环保证"手机一进
-     * 相机 Wi-Fi 就连上"。isNikonWifi() 仅读本地 DHCP 网关，开销极小；只有确实在相机 Wi-Fi 上
-     * 才会发起真正的 socket 连接，不在时不做任何无谓尝试（因此不在相机 Wi-Fi 上不会空耗电量）。
+     * 相机 Wi-Fi 就连上"。isNikonWifi() 仅读本地 DHCP 网关，开销极小；网关命中仅表示值得
+     * 探测，真正身份仍以 PTP/IP 握手为准，避免把同为 192.168.1.1 的普通路由器当成相机。
      */
     private fun startConnectionWatcher() {
         watcherJob?.cancel()
@@ -653,12 +677,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 // dhcpInfo/connectionInfo 是 Binder IPC，放 IO 线程，不在主线程高频抖动。
                 val (onNikonWifi, rssi) = withContext(Dispatchers.IO) {
-                    val on = linkSaysCameraWifi || isNikonWifi()
-                    on to (if (on) readRssi() else null)
+                    val loopback = CameraEndpointOverride.hostOrNull() != null
+                    val on = loopback || linkSaysCameraWifi || isNikonWifi()
+                    on to (if (on && !loopback) readRssi() else null)
                 }
                 // 顺带纠正 Wi-Fi 状态与信号强度，避免回调漏报导致 UI 显示滞后。
-                if (_state.value.isWifiConnected != onNikonWifi || _state.value.wifiRssi != rssi) {
-                    _state.update { it.copy(isWifiConnected = onNikonWifi, wifiRssi = rssi) }
+                if (_state.value.isWifiCandidate != onNikonWifi || _state.value.wifiRssi != rssi) {
+                    updateWifiCandidate(onNikonWifi, rssi)
                 }
                 // 同 onWifiChanged：只负责"在相机 Wi-Fi 上就连上"，绝不主动断开，避免误断打断传输。
                 // 购买挂起期间(purchaseHold)不重连:此时是我们自己主动断的，接回去热点就关不掉了。
@@ -674,6 +699,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun registerNetworkCallback() {
         if (_state.value.connectionType == CameraConnectionType.USB) return
+        // ADB reverse 的回环端点不依赖 Wi-Fi；Release 实现恒返回 null。
+        if (CameraEndpointOverride.hostOrNull() != null) return
         if (wifiHeld) return
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
@@ -690,12 +717,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun releaseWifiNetworkRequest() {
-        if (!wifiHeld) return
-        runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
-        wifiHeld = false
+        if (wifiHeld) {
+            runCatching { connectivityManager.unregisterNetworkCallback(networkCallback) }
+            wifiHeld = false
+        }
         wifiNetwork = null
         linkSaysCameraWifi = false
-        _state.update { it.copy(isWifiConnected = false, wifiRssi = null) }
+        _state.update {
+            it.copy(
+                isWifiCandidate = false,
+                wifiRssi = null,
+                wifiConnectionStatus = WifiConnectionStatus.IDLE
+            )
+        }
     }
 
     // 购买挂起:为 true 期间禁止一切自动重连(watcher / onWifiChanged / 重试循环)。
@@ -731,7 +765,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         releaseSessionWifiLock()
         val cam = camera
         camera = null
-        _state.update { it.copy(isConnectedToCamera = false, isConnecting = false) }
+        _state.update {
+            it.copy(
+                isConnectedToCamera = false,
+                isConnecting = false,
+                wifiConnectionStatus = WifiConnectionStatus.IDLE
+            )
+        }
         viewModelScope.launch {
             cam?.close()   // 先发 CloseSession(需相机网络在),再松开对该网络的占用
             // 弹窗若在 close 完成前已关闭(hold 已握回),占用保持不动,避免撤掉刚握回的回调。
@@ -749,8 +789,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun onWifiChanged() {
         if (_state.value.connectionType == CameraConnectionType.USB) return
         viewModelScope.launch {
-            val onNikonWifi = linkSaysCameraWifi || checkNikonWifi()
-            _state.update { it.copy(isWifiConnected = onNikonWifi) }
+            val loopback = CameraEndpointOverride.hostOrNull() != null
+            val onNikonWifi = loopback || linkSaysCameraWifi || checkNikonWifi()
+            val rssi = if (onNikonWifi && !loopback) {
+                withContext(Dispatchers.IO) { readRssi() }
+            } else {
+                null
+            }
+            updateWifiCandidate(onNikonWifi, rssi)
 
             // 只在"已在相机 Wi-Fi 但尚未连上相机"时发起连接。
             // 绝不因 isNikonWifi()==false 主动断开：该判断依赖 dhcpInfo 网关，运行中可能瞬时误报，
@@ -759,6 +805,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (onNikonWifi && !purchaseHold && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
                 connectToCameraWithRetry()
             }
+        }
+    }
+
+    /**
+     * 更新“疑似相机网络”证据。运行中的真实会话不因 DHCP 的瞬时误报被降级；
+     * 未连接时一旦候选特征消失，连接页立即回到无选择的初始状态。
+     */
+    private fun updateWifiCandidate(candidate: Boolean, rssi: Int?) {
+        _state.update { current ->
+            val keepConnectionStatus =
+                current.isConnectedToCamera &&
+                        current.connectionType == CameraConnectionType.WIFI
+            current.copy(
+                isWifiCandidate = candidate,
+                wifiRssi = rssi,
+                wifiConnectionStatus = if (!candidate && !keepConnectionStatus) {
+                    WifiConnectionStatus.IDLE
+                } else {
+                    current.wifiConnectionStatus
+                }
+            )
         }
     }
 
@@ -790,27 +857,47 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * 持续尝试连接相机：只要还在相机 Wi-Fi 上就不断重试，直到连上为止，不再在若干次后报错。
-     * 用户流程本就是"必须连上相机 Wi-Fi 才能用"，所以保持探测更符合预期。
-     * 一旦离开相机网段则退出循环，由网络回调在重新连上 Wi-Fi 后再次触发。
+     * 持续尝试连接相机：只要还在候选网段就后台重试，直到连上为止。
+     * 第一次失败后 UI 结束“识别中”并给出简短原因；重试本身保持静默。
+     * 一旦离开候选网段则退出循环，由网络回调在重新连上 Wi-Fi 后再次触发。
      */
     private suspend fun connectToCameraWithRetry() {
         if (purchaseHold || _state.value.connectionType == CameraConnectionType.USB ||
             _state.value.isConnecting || _state.value.isConnectedToCamera
         ) return
-        _state.update { it.copy(isConnecting = true) }
+        _state.update {
+            it.copy(
+                isConnecting = true,
+                wifiConnectionStatus = if (
+                    it.wifiConnectionStatus == WifiConnectionStatus.RECONNECTING
+                ) {
+                    WifiConnectionStatus.RECONNECTING
+                } else {
+                    WifiConnectionStatus.PROBING
+                }
+            )
+        }
 
         // 经 AppLocale.wrap：协议层错误文案（会显示在失败卡片上）与应用内语言一致。
         // 提到循环外：语言变更必经 Activity.recreate()，重试循环存续期间不可能变，
         // 不必每轮重试都重建配置上下文。
         val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
         // purchaseHold 也随轮检查:重试循环可能在购买挂起前就已在跑,得让它当轮退出。
+        var failedAttempts = 0
         while (!purchaseHold && _state.value.connectionType != CameraConnectionType.USB &&
-            (linkSaysCameraWifi || checkNikonWifi()) && !_state.value.isConnectedToCamera
+            (CameraEndpointOverride.hostOrNull() != null ||
+                linkSaysCameraWifi || checkNikonWifi()) &&
+            !_state.value.isConnectedToCamera
         ) {
             val cam = NikonCamera(localizedContext)
             var connected = false
-            cam.connect(network = wifiNetwork).fold(
+            var failure: Throwable? = null
+            val overrideHost = CameraEndpointOverride.hostOrNull()
+            cam.connect(
+                ip = overrideHost ?: PtpConstants.CAMERA_IP,
+                // 回环地址经 adb reverse 走本机 socket；绑定 Wi-Fi Network 会绕开隧道。
+                network = if (overrideHost == null) wifiNetwork else null
+            ).fold(
                 onSuccess = {
                     // USB 可能在 Wi-Fi 握手期间接入；此时不发布短暂的 Wi-Fi 成功态，
                     // 先释放刚建立的会话，再由循环出口切换到 USB。
@@ -823,7 +910,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             it.copy(
                                 isConnectedToCamera = true,
                                 isConnecting = false,
-                                connectionType = CameraConnectionType.WIFI
+                                connectionType = CameraConnectionType.WIFI,
+                                wifiConnectionStatus = WifiConnectionStatus.IDLE
                             )
                         }
                         CameraSessionService.start(getApplication())
@@ -833,7 +921,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         connected = true
                     }
                 },
-                onFailure = {
+                onFailure = { error ->
+                    failure = error
                     cam.close()
                 }
             )
@@ -843,11 +932,47 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (purchaseHold) holdCameraWifi(false)
                 return
             }
-            delay(RETRY_INTERVAL_MS)   // 未连上，稍后再试，不显示错误
+
+            // 一次真实握手失败后结束可见的“识别中”，但保留原有后台自动重试。
+            // 候选网络可能只是使用 192.168.1.1 的普通路由器，绝不能继续呈现成功场景。
+            val stillCandidate = CameraEndpointOverride.hostOrNull() != null ||
+                linkSaysCameraWifi || checkNikonWifi()
+            if (!stillCandidate) break
+            failure?.let { error ->
+                failedAttempts++
+                _state.update { current ->
+                    if (current.wifiConnectionStatus == WifiConnectionStatus.RECONNECTING) {
+                        current
+                    } else {
+                        current.copy(wifiConnectionStatus = classifyWifiConnectionFailure(error))
+                    }
+                }
+            }
+            val retryDelay = if (
+                _state.value.wifiConnectionStatus == WifiConnectionStatus.RECONNECTING ||
+                failedAttempts <= 1
+            ) {
+                RETRY_INTERVAL_MS
+            } else {
+                WIFI_BACKGROUND_RETRY_INTERVAL_MS
+            }
+            delay(retryDelay)
         }
 
         // 已离开相机 Wi-Fi（或已连上）；清除“连接中”状态，等待下次网络变化再触发。
-        _state.update { it.copy(isConnecting = false) }
+        _state.update {
+            it.copy(
+                isConnecting = false,
+                wifiConnectionStatus = if (
+                    it.isConnectedToCamera ||
+                    it.isWifiCandidate
+                ) {
+                    it.wifiConnectionStatus
+                } else {
+                    WifiConnectionStatus.IDLE
+                }
+            )
+        }
         if (camera == null) CameraSessionService.stop(getApplication())
         if (_state.value.connectionType == CameraConnectionType.USB) {
             attachedUsbDevice?.let(::connectUsbDevice)
@@ -873,7 +998,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     // 承担（红色断连图标），点击缩略图有抖动+提示反馈；重连后 loadFiles
                     // 整表刷新，不存在陈旧 handle 被使用的问题（点击已被连接检查挡住）。
                     _state.update {
-                        it.copy(isConnectedToCamera = false)
+                        it.copy(
+                            isConnectedToCamera = false,
+                            wifiConnectionStatus = if (
+                                cam.connectionType == CameraConnectionType.WIFI
+                            ) {
+                                WifiConnectionStatus.RECONNECTING
+                            } else {
+                                it.wifiConnectionStatus
+                            }
+                        )
                     }
                     viewModelScope.launch { reconnectSelectedTransport() }
                     break
@@ -1040,7 +1174,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         eventPollJob?.cancel()
         if (failedCamera.connectionType == CameraConnectionType.WIFI) releaseSessionWifiLock()
         _state.update {
-            it.copy(isConnectedToCamera = false, isConnecting = false)
+            it.copy(
+                isConnectedToCamera = false,
+                isConnecting = false,
+                wifiConnectionStatus = if (
+                    failedCamera.connectionType == CameraConnectionType.WIFI
+                ) {
+                    WifiConnectionStatus.RECONNECTING
+                } else {
+                    it.wifiConnectionStatus
+                }
+            )
         }
         viewModelScope.launch {
             failedCamera.close()
@@ -1481,8 +1625,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 相对 10s 心跳的通道占用可忽略;再快意义不大(拍完掏出手机也要几秒)。
         const val EVENT_POLL_INTERVAL_MS = 2_000L
         // 连接失败重试间隔：相机刚开热点时 PTP 服务可能晚于 Wi-Fi 就绪，快节奏重试
-        // 让"差一步"的场景少等一秒。看护轮询同理（开销只是读本地 DHCP，可忽略）。
+        // 让"差一步"的场景少等一秒；连续失败后降频，避免普通路由器恰好使用同网关时
+        // 每秒空连。看护轮询只读本地 DHCP，保持 1 秒用于及时发现真正的网络切换。
         const val RETRY_INTERVAL_MS = 1_000L
+        const val WIFI_BACKGROUND_RETRY_INTERVAL_MS = 3_000L
         const val WATCH_INTERVAL_MS = 1_000L
         // 黑边判定：近黑像素的通道上限（JPEG 压缩后黑条并非纯黑，留噪声余量）；
         // 黑边占边长的上限——3:2 塞 4:3 为 5.6%、16:9 为 12.5%，超过 15% 视为画面本身偏暗。

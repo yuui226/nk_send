@@ -59,11 +59,7 @@ fun FilterMark(
     }
 }
 
-/**
- * 监看标志：取景框四角 + 中心镜头圆环（监看/遥控拍摄的极简形）。
- * 四角 = 取景/监看；中心用【圆环而非实心点】表示镜头——既把语义拉回"相机"，
- * 又避开与预览页 AF 对焦框（实心角框）撞形。
- */
+/** 监看标志：一眼可识别的极简相机轮廓，镜头与快门灯只保留必要细节。 */
 @Composable
 fun RemoteMark(
     modifier: Modifier = Modifier,
@@ -72,35 +68,42 @@ fun RemoteMark(
 ) {
     Canvas(modifier = modifier.markSemantics(contentDescription).aspectRatio(1f)) {
         val s = size.minDimension
-        val stroke = 0.13f * s
-        val edge = 0.16f      // 角点到边缘的距离
-        val arm = 0.18f       // 角臂长度
-        fun corner(x: Float, y: Float, dx: Float, dy: Float) {
-            drawLine(
-                color = color,
-                start = Offset(x * s, y * s),
-                end = Offset((x + arm * dx) * s, y * s),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = color,
-                start = Offset(x * s, y * s),
-                end = Offset(x * s, (y + arm * dy) * s),
-                strokeWidth = stroke,
-                cap = StrokeCap.Round
-            )
+        val stroke = 0.075f * s
+        // 相机机身：顶部把镜头座直接并入轮廓，避免在 24dp 下出现重叠杂线。
+        val body = Path().apply {
+            moveTo(0.20f * s, 0.30f * s)
+            lineTo(0.30f * s, 0.30f * s)
+            lineTo(0.36f * s, 0.20f * s)
+            quadraticBezierTo(0.38f * s, 0.17f * s, 0.42f * s, 0.17f * s)
+            lineTo(0.57f * s, 0.17f * s)
+            quadraticBezierTo(0.61f * s, 0.17f * s, 0.63f * s, 0.20f * s)
+            lineTo(0.70f * s, 0.30f * s)
+            lineTo(0.80f * s, 0.30f * s)
+            quadraticBezierTo(0.89f * s, 0.30f * s, 0.89f * s, 0.39f * s)
+            lineTo(0.89f * s, 0.73f * s)
+            quadraticBezierTo(0.89f * s, 0.82f * s, 0.80f * s, 0.82f * s)
+            lineTo(0.20f * s, 0.82f * s)
+            quadraticBezierTo(0.11f * s, 0.82f * s, 0.11f * s, 0.73f * s)
+            lineTo(0.11f * s, 0.39f * s)
+            quadraticBezierTo(0.11f * s, 0.30f * s, 0.20f * s, 0.30f * s)
+            close()
         }
-        corner(edge, edge, 1f, 1f)             // 左上
-        corner(1f - edge, edge, -1f, 1f)       // 右上
-        corner(edge, 1f - edge, 1f, -1f)       // 左下
-        corner(1f - edge, 1f - edge, -1f, -1f) // 右下
-        // 中心镜头圆环：描边比杆件略细，半径留出与四角的呼吸间距。
+        drawPath(
+            path = body,
+            color = color,
+            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        // 大镜头圆环是最强识别特征；略偏左给右上的快门灯留出呼吸空间。
         drawCircle(
             color = color,
-            radius = 0.12f * s,
-            center = Offset(0.5f * s, 0.5f * s),
-            style = Stroke(width = 0.10f * s)
+            radius = 0.16f * s,
+            center = Offset(0.48f * s, 0.56f * s),
+            style = Stroke(width = stroke)
+        )
+        drawCircle(
+            color = color,
+            radius = 0.035f * s,
+            center = Offset(0.76f * s, 0.42f * s)
         )
     }
 }

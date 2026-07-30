@@ -20,6 +20,15 @@
     <string name="error_read_device_info">Could not read camera information: %1$s</string>
     <string name="connect_camera_wifi">Connect to the camera\'s Wi-Fi</string>
     <string name="open_wifi_settings">Wi-Fi Settings</string>
+    <string name="wifi_identifying_camera">Identifying camera…</string>
+    <string name="wifi_camera_not_found">Camera not detected</string>
+    <string name="wifi_connect_camera">Connect to the camera\'s Wi-Fi</string>
+    <string name="wifi_camera_refused">Camera refused connection</string>
+    <string name="wifi_check_camera_connection">Check the camera connection</string>
+    <string name="wifi_camera_connection_failed">Could not connect to camera</string>
+    <string name="wifi_restart_camera">Restart the camera\'s Wi-Fi</string>
+    <string name="wifi_connection_interrupted">Connection interrupted</string>
+    <string name="wifi_reconnecting">Reconnecting…</string>
     <string name="step_camera_wifi">On the camera, enable “Connect to smart device (Wi-Fi)”</string>
     <string name="step_phone_wifi">Connect your phone\'s Wi-Fi to the camera\'s hotspot</string>
     <string name="tip_title">A faster way to connect</string>
@@ -156,7 +165,7 @@
     <string name="ptp_unknown_error">Error (0x%1$s)</string>
 
     <!-- Remote control page -->
-    <string name="cd_remote_entry">Remote control</string>
+    <string name="cd_remote_entry">Camera live view</string>
     <string name="cd_rotate_photo">Rotate photo</string>
     <string name="cd_dev_panel">Developer tools</string>
     <string name="remote_blocked_transfer">Transfer in progress — enter live view after it finishes</string>

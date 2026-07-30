@@ -20,6 +20,15 @@
     <string name="error_read_device_info">读取相机信息失败：%1$s</string>
     <string name="connect_camera_wifi">请连接相机 Wi-Fi</string>
     <string name="open_wifi_settings">Wi-Fi 设置</string>
+    <string name="wifi_identifying_camera">正在识别相机…</string>
+    <string name="wifi_camera_not_found">未检测到相机</string>
+    <string name="wifi_connect_camera">请连接相机 Wi-Fi</string>
+    <string name="wifi_camera_refused">相机拒绝连接</string>
+    <string name="wifi_check_camera_connection">请检查相机连接状态</string>
+    <string name="wifi_camera_connection_failed">无法连接相机</string>
+    <string name="wifi_restart_camera">请重新开启相机 Wi-Fi</string>
+    <string name="wifi_connection_interrupted">连接已中断</string>
+    <string name="wifi_reconnecting">正在重新连接…</string>
     <string name="step_camera_wifi">相机开启「与智能设备建立 Wi-Fi 连接」</string>
     <string name="step_phone_wifi">手机 Wi-Fi 连接到相机的热点</string>
     <string name="tip_title">更快的连接方式</string>
@@ -156,7 +165,7 @@
     <string name="ptp_unknown_error">错误 (0x%1$s)</string>
 
     <!-- 遥控页 -->
-    <string name="cd_remote_entry">遥控</string>
+    <string name="cd_remote_entry">相机监看</string>
     <string name="cd_rotate_photo">旋转照片</string>
     <string name="cd_dev_panel">开发者工具</string>
     <string name="remote_blocked_transfer">传输进行中，完成后再进入监看</string>

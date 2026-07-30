@@ -43,6 +43,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 调试包与已安装的正式包并存，避免模拟器验证覆盖用户数据或遇到签名冲突。
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             signingConfig = if (hasReleaseKeystore) {
                 signingConfigs.getByName("release")

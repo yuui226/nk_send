@@ -36,6 +36,7 @@ import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.ZTransferTheme
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.CameraEndpointOverride
 import com.ztransfer.update.AppUpdateHost
 import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.viewmodel.CameraViewModel
@@ -54,6 +55,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Debug 源集可由 ADB 启用回环相机；Release 源集实现为空，不解析任何调试参数。
+        CameraEndpointOverride.applyLaunchIntent(intent)
         // 恢复授权状态（本地验签，毫秒级）并在后台触发静默续签（≥7 天且有网时）。
         com.ztransfer.license.LicenseManager.init(applicationContext)
         // 每 6 小时至多检查一次；软更新每日最多提示一次，硬更新始终阻止继续使用。

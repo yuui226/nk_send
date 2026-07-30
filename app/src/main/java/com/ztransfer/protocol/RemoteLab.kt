@@ -2,7 +2,10 @@ package com.ztransfer.protocol
 
 import android.os.SystemClock
 import java.net.SocketTimeoutException
+import java.util.zip.CRC32
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -78,6 +81,8 @@ object Lab {
     const val PROP_NK_LV_IMAGE_ZOOM_RATIO = 0xD1A3  // Nikon 实时取景画面放大倍率
     const val PROP_NK_LV_PROHIBIT = 0xD1A4
     const val PROP_NK_LV_IMAGE_SIZE = 0xD1AC
+    const val PROP_NK_LV_ZOOM_AREA = 0xD1BD         // 放大取景区域/位置（通常只读）
+    const val PROP_NK_HI_RES_ZOOM = 0x1D033         // 新世代视频高解析度数字变焦（32 位扩展属性码）
     const val PROP_NK_MOVIE_AUTO_ISO = 0xD0AD
     const val PROP_NK_ISO_EX = 0xD0B4
     const val PROP_NK_ISO_CONTROL_SENSITIVITY = 0xD0B5
@@ -97,15 +102,21 @@ object Lab {
     const val PROP_NK_MOVIE_EXP_COMP = 0xD1AB
 
     /**
-     * 两类“数字变焦”必须分开探测：
+     * 四类“数字变焦”必须分开探测：
      * - 0xD1A3 只放大实时取景，最接近监看页 +/- 对焦辅助；
      * - 0x5016 是标准 PTP 数字变焦，可能影响相机实际输出。
+     * - 0xD1BD 是取景放大区域/位置，用来判断放大后能否遥控移动观察区域；
+     * - 0x1D033 是新世代 Nikon Hi-Res Zoom。它超过 16 位，必须按 0x9439
+     *   的 32 位码表保留完整编号，再作为标准 PTP 属性命令的 32 位参数传入。
      *
-     * 两者都只加入只读能力探测；在没有真机日志确认类型、可写性和值域前不用于正式控制。
+     * 深度探测只对相机明确报告为可写且给出值域的标量做临时写入，并保证恢复原值；
+     * 在没有真机日志确认前不用于正式控制。
      */
     val DIGITAL_ZOOM_PROPS = linkedMapOf(
         PROP_NK_LV_IMAGE_ZOOM_RATIO to "NikonLiveViewImageZoomRatio",
+        PROP_NK_LV_ZOOM_AREA to "NikonLiveViewZoomArea",
         PROP_DIGITAL_ZOOM to "DigitalZoom(std)",
+        PROP_NK_HI_RES_ZOOM to "NikonHiResZoom(ext32)",
     )
 
     /** 探测清单：操作码 -> 可读名称（勾选表用）。 */
@@ -156,6 +167,8 @@ object Lab {
         PROP_NK_RECORDING_MEDIA to "RecordingMedia",
         PROP_NK_LV_STATUS to "LiveViewStatus",
         PROP_NK_LV_IMAGE_ZOOM_RATIO to "NikonLiveViewImageZoomRatio",
+        PROP_NK_LV_ZOOM_AREA to "NikonLiveViewZoomArea",
+        PROP_NK_HI_RES_ZOOM to "NikonHiResZoom(ext32)",
         PROP_NK_LV_PROHIBIT to "LiveViewProhibit",
         PROP_NK_LV_IMAGE_SIZE to "LiveViewImageSize",
         PROP_NK_LV_SELECTOR to "LiveViewSelector",
@@ -171,6 +184,8 @@ object Lab {
 
 private fun hex4(v: Int) = "0x%04X".format(v and 0xFFFF)
 private fun hex8(v: Long) = "0x%08X".format(v)
+private fun hexCode(v: Int) =
+    if (v in 0..0xFFFF) hex4(v) else "0x%05X".format(v)
 
 private const val PROBE_CODES_PER_LINE = 16
 
@@ -183,13 +198,13 @@ internal fun formatProbeCodeLines(
     codes: Collection<Int>,
     names: Map<Int, String> = emptyMap(),
 ): List<String> {
-    val sorted = codes.map { it and 0xFFFF }.distinct().sorted()
+    val sorted = codes.distinct().sorted()
     if (sorted.isEmpty()) return listOf("$label (0): <none>")
     return sorted.chunked(PROBE_CODES_PER_LINE).mapIndexed { index, chunk ->
         val from = index * PROBE_CODES_PER_LINE + 1
         val to = from + chunk.size - 1
         "$label (${sorted.size}) [$from-$to]: " + chunk.joinToString(" ") { code ->
-            names[code]?.let { "${hex4(code)}($it)" } ?: hex4(code)
+            names[code]?.let { "${hexCode(code)}($it)" } ?: hexCode(code)
         }
     }
 }
@@ -295,6 +310,23 @@ private class Cur(val d: ByteArray) {
     }
 }
 
+/**
+ * Nikon GetVendorCodes(0x9439) 使用 u32 count + count×u32 code。
+ * 先校验数量，避免损坏的载荷按虚假数量分配大数组。
+ */
+internal fun parseVendorCodes32(d: ByteArray): Set<Int> {
+    require(d.size >= 4) { "missing u32 count" }
+    val c = Cur(d)
+    val count = c.u32()
+    val available = (d.size - 4) / 4
+    require(count <= available.toLong()) {
+        "declared $count codes but payload only contains $available"
+    }
+    val result = LinkedHashSet<Int>(count.toInt())
+    repeat(count.toInt()) { result += c.u32().toInt() }
+    return result
+}
+
 data class LabDeviceInfo(
     val manufacturer: String,
     val model: String,
@@ -379,36 +411,91 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
     else -> "$raw"
 }
 
-/** 解析 DevicePropDesc 并格式化成单段日志文本。 */
-private fun parsePropDesc(prop: Int, d: ByteArray): String {
+private data class ProbePropDescData(
+    val dataType: Int,
+    val writable: Boolean,
+    val defaultValue: Long,
+    val defaultIsScalar: Boolean,
+    val current: Long,
+    val currentIsScalar: Boolean,
+    val formFlag: Int,
+    val rangeMin: Long? = null,
+    val rangeMax: Long? = null,
+    val rangeStep: Long? = null,
+    val enumValues: List<Long> = emptyList(),
+)
+
+/**
+ * 解析标准 DevicePropDesc。即使请求参数是 Nikon 的 32 位属性编号，返回数据集里的
+ * DevicePropCode 仍是标准 u16；完整编号只存在于命令参数和 0x9439 能力表中。
+ */
+private fun parseProbePropDescData(prop: Int, d: ByteArray): ProbePropDescData {
     val c = Cur(d)
-    c.u16()                                     // propCode（回显）
+    val echoedProp = c.u16()
+    require(echoedProp == (prop and 0xFFFF)) {
+        "descriptor echoed ${hex4(echoedProp)}, expected ${hex4(prop)}"
+    }
     val dataType = c.u16()
-    val rw = c.u8()                             // 0=只读 1=可写
+    val writable = c.u8() == 1
     val (def, defScalar) = c.typed(dataType)
     val (cur, curScalar) = c.typed(dataType)
     val formFlag = c.u8()
-    val form = when (formFlag) {
+    var rangeMin: Long? = null
+    var rangeMax: Long? = null
+    var rangeStep: Long? = null
+    var enumValues = emptyList<Long>()
+    when (formFlag) {
         1 -> {
-            val (min, _) = c.typed(dataType)
-            val (max, _) = c.typed(dataType)
-            val (step, _) = c.typed(dataType)
-            "range[${fmtVal(prop, min)}..${fmtVal(prop, max)} step $step]"
+            rangeMin = c.typed(dataType).first
+            rangeMax = c.typed(dataType).first
+            rangeStep = c.typed(dataType).first
         }
         2 -> {
             val n = c.u16()
-            val values = (0 until n).map { c.typed(dataType).first }
+            enumValues = (0 until n).map { c.typed(dataType).first }
+        }
+    }
+    return ProbePropDescData(
+        dataType = dataType,
+        writable = writable,
+        defaultValue = def,
+        defaultIsScalar = defScalar,
+        current = cur,
+        currentIsScalar = curScalar,
+        formFlag = formFlag,
+        rangeMin = rangeMin,
+        rangeMax = rangeMax,
+        rangeStep = rangeStep,
+        enumValues = enumValues,
+    )
+}
+
+/** 解析 DevicePropDesc 并格式化成单段日志文本。 */
+private fun parsePropDesc(prop: Int, d: ByteArray): String {
+    val desc = parseProbePropDescData(prop, d)
+    val form = when (desc.formFlag) {
+        1 ->
+            "range[${fmtVal(prop, desc.rangeMin ?: 0L)}.." +
+                "${fmtVal(prop, desc.rangeMax ?: 0L)} step ${desc.rangeStep}]"
+        2 -> {
             // 数字变焦的全部档位正是这次探测要回收的核心信息，即使超过 12 档也不截断。
             // 其他属性仍保持紧凑展示；它们的完整二进制始终另行写入 raw 字段。
             val displayLimit = if (prop in Lab.DIGITAL_ZOOM_PROPS) Int.MAX_VALUE else 12
-            val shown = values.take(displayLimit).joinToString(",") { fmtVal(prop, it) }
-            "enum(${n})[${shown}${if (n > displayLimit) ",…" else ""}]"
+            val shown = desc.enumValues.take(displayLimit)
+                .joinToString(",") { fmtVal(prop, it) }
+            val suffix = if (desc.enumValues.size > displayLimit) ",…]" else "]"
+            "enum(${desc.enumValues.size})[$shown$suffix"
         }
         else -> "none"
     }
-    val curTxt = if (curScalar) "${fmtVal(prop, cur)} (raw=$cur)" else "<non-scalar>"
-    val defTxt = if (defScalar) fmtVal(prop, def) else "<non-scalar>"
-    return "type=${hex4(dataType)} ${if (rw == 1) "RW" else "RO"} cur=$curTxt def=$defTxt $form"
+    val curTxt =
+        if (desc.currentIsScalar) "${fmtVal(prop, desc.current)} (raw=${desc.current})"
+        else "<non-scalar>"
+    val defTxt =
+        if (desc.defaultIsScalar) fmtVal(prop, desc.defaultValue)
+        else "<non-scalar>"
+    return "type=${hex4(desc.dataType)} ${if (desc.writable) "RW" else "RO"} " +
+        "cur=$curTxt def=$defTxt $form"
 }
 
 /** 解析 Nikon GetEvent(0x90C7) 载荷：u16 count + count×{u16 code, u32 param}。 */
@@ -463,13 +550,47 @@ private fun parsePropDescData(d: ByteArray): PropDescData {
 }
 
 private fun encodeScalar(dataType: Int, v: Long): ByteArray {
-    val size = when (dataType) {
+    val size = scalarSize(dataType) ?: 8
+    return ByteArray(size) { i -> ((v shr (8 * i)) and 0xFF).toByte() }
+}
+
+private fun scalarSize(dataType: Int): Int? =
+    when (dataType) {
         0x0001, 0x0002 -> 1
         0x0003, 0x0004 -> 2
         0x0005, 0x0006 -> 4
-        else -> 8
+        0x0007, 0x0008 -> 8
+        else -> null
     }
-    return ByteArray(size) { i -> ((v shr (8 * i)) and 0xFF).toByte() }
+
+/**
+ * 深度探测不暴力枚举未知整数空间：只使用相机自己给出的 enum，或 range 的端点/
+ * 当前值相邻一步。最多 8 档，既能反推出写法，也避免让用户等待几十秒。
+ */
+private fun digitalZoomProbeValues(desc: ProbePropDescData): List<Long> {
+    val candidates = when (desc.formFlag) {
+        2 -> desc.enumValues
+        1 -> buildList {
+            desc.rangeMin?.let(::add)
+            val step = desc.rangeStep
+            if (step != null && step > 0L) {
+                add(desc.current - step)
+                add(desc.current + step)
+            }
+            desc.rangeMax?.let(::add)
+        }.filter { value ->
+            val min = desc.rangeMin
+            val max = desc.rangeMax
+            (min == null || value >= min) && (max == null || value <= max)
+        }
+        else -> emptyList()
+    }
+    val distinct = candidates.distinct().filter { it != desc.current }
+    if (distinct.size <= 8) return distinct
+    val evenlySpaced = (0 until 8).map { index ->
+        distinct[index * (distinct.lastIndex) / 7]
+    }
+    return evenlySpaced.distinct()
 }
 
 /** 一个曝光参数的完整描述。值域来自相机且随曝光模式动态变化，收到
@@ -1246,7 +1367,8 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
  *
  * 安全边界：
  * - 不调用未知操作码；只列出相机广告的操作码。
- * - 不调用 SetDevicePropValue，也不向相机写入任何属性。
+ * - 普通属性全部只读；只有明确报告为 RW、标量且给出 enum/range 的数字变焦候选
+ *   会临时试写。每次写入都回读，整个档位扫描由 finally 恢复原始字节。
  * - 不把机身序列号写进可分享日志。
  * - 除相机广告的属性外，只额外只读查询 App 已知的兼容属性。
  *
@@ -1257,8 +1379,11 @@ suspend fun NikonCamera.runLabProbe(
     onFrame: suspend (ByteArray) -> Unit
 ) {
     val t0 = System.currentTimeMillis()
-    log("=== ZTransfer capability probe v3 ===")
-    log("scope=advertised-codes+advertised-properties+digital-zoom-fallbacks mode=no-property-writes")
+    log("=== ZTransfer capability probe v4 ===")
+    log(
+        "scope=u32-vendor-codes+u32-property-params+live-view-digital-zoom-roundtrip " +
+            "mode=zoom-only-temporary-writes-with-restore"
+    )
 
     // ---- 1. DeviceInfo ----
     val (dirc, did) = labCommand(Lab.GET_DEVICE_INFO)
@@ -1311,31 +1436,36 @@ suspend fun NikonCamera.runLabProbe(
     }
 
     // ---- 3. Z8/Z9 世代 GetVendorCodes（0x9439）----
-    var vendorOps9439: Set<Int> = emptySet()
     var vendorProps9439: Set<Int> = emptySet()
     if (Lab.NK_GET_VENDOR_CODES in ops) {
-        for (kind in intArrayOf(0x09, 0x0D)) {   // 0x09=操作码 0x0D=属性码（ptpwebcam 用法）
-            val (rc, d) = labCommand(Lab.NK_GET_VENDOR_CODES, kind)
-            if (rc == Lab.OK && d != null) {
-                val parsed = runCatching { Cur(d).u16Array().toSet() }
-                parsed.onSuccess {
-                    if (kind == 0x09) vendorOps9439 = it else vendorProps9439 = it
-                    val suffix = if (kind == 0x09) "operations" else "properties"
-                    val names = if (kind == 0x09) Lab.INTEREST_OPS else Lab.INTEREST_PROPS
-                    logProbeCodes(log, "GetVendorCodes(0x9439,$kind).$suffix", it, names)
-                }.onFailure {
-                    log(
-                        "!! GetVendorCodes(0x9439,$kind) parse failed: ${it.message}; " +
-                            "raw=${probeHex(d)}"
-                    )
-                }
-            } else log("GetVendorCodes(0x9439, $kind) resp=${hex4(rc)}")
+        // libgphoto2 的 Nikon 实现固定传 0x0D，并按 u32 数组接收属性码。
+        val kind = 0x0D
+        val (rc, d) = labCommand(Lab.NK_GET_VENDOR_CODES, kind)
+        if (rc == Lab.OK && d != null) {
+            // 旧探测按 u16 读取会把每个扩展码拆成“低 16 位 + 0”，正是新属性消失的根因。
+            val parsed = runCatching { parseVendorCodes32(d) }
+            parsed.onSuccess {
+                vendorProps9439 = it
+                logProbeCodes(
+                    log,
+                    "GetVendorCodes(0x9439,0x0D).properties",
+                    it,
+                    Lab.INTEREST_PROPS
+                )
+            }.onFailure {
+                log(
+                    "!! GetVendorCodes(0x9439,0x0D) parse failed: ${it.message}; " +
+                        "raw=${probeHex(d)}"
+                )
+            }
+        } else {
+            log("GetVendorCodes(0x9439, 0x0D) resp=${hex4(rc)}")
         }
     } else {
         log("GetVendorCodes(0x9439): not advertised")
     }
 
-    val allAdvertisedOps = ops + vendorOps9439
+    val allAdvertisedOps = ops
     val advertised = (info?.props ?: emptySet()) + vendorProps90ca + vendorProps9439
     logProbeCodes(log, "Merged.operations", allAdvertisedOps, Lab.INTEREST_OPS)
     logProbeCodes(log, "Merged.properties", advertised, Lab.INTEREST_PROPS)
@@ -1351,6 +1481,12 @@ suspend fun NikonCamera.runLabProbe(
     var valueOkCount = 0
     val digitalZoomDesc = mutableMapOf<Int, String>()
     val digitalZoomValue = mutableMapOf<Int, String>()
+    val digitalZoomParsedDesc = mutableMapOf<Int, ProbePropDescData>()
+    val digitalZoomDescRoute = mutableMapOf<Int, Int>()
+    val digitalZoomValueRoute = mutableMapOf<Int, Int>()
+    val digitalZoomValueRaw = mutableMapOf<Int, ByteArray>()
+    val digitalZoomSweepResult = mutableMapOf<Int, String>()
+    val digitalZoomControlConfirmed = mutableSetOf<Int>()
     log("--- property survey (${probeProps.size}) ---")
     log("Each DESC/VALUE raw field is complete little-endian payload; unknown codes are intentional.")
     for ((index, prop) in probeProps.withIndex()) {
@@ -1362,42 +1498,56 @@ suspend fun NikonCamera.runLabProbe(
             if (prop in Lab.INTEREST_PROPS && prop !in advertised) add("known-fallback")
         }.joinToString("+").ifEmpty { "unknown" }
 
-        val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
+        // PTP 命令参数本身是 u32，0x1D033 直接以完整 Int 传给标准 0x1014。
+        val descOp = Lab.GET_DEVICE_PROP_DESC
+        val (rc, d) = labCommand(descOp, prop)
         if (rc == Lab.OK && d != null) {
             descOkCount++
             val parsed = runCatching { parsePropDesc(prop, d) }
             val txt = parsed.getOrElse { "parse failed: ${it.message}" }
             log(
-                "PROP ${index + 1}/${probeProps.size} ${hex4(prop)} $name " +
-                    "src=$sources DESC resp=${hex4(rc)} bytes=${d.size} $txt raw=${probeHex(d)}"
+                "PROP ${index + 1}/${probeProps.size} ${hexCode(prop)} $name " +
+                    "src=$sources DESC via=${hex4(descOp)} resp=${hex4(rc)} " +
+                    "bytes=${d.size} $txt raw=${probeHex(d)}"
             )
             if (prop in Lab.DIGITAL_ZOOM_PROPS) {
                 digitalZoomDesc[prop] = "OK $txt"
+                runCatching { parseProbePropDescData(prop, d) }.getOrNull()?.let {
+                    digitalZoomParsedDesc[prop] = it
+                    digitalZoomDescRoute[prop] = descOp
+                }
             }
         } else {
             log(
-                "PROP ${index + 1}/${probeProps.size} ${hex4(prop)} $name " +
-                    "src=$sources DESC resp=${hex4(rc)} bytes=${d?.size ?: 0} raw=${probeHex(d)}"
+                "PROP ${index + 1}/${probeProps.size} ${hexCode(prop)} $name " +
+                    "src=$sources DESC via=${hex4(descOp)} resp=${hex4(rc)} " +
+                    "bytes=${d?.size ?: 0} raw=${probeHex(d)}"
             )
             if (prop in Lab.DIGITAL_ZOOM_PROPS) {
                 digitalZoomDesc[prop] = "resp=${hex4(rc)}"
             }
         }
 
-        // 两个数字变焦候选即使没有出现在 DeviceInfo 中也强制只读查询。Nikon 的隐藏厂商
+        // 数字变焦候选即使没有出现在 DeviceInfo 中也强制只读查询。Nikon 的隐藏厂商
         // 属性经常可用却不广告；失败只会返回响应码，不会改变相机状态。
-        val readValue = Lab.GET_DEVICE_PROP_VALUE in allAdvertisedOps ||
+        val valueOp = Lab.GET_DEVICE_PROP_VALUE
+        val readValue = valueOp in allAdvertisedOps ||
             prop in Lab.DIGITAL_ZOOM_PROPS
         if (readValue) {
-            val (vrc, vd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, prop)
+            val (vrc, vd) = labCommand(valueOp, prop)
             if (vrc == Lab.OK && vd != null) valueOkCount++
             log(
-                "PROP ${index + 1}/${probeProps.size} ${hex4(prop)} $name " +
-                    "VALUE resp=${hex4(vrc)} bytes=${vd?.size ?: 0} raw=${probeHex(vd)}"
+                "PROP ${index + 1}/${probeProps.size} ${hexCode(prop)} $name " +
+                    "VALUE via=${hex4(valueOp)} resp=${hex4(vrc)} " +
+                    "bytes=${vd?.size ?: 0} raw=${probeHex(vd)}"
             )
             if (prop in Lab.DIGITAL_ZOOM_PROPS) {
                 digitalZoomValue[prop] =
                     "resp=${hex4(vrc)} bytes=${vd?.size ?: 0} raw=${probeHex(vd)}"
+                if (vrc == Lab.OK && vd != null) {
+                    digitalZoomValueRaw[prop] = vd
+                    digitalZoomValueRoute[prop] = valueOp
+                }
             }
         } else if (index == 0) {
             log("GetDevicePropValue(0x1015): not advertised; VALUE survey skipped")
@@ -1414,21 +1564,41 @@ suspend fun NikonCamera.runLabProbe(
     // ---- 5. 数字变焦专检汇总 ----
     // DESC 中 RW/RO 决定能否控制，enum/range 给出完整档位；VALUE 保留当前值原始编码。
     // 这里只汇总上面的只读结果，不重复发命令。
+    val probeMovieMode = runCatching { rcGetMovieMode() }.getOrNull()
     log("--- digital zoom focus ---")
+    log(
+        "DIGITAL_ZOOM camera-selector=" +
+            when (probeMovieMode) {
+                true -> "MOVIE"
+                false -> "PHOTO"
+                null -> "UNKNOWN"
+            }
+    )
     Lab.DIGITAL_ZOOM_PROPS.forEach { (prop, name) ->
-        val meaning = if (prop == Lab.PROP_NK_LV_IMAGE_ZOOM_RATIO) {
-            "live-view-magnification"
-        } else {
-            "captured-output-digital-zoom"
+        val meaning = when (prop) {
+            Lab.PROP_NK_LV_IMAGE_ZOOM_RATIO -> "live-view-magnification-ratio"
+            Lab.PROP_NK_LV_ZOOM_AREA -> "live-view-magnified-area"
+            Lab.PROP_NK_HI_RES_ZOOM -> "movie-hi-res-digital-zoom"
+            else -> "captured-output-digital-zoom"
         }
         log(
-            "DIGITAL_ZOOM ${hex4(prop)} $name meaning=$meaning " +
+            "DIGITAL_ZOOM ${hexCode(prop)} $name meaning=$meaning " +
                 "advertised=${if (prop in advertised) "YES" else "NO"} " +
                 "DESC ${digitalZoomDesc[prop] ?: "NOT_QUERIED"} " +
                 "VALUE ${digitalZoomValue[prop] ?: "NOT_QUERIED"}"
         )
     }
-    log("DIGITAL_ZOOM note: DESC=OK+RW means controllable; enum/range contains usable levels.")
+    log("DIGITAL_ZOOM 32-bit property IDs use standard PTP 0x1014/0x1015/0x1016")
+    log(
+        "DIGITAL_ZOOM note: the live-view stage repeats reads after LV starts; " +
+            "RW scalar enum/range properties are temporarily swept and restored."
+    )
+    if (probeMovieMode != true) {
+        log(
+            "DIGITAL_ZOOM note: Hi-Res Zoom may only be exposed in movie mode; " +
+                "if 0x1D033 is unavailable, move the physical selector to movie and probe again."
+        )
+    }
 
     // ---- 6. 电子水平仪 AngleLevel (0xD067) 专检 ----
     // Z 30 为首要目标机身，此属性是水平仪唯一数据源（libgphoto2 ptp.h 定义
@@ -1455,37 +1625,268 @@ suspend fun NikonCamera.runLabProbe(
         } else log("GetEvent(0x90C7) resp=${hex4(rc)}")
     }
 
+    suspend fun readDigitalZoomInLiveView() {
+        log("--- digital zoom live-view re-read ---")
+        for ((prop, name) in Lab.DIGITAL_ZOOM_PROPS) {
+            val descRoute = Lab.GET_DEVICE_PROP_DESC
+            val (descRc, descData) = labCommand(descRoute, prop)
+            val parsed =
+                if (descRc == Lab.OK && descData != null) {
+                    runCatching { parseProbePropDescData(prop, descData) }
+                } else {
+                    null
+                }
+            val descDetail =
+                parsed?.fold(
+                    onSuccess = {
+                        "${parsePropDesc(prop, checkNotNull(descData))} raw=${probeHex(descData)}"
+                    },
+                    onFailure = {
+                        "parse_failed=${it.message} raw=${probeHex(descData)}"
+                    }
+                ) ?: "raw=${probeHex(descData)}"
+            log(
+                "DIGITAL_ZOOM_READ stage=live-view prop=${hexCode(prop)} $name " +
+                    "DESC via=${hex4(descRoute)} resp=${hex4(descRc)} " +
+                    "bytes=${descData?.size ?: 0} $descDetail"
+            )
+            parsed?.getOrNull()?.let { descriptor ->
+                digitalZoomParsedDesc[prop] = descriptor
+                digitalZoomDescRoute[prop] = descRoute
+                digitalZoomDesc[prop] =
+                    "OK ${parsePropDesc(prop, checkNotNull(descData))} via=${hex4(descRoute)}"
+            }
+
+            val valueRoute = Lab.GET_DEVICE_PROP_VALUE
+            val (valueRc, valueData) = labCommand(valueRoute, prop)
+            log(
+                "DIGITAL_ZOOM_READ stage=live-view prop=${hexCode(prop)} $name " +
+                    "VALUE via=${hex4(valueRoute)} resp=${hex4(valueRc)} " +
+                    "bytes=${valueData?.size ?: 0} raw=${probeHex(valueData)}"
+            )
+            if (valueRc == Lab.OK && valueData != null) {
+                digitalZoomValueRaw[prop] = valueData
+                digitalZoomValueRoute[prop] = valueRoute
+                digitalZoomValue[prop] =
+                    "resp=${hex4(valueRc)} bytes=${valueData.size} " +
+                        "raw=${probeHex(valueData)} via=${hex4(valueRoute)}"
+            }
+        }
+    }
+
+    suspend fun sweepWritableDigitalZoom() {
+        log("--- digital zoom controlled write/readback sweep ---")
+        for ((prop, name) in Lab.DIGITAL_ZOOM_PROPS) {
+            val desc = digitalZoomParsedDesc[prop]
+            val original = digitalZoomValueRaw[prop]
+            val valueRoute = digitalZoomValueRoute[prop]
+            val descRoute = digitalZoomDescRoute[prop]
+            val scalarBytes = desc?.let { scalarSize(it.dataType) }
+            val writeRoute =
+                if (
+                    descRoute == Lab.GET_DEVICE_PROP_DESC &&
+                    Lab.SET_DEVICE_PROP_VALUE in allAdvertisedOps
+                ) {
+                    Lab.SET_DEVICE_PROP_VALUE
+                } else {
+                    null
+                }
+            val skipReason = when {
+                desc == null -> "no-parseable-desc"
+                !desc.writable -> "read-only"
+                !desc.currentIsScalar || scalarBytes == null -> "non-scalar"
+                original == null || valueRoute == null -> "no-readable-current-value"
+                original.size != scalarBytes ->
+                    "value-size-${original.size}-expected-$scalarBytes"
+                writeRoute == null -> "no-matching-advertised-set-route"
+                else -> null
+            }
+            if (skipReason != null) {
+                digitalZoomSweepResult[prop] = "SKIP($skipReason)"
+                log(
+                    "DIGITAL_ZOOM_SWEEP prop=${hexCode(prop)} $name SKIP reason=$skipReason"
+                )
+                continue
+            }
+
+            val activeDesc = checkNotNull(desc)
+            val originalRaw = checkNotNull(original)
+            val activeDescRoute = checkNotNull(descRoute)
+            val activeValueRoute = checkNotNull(valueRoute)
+            val activeWriteRoute = checkNotNull(writeRoute)
+            val candidates = digitalZoomProbeValues(activeDesc).map {
+                it to encodeScalar(activeDesc.dataType, it)
+            }.filter { (_, raw) -> !raw.contentEquals(originalRaw) }
+            if (candidates.isEmpty()) {
+                digitalZoomSweepResult[prop] = "SKIP(no-alternate-enum-or-range-value)"
+                log(
+                    "DIGITAL_ZOOM_SWEEP prop=${hexCode(prop)} $name SKIP " +
+                        "reason=no-alternate-enum-or-range-value"
+                )
+                continue
+            }
+
+            log(
+                "DIGITAL_ZOOM_SWEEP prop=${hexCode(prop)} $name " +
+                    "descVia=${hex4(activeDescRoute)} readVia=${hex4(activeValueRoute)} " +
+                    "writeVia=${hex4(activeWriteRoute)} type=${hex4(activeDesc.dataType)} " +
+                    "original=${probeHex(originalRaw)} candidates=" +
+                    candidates.joinToString(",") { (value, raw) ->
+                        "$value:${probeHex(raw)}"
+                    }
+            )
+
+            var acceptedValues = 0
+            var sweepError: String? = null
+            try {
+                for ((value, raw) in candidates) {
+                    val setRc = labSetProp(prop, raw)
+                    delay(220)
+                    val (readRc, readRaw) = labCommand(activeValueRoute, prop)
+                    val changed = readRc == Lab.OK && readRaw != null &&
+                        !readRaw.contentEquals(originalRaw)
+                    val matched = readRc == Lab.OK && readRaw?.contentEquals(raw) == true
+                    if (setRc == Lab.OK && matched) {
+                        acceptedValues++
+                        digitalZoomControlConfirmed += prop
+                    }
+                    log(
+                        "DIGITAL_ZOOM_STEP prop=${hexCode(prop)} requested=$value " +
+                            "write=${hex4(setRc)} read=${hex4(readRc)} " +
+                            "readRaw=${probeHex(readRaw)} changed=$changed matched=$matched"
+                    )
+                    if (setRc != Lab.OK) break
+
+                    if (Lab.NK_GET_EVENT in allAdvertisedOps) {
+                        val (eventRc, eventData) = labCommand(Lab.NK_GET_EVENT)
+                        val events = if (eventRc == Lab.OK && eventData != null) {
+                            runCatching { parseEvents(eventData) }.getOrDefault(emptyList())
+                        } else {
+                            emptyList()
+                        }
+                        log(
+                            "DIGITAL_ZOOM_STEP events resp=${hex4(eventRc)} " +
+                                events.joinToString(" ") { (code, param) ->
+                                    "${hex4(code)}(${hex8(param)})"
+                                }.ifEmpty { "<none>" }
+                        )
+                    }
+                    if (Lab.NK_GET_EVENT_EX in allAdvertisedOps) {
+                        val (eventExRc, eventExData) = labCommand(Lab.NK_GET_EVENT_EX)
+                        log(
+                            "DIGITAL_ZOOM_STEP eventsEx resp=${hex4(eventExRc)} " +
+                                "bytes=${eventExData?.size ?: 0} raw=${probeHex(eventExData)}"
+                        )
+                    }
+
+                    var frameInfo: Pair<ByteArray, Int>? = null
+                    repeat(6) {
+                        if (frameInfo == null) {
+                            frameInfo = labGrabFrame()
+                            if (frameInfo == null) delay(40)
+                        }
+                    }
+                    frameInfo?.let { (buffer, jpegOffset) ->
+                        val jpeg = buffer.copyOfRange(jpegOffset, buffer.size)
+                        val crc = CRC32().apply { update(jpeg) }.value
+                        log(
+                            "DIGITAL_ZOOM_STEP frame bytes=${jpeg.size} " +
+                                "jpegOffset=$jpegOffset crc32=${hex8(crc)}"
+                        )
+                        onFrame(jpeg)
+                        delay(300)
+                    } ?: log("DIGITAL_ZOOM_STEP frame=<unavailable>")
+                }
+            } catch (probeError: Exception) {
+                if (probeError is CancellationException) throw probeError
+                sweepError = "${probeError.javaClass.simpleName}:${probeError.message}"
+                log(
+                    "!! DIGITAL_ZOOM_SWEEP prop=${hexCode(prop)} FAILED $sweepError"
+                )
+            } finally {
+                // 用户退出页面会取消探测协程；恢复必须脱离取消状态继续执行。
+                withContext(NonCancellable) {
+                    try {
+                        val restoreRc = labSetProp(prop, originalRaw)
+                        delay(180)
+                        val (verifyRc, verifyRaw) = labCommand(activeValueRoute, prop)
+                        val restored =
+                            verifyRc == Lab.OK && verifyRaw?.contentEquals(originalRaw) == true
+                        digitalZoomSweepResult[prop] =
+                            "accepted=$acceptedValues/${candidates.size} restored=$restored " +
+                                "writeVia=${hex4(activeWriteRoute)}" +
+                                (sweepError?.let { " error=$it" } ?: "")
+                        log(
+                            "DIGITAL_ZOOM_RESTORE prop=${hexCode(prop)} " +
+                                "write=${hex4(restoreRc)} verify=${hex4(verifyRc)} " +
+                                "raw=${probeHex(verifyRaw)} restored=$restored"
+                        )
+                    } catch (restoreError: Exception) {
+                        digitalZoomSweepResult[prop] =
+                            "accepted=$acceptedValues/${candidates.size} restore=FAILED " +
+                                "error=${restoreError.message}"
+                        log(
+                            "!! DIGITAL_ZOOM_RESTORE prop=${hexCode(prop)} FAILED " +
+                                "${restoreError.javaClass.simpleName}: ${restoreError.message}"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     // ---- 8. Live View 试取帧 ----
     log("--- live view test ---")
     if (Lab.NK_START_LIVE_VIEW !in ops) log("StartLiveView not advertised - trying anyway")
     var lvOk = false
     if (labStartLiveView(log)) {
         lvOk = true
-        var got = 0
-        var totalMs = 0L
-        var attempts = 0
-        var lastTotal = 0
-        var soiOff = -1
         try {
-            while (got < 8 && attempts < 30) {
-                attempts++
-                val f0 = System.currentTimeMillis()
-                val frame = labGrabFrame()
-                if (frame == null) { delay(40); continue }
-                val ms = System.currentTimeMillis() - f0
-                val (buf, soi) = frame
-                got++
-                totalMs += ms
-                lastTotal = buf.size
-                soiOff = soi
-                onFrame(buf.copyOfRange(soi, buf.size))   // 探测仅 8 帧，拷贝无所谓
+            readDigitalZoomInLiveView()
+            sweepWritableDigitalZoom()
+            var got = 0
+            var totalMs = 0L
+            var attempts = 0
+            var lastTotal = 0
+            var soiOff = -1
+            try {
+                while (got < 8 && attempts < 30) {
+                    attempts++
+                    val f0 = System.currentTimeMillis()
+                    val frame = labGrabFrame()
+                    if (frame == null) { delay(40); continue }
+                    val ms = System.currentTimeMillis() - f0
+                    val (buf, soi) = frame
+                    got++
+                    totalMs += ms
+                    lastTotal = buf.size
+                    soiOff = soi
+                    onFrame(buf.copyOfRange(soi, buf.size))   // 探测仅 8 帧，拷贝无所谓
+                }
+                // 逐帧不打印，只汇总一行（帧大小/头偏移/平均耗时足够定位问题）
+                if (got > 0) {
+                    log(
+                        "LV: $got frames ok / $attempts polls, ~${lastTotal / 1024}KB " +
+                            "jpeg@$soiOff, avg ${totalMs / got}ms " +
+                            "(~%.1f fps ceiling)".format(1000f / (totalMs / got))
+                    )
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                log("!! LV frame error: ${e.message}")
             }
-            // 逐帧不打印，只汇总一行（帧大小/头偏移/平均耗时足够定位问题）
-            if (got > 0) log("LV: $got frames ok / $attempts polls, ~${lastTotal / 1024}KB jpeg@$soiOff, avg ${totalMs / got}ms (~%.1f fps ceiling)".format(1000f / (totalMs / got)))
-        } catch (e: Exception) {
-            log("!! LV frame error: ${e.message}")
+        } finally {
+            withContext(NonCancellable) {
+                val endRc = runCatching { labEndLiveView() }.getOrNull()
+                log(
+                    if (endRc != null) {
+                        "EndLiveView(0x9202) resp=${hex4(endRc)}"
+                    } else {
+                        "!! EndLiveView(0x9202) failed"
+                    }
+                )
+            }
         }
-        log("EndLiveView(0x9202) resp=${hex4(labEndLiveView())}")
     }
 
     // ---- 9. 结论 ----
@@ -1516,6 +1917,31 @@ suspend fun NikonCamera.runLabProbe(
                 "0x5016 UNAVAILABLE"
             }
     )
+    log(
+        "hi-res zoom:    " +
+            if (digitalZoomDesc[Lab.PROP_NK_HI_RES_ZOOM]?.startsWith("OK ") == true) {
+                "0x1D033 DESC_OK (extended Nikon property)"
+            } else {
+                "0x1D033 UNAVAILABLE"
+            }
+    )
+    log(
+        "zoom area:      " +
+            if (digitalZoomDesc[Lab.PROP_NK_LV_ZOOM_AREA]?.startsWith("OK ") == true) {
+                "0xD1BD DESC_OK (inspect payload/RO status above)"
+            } else {
+                "0xD1BD UNAVAILABLE"
+            }
+    )
+    Lab.DIGITAL_ZOOM_PROPS.forEach { (prop, name) ->
+        val control =
+            if (prop in digitalZoomControlConfirmed) "REMOTE_CONTROL_CONFIRMED"
+            else "not-confirmed"
+        log(
+            "zoom candidate ${hexCode(prop)} $name: $control; " +
+                "sweep=${digitalZoomSweepResult[prop] ?: "NOT_RUN"}"
+        )
+    }
     log("angle level:    ${if (alrc == Lab.OK && ald != null && ald.size >= 4) "0xD067 OK" else "UNAVAILABLE"}")
     log("capture opcode: ${if (Lab.NK_CAPTURE_REC_IN_MEDIA in ops || Lab.NK_CAPTURE_REC_IN_SDRAM in ops) "advertised" else "MISSING"}")
     log("event polling:  ${if (Lab.NK_GET_EVENT in ops || Lab.NK_GET_EVENT_EX in ops) "advertised" else "MISSING"}")

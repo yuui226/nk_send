@@ -67,6 +67,7 @@ import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.viewmodel.WifiConnectionStatus
 import kotlinx.coroutines.delay
 import kotlin.math.cos
 import kotlin.math.sin
@@ -105,8 +106,6 @@ fun HomeScreen(
 
     val colors = AppTheme.colors
     val connected = state.isConnectedToCamera
-    val onCameraWifi = state.isWifiConnected
-    val onUsb = state.connectionType == CameraConnectionType.USB
     val usbError = state.usbConnectionError
     // 会话真正就绪后再触发卡片内成功动画；MainScreen 使用同一组常量等待动画结束再跳转。
     var celebrate by remember { mutableStateOf(false) }
@@ -120,16 +119,17 @@ fun HomeScreen(
     }
 
     // 用户不需要点卡片作出强选择：App 观察真实链路，先识别到哪种传输就点亮哪张卡片。
-    val selectedConnection = when {
-        onUsb -> CameraConnectionType.USB
-        onCameraWifi || (connected && state.connectionType == CameraConnectionType.WIFI) ->
-            CameraConnectionType.WIFI
-        else -> null
-    }
+    val selectedConnection = homeSelectedConnection(
+        connected = connected,
+        connectionType = state.connectionType
+    )
     val selectionScene = remember { Animatable(0f) }
     LaunchedEffect(selectedConnection) {
         if (selectedConnection == null) {
-            selectionScene.snapTo(0f)
+            selectionScene.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(380, easing = FastOutSlowInEasing)
+            )
         } else {
             selectionScene.snapTo(0f)
             selectionScene.animateTo(
@@ -138,23 +138,52 @@ fun HomeScreen(
             )
         }
     }
-    // 待连接时两张卡相差半个周期依次呼吸；识别传输方式后立即停止提示动画。
-    val attentionTransition = rememberInfiniteTransition(label = "connectionAttention")
-    val attentionPhase by attentionTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(CONNECTION_ATTENTION_MS, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "connectionAttentionPhase"
-    )
-    val usbPhase = attentionPhase
-    val wifiPhase = (attentionPhase + 0.5f).mod(1f)
-    val usbAttention = if (selectedConnection == null) connectionAttention(usbPhase) else 0f
-    val wifiAttention = if (selectedConnection == null) {
-        connectionAttention(wifiPhase)
-    } else 0f
+
+    // 快速成功/失败不显示中间态，避免连接页在启动时闪一下“正在识别”。
+    var showWifiProbing by remember { mutableStateOf(false) }
+    LaunchedEffect(state.wifiConnectionStatus) {
+        showWifiProbing = false
+        if (state.wifiConnectionStatus == WifiConnectionStatus.PROBING) {
+            delay(WIFI_PROBING_FEEDBACK_DELAY_MS)
+            showWifiProbing = true
+        }
+    }
+    val wifiFeedback = when (state.wifiConnectionStatus) {
+        WifiConnectionStatus.PROBING -> if (showWifiProbing) {
+            ConnectionCardFeedback(
+                title = stringResource(R.string.wifi_identifying_camera),
+                body = null,
+                accent = colors.accentBlue,
+                busy = true
+            )
+        } else {
+            null
+        }
+        WifiConnectionStatus.NOT_FOUND -> ConnectionCardFeedback(
+            title = stringResource(R.string.wifi_camera_not_found),
+            body = stringResource(R.string.wifi_connect_camera),
+            accent = colors.accentOrange
+        )
+        WifiConnectionStatus.REFUSED -> ConnectionCardFeedback(
+            title = stringResource(R.string.wifi_camera_refused),
+            body = stringResource(R.string.wifi_check_camera_connection),
+            accent = colors.accentOrange
+        )
+        WifiConnectionStatus.FAILED -> ConnectionCardFeedback(
+            title = stringResource(R.string.wifi_camera_connection_failed),
+            body = stringResource(R.string.wifi_restart_camera),
+            accent = colors.accentOrange
+        )
+        WifiConnectionStatus.RECONNECTING -> ConnectionCardFeedback(
+            title = stringResource(R.string.wifi_connection_interrupted),
+            body = stringResource(R.string.wifi_reconnecting),
+            accent = colors.accentOrange,
+            busy = true
+        )
+        WifiConnectionStatus.IDLE -> null
+    }
+    // 识别传输方式后立即停止提示动画；具体动画在卡片图层内运行，避免每帧重组整个页面。
+    val connectionAttentionActive = selectedConnection == null
     val soonDays = if (isPro) {
         val subExp = remember(showRenewInfo) { LicenseManager.subExpiresAtSec() }
         if (subExp > 0L) subDaysLeft(subExp) else -1
@@ -188,7 +217,9 @@ fun HomeScreen(
                 .systemBarsPadding()
         ) {
             val compact = maxHeight < 690.dp
-            val cardHeight = if (compact) 272.dp else 292.dp
+            // 提示只占用卡片内部留白，不改变卡片外形，避免识别结果出现时整页跳动。
+            // 272dp 足以容纳提示态内容，也比原 292dp 的空闲态更紧凑。
+            val cardHeight = 272.dp
             val horizontalPadding = if (maxWidth < 360.dp) 14.dp else 20.dp
             val cardSpacing = 12.dp
 
@@ -221,7 +252,8 @@ fun HomeScreen(
                         ),
                         selected = selectedConnection == CameraConnectionType.USB,
                         success = celebrate && selectedConnection == CameraConnectionType.USB,
-                        attention = usbAttention,
+                        attentionActive = connectionAttentionActive,
+                        attentionPhaseOffset = 0f,
                         selectionScene = selectionScene.value,
                         error = usbError?.takeIf {
                             selectedConnection == CameraConnectionType.USB
@@ -247,9 +279,11 @@ fun HomeScreen(
                         ),
                         selected = selectedConnection == CameraConnectionType.WIFI,
                         success = celebrate && selectedConnection == CameraConnectionType.WIFI,
-                        attention = wifiAttention,
+                        attentionActive = connectionAttentionActive,
+                        attentionPhaseOffset = 0.5f,
                         selectionScene = selectionScene.value,
                         goldBurst = isPro,
+                        feedback = wifiFeedback,
                         footer = {
                             GlassButton(
                                 onClick = { showTips = true },
@@ -414,7 +448,6 @@ fun HomeScreen(
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },
                 onPlayFireworks = { fireworks.launch() },
-                cameraUsesWifi = state.connectionType == CameraConnectionType.WIFI,
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
             )
         }
@@ -458,6 +491,27 @@ fun HomeScreen(
 }
 
 private const val CONNECTION_ATTENTION_MS = 2_400
+private const val WIFI_PROBING_FEEDBACK_DELAY_MS = 350L
+
+/**
+ * 物理链路只是候选证据。无线模式必须等真实相机会话建立后才能进入 hero 场景；
+ * 有线部分保留既有的“检测到设备即选中”交互。
+ */
+internal fun homeSelectedConnection(
+    connected: Boolean,
+    connectionType: CameraConnectionType?
+): CameraConnectionType? = when {
+    connectionType == CameraConnectionType.USB -> CameraConnectionType.USB
+    connected && connectionType == CameraConnectionType.WIFI -> CameraConnectionType.WIFI
+    else -> null
+}
+
+private data class ConnectionCardFeedback(
+    val title: String,
+    val body: String?,
+    val accent: Color,
+    val busy: Boolean = false
+)
 
 /**
  * 每轮只有一个峰值：缓入吸气、柔和呼气、短暂停顿；另一张卡错开半拍。
@@ -484,15 +538,33 @@ private fun ConnectionMethodCard(
     steps: List<String>,
     selected: Boolean,
     success: Boolean,
-    attention: Float,
+    attentionActive: Boolean,
+    attentionPhaseOffset: Float,
     selectionScene: Float,
     error: String? = null,
     goldBurst: Boolean = false,
+    feedback: ConnectionCardFeedback? = null,
     footer: (@Composable RowScope.() -> Unit)? = null
 ) {
     val colors = AppTheme.colors
     val shape = RoundedCornerShape(24.dp)
     val view = LocalView.current
+    // State 只在 graphicsLayer 中读取：每帧只更新卡片图层，不触发 HomeScreen 重组。
+    // 系统关闭动画时 Compose 会停止该过渡，下面的静态 tint/描边仍保留等待提示。
+    val attentionPhase = if (attentionActive) {
+        val transition = rememberInfiniteTransition(label = "connectionCardAttention")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(CONNECTION_ATTENTION_MS, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "connectionCardAttentionPhase"
+        )
+    } else {
+        null
+    }
     var iconCenterInRoot by remember { mutableStateOf<Offset?>(null) }
     var cardPressed by remember { mutableStateOf(false) }
     var pressDirection by remember { mutableStateOf(0f) }
@@ -504,6 +576,11 @@ private fun ConnectionMethodCard(
             spring(dampingRatio = 0.42f, stiffness = 500f)
         },
         label = "connectionCardPress"
+    )
+    val probeProgress by animateFloatAsState(
+        targetValue = if (feedback?.busy == true && !selected) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 420f),
+        label = "connectionProbeLift"
     )
 
     fun eased(value: Float): Float {
@@ -525,7 +602,10 @@ private fun ConnectionMethodCard(
             .zIndex(if (selected) 3f else 0f)
             // 呼吸和按压放在共同父层：玻璃卡、文字、按钮、模式图标始终同步形变。
             .graphicsLayer {
-                val breathingScale = 1f + attention * 0.032f
+                val attention = attentionPhase?.value?.let { phase ->
+                    connectionAttention((phase + attentionPhaseOffset).mod(1f))
+                } ?: 0f
+                val breathingScale = 1f + attention * 0.04f
                 val deformation = pressDeformation
                 scaleX = breathingScale * (1f + deformation * 0.012f)
                 scaleY = breathingScale * (1f - deformation * 0.024f)
@@ -546,6 +626,9 @@ private fun ConnectionMethodCard(
             shape = shape,
             tint = when {
                 error != null -> colors.statusError.copy(alpha = 0.055f)
+                feedback != null && !feedback.busy ->
+                    feedback.accent.copy(alpha = 0.045f)
+                attentionActive -> accent.copy(alpha = 0.018f)
                 else -> Color.Transparent
             }
         ) {
@@ -598,6 +681,46 @@ private fun ConnectionMethodCard(
                     steps.forEachIndexed { index, text ->
                         ConnectionStep(index + 1, text, accent)
                         if (index != steps.lastIndex) Spacer(Modifier.height(13.dp))
+                    }
+
+                    if (feedback != null) {
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(feedback.accent.copy(alpha = 0.10f))
+                                .padding(horizontal = 9.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (feedback.busy) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    color = feedback.accent,
+                                    strokeWidth = 1.5.dp
+                                )
+                                Spacer(Modifier.width(7.dp))
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = feedback.title,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = feedback.accent,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                feedback.body?.let { body ->
+                                    Text(
+                                        text = body,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     if (error != null) {
@@ -654,14 +777,16 @@ private fun ConnectionMethodCard(
                 .graphicsLayer {
                     translationX = heroTravelX * heroProgress
                     translationY = heroTravelY * heroProgress -
-                        kotlin.math.sin(heroProgress * Math.PI.toFloat()) * 10.dp.toPx()
+                        kotlin.math.sin(heroProgress * Math.PI.toFloat()) * 10.dp.toPx() -
+                        probeProgress * 5.dp.toPx()
                 }
         ) {
             GlassSurface(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        val heroScale = 1f + heroProgress * 1.12f
+                        val heroScale = (1f + heroProgress * 1.12f) *
+                            (1f + probeProgress * 0.04f)
                         scaleX = heroScale
                         scaleY = heroScale
                         alpha = if (selected) 1f else 1f - cardExitProgress
@@ -676,7 +801,10 @@ private fun ConnectionMethodCard(
                 borderColor = if (success) {
                     colors.statusConnected.copy(alpha = 0.78f)
                 } else {
-                    accent.copy(alpha = 0.24f)
+                    accent.copy(
+                        alpha = (if (attentionActive) 0.32f else 0.24f) +
+                            probeProgress * 0.30f
+                    )
                 }
             ) {
                 modeIcon(

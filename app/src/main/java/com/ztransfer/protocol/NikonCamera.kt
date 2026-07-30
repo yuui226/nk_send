@@ -23,6 +23,9 @@ import java.nio.ByteOrder
 /** 写入本地文件失败（非相机连接错误），用于区分"掉线"与"磁盘/存储"问题。 */
 class OutputWriteException(message: String, cause: Throwable) : Exception(message, cause)
 
+/** PTP/IP 已响应但相机明确拒绝初始化；区别于普通网络不可达。 */
+class CameraRefusedException(message: String) : Exception(message)
+
 /**
  * 续传无法进行：已有半成品，但本次下载走不了分块路径（相机不支持 GetPartialObjectEx，
  * 或 >4GB 文件拿不到真实大小无法对齐）。全量 GetObject 只能从 0 开始、会写坏已定位到
@@ -153,7 +156,9 @@ class NikonCamera(private val context: Context) {
             if (ack.type != PtpConstants.INIT_CMD_ACK) {
                 // INIT_FAIL = 相机主动拒绝（如未配对/连接数已满），与协议错乱区分开提示。
                 return@withContext Result.failure(
-                    if (ack.type == PtpConstants.INIT_FAIL) Exception(context.getString(R.string.error_camera_refused))
+                    if (ack.type == PtpConstants.INIT_FAIL) CameraRefusedException(
+                        context.getString(R.string.error_camera_refused)
+                    )
                     else Exception(context.getString(R.string.error_handshake_bad_ack))
                 )
             }

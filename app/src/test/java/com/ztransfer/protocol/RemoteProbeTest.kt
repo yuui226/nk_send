@@ -33,6 +33,33 @@ class RemoteProbeTest {
     }
 
     @Test
+    fun extendedVendorCodesStay32BitInParserAndReport() {
+        val payload = byteArrayOf(
+            0x03, 0x00, 0x00, 0x00,
+            0xA3.toByte(), 0xD1.toByte(), 0x00, 0x00,
+            0x33, 0xD0.toByte(), 0x01, 0x00,
+            0xBD.toByte(), 0xD1.toByte(), 0x00, 0x00,
+        )
+
+        val codes = parseVendorCodes32(payload)
+        val report = formatProbeCodeLines("properties", codes).joinToString("\n")
+
+        assertEquals(setOf(0xD1A3, 0x1D033, 0xD1BD), codes)
+        assertTrue(report.contains("0x1D033"))
+        assertFalse(report.contains("0xD033"))
+    }
+
+    @Test
+    fun malformedExtendedVendorCodeCountIsRejected() {
+        val truncated = byteArrayOf(
+            0x02, 0x00, 0x00, 0x00,
+            0x33, 0xD0.toByte(), 0x01, 0x00,
+        )
+
+        assertTrue(runCatching { parseVendorCodes32(truncated) }.isFailure)
+    }
+
+    @Test
     fun rawPayloadHexKeepsUnsignedBytesAndEmptyStatesDistinct() {
         assertEquals("00FF1080", probeHex(byteArrayOf(0x00, 0xFF.toByte(), 0x10, 0x80.toByte())))
         assertEquals("<empty>", probeHex(byteArrayOf()))
@@ -51,7 +78,12 @@ class RemoteProbeTest {
             Lab.INTEREST_PROPS[Lab.PROP_DIGITAL_ZOOM],
         )
         assertEquals(
-            setOf(Lab.PROP_NK_LV_IMAGE_ZOOM_RATIO, Lab.PROP_DIGITAL_ZOOM),
+            setOf(
+                Lab.PROP_NK_LV_IMAGE_ZOOM_RATIO,
+                Lab.PROP_NK_LV_ZOOM_AREA,
+                Lab.PROP_DIGITAL_ZOOM,
+                Lab.PROP_NK_HI_RES_ZOOM,
+            ),
             Lab.DIGITAL_ZOOM_PROPS.keys.toSet(),
         )
     }

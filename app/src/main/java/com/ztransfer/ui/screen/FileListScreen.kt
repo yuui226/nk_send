@@ -123,6 +123,7 @@ import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.remainingCount
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
@@ -259,6 +260,16 @@ fun FileListScreen(
     // 网格滚动状态提升到页面层：回到顶部按钮需要读取滚动位置/方向并驱动滚动。
     val gridState = rememberLazyGridState()
     val scrollScope = rememberCoroutineScope()
+    val atTop by remember {
+        derivedStateOf {
+            gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset < 8
+        }
+    }
+    // 监看入口离开顶部后缩进左侧；用户点开后保持完整，继续滚动或回到顶部时重置手动状态。
+    var remoteExpandedAwayFromTop by remember { mutableStateOf(false) }
+    LaunchedEffect(atTop) {
+        if (atTop) remoteExpandedAwayFromTop = false
+    }
     // 回到顶部按钮的可见性：翻得够深 + 正向顶部方向滚动才出现；往深处翻/接近顶部
     // 立即隐藏；停止滚动一段时间后自动隐藏——静止画面上没有按钮，误触窗口极小。
     var showBackTop by remember { mutableStateOf(false) }
@@ -278,6 +289,9 @@ fun FileListScreen(
                 when {
                     towardTop && deep && !returningToTop -> showBackTop = true
                     towardBottom || !deep -> showBackTop = false
+                }
+                if ((towardTop || towardBottom) && !(index == 0 && offset < 8)) {
+                    remoteExpandedAwayFromTop = false
                 }
                 lastIndex = index
                 lastOffset = offset
@@ -802,37 +816,68 @@ fun FileListScreen(
             )
         }
 
-        // ---------- 遥控入口（左下角毛玻璃圆钮）：仅当列表停在最顶部时出现——
-        // 用户翻到深处时不显示，杜绝翻页误触；点击播放与横滑相同的左侧滑入转场 ----------
-        val atTop by remember {
-            derivedStateOf {
-                gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset < 8
-            }
-        }
+        // ---------- 监看入口（左下角毛玻璃相机钮） ----------
+        // 顶部完整显示；离开顶部后沿一条轻微上拱的路径缩进左边，只露出约半颗。
+        // 收起态第一次点击只展开，第二次点击才进入监看，避免浏览照片时误触跳页。
         // 传输进行中禁止进入监看：监看要独占相机通道（LV 取帧连续占锁），与下载抢锁会两败俱伤。
         // 图标压暗示意不可用，点击给出提示而非静默无响应。
         val remoteBlockedHint = stringResource(R.string.remote_blocked_transfer)
-        AnimatedVisibility(
-            visible = atTop,
-            enter = fadeIn() + scaleIn(initialScale = 0.6f),
-            exit = fadeOut() + scaleOut(targetScale = 0.6f),
+        val remoteEntryDescription = stringResource(R.string.cd_remote_entry)
+        val remoteExpanded = atTop || remoteExpandedAwayFromTop
+        val remoteReveal = animateFloatAsState(
+            targetValue = if (remoteExpanded) 1f else 0f,
+            animationSpec = spring(dampingRatio = 0.58f, stiffness = 360f),
+            label = "remoteEntryReveal"
+        )
+        val remotePeekInteraction = remember { MutableInteractionSource() }
+        val density = LocalDensity.current
+        val hiddenTravelPx = with(density) { 48.dp.toPx() }
+        val playfulLiftPx = with(density) { 6.dp.toPx() }
+        val openRemote: () -> Unit = {
+            // 端侧录制与照片传输共用同一个 SAF 保存目录。与加入传输队列的
+            // 拦截顺序一致：目录未设置时先引导设置，不进入监看后再让用户返工。
+            if (transferState.transferDirUri == null) showSettings = true
+            else if (transfersBusy) showHint(remoteBlockedHint)
+            // 免费版当日监看时长已用完:入口处直接提示,不进页再弹回。
+            else if (LicenseManager.remoteTimeLeftMs() <= 0L) showHint(remoteEndedHint)
+            else {
+                remoteExpandedAwayFromTop = false
+                onNavigateToRemote()
+            }
+        }
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .navigationBarsPadding()
-                .padding(start = 20.dp, bottom = 24.dp)
+                .padding(bottom = 40.dp)
+                .size(width = 80.dp, height = 56.dp),
+            contentAlignment = Alignment.CenterStart
         ) {
             GlassButton(
                 onClick = {
-                    // 端侧录制与照片传输共用同一个 SAF 保存目录。与加入传输队列的
-                    // 拦截顺序一致：目录未设置时先引导设置，不进入监看后再让用户返工。
-                    if (transferState.transferDirUri == null) showSettings = true
-                    else if (transfersBusy) showHint(remoteBlockedHint)
-                    // 免费版当日监看时长已用完:入口处直接提示,不进页再弹回。
-                    else if (LicenseManager.remoteTimeLeftMs() <= 0L) showHint(remoteEndedHint)
-                    else onNavigateToRemote()
+                    if (remoteExpanded) {
+                        openRemote()
+                    } else {
+                        haptics.tick()
+                        remoteExpandedAwayFromTop = true
+                    }
                 },
                 modifier = Modifier
-                    .size(52.dp),
+                    .offset(x = 20.dp)
+                    .size(52.dp)
+                    .graphicsLayer {
+                        // 弹簧允许轻微越界；路径中段上抬，收起时带一点俏皮歪头。
+                        val progress = remoteReveal.value.coerceIn(-0.12f, 1.12f)
+                        val pathProgress = progress.coerceIn(0f, 1f)
+                        val arc = sin(pathProgress * Math.PI).toFloat()
+                        translationX = -hiddenTravelPx * (1f - progress)
+                        translationY = -playfulLiftPx * arc
+                        val scale = 0.88f + 0.12f * progress
+                        scaleX = scale
+                        scaleY = scale
+                        rotationZ = -3.5f * (1f - pathProgress) + arc * 1.25f
+                        transformOrigin = TransformOrigin.Center
+                    },
                 shape = CircleShape,
                 contentPadding = PaddingValues(14.dp),
                 showSheen = false,
@@ -847,7 +892,26 @@ fun FileListScreen(
                     modifier = Modifier
                         .size(24.dp),
                     color = if (transfersBusy) colors.onSurfaceVariant.copy(alpha = 0.5f) else colors.accentBlue,
-                    contentDescription = stringResource(R.string.cd_remote_entry)
+                    // 收起时由屏内 48dp 热区承担唯一语义，避免无障碍树出现两个同名入口。
+                    contentDescription = remoteEntryDescription.takeIf { remoteExpanded }
+                )
+            }
+            if (!remoteExpanded) {
+                // 视觉上只露出半颗，但保留 48dp 的屏内点击热区，兼顾发现性与可访问性。
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxHeight()
+                        .width(48.dp)
+                        .semantics { contentDescription = remoteEntryDescription }
+                        .clickable(
+                            interactionSource = remotePeekInteraction,
+                            indication = null,
+                            role = Role.Button
+                        ) {
+                            haptics.tick()
+                            remoteExpandedAwayFromTop = true
+                        }
                 )
             }
         }
@@ -1048,7 +1112,6 @@ fun FileListScreen(
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },
                 onPlayFireworks = { fireworks.launch() },
-                cameraUsesWifi = state.connectionType == CameraConnectionType.WIFI,
                 // 本页是连着相机时的主界面,购买入口多半从这里进——不接上这条,
                 // 购买时就不会断开相机、相机热点不关、付款没网。
                 onHoldCameraWifi = { cameraViewModel.holdCameraWifi(it) }
