@@ -1779,19 +1779,20 @@ suspend fun NikonCamera.runLabProbe(
                         )
                     }
 
-                    var frameInfo: Pair<ByteArray, Int>? = null
+                    var frameInfo: LiveViewPacket? = null
                     repeat(6) {
                         if (frameInfo == null) {
                             frameInfo = labGrabFrame()
                             if (frameInfo == null) delay(40)
                         }
                     }
-                    frameInfo?.let { (buffer, jpegOffset) ->
-                        val jpeg = buffer.copyOfRange(jpegOffset, buffer.size)
+                    frameInfo?.let { packet ->
+                        val jpeg =
+                            packet.bytes.copyOfRange(packet.jpegOffset, packet.bytes.size)
                         val crc = CRC32().apply { update(jpeg) }.value
                         log(
                             "DIGITAL_ZOOM_STEP frame bytes=${jpeg.size} " +
-                                "jpegOffset=$jpegOffset crc32=${hex8(crc)}"
+                                "jpegOffset=${packet.jpegOffset} crc32=${hex8(crc)}"
                         )
                         onFrame(jpeg)
                         delay(300)
