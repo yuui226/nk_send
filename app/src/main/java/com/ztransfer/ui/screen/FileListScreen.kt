@@ -159,8 +159,11 @@ internal sealed interface ThumbnailGridItem {
     }
 }
 
-/** 队列胶囊的三种内容形态：入口图标 / 完成短标 / 计数（速度+剩余数）。 */
-private enum class PillMode { ICON, DONE, COUNTING }
+/** 展开后的队列胶囊内容：完成短标 / 计数（速度+剩余数）；入口图标由主题按钮独立绘制。 */
+private enum class PillMode { DONE, COUNTING }
+
+/** 队列入口收起为普通按钮时使用固定材质种子，保证木纹/金属微纹在重组后保持一致。 */
+private const val QUEUE_ENTRY_BUTTON_TEXTURE_SEED = 0x2A71E001
 
 // 缩略图后台填充没有任何窗口/视口参数：未传输=从新到旧全量填充；传输中=完全停止。
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
@@ -926,7 +929,7 @@ fun FileListScreen(
                 // 深色由 0.38 提至约 0.60，浅色由 0.80 提至约 0.87；
                 // 仍能透出背景，但入口不会再像一层几乎看不见的薄膜。
                 frostedOpacityBoost = 0.35f,
-                // 入口必须走公共按钮材质：毛玻璃、皮革、木纹均与当前主题同步。
+                // 入口必须走公共按钮材质：毛玻璃、钛合金、木纹均与当前主题同步。
                 // 按压缩放由 GlassButton 统一提供，不在此重复实现。
                 shadowElevation = 6.dp
             ) {
@@ -1030,6 +1033,8 @@ fun FileListScreen(
                 // 顶栏按钮统一 36dp 高（与队列胶囊等一致）；标志 20dp + 上下 8dp 正好填满。
                 // 水平 padding 与旁边信号按钮同值，宽度刚好包住标志。
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                // 钛合金主题使用品牌黄填充钢印；其余主题仍保留 ZMark 原本的前景色。
+                titaniumStampColor = colors.accentYellow,
                 modifier = Modifier
                     .height(36.dp)
                     .onGloballyPositioned { zAnchor = it.boundsInRoot() }
@@ -1289,21 +1294,52 @@ fun QueuePill(
     // 收起为图标：全部完成（且 done 标签已过），或数字尚未获准显示（防"已存在跳过"闪 1）。
     val collapsedToIcon = (allDone && !showDoneLabel) || (!allDone && !countingVisible)
 
-    // 弹性宽度动画：测量内容的自然宽度，用 spring 驱动一个显式宽度；内容靠右对齐、左侧溢出被圆角裁掉。
-    // 于是任何内容变化（图标/done/数量/速度）都平滑有弹性，而右边缘由外层 Box(CenterEnd) 钉死不动。
+    // 普通按钮与胶囊共用同一条宽度弹簧。切换材质实现时右缘仍固定，只向左平滑伸缩，
+    // 不会因为图标态改用 GlassButton 而丢掉原先的胶囊变形手感。
     val density = LocalDensity.current
     var contentWidthPx by remember { mutableStateOf(0) }
+    val collapsedWidthPx = with(density) { 46.dp.toPx() } // 22dp 图标 + 左右各 12dp
     val widthAnim = remember { Animatable(0f) }
     var firstMeasure by remember { mutableStateOf(true) }
-    LaunchedEffect(contentWidthPx) {
-        if (contentWidthPx > 0) {
+    val targetWidthPx = if (collapsedToIcon) collapsedWidthPx else contentWidthPx.toFloat()
+    LaunchedEffect(targetWidthPx) {
+        if (targetWidthPx > 0f) {
             if (firstMeasure) {
-                widthAnim.snapTo(contentWidthPx.toFloat())   // 首次出现直接就位，不从 0 弹出
+                widthAnim.snapTo(targetWidthPx)
                 firstMeasure = false
             } else {
-                widthAnim.animateTo(contentWidthPx.toFloat(), Motion.bouncy())
+                widthAnim.animateTo(targetWidthPx, Motion.bouncy())
             }
         }
+    }
+
+    // 图标态已经是普通入口按钮，不再沿用下方固定毛玻璃胶囊的手写 Surface。
+    // 直接复用全局按钮组件后，毛玻璃、钛合金（含钢印）与随机稳定木纹都会自动生效；
+    // 一旦出现 Done、速度或数量，仍回到原胶囊实现，不受按钮主题影响。
+    if (collapsedToIcon) {
+        GlassButton(
+            onClick = onClick,
+            shape = RoundedCornerShape(22.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+            textureSeed = QUEUE_ENTRY_BUTTON_TEXTURE_SEED,
+            modifier = Modifier
+                .height(36.dp)
+                .then(
+                    if (widthAnim.value > 0f) {
+                        Modifier.width(with(density) { widthAnim.value.toDp() })
+                    } else {
+                        Modifier
+                    }
+                )
+        ) {
+            Icon(
+                imageVector = Icons.Default.Checklist,
+                contentDescription = stringResource(R.string.cd_transfer),
+                tint = colors.statusConnected,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        return
     }
 
     // 按压微缩放：本胶囊是顶栏唯一手写 Surface（不经 GlassButton），手感与全局按钮对齐。
@@ -1364,14 +1400,10 @@ fun QueuePill(
             // 3) 内容：以自然宽度测量(unbounded)、靠右对齐；宽度动画滞后时左侧溢出被圆角裁掉。
             Box(modifier = Modifier.wrapContentWidth(Alignment.End, unbounded = true)) {
                 Box(modifier = Modifier.onGloballyPositioned { contentWidthPx = it.size.width }) {
-                    // 三态内容（图标 / done / 计数）切换用交叉淡化 + 轻微缩放过渡，不硬切。
+                    // 胶囊内部的 Done / 计数切换用交叉淡化 + 轻微缩放过渡，不硬切。
                     // 尺寸动画交给外层的弹性宽度弹簧（snap 禁用 AnimatedContent 自带的尺寸
                     // 动画，避免两套叠加）；计数态内部的数字/速度更新不触发转场，原地刷新。
-                    val mode = when {
-                        collapsedToIcon -> PillMode.ICON
-                        allDone -> PillMode.DONE
-                        else -> PillMode.COUNTING
-                    }
+                    val mode = if (allDone) PillMode.DONE else PillMode.COUNTING
                     AnimatedContent(
                         targetState = mode,
                         // 胶囊右缘钉死、向左伸缩：新旧内容必须都锚定右缘（CenterEnd），
@@ -1391,16 +1423,6 @@ fun QueuePill(
                         label = "pillContent"
                     ) { m ->
                         when (m) {
-                            PillMode.ICON ->
-                                // 传输入口图标：清单勾选，直观表示"传输"。
-                                Icon(
-                                    imageVector = Icons.Default.Checklist,
-                                    contentDescription = stringResource(R.string.cd_transfer),
-                                    tint = colors.statusConnected,
-                                    modifier = Modifier
-                                        .padding(horizontal = 12.dp)
-                                        .size(22.dp)
-                                )
                             PillMode.DONE ->
                                 Text(
                                     // 刻意不走字符串资源:所有语言统一显示 "Done"(短暂闪现的

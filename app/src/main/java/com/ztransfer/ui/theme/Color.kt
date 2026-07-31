@@ -20,7 +20,7 @@ import com.ztransfer.R
  */
 enum class SkinPreset(val displayNameResId: Int) {
     FROSTED_GLASS(R.string.skin_frosted_glass),
-    LEATHER(R.string.skin_leather),
+    TITANIUM(R.string.skin_titanium),
     WOOD(R.string.skin_wood)
 }
 
@@ -100,7 +100,7 @@ data class AppColors(
     val glassPanelBorder: Color,
     /** 面板顶部自上而下淡出的高光叠层。 */
     val glassSheen: Color,
-    // ---- 按钮专属材质 token：皮肤（皮革/木纹）只覆写下面这 4 个字段 ----
+    // ---- 按钮专属材质 token：皮肤（钛合金/木纹）只覆写下面这 4 个字段 ----
     // GlassButton 读 button*，面板/弹窗/提示条读 glass*，因此换皮肤只换按钮，
     // 面板在三款皮肤下逐字节一致；默认毛玻璃按钮也可单独调出更轻、更透的光学质感。
     /** 玻璃按钮底色（非 panel 变体的基底填充）。 */
@@ -142,11 +142,11 @@ val DarkAppColors = AppColors(
     glassBorderBottom = Color.White.copy(alpha = 0.1f),
     glassPanelBorder = Color.White.copy(alpha = 0.15f),
     glassSheen = Color.White.copy(alpha = 0.08f),
-    // 液态玻璃按钮比面板更轻、更透；体积与亮度主要由 GlassButton 的局部光场提供。
-    buttonSurface = Color(0xFF25313B).copy(alpha = 0.38f),
-    buttonHighlightTop = Color.White.copy(alpha = 0.11f),
-    buttonHighlightBottom = Color.White.copy(alpha = 0.015f),
-    buttonSheen = Color.White.copy(alpha = 0.07f),
+    // 深色按钮是 40% 冷灰半透明磨砂；宽缓鹅卵石光场由 GlassButton 绘制。
+    buttonSurface = Color(0xFF25313B).copy(alpha = 0.40f),
+    buttonHighlightTop = Color.White.copy(alpha = 0.025f),
+    buttonHighlightBottom = Color.Transparent,
+    buttonSheen = Color.White.copy(alpha = 0.025f),
     scrim = Color.Black.copy(alpha = 0.4f),
     thumbPlaceholder = DarkSurface,
     cardHairline = Color.Transparent,
@@ -183,9 +183,9 @@ val LightAppColors = AppColors(
     // 浅色液态玻璃增加冷雾蓝密度与顶部散射：在浅灰页面上仍能明确看出一层磨砂玻璃，
     // 但保持半透明，不退化成不透明的白色塑料按钮。
     buttonSurface = Color(0xFFEAF4FA).copy(alpha = 0.86f),
-    buttonHighlightTop = Color.White.copy(alpha = 0.48f),
-    buttonHighlightBottom = Color(0xFFB8D5E5).copy(alpha = 0.075f),
-    buttonSheen = Color.White.copy(alpha = 0.34f),
+    buttonHighlightTop = Color.White.copy(alpha = 0.12f),
+    buttonHighlightBottom = Color(0xFFB8D5E5).copy(alpha = 0.025f),
+    buttonSheen = Color.White.copy(alpha = 0.10f),
     scrim = Color.Black.copy(alpha = 0.32f),
     thumbPlaceholder = Color(0xFFE6E6EB),
     cardHairline = Color.Black.copy(alpha = 0.06f),
@@ -198,7 +198,7 @@ val LightAppColors = AppColors(
  */
 fun skinAppColors(skin: SkinPreset, dark: Boolean): AppColors = when (skin) {
     SkinPreset.FROSTED_GLASS -> if (dark) DarkAppColors else LightAppColors
-    SkinPreset.LEATHER -> if (dark) DarkLeatherColors else LightLeatherColors
+    SkinPreset.TITANIUM -> if (dark) DarkTitaniumColors else LightTitaniumColors
     SkinPreset.WOOD -> if (dark) DarkWoodColors else LightWoodColors
 }
 
@@ -231,22 +231,23 @@ fun rememberAppBackgroundBrush(): Brush {
 // 皮肤只改 [AppColors] 里那 4 个 button* token，其余字段全部由 `copy()` 从基础色板继承。
 // glass* token（面板/弹窗/提示条在读）刻意不覆写——设置卡片、弹层、提示条在三款皮肤下
 // 逐字节一致，换皮肤只换按钮的材质；background/surface/文字/强调色同理不受影响。
-// 皮革/木纹按钮另有一层程序化纹理（见 SkinTexture.kt），由 GlassButton 独家叠加。
+// 钛合金/木纹按钮另有一层程序化纹理（见 SkinTexture.kt），由 GlassButton 独家叠加。
 //
 // 两款材质沿两个轴与默认毛玻璃拉开差异（数值对着 GlassButton 的叠层顺序看：
 // 底色 → 纹理 → 纵向高光渐变）：
 //
-//   1) 底色不透明度（透出多少背景）：毛玻璃 < 木纹 ≈ 皮革
-//      毛玻璃 0.38/0.80（深/浅），木纹 0.86/0.96，皮革 0.90/0.96。
-//   2) 高光对比（多亮）：皮革（哑光） < 木纹（半光/缎面） < 毛玻璃（高光）
-//      皮革高光压到毛玻璃的 1/3、sheen 几乎归零——皮革一旦发亮就像塑料。
+//   1) 底色不透明度（透出多少背景）：毛玻璃 < 木纹 < 钛合金
+//      毛玻璃 0.40/0.86（深/浅），木纹 0.86/0.96，钛合金两套均为 0.98。
+//   2) 高光形态：钛合金是冷色宽反射，木纹是暖色硬质微弧，毛玻璃是柔和散射。
 // ================================================================================================
 
-// 皮革材质色：牛血红深棕 / 干邑红棕，保持真实牛皮的暖红底调与哑光。
-private val LeatherHideDark = Color(0xFF4B1F1B)
-private val LeatherTanLight = Color(0xFFB96B50)
-private val LeatherCream = Color(0xFFD99880)
-private val LeatherCreamLight = Color(0xFFF1B89C)
+// 钛合金材质色：深色石墨钛 / 浅色原钛银，均保持低饱和冷灰。
+private val TitaniumGraphite = Color(0xFF68737A)
+private val TitaniumSilver = Color(0xFFBBC3C8)
+private val TitaniumHighlight = Color(0xFFEAF1F4)
+private val TitaniumHighlightLight = Color(0xFFFAFCFD)
+private val TitaniumShadow = Color(0xFF303A41)
+private val TitaniumShadowLight = Color(0xFF68737B)
 
 // 木纹材质色：胡桃棕 / 蜂蜜橡木，底色更实、高光为克制的木蜡缎光。
 private val WoodAmberDark = Color(0xFF3F2818)
@@ -255,30 +256,27 @@ private val WoodGold = Color(0xFFD8A765)
 private val WoodGoldLight = Color(0xFFF2CF93)
 
 // ================================================================================================
-// 皮肤系统：皮革 (LEATHER) — 牛血红棕、最不透、哑光（只覆写按钮 token）
+// 皮肤系统：钛合金 (TITANIUM) — 冷灰金属、圆润宽反射（只覆写按钮 token）
 // ================================================================================================
 
 /**
- * 皮革·深色：按钮是一整块牛血红棕硬皮。底色不透明度最高（0.90），背景基本被挡住，
- * 手感上是"实心的一张皮"而不是一层玻璃。
- * 基础高光只留 0.045，再叠一层宽阔局部哑光，把真皮温润的厚度做出来而不泛塑料光。
+ * 钛合金·深色：石墨钛基底几乎不透，宽冷光和深灰收边由 GlassButton 塑造成圆润金属块。
  */
-val DarkLeatherColors = DarkAppColors.copy(
-    buttonSurface = LeatherHideDark.copy(alpha = 0.90f),
-    buttonHighlightTop = LeatherCream.copy(alpha = 0.045f),
-    buttonHighlightBottom = LeatherCream.copy(alpha = 0.010f),
-    buttonSheen = LeatherCream.copy(alpha = 0.016f),
+val DarkTitaniumColors = DarkAppColors.copy(
+    buttonSurface = TitaniumGraphite.copy(alpha = 0.98f),
+    buttonHighlightTop = TitaniumHighlight.copy(alpha = 0.080f),
+    buttonHighlightBottom = TitaniumShadow.copy(alpha = 0.035f),
+    buttonSheen = TitaniumHighlight.copy(alpha = 0.070f),
 )
 
 /**
- * 皮革·浅色：高不透明度的干邑红棕按钮，深色文字仍保持清楚。
- * 顶部高光与 sheen 都显著低于毛玻璃，避免牛皮表面产生塑料亮膜。
+ * 钛合金·浅色：原钛银基底配低饱和冷灰阴影，不使用纯白铬面镜光。
  */
-val LightLeatherColors = LightAppColors.copy(
-    buttonSurface = LeatherTanLight.copy(alpha = 0.96f),
-    buttonHighlightTop = LeatherCreamLight.copy(alpha = 0.16f),
-    buttonHighlightBottom = LeatherCreamLight.copy(alpha = 0.026f),
-    buttonSheen = LeatherCreamLight.copy(alpha = 0.085f),
+val LightTitaniumColors = LightAppColors.copy(
+    buttonSurface = TitaniumSilver.copy(alpha = 0.98f),
+    buttonHighlightTop = TitaniumHighlightLight.copy(alpha = 0.150f),
+    buttonHighlightBottom = TitaniumShadowLight.copy(alpha = 0.035f),
+    buttonSheen = TitaniumHighlightLight.copy(alpha = 0.120f),
 )
 
 // ================================================================================================
@@ -291,9 +289,9 @@ val LightLeatherColors = LightAppColors.copy(
  */
 val DarkWoodColors = DarkAppColors.copy(
     buttonSurface = WoodAmberDark.copy(alpha = 0.86f),
-    buttonHighlightTop = WoodGold.copy(alpha = 0.07f),
-    buttonHighlightBottom = WoodGold.copy(alpha = 0.016f),
-    buttonSheen = WoodGold.copy(alpha = 0.035f),
+    buttonHighlightTop = WoodGold.copy(alpha = 0.030f),
+    buttonHighlightBottom = WoodGold.copy(alpha = 0.010f),
+    buttonSheen = WoodGold.copy(alpha = 0.025f),
 )
 
 /**
@@ -301,7 +299,7 @@ val DarkWoodColors = DarkAppColors.copy(
  */
 val LightWoodColors = LightAppColors.copy(
     buttonSurface = WoodHoneyLight.copy(alpha = 0.96f),
-    buttonHighlightTop = WoodGoldLight.copy(alpha = 0.20f),
-    buttonHighlightBottom = WoodGoldLight.copy(alpha = 0.034f),
-    buttonSheen = WoodGoldLight.copy(alpha = 0.13f),
+    buttonHighlightTop = WoodGoldLight.copy(alpha = 0.060f),
+    buttonHighlightBottom = WoodGoldLight.copy(alpha = 0.015f),
+    buttonSheen = WoodGoldLight.copy(alpha = 0.045f),
 )

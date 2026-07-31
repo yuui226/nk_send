@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Z传 · 按钮材质对比</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page-top: #181818;
+      --page-bottom: #0d0d0d;
+      --text: #e0e0e0;
+      --muted: #8f8f8f;
+      --blue: #4fc3f7;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+      padding: 56px 30px;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at 50% 40%, rgba(66, 72, 78, 0.12), transparent 42%),
+        linear-gradient(180deg, var(--page-top), var(--page-bottom));
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(220px, 280px));
+      gap: clamp(32px, 4vw, 58px);
+      align-items: start;
+      justify-content: center;
+      width: min(1100px, 96vw);
+    }
+
+    .sample {
+      display: grid;
+      justify-items: center;
+      gap: 22px;
+    }
+
+    .theme-name {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: 0.14em;
+    }
+
+    .material-button {
+      position: relative;
+      isolation: isolate;
+      width: 100%;
+      height: 76px;
+      padding: 0;
+      overflow: hidden;
+      border: 0;
+      border-radius: 38px;
+      color: var(--text);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition:
+        transform 90ms ease,
+        box-shadow 160ms ease,
+        filter 160ms ease;
+    }
+
+    .material-button .content {
+      position: relative;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 680;
+      letter-spacing: 0.06em;
+    }
+
+    .material-button .icon {
+      width: 22px;
+      height: 22px;
+      color: var(--blue);
+      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.22));
+    }
+
+    .texture {
+      position: absolute;
+      z-index: 2;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .optics {
+      position: absolute;
+      z-index: 3;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+    }
+
+    /* -----------------------------------------------------------------------------------------
+       毛玻璃：对应当前 DarkAppColors buttonSurface #25313B / 0.38。
+       半透明底色配合背景模糊形成纯净磨砂；没有颗粒、纹路、镜面光带或闭合描边。
+       宽缓明暗只负责塑造圆润鼓面，不改变玻璃本身的通透感。
+       ----------------------------------------------------------------------------------------- */
+    .glass {
+      background: rgba(37, 49, 59, 0.40);
+      box-shadow:
+        0 18px 34px rgba(0, 0, 0, 0.25),
+        0 8px 17px rgba(0, 0, 0, 0.18),
+        0 3px 7px rgba(6, 14, 19, 0.20),
+        0 0 22px rgba(136, 195, 220, 0.040);
+      backdrop-filter: blur(22px) saturate(0.96);
+      -webkit-backdrop-filter: blur(22px) saturate(0.96);
+    }
+
+    .glass .optics {
+      background: radial-gradient(
+        ellipse 102% 190% at 42% 34%,
+        rgba(241, 251, 255, 0.115) 0%,
+        rgba(223, 240, 248, 0.072) 35%,
+        rgba(190, 216, 228, 0.030) 62%,
+        rgba(18, 33, 43, 0.028) 82%,
+        rgba(4, 14, 22, 0.070) 100%
+      );
+      box-shadow:
+        inset 0 18px 27px -17px rgba(248, 253, 255, 0.155),
+        inset 16px 0 29px -21px rgba(225, 244, 252, 0.095),
+        inset -18px 0 31px -21px rgba(3, 12, 19, 0.145),
+        inset 0 -21px 34px -18px rgba(2, 10, 17, 0.205);
+    }
+
+    .glass:active {
+      transform: translateY(2px) scale(0.965);
+      box-shadow:
+        0 5px 10px rgba(0, 0, 0, 0.22),
+        0 2px 4px rgba(0, 0, 0, 0.20);
+      filter: brightness(0.985);
+    }
+
+    /* -----------------------------------------------------------------------------------------
+       钛合金：细腻喷砂金属底，宽而柔和的反射塑造圆润弧面，避免尖锐的镀铬高光。
+       文字与图标使用上下错位的冷暖明暗边缘，模拟压进金属表面的钢印。
+       ----------------------------------------------------------------------------------------- */
+    .titanium {
+      background: rgba(104, 115, 122, 0.98);
+      box-shadow:
+        0 13px 24px rgba(0, 0, 0, 0.30),
+        0 6px 12px rgba(0, 0, 0, 0.23),
+        0 2px 4px rgba(24, 31, 35, 0.38);
+    }
+
+    .titanium .texture {
+      opacity: 0.40;
+      mix-blend-mode: soft-light;
+    }
+
+    .titanium .optics {
+      background:
+        radial-gradient(
+          ellipse 105% 150% at 48% 14%,
+          rgba(238, 247, 250, 0.22) 0%,
+          rgba(211, 224, 230, 0.10) 32%,
+          transparent 63%
+        ),
+        linear-gradient(
+          105deg,
+          transparent 16%,
+          rgba(239, 247, 250, 0.07) 40%,
+          rgba(255, 255, 255, 0.12) 51%,
+          rgba(203, 216, 222, 0.04) 63%,
+          transparent 82%
+        );
+      box-shadow:
+        inset 0 9px 13px -10px rgba(247, 252, 254, 0.78),
+        inset 8px 0 13px -12px rgba(242, 249, 252, 0.62),
+        inset -9px 0 14px -12px rgba(38, 48, 54, 0.56),
+        inset 0 -12px 16px -11px rgba(34, 43, 49, 0.72);
+    }
+
+    .titanium .content {
+      color: rgba(54, 66, 73, 0.88);
+      text-shadow:
+        -0.8px -0.8px 0 rgba(27, 35, 40, 0.68),
+        0.8px 0.8px 0 rgba(226, 237, 241, 0.52);
+    }
+
+    .titanium:active {
+      transform: translateY(3px) scale(0.970);
+      box-shadow:
+        0 5px 10px rgba(0, 0, 0, 0.26),
+        0 2px 4px rgba(0, 0, 0, 0.22);
+      filter: brightness(0.975);
+    }
+
+    /* -----------------------------------------------------------------------------------------
+       木纹：对应当前 DarkWoodColors #3F2818 / 0.86。
+       深胡桃底、顺长边木纹、少量导管/木结；硬质微弧木面和较深倒边体现实木体积。
+       ----------------------------------------------------------------------------------------- */
+    .wood {
+      background: rgba(63, 40, 24, 0.86);
+      box-shadow:
+        0 17px 30px rgba(0, 0, 0, 0.32),
+        0 7px 14px rgba(0, 0, 0, 0.25),
+        0 3px 6px rgba(20, 10, 4, 0.36);
+    }
+
+    .wood .texture {
+      opacity: 0.80;
+      mix-blend-mode: soft-light;
+      -webkit-mask-image: radial-gradient(
+        ellipse 76% 88% at 50% 47%,
+        #000 58%,
+        rgba(0, 0, 0, 0.94) 74%,
+        rgba(0, 0, 0, 0.50) 91%,
+        rgba(0, 0, 0, 0.12) 100%
+      );
+      mask-image: radial-gradient(
+        ellipse 76% 88% at 50% 47%,
+        #000 58%,
+        rgba(0, 0, 0, 0.94) 74%,
+        rgba(0, 0, 0, 0.50) 91%,
+        rgba(0, 0, 0, 0.12) 100%
+      );
+    }
+
+    .wood .optics {
+      background: radial-gradient(
+        ellipse 104% 198% at 39% 30%,
+        rgba(247, 214, 155, 0.115) 0%,
+        rgba(222, 175, 108, 0.068) 35%,
+        rgba(151, 101, 55, 0.025) 61%,
+        rgba(45, 24, 11, 0.045) 81%,
+        rgba(20, 10, 4, 0.135) 100%
+      );
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 222, 164, 0.075),
+        inset 0 4px 7px rgba(255, 224, 169, 0.105),
+        inset 5px 0 10px rgba(229, 182, 113, 0.035),
+        inset -7px 0 12px rgba(31, 16, 7, 0.135),
+        inset 0 -9px 13px rgba(20, 10, 4, 0.31);
+    }
+
+    .wood:active {
+      transform: translateY(2px) scale(0.965);
+      box-shadow:
+        0 5px 10px rgba(0, 0, 0, 0.24),
+        0 2px 4px rgba(0, 0, 0, 0.21);
+      filter: brightness(0.985);
+    }
+
+    @media (max-width: 820px) {
+      body { padding: 42px 22px; }
+      .comparison {
+        grid-template-columns: minmax(240px, 340px);
+        gap: 42px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- 纹理定义。三颗按钮尺寸、圆角、内容与背景完全一致，只比较材质。 -->
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <defs>
+      <filter id="titanium-texture" x="-20%" y="-30%" width="140%" height="160%">
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency="0.032 0.62"
+          numOctaves="2"
+          seed="23"
+          stitchTiles="stitch"
+          result="brushed-grain"/>
+        <feGaussianBlur
+          in="brushed-grain"
+          stdDeviation="0.30 0.10"
+          result="soft-metal"/>
+        <feColorMatrix
+          in="soft-metal"
+          type="matrix"
+          values="
+            0.30 0    0    0 0.36
+            0    0.34 0    0 0.40
+            0    0    0.38 0 0.43
+            0    0    0    0.24 0"/>
+      </filter>
+
+      <filter id="wood-warp" x="-20%" y="-30%" width="140%" height="160%">
+        <feTurbulence
+          type="fractalNoise"
+          baseFrequency="0.010 0.055"
+          numOctaves="2"
+          seed="31"
+          stitchTiles="stitch"
+          result="warp"/>
+        <feDisplacementMap
+          in="SourceGraphic"
+          in2="warp"
+          scale="14"
+          xChannelSelector="R"
+          yChannelSelector="G"/>
+      </filter>
+
+      <pattern id="wood-lines" width="280" height="54" patternUnits="userSpaceOnUse">
+        <rect width="280" height="54" fill="transparent"/>
+        <path d="M-20 7 C42 1 91 14 156 7 S248 2 310 9"
+              fill="none" stroke="#160b05" stroke-width="4.2" opacity="0.58"/>
+        <path d="M-20 14 C39 10 87 21 151 15 S245 10 310 17"
+              fill="none" stroke="#e0b16e" stroke-width="1.2" opacity="0.25"/>
+        <path d="M-20 25 C55 17 103 34 169 24 S251 22 310 28"
+              fill="none" stroke="#160b05" stroke-width="2.7" opacity="0.48"/>
+        <path d="M-20 35 C35 29 98 43 157 35 S246 31 310 38"
+              fill="none" stroke="#e0b16e" stroke-width="1.1" opacity="0.18"/>
+        <path d="M-20 44 C49 39 102 52 170 44 S254 40 310 47"
+              fill="none" stroke="#160b05" stroke-width="4.8" opacity="0.52"/>
+        <ellipse cx="219" cy="28" rx="18" ry="7"
+                 fill="none" stroke="#160b05" stroke-width="3" opacity="0.32"/>
+      </pattern>
+    </defs>
+  </svg>
+
+  <main class="comparison">
+    <section class="sample">
+      <button class="material-button glass" type="button">
+        <span class="optics"></span>
+        <span class="content">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v12m0-12 4 4m-4-4L8 7M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"
+                  fill="none" stroke="currentColor" stroke-width="1.9"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          传输照片
+        </span>
+      </button>
+      <span class="theme-name">毛玻璃</span>
+    </section>
+
+    <section class="sample">
+      <button class="material-button titanium" type="button">
+        <svg class="texture" viewBox="0 0 280 76" preserveAspectRatio="none" aria-hidden="true">
+          <rect width="280" height="76" filter="url(#titanium-texture)"/>
+        </svg>
+        <span class="optics"></span>
+        <span class="content">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v12m0-12 4 4m-4-4L8 7M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"
+                  fill="none" stroke="currentColor" stroke-width="1.9"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          传输照片
+        </span>
+      </button>
+      <span class="theme-name">钛合金</span>
+    </section>
+
+    <section class="sample">
+      <button class="material-button wood" type="button">
+        <svg class="texture" viewBox="0 0 280 76" preserveAspectRatio="none" aria-hidden="true">
+          <rect width="280" height="76" fill="url(#wood-lines)" filter="url(#wood-warp)"/>
+        </svg>
+        <span class="optics"></span>
+        <span class="content">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v12m0-12 4 4m-4-4L8 7M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"
+                  fill="none" stroke="currentColor" stroke-width="1.9"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          传输照片
+        </span>
+      </button>
+      <span class="theme-name">木纹</span>
+    </section>
+  </main>
+</body>
+</html>

@@ -296,7 +296,7 @@ fun HomeScreen(
                                 onClick = { showTips = true },
                                 shape = RoundedCornerShape(12.dp),
                                 contentPadding = PaddingValues(0.dp),
-                                panel = true,
+                                textureSeed = WIFI_TIP_BUTTON_TEXTURE_SEED,
                                 modifier = Modifier
                                     .size(36.dp)
                                     .onGloballyPositioned { tipsAnchor = it.boundsInRoot() }
@@ -321,7 +321,7 @@ fun HomeScreen(
                                 },
                                 shape = RoundedCornerShape(12.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                                panel = true,
+                                textureSeed = WIFI_SETTINGS_BUTTON_TEXTURE_SEED,
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(36.dp)
@@ -384,6 +384,8 @@ fun HomeScreen(
                 shape = RoundedCornerShape(22.dp),
                 // 与文件列表页的双 Z 标按钮完全同规格（顶栏统一 36dp 高，见彼处注释）。
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                // 钛合金主题使用品牌黄填充钢印；其余主题仍保留 ZMark 原本的前景色。
+                titaniumStampColor = colors.accentYellow,
                 modifier = Modifier
                     .height(36.dp)
                     .onGloballyPositioned { zAnchor = it.boundsInRoot() }
@@ -1092,6 +1094,8 @@ private fun PremiumSuccessEffect(
 // [CONNECT_SUCCESS_ANIM_MS] 的卡片内成功动画；动画结束后由 MainScreen 跳到照片列表。
 const val CONNECT_CELEBRATE_DELAY_MS = 500L
 const val CONNECT_SUCCESS_ANIM_MS = 850L
+private const val WIFI_TIP_BUTTON_TEXTURE_SEED = 0x1457A101
+private const val WIFI_SETTINGS_BUTTON_TEXTURE_SEED = 0x1457A102
 
 /**
  * 连接页「小技巧」气泡：从 tips 按钮变形弹出的毛玻璃内容框（复用全局 [AnchorPopup]）。

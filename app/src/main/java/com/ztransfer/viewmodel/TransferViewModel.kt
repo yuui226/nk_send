@@ -280,6 +280,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     init {
         val dir = prefs.getString("transfer_dir", null)
+        val storedSkinName = prefs.getString("skin_preset", null)
+        val restoredSkinPreset = if (storedSkinName == null) {
+            SkinPreset.FROSTED_GLASS
+        } else {
+            SkinPreset.entries.firstOrNull { it.name == storedSkinName } ?: SkinPreset.TITANIUM
+        }
+        // 已下线的旧材质或异常值统一迁移到钛合金，并立即写回新枚举名。
+        if (storedSkinName != null && storedSkinName != restoredSkinPreset.name) {
+            prefs.edit().putString("skin_preset", restoredSkinPreset.name).apply()
+        }
         _state.update {
             it.copy(
                 transferDirUri = dir,
@@ -292,7 +302,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
                     ?: ThemeMode.SYSTEM,
-                skinPreset = runCatching { SkinPreset.valueOf(prefs.getString("skin_preset", SkinPreset.FROSTED_GLASS.name) ?: SkinPreset.FROSTED_GLASS.name) }.getOrDefault(SkinPreset.FROSTED_GLASS),
+                skinPreset = restoredSkinPreset,
                 // getStringSet 返回的实例不可直接持有（SharedPreferences 约定），拷贝一份。
                 filterExtensions = prefs.getStringSet("filter_exts", null)?.toSet(),
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
