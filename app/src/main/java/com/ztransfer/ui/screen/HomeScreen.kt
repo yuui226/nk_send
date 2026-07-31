@@ -2,11 +2,13 @@ package com.ztransfer.ui.screen
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -141,14 +143,19 @@ fun HomeScreen(
 
     // 快速成功/失败不显示中间态，避免连接页在启动时闪一下“正在识别”。
     var showWifiProbing by remember { mutableStateOf(false) }
-    LaunchedEffect(state.wifiConnectionStatus) {
+    LaunchedEffect(state.wifiConnectionStatus, state.connectionType) {
         showWifiProbing = false
-        if (state.wifiConnectionStatus == WifiConnectionStatus.PROBING) {
+        if (
+            shouldShowWifiConnectionFeedback(state.connectionType) &&
+            state.wifiConnectionStatus == WifiConnectionStatus.PROBING
+        ) {
             delay(WIFI_PROBING_FEEDBACK_DELAY_MS)
             showWifiProbing = true
         }
     }
-    val wifiFeedback = when (state.wifiConnectionStatus) {
+    // USB 一经识别，本次会话的连接反馈就只属于有线卡片。即使网络回调还有一帧
+    // 迟到状态，也不能让 Wi-Fi 提示在卡片退场动画中闪现。
+    val wifiFeedback = if (!shouldShowWifiConnectionFeedback(state.connectionType)) null else when (state.wifiConnectionStatus) {
         WifiConnectionStatus.PROBING -> if (showWifiProbing) {
             ConnectionCardFeedback(
                 title = stringResource(R.string.wifi_identifying_camera),
@@ -506,6 +513,10 @@ internal fun homeSelectedConnection(
     else -> null
 }
 
+internal fun shouldShowWifiConnectionFeedback(
+    connectionType: CameraConnectionType?
+): Boolean = connectionType != CameraConnectionType.USB
+
 private data class ConnectionCardFeedback(
     val title: String,
     val body: String?,
@@ -683,41 +694,89 @@ private fun ConnectionMethodCard(
                         if (index != steps.lastIndex) Spacer(Modifier.height(13.dp))
                     }
 
-                    if (feedback != null) {
-                        Spacer(Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(feedback.accent.copy(alpha = 0.10f))
-                                .padding(horizontal = 9.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (feedback.busy) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    color = feedback.accent,
-                                    strokeWidth = 1.5.dp
-                                )
-                                Spacer(Modifier.width(7.dp))
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = feedback.title,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = feedback.accent,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                feedback.body?.let { body ->
-                                    Text(
-                                        text = body,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = colors.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                    AnimatedContent(
+                        targetState = feedback,
+                        transitionSpec = {
+                            when {
+                                initialState == null && targetState != null ->
+                                    (
+                                        fadeIn(
+                                            animationSpec = tween(
+                                                durationMillis = 220,
+                                                delayMillis = 35,
+                                                easing = FastOutSlowInEasing
+                                            )
+                                        ) + slideInVertically(
+                                            animationSpec = tween(
+                                                durationMillis = 260,
+                                                easing = FastOutSlowInEasing
+                                            ),
+                                            initialOffsetY = { it / 4 }
+                                        )
+                                    ) togetherWith fadeOut(tween(90))
+
+                                initialState != null && targetState == null ->
+                                    fadeIn(tween(90)) togetherWith (
+                                        fadeOut(tween(150)) + slideOutVertically(
+                                            animationSpec = tween(
+                                                durationMillis = 180,
+                                                easing = FastOutSlowInEasing
+                                            ),
+                                            targetOffsetY = { it / 8 }
+                                        )
                                     )
+
+                                else ->
+                                    fadeIn(
+                                        tween(
+                                            durationMillis = 180,
+                                            easing = FastOutSlowInEasing
+                                        )
+                                    ) togetherWith fadeOut(tween(120))
+                            }
+                        },
+                        label = "connectionCardFeedback"
+                    ) { animatedFeedback ->
+                        if (animatedFeedback != null) {
+                            Column {
+                                Spacer(Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            animatedFeedback.accent.copy(alpha = 0.10f)
+                                        )
+                                        .padding(horizontal = 9.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (animatedFeedback.busy) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(14.dp),
+                                            color = animatedFeedback.accent,
+                                            strokeWidth = 1.5.dp
+                                        )
+                                        Spacer(Modifier.width(7.dp))
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = animatedFeedback.title,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = animatedFeedback.accent,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        animatedFeedback.body?.let { body ->
+                                            Text(
+                                                text = body,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = colors.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

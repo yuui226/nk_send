@@ -656,33 +656,67 @@ fun FileListScreen(
                 ) {
                     if (!state.isConnectedToCamera) {
                         // 兜底：断开且列表从未加载成功（掉线不再清列表，正常断开时网格保留、
-                        // 由顶栏信号按钮指示状态，不会走到这里）。
-                        Icon(Icons.Default.WifiOff, contentDescription = null, modifier = Modifier.size(64.dp), tint = colors.accentOrange)
+                        // 由顶栏信号按钮指示状态，不会走到这里）。提示与本次会话的传输方式
+                        // 绑定，避免 USB 相机关机时短暂闪出 Wi-Fi 文案和系统设置按钮。
+                        val usbMode =
+                            disconnectedConnectionType(state.connectionType) ==
+                                CameraConnectionType.USB
+                        if (usbMode) {
+                            ClassicUsbIcon(
+                                tint = colors.accentOrange,
+                                modifier = Modifier.size(64.dp)
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.WifiOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                tint = colors.accentOrange
+                            )
+                        }
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(stringResource(R.string.connection_lost), color = colors.onBackground, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            stringResource(
+                                if (usbMode) {
+                                    R.string.usb_connection_lost
+                                } else {
+                                    R.string.connection_lost
+                                }
+                            ),
+                            color = colors.onBackground,
+                            style = MaterialTheme.typography.titleMedium
+                        )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            stringResource(R.string.connect_camera_wifi),
+                            stringResource(
+                                if (usbMode) {
+                                    R.string.reconnect_camera_usb
+                                } else {
+                                    R.string.connect_camera_wifi
+                                }
+                            ),
                             color = colors.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center
                         )
                         // 一键直达系统 Wi-Fi 设置（与连接页同款按钮），不必退回连接页。
-                        Spacer(modifier = Modifier.height(20.dp))
-                        GlassButton(
-                            onClick = {
-                                try {
-                                    context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-                                } catch (_: Exception) {}
+                        if (!usbMode) {
+                            Spacer(modifier = Modifier.height(20.dp))
+                            GlassButton(
+                                onClick = {
+                                    try {
+                                        context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                                    } catch (_: Exception) {}
+                                }
+                            ) {
+                                Icon(Icons.Default.Wifi, contentDescription = null, tint = colors.accentBlue, modifier = Modifier.size(20.dp))
+                                Text(
+                                    stringResource(R.string.open_wifi_settings),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.onBackground
+                                )
                             }
-                        ) {
-                            Icon(Icons.Default.Wifi, contentDescription = null, tint = colors.accentBlue, modifier = Modifier.size(20.dp))
-                            Text(
-                                stringResource(R.string.open_wifi_settings),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Medium,
-                                color = colors.onBackground
-                            )
                         }
                     } else {
                         // 空态缓慢呼吸（与队列页空态同参数）：页面此时无其它动态，不至于死板。
@@ -1411,6 +1445,14 @@ fun QueuePill(
         }
     }
 }
+
+/**
+ * 文件列表只会在建立过相机会话后出现；极端恢复场景拿不到类型时沿用原有 Wi-Fi 兜底。
+ * 一旦识别过 USB，本次会话即使掉线也必须持续展示 USB 提示。
+ */
+internal fun disconnectedConnectionType(
+    connectionType: CameraConnectionType?
+): CameraConnectionType = connectionType ?: CameraConnectionType.WIFI
 
 /**
  * 连接状态毛玻璃按钮：Wi-Fi 显示信号格与 dBm，USB 显示经典三叉标；

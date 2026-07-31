@@ -38,6 +38,8 @@
     <!-- 文件列表 -->
     <string name="loading_file_list">正在获取文件列表…</string>
     <string name="connection_lost">连接已断开</string>
+    <string name="usb_connection_lost">有线连接已断开</string>
+    <string name="reconnect_camera_usb">请打开相机电源并检查 USB 数据线</string>
     <string name="no_photos_on_camera">相机中没有照片</string>
     <string name="camera_not_connected">相机未连接</string>
     <string name="press_back_to_exit">再按一次退出</string>

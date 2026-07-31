@@ -321,7 +321,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _state.update {
             it.copy(
                 connectionType = CameraConnectionType.USB,
-                usbConnectionError = null
+                usbConnectionError = null,
+                isWifiCandidate = false,
+                wifiRssi = null,
+                wifiConnectionStatus = WifiConnectionStatus.IDLE
             )
         }
         // 模式选定即释放 Wi-Fi 请求；授权等待和失败状态也不能继续占用手机网络。

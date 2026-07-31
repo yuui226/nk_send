@@ -38,6 +38,8 @@
     <!-- 檔案清單 -->
     <string name="loading_file_list">正在取得檔案清單…</string>
     <string name="connection_lost">連線已中斷</string>
+    <string name="usb_connection_lost">有線連線已中斷</string>
+    <string name="reconnect_camera_usb">請開啟相機電源並檢查 USB 資料線</string>
     <string name="no_photos_on_camera">相機中沒有照片</string>
     <string name="camera_not_connected">相機未連線</string>
     <string name="press_back_to_exit">再按一次離開</string>

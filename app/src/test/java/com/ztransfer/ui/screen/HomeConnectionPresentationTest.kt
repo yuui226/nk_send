@@ -2,7 +2,9 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.protocol.CameraConnectionType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeConnectionPresentationTest {
@@ -35,6 +37,29 @@ class HomeConnectionPresentationTest {
                 connected = false,
                 connectionType = CameraConnectionType.USB
             )
+        )
+    }
+
+    @Test
+    fun usbSelectionSuppressesAllWifiFeedback() {
+        assertFalse(shouldShowWifiConnectionFeedback(CameraConnectionType.USB))
+    }
+
+    @Test
+    fun wifiFeedbackRemainsAvailableBeforeAndDuringWifiSelection() {
+        assertTrue(shouldShowWifiConnectionFeedback(null))
+        assertTrue(shouldShowWifiConnectionFeedback(CameraConnectionType.WIFI))
+    }
+
+    @Test
+    fun disconnectedFileListKeepsTheSessionTransport() {
+        assertEquals(
+            CameraConnectionType.USB,
+            disconnectedConnectionType(CameraConnectionType.USB)
+        )
+        assertEquals(
+            CameraConnectionType.WIFI,
+            disconnectedConnectionType(CameraConnectionType.WIFI)
         )
     }
 }

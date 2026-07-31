@@ -38,6 +38,8 @@
     <!-- File list -->
     <string name="loading_file_list">Loading file list…</string>
     <string name="connection_lost">Connection lost</string>
+    <string name="usb_connection_lost">USB connection lost</string>
+    <string name="reconnect_camera_usb">Turn on the camera and check the USB cable</string>
     <string name="no_photos_on_camera">No photos on the camera</string>
     <string name="camera_not_connected">Camera not connected</string>
     <string name="press_back_to_exit">Press back again to exit</string>
