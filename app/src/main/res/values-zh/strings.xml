@@ -41,6 +41,7 @@
     <string name="usb_connection_lost">有线连接已断开</string>
     <string name="reconnect_camera_usb">请打开相机电源并检查 USB 数据线</string>
     <string name="no_photos_on_camera">相机中没有照片</string>
+    <string name="usb_turn_on_camera_hint">请打开相机电源</string>
     <string name="camera_not_connected">相机未连接</string>
     <string name="press_back_to_exit">再按一次退出</string>
     <string name="no_photos_match_filter">没有符合筛选的照片</string>

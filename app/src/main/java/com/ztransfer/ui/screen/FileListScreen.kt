@@ -733,6 +733,14 @@ fun FileListScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(stringResource(R.string.no_photos_on_camera), color = colors.onSurfaceVariant)
+                        if (state.connectionType == CameraConnectionType.USB) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                stringResource(R.string.usb_turn_on_camera_hint),
+                                color = colors.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     }
                 }
             }
