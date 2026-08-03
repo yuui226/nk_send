@@ -183,8 +183,25 @@ private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
 private val ALL_AUTO_ISO_PROPS =
     (rcAutoIsoCandidateProps(false) + rcAutoIsoCandidateProps(true)).distinct()
 private const val USB_LIVE_VIEW_STABLE_FRAMES = 8
+internal const val USB_SESSION_SWITCH_RETRY_MS = 3_000L
+internal const val USB_SESSION_SWITCH_MAX_ATTEMPTS = 3
 private const val TAP_FOCUS_LOCKED_FEEDBACK_MS = 1800L
 private const val TAP_FOCUS_MARKER_VISIBLE_MS = 3_000L
+
+internal fun shouldSwitchUsbSession(
+    connectionType: CameraConnectionType,
+    movieMode: Boolean,
+    remoteControlModeSet: Boolean,
+    busy: Boolean,
+    attempts: Int,
+    nowElapsedMs: Long,
+    retryAtElapsedMs: Long
+): Boolean =
+    connectionType == CameraConnectionType.USB &&
+        movieMode != remoteControlModeSet &&
+        !busy &&
+        attempts < USB_SESSION_SWITCH_MAX_ATTEMPTS &&
+        nowElapsedMs >= retryAtElapsedMs
 
 /**
  * A single GetEvent can repeat the same property change many times while Live View starts.
@@ -423,6 +440,8 @@ private fun RemoteContent(
     var capturing by remember { mutableStateOf(false) }
     var modeText by remember { mutableStateOf<String?>(null) }
     var movieMode by remember { mutableStateOf(false) }
+    var usbSessionSwitchAttempts by remember { mutableIntStateOf(0) }
+    var usbSessionSwitchRetryAt by remember { mutableLongStateOf(0L) }
     var focusModeText by remember { mutableStateOf<String?>(null) }
     var focusModeProp by remember { mutableStateOf<Int?>(null) }
     var focusModeManual by remember { mutableStateOf(false) }
@@ -690,29 +709,6 @@ private fun RemoteContent(
             appModeClearBusy = false
         }
     }
-    suspend fun refreshMovieMode(refreshExposureOnChange: Boolean = true) {
-        val cam = cameraViewModel.getCamera() ?: return
-        val mv = runCatching { cam.rcGetMovieMode() }.getOrNull() ?: return
-        val was = movieMode
-        movieMode = mv
-        if (refreshExposureOnChange && mv && !was) {
-            // 切入录像位：拉取录像侧独立参数组（照片/录像两套属性互不相通）
-            MOVIE_EXPOSURE_PROPS.forEach { refreshParam(it) }
-            // Auto ISO 的属性码在 Nikon Z 系与照片模式共用，但描述中的当前值/
-            // 可写性会随拨杆和曝光模式变化，必须在切换后重新读取。
-            refreshAutoIso()
-        }
-        if (!mv) {
-            recording = false   // 拨杆离开录像位，录制状态必然已结束
-            clearAppMode()
-            // 切回照片位：照片侧值域/可写性可能在录像期间变过，重新拉一遍
-            if (refreshExposureOnChange && was) {
-                EXPOSURE_PROPS.forEach { refreshParam(it) }
-                refreshAutoIso()
-            }
-        }
-    }
-
     // ---------- Live View 会话 ----------
     // 手动管理 + 新任务先 join 旧任务：保证"旧会话的 EndLiveView 一定先于新会话的
     // StartLiveView"（LaunchedEffect 换 key 的取消是异步的，直接依赖它会时序穿插）。
@@ -900,6 +896,166 @@ private fun RemoteContent(
         }
     }
 
+    suspend fun prepareUsbMovieSession(
+        cam: NikonCamera,
+        forceRefresh: Boolean = false
+    ): NikonCamera? {
+        if (!forceRefresh && cam.remoteControlModeSet) return cam
+
+        val oldLvJob = lvJob
+        oldLvJob?.cancelAndJoin()
+        if (lvJob === oldLvJob) lvJob = null
+        if (cameraViewModel.getCamera() !== cam) return null
+
+        movieUsbSessionDiagnostic = runCatching {
+            cam.refreshUsbRemoteSession()
+        }.getOrElse { "session error=${it.javaClass.simpleName}" }
+        movieUsbSessionDiagnostic?.let(::devLog)
+
+        val rc = runCatching { cam.rcSetControlMode(true) }.getOrDefault(-1)
+        devLog("SetControlMode(1) resp=0x%04X".format(rc and 0xFFFF))
+        if (rc != Lab.OK) return null
+
+        // Match Nikon's USB tethering order exactly: XGA profile and
+        // StartLiveView immediately after control mode, before property reads.
+        val profileRc = runCatching { cam.rcSetLvSize(3) }.getOrDefault(-1)
+        val started = runCatching {
+            cam.labStartLiveView { devLog(it) }
+        }.getOrDefault(false)
+        movieUsbSessionDiagnostic =
+            "${movieUsbSessionDiagnostic.orEmpty()} lv3=0x%04X/%s".format(
+                profileRc and 0xFFFF,
+                if (started) "Y" else "N"
+            ).trim()
+        return cam.takeIf { started }
+    }
+
+    suspend fun awaitMovieCompletion(cam: NikonCamera): Boolean =
+        withTimeoutOrNull(8_000L) {
+            while (true) {
+                val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
+                for (event in events) {
+                    eventFlow.emit(event)
+                    if (event.first == Lab.EVT_OBJECT_ADDED) {
+                        cameraViewModel.onCameraObjectAdded(event.second.toInt())
+                    }
+                    if (event.first == Lab.EVT_NK_MOVIE_REC_COMPLETE ||
+                        event.first == Lab.EVT_NK_MOVIE_REC_INTERRUPTED
+                    ) {
+                        return@withTimeoutOrNull true
+                    }
+                }
+                delay(200L)
+            }
+        } == true
+
+    suspend fun releaseUsbMovieSession(cam: NikonCamera): Boolean {
+        if (recording) {
+            val rc = runCatching { cam.rcEndMovie() }.getOrDefault(-1)
+            if (rc != Lab.OK) {
+                devLog("!! movie end before photo mode resp=0x%04X".format(rc and 0xFFFF))
+                return false
+            }
+            recording = false
+            if (!awaitMovieCompletion(cam)) {
+                devLog("!! movie completion event timeout before photo mode")
+            }
+        }
+        val oldLvJob = lvJob
+        oldLvJob?.cancelAndJoin()
+        if (lvJob === oldLvJob) lvJob = null
+        clearAppMode(cam, force = true)
+        val rc = runCatching { cam.rcSetControlMode(false) }.getOrDefault(-1)
+        devLog("SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
+        return true
+    }
+
+    suspend fun refreshMovieMode(
+        refreshExposureOnChange: Boolean = true,
+        switchUsbSessionOnChange: Boolean = true
+    ) {
+        val cam = cameraViewModel.getCamera() ?: return
+        val mv = runCatching { cam.rcGetMovieMode() }.getOrNull() ?: return
+        val was = movieMode
+        if (mv != was) {
+            usbSessionSwitchAttempts = 0
+            usbSessionSwitchRetryAt = 0L
+        }
+        movieMode = mv
+
+        if (cam.connectionType == CameraConnectionType.USB &&
+            mv == cam.remoteControlModeSet
+        ) {
+            usbSessionSwitchAttempts = 0
+            usbSessionSwitchRetryAt = 0L
+        }
+        val nowElapsedMs = SystemClock.elapsedRealtime()
+        val switchUsbSession = switchUsbSessionOnChange && shouldSwitchUsbSession(
+            connectionType = cam.connectionType,
+            movieMode = mv,
+            remoteControlModeSet = cam.remoteControlModeSet,
+            busy = recBusy,
+            attempts = usbSessionSwitchAttempts,
+            nowElapsedMs = nowElapsedMs,
+            retryAtElapsedMs = usbSessionSwitchRetryAt
+        )
+        var adoptedLiveView: NikonCamera? = null
+        var rebuildLiveView = false
+        if (switchUsbSession) {
+            initialLoaded = false
+            if (mv) {
+                adoptedLiveView = prepareUsbMovieSession(cam)
+                rebuildLiveView = true
+            } else {
+                rebuildLiveView = releaseUsbMovieSession(cam)
+            }
+            if (mv == cam.remoteControlModeSet) {
+                usbSessionSwitchAttempts = 0
+                usbSessionSwitchRetryAt = 0L
+            } else {
+                usbSessionSwitchAttempts++
+                usbSessionSwitchRetryAt =
+                    SystemClock.elapsedRealtime() + USB_SESSION_SWITCH_RETRY_MS
+            }
+        }
+        val usbSessionMatchedAfterSwitch =
+            switchUsbSession && mv == cam.remoteControlModeSet
+
+        if (refreshExposureOnChange && mv && (!was || usbSessionMatchedAfterSwitch)) {
+            // 切入录像位：拉取录像侧独立参数组（照片/录像两套属性互不相通）
+            MOVIE_EXPOSURE_PROPS.forEach { refreshParam(it) }
+            // Auto ISO 的属性码在 Nikon Z 系与照片模式共用，但描述中的当前值/
+            // 可写性会随拨杆和曝光模式变化，必须在切换后重新读取。
+            refreshAutoIso()
+        }
+        if (!mv) {
+            // USB 释放失败时保留真实录像态，下一轮仍会先重试 EndMovie；不能仅凭
+            // 拨杆值把 UI 置停后直接拆掉一个可能仍在录像的远控会话。
+            if (cam.connectionType != CameraConnectionType.USB ||
+                !cam.remoteControlModeSet
+            ) {
+                recording = false
+            }
+            if (!switchUsbSession) clearAppMode()
+            // 切回照片位：照片侧值域/可写性可能在录像期间变过，重新拉一遍
+            if (refreshExposureOnChange && (was || usbSessionMatchedAfterSwitch)) {
+                EXPOSURE_PROPS.forEach { refreshParam(it) }
+                refreshAutoIso()
+            }
+        }
+
+        if (rebuildLiveView && cameraViewModel.getCamera() === cam) {
+            startSession(
+                hd = hdLiveView,
+                adoptActiveLiveView = adoptedLiveView,
+                suppressStartupPropertyEvents = adoptedLiveView != null
+            )
+        }
+        if (switchUsbSession && cameraViewModel.getCamera() === cam) {
+            initialLoaded = true
+        }
+    }
+
     // 在页期间暂停后台缩略图填充：把 ioMutex 完全让给取帧与参数加载，
     // 否则每条启动命令都排在 GetThumb 后面，进页要等好几秒。退出自动恢复。
     DisposableEffect(Unit) {
@@ -915,45 +1071,42 @@ private fun RemoteContent(
             // 掉线时暂停事件轮询（下面的 initialLoaded 门），重连后参数重读
             // 依然先于轮询，与首次进页同样不抢锁。
             initialLoaded = false
+            movieMode = false
+            usbSessionSwitchAttempts = 0
+            usbSessionSwitchRetryAt = 0L
             return@LaunchedEffect
         }
         val sessionCamera = cameraViewModel.getCamera() ?: return@LaunchedEffect
         var adoptedInitialLiveView: NikonCamera? = null
         try {
-            // USB 监看沿用 Nikon 完整远控模式；应用模式只在用户真正开录时切换。
-            if (sessionCamera.connectionType == CameraConnectionType.USB) {
-                movieUsbSessionDiagnostic = runCatching {
-                    sessionCamera.refreshUsbRemoteSession()
-                }.getOrElse { "session error=${it.javaClass.simpleName}" }
-                movieUsbSessionDiagnostic?.let(::devLog)
-
-                val rc = runCatching {
-                    sessionCamera.rcSetControlMode(true)
-                }.getOrDefault(-1)
-                devLog("SetControlMode(1) resp=0x%04X".format(rc and 0xFFFF))
-
-                if (rc == Lab.OK) {
-                    // Match Nikon's USB tethering order exactly: XGA profile and
-                    // StartLiveView immediately after control mode, before any
-                    // exposure/property reads.
-                    val profileRc = runCatching {
-                        sessionCamera.rcSetLvSize(3)
-                    }.getOrDefault(-1)
-                    val started = runCatching {
-                        sessionCamera.labStartLiveView { devLog(it) }
-                    }.getOrDefault(false)
-                    if (started) adoptedInitialLiveView = sessionCamera
-                    movieUsbSessionDiagnostic =
-                        "${movieUsbSessionDiagnostic.orEmpty()} lv3=0x%04X/%s".format(
-                            profileRc and 0xFFFF,
-                            if (started) "Y" else "N"
-                        ).trim()
-                }
-            }
-
+            // 新连接不继承上一条连接的拨杆状态。首次读取失败时按照片模式处理，优先
+            // 保证机身画面与快门不被错误锁进电脑控制模式。
+            movieMode = false
+            usbSessionSwitchAttempts = 0
+            usbSessionSwitchRetryAt = 0L
             // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
             // 视频组，会表现为参数出现、清空、再加载一遍。
-            refreshMovieMode(refreshExposureOnChange = false)
+            refreshMovieMode(
+                refreshExposureOnChange = false,
+                switchUsbSessionOnChange = false
+            )
+            // USB 照片模式沿用普通 PTP Live View，保留机身画面与实体快门；只有录像
+            // 模式才进入 Nikon 完整远控会话，继续使用已验证的有线开录路径。
+            if (sessionCamera.connectionType == CameraConnectionType.USB) {
+                if (movieMode) {
+                    adoptedInitialLiveView = prepareUsbMovieSession(
+                        sessionCamera,
+                        forceRefresh = true
+                    )
+                } else if (sessionCamera.remoteControlModeSet) {
+                    releaseUsbMovieSession(sessionCamera)
+                }
+                if (movieMode != sessionCamera.remoteControlModeSet) {
+                    usbSessionSwitchAttempts = 1
+                    usbSessionSwitchRetryAt =
+                        SystemClock.elapsedRealtime() + USB_SESSION_SWITCH_RETRY_MS
+                }
+            }
             val initialExposureProps =
                 if (movieMode) MOVIE_EXPOSURE_PROPS else EXPOSURE_PROPS
             initialExposureProps.forEach { refreshParam(it) }
@@ -1104,6 +1257,7 @@ private fun RemoteContent(
                 events = polledEvents.getOrDefault(emptyList()),
                 suppressPropertyChanges = suppressStartupPropertyRefresh
             )
+            var movieModeRefreshRequested = false
             for (e in events) {
                 eventFlow.emit(e)
                 when (e.first) {
@@ -1158,15 +1312,22 @@ private fun RemoteContent(
                         ) {
                             refreshFocusMode()
                         }
-                        if (prop == Lab.PROP_NK_LV_SELECTOR) refreshMovieMode()
+                        if (prop == Lab.PROP_NK_LV_SELECTOR) {
+                            // 先处理完同批录像完成/中断事件，再切换 USB 会话，避免在
+                            // 当前事件消费者内部等待一个其实已经取到的完成事件。
+                            movieModeRefreshRequested = true
+                        }
                     }
                 }
             }
+            if (movieModeRefreshRequested) refreshMovieMode()
             // 照片/录像拨杆兜底轮询：拨杆切换不一定可靠地发 0x4006（机型差异），
             // 每 5 轮（约 3s）主动读一次——单条小命令，相对取帧流量可忽略。
             // 拍摄确认期间跳过：那时轮询提速到 150ms，通道要让给 ObjectAdded。
             pollTick++
-            if (pollTick % 5 == 0 && !capturing) refreshMovieMode()
+            if (pollTick % 5 == 0 && !capturing && !movieModeRefreshRequested) {
+                refreshMovieMode()
+            }
             // 等拍摄确认期间加快轮询，快门转圈更快收到 ObjectAdded；平时 600ms 少占通道。
             delay(if (capturing) 150 else 600)
         }

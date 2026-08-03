@@ -6,6 +6,8 @@ import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.USB_LIVE_VIEW_WARMUP_MS
 import com.ztransfer.protocol.liveViewWarmupRemainingMs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteLiveViewSchedulingTest {
@@ -50,6 +52,80 @@ class RemoteLiveViewSchedulingTest {
                 connectionType = CameraConnectionType.WIFI,
                 readyAtElapsedMs = 1_000L,
                 nowElapsedMs = 1_000L
+            )
+        )
+    }
+
+    @Test
+    fun usbSessionSwitchesOnlyForAReadyModeMismatch() {
+        assertTrue(
+            shouldSwitchUsbSession(
+                connectionType = CameraConnectionType.USB,
+                movieMode = true,
+                remoteControlModeSet = false,
+                busy = false,
+                attempts = 0,
+                nowElapsedMs = 5_000L,
+                retryAtElapsedMs = 0L
+            )
+        )
+        assertFalse(
+            shouldSwitchUsbSession(
+                connectionType = CameraConnectionType.USB,
+                movieMode = false,
+                remoteControlModeSet = false,
+                busy = false,
+                attempts = 0,
+                nowElapsedMs = 5_000L,
+                retryAtElapsedMs = 0L
+            )
+        )
+        assertFalse(
+            shouldSwitchUsbSession(
+                connectionType = CameraConnectionType.WIFI,
+                movieMode = true,
+                remoteControlModeSet = false,
+                busy = false,
+                attempts = 0,
+                nowElapsedMs = 5_000L,
+                retryAtElapsedMs = 0L
+            )
+        )
+    }
+
+    @Test
+    fun usbSessionSwitchRetryIsThrottledAndBounded() {
+        assertFalse(
+            shouldSwitchUsbSession(
+                connectionType = CameraConnectionType.USB,
+                movieMode = true,
+                remoteControlModeSet = false,
+                busy = true,
+                attempts = 0,
+                nowElapsedMs = 5_000L,
+                retryAtElapsedMs = 0L
+            )
+        )
+        assertFalse(
+            shouldSwitchUsbSession(
+                connectionType = CameraConnectionType.USB,
+                movieMode = true,
+                remoteControlModeSet = false,
+                busy = false,
+                attempts = 1,
+                nowElapsedMs = 4_999L,
+                retryAtElapsedMs = 5_000L
+            )
+        )
+        assertFalse(
+            shouldSwitchUsbSession(
+                connectionType = CameraConnectionType.USB,
+                movieMode = true,
+                remoteControlModeSet = false,
+                busy = false,
+                attempts = USB_SESSION_SWITCH_MAX_ATTEMPTS,
+                nowElapsedMs = 5_000L,
+                retryAtElapsedMs = 5_000L
             )
         )
     }
