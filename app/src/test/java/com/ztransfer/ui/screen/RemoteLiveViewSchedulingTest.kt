@@ -57,75 +57,61 @@ class RemoteLiveViewSchedulingTest {
     }
 
     @Test
-    fun usbSessionSwitchesOnlyForAReadyModeMismatch() {
+    fun movieModePollingContinuesWhileOldLiveViewRecovers() {
         assertTrue(
-            shouldSwitchUsbSession(
-                connectionType = CameraConnectionType.USB,
-                movieMode = true,
-                remoteControlModeSet = false,
-                busy = false,
-                attempts = 0,
-                nowElapsedMs = 5_000L,
-                retryAtElapsedMs = 0L
+            shouldPollMovieModeDuringLiveViewRecovery(
+                initialLoaded = true,
+                liveViewStable = false,
+                cameraBusy = false
             )
         )
         assertFalse(
-            shouldSwitchUsbSession(
-                connectionType = CameraConnectionType.USB,
-                movieMode = false,
-                remoteControlModeSet = false,
-                busy = false,
-                attempts = 0,
-                nowElapsedMs = 5_000L,
-                retryAtElapsedMs = 0L
+            shouldPollMovieModeDuringLiveViewRecovery(
+                initialLoaded = false,
+                liveViewStable = false,
+                cameraBusy = false
             )
         )
         assertFalse(
-            shouldSwitchUsbSession(
-                connectionType = CameraConnectionType.WIFI,
-                movieMode = true,
-                remoteControlModeSet = false,
-                busy = false,
-                attempts = 0,
-                nowElapsedMs = 5_000L,
-                retryAtElapsedMs = 0L
+            shouldPollMovieModeDuringLiveViewRecovery(
+                initialLoaded = true,
+                liveViewStable = true,
+                cameraBusy = false
+            )
+        )
+        assertFalse(
+            shouldPollMovieModeDuringLiveViewRecovery(
+                initialLoaded = true,
+                liveViewStable = false,
+                cameraBusy = true
             )
         )
     }
 
     @Test
-    fun usbSessionSwitchRetryIsThrottledAndBounded() {
-        assertFalse(
-            shouldSwitchUsbSession(
+    fun usbComputerControlIsHeldOnlyForAnActualRecordingAttempt() {
+        assertTrue(
+            shouldPrepareUsbMovieSessionForRecord(
                 connectionType = CameraConnectionType.USB,
-                movieMode = true,
-                remoteControlModeSet = false,
-                busy = true,
-                attempts = 0,
-                nowElapsedMs = 5_000L,
-                retryAtElapsedMs = 0L
+                remoteControlModeSet = false
             )
         )
         assertFalse(
-            shouldSwitchUsbSession(
+            shouldPrepareUsbMovieSessionForRecord(
                 connectionType = CameraConnectionType.USB,
-                movieMode = true,
-                remoteControlModeSet = false,
-                busy = false,
-                attempts = 1,
-                nowElapsedMs = 4_999L,
-                retryAtElapsedMs = 5_000L
+                remoteControlModeSet = true
             )
         )
         assertFalse(
-            shouldSwitchUsbSession(
+            shouldPrepareUsbMovieSessionForRecord(
+                connectionType = CameraConnectionType.WIFI,
+                remoteControlModeSet = false
+            )
+        )
+        assertTrue(
+            shouldReturnUsbMovieSessionToStandby(
                 connectionType = CameraConnectionType.USB,
-                movieMode = true,
-                remoteControlModeSet = false,
-                busy = false,
-                attempts = USB_SESSION_SWITCH_MAX_ATTEMPTS,
-                nowElapsedMs = 5_000L,
-                retryAtElapsedMs = 5_000L
+                remoteControlModeSet = true
             )
         )
     }

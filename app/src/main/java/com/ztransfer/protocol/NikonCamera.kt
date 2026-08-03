@@ -81,8 +81,8 @@ class NikonCamera(private val context: Context) {
     // 断线会创建新的 NikonCamera，自然不会把旧连接的记账带过去。
     @Volatile internal var remoteMovieApplicationPropSet = false
     @Volatile internal var remoteMovieApplicationOpSet = false
-    // USB 监看页持有的尼康完整远控模式（0x90C2）。进入页面设 1，退出成对清 0；
-    // 放在连接对象上可跨横竖屏重建记账，断线换实例则自然清空。
+    // USB 录像期间持有的尼康完整远控模式（0x90C2）。开录前设 1，停录回待机时
+    // 成对清 0；放在连接对象上可跨横竖屏重建记账，断线换实例则自然清空。
     @Volatile internal var remoteControlModeSet = false
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI

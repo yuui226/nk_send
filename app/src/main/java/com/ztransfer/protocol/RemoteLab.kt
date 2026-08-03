@@ -1189,8 +1189,8 @@ internal suspend fun NikonCamera.rcPrepareAndStartMovieDetailed(
 suspend fun NikonCamera.rcEndMovie(): Int = cmdBusyRetry(Lab.NK_END_MOVIE_REC)
 
 /**
- * 尼康完整远控模式。USB 进入监看时设 1，退出监看时清 0；模式切换成功后等待机身就绪，
- * 后续 Live View、参数控制和录像命令始终复用同一个 PTP 会话。
+ * 尼康完整远控模式。USB 开录前设 1，停录回普通待机时清 0；模式切换成功后，
+ * 录制期间的 Live View、参数控制和录像命令始终复用同一个 PTP 会话。
  */
 suspend fun NikonCamera.rcSetControlMode(enabled: Boolean): Int {
     if (enabled == remoteControlModeSet) return Lab.OK
