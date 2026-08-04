@@ -90,6 +90,8 @@
     <string name="columns">Columns</string>
     <string name="collapse_burst_photos">Group bursts</string>
     <string name="photo_interaction">Photo interaction</string>
+    <string name="tap_transfer">Tap to transfer</string>
+    <string name="tap_preview">Tap to preview</string>
     <string name="tap_transfer_hold_preview">Tap: transfer\nHold: preview</string>
     <string name="tap_preview_hold_transfer">Tap: preview\nHold: transfer</string>
     <string name="appearance">Appearance</string>

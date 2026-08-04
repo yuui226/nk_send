@@ -90,6 +90,8 @@
     <string name="columns">欄數</string>
     <string name="collapse_burst_photos">連拍成組</string>
     <string name="photo_interaction">照片操作</string>
+    <string name="tap_transfer">點擊傳輸</string>
+    <string name="tap_preview">點擊預覽</string>
     <string name="tap_transfer_hold_preview">點擊：傳輸\n長按：預覽</string>
     <string name="tap_preview_hold_transfer">點擊：預覽\n長按：傳輸</string>
     <string name="appearance">外觀</string>

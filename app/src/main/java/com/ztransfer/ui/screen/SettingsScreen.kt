@@ -279,6 +279,13 @@ fun SettingsOverlay(
             Spacer(Modifier.height(8.dp))
 
             // ---------- 照片列表：布局和操作方式 ----------
+            val photoInteractionChoices = listOf(
+                false to stringResource(R.string.tap_transfer),
+                true to stringResource(R.string.tap_preview),
+            )
+            val selectedPhotoInteraction = photoInteractionChoices.first {
+                it.first == state.tapToPreview
+            }
             SettingsCard {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -330,23 +337,34 @@ fun SettingsOverlay(
 
                 CardDivider()
 
-                Column {
-                    SectionLabel(stringResource(R.string.photo_interaction))
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SelectionChip(
-                            label = stringResource(R.string.tap_transfer_hold_preview),
-                            selected = !state.tapToPreview,
-                            onClick = { viewModel.setTapToPreview(false) },
-                            twoLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
-                        SelectionChip(
-                            label = stringResource(R.string.tap_preview_hold_transfer),
-                            selected = state.tapToPreview,
-                            onClick = { viewModel.setTapToPreview(true) },
-                            twoLine = true,
-                            modifier = Modifier.weight(1f),
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val wheelWidth = (maxWidth - 16.dp) / 3f
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            SectionLabel(stringResource(R.string.photo_interaction))
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                stringResource(
+                                    if (state.tapToPreview) R.string.tap_preview_hold_transfer
+                                    else R.string.tap_transfer_hold_preview
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        ReleaseCommitWheel(
+                            options = photoInteractionChoices,
+                            selected = selectedPhotoInteraction,
+                            optionLabel = { it.second },
+                            onValueCommitted = { viewModel.setTapToPreview(it.first) },
+                            onDetent = haptics::tick,
+                            modifier = Modifier.width(wheelWidth),
                         )
                     }
                 }
@@ -869,29 +887,21 @@ private fun SelectionChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     textStyle: TextStyle = MaterialTheme.typography.labelLarge,
-    compact: Boolean = false,
-    twoLine: Boolean = false,
+    compact: Boolean = false
 ) {
     val colors = AppTheme.colors
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         color = if (selected) colors.accentBlue else colors.surfaceVariant,
-        modifier = modifier.height(
-            when {
-                compact -> 34.dp
-                twoLine -> 52.dp
-                else -> 40.dp
-            }
-        )
+        modifier = modifier.height(if (compact) 34.dp else 40.dp)
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = label,
                 style = textStyle,
                 fontWeight = FontWeight.Bold,
-                maxLines = if (twoLine) 2 else 1,
-                textAlign = TextAlign.Center,
+                maxLines = 1,
                 color = if (selected) colors.onAccent else colors.onSurfaceVariant
             )
         }

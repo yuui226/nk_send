@@ -702,7 +702,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun registerNetworkCallback() {
         if (_state.value.connectionType == CameraConnectionType.USB) return
-        // ADB reverse 的回环端点不依赖 Wi-Fi；Release 实现恒返回 null。
+        // Debug 内置相机使用进程内回环端点，不依赖 Wi-Fi；Release 实现恒返回 null。
         if (CameraEndpointOverride.hostOrNull() != null) return
         if (wifiHeld) return
         val request = NetworkRequest.Builder()
@@ -898,7 +898,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val overrideHost = CameraEndpointOverride.hostOrNull()
             cam.connect(
                 ip = overrideHost ?: PtpConstants.CAMERA_IP,
-                // 回环地址经 adb reverse 走本机 socket；绑定 Wi-Fi Network 会绕开隧道。
+                // Debug 内置相机走进程内回环；绑定 Wi-Fi Network 会错误地绕开该端点。
                 network = if (overrideHost == null) wifiNetwork else null
             ).fold(
                 onSuccess = {

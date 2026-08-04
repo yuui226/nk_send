@@ -1,9 +1,6 @@
 package com.ztransfer.protocol
 
-/**
- * Debug-only embedded camera endpoint. The simulator lives in the app process, so a manually
- * installed Debug APK needs neither ADB reverse nor access to the development computer.
- */
+/** Debug-only endpoint backed by the embedded camera simulator in the app process. */
 object CameraEndpointOverride {
     private const val SIMULATOR_HOST = "127.0.0.1"
 
