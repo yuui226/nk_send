@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -76,6 +77,7 @@ internal fun <T> ReleaseCommitWheel(
     modifier: Modifier = Modifier,
     label: String? = null,
     onDetent: () -> Unit = {},
+    enabled: Boolean = true,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
@@ -115,8 +117,13 @@ internal fun <T> ReleaseCommitWheel(
     } else {
         Color(0xFF88AAB5).copy(alpha = 0.34f)
     }
+    val enabledModifier = if (enabled) {
+        modifier
+    } else {
+        modifier.graphicsLayer { alpha = 0.48f }
+    }
     Box(
-        modifier = modifier
+        modifier = enabledModifier
             .height(54.dp)
             .clip(shape)
             .background(colors.glassSurface)
@@ -142,7 +149,8 @@ internal fun <T> ReleaseCommitWheel(
                     append(optionLabel(options[selectedIndex]))
                 }
             }
-            .pointerInput(options.size, rowPx) {
+            .pointerInput(options.size, rowPx, enabled) {
+                if (!enabled) return@pointerInput
                 var accumulatedDy = 0f
                 try {
                     detectVerticalDragGestures(
@@ -188,7 +196,7 @@ internal fun <T> ReleaseCommitWheel(
                     }
                 }
             }
-            .clickable {
+            .clickable(enabled = enabled) {
                 val currentOptions = latestOptions
                 val next = (latestSelectedIndex + 1) % currentOptions.size
                 if (next != latestSelectedIndex) {
@@ -238,7 +246,12 @@ internal fun <T> ReleaseCommitWheel(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .offset(y = SETTINGS_WHEEL_ROW_HEIGHT * (index - position)),
+                        .offset {
+                            IntOffset(
+                                x = 0,
+                                y = (rowPx * (index - position)).roundToInt(),
+                            )
+                        },
                 )
             }
         }

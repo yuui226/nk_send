@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -178,10 +179,14 @@ internal fun PhotoPreviewOverlay(
     var overlayBounds by remember { mutableStateOf<Rect?>(null) }
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
+    // 高清图/EXIF 到位会触发大位图纹理上传与预览子树更新。等展开动画结束再启动，
+    // 避免网络较快时恰好在变形动画中途上屏，造成偶发掉帧。
+    var deferredLoadsEnabled by remember { mutableStateOf(false) }
 
     LaunchedEffect(overlayBounds, closing) {
         if (!closing && overlayBounds != null && progress.value < 1f) {
             progress.animateTo(1f, Motion.overlayExpand)
+            deferredLoadsEnabled = true
         }
     }
     LaunchedEffect(closing) {
@@ -296,9 +301,10 @@ internal fun PhotoPreviewOverlay(
         previewItems,
         pagerState.currentPage,
         currentHandle,
-        cameraState.isConnectedToCamera
+        cameraState.isConnectedToCamera,
+        deferredLoadsEnabled
     ) {
-        if (!cameraState.isConnectedToCamera) return@LaunchedEffect
+        if (!deferredLoadsEnabled || !cameraState.isConnectedToCamera) return@LaunchedEffect
         val cp = pagerState.currentPage
         if (loadFhdPage(cp, awaitExisting = true)) haptics.tick()
         loadExifPage(cp)
@@ -318,8 +324,10 @@ internal fun PhotoPreviewOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = progress.value }
-                .background(Color.Black.copy(alpha = 0.74f))
+                // 透明黑直接绘制，不让 graphicsLayer(alpha) 创建全屏离屏缓冲。
+                .drawBehind {
+                    drawRect(Color.Black, alpha = 0.74f * progress.value)
+                }
         )
 
         // 当前页是否已放大——放大时禁用翻页，横向平移才不会误翻到下一张。
@@ -371,6 +379,7 @@ internal fun PhotoPreviewOverlay(
                         cameraViewModel = cameraViewModel,
                         fhdBitmap = fhdBitmaps[file.handle],
                         isLoadingFhd = fhdLoading.containsKey(file.handle),
+                        loadEnabled = deferredLoadsEnabled,
                         rotationDegrees = rotationDegrees,
                         isCurrent = page == pagerState.currentPage,
                         onZoomedChange = { currentZoomed = it },
@@ -381,6 +390,7 @@ internal fun PhotoPreviewOverlay(
                     BurstCollectionPreviewPage(
                         collection = item,
                         cameraViewModel = cameraViewModel,
+                        loadEnabled = deferredLoadsEnabled,
                         isCurrent = page == pagerState.currentPage,
                         onZoomedChange = { currentZoomed = it },
                         onTap = startClose
@@ -588,10 +598,128 @@ internal fun PhotoPreviewOverlay(
     }
 }
 
+/**
+ * 单张内存位图的大图预览。与照片列表预览共用缩放、平移、双击和旋转内核，但刻意不创建分页器，
+ * 因而横向手势只可能用于放大后的平移，不存在翻到其他图片的路径。
+ */
+@Composable
+internal fun SinglePhotoPreviewOverlay(
+    bitmap: ImageBitmap,
+    title: String,
+    anchorRect: Rect?,
+    onDismiss: () -> Unit,
+) {
+    var overlayBounds by remember { mutableStateOf<Rect?>(null) }
+    val progress = remember { Animatable(0f) }
+    var closing by remember { mutableStateOf(false) }
+    var rotationDegrees by remember(bitmap) { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(overlayBounds, closing) {
+        if (!closing && overlayBounds != null && progress.value < 1f) {
+            progress.animateTo(1f, Motion.overlayExpand)
+        }
+    }
+    LaunchedEffect(closing) {
+        if (closing) {
+            progress.animateTo(0f, Motion.overlayCollapse)
+            onDismiss()
+        }
+    }
+    val startClose: () -> Unit = {
+        if (!closing) closing = true
+    }
+    BackHandler(enabled = !closing) { startClose() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { overlayBounds = it.boundsInRoot() }
+            // 阻断未被大图手势处理的拖动，避免事件穿透到设置页滚动容器。
+            .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } },
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawBehind { drawRect(Color.Black, alpha = 0.74f * progress.value) },
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val bounds = overlayBounds
+                    val anchor = anchorRect
+                    if (bounds != null && anchor != null && bounds.width > 0f && bounds.height > 0f) {
+                        transformOrigin = TransformOrigin(
+                            (anchor.center.x - bounds.left) / bounds.width,
+                            (anchor.center.y - bounds.top) / bounds.height,
+                        )
+                        val startScale = (anchor.width / bounds.width).coerceIn(0.05f, 1f)
+                        val scale = startScale + (1f - startScale) * progress.value
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = if (closing) {
+                            (progress.value * 1.6f).coerceAtMost(1f)
+                        } else {
+                            1f
+                        }
+                    } else {
+                        scaleX = 1f
+                        scaleY = 1f
+                        alpha = progress.value
+                    }
+                },
+        ) {
+            ZoomablePreviewViewport(
+                imageSize = IntSize(bitmap.width, bitmap.height),
+                stateKey = bitmap,
+                rotationDegrees = rotationDegrees,
+                isCurrent = true,
+                zoomEnabled = true,
+                onZoomedChange = {},
+                onTap = startClose,
+            ) { imageTransform ->
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = title,
+                    contentScale = ContentScale.Fit,
+                    modifier = imageTransform,
+                )
+            }
+        }
+
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            color = Color.White.copy(alpha = 0.85f * progress.value),
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(top = 12.dp, start = 52.dp, end = 52.dp),
+        )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 20.dp, bottom = 32.dp)
+                .graphicsLayer { alpha = progress.value },
+        ) {
+            RotationButton {
+                rotationDegrees -= 90f
+            }
+        }
+    }
+}
+
 @Composable
 private fun BurstCollectionPreviewPage(
     collection: PhotoPreviewItem.BurstCollection,
     cameraViewModel: CameraViewModel,
+    loadEnabled: Boolean,
     isCurrent: Boolean,
     onZoomedChange: (Boolean) -> Unit,
     onTap: () -> Unit
@@ -634,6 +762,7 @@ private fun BurstCollectionPreviewPage(
                     file = file,
                     cameraViewModel = cameraViewModel,
                     transfersBusy = false,
+                    loadEnabled = loadEnabled,
                     showPlaceholderIcon = index == last,
                     modifier = Modifier
                         .fillMaxSize(0.86f)
@@ -767,16 +896,12 @@ private fun PreviewPage(
     cameraViewModel: CameraViewModel,
     fhdBitmap: ImageBitmap?,
     isLoadingFhd: Boolean,
+    loadEnabled: Boolean,
     rotationDegrees: Float,
     isCurrent: Boolean,
     onZoomedChange: (Boolean) -> Unit,
     onTap: () -> Unit
 ) {
-    val animatedRotation by animateFloatAsState(
-        targetValue = rotationDegrees,
-        animationSpec = tween(220),
-        label = "previewRotation"
-    )
     // 预览通常由一个已经显示缩略图的可见格子打开。同步复用同一份内存缓存，确保
     // overlay 第一帧就有画面；缓存未命中时才异步走磁盘/相机兜底。
     var thumbnail by remember(file.handle) {
@@ -784,8 +909,8 @@ private fun PreviewPage(
     }
     // 取过仍为 null → 该文件确实没有缩略图（如部分视频）。
     var noThumb by remember(file.handle) { mutableStateOf(false) }
-    LaunchedEffect(file.handle) {
-        if (thumbnail == null && !noThumb) {
+    LaunchedEffect(file.handle, loadEnabled) {
+        if (loadEnabled && thumbnail == null && !noThumb) {
             val t = cameraViewModel.loadThumbnail(file)
             if (t != null) thumbnail = t else noThumb = true
         }
@@ -803,118 +928,17 @@ private fun PreviewPage(
         }
     }
 
-    // ---- 缩放/平移状态（按 handle 记忆；离开本页复位，与主流相册一致）----
-    var scale by remember(file.handle) { mutableStateOf(1f) }
-    var offset by remember(file.handle) { mutableStateOf(Offset.Zero) }
-    val scope = rememberCoroutineScope()
-    // 双击缩放动画的 Job：新手势/新双击/离页复位前先取消它，避免多方同时写 scale/offset 打架。
-    var zoomAnimJob by remember(file.handle) { mutableStateOf<Job?>(null) }
-    val zoomed = scale > 1.01f
-    LaunchedEffect(isCurrent) { if (!isCurrent) { zoomAnimJob?.cancel(); scale = 1f; offset = Offset.Zero } }
-    // 报告当前页是否已放大——预览层据此在放大时禁用翻页（否则横向平移会误翻页）。
-    LaunchedEffect(isCurrent, zoomed) { if (isCurrent) onZoomedChange(zoomed) }
-
     val displayBitmap = fhdBitmap ?: thumbnail
-    val quarterTurn = ((rotationDegrees / 90f).roundToInt() % 2) != 0
-    val rawAspect = displayBitmap?.let { it.width.toFloat() / it.height.toFloat() }
-    val imgAspect = displayBitmap?.let {
-        if (quarterTurn) 1f / rawAspect!! else rawAspect!!
-    }
-    // Image(Fit) 先按未旋转方向排版；动画期间根据每一帧角度的外接矩形动态缩放，
-    // 避免角度与缩放各自线性插值造成中途裁切、忽大忽小。
-    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
-    val viewportW = viewportSize.width.toFloat()
-    val viewportH = viewportSize.height.toFloat()
-    val baseImageW: Float
-    val baseImageH: Float
-    if (rawAspect != null && viewportW > 0f && viewportH > 0f) {
-        val viewportAspect = viewportW / viewportH
-        baseImageW = if (rawAspect > viewportAspect) viewportW else viewportH * rawAspect
-        baseImageH = if (rawAspect > viewportAspect) viewportW / rawAspect else viewportH
-    } else {
-        baseImageW = 0f
-        baseImageH = 0f
-    }
     val isVideo = file.extension in VIDEO_EXTENSIONS
-
-    // 旋转会改变基础 Fit 尺寸；清掉此前的用户缩放/偏移，避免旧坐标把旋转后的图推离屏幕。
-    LaunchedEffect(rotationDegrees) {
-        zoomAnimJob?.cancel()
-        scale = 1f
-        offset = Offset.Zero
-    }
-
-    // 把 offset 钳制在"图片边缘不越过容器边缘"的范围内（防止拖出黑边）。
-    fun clampOffset(s: Float, o: Offset, dispW: Float, dispH: Float, cw: Float, ch: Float): Offset {
-        val maxX = max(0f, (dispW * s - cw) / 2f)
-        val maxY = max(0f, (dispH * s - ch) / 2f)
-        return Offset(o.x.coerceIn(-maxX, maxX), o.y.coerceIn(-maxY, maxY))
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .onSizeChanged { viewportSize = it }
-            // 捏合缩放 + 放大后单指平移。关键：单指且未放大时【不消费】事件，
-            // 把手势让给 HorizontalPager 翻页 / 单击关闭；双指或已放大才接管并消费。
-            .pointerInput(imgAspect) {
-                // 视频占位页没有可缩放的内容：捏合/平移手势直接不启动，不再空转消费事件。
-                if (isVideo || imgAspect == null) return@pointerInput
-                val cw = size.width.toFloat(); val ch = size.height.toFloat()
-                val containerAspect = cw / ch
-                val dispW = if (imgAspect > containerAspect) cw else ch * imgAspect
-                val dispH = if (imgAspect > containerAspect) cw / imgAspect else ch
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    zoomAnimJob?.cancel()   // 用户开始触摸即让双击动画让位，交互立即接管
-                    do {
-                        val event = awaitPointerEvent()
-                        val pressed = event.changes.count { it.pressed }
-                        if (pressed >= 2 || scale > 1.01f) {
-                            val zoomChange = event.calculateZoom()
-                            val panChange = event.calculatePan()
-                            if (zoomChange != 1f || panChange != Offset.Zero) {
-                                val newScale = (scale * zoomChange).coerceIn(1f, MAX_ZOOM)
-                                val centroid = event.calculateCentroid(useCurrent = true)
-                                // 以捏合中心为不动点：中心到容器心的向量按 (旧-新) 缩放补偿，再叠加平移。
-                                val c = Offset(centroid.x - cw / 2f, centroid.y - ch / 2f)
-                                offset = clampOffset(newScale, offset + c * (scale - newScale) + panChange, dispW, dispH, cw, ch)
-                                scale = newScale
-                                event.changes.forEach { if (it.pressed) it.consume() }
-                            }
-                        }
-                    } while (event.changes.any { it.pressed })
-                }
-            }
-            // 单击：未放大时关闭（放大时不关，避免查看时误触）；双击：1x ↔ 2.5x 在点击处切换（带动画）。
-            .pointerInput(imgAspect) {
-                val cw = size.width.toFloat(); val ch = size.height.toFloat()
-                detectTapGestures(
-                    onTap = { if (scale <= 1.01f) onTap() },
-                    onDoubleTap = { tap ->
-                        // 视频占位页不缩放（单击关闭保留在 onTap）。
-                        if (isVideo) return@detectTapGestures
-                        val a = imgAspect ?: return@detectTapGestures
-                        val containerAspect = cw / ch
-                        val dispW = if (a > containerAspect) cw else ch * a
-                        val dispH = if (a > containerAspect) cw / a else ch
-                        val target = if (scale > 1.01f) 1f else DOUBLE_TAP_ZOOM
-                        val startS = scale
-                        val startO = offset
-                        val targetO = if (target == 1f) Offset.Zero
-                        else clampOffset(target, Offset(tap.x - cw / 2f, tap.y - ch / 2f) * (1f - target), dispW, dispH, cw, ch)
-                        zoomAnimJob?.cancel()   // 二次双击前取消上一个动画，避免两个 tween 同帧抢写
-                        zoomAnimJob = scope.launch {
-                            Animatable(0f).animateTo(1f, tween(240)) {
-                                scale = startS + (target - startS) * value
-                                offset = androidx.compose.ui.geometry.lerp(startO, targetO, value)
-                            }
-                        }
-                    }
-                )
-            },
-        contentAlignment = Alignment.Center
-    ) {
+    ZoomablePreviewViewport(
+        imageSize = displayBitmap?.let { IntSize(it.width, it.height) },
+        stateKey = file.handle,
+        rotationDegrees = rotationDegrees,
+        isCurrent = isCurrent,
+        zoomEnabled = !isVideo && displayBitmap != null,
+        onZoomedChange = onZoomedChange,
+        onTap = onTap,
+    ) { imageTransform ->
         val thumb = thumbnail  // 本地变量，delegate 属性无法被编译器 smart cast
         // 若 FHD 比缩略图先到，直接显示 FHD；不能等待 LaunchedEffect 下一帧再 snap，
         // 否则仍会产生一帧全透明图片区。
@@ -966,29 +990,7 @@ private fun PreviewPage(
             }
             displayBitmap != null -> {
                 // 图像栈（缩略图淡出 + FHD 淡入）统一套用缩放/平移变换。
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            val angle = Math.toRadians(animatedRotation.toDouble())
-                            val absCos = abs(cos(angle)).toFloat()
-                            val absSin = abs(sin(angle)).toFloat()
-                            val boundsW = baseImageW * absCos + baseImageH * absSin
-                            val boundsH = baseImageW * absSin + baseImageH * absCos
-                            val rotationFit = if (boundsW > 0f && boundsH > 0f) {
-                                min(viewportW / boundsW, viewportH / boundsH)
-                            } else 1f
-                            // 常见横图旋成竖向时保留约 4%/侧的呼吸空间；随角度连续变化，
-                            // 回到横向时自然恢复满幅，不在 90° 端点突然缩一下。
-                            val portraitBreathingRoom = if ((rawAspect ?: 0f) > 1f) {
-                                1f - 0.08f * absSin
-                            } else 1f
-                            scaleX = scale * rotationFit * portraitBreathingRoom
-                            scaleY = scale * rotationFit * portraitBreathingRoom
-                            translationX = offset.x; translationY = offset.y
-                            rotationZ = animatedRotation
-                        }
-                ) {
+                Box(modifier = imageTransform) {
                     if (thumb != null && (fhdBitmap == null || effectiveFhdAlpha < 1f)) {
                         Image(
                             bitmap = thumb,
@@ -1013,5 +1015,217 @@ private fun PreviewPage(
             noThumb -> Text(stringResource(R.string.no_preview), color = DarkOnSurfaceVariant)
             else -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
         }
+    }
+}
+
+/**
+ * 照片大图共用的纯位图交互内核。调用方负责提供图像内容与加载状态；本层只管理缩放、平移、
+ * 双击、旋转适配和点击关闭，因此列表预览与其他单图预览不会逐渐产生两套手势行为。
+ */
+@Composable
+private fun ZoomablePreviewViewport(
+    imageSize: IntSize?,
+    stateKey: Any,
+    rotationDegrees: Float,
+    isCurrent: Boolean,
+    zoomEnabled: Boolean,
+    onZoomedChange: (Boolean) -> Unit,
+    onTap: () -> Unit,
+    content: @Composable BoxScope.(Modifier) -> Unit,
+) {
+    val animatedRotation by animateFloatAsState(
+        targetValue = rotationDegrees,
+        animationSpec = tween(220),
+        label = "previewRotation",
+    )
+    var scale by remember(stateKey) { mutableFloatStateOf(1f) }
+    var offset by remember(stateKey) { mutableStateOf(Offset.Zero) }
+    var zoomAnimJob by remember(stateKey) { mutableStateOf<Job?>(null) }
+    val scope = rememberCoroutineScope()
+    val zoomed = scale > 1.01f
+
+    LaunchedEffect(isCurrent) {
+        if (!isCurrent) {
+            zoomAnimJob?.cancel()
+            scale = 1f
+            offset = Offset.Zero
+        }
+    }
+    LaunchedEffect(isCurrent, zoomed) {
+        if (isCurrent) onZoomedChange(zoomed)
+    }
+    LaunchedEffect(rotationDegrees) {
+        zoomAnimJob?.cancel()
+        scale = 1f
+        offset = Offset.Zero
+    }
+
+    val rawAspect = imageSize?.takeIf { it.width > 0 && it.height > 0 }?.let {
+        it.width.toFloat() / it.height.toFloat()
+    }
+    val quarterTurn = ((rotationDegrees / 90f).roundToInt() % 2) != 0
+    val imageAspect = rawAspect?.let { if (quarterTurn) 1f / it else it }
+    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
+    val viewportW = viewportSize.width.toFloat()
+    val viewportH = viewportSize.height.toFloat()
+    val baseImageW: Float
+    val baseImageH: Float
+    if (rawAspect != null && viewportW > 0f && viewportH > 0f) {
+        val viewportAspect = viewportW / viewportH
+        baseImageW = if (rawAspect > viewportAspect) viewportW else viewportH * rawAspect
+        baseImageH = if (rawAspect > viewportAspect) viewportW / rawAspect else viewportH
+    } else {
+        baseImageW = 0f
+        baseImageH = 0f
+    }
+
+    fun clampOffset(
+        targetScale: Float,
+        targetOffset: Offset,
+        displayWidth: Float,
+        displayHeight: Float,
+        containerWidth: Float,
+        containerHeight: Float,
+    ): Offset {
+        val maxX = max(0f, (displayWidth * targetScale - containerWidth) / 2f)
+        val maxY = max(0f, (displayHeight * targetScale - containerHeight) / 2f)
+        return Offset(
+            targetOffset.x.coerceIn(-maxX, maxX),
+            targetOffset.y.coerceIn(-maxY, maxY),
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { viewportSize = it }
+            // 单指且处于 1x 时不消费，让列表分页器接管；单图预览的根层会统一阻断穿透。
+            .pointerInput(imageAspect, zoomEnabled) {
+                val aspect = imageAspect
+                if (!zoomEnabled || aspect == null) return@pointerInput
+                val containerWidth = size.width.toFloat()
+                val containerHeight = size.height.toFloat()
+                val containerAspect = containerWidth / containerHeight
+                val displayWidth = if (aspect > containerAspect) {
+                    containerWidth
+                } else {
+                    containerHeight * aspect
+                }
+                val displayHeight = if (aspect > containerAspect) {
+                    containerWidth / aspect
+                } else {
+                    containerHeight
+                }
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    zoomAnimJob?.cancel()
+                    do {
+                        val event = awaitPointerEvent()
+                        val pressed = event.changes.count { it.pressed }
+                        if (pressed >= 2 || scale > 1.01f) {
+                            val zoomChange = event.calculateZoom()
+                            val panChange = event.calculatePan()
+                            if (zoomChange != 1f || panChange != Offset.Zero) {
+                                val newScale = (scale * zoomChange).coerceIn(1f, MAX_ZOOM)
+                                val centroid = event.calculateCentroid(useCurrent = true)
+                                val centerDelta = Offset(
+                                    centroid.x - containerWidth / 2f,
+                                    centroid.y - containerHeight / 2f,
+                                )
+                                offset = clampOffset(
+                                    newScale,
+                                    offset + centerDelta * (scale - newScale) + panChange,
+                                    displayWidth,
+                                    displayHeight,
+                                    containerWidth,
+                                    containerHeight,
+                                )
+                                scale = newScale
+                                event.changes.forEach { change ->
+                                    if (change.pressed) change.consume()
+                                }
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
+                }
+            }
+            .pointerInput(imageAspect, zoomEnabled) {
+                val containerWidth = size.width.toFloat()
+                val containerHeight = size.height.toFloat()
+                detectTapGestures(
+                    onTap = { if (scale <= 1.01f) onTap() },
+                    onDoubleTap = { tap ->
+                        val aspect = imageAspect
+                        if (!zoomEnabled || aspect == null) return@detectTapGestures
+                        val containerAspect = containerWidth / containerHeight
+                        val displayWidth = if (aspect > containerAspect) {
+                            containerWidth
+                        } else {
+                            containerHeight * aspect
+                        }
+                        val displayHeight = if (aspect > containerAspect) {
+                            containerWidth / aspect
+                        } else {
+                            containerHeight
+                        }
+                        val targetScale = if (scale > 1.01f) 1f else DOUBLE_TAP_ZOOM
+                        val startScale = scale
+                        val startOffset = offset
+                        val targetOffset = if (targetScale == 1f) {
+                            Offset.Zero
+                        } else {
+                            clampOffset(
+                                targetScale,
+                                Offset(
+                                    tap.x - containerWidth / 2f,
+                                    tap.y - containerHeight / 2f,
+                                ) * (1f - targetScale),
+                                displayWidth,
+                                displayHeight,
+                                containerWidth,
+                                containerHeight,
+                            )
+                        }
+                        zoomAnimJob?.cancel()
+                        zoomAnimJob = scope.launch {
+                            Animatable(0f).animateTo(1f, tween(240)) {
+                                scale = startScale + (targetScale - startScale) * value
+                                offset = androidx.compose.ui.geometry.lerp(
+                                    startOffset,
+                                    targetOffset,
+                                    value,
+                                )
+                            }
+                        }
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        val imageTransform = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                val angle = Math.toRadians(animatedRotation.toDouble())
+                val absCos = abs(cos(angle)).toFloat()
+                val absSin = abs(sin(angle)).toFloat()
+                val boundsWidth = baseImageW * absCos + baseImageH * absSin
+                val boundsHeight = baseImageW * absSin + baseImageH * absCos
+                val rotationFit = if (boundsWidth > 0f && boundsHeight > 0f) {
+                    min(viewportW / boundsWidth, viewportH / boundsHeight)
+                } else {
+                    1f
+                }
+                val portraitBreathingRoom = if ((rawAspect ?: 0f) > 1f) {
+                    1f - 0.08f * absSin
+                } else {
+                    1f
+                }
+                scaleX = scale * rotationFit * portraitBreathingRoom
+                scaleY = scale * rotationFit * portraitBreathingRoom
+                translationX = offset.x
+                translationY = offset.y
+                rotationZ = animatedRotation
+            }
+        content(imageTransform)
     }
 }

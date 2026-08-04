@@ -394,6 +394,7 @@ fun HomeScreen(
                 ZMark(modifier = Modifier.height(20.dp))
             }
             Spacer(modifier = Modifier.weight(1f))
+            DebugSimulatorButton(onClick = viewModel::connectDebugSimulator)
             // 免费版：金徽标"解锁高级版"，点击开介绍弹窗（全 app 唯一激活码入口）。
             // 已解锁：金徽标"高级版"，点击不弹窗，放烟花彩蛋。
             if (!isPro) {

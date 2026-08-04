@@ -6,5 +6,7 @@ import android.content.Intent
 object CameraEndpointOverride {
     fun applyLaunchIntent(@Suppress("UNUSED_PARAMETER") intent: Intent?) = Unit
 
+    fun enableSimulator(): Boolean = false
+
     fun hostOrNull(): String? = null
 }

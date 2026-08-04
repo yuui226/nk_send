@@ -13,11 +13,23 @@ import com.ztransfer.R
 import com.ztransfer.frame.PhotoFrameDestination
 import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFramePreset
+import com.ztransfer.frame.PhotoFrameWatermark
+import com.ztransfer.frame.PhotoFrameWatermarkColor
+import com.ztransfer.frame.PhotoFrameWatermarkContent
+import com.ztransfer.frame.PhotoFrameWatermarkEffect
+import com.ztransfer.frame.PhotoFrameWatermarkFont
+import com.ztransfer.frame.PhotoFrameWatermarkOpacity
+import com.ztransfer.frame.PhotoFrameWatermarkPosition
+import com.ztransfer.frame.PhotoFrameWatermarkSize
 import com.ztransfer.frame.PHOTO_FRAME_OUTPUT_DIRECTORY
 import com.ztransfer.frame.PHOTO_FRAME_PART_PREFIX
 import com.ztransfer.frame.hasFrameFor
 import com.ztransfer.frame.isCurrentPhotoFrameTempName
 import com.ztransfer.frame.isPhotoFrameOutputName
+import com.ztransfer.frame.isPhotoPlacement
+import com.ztransfer.frame.importPhotoFrameWatermarkImage as storePhotoFrameWatermarkImage
+import com.ztransfer.frame.photoFrameWatermarkImageFile
+import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
@@ -55,7 +67,7 @@ data class TransferTask(
     /** 入队时锁定的边框预设；null 表示该任务不生成边框图。 */
     val framePreset: PhotoFramePreset? = null,
     /** 与预设同时快照，避免排队期间修改设置改变已入队任务的输出。 */
-    val frameBrandingRequested: Boolean = true,
+    val frameWatermarkRequested: PhotoFrameWatermark = PhotoFrameWatermark(),
     val status: TransferStatus = TransferStatus.WAITING,
     val progress: Float = 0f,
     val speed: Long = 0,
@@ -120,8 +132,17 @@ data class TransferState(
     val photoFrameEnabled: Boolean = false,
     // 已传输 JPG 生成分享边框图时采用的默认预设。渲染只另存新文件，不覆盖原片。
     val photoFramePreset: PhotoFramePreset = PhotoFramePreset.MIST,
-    // 右下角 ZTransfer 品牌标记。免费版渲染时强制开启；高级版可关闭并记住选择。
-    val photoFrameBrandingEnabled: Boolean = true,
+    // 自定义水印。免费版渲染时强制使用默认值；高级版可关闭和调整，并记住选择。
+    val photoFrameWatermarkEnabled: Boolean = true,
+    val photoFrameWatermarkContent: PhotoFrameWatermarkContent = PhotoFrameWatermarkContent.TEXT,
+    val photoFrameWatermarkText: String = "ZTransfer",
+    val photoFrameWatermarkImageHash: String? = null,
+    val photoFrameWatermarkFont: PhotoFrameWatermarkFont = PhotoFrameWatermarkFont.ELEGANT,
+    val photoFrameWatermarkSize: PhotoFrameWatermarkSize = PhotoFrameWatermarkSize.MEDIUM,
+    val photoFrameWatermarkPosition: PhotoFrameWatermarkPosition = PhotoFrameWatermarkPosition.AUTO,
+    val photoFrameWatermarkColor: PhotoFrameWatermarkColor = PhotoFrameWatermarkColor.ADAPTIVE,
+    val photoFrameWatermarkOpacity: PhotoFrameWatermarkOpacity = PhotoFrameWatermarkOpacity.STANDARD,
+    val photoFrameWatermarkEffect: PhotoFrameWatermarkEffect = PhotoFrameWatermarkEffect.AUTO,
     // 监看页是否使用应用内横屏全屏布局。跨进页、跨应用重启持久化。
     val remoteRotation: Int = 0,  // 0=竖屏, 1=横90°, 2=横270°
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
@@ -130,6 +151,20 @@ data class TransferState(
 )
 
 internal fun normalizeThumbnailColumns(columns: Int): Int = columns.coerceIn(2, 4)
+
+internal val TransferState.photoFrameWatermark: PhotoFrameWatermark
+    get() = PhotoFrameWatermark(
+        enabled = photoFrameWatermarkEnabled,
+        content = photoFrameWatermarkContent,
+        text = photoFrameWatermarkText,
+        imageHash = photoFrameWatermarkImageHash,
+        font = photoFrameWatermarkFont,
+        size = photoFrameWatermarkSize,
+        position = photoFrameWatermarkPosition,
+        color = photoFrameWatermarkColor,
+        opacity = photoFrameWatermarkOpacity,
+        effect = photoFrameWatermarkEffect,
+    )
 
 /** 队列剩余待处理数量（正在传、等待传或正在生成派生图）。供顶栏药丸等复用。 */
 val TransferState.remainingCount: Int
@@ -147,9 +182,34 @@ val TransferState.currentFileProgress: Float
     get() = tasks.firstOrNull { it.status == TransferStatus.TRANSFERING }?.progress
         ?: if (tasks.any { it.isGeneratingFrame }) 1f else 0f
 
-/** 免费版始终显示品牌；高级版遵从用户开关。渲染层和设置 UI 共用，避免授权规则分叉。 */
-internal fun photoFrameBrandingVisible(isPro: Boolean, preferenceEnabled: Boolean): Boolean =
-    !isPro || preferenceEnabled
+/** 免费版固定使用默认水印；高级版完整采用用户设置。预览和真正导出必须共用该入口。 */
+internal fun effectivePhotoFrameWatermark(
+    isPro: Boolean,
+    preference: PhotoFrameWatermark,
+): PhotoFrameWatermark {
+    if (!isPro) return PhotoFrameWatermark()
+
+    val imageHash = validPhotoFrameWatermarkImageHash(preference.imageHash)
+    val content = if (
+        preference.content == PhotoFrameWatermarkContent.IMAGE && imageHash != null
+    ) {
+        PhotoFrameWatermarkContent.IMAGE
+    } else {
+        PhotoFrameWatermarkContent.TEXT
+    }
+    return preference.copy(
+        content = content,
+        text = preference.displayText,
+        imageHash = imageHash,
+        position = if (content == PhotoFrameWatermarkContent.IMAGE &&
+            !preference.position.isPhotoPlacement()
+        ) {
+            PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
+        } else {
+            preference.position
+        },
+    )
+}
 
 /** 只允许 JPG/JPEG 派生分享图；视频、RAW 和未知类型始终保持原样传输。 */
 internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Boolean =
@@ -170,7 +230,7 @@ internal fun createQueueTasks(
     files: List<NikonCamera.FileInfo>,
     photoFrameEnabled: Boolean,
     photoFramePreset: PhotoFramePreset,
-    photoFrameBrandingEnabled: Boolean,
+    photoFrameWatermark: PhotoFrameWatermark,
 ): List<TransferTask> = files.asSequence()
     // 同一次批量点击按相机文件去重；不同点击始终创建独立任务。
     .distinctBy { it.handle }
@@ -180,7 +240,7 @@ internal fun createQueueTasks(
             framePreset = photoFramePreset.takeIf {
                 shouldGeneratePhotoFrame(photoFrameEnabled, file.extension)
             },
-            frameBrandingRequested = photoFrameBrandingEnabled,
+            frameWatermarkRequested = photoFrameWatermark,
         )
     }
     .toList()
@@ -292,6 +352,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         if (storedSkinName != null && storedSkinName != restoredSkinPreset.name) {
             prefs.edit().putString("skin_preset", restoredSkinPreset.name).apply()
         }
+        val restoredWatermarkImageHash = validPhotoFrameWatermarkImageHash(
+            prefs.getString("photo_frame_watermark_image_hash", null)
+        )?.takeIf { hash -> photoFrameWatermarkImageFile(application, hash).isFile }
+        val restoredWatermarkContent = runCatching {
+            PhotoFrameWatermarkContent.valueOf(
+                prefs.getString(
+                    "photo_frame_watermark_content",
+                    PhotoFrameWatermarkContent.TEXT.name,
+                ) ?: PhotoFrameWatermarkContent.TEXT.name,
+            )
+        }.getOrDefault(PhotoFrameWatermarkContent.TEXT).let { content ->
+            if (content == PhotoFrameWatermarkContent.IMAGE && restoredWatermarkImageHash == null) {
+                PhotoFrameWatermarkContent.TEXT
+            } else {
+                content
+            }
+        }
         _state.update {
             it.copy(
                 transferDirUri = dir,
@@ -321,8 +398,60 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             ?: PhotoFramePreset.MIST.name
                     )
                 }.getOrDefault(PhotoFramePreset.MIST),
-                photoFrameBrandingEnabled =
+                photoFrameWatermarkEnabled =
                     prefs.getBoolean("photo_frame_branding_enabled", true),
+                photoFrameWatermarkContent = restoredWatermarkContent,
+                photoFrameWatermarkText =
+                    prefs.getString("photo_frame_watermark_text", "ZTransfer") ?: "ZTransfer",
+                photoFrameWatermarkImageHash = restoredWatermarkImageHash,
+                photoFrameWatermarkFont = runCatching {
+                    PhotoFrameWatermarkFont.valueOf(
+                        prefs.getString(
+                            "photo_frame_watermark_font",
+                            PhotoFrameWatermarkFont.ELEGANT.name,
+                        ) ?: PhotoFrameWatermarkFont.ELEGANT.name,
+                    )
+                }.getOrDefault(PhotoFrameWatermarkFont.ELEGANT),
+                photoFrameWatermarkSize = runCatching {
+                    PhotoFrameWatermarkSize.valueOf(
+                        prefs.getString(
+                            "photo_frame_watermark_size",
+                            PhotoFrameWatermarkSize.MEDIUM.name,
+                        ) ?: PhotoFrameWatermarkSize.MEDIUM.name,
+                    )
+                }.getOrDefault(PhotoFrameWatermarkSize.MEDIUM),
+                photoFrameWatermarkPosition = runCatching {
+                    PhotoFrameWatermarkPosition.valueOf(
+                        prefs.getString(
+                            "photo_frame_watermark_position",
+                            PhotoFrameWatermarkPosition.AUTO.name,
+                        ) ?: PhotoFrameWatermarkPosition.AUTO.name,
+                    )
+                }.getOrDefault(PhotoFrameWatermarkPosition.AUTO),
+                photoFrameWatermarkColor = runCatching {
+                    PhotoFrameWatermarkColor.valueOf(
+                        prefs.getString(
+                            "photo_frame_watermark_color",
+                            PhotoFrameWatermarkColor.ADAPTIVE.name,
+                        ) ?: PhotoFrameWatermarkColor.ADAPTIVE.name,
+                    )
+                }.getOrDefault(PhotoFrameWatermarkColor.ADAPTIVE),
+                photoFrameWatermarkOpacity = runCatching {
+                    PhotoFrameWatermarkOpacity.valueOf(
+                        prefs.getString(
+                            "photo_frame_watermark_opacity",
+                            PhotoFrameWatermarkOpacity.STANDARD.name,
+                        ) ?: PhotoFrameWatermarkOpacity.STANDARD.name,
+                    )
+                }.getOrDefault(PhotoFrameWatermarkOpacity.STANDARD),
+                photoFrameWatermarkEffect = runCatching {
+                    PhotoFrameWatermarkEffect.valueOf(
+                        prefs.getString(
+                            "photo_frame_watermark_effect",
+                            PhotoFrameWatermarkEffect.AUTO.name,
+                        ) ?: PhotoFrameWatermarkEffect.AUTO.name,
+                    )
+                }.getOrDefault(PhotoFrameWatermarkEffect.AUTO),
                 remoteRotation = prefs.getInt("remote_rotation", 0),
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
@@ -378,38 +507,94 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(previewRotationQuarterTurns = normalized) }
     }
 
-    fun setPhotoFramePreset(preset: PhotoFramePreset) {
-        prefs.edit().putString("photo_frame_preset", preset.name).apply()
-        _state.update { it.copy(photoFramePreset = preset) }
-    }
-
     fun setPhotoFrameEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("photo_frame_enabled", enabled).apply()
         _state.update { it.copy(photoFrameEnabled = enabled) }
     }
 
     /**
-     * 设置页拨轮的原子提交入口：null 表示关闭且不清空上次预设，非空值同时开启并更新预设。
-     * 只在拨轮松手后调用，避免拖动预览过程中连续写 SharedPreferences。
+     * 二级页退出时一次提交边框与水印，避免逐字写偏好或让主设置短暂显示半套新配置。
+     * 免费版即使绕过 UI 传入水印也会被忽略，只允许更新边框样式。
      */
-    fun setPhotoFrameSelection(preset: PhotoFramePreset?) {
+    fun setPhotoFrameConfiguration(
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark?,
+    ) {
+        val normalized = watermark
+            ?.takeIf { LicenseManager.isPro.value }
+            ?.let { effectivePhotoFrameWatermark(isPro = true, preference = it) }
         prefs.edit().apply {
-            putBoolean("photo_frame_enabled", preset != null)
-            if (preset != null) putString("photo_frame_preset", preset.name)
+            putString("photo_frame_preset", preset.name)
+            normalized?.let {
+                // 沿用旧 key，升级用户原有的水印开关偏好无需迁移。
+                putBoolean("photo_frame_branding_enabled", it.enabled)
+                putString("photo_frame_watermark_content", it.content.name)
+                putString("photo_frame_watermark_text", it.text)
+                if (it.imageHash == null) {
+                    remove("photo_frame_watermark_image_hash")
+                } else {
+                    putString("photo_frame_watermark_image_hash", it.imageHash)
+                }
+                putString("photo_frame_watermark_font", it.font.name)
+                putString("photo_frame_watermark_size", it.size.name)
+                putString("photo_frame_watermark_position", it.position.name)
+                putString("photo_frame_watermark_color", it.color.name)
+                putString("photo_frame_watermark_opacity", it.opacity.name)
+                putString("photo_frame_watermark_effect", it.effect.name)
+            }
         }.apply()
         _state.update {
             it.copy(
-                photoFrameEnabled = preset != null,
-                photoFramePreset = preset ?: it.photoFramePreset,
+                photoFramePreset = preset,
+                photoFrameWatermarkEnabled = normalized?.enabled
+                    ?: it.photoFrameWatermarkEnabled,
+                photoFrameWatermarkContent = normalized?.content
+                    ?: it.photoFrameWatermarkContent,
+                photoFrameWatermarkText = normalized?.text
+                    ?: it.photoFrameWatermarkText,
+                photoFrameWatermarkImageHash = if (normalized != null) {
+                    normalized.imageHash
+                } else {
+                    it.photoFrameWatermarkImageHash
+                },
+                photoFrameWatermarkFont = normalized?.font
+                    ?: it.photoFrameWatermarkFont,
+                photoFrameWatermarkSize = normalized?.size
+                    ?: it.photoFrameWatermarkSize,
+                photoFrameWatermarkPosition = normalized?.position
+                    ?: it.photoFrameWatermarkPosition,
+                photoFrameWatermarkColor = normalized?.color
+                    ?: it.photoFrameWatermarkColor,
+                photoFrameWatermarkOpacity = normalized?.opacity
+                    ?: it.photoFrameWatermarkOpacity,
+                photoFrameWatermarkEffect = normalized?.effect
+                    ?: it.photoFrameWatermarkEffect,
             )
         }
     }
 
-    fun setPhotoFrameBrandingEnabled(enabled: Boolean) {
-        // 免费版不能关闭。即使 UI 发生竞态或未来增加其它入口，业务层仍是最终防线。
-        if (!enabled && !LicenseManager.isPro.value) return
-        prefs.edit().putBoolean("photo_frame_branding_enabled", enabled).apply()
-        _state.update { it.copy(photoFrameBrandingEnabled = enabled) }
+    /**
+     * 将 Photo Picker 返回的临时 URI 复制为内容寻址的私有文件。调用方只持有摘要，原图随后
+     * 被移动、删除或系统回收 URI 权限，都不会影响预览和导出。
+     */
+    fun importPhotoFrameWatermarkImage(
+        sourceUri: Uri,
+        onComplete: (Result<String>) -> Unit,
+    ) {
+        if (!LicenseManager.isPro.value) {
+            onComplete(Result.failure(IllegalStateException("Custom watermark requires Pro")))
+            return
+        }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                storePhotoFrameWatermarkImage(
+                    context = getApplication(),
+                    resolver = contentResolver,
+                    sourceUri = sourceUri,
+                )
+            }
+            onComplete(result)
+        }
     }
 
     /** 保存监看页的应用内横屏状态；不改变 Android Activity 的系统方向。 */
@@ -504,7 +689,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             files = files,
             photoFrameEnabled = snapshot.photoFrameEnabled,
             photoFramePreset = snapshot.photoFramePreset,
-            photoFrameBrandingEnabled = snapshot.photoFrameBrandingEnabled,
+            photoFrameWatermark = snapshot.photoFrameWatermark,
         )
         if (newTasks.isEmpty()) return
         _state.update { state -> state.copy(tasks = state.tasks + newTasks) }
@@ -596,6 +781,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             // 第二查必须发生在启动前台服务之前。若边框已经存在，任务会瞬间
                             // 完成；此时先 startForegroundService 再立即 stop，会在部分系统上
                             // 触发 ForegroundServiceDidNotStartInTimeException，直接杀掉 App。
+                            val effectiveWatermark = effectivePhotoFrameWatermark(
+                                isPro = LicenseManager.isPro.value,
+                                preference = task.frameWatermarkRequested,
+                            )
                             val destinationKey = uri.toString()
                             val frameExists = withContext(photoFrameDispatcher) {
                                 val destination = photoFrameDestinations[destinationKey]
@@ -608,7 +797,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             prepared,
                                         ) ?: prepared
                                     }
-                                destination.hasFrameFor(localOriginal.displayName, preset)
+                                destination.hasFrameFor(
+                                    localOriginal.displayName,
+                                    preset,
+                                    effectiveWatermark,
+                                )
                             }
                             if (frameExists) {
                                 log {
@@ -644,7 +837,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 sourceUri = localOriginal.uri,
                                 sourceName = localOriginal.displayName,
                                 preset = preset,
-                                brandingRequested = task.frameBrandingRequested,
+                                watermarkRequested = task.frameWatermarkRequested,
                                 skipIfExisting = true,
                                 failTaskOnError = true,
                             )
@@ -893,7 +1086,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             sourceUri = renamedUri,
                                             sourceName = savedName,
                                             preset = framePreset,
-                                            brandingRequested = task.frameBrandingRequested,
+                                            watermarkRequested = task.frameWatermarkRequested,
                                             skipIfExisting = true,
                                         )
                                     }
@@ -1213,7 +1406,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         sourceUri: Uri,
         sourceName: String,
         preset: PhotoFramePreset,
-        brandingRequested: Boolean,
+        watermarkRequested: PhotoFrameWatermark,
         skipIfExisting: Boolean = false,
         failTaskOnError: Boolean = false,
     ) {
@@ -1228,21 +1421,26 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     ).let { prepared ->
                         photoFrameDestinations.putIfAbsent(destinationKey, prepared) ?: prepared
                     }
-                if (skipIfExisting && destination.hasFrameFor(sourceName, preset)) {
+                // 在真正轮到渲染时重新判定授权：排队期间若高级版到期，免费版默认
+                // 水印立即恢复；查重与导出必须使用同一份生效配置。
+                val effectiveWatermark = effectivePhotoFrameWatermark(
+                    isPro = LicenseManager.isPro.value,
+                    preference = watermarkRequested,
+                )
+                if (
+                    skipIfExisting &&
+                    destination.hasFrameFor(sourceName, preset, effectiveWatermark)
+                ) {
                     FrameExportOutcome.AlreadyExists
                 } else {
                     PhotoFrameExporter.export(
+                        context = getApplication(),
                         resolver = contentResolver,
                         destination = destination,
                         sourceUri = sourceUri,
                         sourceName = sourceName,
                         preset = preset,
-                        // 在真正轮到渲染时重新判定授权：排队期间若高级版到期，免费版水印
-                        // 立即恢复；不能只依赖入队瞬间的 UI 状态。
-                        showBranding = photoFrameBrandingVisible(
-                            isPro = LicenseManager.isPro.value,
-                            preferenceEnabled = brandingRequested,
-                        ),
+                        watermark = effectiveWatermark,
                     ).fold(
                         onSuccess = { FrameExportOutcome.Saved(it.displayName) },
                         onFailure = { FrameExportOutcome.Failed(it) },
