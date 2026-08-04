@@ -33,8 +33,8 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
-        versionName = "1.55"
+        versionCode = 26
+        versionName = "1.56"
 
         // The app exposes exactly English, Simplified Chinese and Traditional
         // Chinese. Do not package translations contributed by AndroidX for

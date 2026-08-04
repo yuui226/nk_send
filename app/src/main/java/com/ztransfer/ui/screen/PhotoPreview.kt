@@ -348,7 +348,14 @@ internal fun PhotoPreviewOverlay(
                         val s = startScale + (1f - startScale) * progress.value
                         scaleX = s
                         scaleY = s
-                        alpha = (progress.value * 1.6f).coerceAtMost(1f)
+                        // 打开首帧就绘制已缓存的源缩略图，避免 overlay 已挂载但动画尚未
+                        // 前进时整块图片透明、短暂透出照片列表。关闭时仍随缩回过程淡出，
+                        // 与底层原格子自然交接。
+                        alpha = if (closing) {
+                            (progress.value * 1.6f).coerceAtMost(1f)
+                        } else {
+                            1f
+                        }
                     } else {
                         scaleX = 1f
                         scaleY = 1f
@@ -770,7 +777,11 @@ private fun PreviewPage(
         animationSpec = tween(220),
         label = "previewRotation"
     )
-    var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
+    // 预览通常由一个已经显示缩略图的可见格子打开。同步复用同一份内存缓存，确保
+    // overlay 第一帧就有画面；缓存未命中时才异步走磁盘/相机兜底。
+    var thumbnail by remember(file.handle) {
+        mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
+    }
     // 取过仍为 null → 该文件确实没有缩略图（如部分视频）。
     var noThumb by remember(file.handle) { mutableStateOf(false) }
     LaunchedEffect(file.handle) {
@@ -780,7 +791,8 @@ private fun PreviewPage(
         }
     }
 
-    // FHD 到位后从缩略图平滑过渡（300ms 淡入），视觉上"画面变清晰"（blur-up）。
+    // FHD 到位后覆盖在缩略图上淡入。缩略图在过渡完成前始终保持不透明，避免两张图
+    // 的有效画面边界略有差异时交叉淡出露出背景，视觉上只发生一次连续的“变清晰”。
     val fhdAlpha = remember { Animatable(0f) }
     LaunchedEffect(fhdBitmap) {
         if (fhdBitmap != null) {
@@ -904,6 +916,9 @@ private fun PreviewPage(
         contentAlignment = Alignment.Center
     ) {
         val thumb = thumbnail  // 本地变量，delegate 属性无法被编译器 smart cast
+        // 若 FHD 比缩略图先到，直接显示 FHD；不能等待 LaunchedEffect 下一帧再 snap，
+        // 否则仍会产生一帧全透明图片区。
+        val effectiveFhdAlpha = if (thumb == null) 1f else fhdAlpha.value
         val anyLoading = isLoadingFhd || (!noThumb && thumbnail == null)
         when {
             isVideo -> {
@@ -974,22 +989,23 @@ private fun PreviewPage(
                             rotationZ = animatedRotation
                         }
                 ) {
-                    if (fhdBitmap != null && thumb != null && fhdAlpha.value < 1f) {
+                    if (thumb != null && (fhdBitmap == null || effectiveFhdAlpha < 1f)) {
                         Image(
                             bitmap = thumb,
-                            contentDescription = null,
+                            contentDescription = file.fileName.takeIf { fhdBitmap == null },
                             contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                            alpha = 1f - fhdAlpha.value
+                            modifier = Modifier.fillMaxSize()
                         )
                     }
-                    Image(
-                        bitmap = displayBitmap,
-                        contentDescription = file.fileName,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize(),
-                        alpha = if (fhdBitmap != null) fhdAlpha.value else 1f
-                    )
+                    if (fhdBitmap != null) {
+                        Image(
+                            bitmap = fhdBitmap,
+                            contentDescription = file.fileName,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                            alpha = effectiveFhdAlpha
+                        )
+                    }
 
                 }
             }
