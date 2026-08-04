@@ -94,6 +94,8 @@ data class TransferState(
     // 连拍合集显示（默认关闭，保持旧版照片网格原样）：开启后列表把每段已识别的连拍
     // 收成一个可展开的虚拟卡位；原始文件集合、筛选和传输语义均不改变。
     val collapseBurstPhotos: Boolean = false,
+    // 照片网格手势：默认保持轻触传输、长按预览；开启后只交换两个触发入口。
+    val tapToPreview: Boolean = false,
     // 触感反馈开关：默认开启，用户关闭后持久化，下次启动保持。
     val hapticsEnabled: Boolean = true,
     // 屏幕常亮（默认开启）：应用在前台时不熄屏——熄屏后系统会冻结进程/让 Wi-Fi 打盹，
@@ -297,6 +299,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     prefs.getInt("thumbnail_columns", 3)
                 ),
                 collapseBurstPhotos = prefs.getBoolean("collapse_burst_photos", true),
+                tapToPreview = prefs.getBoolean("tap_to_preview", false),
                 hapticsEnabled = prefs.getBoolean("haptics_enabled", true),
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
                 themeMode = prefs.getString("theme_mode", null)
@@ -341,6 +344,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setCollapseBurstPhotos(enabled: Boolean) {
         prefs.edit().putBoolean("collapse_burst_photos", enabled).apply()
         _state.update { it.copy(collapseBurstPhotos = enabled) }
+    }
+
+    fun setTapToPreview(enabled: Boolean) {
+        prefs.edit().putBoolean("tap_to_preview", enabled).apply()
+        _state.update { it.copy(tapToPreview = enabled) }
     }
 
     fun setThemeMode(mode: ThemeMode) {

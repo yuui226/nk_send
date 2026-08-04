@@ -89,6 +89,9 @@
     <string name="choose_directory">Choose folder</string>
     <string name="columns">Columns</string>
     <string name="collapse_burst_photos">Group bursts</string>
+    <string name="photo_interaction">Photo interaction</string>
+    <string name="tap_transfer_hold_preview">Tap: transfer\nHold: preview</string>
+    <string name="tap_preview_hold_transfer">Tap: preview\nHold: transfer</string>
     <string name="appearance">Appearance</string>
     <string name="light_dark_mode">Light &amp; dark</string>
     <string name="button_style">Button style</string>

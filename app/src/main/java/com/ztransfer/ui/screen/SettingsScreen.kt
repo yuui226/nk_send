@@ -278,7 +278,7 @@ fun SettingsOverlay(
 
             Spacer(Modifier.height(8.dp))
 
-            // ---------- 高频开关：固定 2×2，去掉解释文字以压缩高度 ----------
+            // ---------- 照片列表：布局和操作方式 ----------
             SettingsCard {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -330,40 +330,23 @@ fun SettingsOverlay(
 
                 CardDivider()
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.heightIn(min = 44.dp),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        SectionLabel(
-                            stringResource(R.string.haptic_feedback),
-                            modifier = Modifier.weight(1f)
+                Column {
+                    SectionLabel(stringResource(R.string.photo_interaction))
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SelectionChip(
+                            label = stringResource(R.string.tap_transfer_hold_preview),
+                            selected = !state.tapToPreview,
+                            onClick = { viewModel.setTapToPreview(false) },
+                            twoLine = true,
+                            modifier = Modifier.weight(1f),
                         )
-                        SettingsSwitch(
-                            checked = state.hapticsEnabled,
-                            onCheckedChange = viewModel::setHapticsEnabled,
-                            hapticsEnabled = state.hapticsEnabled,
-                            isHapticsPreference = true,
-                        )
-                    }
-                    CompactVerticalDivider()
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 12.dp),
-                    ) {
-                        SectionLabel(
-                            stringResource(R.string.keep_screen_on),
-                            modifier = Modifier.weight(1f)
-                        )
-                        SettingsSwitch(
-                            checked = state.keepScreenOn,
-                            onCheckedChange = viewModel::setKeepScreenOn,
-                            hapticsEnabled = state.hapticsEnabled,
+                        SelectionChip(
+                            label = stringResource(R.string.tap_preview_hold_transfer),
+                            selected = state.tapToPreview,
+                            onClick = { viewModel.setTapToPreview(true) },
+                            twoLine = true,
+                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
@@ -528,6 +511,46 @@ fun SettingsOverlay(
                             onDetent = haptics::tick,
                             label = stringResource(R.string.button_style),
                             modifier = Modifier.width(wheelWidth),
+                        )
+                    }
+                }
+
+                CardDivider()
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.heightIn(min = 44.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        SectionLabel(
+                            stringResource(R.string.haptic_feedback),
+                            modifier = Modifier.weight(1f)
+                        )
+                        SettingsSwitch(
+                            checked = state.hapticsEnabled,
+                            onCheckedChange = viewModel::setHapticsEnabled,
+                            hapticsEnabled = state.hapticsEnabled,
+                            isHapticsPreference = true,
+                        )
+                    }
+                    CompactVerticalDivider()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp),
+                    ) {
+                        SectionLabel(
+                            stringResource(R.string.keep_screen_on),
+                            modifier = Modifier.weight(1f)
+                        )
+                        SettingsSwitch(
+                            checked = state.keepScreenOn,
+                            onCheckedChange = viewModel::setKeepScreenOn,
+                            hapticsEnabled = state.hapticsEnabled,
                         )
                     }
                 }
@@ -846,21 +869,29 @@ private fun SelectionChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     textStyle: TextStyle = MaterialTheme.typography.labelLarge,
-    compact: Boolean = false
+    compact: Boolean = false,
+    twoLine: Boolean = false,
 ) {
     val colors = AppTheme.colors
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(8.dp),
         color = if (selected) colors.accentBlue else colors.surfaceVariant,
-        modifier = modifier.height(if (compact) 34.dp else 40.dp)
+        modifier = modifier.height(
+            when {
+                compact -> 34.dp
+                twoLine -> 52.dp
+                else -> 40.dp
+            }
+        )
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = label,
                 style = textStyle,
                 fontWeight = FontWeight.Bold,
-                maxLines = 1,
+                maxLines = if (twoLine) 2 else 1,
+                textAlign = TextAlign.Center,
                 color = if (selected) colors.onAccent else colors.onSurfaceVariant
             )
         }

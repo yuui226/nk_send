@@ -1,21 +1,15 @@
 package com.ztransfer.protocol
 
-import android.content.Intent
-
 /**
- * Debug-only ADB reverse endpoint. The enabling extra and loopback address do not exist in
- * the Release source set, so a production build cannot activate or discover this path.
+ * Debug-only embedded camera endpoint. The simulator lives in the app process, so a manually
+ * installed Debug APK needs neither ADB reverse nor access to the development computer.
  */
 object CameraEndpointOverride {
-    private const val EXTRA_LOOPBACK_CAMERA = "com.ztransfer.debug.LOOPBACK_CAMERA"
-    private const val LOOPBACK_HOST = "127.0.0.1"
+    private const val SIMULATOR_HOST = "127.0.0.1"
 
-    @Volatile
-    private var enabled = false
-
-    fun applyLaunchIntent(intent: Intent?) {
-        enabled = intent?.getBooleanExtra(EXTRA_LOOPBACK_CAMERA, false) == true
+    fun applyLaunchIntent(@Suppress("UNUSED_PARAMETER") intent: android.content.Intent?) {
+        DebugCameraSimulator.start()
     }
 
-    fun hostOrNull(): String? = LOOPBACK_HOST.takeIf { enabled }
+    fun hostOrNull(): String? = SIMULATOR_HOST
 }

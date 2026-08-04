@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Debug 源集可由 ADB 启用回环相机；Release 源集实现为空，不解析任何调试参数。
+        // Debug 源集启动内置回环相机；Release 源集实现为空，不包含任何模拟入口。
         CameraEndpointOverride.applyLaunchIntent(intent)
         // 恢复授权状态（本地验签，毫秒级）并在后台触发静默续签（≥7 天且有网时）。
         com.ztransfer.license.LicenseManager.init(applicationContext)

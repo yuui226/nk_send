@@ -89,6 +89,9 @@
     <string name="choose_directory">選擇目錄</string>
     <string name="columns">欄數</string>
     <string name="collapse_burst_photos">連拍成組</string>
+    <string name="photo_interaction">照片操作</string>
+    <string name="tap_transfer_hold_preview">點擊：傳輸\n長按：預覽</string>
+    <string name="tap_preview_hold_transfer">點擊：預覽\n長按：傳輸</string>
     <string name="appearance">外觀</string>
     <string name="light_dark_mode">明暗模式</string>
     <string name="button_style">按鈕風格</string>

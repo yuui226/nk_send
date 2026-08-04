@@ -839,6 +839,7 @@ fun FileListScreen(
                 onTapFile = onTapFile,
                 onPreview = onPreview,
                 onPreviewBurst = onPreviewBurst,
+                tapToPreview = transferState.tapToPreview,
                 cellBoundsRegistry = cellBoundsRegistry,
                 burstHandles = burstHandles,
                 burstIdByHandle = burstIdByHandle,
@@ -1775,6 +1776,7 @@ private fun ThumbnailGrid(
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
     onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit,
+    tapToPreview: Boolean,
     cellBoundsRegistry: MutableMap<Int, Rect>,
     burstHandles: Set<Int>,
     burstIdByHandle: Map<Int, String>,
@@ -2050,6 +2052,7 @@ private fun ThumbnailGrid(
                                     cameraViewModel = cameraViewModel,
                                     onTapFile = onTapFile,
                                     onPreview = onPreview,
+                                    tapToPreview = tapToPreview,
                                     cellBoundsRegistry = cellBoundsRegistry,
                                     inBurst = file.handle in burstHandles,
                                     inExpandedBurstCollection =
@@ -2317,6 +2320,7 @@ private fun ThumbnailCell(
     cameraViewModel: CameraViewModel,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
+    tapToPreview: Boolean,
     cellBoundsRegistry: MutableMap<Int, Rect>,
     modifier: Modifier = Modifier,
     inBurst: Boolean = false,
@@ -2406,13 +2410,17 @@ private fun ThumbnailCell(
                     }
                 }
             }
-            // 轻触加入队列；普通下载已入队时父层忽略，已落盘或正在下载的 JPG
-            // 可按新边框预设追加独立任务。
-            // 长按预览大图在任何状态下都可用。
+            // 只在这里交换两个既有动作的手势入口；传输校验、入队和预览逻辑保持单一来源。
             .combinedClickable(
                 enabled = !exiting,
-                onClick = { onTapFile(file) },
-                onLongClick = { cellBounds?.let { onPreview(file, it) } }
+                onClick = {
+                    if (tapToPreview) cellBounds?.let { onPreview(file, it) }
+                    else onTapFile(file)
+                },
+                onLongClick = {
+                    if (tapToPreview) onTapFile(file)
+                    else cellBounds?.let { onPreview(file, it) }
+                }
             )
     ) {
         val image = thumbnail
