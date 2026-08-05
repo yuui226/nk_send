@@ -1,6 +1,7 @@
 package com.ztransfer.protocol
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Test
 import java.io.EOFException
 import java.io.InputStream
@@ -12,7 +13,19 @@ import java.nio.ByteOrder
 class DebugCameraSimulatorTest {
     @Test
     fun embeddedSimulatorCompletesHandshakeAndListsAllPhotos() {
-        DebugCameraSimulator.start()
+        val featuredJpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xD9.toByte())
+        val featuredFhd = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0x01, 0xFF.toByte(), 0xD9.toByte())
+        DebugCameraSimulator.start(
+            DebugCameraSimulator.FeaturedImage(
+                image = featuredJpeg,
+                fhdPreview = featuredFhd,
+                thumbnail = featuredJpeg,
+                width = 1365,
+                height = 2048,
+                thumbnailWidth = 320,
+                thumbnailHeight = 480,
+            )
+        )
         val command = connectWithRetry()
         command.use { cmd ->
             writePacket(cmd, type = 1)
@@ -43,6 +56,7 @@ class DebugCameraSimulatorTest {
                 val handles = readDataResponse(cmd, transactionId = 2)
                 assertEquals(36, handles.intLe(0))
                 val firstHandle = handles.intLe(4)
+                val featuredHandle = handles.intLe(4 + 35 * 4)
 
                 sendCommand(cmd, operation = 0x1008, transactionId = 3, firstHandle)
                 val objectInfo = readDataResponse(cmd, transactionId = 3)
@@ -54,6 +68,20 @@ class DebugCameraSimulatorTest {
                 assertEquals("89504e47", thumbnail.take(4).joinToString("") {
                     "%02x".format(it)
                 })
+
+                sendCommand(cmd, operation = 0x1008, transactionId = 5, featuredHandle)
+                val featuredInfo = readDataResponse(cmd, transactionId = 5)
+                assertEquals(0x3801, featuredInfo.shortLe(4))
+                assertEquals("ZSIM_0001.JPG", featuredInfo.ptpString(52))
+
+                sendCommand(cmd, operation = 0x100A, transactionId = 6, featuredHandle)
+                val featuredThumbnail = readDataResponse(cmd, transactionId = 6)
+                assertEquals("ffd8", featuredThumbnail.take(2).joinToString("") {
+                    "%02x".format(it)
+                })
+
+                sendCommand(cmd, operation = 0x920F, transactionId = 7, featuredHandle)
+                assertArrayEquals(featuredFhd, readDataResponse(cmd, transactionId = 7))
             }
         }
     }

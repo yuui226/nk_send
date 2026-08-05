@@ -171,6 +171,28 @@
     <string name="photo_frame_effect_none">無</string>
     <string name="photo_frame_effect_shadow">陰影</string>
     <string name="photo_frame_effect_outline">描邊</string>
+    <string name="photo_filter">照片濾鏡</string>
+    <string name="photo_filter_none">尚未匯入濾鏡</string>
+    <string name="photo_filter_summary">%1$s · %2$d%%</string>
+    <string name="photo_filter_open_editor">編輯照片濾鏡</string>
+    <string name="photo_filter_import">匯入 NP3</string>
+    <string name="photo_filter_importing">正在匯入…</string>
+    <string name="photo_filter_import_result">已匯入 %1$d 個 · 略過 %2$d 個</string>
+    <string name="photo_filter_import_none">沒有找到可相容的簡單 NP3 濾鏡</string>
+    <string name="photo_filter_description">原圖保持不變，套用濾鏡的效果圖會另外儲存</string>
+    <string name="photo_filter_simple_note">支援不含自訂曲線和三路分級的簡單 NP3 預設</string>
+    <string name="photo_filter_intensity">濾鏡強度</string>
+    <string name="photo_filter_before">原圖</string>
+    <string name="photo_filter_after">濾鏡</string>
+    <string name="photo_filter_compare_hint">拖曳亮線，對比前後效果</string>
+    <string name="photo_filter_task_label">濾鏡：%1$s · %2$d%%</string>
+    <string name="photo_filter_preview">照片濾鏡預覽</string>
+    <string name="photo_filter_builtin_natural">自然鮮活</string>
+    <string name="photo_filter_builtin_warm_film">暖陽膠片</string>
+    <string name="photo_filter_builtin_teal_cinema">青橙電影</string>
+    <string name="photo_filter_builtin_soft_portrait">柔和人像</string>
+    <string name="photo_filter_builtin_documentary_mono">黑白紀實</string>
+    <string name="photo_filter_builtin_note">內置預設由應用統一調校並隨版本維護</string>
     <string name="restore_default">恢復預設</string>
 
     <!-- 傳輸錯誤 -->

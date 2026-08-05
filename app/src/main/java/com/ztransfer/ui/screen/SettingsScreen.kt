@@ -3,6 +3,7 @@ package com.ztransfer.ui.screen
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Shader
 import android.provider.DocumentsContract
@@ -32,6 +33,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -39,11 +41,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
@@ -58,13 +63,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -82,6 +90,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
@@ -102,6 +111,11 @@ import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
 import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
 import com.ztransfer.frame.limitPhotoFrameWatermarkText
 import com.ztransfer.frame.isPhotoPlacement
+import com.ztransfer.filter.Np3PhotoFilter
+import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.PhotoFilterRenderer
+import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
@@ -109,17 +123,23 @@ import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
 import com.ztransfer.viewmodel.photoFrameWatermark
+import com.ztransfer.viewmodel.photoFilterSelection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 // 客服/购买 QQ 号（用户使用场景多为连着相机 Wi-Fi 无外网，只能靠复制号码离线联系）。
 internal const val QQ_NUMBER = "953000922"
 // 定价不在这里了:由服务端下发(LicenseManager.pricing),改价改服务器的 pricing.json 即可,
 // 不用发版。兜底常量见 LicenseManager.FALLBACK_PRICE_FEN。
+
+private enum class SettingsPage { MAIN, FRAME, FILTER }
 
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），从顶栏设置按钮变形弹出、关闭缩回按钮
@@ -129,6 +149,7 @@ internal const val QQ_NUMBER = "953000922"
 @Composable
 fun SettingsOverlay(
     viewModel: TransferViewModel,
+    effectPreviewSource: Bitmap? = null,
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
     // 已解锁时右上角徽标点击的回调（放烟花彩蛋）；由承载页提供其页面级 FireworksState。
@@ -140,7 +161,8 @@ fun SettingsOverlay(
     val colors = AppTheme.colors
     val isPro by LicenseManager.isPro.collectAsState()
     val haptics = rememberHaptics(state.hapticsEnabled)
-    val activity = LocalContext.current.findActivity()
+    val context = LocalContext.current
+    val activity = context.findActivity()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
@@ -175,7 +197,7 @@ fun SettingsOverlay(
     var showRenewInfo by remember { mutableStateOf(false) }
     // 页脚"我要换机"打开的对话框（取激活码 + 换机后果告知）。
     var showSwitchDevice by remember { mutableStateOf(false) }
-    var showPhotoFrameEditor by remember { mutableStateOf(false) }
+    var settingsPage by remember { mutableStateOf(SettingsPage.MAIN) }
     var expandedWatermarkPreview by remember {
         mutableStateOf<ExpandedWatermarkPreview?>(null)
     }
@@ -185,13 +207,43 @@ fun SettingsOverlay(
     var frameDraftBorderEnabled by remember { mutableStateOf(state.photoFrameBorderEnabled) }
     var frameDraftPreset by remember { mutableStateOf(state.photoFramePreset) }
     var watermarkDraft by remember { mutableStateOf(state.photoFrameWatermark) }
+    var filterDraftId by remember { mutableStateOf(state.selectedPhotoFilterId) }
+    var filterDraftEnabled by remember { mutableStateOf(state.photoFilterEnabled) }
+    var filterDraftIntensity by remember {
+        mutableIntStateOf(state.photoFilterIntensityPercent)
+    }
+    val fallbackEffectPreviewSource = remember { createPhotoFramePreviewSource() }
+    val effectPreviewBase = remember(effectPreviewSource) {
+        downscalePreviewBitmap(
+            effectPreviewSource ?: fallbackEffectPreviewSource,
+            PHOTO_FRAME_PREVIEW_RENDER_LONG_EDGE,
+        )
+    }
+    var effectPreviewRotationQuarterTurns by remember(effectPreviewBase) {
+        mutableIntStateOf(0)
+    }
+    val rotatedEffectPreviewSource by produceState(
+        initialValue = effectPreviewBase,
+        effectPreviewBase,
+        effectPreviewRotationQuarterTurns,
+    ) {
+        value = withContext(Dispatchers.Default) {
+            rotatePreviewBitmap(effectPreviewBase, effectPreviewRotationQuarterTurns)
+        }
+    }
+    val rotateEffectPreview = {
+        effectPreviewRotationQuarterTurns = (effectPreviewRotationQuarterTurns + 1) % 4
+    }
     val mainSettingsScroll = rememberScrollState()
     val photoFrameEditorScroll = rememberScrollState()
+    val photoFilterEditorScroll = rememberScrollState()
     val subExpired by LicenseManager.subExpired.collectAsState()
-    LaunchedEffect(showPhotoFrameEditor) {
-        if (showPhotoFrameEditor) {
+    LaunchedEffect(settingsPage) {
+        if (settingsPage == SettingsPage.FRAME) {
             showFrameExportInfo = false
             photoFrameEditorScroll.scrollTo(0)
+        } else if (settingsPage == SettingsPage.FILTER) {
+            photoFilterEditorScroll.scrollTo(0)
         }
     }
     fun commitPhotoFrameDraft() {
@@ -201,6 +253,13 @@ fun SettingsOverlay(
             borderEnabled = frameDraftBorderEnabled,
             preset = frameDraftPreset,
             watermark = watermarkDraft.takeIf { isPro },
+        )
+    }
+    fun commitPhotoFilterDraft() {
+        viewModel.setPhotoFilterConfiguration(
+            selectedId = filterDraftId,
+            intensityPercent = filterDraftIntensity,
+            enabled = filterDraftEnabled && filterDraftId != null,
         )
     }
 
@@ -260,7 +319,11 @@ fun SettingsOverlay(
     AnchorPopup(
         anchorBounds = openingAnchorBounds,
         onDismiss = {
-            if (showPhotoFrameEditor) commitPhotoFrameDraft()
+            when (settingsPage) {
+                SettingsPage.FRAME -> commitPhotoFrameDraft()
+                SettingsPage.FILTER -> commitPhotoFilterDraft()
+                SettingsPage.MAIN -> Unit
+            }
             // AnchorPopup 只会在收起动画 animateTo(0f) 完成后调用这里，因此语言切换不会
             // 再硬切掉弹窗；关闭按钮、返回键和点遮罩三条路径都共用这一时序。
             onDismiss()
@@ -327,20 +390,25 @@ fun SettingsOverlay(
         }
     ) { close ->
         BackHandler(
-            enabled = showPhotoFrameEditor && expandedWatermarkPreview == null
+            enabled = settingsPage != SettingsPage.MAIN && expandedWatermarkPreview == null
         ) {
-            commitPhotoFrameDraft()
-            showPhotoFrameEditor = false
+            when (settingsPage) {
+                SettingsPage.FRAME -> commitPhotoFrameDraft()
+                SettingsPage.FILTER -> commitPhotoFilterDraft()
+                SettingsPage.MAIN -> Unit
+            }
+            settingsPage = SettingsPage.MAIN
         }
         AnimatedContent(
-            targetState = showPhotoFrameEditor,
+            targetState = settingsPage,
             transitionSpec = {
-                val enter = if (targetState) {
+                val enteringEditor = targetState != SettingsPage.MAIN
+                val enter = if (enteringEditor) {
                     slideInHorizontally(Motion.pageSlide) { it / 3 }
                 } else {
                     slideInHorizontally(Motion.pageSlide) { -it / 3 }
                 }
-                val exit = if (targetState) {
+                val exit = if (enteringEditor) {
                     slideOutHorizontally(Motion.pageSlide) { -it / 3 }
                 } else {
                     slideOutHorizontally(Motion.pageSlide) { it / 3 }
@@ -355,27 +423,35 @@ fun SettingsOverlay(
                     )
             },
             contentAlignment = Alignment.TopCenter,
-            label = "settingsPhotoFramePage",
+            label = "settingsDetailPage",
             modifier = Modifier.fillMaxWidth(),
-        ) { editorPage ->
+        ) { page ->
             Column(
                 modifier = Modifier
-                    .clearFocusOnBackgroundTap(editorPage) {
+                    .clearFocusOnBackgroundTap(page != SettingsPage.MAIN) {
                         focusManager.clearFocus()
                     }
                     .verticalScroll(
-                        if (editorPage) photoFrameEditorScroll else mainSettingsScroll
+                        when (page) {
+                            SettingsPage.MAIN -> mainSettingsScroll
+                            SettingsPage.FRAME -> photoFrameEditorScroll
+                            SettingsPage.FILTER -> photoFilterEditorScroll
+                        }
                     )
                     .padding(16.dp)
             ) {
             // ---------- 标题栏：二级页复用全局 GlassButton 返回；主设置保留原关闭入口 ----------
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (editorPage) {
+                if (page != SettingsPage.MAIN) {
                     GlassButton(
                         onClick = {
                             focusManager.clearFocus()
-                            commitPhotoFrameDraft()
-                            showPhotoFrameEditor = false
+                            when (page) {
+                                SettingsPage.FRAME -> commitPhotoFrameDraft()
+                                SettingsPage.FILTER -> commitPhotoFilterDraft()
+                                SettingsPage.MAIN -> Unit
+                            }
+                            settingsPage = SettingsPage.MAIN
                         },
                         modifier = Modifier.height(36.dp),
                     ) {
@@ -390,21 +466,30 @@ fun SettingsOverlay(
                 }
                 Text(
                     stringResource(
-                        if (editorPage) R.string.photo_frame_watermark
-                        else R.string.settings
+                        when (page) {
+                            SettingsPage.MAIN -> R.string.settings
+                            SettingsPage.FRAME -> R.string.photo_frame_watermark
+                            SettingsPage.FILTER -> R.string.photo_filter
+                        }
                     ),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = colors.onBackground
                 )
                 Spacer(Modifier.weight(1f))
-                if (editorPage) {
+                if (page != SettingsPage.MAIN) {
                     GlassButton(
                         onClick = {
                             focusManager.clearFocus()
-                            frameDraftBorderEnabled = true
-                            frameDraftPreset = PhotoFramePreset.MIST
-                            if (isPro) watermarkDraft = PhotoFrameWatermark()
+                            when (page) {
+                                SettingsPage.FRAME -> {
+                                    frameDraftBorderEnabled = true
+                                    frameDraftPreset = PhotoFramePreset.MIST
+                                    if (isPro) watermarkDraft = PhotoFrameWatermark()
+                                }
+                                SettingsPage.FILTER -> filterDraftIntensity = 100
+                                SettingsPage.MAIN -> Unit
+                            }
                         },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.height(36.dp),
@@ -438,9 +523,11 @@ fun SettingsOverlay(
                 }
             }
 
-            if (editorPage) {
+            if (page == SettingsPage.FRAME) {
                 Spacer(Modifier.height(14.dp))
                 PhotoFrameWatermarkEditor(
+                    previewSource = rotatedEffectPreviewSource,
+                    onPreviewRotate = rotateEffectPreview,
                     borderEnabled = frameDraftBorderEnabled,
                     preset = frameDraftPreset,
                     // 高级版编辑器必须保留正在输入的原始草稿（包括暂时为空）；若在这里
@@ -490,6 +577,21 @@ fun SettingsOverlay(
                             )
                         }
                     },
+                )
+            } else if (page == SettingsPage.FILTER) {
+                Spacer(Modifier.height(14.dp))
+                PhotoFilterEditor(
+                    previewSource = rotatedEffectPreviewSource,
+                    onPreviewRotate = rotateEffectPreview,
+                    filters = state.photoFilters,
+                    selectedId = filterDraftId,
+                    intensityPercent = filterDraftIntensity,
+                    onSelected = {
+                        filterDraftId = it
+                        filterDraftEnabled = true
+                    },
+                    onIntensityChanged = { filterDraftIntensity = it },
+                    hapticsEnabled = state.hapticsEnabled,
                 )
             } else {
             if (showPro) {
@@ -646,6 +748,92 @@ fun SettingsOverlay(
 
             Spacer(Modifier.height(8.dp))
 
+            // ---------- 照片滤镜：原片不改动，只给导出的副本套用；点击卡片进入可视化编辑页 ----------
+            val selectedPhotoFilter = state.photoFilters.firstOrNull {
+                it.id == state.selectedPhotoFilterId
+            }
+            val openFilterEditor = {
+                filterDraftId = state.selectedPhotoFilterId
+                    ?: state.photoFilters.firstOrNull()?.id
+                filterDraftIntensity = state.photoFilterIntensityPercent
+                filterDraftEnabled = state.photoFilterEnabled
+                settingsPage = SettingsPage.FILTER
+            }
+            SettingsCard(
+                borderColor = colors.accentOrange.copy(
+                    alpha = if (state.photoFilterEnabled) 0.56f else 0.30f
+                ),
+                pressAccentColor = colors.accentOrange,
+                onClick = openFilterEditor,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                ) {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = colors.accentOrange,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(vertical = 4.dp),
+                    ) {
+                        SectionLabel(
+                            stringResource(R.string.photo_filter),
+                            color = colors.accentOrange,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = selectedPhotoFilter?.let {
+                                stringResource(
+                                    R.string.photo_filter_summary,
+                                    photoFilterDisplayName(it),
+                                    state.photoFilterIntensityPercent,
+                                )
+                            } ?: stringResource(R.string.photo_filter_none),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = stringResource(R.string.photo_filter_description),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    GlassButton(
+                        onClick = openFilterEditor,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = stringResource(R.string.photo_filter_open_editor),
+                            tint = colors.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    SettingsSwitch(
+                        checked = state.photoFilterEnabled,
+                        onCheckedChange = viewModel::setPhotoFilterEnabled,
+                        hapticsEnabled = state.hapticsEnabled,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
             // ---------- 边框水印：主行只保留总开关，点击进入同一面板内的二级编辑页 ----------
             val frameChoices = listOf(
                 PhotoFramePreset.MIST to stringResource(R.string.photo_frame_mist),
@@ -677,7 +865,7 @@ fun SettingsOverlay(
                     // 输入框，用户点进去编辑的就是它本身，不再显示一个假占位文本。
                     it.copy(text = it.displayText)
                 }
-                showPhotoFrameEditor = true
+                settingsPage = SettingsPage.FRAME
             }
             SettingsCard(
                 borderColor = colors.accentBlue.copy(
@@ -1000,7 +1188,370 @@ private data class ExpandedWatermarkPreview(
 )
 
 @Composable
+private fun PhotoFilterEditor(
+    previewSource: Bitmap,
+    onPreviewRotate: () -> Unit,
+    filters: List<Np3PhotoFilter>,
+    selectedId: String?,
+    intensityPercent: Int,
+    onSelected: (String) -> Unit,
+    onIntensityChanged: (Int) -> Unit,
+    hapticsEnabled: Boolean,
+) {
+    val colors = AppTheme.colors
+    val haptics = rememberHaptics(hapticsEnabled)
+    val source = remember(previewSource) {
+        downscalePreviewBitmap(
+            previewSource,
+            PHOTO_FILTER_PREVIEW_LONG_EDGE,
+        )
+    }
+    val thumbnailSource = remember(source) {
+        val width = 240
+        val height = (width * source.height.toFloat() / source.width.coerceAtLeast(1))
+            .roundToInt()
+            .coerceAtLeast(1)
+        Bitmap.createScaledBitmap(source, width, height, true)
+    }
+    val selected = filters.firstOrNull { it.id == selectedId }
+    val normalizedIntensity = normalizePhotoFilterIntensity(intensityPercent)
+
+    SettingsCard(
+        borderColor = colors.accentOrange.copy(alpha = 0.42f),
+    ) {
+        PhotoFilterComparePreview(
+            source = source,
+            filter = selected,
+            intensityPercent = normalizedIntensity,
+            onRotate = onPreviewRotate,
+        )
+        Spacer(Modifier.height(10.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(
+                Icons.Default.Compare,
+                contentDescription = null,
+                tint = colors.accentOrange,
+                modifier = Modifier.size(17.dp),
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                stringResource(R.string.photo_filter_compare_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
+    }
+
+    Spacer(Modifier.height(10.dp))
+    SettingsCard {
+        SectionLabel(stringResource(R.string.photo_filter))
+
+        Spacer(Modifier.height(10.dp))
+        if (filters.isEmpty()) {
+            Surface(
+                color = colors.accentOrange.copy(alpha = 0.09f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, colors.accentOrange.copy(alpha = 0.30f)),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    stringResource(R.string.photo_filter_none),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 20.dp),
+                )
+            }
+        } else {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                contentPadding = PaddingValues(horizontal = 1.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                items(filters, key = { it.id }) { filter ->
+                    PhotoFilterFilmCard(
+                        source = thumbnailSource,
+                        filter = filter,
+                        selected = filter.id == selectedId,
+                        onClick = {
+                            if (filter.id != selectedId) haptics.tick()
+                            onSelected(filter.id)
+                        },
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.photo_filter_intensity),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onBackground,
+            )
+            Spacer(Modifier.weight(1f))
+            Surface(
+                color = colors.accentOrange.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(9.dp),
+            ) {
+                Text(
+                    "$normalizedIntensity%",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.accentOrange,
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                )
+            }
+        }
+        Slider(
+            value = normalizedIntensity.toFloat(),
+            onValueChange = { onIntensityChanged(it.roundToInt()) },
+            valueRange = 0f..100f,
+            enabled = selected != null,
+            colors = SliderDefaults.colors(
+                thumbColor = colors.accentOrange,
+                activeTrackColor = colors.accentOrange,
+                inactiveTrackColor = colors.onSurfaceVariant.copy(alpha = 0.18f),
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            stringResource(R.string.photo_filter_builtin_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            stringResource(R.string.photo_filter_description),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun PhotoFilterComparePreview(
+    source: Bitmap,
+    filter: Np3PhotoFilter?,
+    intensityPercent: Int,
+    onRotate: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    var seamFraction by remember { mutableFloatStateOf(0.5f) }
+    var renderFailed by remember(source, filter, intensityPercent) { mutableStateOf(false) }
+    val filtered by produceState<Bitmap?>(
+        initialValue = null,
+        source,
+        filter,
+        intensityPercent,
+    ) {
+        value = null
+        renderFailed = false
+        if (filter != null) {
+            try {
+                value = withContext(Dispatchers.Default) {
+                    val renderContext = currentCoroutineContext()
+                    PhotoFilterRenderer.render(
+                        source,
+                        PhotoFilterSelection(filter, intensityPercent),
+                        isCancelled = { !renderContext.isActive },
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Rendering is an enhancement. Keep the original visible instead of leaving a
+                // permanent loading spinner after an allocation/device-specific failure.
+                renderFailed = true
+            }
+        }
+    }
+    val beforeImage = remember(source) { source.asImageBitmap() }
+    val afterImage = remember(filtered) { filtered?.asImageBitmap() }
+    val shape = RoundedCornerShape(16.dp)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(
+                (source.width.toFloat() / source.height.coerceAtLeast(1)).coerceIn(0.5f, 2.5f)
+            )
+            .clip(shape)
+            .background(colors.surfaceVariant)
+            .onSizeChanged { viewport = it }
+            .pointerInput(viewport, filter) {
+                if (filter == null) return@pointerInput
+                detectDragGestures(
+                    onDragStart = { offset ->
+                        if (viewport.width > 0) {
+                            seamFraction = (offset.x / viewport.width).coerceIn(0f, 1f)
+                        }
+                    },
+                    onDrag = { change, _ ->
+                        if (viewport.width > 0) {
+                            seamFraction = (change.position.x / viewport.width).coerceIn(0f, 1f)
+                        }
+                    },
+                )
+            },
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val destination = IntSize(size.width.roundToInt(), size.height.roundToInt())
+            drawImage(afterImage ?: beforeImage, dstSize = destination)
+            if (afterImage != null) {
+                val seamX = size.width * seamFraction
+                clipRect(right = seamX) {
+                    drawImage(beforeImage, dstSize = destination)
+                }
+                drawLine(
+                    color = Color.White.copy(alpha = 0.96f),
+                    start = Offset(seamX, 0f),
+                    end = Offset(seamX, size.height),
+                    strokeWidth = 2.5.dp.toPx(),
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.96f),
+                    radius = 11.dp.toPx(),
+                    center = Offset(seamX, size.height / 2f),
+                )
+                drawCircle(
+                    color = colors.accentOrange,
+                    radius = 6.dp.toPx(),
+                    center = Offset(seamX, size.height / 2f),
+                )
+            }
+        }
+        if (filter != null && filtered == null && !renderFailed) {
+            CircularProgressIndicator(
+                color = colors.accentOrange,
+                strokeWidth = 2.dp,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(24.dp),
+            )
+        }
+        PhotoFilterCompareLabel(
+            text = stringResource(R.string.photo_filter_before),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(9.dp),
+        )
+        PreviewRotationButton(
+            onClick = onRotate,
+            buttonSize = 38.dp,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(9.dp),
+        )
+        PhotoFilterCompareLabel(
+            text = stringResource(R.string.photo_filter_after),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(9.dp),
+        )
+    }
+}
+
+@Composable
+private fun PhotoFilterCompareLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.46f),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+        modifier = modifier,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun PhotoFilterFilmCard(
+    source: Bitmap,
+    filter: Np3PhotoFilter,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val thumbnail by produceState<Bitmap?>(null, source, filter.id) {
+        value = withContext(Dispatchers.Default) {
+            PhotoFilterRenderer.render(source, PhotoFilterSelection(filter, 100))
+        }
+    }
+    val image = remember(thumbnail) { thumbnail?.asImageBitmap() }
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(112.dp)
+            .clip(shape)
+            .clickable(onClick = onClick)
+            .background(
+                if (selected) colors.accentOrange.copy(alpha = 0.13f)
+                else colors.surfaceVariant.copy(alpha = 0.52f)
+            )
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) colors.accentOrange
+                else colors.glassPanelBorder,
+                shape = shape,
+            )
+            .padding(5.dp),
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f / 2f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(colors.surfaceVariant),
+        ) {
+            if (image != null) {
+                Image(
+                    bitmap = image,
+                    contentDescription = photoFilterDisplayName(filter),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                CircularProgressIndicator(
+                    color = colors.accentOrange,
+                    strokeWidth = 1.5.dp,
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            photoFilterDisplayName(filter),
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) colors.accentOrange else colors.onSurfaceVariant,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun photoFilterDisplayName(filter: Np3PhotoFilter): String =
+    BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
+
+@Composable
 private fun PhotoFrameWatermarkEditor(
+    previewSource: Bitmap,
+    onPreviewRotate: () -> Unit,
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
@@ -1081,6 +1632,8 @@ private fun PhotoFrameWatermarkEditor(
     )
 
     PhotoFrameRenderedPreview(
+        source = previewSource,
+        onRotate = onPreviewRotate,
         borderEnabled = borderEnabled,
         preset = preset,
         watermark = watermark,
@@ -1481,6 +2034,8 @@ private fun WatermarkTextField(
 
 @Composable
 private fun PhotoFrameRenderedPreview(
+    source: Bitmap,
+    onRotate: () -> Unit,
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
@@ -1488,7 +2043,6 @@ private fun PhotoFrameRenderedPreview(
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
-    val source = remember { createPhotoFramePreviewSource() }
     val rendered = remember { mutableStateOf<RenderedPhotoFramePreview?>(null) }
     var previewFailed by remember { mutableStateOf(false) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
@@ -1530,13 +2084,18 @@ private fun PhotoFrameRenderedPreview(
         }
     }
     val preview = rendered.value
+    val viewportAspectRatio = if (source.height > source.width) {
+        PHOTO_FRAME_PREVIEW_PORTRAIT_ASPECT_RATIO
+    } else {
+        PHOTO_FRAME_PREVIEW_LANDSCAPE_ASPECT_RATIO
+    }
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxWidth()
             // 不包设置卡片：省下描边和 12dp 内边距，把整块可用宽高留给真实成片预览。
-            // 所有预设仍共用固定视口；铭牌在内部 Fit，不会推动设置页高度跳变。
-            .aspectRatio(PHOTO_FRAME_PREVIEW_VIEWPORT_ASPECT_RATIO)
+            // 横图和竖图各用稳定视口；边框成片在内部 Fit，完整呈现对应方向的留白与铭牌。
+            .aspectRatio(viewportAspectRatio)
             .onGloballyPositioned { previewBounds = it.boundsInRoot() }
             .clickable(
                 enabled = preview != null && previewBounds != null,
@@ -1630,12 +2189,41 @@ private fun PhotoFrameRenderedPreview(
                     )
                 }
             }
+            PreviewRotationButton(
+                onClick = onRotate,
+                buttonSize = 38.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp),
+            )
     }
 }
 
-private const val PHOTO_FRAME_PREVIEW_VIEWPORT_ASPECT_RATIO = 4f / 3f
+private const val PHOTO_FRAME_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
+private const val PHOTO_FRAME_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
 // 比屏幕展示尺寸保留约 3 倍采样余量，同时避免连续调节时堆积过大的过渡位图。
 private const val PHOTO_FRAME_PREVIEW_RENDER_LONG_EDGE = 1080
+// 设置卡片实际显示宽度不足 500px；720 已有充足超采样，同时让切换滤镜保持即时响应。
+private const val PHOTO_FILTER_PREVIEW_LONG_EDGE = 720
+
+private fun downscalePreviewBitmap(source: Bitmap, maxLongEdge: Int): Bitmap {
+    val longEdge = maxOf(source.width, source.height)
+    if (longEdge <= maxLongEdge) return source
+    val scale = maxLongEdge.toFloat() / longEdge
+    return Bitmap.createScaledBitmap(
+        source,
+        (source.width * scale).roundToInt().coerceAtLeast(1),
+        (source.height * scale).roundToInt().coerceAtLeast(1),
+        true,
+    )
+}
+
+private fun rotatePreviewBitmap(source: Bitmap, quarterTurns: Int): Bitmap {
+    val normalized = Math.floorMod(quarterTurns, 4)
+    if (normalized == 0) return source
+    val matrix = Matrix().apply { setRotate(-90f * normalized) }
+    return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+}
 
 private data class RenderedPhotoFramePreview(
     val preset: PhotoFramePreset,

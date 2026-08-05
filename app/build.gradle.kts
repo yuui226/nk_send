@@ -1,4 +1,6 @@
 import java.io.FileInputStream
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Properties
 
 plugins {
@@ -33,8 +35,8 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "1.56"
+        versionCode = 27
+        versionName = "1.57"
 
         // The app exposes exactly English, Simplified Chinese and Traditional
         // Chinese. Do not package translations contributed by AndroidX for
@@ -117,6 +119,31 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")
+}
+
+// assembleDebug 完成后额外复制一份带秒级时间戳的 APK。保留 AGP 的 app-debug.apk，
+// 避免破坏 IDE/ADB 对标准产物路径的依赖；实际发到手机时使用 dist-debug 下的唯一文件名，
+// 不会被 QQ、网盘或文件管理器的同名缓存误认为旧安装包。
+val copyTimestampedDebugApk = tasks.register("copyTimestampedDebugApk") {
+    group = "build"
+    description = "Copy the debug APK to dist with a unique build timestamp"
+    outputs.upToDateWhen { false }
+    doLast {
+        val source = layout.buildDirectory.file("outputs/apk/debug/app-debug.apk").get().asFile
+        check(source.isFile) { "Debug APK not found: ${source.absolutePath}" }
+        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        val version = android.defaultConfig.versionName ?: "unknown"
+        val destinationDirectory = rootProject.file("dist-debug").apply { mkdirs() }
+        val destination = destinationDirectory.resolve(
+            "ZTransfer-debug-$version-$stamp.apk"
+        )
+        source.copyTo(destination, overwrite = false)
+        println("Timestamped debug APK: ${destination.absolutePath}")
+    }
+}
+
+tasks.configureEach {
+    if (name == "assembleDebug") finalizedBy(copyTimestampedDebugApk)
 }
 
 // 手动安装到设备的便捷任务：./gradlew installToDevice（构建 release 后按需调用，

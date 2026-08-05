@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -559,7 +558,7 @@ internal fun PhotoPreviewOverlay(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     if (current.extension !in VIDEO_EXTENSIONS) {
-                        RotationButton(onClick = {
+                        PreviewRotationButton(onClick = {
                             val nextDegrees = rotationDegrees - 90f
                             rotationDegrees = nextDegrees
                             // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
@@ -708,9 +707,9 @@ internal fun SinglePhotoPreviewOverlay(
                 .padding(end = 20.dp, bottom = 32.dp)
                 .graphicsLayer { alpha = progress.value },
         ) {
-            RotationButton {
+            PreviewRotationButton(onClick = {
                 rotationDegrees -= 90f
-            }
+            })
         }
     }
 }
@@ -780,20 +779,6 @@ private fun BurstCollectionPreviewPage(
                     .offset(x = stackInset, y = stackInset)
             )
         }
-    }
-}
-
-@Composable
-private fun RotationButton(onClick: () -> Unit) {
-    val colors = AppTheme.colors
-    GlassButton(
-        onClick = onClick,
-        modifier = Modifier.size(44.dp),
-        shape = CircleShape,
-        contentPadding = PaddingValues(11.dp)
-    ) {
-        Icon(Icons.Default.RotateLeft, stringResource(R.string.cd_rotate_photo),
-            tint = colors.accentBlue, modifier = Modifier.size(22.dp))
     }
 }
 

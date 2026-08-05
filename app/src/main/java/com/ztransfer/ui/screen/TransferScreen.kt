@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.frame.PhotoFramePreset
+import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.Np3PhotoFilter
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
@@ -330,6 +332,20 @@ fun TransferScreen(
                                             } else {
                                                 stringResource(R.string.photo_frame_watermark_only)
                                             },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colors.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    task.photoFilterRequested?.let { filter ->
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = stringResource(
+                                                R.string.photo_filter_task_label,
+                                                photoFilterDisplayName(filter.preset),
+                                                filter.normalizedIntensityPercent,
+                                            ),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = colors.onSurfaceVariant,
                                             maxLines = 1,
@@ -612,6 +628,10 @@ private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringReso
         PhotoFramePreset.PLAQUE -> R.string.photo_frame_plaque
     }
 )
+
+@Composable
+private fun photoFilterDisplayName(filter: Np3PhotoFilter): String =
+    BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
 /**
  * 右下角悬浮的"图标 FAB + 二次确认"控件（清空/重试全部共用）：毛玻璃圆形按钮，

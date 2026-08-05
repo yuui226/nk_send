@@ -7,6 +7,9 @@ import com.ztransfer.frame.PhotoFrameWatermarkContent
 import com.ztransfer.frame.PhotoFrameWatermarkEffect
 import com.ztransfer.frame.PhotoFrameWatermarkFont
 import com.ztransfer.frame.PhotoFrameWatermarkPosition
+import com.ztransfer.filter.Np3ColorBand
+import com.ztransfer.filter.Np3PhotoFilter
+import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.protocol.NikonCamera
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -247,6 +250,38 @@ class TransferStateTest {
 
         assertEquals(1, tasks.size)
         assertEquals(null, tasks.single().framePreset)
+    }
+
+    @Test
+    fun queueTaskSnapshotsFilterAtClickTimeWithoutEnablingAFrame() {
+        val filter = PhotoFilterSelection(
+            preset = Np3PhotoFilter(
+                id = "abcdef0123456789",
+                name = "Simple",
+                contrast = 0,
+                highlights = 0,
+                shadows = 0,
+                whiteLevel = 0,
+                blackLevel = 0,
+                saturation = 0,
+                colorBands = List(8) { index ->
+                    Np3ColorBand(index * 45f, 0, 0, 0)
+                },
+            ),
+            intensityPercent = 63,
+        )
+
+        val task = createQueueTasks(
+            files = listOf(file(1)),
+            photoFrameEnabled = false,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = false),
+            photoFilter = filter,
+        ).single()
+
+        assertEquals(null, task.framePreset)
+        assertEquals(filter, task.photoFilterRequested)
+        assertEquals(63, task.photoFilterRequested?.normalizedIntensityPercent)
     }
 
     @Test

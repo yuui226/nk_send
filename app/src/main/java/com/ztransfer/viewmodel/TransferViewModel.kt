@@ -33,6 +33,12 @@ import com.ztransfer.frame.normalizePhotoFrameWatermarkSizePercent
 import com.ztransfer.frame.importPhotoFrameWatermarkImage as storePhotoFrameWatermarkImage
 import com.ztransfer.frame.photoFrameWatermarkImageFile
 import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
+import com.ztransfer.filter.Np3PhotoFilter
+import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.PhotoFilterImportReport
+import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.filter.PhotoFilterStore
+import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
@@ -73,6 +79,8 @@ data class TransferTask(
     val frameBorderRequested: Boolean = true,
     /** 与预设同时快照，避免排队期间修改设置改变已入队任务的输出。 */
     val frameWatermarkRequested: PhotoFrameWatermark = PhotoFrameWatermark(),
+    /** 入队时锁定的滤镜；与边框互相独立，null 表示原片不做颜色处理。 */
+    val photoFilterRequested: PhotoFilterSelection? = null,
     val status: TransferStatus = TransferStatus.WAITING,
     val progress: Float = 0f,
     val speed: Long = 0,
@@ -150,6 +158,11 @@ data class TransferState(
     val photoFrameWatermarkColor: PhotoFrameWatermarkColor = PhotoFrameWatermarkColor.ADAPTIVE,
     val photoFrameWatermarkOpacityPercent: Int = DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
     val photoFrameWatermarkEffect: PhotoFrameWatermarkEffect = PhotoFrameWatermarkEffect.AUTO,
+    // 用户从系统文件选择器导入的简单 NP3；只保存在 App 私有目录，不随安装包分发。
+    val photoFilters: List<Np3PhotoFilter> = emptyList(),
+    val photoFilterEnabled: Boolean = false,
+    val selectedPhotoFilterId: String? = null,
+    val photoFilterIntensityPercent: Int = 100,
     // 监看页是否使用应用内横屏全屏布局。跨进页、跨应用重启持久化。
     val remoteRotation: Int = 0,  // 0=竖屏, 1=横90°, 2=横270°
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
@@ -205,6 +218,13 @@ internal val TransferState.photoFrameWatermark: PhotoFrameWatermark
         opacityPercent = photoFrameWatermarkOpacityPercent,
         effect = photoFrameWatermarkEffect,
     )
+
+internal val TransferState.photoFilterSelection: PhotoFilterSelection?
+    get() {
+        if (!photoFilterEnabled) return null
+        val preset = photoFilters.firstOrNull { it.id == selectedPhotoFilterId } ?: return null
+        return PhotoFilterSelection(preset, photoFilterIntensityPercent)
+    }
 
 /** 队列剩余待处理数量（正在传、等待传或正在生成派生图）。供顶栏药丸等复用。 */
 val TransferState.remainingCount: Int
@@ -273,6 +293,7 @@ internal fun createQueueTasks(
     photoFrameBorderEnabled: Boolean = true,
     photoFramePreset: PhotoFramePreset,
     photoFrameWatermark: PhotoFrameWatermark,
+    photoFilter: PhotoFilterSelection? = null,
 ): List<TransferTask> = files.asSequence()
     // 同一次批量点击按相机文件去重；不同点击始终创建独立任务。
     .distinctBy { it.handle }
@@ -284,6 +305,9 @@ internal fun createQueueTasks(
             },
             frameBorderRequested = photoFrameBorderEnabled,
             frameWatermarkRequested = photoFrameWatermark,
+            photoFilterRequested = photoFilter.takeIf {
+                isSupportedPhotoFrameSourceExtension(file.extension)
+            },
         )
     }
     .toList()
@@ -385,6 +409,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     init {
         val dir = prefs.getString("transfer_dir", null)
+        val restoredPhotoFilters = BuiltInPhotoFilters.all
+        val storedPhotoFilterId = prefs.getString("photo_filter_selected_id", null)
+        val restoredPhotoFilterId = storedPhotoFilterId
+            ?.takeIf { id -> restoredPhotoFilters.any { it.id == id } }
+            ?: restoredPhotoFilters.firstOrNull()?.id
         val storedSkinName = prefs.getString("skin_preset", null)
         val restoredSkinPreset = if (storedSkinName == null) {
             SkinPreset.FROSTED_GLASS
@@ -503,6 +532,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         ) ?: PhotoFrameWatermarkEffect.AUTO.name,
                     )
                 }.getOrDefault(PhotoFrameWatermarkEffect.AUTO),
+                photoFilters = restoredPhotoFilters,
+                photoFilterEnabled = storedPhotoFilterId == restoredPhotoFilterId &&
+                    prefs.getBoolean("photo_filter_enabled", false),
+                selectedPhotoFilterId = restoredPhotoFilterId,
+                photoFilterIntensityPercent = normalizePhotoFilterIntensity(
+                    prefs.getInt("photo_filter_intensity", 100),
+                ),
                 remoteRotation = prefs.getInt("remote_rotation", 0),
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
@@ -658,6 +694,66 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setPhotoFilterEnabled(enabled: Boolean) {
+        val canEnable = enabled && _state.value.selectedPhotoFilterId != null
+        prefs.edit().putBoolean("photo_filter_enabled", canEnable).apply()
+        _state.update { it.copy(photoFilterEnabled = canEnable) }
+    }
+
+    fun setPhotoFilterConfiguration(
+        selectedId: String?,
+        intensityPercent: Int,
+        enabled: Boolean,
+    ) {
+        val validId = selectedId?.takeIf { id -> _state.value.photoFilters.any { it.id == id } }
+        val intensity = normalizePhotoFilterIntensity(intensityPercent)
+        val active = enabled && validId != null
+        prefs.edit().apply {
+            if (validId == null) remove("photo_filter_selected_id")
+            else putString("photo_filter_selected_id", validId)
+            putInt("photo_filter_intensity", intensity)
+            putBoolean("photo_filter_enabled", active)
+        }.apply()
+        _state.update {
+            it.copy(
+                selectedPhotoFilterId = validId,
+                photoFilterIntensityPercent = intensity,
+                photoFilterEnabled = active,
+            )
+        }
+    }
+
+    fun importPhotoFilters(
+        sourceUris: List<Uri>,
+        onComplete: (PhotoFilterImportReport) -> Unit,
+    ) {
+        if (sourceUris.isEmpty()) return
+        viewModelScope.launch {
+            val report = withContext(Dispatchers.IO) {
+                PhotoFilterStore.import(
+                    context = getApplication(),
+                    resolver = contentResolver,
+                    uris = sourceUris,
+                )
+            }
+            val selected = report.imported.firstOrNull()?.id
+                ?: _state.value.selectedPhotoFilterId
+                ?: report.available.firstOrNull()?.id
+            prefs.edit().apply {
+                if (selected != null) putString("photo_filter_selected_id", selected)
+                putBoolean("photo_filter_enabled", selected != null)
+            }.apply()
+            _state.update {
+                it.copy(
+                    photoFilters = report.available,
+                    selectedPhotoFilterId = selected,
+                    photoFilterEnabled = selected != null,
+                )
+            }
+            onComplete(report)
+        }
+    }
+
     /**
      * 将 Photo Picker 返回的临时 URI 复制为内容寻址的私有文件。调用方只持有摘要，原图随后
      * 被移动、删除或系统回收 URI 权限，都不会影响预览和导出。
@@ -776,6 +872,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             photoFrameBorderEnabled = snapshot.photoFrameBorderEnabled,
             photoFramePreset = snapshot.photoFramePreset,
             photoFrameWatermark = snapshot.photoFrameWatermark,
+            photoFilter = snapshot.photoFilterSelection,
         )
         if (newTasks.isEmpty()) return
         _state.update { state -> state.copy(tasks = state.tasks + newTasks) }
@@ -853,7 +950,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         log { "DL_SKIP existing: ${task.file.fileName}" }
                         recordExistingExport(uri, localOriginal.displayName, localOriginal.size)
                         val preset = task.framePreset
-                        if (preset == null) {
+                        val filter = task.photoFilterRequested
+                        if (preset == null && filter == null) {
                             updateTask(taskId) {
                                 it.copy(
                                     status = TransferStatus.COMPLETED,
@@ -867,11 +965,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             // 第二查必须发生在启动前台服务之前。若派生图已经存在，任务会瞬间
                             // 完成；此时先 startForegroundService 再立即 stop，会在部分系统上
                             // 触发 ForegroundServiceDidNotStartInTimeException，直接杀掉 App。
-                            val effectiveWatermark = effectivePhotoFrameWatermark(
-                                isPro = LicenseManager.isPro.value,
-                                preference = task.frameWatermarkRequested,
-                                borderEnabled = task.frameBorderRequested,
-                            )
+                            val decorationRequested = preset != null
+                            val effectivePreset = preset ?: PhotoFramePreset.MIST
+                            val effectiveBorder = decorationRequested && task.frameBorderRequested
+                            val effectiveWatermark = if (decorationRequested) {
+                                effectivePhotoFrameWatermark(
+                                    isPro = LicenseManager.isPro.value,
+                                    preference = task.frameWatermarkRequested,
+                                    borderEnabled = effectiveBorder,
+                                )
+                            } else {
+                                PhotoFrameWatermark(enabled = false)
+                            }
                             val destinationKey = uri.toString()
                             val frameExists = withContext(photoFrameDispatcher) {
                                 val destination = photoFrameDestinations[destinationKey]
@@ -886,15 +991,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     }
                                 destination.hasFrameFor(
                                     localOriginal.displayName,
-                                    preset,
+                                    effectivePreset,
                                     effectiveWatermark,
-                                    borderEnabled = task.frameBorderRequested,
+                                    borderEnabled = effectiveBorder,
+                                    filter = filter,
                                 )
                             }
                             if (frameExists) {
                                 log {
-                                    "DERIVATIVE_SKIP existing: ${localOriginal.displayName} " +
-                                        "border=${task.frameBorderRequested} preset=${preset.name}"
+                                        "DERIVATIVE_SKIP existing: ${localOriginal.displayName} " +
+                                        "border=$effectiveBorder preset=${effectivePreset.name} " +
+                                        "filter=${filter?.preset?.name}"
                                 }
                                 updateTask(taskId) {
                                     it.copy(
@@ -925,9 +1032,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 treeUri = uri,
                                 sourceUri = localOriginal.uri,
                                 sourceName = localOriginal.displayName,
-                                preset = preset,
-                                borderEnabled = task.frameBorderRequested,
+                                preset = effectivePreset,
+                                borderEnabled = effectiveBorder,
                                 watermarkRequested = task.frameWatermarkRequested,
+                                decorationRequested = decorationRequested,
+                                filterRequested = filter,
                                 skipIfExisting = true,
                                 failTaskOnError = true,
                             )
@@ -1149,7 +1258,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     existingUris[savedName] = renamedUri
                                     recordExistingExport(uri, savedName, stats.bytes)
                                     val framePreset = task.framePreset
-                                    val shouldGenerateFrame = framePreset != null
+                                    val photoFilter = task.photoFilterRequested
+                                    val shouldGenerateFrame = framePreset != null || photoFilter != null
                                     // 起点由协议层在取得相机 IO 独占权后记录；这里仍是正式文件
                                     // 已落盘并完成改名/复制后的完成点。
                                     val elapsed = android.os.SystemClock.elapsedRealtime() -
@@ -1166,7 +1276,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             isGeneratingFrame = shouldGenerateFrame,
                                         )
                                     }
-                                    if (framePreset != null) {
+                                    if (shouldGenerateFrame) {
                                         // 派生严格发生在正式原片落盘之后。导出器只读取原片并创建
                                         // 新文件；独立低优先级线程立即接管，传输循环直接处理下一张。
                                         // 无论解码/写入是否失败，都不回滚、不删除原片。
@@ -1175,9 +1285,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             treeUri = uri,
                                             sourceUri = renamedUri,
                                             sourceName = savedName,
-                                            preset = framePreset,
-                                            borderEnabled = task.frameBorderRequested,
+                                            preset = framePreset ?: PhotoFramePreset.MIST,
+                                            borderEnabled = framePreset != null &&
+                                                task.frameBorderRequested,
                                             watermarkRequested = task.frameWatermarkRequested,
+                                            decorationRequested = framePreset != null,
+                                            filterRequested = photoFilter,
                                             skipIfExisting = true,
                                         )
                                     }
@@ -1499,6 +1612,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         preset: PhotoFramePreset,
         borderEnabled: Boolean,
         watermarkRequested: PhotoFrameWatermark,
+        decorationRequested: Boolean = true,
+        filterRequested: PhotoFilterSelection? = null,
         skipIfExisting: Boolean = false,
         failTaskOnError: Boolean = false,
     ) {
@@ -1515,18 +1630,24 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
                 // 在真正轮到渲染时重新判定授权：排队期间若高级版到期，免费版默认
                 // 水印立即恢复；查重与导出必须使用同一份生效配置。
-                val effectiveWatermark = effectivePhotoFrameWatermark(
-                    isPro = LicenseManager.isPro.value,
-                    preference = watermarkRequested,
-                    borderEnabled = borderEnabled,
-                )
+                val effectiveBorder = decorationRequested && borderEnabled
+                val effectiveWatermark = if (decorationRequested) {
+                    effectivePhotoFrameWatermark(
+                        isPro = LicenseManager.isPro.value,
+                        preference = watermarkRequested,
+                        borderEnabled = effectiveBorder,
+                    )
+                } else {
+                    PhotoFrameWatermark(enabled = false)
+                }
                 if (
                     skipIfExisting &&
                     destination.hasFrameFor(
                         sourceName,
                         preset,
                         effectiveWatermark,
-                        borderEnabled = borderEnabled,
+                        borderEnabled = effectiveBorder,
+                        filter = filterRequested,
                     )
                 ) {
                     FrameExportOutcome.AlreadyExists
@@ -1539,7 +1660,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         sourceName = sourceName,
                         preset = preset,
                         watermark = effectiveWatermark,
-                        borderEnabled = borderEnabled,
+                        borderEnabled = effectiveBorder,
+                        filter = filterRequested,
                     ).fold(
                         onSuccess = { FrameExportOutcome.Saved(it.displayName) },
                         onFailure = { FrameExportOutcome.Failed(it) },

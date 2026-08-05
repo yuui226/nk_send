@@ -32,6 +32,7 @@ import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.UsbPtpConnection
 import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.service.CameraSessionService
+import com.ztransfer.util.applyExifOrientation
 import java.io.ByteArrayInputStream
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -57,6 +58,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.math.roundToInt
 
 enum class WifiConnectionStatus {
     IDLE,
@@ -75,6 +77,14 @@ internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStat
     else -> WifiConnectionStatus.FAILED
 }
 
+private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
+
+/** Selects the newest still image deterministically; video covers must never become effect demos. */
+internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCamera.FileInfo? =
+    files.asSequence()
+        .filter { it.extension !in EFFECT_PREVIEW_VIDEO_EXTENSIONS }
+        .maxWithOrNull(compareBy<NikonCamera.FileInfo>({ it.captureDate.orEmpty() }, { it.handle }))
+
 data class CameraState(
     /** 网关特征只表示“值得探测”，不能作为已经连上相机的依据。 */
     val isWifiCandidate: Boolean = false,
@@ -85,6 +95,9 @@ data class CameraState(
     val wifiConnectionStatus: WifiConnectionStatus = WifiConnectionStatus.IDLE,
     val files: List<NikonCamera.FileInfo> = emptyList(),
     val isLoadingFiles: Boolean = false,
+    /** Latest camera still, quietly prefetched at FHD for the frame/filter settings demos. */
+    val effectPreviewBitmap: Bitmap? = null,
+    val effectPreviewFileKey: String? = null,
     // 当前候选 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；无候选链路时为 null。
     val wifiRssi: Int? = null
 )
@@ -611,6 +624,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 与 remoteActive 同机制——前台交互独占通道；退出预览自动恢复。
     private val fhdActiveFlow = MutableStateFlow(false)
 
+    // Separate from interactive FHD preview: while this one-shot request runs, the thumbnail
+    // sweep yields the PTP channel, but opening/closing the full-screen preview cannot clobber it.
+    private val effectPreviewActiveFlow = MutableStateFlow(false)
+    private var effectPreviewAttemptKey: String? = null
+
     fun setFhdActive(active: Boolean) {
         fhdActiveFlow.value = active
     }
@@ -623,6 +641,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 磁盘缓存超容淘汰（后台一次，不阻塞启动）。
         viewModelScope.launch(Dispatchers.IO) { pruneThumbDisk() }
         startThumbnailFill()
+        startEffectPreviewPrefetch()
     }
 
     /**
@@ -638,9 +657,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 state.map { it.files }.distinctUntilChanged(),
                 transfersBusyFlow,
                 remoteActiveFlow,
-                fhdActiveFlow
-            ) { files, busy, remote, fhd -> Quad(files, busy, remote, fhd) }.collectLatest { (files, busy, remote, fhd) ->
-                if (busy || remote || fhd || files.isEmpty()) return@collectLatest
+                fhdActiveFlow,
+                effectPreviewActiveFlow,
+            ) { files, busy, remote, fhd, effectPreview ->
+                Quint(files, busy, remote, fhd, effectPreview)
+            }.collectLatest { (files, busy, remote, fhd, effectPreview) ->
+                if (busy || remote || fhd || effectPreview || files.isEmpty()) return@collectLatest
                 // 展示序≈拍摄时间新→旧；无拍摄时间的排最后。
                 val ordered = files.sortedByDescending { it.captureDate ?: "" }
                 log { "THUMB_SWEEP start n=${ordered.size}" }
@@ -663,6 +685,67 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
+
+    /**
+     * Once the initial file list has been quiet briefly, fetch exactly one FHD image for the
+     * frame/filter settings demos. This is deliberately best-effort: it never blocks file loading,
+     * transfers, remote control, or interactive FHD preview, and failures remain invisible.
+     * A newly captured latest still replaces the previous demo automatically.
+     */
+    private fun startEffectPreviewPrefetch() {
+        viewModelScope.launch {
+            combine(
+                state.map { it.files }.distinctUntilChanged(),
+                transfersBusyFlow,
+                remoteActiveFlow,
+                fhdActiveFlow,
+            ) { files, busy, remote, fhd -> Quad(files, busy, remote, fhd) }
+                .collectLatest { (files, busy, remote, fhd) ->
+                    if (busy || remote || fhd || files.isEmpty()) return@collectLatest
+                    val latest = latestEffectPreviewFile(files) ?: return@collectLatest
+                    val key = effectPreviewKey(latest)
+                    if (_state.value.effectPreviewFileKey == key || effectPreviewAttemptKey == key) {
+                        return@collectLatest
+                    }
+
+                    // File batches and the first visible thumbnails get priority over this demo.
+                    delay(EFFECT_PREVIEW_SETTLE_MS)
+                    if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
+                        !_state.value.isConnectedToCamera ||
+                        effectPreviewKey(latestEffectPreviewFile(_state.value.files) ?: return@collectLatest) != key
+                    ) {
+                        return@collectLatest
+                    }
+
+                    effectPreviewActiveFlow.value = true
+                    try {
+                        val bitmap = loadFhdBitmap(
+                            latest,
+                            Bitmap.Config.ARGB_8888,
+                            honorExifOrientation = true,
+                        )
+                        // A real camera response (including unsupported/null) is one completed
+                        // attempt. Cancellation by a foreground task is not latched, so idle time
+                        // can retry later.
+                        effectPreviewAttemptKey = key
+                        bitmap ?: return@collectLatest
+                        if (_state.value.isConnectedToCamera &&
+                            effectPreviewKey(latestEffectPreviewFile(_state.value.files) ?: return@collectLatest) == key
+                        ) {
+                            _state.update {
+                                it.copy(effectPreviewBitmap = bitmap, effectPreviewFileKey = key)
+                            }
+                            log { "EFFECT_PREVIEW ready handle=${latest.handle} ${bitmap.width}x${bitmap.height}" }
+                        }
+                    } finally {
+                        effectPreviewActiveFlow.value = false
+                    }
+                }
+        }
+    }
+
+    private fun effectPreviewKey(file: NikonCamera.FileInfo): String =
+        "${file.handle}|${file.fileName}|${file.size}|${file.captureDate.orEmpty()}"
 
     /**
      * 连接看护：只要未连上相机，就周期性检测手机是否进入候选网段，一旦命中就立即发起连接。
@@ -816,7 +899,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             if (_state.value.isConnectedToCamera || _state.value.isConnecting) return@launch
             val enabled = withContext(Dispatchers.IO) {
-                CameraEndpointOverride.enableSimulator()
+                CameraEndpointOverride.enableSimulator(getApplication())
             }
             if (!enabled || _state.value.isConnectedToCamera || _state.value.isConnecting) return@launch
             updateWifiCandidate(candidate = true, rssi = null)
@@ -1097,11 +1180,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (!preserveExisting) {
             thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
             noThumbHandles.clear()      // handle 跨会话可能复用，负缓存一并作废
+            effectPreviewAttemptKey = null
         }
         _state.update {
             it.copy(
                 isLoadingFiles = !remoteActiveFlow.value,
-                files = if (preserveExisting) it.files else emptyList()
+                files = if (preserveExisting) it.files else emptyList(),
+                effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
+                effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
             )
         }
         // 监看先于列表枚举：保留“待加载”标记，退出监看后再启动，不向 ioMutex 排队。
@@ -1426,10 +1512,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 自身的缩略图请求由 [remoteThumbGate] 限制为最多一个进入 PTP 队列。强行 cancel 会杀掉 PreviewPage 的
      * LaunchedEffect（key 不变不复启），导致缩略图永久丢失、FHD 加载期间无占位图。
      *
-     * FHD 图片不缓存（每次长按实时拉），预览关闭时 ImageBitmap 随 Composable 销毁释放。
+     * 不复用设置页的效果演示图：该图会按 EXIF 校正方向，而全屏预览保留相机返回
+     * 的像素方向，继续由既有手动旋转功能负责。
      * 调用方应先通过 [setFhdActive] 暂停后台缩略图填充，再调用本方法。
      */
     suspend fun loadFhdPreview(file: NikonCamera.FileInfo): ImageBitmap? {
+        return loadFhdBitmap(
+            file,
+            Bitmap.Config.RGB_565,
+            honorExifOrientation = false,
+        )?.asImageBitmap()
+    }
+
+    private suspend fun loadFhdBitmap(
+        file: NikonCamera.FileInfo,
+        config: Bitmap.Config,
+        honorExifOrientation: Boolean,
+    ): Bitmap? {
         val cam = camera ?: return null
         val startedAt = android.os.SystemClock.elapsedRealtime()
         val bytes = try {
@@ -1447,12 +1546,52 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return withContext(Dispatchers.Default) {
             try {
                 // FHD 预览图是相机直出的 1920×1080 JPEG，非缩略图，不做黑边裁切。
-                // 用 RGB_565 解码：不透明 JPEG 无需 alpha，2 字节/像素（1920×1080≈4MB，
-                // 比 ARGB_8888 减半），屏幕预览肉眼无差别，多页预览内存峰值大降。
-                val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 }
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.asImageBitmap().also {
+                // 交互式长按使用 RGB_565 控制内存；设置演示图使用 ARGB_8888，确保连续
+                // 调色计算不会先被 565 量化。两者共用同一条可靠的取图/解码路径。
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                var sampleSize = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / (sampleSize * 2) >=
+                    MAX_FHD_PREVIEW_EDGE
+                ) {
+                    sampleSize *= 2
+                }
+                val opts = BitmapFactory.Options().apply {
+                    inPreferredConfig = config
+                    inSampleSize = sampleSize
+                }
+                val orientation = if (honorExifOrientation) {
+                    runCatching {
+                        ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
+                            ExifInterface.TAG_ORIENTATION,
+                            ExifInterface.ORIENTATION_NORMAL,
+                        )
+                    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+                } else {
+                    ExifInterface.ORIENTATION_NORMAL
+                }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)?.let { decoded ->
+                    if (honorExifOrientation) applyExifOrientation(decoded, orientation) else decoded
+                }?.let { displayBitmap ->
+                    val longEdge = maxOf(displayBitmap.width, displayBitmap.height)
+                    if (longEdge <= MAX_FHD_PREVIEW_EDGE) {
+                        displayBitmap
+                    } else {
+                        val scale = MAX_FHD_PREVIEW_EDGE.toFloat() / longEdge
+                        val scaled = Bitmap.createScaledBitmap(
+                            displayBitmap,
+                            (displayBitmap.width * scale).roundToInt().coerceAtLeast(1),
+                            (displayBitmap.height * scale).roundToInt().coerceAtLeast(1),
+                            true,
+                        )
+                        if (scaled !== displayBitmap) displayBitmap.recycle()
+                        scaled
+                    }
+                }.also { bitmap ->
                     log {
                         "FHD ready handle=${file.handle} bytes=${bytes.size} " +
+                            "effectOrientation=$honorExifOrientation/$orientation " +
+                            "output=${bitmap?.width}x${bitmap?.height} " +
                             "queue+network=${receivedAt - startedAt}ms " +
                             "decode=${android.os.SystemClock.elapsedRealtime() - receivedAt}ms"
                     }
@@ -1646,6 +1785,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val RETRY_INTERVAL_MS = 1_000L
         const val WIFI_BACKGROUND_RETRY_INTERVAL_MS = 3_000L
         const val WATCH_INTERVAL_MS = 1_000L
+        const val EFFECT_PREVIEW_SETTLE_MS = 900L
+        const val MAX_FHD_PREVIEW_EDGE = 1_920
         // 黑边判定：近黑像素的通道上限（JPEG 压缩后黑条并非纯黑，留噪声余量）；
         // 黑边占边长的上限——3:2 塞 4:3 为 5.6%、16:9 为 12.5%，超过 15% 视为画面本身偏暗。
         const val BAR_BLACK_MAX = 32
@@ -1655,7 +1796,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val BAR_AVG_MAX = 40
         // 视频扩展名：封面黑边兜底裁切按 16:9 画面处理。
         // 注意与 PhotoPreview.kt 顶部的 VIDEO_EXTENSIONS（预览占位分支）保持同步。
-        val VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
+        val VIDEO_EXTENSIONS = EFFECT_PREVIEW_VIDEO_EXTENSIONS
         // 缩略图磁盘缓存容量上限（原始 JPEG 每张几 KB，64MB 足够上万张）。
         const val THUMB_DISK_MAX_BYTES = 64L * 1024 * 1024
         // EXIF 解析支持的图片扩展名——视频/音频等格式不会有 EXIF 头。
@@ -1665,4 +1806,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+    private data class Quint<A, B, C, D, E>(
+        val first: A,
+        val second: B,
+        val third: C,
+        val fourth: D,
+        val fifth: E,
+    )
 }

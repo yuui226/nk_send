@@ -1177,6 +1177,7 @@ fun FileListScreen(
         if (showSettings) {
             SettingsOverlay(
                 viewModel = transferViewModel,
+                effectPreviewSource = state.effectPreviewBitmap,
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },
                 onPlayFireworks = { fireworks.launch() },

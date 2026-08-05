@@ -49,22 +49,23 @@ internal object DebugCameraSimulator {
     private const val RESPONSE_OK = 0x2001
     private const val OPERATION_NOT_SUPPORTED = 0x2005
     private const val INVALID_OBJECT_HANDLE = 0x2009
+    private const val FORMAT_JPEG = 0x3801
     private const val FORMAT_PNG = 0x3804
 
     private val connectionNumbers = AtomicInteger(0)
     @Volatile private var started = false
 
     @Synchronized
-    fun start() {
+    fun start(featuredImage: FeaturedImage? = null) {
         if (started) return
         started = true
-        Thread({ serve() }, "Debug-Camera-Simulator").apply {
+        Thread({ serve(featuredImage) }, "Debug-Camera-Simulator").apply {
             isDaemon = true
             start()
         }
     }
 
-    private fun serve() {
+    private fun serve(featuredImage: FeaturedImage?) {
         try {
             ServerSocket().use { server ->
                 server.reuseAddress = true
@@ -74,7 +75,7 @@ internal object DebugCameraSimulator {
                 server.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), PORT))
                 // Bind before generating sample images. A connection arriving during generation
                 // waits in the listen backlog instead of failing with Connection refused.
-                val objects = buildObjects()
+                val objects = buildObjects(featuredImage)
                 println("DebugCameraSimulator listening on 127.0.0.1:$PORT")
                 while (true) {
                     val socket = server.accept()
@@ -187,8 +188,9 @@ internal object DebugCameraSimulator {
                 }
                 when (operation) {
                     GET_OBJECT_INFO -> sendData(output, transactionId, obj!!.objectInfo())
-                    GET_OBJECT, GET_THUMB, NK_GET_FHD_PICTURE ->
-                        sendData(output, transactionId, obj!!.image)
+                    GET_OBJECT -> sendData(output, transactionId, obj!!.image)
+                    NK_GET_FHD_PICTURE -> sendData(output, transactionId, obj!!.fhdPreview)
+                    GET_THUMB -> sendData(output, transactionId, obj!!.thumbnail)
                     NK_GET_OBJECT_SIZE -> sendData(
                         output,
                         transactionId,
@@ -269,20 +271,25 @@ internal object DebugCameraSimulator {
         val fileName: String,
         val captureDate: String,
         val protected: Boolean,
+        val format: Int,
         val image: ByteArray,
+        val fhdPreview: ByteArray,
+        val thumbnail: ByteArray,
         val width: Int,
-        val height: Int
+        val height: Int,
+        val thumbnailWidth: Int,
+        val thumbnailHeight: Int,
     ) {
         fun objectInfo(): ByteArray {
             val fixed = littleEndian(52) {
                 putInt(STORAGE_ID)
-                putShort(FORMAT_PNG.toShort())
+                putShort(format.toShort())
                 putShort(if (protected) 1 else 0)
                 putInt(image.size)
-                putShort(FORMAT_PNG.toShort())
-                putInt(image.size)
-                putInt(width)
-                putInt(height)
+                putShort(format.toShort())
+                putInt(thumbnail.size)
+                putInt(thumbnailWidth)
+                putInt(thumbnailHeight)
                 putInt(width)
                 putInt(height)
                 putInt(24)
@@ -296,7 +303,7 @@ internal object DebugCameraSimulator {
         }
     }
 
-    private fun buildObjects(): Map<Int, SimObject> {
+    private fun buildObjects(featured: FeaturedImage?): Map<Int, SimObject> {
         val variants = Array(12) { variant ->
             val portrait = variant == 3 || variant == 9
             val width = if (portrait) 320 else 480
@@ -307,18 +314,43 @@ internal object DebugCameraSimulator {
         val now = System.currentTimeMillis()
         return (0 until PHOTO_COUNT).associate { index ->
             val handle = 0x1001 + index
-            val (width, height, image) = variants[index % variants.size]
+            val generated = variants[index % variants.size]
+            val featuredItem = featured.takeIf { index == 0 }
+            val isFeatured = featuredItem != null
+            val width = featuredItem?.width ?: generated.first
+            val height = featuredItem?.height ?: generated.second
+            val image = featuredItem?.image ?: generated.third
+            val thumbnail = featuredItem?.thumbnail ?: image
             handle to SimObject(
                 handle = handle,
-                fileName = "ZSIM_%04d.PNG".format(Locale.US, index + 1),
+                fileName = "ZSIM_%04d.%s".format(
+                    Locale.US,
+                    index + 1,
+                    if (isFeatured) "JPG" else "PNG",
+                ),
                 captureDate = formatter.format(Date(now - index * 5L * 60L * 60L * 1000L)),
                 protected = index % 11 == 1,
+                format = if (isFeatured) FORMAT_JPEG else FORMAT_PNG,
                 image = image,
+                fhdPreview = featuredItem?.fhdPreview ?: image,
+                thumbnail = thumbnail,
                 width = width,
-                height = height
+                height = height,
+                thumbnailWidth = featuredItem?.thumbnailWidth ?: width,
+                thumbnailHeight = featuredItem?.thumbnailHeight ?: height,
             )
         }
     }
+
+    internal data class FeaturedImage(
+        val image: ByteArray,
+        val fhdPreview: ByteArray,
+        val thumbnail: ByteArray,
+        val width: Int,
+        val height: Int,
+        val thumbnailWidth: Int,
+        val thumbnailHeight: Int,
+    )
 
     private fun makeImage(width: Int, height: Int, variant: Int): ByteArray {
         val rows = ByteArray(height * (1 + width * 3))
@@ -418,7 +450,7 @@ internal object DebugCameraSimulator {
             GET_THUMB
         )))
         repeat(3) { output.write(u16Array(emptyList())) }
-        output.write(u16Array(listOf(FORMAT_PNG)))
+        output.write(u16Array(listOf(FORMAT_JPEG, FORMAT_PNG)))
         output.write(ptpString("Nikon Simulator"))
         output.write(ptpString("Z SIM"))
         output.write(ptpString("1.0"))

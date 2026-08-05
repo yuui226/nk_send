@@ -9,7 +9,6 @@ import android.graphics.Color
 import android.graphics.ColorSpace
 import android.graphics.ImageDecoder
 import android.graphics.LinearGradient
-import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
@@ -23,6 +22,9 @@ import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
 import androidx.core.content.res.ResourcesCompat
 import com.ztransfer.R
+import com.ztransfer.filter.PhotoFilterRenderer
+import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.util.applyExifOrientation
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
@@ -269,6 +271,7 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean = true,
+        filter: PhotoFilterSelection? = null,
     ): Result<PhotoFrameExportResult> {
         return try {
             currentCoroutineContext().ensureActive()
@@ -279,8 +282,17 @@ object PhotoFrameExporter {
             }
             val renderedWatermark = watermark.forBorderMode(borderEnabled)
             val metadata = if (borderEnabled) readMetadata(resolver, sourceUri) else EMPTY_METADATA
-            val bitmap = decodeForFraming(resolver, sourceUri)
+            val decoded = decodeForFraming(resolver, sourceUri)
                 ?: error("Cannot decode transferred original")
+            val bitmap = if (filter == null) {
+                decoded
+            } else {
+                try {
+                    PhotoFilterRenderer.render(decoded, filter)
+                } finally {
+                    decoded.recycle()
+                }
+            }
             val rendered = try {
                 renderFrame(context, bitmap, metadata, preset, renderedWatermark, borderEnabled)
             } finally {
@@ -295,6 +307,7 @@ object PhotoFrameExporter {
                     preset = preset,
                     watermark = renderedWatermark,
                     borderEnabled = borderEnabled,
+                    filter = filter,
                     bitmap = rendered,
                 )
             } finally {
@@ -538,34 +551,11 @@ object PhotoFrameExporter {
             } ?: ExifInterface.ORIENTATION_NORMAL
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
         return try {
-            applyOrientation(decoded, orientation)
+            applyExifOrientation(decoded, orientation)
         } catch (error: Throwable) {
             decoded.recycle()
             throw error
         }
-    }
-
-    private fun applyOrientation(source: Bitmap, orientation: Int): Bitmap {
-        val matrix = Matrix()
-        when (orientation) {
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
-            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
-            ExifInterface.ORIENTATION_TRANSPOSE -> {
-                matrix.setRotate(90f)
-                matrix.postScale(-1f, 1f)
-            }
-            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
-            ExifInterface.ORIENTATION_TRANSVERSE -> {
-                matrix.setRotate(-90f)
-                matrix.postScale(-1f, 1f)
-            }
-            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(-90f)
-            else -> return source
-        }
-        val oriented = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
-        if (oriented !== source) source.recycle()
-        return oriented
     }
 
     internal fun renderPreview(
@@ -576,15 +566,23 @@ object PhotoFrameExporter {
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean = true,
         longEdge: Int = 720,
-    ): Bitmap = renderFrame(
-        context,
-        source,
-        metadata,
-        preset,
-        watermark.forBorderMode(borderEnabled),
-        borderEnabled,
-        longEdge,
-    )
+        filter: PhotoFilterSelection? = null,
+    ): Bitmap {
+        val input = filter?.let { PhotoFilterRenderer.render(source, it) } ?: source
+        return try {
+            renderFrame(
+                context,
+                input,
+                metadata,
+                preset,
+                watermark.forBorderMode(borderEnabled),
+                borderEnabled,
+                longEdge,
+            )
+        } finally {
+            if (input !== source) input.recycle()
+        }
+    }
 
     private fun renderFrame(
         context: Context,
@@ -1748,6 +1746,7 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean,
+        filter: PhotoFilterSelection?,
         bitmap: Bitmap,
     ): PhotoFrameExportResult {
         val parentUri = destination.directoryUri
@@ -1756,6 +1755,7 @@ object PhotoFrameExporter {
             preset,
             watermark,
             borderEnabled = borderEnabled,
+            filter = filter,
         )
         val name = uniqueName(preferred, destination.occupiedNames)
         val tempName = photoFrameTempName(System.nanoTime())
@@ -2226,7 +2226,8 @@ internal fun isCurrentPhotoFrameTempName(name: String): Boolean =
 private val PHOTO_FRAME_OUTPUT_PATTERN = Regex(
     pattern = "(?:_frame_(${PhotoFramePreset.entries.joinToString("|") { preset ->
         Regex.escape(preset.fileSuffix)
-    }})|_watermark)(?:_w[0-9a-f]{12})?(?: \\(\\d+\\)|_\\d+)?\\.jpe?g$",
+    }})|_watermark|_filter)(?:_w[0-9a-f]{12})?(?:_f[0-9a-f]{8}i\\d{1,3})?" +
+        "(?: \\(\\d+\\)|_\\d+)?\\.jpe?g$",
     option = RegexOption.IGNORE_CASE,
 )
 
@@ -2241,12 +2242,27 @@ internal fun photoFrameOutputName(
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
     borderEnabled: Boolean = true,
+    filter: PhotoFilterSelection? = null,
 ): String {
     // v2 调整了默认字体与透明度语义，所有成片都带配置摘要，避免误命中升级前旧图。
     val renderedWatermark = watermark.forBorderMode(borderEnabled)
-    val watermarkSuffix = "_w${photoFrameWatermarkFingerprint(renderedWatermark, preset)}"
-    val styleSuffix = if (borderEnabled) "frame_${preset.fileSuffix}" else "watermark"
-    return "${File(sourceName).nameWithoutExtension}_${styleSuffix}$watermarkSuffix.jpg"
+    val decorationEnabled = borderEnabled || renderedWatermark.enabled
+    val watermarkSuffix = if (decorationEnabled) {
+        "_w${photoFrameWatermarkFingerprint(renderedWatermark, preset)}"
+    } else {
+        ""
+    }
+    val filterSuffix = filter?.let {
+        "_f${it.preset.id.take(8)}i${it.normalizedIntensityPercent}"
+    }.orEmpty()
+    val styleSuffix = when {
+        borderEnabled -> "frame_${preset.fileSuffix}"
+        renderedWatermark.enabled -> "watermark"
+        filter != null -> "filter"
+        else -> "watermark"
+    }
+    return "${File(sourceName).nameWithoutExtension}_${styleSuffix}" +
+        "$watermarkSuffix$filterSuffix.jpg"
 }
 
 /** 摘要只用于稳定区分成片配置，绝不把用户水印原文写入文件名。 */
@@ -2337,8 +2353,9 @@ internal fun PhotoFrameDestination.hasFrameFor(
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
     borderEnabled: Boolean = true,
+    filter: PhotoFilterSelection? = null,
 ): Boolean {
-    val pattern = photoFrameOutputPattern(sourceName, preset, watermark, borderEnabled)
+    val pattern = photoFrameOutputPattern(sourceName, preset, watermark, borderEnabled, filter)
     return occupiedNames.any(pattern::matches)
 }
 
@@ -2348,15 +2365,23 @@ internal fun isPhotoFrameOutputFor(
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
     borderEnabled: Boolean = true,
-): Boolean = photoFrameOutputPattern(sourceName, preset, watermark, borderEnabled).matches(name)
+    filter: PhotoFilterSelection? = null,
+): Boolean = photoFrameOutputPattern(
+    sourceName,
+    preset,
+    watermark,
+    borderEnabled,
+    filter,
+).matches(name)
 
 private fun photoFrameOutputPattern(
     sourceName: String,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
     borderEnabled: Boolean,
+    filter: PhotoFilterSelection?,
 ): Regex {
-    val preferred = photoFrameOutputName(sourceName, preset, watermark, borderEnabled)
+    val preferred = photoFrameOutputName(sourceName, preset, watermark, borderEnabled, filter)
     val dot = preferred.lastIndexOf('.')
     val stem = if (dot >= 0) preferred.substring(0, dot) else preferred
     val extension = if (dot >= 0) preferred.substring(dot) else ""
