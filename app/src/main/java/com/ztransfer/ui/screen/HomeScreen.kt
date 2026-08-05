@@ -102,9 +102,10 @@ fun HomeScreen(
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
-    // 连接页「小技巧」气泡：从 tips 按钮变形弹出（复用 AnchorPopup 的全局毛玻璃）。
-    var showTips by remember { mutableStateOf(false) }
-    var tipsAnchor by remember { mutableStateOf<Rect?>(null) }
+    // 按钮跟随 Wi-Fi 卡片呼吸缩放。这里只用非 Snapshot 容器记录实时坐标，点击时再冻结
+    // 给弹窗，避免每帧坐标变化触发整个连接页重组，也避免展开途中锚点继续漂移。
+    val liveTipsButtonBounds = remember { LayoutBoundsHolder() }
+    var tipsPopupAnchor by remember { mutableStateOf<Rect?>(null) }
 
     val colors = AppTheme.colors
     val connected = state.isConnectedToCamera
@@ -292,27 +293,17 @@ fun HomeScreen(
                         goldBurst = isPro,
                         feedback = wifiFeedback,
                         footer = {
-                            GlassButton(
-                                onClick = { showTips = true },
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(0.dp),
-                                textureSeed = WIFI_TIP_BUTTON_TEXTURE_SEED,
+                            TipLightbulbButton(
+                                onClick = {
+                                    tipsPopupAnchor = liveTipsButtonBounds.value
+                                },
+                                contentDescription = stringResource(R.string.tip_title),
                                 modifier = Modifier
                                     .size(36.dp)
-                                    .onGloballyPositioned { tipsAnchor = it.boundsInRoot() }
-                            ) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Default.Lightbulb,
-                                        contentDescription = stringResource(R.string.tip_title),
-                                        tint = colors.accentOrange,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
+                                    .onGloballyPositioned {
+                                        liveTipsButtonBounds.value = it.boundsInRoot()
+                                    },
+                            )
                             GlassButton(
                                 onClick = {
                                     try {
@@ -463,8 +454,11 @@ fun HomeScreen(
         }
 
         // ---------- 小技巧气泡：从 tips 按钮变形弹出的毛玻璃内容框 ----------
-        if (showTips) {
-            TipsBubble(anchorBounds = tipsAnchor, onDismiss = { showTips = false })
+        tipsPopupAnchor?.let { frozenAnchor ->
+            TipsBubble(
+                anchorBounds = frozenAnchor,
+                onDismiss = { tipsPopupAnchor = null },
+            )
         }
 
         // 自动恢复与主动“恢复授权”共用页面底部的通用玻璃提示。
@@ -1095,8 +1089,10 @@ private fun PremiumSuccessEffect(
 // [CONNECT_SUCCESS_ANIM_MS] 的卡片内成功动画；动画结束后由 MainScreen 跳到照片列表。
 const val CONNECT_CELEBRATE_DELAY_MS = 500L
 const val CONNECT_SUCCESS_ANIM_MS = 850L
-private const val WIFI_TIP_BUTTON_TEXTURE_SEED = 0x1457A101
 private const val WIFI_SETTINGS_BUTTON_TEXTURE_SEED = 0x1457A102
+
+/** 布局热路径专用的非观察容器；更新坐标不触发 Compose 重组。 */
+private class LayoutBoundsHolder(var value: Rect? = null)
 
 /**
  * 连接页「小技巧」气泡：从 tips 按钮变形弹出的毛玻璃内容框（复用全局 [AnchorPopup]）。
@@ -1106,7 +1102,8 @@ private const val WIFI_SETTINGS_BUTTON_TEXTURE_SEED = 0x1457A102
 private fun TipsBubble(anchorBounds: Rect?, onDismiss: () -> Unit) {
     val colors = AppTheme.colors
     val density = LocalDensity.current
-    val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 8.dp } ?: 140.dp
+    // 按钮位于卡片底部内边距中，留 24dp 才能让气泡完整落在卡片之外。
+    val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 24.dp } ?: 156.dp
     AnchorPopup(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
@@ -1114,7 +1111,8 @@ private fun TipsBubble(anchorBounds: Rect?, onDismiss: () -> Unit) {
             .padding(start = 20.dp, end = 20.dp, top = panelTop)
             .navigationBarsPadding()
             .fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp)
+        shape = RoundedCornerShape(18.dp),
+        dim = false,
     ) { _ ->
         Column(modifier = Modifier.padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1127,6 +1125,13 @@ private fun TipsBubble(anchorBounds: Rect?, onDismiss: () -> Unit) {
                     color = colors.onBackground
                 )
             }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                stringResource(R.string.tip_ap_mode),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = colors.accentBlue,
+            )
             Spacer(Modifier.height(10.dp))
             Text(
                 stringResource(R.string.tip_body),

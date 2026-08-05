@@ -772,7 +772,10 @@ fun GlassButton(
             Row(
                 modifier = Modifier.padding(contentPadding),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(
+                    6.dp,
+                    Alignment.CenterHorizontally,
+                ),
                 content = content
             )
         }
@@ -815,9 +818,14 @@ fun GlassButton(
                         dark = dark,
                         pressProgress = pressLight,
                         stampColor = titaniumStampColor
-                    ),
+                ),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                // Surface 会把固定尺寸按钮的 Row 撑满；显式居中，避免钛合金/木纹主题
+                // 沿用 Row 默认的 Start 排列，把单图标推到按钮左侧。
+                horizontalArrangement = Arrangement.spacedBy(
+                    6.dp,
+                    Alignment.CenterHorizontally,
+                ),
                 content = content
             )
         }

@@ -6,6 +6,16 @@ import org.junit.Test
 
 class PhotoFrameExporterTest {
     @Test
+    fun supportedFrameSourcesIncludeJpegAndPngOnly() {
+        assertTrue(isSupportedPhotoFrameSourceExtension(".jpg"))
+        assertTrue(isSupportedPhotoFrameSourceExtension("JPEG"))
+        assertTrue(isSupportedPhotoFrameSourceExtension(".png"))
+        assertTrue(isSupportedPhotoFrameSourceExtension("PNG"))
+        assertTrue(!isSupportedPhotoFrameSourceExtension(".nef"))
+        assertTrue(!isSupportedPhotoFrameSourceExtension(".mp4"))
+    }
+
+    @Test
     fun frostedPresetKeepsItsStablePersistenceKey() {
         assertEquals(PhotoFramePreset.FROSTED, PhotoFramePreset.valueOf("FROSTED"))
         assertEquals(PhotoFramePreset.PLAQUE, PhotoFramePreset.valueOf("PLAQUE"))
@@ -311,6 +321,7 @@ class PhotoFrameExporterTest {
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_glass (2).JPG"))
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_dark_123456.jpeg"))
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_plaque.jpg"))
+        assertTrue(isPhotoFrameOutputName("DSC_0123_watermark_w123456789abc.jpg"))
         assertTrue(!isPhotoFrameOutputName("DSC_0123.JPG"))
     }
 
@@ -360,6 +371,48 @@ class PhotoFrameExporterTest {
     }
 
     @Test
+    fun watermarkOnlyOutputHasItsOwnStableIdentityIndependentOfHiddenFrameStyle() {
+        val watermark = PhotoFrameWatermark(
+            text = "Studio",
+            position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
+        )
+        val mist = photoFrameOutputName(
+            "DSC.JPG",
+            PhotoFramePreset.MIST,
+            watermark,
+            borderEnabled = false,
+        )
+        val plaque = photoFrameOutputName(
+            "DSC.JPG",
+            PhotoFramePreset.PLAQUE,
+            watermark,
+            borderEnabled = false,
+        )
+
+        assertEquals(mist, plaque)
+        assertTrue(mist.matches(Regex("DSC_watermark_w[0-9a-f]{12}\\.jpg")))
+        assertTrue(isPhotoFrameOutputName(mist))
+        assertTrue(
+            isPhotoFrameOutputFor(
+                mist,
+                "DSC.JPG",
+                PhotoFramePreset.MIST,
+                watermark,
+                borderEnabled = false,
+            ),
+        )
+        assertTrue(
+            !isPhotoFrameOutputFor(
+                mist,
+                "DSC.JPG",
+                PhotoFramePreset.MIST,
+                watermark,
+                borderEnabled = true,
+            ),
+        )
+    }
+
+    @Test
     fun customWatermarkGetsAStablePrivateOutputIdentity() {
         val first = PhotoFrameWatermark(text = "Studio A")
         val same = PhotoFrameWatermark(text = " Studio A ")
@@ -391,6 +444,29 @@ class PhotoFrameExporterTest {
                 "DSC.JPG",
                 PhotoFramePreset.PLAQUE,
                 PhotoFrameWatermark(position = PhotoFrameWatermarkPosition.LEFT),
+            ),
+        )
+    }
+
+    @Test
+    fun watermarkOnlyIdentityNormalizesBorderPositionsAndIgnoresHiddenPreset() {
+        val automatic = PhotoFrameWatermark(position = PhotoFrameWatermarkPosition.AUTO)
+        val explicit = PhotoFrameWatermark(
+            position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
+        )
+
+        assertEquals(
+            photoFrameOutputName(
+                "DSC.JPG",
+                PhotoFramePreset.MIST,
+                automatic,
+                borderEnabled = false,
+            ),
+            photoFrameOutputName(
+                "DSC.JPG",
+                PhotoFramePreset.PLAQUE,
+                explicit,
+                borderEnabled = false,
             ),
         )
     }
@@ -465,9 +541,24 @@ class PhotoFrameExporterTest {
 
     @Test
     fun watermarkOpacityMapsToAnUnambiguousFinalAlpha() {
-        assertEquals(102, watermarkAlpha(PhotoFrameWatermarkOpacity.SUBTLE))
-        assertEquals(184, watermarkAlpha(PhotoFrameWatermarkOpacity.STANDARD))
-        assertEquals(255, watermarkAlpha(PhotoFrameWatermarkOpacity.STRONG))
+        assertEquals(3, watermarkAlpha(1))
+        assertEquals(102, watermarkAlpha(40))
+        assertEquals(184, watermarkAlpha(72))
+        assertEquals(255, watermarkAlpha(100))
+        assertEquals(3, watermarkAlpha(-1))
+        assertEquals(255, watermarkAlpha(101))
+    }
+
+    @Test
+    fun watermarkSizePercentKeepsLegacyAnchorsAndDoublesTheOldMaximum() {
+        assertEquals(0.0105f, photoFrameWatermarkTextSizeFraction(58), 0.000001f)
+        assertEquals(0.0135f, photoFrameWatermarkTextSizeFraction(75), 0.000001f)
+        assertEquals(0.018f, photoFrameWatermarkTextSizeFraction(100), 0.000001f)
+        assertEquals(0.036f, photoFrameWatermarkTextSizeFraction(200), 0.000001f)
+        assertEquals(0.035f, photoFrameWatermarkImageSizeFraction(47), 0.000001f)
+        assertEquals(0.052f, photoFrameWatermarkImageSizeFraction(69), 0.000001f)
+        assertEquals(0.075f, photoFrameWatermarkImageSizeFraction(100), 0.000001f)
+        assertEquals(0.15f, photoFrameWatermarkImageSizeFraction(200), 0.000001f)
     }
 
     @Test
@@ -481,10 +572,13 @@ class PhotoFrameExporterTest {
         assertEquals(baselineName, photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, baseline))
         assertTrue(defaultName != "DSC_frame_mist.jpg")
 
-        val subtle = baseline.copy(opacity = PhotoFrameWatermarkOpacity.SUBTLE)
+        val subtle = baseline.copy(opacityPercent = 40)
+        val maximumSize = baseline.copy(sizePercent = 200)
         val outlined = baseline.copy(effect = PhotoFrameWatermarkEffect.OUTLINE)
         val onPhoto = baseline.copy(position = PhotoFrameWatermarkPosition.PHOTO_TOP_LEFT)
         assertTrue(photoFrameWatermarkFingerprint(subtle, PhotoFramePreset.MIST) !=
+            photoFrameWatermarkFingerprint(baseline, PhotoFramePreset.MIST))
+        assertTrue(photoFrameWatermarkFingerprint(maximumSize, PhotoFramePreset.MIST) !=
             photoFrameWatermarkFingerprint(baseline, PhotoFramePreset.MIST))
         assertTrue(photoFrameWatermarkFingerprint(outlined, PhotoFramePreset.MIST) !=
             photoFrameWatermarkFingerprint(baseline, PhotoFramePreset.MIST))

@@ -32,7 +32,8 @@
     <string name="step_camera_wifi">On the camera, enable “Connect to smart device (Wi-Fi)”</string>
     <string name="step_phone_wifi">Connect your phone\'s Wi-Fi to the camera\'s hotspot</string>
     <string name="tip_title">A faster way to connect</string>
-    <string name="tip_body">Add “Wi-Fi connection” to your camera\'s i menu, then just press the i button to turn it on in one tap — no menu digging. Path:</string>
+    <string name="tip_ap_mode">PS: This corresponds to the camera\'s Wi-Fi AP mode</string>
+    <string name="tip_body">Add “Wi-Fi connection” to the camera\'s i menu, then press i to turn it on quickly.</string>
     <string name="tip_path">MENU → Custom Settings Menu → Controls → Customize i menu → pick a slot → Wi-Fi connection</string>
 
     <!-- File list -->
@@ -114,7 +115,7 @@
     <!-- Photo preview -->
     <string name="no_preview">No preview</string>
     <string name="video_no_preview">Video · preview not supported</string>
-    <string name="photo_frame_watermark">Frame watermark</string>
+    <string name="photo_frame_watermark">Frame &amp; watermark</string>
     <string name="photo_frame_off">Off</string>
     <string name="photo_frame_on">On</string>
     <string name="photo_frame_mist">Mist</string>
@@ -124,13 +125,14 @@
     <string name="photo_frame_plaque">Plaque</string>
     <string name="photo_frame_task_label">Frame: %1$s</string>
     <string name="photo_frame_watermark_summary">Watermark: %1$s</string>
+    <string name="photo_frame_export_description">The original transfers normally; the styled copy is saved separately</string>
+    <string name="photo_frame_watermark_only">Watermark only</string>
     <string name="photo_frame_no_watermark">No watermark</string>
     <string name="photo_frame_style_short">Frame</string>
     <string name="photo_frame_watermark_short">Watermark</string>
     <string name="photo_frame_open_editor">Edit frame and watermark</string>
     <string name="photo_frame_preview">Frame and watermark preview</string>
     <string name="photo_frame_preview_unavailable">Preview temporarily unavailable</string>
-    <string name="photo_frame_watermark_text">Watermark text</string>
     <string name="photo_frame_watermark_font">Font</string>
     <string name="photo_frame_watermark_size">Size</string>
     <string name="photo_frame_watermark_position">Position</string>
@@ -148,9 +150,6 @@
     <string name="photo_frame_color_gold">Champagne</string>
     <string name="photo_frame_color_mist_blue">Mist blue</string>
     <string name="photo_frame_color_rose_gold">Rosewood</string>
-    <string name="photo_frame_size_small">Small</string>
-    <string name="photo_frame_size_medium">Medium</string>
-    <string name="photo_frame_size_large">Large</string>
     <string name="photo_frame_position_auto">Frame auto</string>
     <string name="photo_frame_position_left">Frame left</string>
     <string name="photo_frame_position_center">Frame center</string>
@@ -162,15 +161,12 @@
     <string name="photo_frame_position_photo_bottom_left">Photo bottom left</string>
     <string name="photo_frame_position_photo_bottom_center">Photo bottom center</string>
     <string name="photo_frame_position_photo_bottom_right">Photo bottom right</string>
-    <string name="photo_frame_opacity_subtle">40%</string>
-    <string name="photo_frame_opacity_standard">72%</string>
-    <string name="photo_frame_opacity_strong">100%</string>
-    <string name="photo_frame_watermark_content">Content</string>
+    <string name="photo_frame_watermark_content">Watermark type</string>
     <string name="photo_frame_content_text">Text</string>
-    <string name="photo_frame_content_image">Image</string>
-    <string name="photo_frame_image_watermark">Image / Logo</string>
-    <string name="photo_frame_replace_image">Choose another image</string>
-    <string name="photo_frame_image_import_failed">Couldn’t import this image</string>
+    <string name="photo_frame_content_image">Logo</string>
+    <string name="photo_frame_image_watermark">Logo</string>
+    <string name="photo_frame_replace_image">Replace logo</string>
+    <string name="photo_frame_image_import_failed">Couldn’t import this logo</string>
     <string name="photo_frame_effect_auto">Auto</string>
     <string name="photo_frame_effect_none">None</string>
     <string name="photo_frame_effect_shadow">Shadow</string>
@@ -286,7 +282,9 @@
     <string name="compare_remote_free">%1$d min/day</string>
     <string name="compare_unlimited">Unlimited</string>
     <string name="compare_on_device_recording">On-device recording</string>
-    <string name="compare_custom_watermark">Custom watermark</string>
+    <string name="compare_frames_watermarks">Frames &amp; watermarks</string>
+    <string name="compare_watermark_free">Default</string>
+    <string name="compare_watermark_pro">Custom</string>
     <string name="compare_unavailable">No</string>
     <string name="compare_available">Yes</string>
     <string name="compare_duration">Duration</string>

@@ -297,10 +297,10 @@ fun ProDialog(
                                     compact = compactTable,
                                 )
                                 CompareRow(
-                                    stringResource(R.string.compare_custom_watermark),
-                                    stringResource(R.string.compare_unavailable),
-                                    stringResource(R.string.compare_available),
-                                    stringResource(R.string.compare_available),
+                                    stringResource(R.string.compare_frames_watermarks),
+                                    stringResource(R.string.compare_watermark_free),
+                                    stringResource(R.string.compare_watermark_pro),
+                                    stringResource(R.string.compare_watermark_pro),
                                     valueColumnWidth = valueColumnWidth,
                                     compact = compactTable,
                                 )

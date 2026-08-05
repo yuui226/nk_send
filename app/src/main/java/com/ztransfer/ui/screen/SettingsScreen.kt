@@ -68,6 +68,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -78,7 +79,6 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -94,10 +94,12 @@ import com.ztransfer.frame.PhotoFrameWatermarkColor
 import com.ztransfer.frame.PhotoFrameWatermarkContent
 import com.ztransfer.frame.PhotoFrameWatermarkEffect
 import com.ztransfer.frame.PhotoFrameWatermarkFont
-import com.ztransfer.frame.PhotoFrameWatermarkOpacity
 import com.ztransfer.frame.PhotoFrameWatermarkPosition
-import com.ztransfer.frame.PhotoFrameWatermarkSize
 import com.ztransfer.frame.DEFAULT_PHOTO_FRAME_WATERMARK_TEXT
+import com.ztransfer.frame.MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
+import com.ztransfer.frame.MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
+import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
+import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
 import com.ztransfer.frame.limitPhotoFrameWatermarkText
 import com.ztransfer.frame.isPhotoPlacement
 import com.ztransfer.license.LicenseManager
@@ -141,6 +143,7 @@ fun SettingsOverlay(
     val activity = LocalContext.current.findActivity()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     // 当前语言依赖 attachBaseContext，在 Activity 重建后才会全局生效。拨轮提交后走弹窗
     // 自己的 close 动画；此标记让动画完成回调知道随后需要重建，而不是当场硬切页面。
     var recreateAfterDismiss by remember { mutableStateOf(false) }
@@ -177,18 +180,25 @@ fun SettingsOverlay(
         mutableStateOf<ExpandedWatermarkPreview?>(null)
     }
     var watermarkImageImporting by remember { mutableStateOf(false) }
+    var showFrameExportInfo by remember { mutableStateOf(false) }
+    var frameExportInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
+    var frameDraftBorderEnabled by remember { mutableStateOf(state.photoFrameBorderEnabled) }
     var frameDraftPreset by remember { mutableStateOf(state.photoFramePreset) }
     var watermarkDraft by remember { mutableStateOf(state.photoFrameWatermark) }
     val mainSettingsScroll = rememberScrollState()
     val photoFrameEditorScroll = rememberScrollState()
     val subExpired by LicenseManager.subExpired.collectAsState()
     LaunchedEffect(showPhotoFrameEditor) {
-        if (showPhotoFrameEditor) photoFrameEditorScroll.scrollTo(0)
+        if (showPhotoFrameEditor) {
+            showFrameExportInfo = false
+            photoFrameEditorScroll.scrollTo(0)
+        }
     }
     fun commitPhotoFrameDraft() {
         focusManager.clearFocus()
         keyboardController?.hide()
         viewModel.setPhotoFrameConfiguration(
+            borderEnabled = frameDraftBorderEnabled,
             preset = frameDraftPreset,
             watermark = watermarkDraft.takeIf { isPro },
         )
@@ -230,7 +240,11 @@ fun SettingsOverlay(
                     )
                     watermarkDraft = updatedWatermark
                     // 图片选择完成即保存配置；即使用户随后直接杀掉应用，私有副本仍会被选中。
-                    viewModel.setPhotoFrameConfiguration(frameDraftPreset, updatedWatermark)
+                    viewModel.setPhotoFrameConfiguration(
+                        frameDraftBorderEnabled,
+                        frameDraftPreset,
+                        updatedWatermark,
+                    )
                 },
                 onFailure = { showFooterHint(watermarkImageImportFailed) },
             )
@@ -279,6 +293,34 @@ fun SettingsOverlay(
                         style = MaterialTheme.typography.labelLarge,
                         color = colors.onBackground,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                    )
+                }
+            }
+            val infoAnchor = frameExportInfoAnchorBounds
+            if (showFrameExportInfo && infoAnchor != null) {
+                val bubbleWidth = 196.dp
+                val desiredLeft = with(density) { infoAnchor.right.toDp() } + 8.dp
+                val bubbleLeft = desiredLeft.coerceIn(
+                    12.dp,
+                    (screenWidth - bubbleWidth - 12.dp).coerceAtLeast(12.dp),
+                )
+                val bubbleTop = (
+                    with(density) { infoAnchor.center.y.toDp() } - 24.dp
+                ).coerceAtLeast(12.dp)
+                AnchorPopup(
+                    anchorBounds = infoAnchor,
+                    onDismiss = { showFrameExportInfo = false },
+                    panelModifier = Modifier
+                        .offset(x = bubbleLeft, y = bubbleTop)
+                        .width(bubbleWidth),
+                    shape = RoundedCornerShape(14.dp),
+                    dim = false,
+                ) { _ ->
+                    Text(
+                        stringResource(R.string.photo_frame_export_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onBackground,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
                     )
                 }
             }
@@ -360,6 +402,7 @@ fun SettingsOverlay(
                     GlassButton(
                         onClick = {
                             focusManager.clearFocus()
+                            frameDraftBorderEnabled = true
                             frameDraftPreset = PhotoFramePreset.MIST
                             if (isPro) watermarkDraft = PhotoFrameWatermark()
                         },
@@ -398,6 +441,7 @@ fun SettingsOverlay(
             if (editorPage) {
                 Spacer(Modifier.height(14.dp))
                 PhotoFrameWatermarkEditor(
+                    borderEnabled = frameDraftBorderEnabled,
                     preset = frameDraftPreset,
                     // 高级版编辑器必须保留正在输入的原始草稿（包括暂时为空）；若在这里
                     // 经过 effectivePhotoFrameWatermark，空值会在每次重组时立刻变回默认值，
@@ -405,6 +449,14 @@ fun SettingsOverlay(
                     watermark = if (isPro) watermarkDraft else PhotoFrameWatermark(),
                     isPro = isPro,
                     hapticsEnabled = state.hapticsEnabled,
+                    onBorderEnabledChanged = { enabled ->
+                        frameDraftBorderEnabled = enabled
+                        if (!enabled && !watermarkDraft.position.isPhotoPlacement()) {
+                            watermarkDraft = watermarkDraft.copy(
+                                position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
+                            )
+                        }
+                    },
                     onPresetChanged = { frameDraftPreset = it },
                     onWatermarkChanged = { updated ->
                         if (isPro) watermarkDraft = updated
@@ -413,7 +465,11 @@ fun SettingsOverlay(
                         if (isPro) {
                             val updated = watermarkDraft.copy(text = text)
                             watermarkDraft = updated
-                            viewModel.setPhotoFrameConfiguration(frameDraftPreset, updated)
+                            viewModel.setPhotoFrameConfiguration(
+                                frameDraftBorderEnabled,
+                                frameDraftPreset,
+                                updated,
+                            )
                         }
                     },
                     onPreviewOpen = { bitmap, anchorRect ->
@@ -554,27 +610,36 @@ fun SettingsOverlay(
 
                 CardDivider()
 
-                SectionLabel(stringResource(R.string.photo_interaction))
-                Spacer(Modifier.height(6.dp))
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.heightIn(min = 44.dp),
                 ) {
-                    photoInteractionChoices.forEach { (tapToPreview, label) ->
-                        SelectionChip(
-                            label = label,
-                            selected = state.tapToPreview == tapToPreview,
-                            onClick = {
-                                if (state.tapToPreview != tapToPreview) {
-                                    haptics.tick()
-                                    viewModel.setTapToPreview(tapToPreview)
-                                }
-                            },
-                            textStyle = MaterialTheme.typography.labelMedium,
-                            height = 48.dp,
-                            maxLines = 2,
-                            modifier = Modifier.weight(1f),
-                        )
+                    SectionLabel(
+                        stringResource(R.string.photo_interaction),
+                        modifier = Modifier.weight(0.72f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.weight(2f),
+                    ) {
+                        photoInteractionChoices.forEach { (tapToPreview, label) ->
+                            SelectionChip(
+                                label = label,
+                                selected = state.tapToPreview == tapToPreview,
+                                onClick = {
+                                    if (state.tapToPreview != tapToPreview) {
+                                        haptics.tick()
+                                        viewModel.setTapToPreview(tapToPreview)
+                                    }
+                                },
+                                textStyle = MaterialTheme.typography.labelMedium,
+                                compact = true,
+                                height = 42.dp,
+                                maxLines = 2,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
                 }
             }
@@ -590,7 +655,11 @@ fun SettingsOverlay(
                 PhotoFramePreset.PLAQUE to stringResource(R.string.photo_frame_plaque),
             )
             val selectedFrameChoice = frameChoices.first { it.first == state.photoFramePreset }
-            val visibleWatermark = effectivePhotoFrameWatermark(isPro, state.photoFrameWatermark)
+            val visibleWatermark = effectivePhotoFrameWatermark(
+                isPro,
+                state.photoFrameWatermark,
+                borderEnabled = state.photoFrameBorderEnabled,
+            )
             val watermarkSummary = if (visibleWatermark.enabled) {
                 if (visibleWatermark.content == PhotoFrameWatermarkContent.IMAGE) {
                     stringResource(R.string.photo_frame_image_watermark)
@@ -601,6 +670,7 @@ fun SettingsOverlay(
                 stringResource(R.string.photo_frame_no_watermark)
             }
             val openFrameEditor = {
+                frameDraftBorderEnabled = state.photoFrameBorderEnabled
                 frameDraftPreset = state.photoFramePreset
                 watermarkDraft = state.photoFrameWatermark.let {
                     // 老版本可能保存过空字符串。进入编辑器时把真正会导出的默认文字放进
@@ -613,6 +683,7 @@ fun SettingsOverlay(
                 borderColor = colors.accentBlue.copy(
                     alpha = if (state.photoFrameEnabled) 0.52f else 0.30f
                 ),
+                pressAccentColor = colors.accentBlue,
                 enabled = state.photoFrameEnabled,
                 onClick = openFrameEditor,
             ) {
@@ -627,15 +698,35 @@ fun SettingsOverlay(
                             .weight(1f)
                             .padding(vertical = 4.dp),
                     ) {
-                        SectionLabel(
-                            stringResource(R.string.photo_frame_watermark),
-                            color = colors.accentBlue,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SectionLabel(
+                                stringResource(R.string.photo_frame_watermark),
+                                color = colors.accentBlue,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            TipLightbulbButton(
+                                onClick = {
+                                    showFrameExportInfo = !showFrameExportInfo
+                                },
+                                contentDescription = stringResource(
+                                    R.string.photo_frame_export_description
+                                ),
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .onGloballyPositioned {
+                                        frameExportInfoAnchorBounds = it.boundsInRoot()
+                                    },
+                            )
+                        }
                         Spacer(Modifier.height(2.dp))
                         Text(
                             stringResource(
                                 R.string.photo_frame_task_label,
-                                selectedFrameChoice.second,
+                                if (state.photoFrameBorderEnabled) {
+                                    selectedFrameChoice.second
+                                } else {
+                                    stringResource(R.string.photo_frame_off)
+                                },
                             ),
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.onSurfaceVariant,
@@ -910,10 +1001,12 @@ private data class ExpandedWatermarkPreview(
 
 @Composable
 private fun PhotoFrameWatermarkEditor(
+    borderEnabled: Boolean,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
     isPro: Boolean,
     hapticsEnabled: Boolean,
+    onBorderEnabledChanged: (Boolean) -> Unit,
     onPresetChanged: (PhotoFramePreset) -> Unit,
     onWatermarkChanged: (PhotoFrameWatermark) -> Unit,
     onWatermarkTextCommitted: (String) -> Unit,
@@ -925,6 +1018,7 @@ private fun PhotoFrameWatermarkEditor(
     val haptics = rememberHaptics(hapticsEnabled)
     val focusManager = LocalFocusManager.current
     val frameChoices = listOf(
+        null to stringResource(R.string.photo_frame_off),
         PhotoFramePreset.MIST to stringResource(R.string.photo_frame_mist),
         PhotoFramePreset.CINEMA to stringResource(R.string.photo_frame_cinema),
         PhotoFramePreset.MINIMAL to stringResource(R.string.photo_frame_minimal),
@@ -938,11 +1032,11 @@ private fun PhotoFrameWatermarkEditor(
         PhotoFrameWatermarkFont.SIMPLE to stringResource(R.string.photo_frame_font_simple),
         PhotoFrameWatermarkFont.BOLD to stringResource(R.string.photo_frame_font_bold),
     )
-    val sizeChoices = listOf(
-        PhotoFrameWatermarkSize.SMALL to stringResource(R.string.photo_frame_size_small),
-        PhotoFrameWatermarkSize.MEDIUM to stringResource(R.string.photo_frame_size_medium),
-        PhotoFrameWatermarkSize.LARGE to stringResource(R.string.photo_frame_size_large),
-    )
+    val sizeChoices = remember {
+        (MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT downTo
+            MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT)
+            .map { percent -> percent to "$percent%" }
+    }
     val positionChoices = listOf(
         PhotoFrameWatermarkPosition.AUTO to stringResource(R.string.photo_frame_position_auto),
         PhotoFrameWatermarkPosition.LEFT to stringResource(R.string.photo_frame_position_left),
@@ -957,6 +1051,7 @@ private fun PhotoFrameWatermarkEditor(
         PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT to stringResource(R.string.photo_frame_position_photo_bottom_right),
     )
     val photoPositionChoices = positionChoices.filter { it.first.isPhotoPlacement() }
+    val textPositionChoices = if (borderEnabled) positionChoices else photoPositionChoices
     val contentChoices = listOf(
         PhotoFrameWatermarkContent.TEXT to stringResource(R.string.photo_frame_content_text),
         PhotoFrameWatermarkContent.IMAGE to stringResource(R.string.photo_frame_content_image),
@@ -969,11 +1064,11 @@ private fun PhotoFrameWatermarkEditor(
         PhotoFrameWatermarkColor.MIST_BLUE to stringResource(R.string.photo_frame_color_mist_blue),
         PhotoFrameWatermarkColor.ROSE_GOLD to stringResource(R.string.photo_frame_color_rose_gold),
     )
-    val opacityChoices = listOf(
-        PhotoFrameWatermarkOpacity.SUBTLE to stringResource(R.string.photo_frame_opacity_subtle),
-        PhotoFrameWatermarkOpacity.STANDARD to stringResource(R.string.photo_frame_opacity_standard),
-        PhotoFrameWatermarkOpacity.STRONG to stringResource(R.string.photo_frame_opacity_strong),
-    )
+    val opacityChoices = remember {
+        (MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT downTo
+            MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT)
+            .map { percent -> percent to "$percent%" }
+    }
     val effectChoices = listOf(
         PhotoFrameWatermarkEffect.AUTO to stringResource(R.string.photo_frame_effect_auto),
         PhotoFrameWatermarkEffect.NONE to stringResource(R.string.photo_frame_effect_none),
@@ -986,6 +1081,7 @@ private fun PhotoFrameWatermarkEditor(
     )
 
     PhotoFrameRenderedPreview(
+        borderEnabled = borderEnabled,
         preset = preset,
         watermark = watermark,
         onOpen = onPreviewOpen,
@@ -998,11 +1094,19 @@ private fun PhotoFrameWatermarkEditor(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ReleaseCommitWheel(
                     options = frameChoices,
-                    selected = frameChoices.first { it.first == preset },
+                    selected = frameChoices.first {
+                        if (borderEnabled) it.first == preset else it.first == null
+                    },
                     optionLabel = { it.second },
-                    onValueCommitted = {
+                    onValueCommitted = { choice ->
                         focusManager.clearFocus()
-                        onPresetChanged(it.first)
+                        val selectedPreset = choice.first
+                        if (selectedPreset == null) {
+                            onBorderEnabledChanged(false)
+                        } else {
+                            onPresetChanged(selectedPreset)
+                            onBorderEnabledChanged(true)
+                        }
                     },
                     onDetent = haptics::tick,
                     label = stringResource(R.string.photo_frame_style_short),
@@ -1072,7 +1176,7 @@ private fun PhotoFrameWatermarkEditor(
                             modifier = Modifier.width(contentWheelWidth),
                         )
                         if (watermark.content == PhotoFrameWatermarkContent.TEXT) {
-                            AdaptiveWatermarkTextField(
+                            WatermarkTextField(
                                 value = watermark.text,
                                 enabled = isPro,
                                 onValueChange = { value ->
@@ -1139,11 +1243,11 @@ private fun PhotoFrameWatermarkEditor(
                             )
                             ReleaseCommitWheel(
                                 options = sizeChoices,
-                                selected = sizeChoices.first { it.first == watermark.size },
+                                selected = sizeChoices.first { it.first == watermark.sizePercent },
                                 optionLabel = { it.second },
                                 onValueCommitted = {
                                     focusManager.clearFocus()
-                                    onWatermarkChanged(watermark.copy(size = it.first))
+                                    onWatermarkChanged(watermark.copy(sizePercent = it.first))
                                 },
                                 onDetent = haptics::tick,
                                 label = stringResource(R.string.photo_frame_watermark_size),
@@ -1152,11 +1256,13 @@ private fun PhotoFrameWatermarkEditor(
                             )
                             ReleaseCommitWheel(
                                 options = opacityChoices,
-                                selected = opacityChoices.first { it.first == watermark.opacity },
+                                selected = opacityChoices.first {
+                                    it.first == watermark.opacityPercent
+                                },
                                 optionLabel = { it.second },
                                 onValueCommitted = {
                                     focusManager.clearFocus()
-                                    onWatermarkChanged(watermark.copy(opacity = it.first))
+                                    onWatermarkChanged(watermark.copy(opacityPercent = it.first))
                                 },
                                 onDetent = haptics::tick,
                                 label = stringResource(R.string.photo_frame_watermark_opacity),
@@ -1166,8 +1272,10 @@ private fun PhotoFrameWatermarkEditor(
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ReleaseCommitWheel(
-                                options = positionChoices,
-                                selected = positionChoices.first { it.first == watermark.position },
+                                options = textPositionChoices,
+                                selected = textPositionChoices.firstOrNull {
+                                    it.first == watermark.position
+                                } ?: photoPositionChoices.last(),
                                 optionLabel = { it.second },
                                 onValueCommitted = {
                                     focusManager.clearFocus()
@@ -1209,10 +1317,12 @@ private fun PhotoFrameWatermarkEditor(
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ReleaseCommitWheel(
                                     options = sizeChoices,
-                                    selected = sizeChoices.first { it.first == watermark.size },
+                                    selected = sizeChoices.first {
+                                        it.first == watermark.sizePercent
+                                    },
                                     optionLabel = { it.second },
                                     onValueCommitted = {
-                                        onWatermarkChanged(watermark.copy(size = it.first))
+                                        onWatermarkChanged(watermark.copy(sizePercent = it.first))
                                     },
                                     onDetent = haptics::tick,
                                     label = stringResource(R.string.photo_frame_watermark_size),
@@ -1222,11 +1332,11 @@ private fun PhotoFrameWatermarkEditor(
                                 ReleaseCommitWheel(
                                     options = opacityChoices,
                                     selected = opacityChoices.first {
-                                        it.first == watermark.opacity
+                                        it.first == watermark.opacityPercent
                                     },
                                     optionLabel = { it.second },
                                     onValueCommitted = {
-                                        onWatermarkChanged(watermark.copy(opacity = it.first))
+                                        onWatermarkChanged(watermark.copy(opacityPercent = it.first))
                                     },
                                     onDetent = haptics::tick,
                                     label = stringResource(R.string.photo_frame_watermark_opacity),
@@ -1274,7 +1384,7 @@ private fun Modifier.clearFocusOnBackgroundTap(
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun AdaptiveWatermarkTextField(
+private fun WatermarkTextField(
     value: String,
     enabled: Boolean,
     onValueChange: (String) -> Unit,
@@ -1282,7 +1392,6 @@ private fun AdaptiveWatermarkTextField(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
-    val density = LocalDensity.current
     val contentAlpha = if (enabled) 1f else 0.52f
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
@@ -1313,26 +1422,11 @@ private fun AdaptiveWatermarkTextField(
     val textStyle = MaterialTheme.typography.bodyMedium.copy(
         color = colors.onBackground.copy(alpha = contentAlpha),
     )
-    val textMeasurer = rememberTextMeasurer()
-    val measuredWidth = remember(fieldValue.text, textStyle) {
-        textMeasurer.measure(
-            text = AnnotatedString(
-                fieldValue.text.ifEmpty { DEFAULT_PHOTO_FRAME_WATERMARK_TEXT }
-            ),
-            style = textStyle,
-            maxLines = 1,
-        ).size.width
-    }
-    val fieldWidth = with(density) { measuredWidth.toDp() + 40.dp }
-        .coerceIn(140.dp, 280.dp)
     val shape = RoundedCornerShape(20.dp)
-    Column(modifier = modifier) {
-        Text(
-            stringResource(R.string.photo_frame_watermark_text),
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.onBackground.copy(alpha = contentAlpha),
-        )
-        Spacer(Modifier.height(6.dp))
+    Box(
+        modifier = modifier.height(54.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
         BasicTextField(
             value = fieldValue,
             onValueChange = { updated ->
@@ -1371,7 +1465,7 @@ private fun AdaptiveWatermarkTextField(
                         onEditingFinished(committed)
                     }
                 }
-                .width(fieldWidth)
+                .fillMaxWidth()
                 .clip(shape)
                 .background(colors.glassSurface.copy(alpha = colors.glassSurface.alpha * contentAlpha))
                 .border(
@@ -1387,6 +1481,7 @@ private fun AdaptiveWatermarkTextField(
 
 @Composable
 private fun PhotoFrameRenderedPreview(
+    borderEnabled: Boolean,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
     onOpen: (Bitmap, Rect) -> Unit,
@@ -1397,7 +1492,7 @@ private fun PhotoFrameRenderedPreview(
     val rendered = remember { mutableStateOf<RenderedPhotoFramePreview?>(null) }
     var previewFailed by remember { mutableStateOf(false) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
-    LaunchedEffect(source, preset, watermark) {
+    LaunchedEffect(source, borderEnabled, preset, watermark) {
         delay(80)
         var pending: Bitmap? = null
         try {
@@ -1409,6 +1504,8 @@ private fun PhotoFrameRenderedPreview(
                     metadata = PHOTO_FRAME_PREVIEW_METADATA,
                     preset = preset,
                     watermark = watermark,
+                    borderEnabled = borderEnabled,
+                    longEdge = PHOTO_FRAME_PREVIEW_RENDER_LONG_EDGE,
                 )
             }
             ensureActive()
@@ -1537,6 +1634,8 @@ private fun PhotoFrameRenderedPreview(
 }
 
 private const val PHOTO_FRAME_PREVIEW_VIEWPORT_ASPECT_RATIO = 4f / 3f
+// 比屏幕展示尺寸保留约 3 倍采样余量，同时避免连续调节时堆积过大的过渡位图。
+private const val PHOTO_FRAME_PREVIEW_RENDER_LONG_EDGE = 1080
 
 private data class RenderedPhotoFramePreview(
     val preset: PhotoFramePreset,
@@ -1618,6 +1717,7 @@ private fun SettingsSwitch(
 private fun SettingsCard(
     modifier: Modifier = Modifier,
     borderColor: Color = AppTheme.colors.glassPanelBorder,
+    pressAccentColor: Color? = null,
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
@@ -1625,10 +1725,20 @@ private fun SettingsCard(
     val shape = RoundedCornerShape(14.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
+    val enhancedPress = pressAccentColor != null
     val pressScale by animateFloatAsState(
-        targetValue = if (pressed && enabled && onClick != null) 0.992f else 1f,
+        targetValue = if (pressed && enabled && onClick != null) {
+            if (enhancedPress) 0.982f else 0.992f
+        } else {
+            1f
+        },
         animationSpec = if (pressed) tween(80) else Motion.bouncy(),
         label = "settingsCardPress",
+    )
+    val pressProgress by animateFloatAsState(
+        targetValue = if (pressed && enabled && onClick != null && enhancedPress) 1f else 0f,
+        animationSpec = if (pressed) tween(90) else Motion.bouncy(),
+        label = "settingsCardPressHighlight",
     )
     Column(
         modifier = modifier
@@ -1652,7 +1762,22 @@ private fun SettingsCard(
             )
             // onBackground 极低透明度：深色主题下是白色微提亮、浅色下是黑色微压暗，两套都成立。
             .background(AppTheme.colors.onBackground.copy(alpha = 0.04f))
-            .border(1.dp, borderColor, shape)
+            .then(
+                pressAccentColor?.let { accent ->
+                    Modifier.background(accent.copy(alpha = 0.10f * pressProgress))
+                } ?: Modifier
+            )
+            .border(
+                width = (1f + 0.45f * pressProgress).dp,
+                color = pressAccentColor?.let { accent ->
+                    if (pressProgress > 0f) {
+                        accent.copy(alpha = 0.52f + 0.30f * pressProgress)
+                    } else {
+                        borderColor
+                    }
+                } ?: borderColor,
+                shape = shape,
+            )
             .padding(12.dp),
         content = content
     )
