@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -33,7 +34,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -41,7 +41,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -63,16 +63,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -82,6 +81,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -90,6 +91,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.ztransfer.AppLocale
@@ -132,7 +134,10 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 // 客服/购买 QQ 号（用户使用场景多为连着相机 Wi-Fi 无外网，只能靠复制号码离线联系）。
 internal const val QQ_NUMBER = "953000922"
@@ -477,19 +482,13 @@ fun SettingsOverlay(
                     color = colors.onBackground
                 )
                 Spacer(Modifier.weight(1f))
-                if (page != SettingsPage.MAIN) {
+                if (page == SettingsPage.FRAME) {
                     GlassButton(
                         onClick = {
                             focusManager.clearFocus()
-                            when (page) {
-                                SettingsPage.FRAME -> {
-                                    frameDraftBorderEnabled = true
-                                    frameDraftPreset = PhotoFramePreset.MIST
-                                    if (isPro) watermarkDraft = PhotoFrameWatermark()
-                                }
-                                SettingsPage.FILTER -> filterDraftIntensity = 100
-                                SettingsPage.MAIN -> Unit
-                            }
+                            frameDraftBorderEnabled = true
+                            frameDraftPreset = PhotoFramePreset.MIST
+                            if (isPro) watermarkDraft = PhotoFrameWatermark()
                         },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.height(36.dp),
@@ -500,7 +499,7 @@ fun SettingsOverlay(
                             color = colors.onBackground,
                         )
                     }
-                } else {
+                } else if (page == SettingsPage.MAIN) {
                     // 未解锁：金徽标"解锁高级版"，点击开介绍弹窗。
                     // 已解锁：金徽标改显"高级版"，点击不弹窗，放烟花彩蛋。
                     if (isPro) {
@@ -1215,6 +1214,7 @@ private fun PhotoFilterEditor(
     }
     val selected = filters.firstOrNull { it.id == selectedId }
     val normalizedIntensity = normalizePhotoFilterIntensity(intensityPercent)
+    val intensityChoices = remember { (100 downTo 0).toList() }
 
     SettingsCard(
         borderColor = colors.accentOrange.copy(alpha = 0.42f),
@@ -1226,23 +1226,13 @@ private fun PhotoFilterEditor(
             onRotate = onPreviewRotate,
         )
         Spacer(Modifier.height(10.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        Text(
+            stringResource(R.string.photo_filter_compare_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Icon(
-                Icons.Default.Compare,
-                contentDescription = null,
-                tint = colors.accentOrange,
-                modifier = Modifier.size(17.dp),
-            )
-            Spacer(Modifier.width(7.dp))
-            Text(
-                stringResource(R.string.photo_filter_compare_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-            )
-        }
+        )
     }
 
     Spacer(Modifier.height(10.dp))
@@ -1286,38 +1276,17 @@ private fun PhotoFilterEditor(
         }
 
         Spacer(Modifier.height(12.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                stringResource(R.string.photo_filter_intensity),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.onBackground,
-            )
-            Spacer(Modifier.weight(1f))
-            Surface(
-                color = colors.accentOrange.copy(alpha = 0.12f),
-                shape = RoundedCornerShape(9.dp),
-            ) {
-                Text(
-                    "$normalizedIntensity%",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.accentOrange,
-                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-                )
-            }
-        }
-        Slider(
-            value = normalizedIntensity.toFloat(),
-            onValueChange = { onIntensityChanged(it.roundToInt()) },
-            valueRange = 0f..100f,
+        ReleaseCommitWheel(
+            options = intensityChoices,
+            selected = normalizedIntensity,
+            optionLabel = { "$it%" },
+            onValueCommitted = onIntensityChanged,
+            onDetent = haptics::tick,
+            label = stringResource(R.string.photo_filter_intensity),
             enabled = selected != null,
-            colors = SliderDefaults.colors(
-                thumbColor = colors.accentOrange,
-                activeTrackColor = colors.accentOrange,
-                inactiveTrackColor = colors.onSurfaceVariant.copy(alpha = 0.18f),
-            ),
             modifier = Modifier.fillMaxWidth(),
         )
+        Spacer(Modifier.height(10.dp))
         Text(
             stringResource(R.string.photo_filter_builtin_note),
             style = MaterialTheme.typography.bodySmall,
@@ -1340,8 +1309,7 @@ private fun PhotoFilterComparePreview(
     onRotate: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    var viewport by remember { mutableStateOf(IntSize.Zero) }
-    var seamFraction by remember { mutableFloatStateOf(0.5f) }
+    var showOriginal by remember(source) { mutableStateOf(false) }
     var renderFailed by remember(source, filter, intensityPercent) { mutableStateOf(false) }
     val filtered by produceState<Bitmap?>(
         initialValue = null,
@@ -1373,58 +1341,52 @@ private fun PhotoFilterComparePreview(
     val beforeImage = remember(source) { source.asImageBitmap() }
     val afterImage = remember(filtered) { filtered?.asImageBitmap() }
     val shape = RoundedCornerShape(16.dp)
+    val targetAspectRatio = (
+        source.width.toFloat() / source.height.coerceAtLeast(1)
+    ).coerceIn(0.5f, 2.5f)
+    val viewportAspectRatio by animateFloatAsState(
+        targetValue = targetAspectRatio,
+        animationSpec = Motion.overlayExpand,
+        label = "photoFilterPreviewAspectRatio",
+    )
+    val quarterTurn = remember { Animatable(0f) }
+    var previousSource by remember { mutableStateOf(source) }
+    LaunchedEffect(source) {
+        if (source !== previousSource) {
+            previousSource = source
+            // The replacement bitmap has already been rotated left. Starting it at +90° keeps
+            // the first frame aligned with the old bitmap, then turns it into the new direction.
+            quarterTurn.snapTo(90f)
+            quarterTurn.animateTo(0f, Motion.overlayExpand)
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(
-                (source.width.toFloat() / source.height.coerceAtLeast(1)).coerceIn(0.5f, 2.5f)
-            )
+            .aspectRatio(viewportAspectRatio)
             .clip(shape)
-            .background(colors.surfaceVariant)
-            .onSizeChanged { viewport = it }
-            .pointerInput(viewport, filter) {
-                if (filter == null) return@pointerInput
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        if (viewport.width > 0) {
-                            seamFraction = (offset.x / viewport.width).coerceIn(0f, 1f)
-                        }
-                    },
-                    onDrag = { change, _ ->
-                        if (viewport.width > 0) {
-                            seamFraction = (change.position.x / viewport.width).coerceIn(0f, 1f)
-                        }
-                    },
-                )
-            },
+            .background(colors.surfaceVariant),
     ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val destination = IntSize(size.width.roundToInt(), size.height.roundToInt())
-            drawImage(afterImage ?: beforeImage, dstSize = destination)
-            if (afterImage != null) {
-                val seamX = size.width * seamFraction
-                clipRect(right = seamX) {
-                    drawImage(beforeImage, dstSize = destination)
-                }
-                drawLine(
-                    color = Color.White.copy(alpha = 0.96f),
-                    start = Offset(seamX, 0f),
-                    end = Offset(seamX, size.height),
-                    strokeWidth = 2.5.dp.toPx(),
-                )
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.96f),
-                    radius = 11.dp.toPx(),
-                    center = Offset(seamX, size.height / 2f),
-                )
-                drawCircle(
-                    color = colors.accentOrange,
-                    radius = 6.dp.toPx(),
-                    center = Offset(seamX, size.height / 2f),
-                )
-            }
-        }
+        FittedRotatingBitmap(
+            image = if (showOriginal || afterImage == null) beforeImage else afterImage,
+            rotationDegrees = quarterTurn.value,
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(source, filter, filtered) {
+                    if (filter == null || filtered == null) return@pointerInput
+                    detectTapGestures(
+                        onPress = {
+                            showOriginal = true
+                            try {
+                                tryAwaitRelease()
+                            } finally {
+                                showOriginal = false
+                            }
+                        },
+                    )
+                },
+        )
         if (filter != null && filtered == null && !renderFailed) {
             CircularProgressIndicator(
                 color = colors.accentOrange,
@@ -1434,12 +1396,6 @@ private fun PhotoFilterComparePreview(
                     .size(24.dp),
             )
         }
-        PhotoFilterCompareLabel(
-            text = stringResource(R.string.photo_filter_before),
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(9.dp),
-        )
         PreviewRotationButton(
             onClick = onRotate,
             buttonSize = 38.dp,
@@ -1447,32 +1403,45 @@ private fun PhotoFilterComparePreview(
                 .align(Alignment.BottomEnd)
                 .padding(9.dp),
         )
-        PhotoFilterCompareLabel(
-            text = stringResource(R.string.photo_filter_after),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(9.dp),
-        )
     }
 }
 
+/** Draws a bitmap without distortion while its fitted bounds rotate inside a resizing viewport. */
 @Composable
-private fun PhotoFilterCompareLabel(
-    text: String,
+private fun FittedRotatingBitmap(
+    image: ImageBitmap,
+    rotationDegrees: Float,
     modifier: Modifier = Modifier,
+    description: String? = null,
 ) {
-    Surface(
-        color = Color.Black.copy(alpha = 0.46f),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
-        modifier = modifier,
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+    val accessibleModifier = if (description == null) {
+        modifier
+    } else {
+        modifier.semantics { contentDescription = description }
+    }
+    androidx.compose.foundation.Canvas(accessibleModifier) {
+        if (size.width <= 0f || size.height <= 0f || image.width <= 0 || image.height <= 0) {
+            return@Canvas
+        }
+        val radians = Math.toRadians(rotationDegrees.toDouble())
+        val cosine = abs(cos(radians)).toFloat()
+        val sine = abs(sin(radians)).toFloat()
+        val rotatedWidth = image.width * cosine + image.height * sine
+        val rotatedHeight = image.width * sine + image.height * cosine
+        val scale = minOf(size.width / rotatedWidth, size.height / rotatedHeight)
+        val drawWidth = (image.width * scale).roundToInt().coerceAtLeast(1)
+        val drawHeight = (image.height * scale).roundToInt().coerceAtLeast(1)
+        val destinationOffset = IntOffset(
+            x = ((size.width - drawWidth) / 2f).roundToInt(),
+            y = ((size.height - drawHeight) / 2f).roundToInt(),
         )
+        rotate(degrees = rotationDegrees, pivot = center) {
+            drawImage(
+                image = image,
+                dstOffset = destinationOffset,
+                dstSize = IntSize(drawWidth, drawHeight),
+            )
+        }
     }
 }
 
@@ -2084,10 +2053,30 @@ private fun PhotoFrameRenderedPreview(
         }
     }
     val preview = rendered.value
-    val viewportAspectRatio = if (source.height > source.width) {
+    val aspectSource = preview?.bitmap ?: source
+    val targetViewportAspectRatio = if (aspectSource.height > aspectSource.width) {
         PHOTO_FRAME_PREVIEW_PORTRAIT_ASPECT_RATIO
     } else {
         PHOTO_FRAME_PREVIEW_LANDSCAPE_ASPECT_RATIO
+    }
+    val viewportAspectRatio by animateFloatAsState(
+        targetValue = targetViewportAspectRatio,
+        animationSpec = Motion.overlayExpand,
+        label = "photoFramePreviewAspectRatio",
+    )
+    val quarterTurn = remember { Animatable(0f) }
+    var previousPreviewPortrait by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(preview?.bitmap) {
+        val currentBitmap = preview?.bitmap ?: return@LaunchedEffect
+        val currentPortrait = currentBitmap.height > currentBitmap.width
+        val orientationChanged = previousPreviewPortrait?.let { it != currentPortrait } == true
+        previousPreviewPortrait = currentPortrait
+        if (orientationChanged) {
+            quarterTurn.snapTo(90f)
+            quarterTurn.animateTo(0f, Motion.overlayExpand)
+        } else {
+            quarterTurn.snapTo(0f)
+        }
     }
     Box(
         contentAlignment = Alignment.Center,
@@ -2129,10 +2118,14 @@ private fun PhotoFrameRenderedPreview(
                     modifier = Modifier.fillMaxSize(),
                 ) { frame ->
                     val imageBitmap = remember(frame.bitmap) { frame.bitmap.asImageBitmap() }
-                    Image(
-                        bitmap = imageBitmap,
-                        contentDescription = stringResource(R.string.photo_frame_preview),
-                        contentScale = ContentScale.Fit,
+                    FittedRotatingBitmap(
+                        image = imageBitmap,
+                        rotationDegrees = if (frame.bitmap === preview.bitmap) {
+                            quarterTurn.value
+                        } else {
+                            0f
+                        },
+                        description = stringResource(R.string.photo_frame_preview),
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
