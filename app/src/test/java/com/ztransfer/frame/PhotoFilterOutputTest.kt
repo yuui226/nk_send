@@ -1,7 +1,7 @@
 package com.ztransfer.frame
 
-import com.ztransfer.filter.Np3ColorBand
-import com.ztransfer.filter.Np3PhotoFilter
+import com.ztransfer.filter.PhotoFilterColorBand
+import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -60,7 +60,7 @@ class PhotoFilterOutputTest {
         filter = filter,
     )
 
-    private fun testFilter(id: String) = Np3PhotoFilter(
+    private fun testFilter(id: String) = PhotoFilterPreset(
         id = id,
         name = "Test",
         contrast = 0,
@@ -70,7 +70,7 @@ class PhotoFilterOutputTest {
         blackLevel = 0,
         saturation = 0,
         colorBands = List(8) { index ->
-            Np3ColorBand(index * 45f, hue = 0, chroma = 0, brightness = 0)
+            PhotoFilterColorBand(index * 45f, hue = 0, chroma = 0, brightness = 0)
         },
     )
 }

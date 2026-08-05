@@ -11,7 +11,7 @@ import java.util.Locale
  * 修改任何参数都会产生新的内容 ID，避免旧效果图被错误当成新版结果。
  */
 object BuiltInPhotoFilters {
-    val all: List<Np3PhotoFilter> by lazy {
+    val all: List<PhotoFilterPreset> by lazy {
         listOf(
             preset(
                 key = "natural-v1",
@@ -124,9 +124,9 @@ object BuiltInPhotoFilters {
         whiteLevel: Int,
         blackLevel: Int,
         saturation: Int,
-        bands: List<Np3ColorBand> = NP3_COLOR_BAND_CENTERS.map { band(it) },
-    ): Np3PhotoFilter {
-        require(bands.size == NP3_COLOR_BAND_CENTERS.size)
+        bands: List<PhotoFilterColorBand> = PHOTO_FILTER_COLOR_BAND_CENTERS.map { band(it) },
+    ): PhotoFilterPreset {
+        require(bands.size == PHOTO_FILTER_COLOR_BAND_CENTERS.size)
         val identity = buildString {
             append(key)
             listOf(contrast, highlights, shadows, whiteLevel, blackLevel, saturation)
@@ -138,7 +138,7 @@ object BuiltInPhotoFilters {
                 append(',').append(value.brightness)
             }
         }
-        return Np3PhotoFilter(
+        return PhotoFilterPreset(
             id = MessageDigest.getInstance("SHA-256")
                 .digest(identity.toByteArray(Charsets.UTF_8))
                 .joinToString("") { byte ->
@@ -160,12 +160,17 @@ object BuiltInPhotoFilters {
         hue: Int = 0,
         chroma: Int = 0,
         brightness: Int = 0,
-    ): Np3ColorBand = band(NP3_COLOR_BAND_CENTERS[index], hue, chroma, brightness)
+    ): PhotoFilterColorBand = band(
+        PHOTO_FILTER_COLOR_BAND_CENTERS[index],
+        hue,
+        chroma,
+        brightness,
+    )
 
     private fun band(
         centerDegrees: Float,
         hue: Int = 0,
         chroma: Int = 0,
         brightness: Int = 0,
-    ) = Np3ColorBand(centerDegrees, hue, chroma, brightness)
+    ) = PhotoFilterColorBand(centerDegrees, hue, chroma, brightness)
 }

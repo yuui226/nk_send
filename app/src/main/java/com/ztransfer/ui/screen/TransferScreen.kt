@@ -59,7 +59,7 @@ import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.filter.BuiltInPhotoFilters
-import com.ztransfer.filter.Np3PhotoFilter
+import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
@@ -630,7 +630,7 @@ private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringReso
 )
 
 @Composable
-private fun photoFilterDisplayName(filter: Np3PhotoFilter): String =
+private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
     BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
 /**

@@ -49,7 +49,7 @@ object PhotoFilterRenderer {
         }
     }
 
-    private fun filterPixel(color: Int, preset: Np3PhotoFilter, strength: Float): Int {
+    private fun filterPixel(color: Int, preset: PhotoFilterPreset, strength: Float): Int {
         val alpha = Color.alpha(color)
         if (alpha == 0) return color
         val originalR = Color.red(color)
@@ -81,10 +81,10 @@ object PhotoFilterRenderer {
         var leftIndex = 0
         var rightIndex = 1
         var progress = 0f
-        for (index in NP3_COLOR_BAND_CENTERS.indices) {
-            val next = (index + 1) % NP3_COLOR_BAND_CENTERS.size
-            val start = NP3_COLOR_BAND_CENTERS[index]
-            val end = if (next == 0) 360f else NP3_COLOR_BAND_CENTERS[next]
+        for (index in PHOTO_FILTER_COLOR_BAND_CENTERS.indices) {
+            val next = (index + 1) % PHOTO_FILTER_COLOR_BAND_CENTERS.size
+            val start = PHOTO_FILTER_COLOR_BAND_CENTERS[index]
+            val end = if (next == 0) 360f else PHOTO_FILTER_COLOR_BAND_CENTERS[next]
             val adjustedHue = if (next == 0 && originalHue < start) originalHue + 360f else originalHue
             if (adjustedHue in start..end) {
                 leftIndex = index
@@ -122,7 +122,7 @@ object PhotoFilterRenderer {
         )
     }
 
-    private fun applyTonalControls(value: Float, preset: Np3PhotoFilter): Float {
+    private fun applyTonalControls(value: Float, preset: PhotoFilterPreset): Float {
         var lightness = value.coerceIn(0f, 1f)
         val shadowWeight = 1f - smoothStep(0.18f, 0.72f, lightness)
         val highlightWeight = smoothStep(0.28f, 0.82f, lightness)

@@ -130,7 +130,6 @@
     <string name="photo_frame_no_watermark">无水印</string>
     <string name="photo_frame_style_short">边框</string>
     <string name="photo_frame_watermark_short">水印</string>
-    <string name="photo_frame_open_editor">编辑边框和水印</string>
     <string name="photo_frame_preview">边框与水印预览</string>
     <string name="photo_frame_preview_unavailable">预览暂时不可用</string>
     <string name="photo_frame_watermark_font">字体</string>
@@ -172,26 +171,21 @@
     <string name="photo_frame_effect_shadow">阴影</string>
     <string name="photo_frame_effect_outline">描边</string>
     <string name="photo_filter">照片滤镜</string>
-    <string name="photo_filter_none">尚未导入滤镜</string>
+    <string name="photo_effects">照片效果</string>
+    <string name="photo_effects_description">统一设置滤镜、边框和水印</string>
+    <string name="photo_effects_open_editor">编辑照片效果</string>
+    <string name="photo_effects_compare_hint">长按画面对比最终效果</string>
+    <string name="photo_filter_none">滤镜已关闭</string>
     <string name="photo_filter_summary">%1$s · %2$d%%</string>
-    <string name="photo_filter_open_editor">编辑照片滤镜</string>
-    <string name="photo_filter_import">导入 NP3</string>
-    <string name="photo_filter_importing">正在导入…</string>
-    <string name="photo_filter_import_result">已导入 %1$d 个 · 跳过 %2$d 个</string>
-    <string name="photo_filter_import_none">没有找到可兼容的简单 NP3 滤镜</string>
-    <string name="photo_filter_description">原图保持不变，套滤镜的效果图单独保存</string>
-    <string name="photo_filter_simple_note">支持不含自定义曲线和三路分级的简单 NP3 预设</string>
+    <string name="photo_filter_description">滤镜会先于边框和水印应用</string>
     <string name="photo_filter_intensity">滤镜强度</string>
-    <string name="photo_filter_compare_hint">长按画面对比效果</string>
     <string name="photo_filter_task_label">滤镜：%1$s · %2$d%%</string>
-    <string name="photo_filter_preview">照片滤镜预览</string>
     <string name="photo_filter_builtin_natural">自然鲜活</string>
     <string name="photo_filter_builtin_warm_film">暖阳胶片</string>
     <string name="photo_filter_builtin_teal_cinema">青橙电影</string>
     <string name="photo_filter_builtin_soft_portrait">柔和人像</string>
     <string name="photo_filter_builtin_documentary_mono">黑白纪实</string>
     <string name="photo_filter_builtin_note">内置预设由应用统一调校并随版本维护</string>
-    <string name="restore_default">恢复默认</string>
 
     <!-- 传输错误 -->
     <string name="error_dir_invalid">传输目录已失效，请重新选择</string>

@@ -7,8 +7,8 @@ import com.ztransfer.frame.PhotoFrameWatermarkContent
 import com.ztransfer.frame.PhotoFrameWatermarkEffect
 import com.ztransfer.frame.PhotoFrameWatermarkFont
 import com.ztransfer.frame.PhotoFrameWatermarkPosition
-import com.ztransfer.filter.Np3ColorBand
-import com.ztransfer.filter.Np3PhotoFilter
+import com.ztransfer.filter.PhotoFilterColorBand
+import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.protocol.NikonCamera
 import org.junit.Assert.assertEquals
@@ -255,7 +255,7 @@ class TransferStateTest {
     @Test
     fun queueTaskSnapshotsFilterAtClickTimeWithoutEnablingAFrame() {
         val filter = PhotoFilterSelection(
-            preset = Np3PhotoFilter(
+            preset = PhotoFilterPreset(
                 id = "abcdef0123456789",
                 name = "Simple",
                 contrast = 0,
@@ -265,7 +265,7 @@ class TransferStateTest {
                 blackLevel = 0,
                 saturation = 0,
                 colorBands = List(8) { index ->
-                    Np3ColorBand(index * 45f, 0, 0, 0)
+                    PhotoFilterColorBand(index * 45f, 0, 0, 0)
                 },
             ),
             intensityPercent = 63,

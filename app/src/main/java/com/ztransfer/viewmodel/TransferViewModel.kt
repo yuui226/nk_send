@@ -33,11 +33,9 @@ import com.ztransfer.frame.normalizePhotoFrameWatermarkSizePercent
 import com.ztransfer.frame.importPhotoFrameWatermarkImage as storePhotoFrameWatermarkImage
 import com.ztransfer.frame.photoFrameWatermarkImageFile
 import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
-import com.ztransfer.filter.Np3PhotoFilter
+import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
-import com.ztransfer.filter.PhotoFilterImportReport
 import com.ztransfer.filter.PhotoFilterSelection
-import com.ztransfer.filter.PhotoFilterStore
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
@@ -158,8 +156,7 @@ data class TransferState(
     val photoFrameWatermarkColor: PhotoFrameWatermarkColor = PhotoFrameWatermarkColor.ADAPTIVE,
     val photoFrameWatermarkOpacityPercent: Int = DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
     val photoFrameWatermarkEffect: PhotoFrameWatermarkEffect = PhotoFrameWatermarkEffect.AUTO,
-    // 用户从系统文件选择器导入的简单 NP3；只保存在 App 私有目录，不随安装包分发。
-    val photoFilters: List<Np3PhotoFilter> = emptyList(),
+    val photoFilters: List<PhotoFilterPreset> = emptyList(),
     val photoFilterEnabled: Boolean = false,
     val selectedPhotoFilterId: String? = null,
     val photoFilterIntensityPercent: Int = 100,
@@ -720,37 +717,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 photoFilterIntensityPercent = intensity,
                 photoFilterEnabled = active,
             )
-        }
-    }
-
-    fun importPhotoFilters(
-        sourceUris: List<Uri>,
-        onComplete: (PhotoFilterImportReport) -> Unit,
-    ) {
-        if (sourceUris.isEmpty()) return
-        viewModelScope.launch {
-            val report = withContext(Dispatchers.IO) {
-                PhotoFilterStore.import(
-                    context = getApplication(),
-                    resolver = contentResolver,
-                    uris = sourceUris,
-                )
-            }
-            val selected = report.imported.firstOrNull()?.id
-                ?: _state.value.selectedPhotoFilterId
-                ?: report.available.firstOrNull()?.id
-            prefs.edit().apply {
-                if (selected != null) putString("photo_filter_selected_id", selected)
-                putBoolean("photo_filter_enabled", selected != null)
-            }.apply()
-            _state.update {
-                it.copy(
-                    photoFilters = report.available,
-                    selectedPhotoFilterId = selected,
-                    photoFilterEnabled = selected != null,
-                )
-            }
-            onComplete(report)
         }
     }
 

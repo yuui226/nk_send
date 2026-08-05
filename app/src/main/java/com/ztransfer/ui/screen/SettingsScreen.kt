@@ -41,7 +41,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -113,7 +112,7 @@ import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
 import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
 import com.ztransfer.frame.limitPhotoFrameWatermarkText
 import com.ztransfer.frame.isPhotoPlacement
-import com.ztransfer.filter.Np3PhotoFilter
+import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
@@ -125,15 +124,13 @@ import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
 import com.ztransfer.viewmodel.photoFrameWatermark
-import com.ztransfer.viewmodel.photoFilterSelection
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -144,7 +141,7 @@ internal const val QQ_NUMBER = "953000922"
 // 定价不在这里了:由服务端下发(LicenseManager.pricing),改价改服务器的 pricing.json 即可,
 // 不用发版。兜底常量见 LicenseManager.FALLBACK_PRICE_FEN。
 
-private enum class SettingsPage { MAIN, FRAME, FILTER }
+private enum class SettingsPage { MAIN, EFFECTS }
 
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），从顶栏设置按钮变形弹出、关闭缩回按钮
@@ -203,12 +200,13 @@ fun SettingsOverlay(
     // 页脚"我要换机"打开的对话框（取激活码 + 换机后果告知）。
     var showSwitchDevice by remember { mutableStateOf(false) }
     var settingsPage by remember { mutableStateOf(SettingsPage.MAIN) }
-    var expandedWatermarkPreview by remember {
-        mutableStateOf<ExpandedWatermarkPreview?>(null)
+    var expandedEffectsPreview by remember {
+        mutableStateOf<ExpandedEffectsPreview?>(null)
     }
     var watermarkImageImporting by remember { mutableStateOf(false) }
     var showFrameExportInfo by remember { mutableStateOf(false) }
     var frameExportInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
+    var frameDraftDecorationEnabled by remember { mutableStateOf(state.photoFrameEnabled) }
     var frameDraftBorderEnabled by remember { mutableStateOf(state.photoFrameBorderEnabled) }
     var frameDraftPreset by remember { mutableStateOf(state.photoFramePreset) }
     var watermarkDraft by remember { mutableStateOf(state.photoFrameWatermark) }
@@ -221,7 +219,7 @@ fun SettingsOverlay(
     val effectPreviewBase = remember(effectPreviewSource) {
         downscalePreviewBitmap(
             effectPreviewSource ?: fallbackEffectPreviewSource,
-            PHOTO_FRAME_PREVIEW_RENDER_LONG_EDGE,
+            PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
         )
     }
     var effectPreviewRotationQuarterTurns by remember(effectPreviewBase) {
@@ -240,25 +238,26 @@ fun SettingsOverlay(
         effectPreviewRotationQuarterTurns = (effectPreviewRotationQuarterTurns + 1) % 4
     }
     val mainSettingsScroll = rememberScrollState()
-    val photoFrameEditorScroll = rememberScrollState()
-    val photoFilterEditorScroll = rememberScrollState()
+    val photoEffectsEditorScroll = rememberScrollState()
     val subExpired by LicenseManager.subExpired.collectAsState()
     LaunchedEffect(settingsPage) {
-        if (settingsPage == SettingsPage.FRAME) {
+        if (settingsPage == SettingsPage.EFFECTS) {
             showFrameExportInfo = false
-            photoFrameEditorScroll.scrollTo(0)
-        } else if (settingsPage == SettingsPage.FILTER) {
-            photoFilterEditorScroll.scrollTo(0)
+            photoEffectsEditorScroll.scrollTo(0)
         }
     }
     fun commitPhotoFrameDraft() {
         focusManager.clearFocus()
         keyboardController?.hide()
-        viewModel.setPhotoFrameConfiguration(
-            borderEnabled = frameDraftBorderEnabled,
-            preset = frameDraftPreset,
-            watermark = watermarkDraft.takeIf { isPro },
-        )
+        if (frameDraftDecorationEnabled) {
+            viewModel.setPhotoFrameConfiguration(
+                borderEnabled = frameDraftBorderEnabled,
+                preset = frameDraftPreset,
+                watermark = watermarkDraft.takeIf { isPro },
+            )
+        } else {
+            viewModel.setPhotoFrameEnabled(false)
+        }
     }
     fun commitPhotoFilterDraft() {
         viewModel.setPhotoFilterConfiguration(
@@ -266,6 +265,10 @@ fun SettingsOverlay(
             intensityPercent = filterDraftIntensity,
             enabled = filterDraftEnabled && filterDraftId != null,
         )
+    }
+    fun commitPhotoEffectsDraft() {
+        commitPhotoFilterDraft()
+        commitPhotoFrameDraft()
     }
 
     // 页脚底部玻璃提示（反馈复制确认 / 隐藏入口的恢复免费版确认共用）；
@@ -324,11 +327,7 @@ fun SettingsOverlay(
     AnchorPopup(
         anchorBounds = openingAnchorBounds,
         onDismiss = {
-            when (settingsPage) {
-                SettingsPage.FRAME -> commitPhotoFrameDraft()
-                SettingsPage.FILTER -> commitPhotoFilterDraft()
-                SettingsPage.MAIN -> Unit
-            }
+            if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
             // AnchorPopup 只会在收起动画 animateTo(0f) 完成后调用这里，因此语言切换不会
             // 再硬切掉弹窗；关闭按钮、返回键和点遮罩三条路径都共用这一时序。
             onDismiss()
@@ -395,13 +394,9 @@ fun SettingsOverlay(
         }
     ) { close ->
         BackHandler(
-            enabled = settingsPage != SettingsPage.MAIN && expandedWatermarkPreview == null
+            enabled = settingsPage != SettingsPage.MAIN && expandedEffectsPreview == null
         ) {
-            when (settingsPage) {
-                SettingsPage.FRAME -> commitPhotoFrameDraft()
-                SettingsPage.FILTER -> commitPhotoFilterDraft()
-                SettingsPage.MAIN -> Unit
-            }
+            if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
             settingsPage = SettingsPage.MAIN
         }
         AnimatedContent(
@@ -439,8 +434,7 @@ fun SettingsOverlay(
                     .verticalScroll(
                         when (page) {
                             SettingsPage.MAIN -> mainSettingsScroll
-                            SettingsPage.FRAME -> photoFrameEditorScroll
-                            SettingsPage.FILTER -> photoFilterEditorScroll
+                            SettingsPage.EFFECTS -> photoEffectsEditorScroll
                         }
                     )
                     .padding(16.dp)
@@ -451,11 +445,7 @@ fun SettingsOverlay(
                     GlassButton(
                         onClick = {
                             focusManager.clearFocus()
-                            when (page) {
-                                SettingsPage.FRAME -> commitPhotoFrameDraft()
-                                SettingsPage.FILTER -> commitPhotoFilterDraft()
-                                SettingsPage.MAIN -> Unit
-                            }
+                            if (page == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
                             settingsPage = SettingsPage.MAIN
                         },
                         modifier = Modifier.height(36.dp),
@@ -473,8 +463,7 @@ fun SettingsOverlay(
                     stringResource(
                         when (page) {
                             SettingsPage.MAIN -> R.string.settings
-                            SettingsPage.FRAME -> R.string.photo_frame_watermark
-                            SettingsPage.FILTER -> R.string.photo_filter
+                            SettingsPage.EFFECTS -> R.string.photo_effects
                         }
                     ),
                     style = MaterialTheme.typography.titleLarge,
@@ -482,24 +471,7 @@ fun SettingsOverlay(
                     color = colors.onBackground
                 )
                 Spacer(Modifier.weight(1f))
-                if (page == SettingsPage.FRAME) {
-                    GlassButton(
-                        onClick = {
-                            focusManager.clearFocus()
-                            frameDraftBorderEnabled = true
-                            frameDraftPreset = PhotoFramePreset.MIST
-                            if (isPro) watermarkDraft = PhotoFrameWatermark()
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.height(36.dp),
-                    ) {
-                        Text(
-                            stringResource(R.string.restore_default),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.onBackground,
-                        )
-                    }
-                } else if (page == SettingsPage.MAIN) {
+                if (page == SettingsPage.MAIN) {
                     // 未解锁：金徽标"解锁高级版"，点击开介绍弹窗。
                     // 已解锁：金徽标改显"高级版"，点击不弹窗，放烟花彩蛋。
                     if (isPro) {
@@ -522,21 +494,69 @@ fun SettingsOverlay(
                 }
             }
 
-            if (page == SettingsPage.FRAME) {
+            if (page == SettingsPage.EFFECTS) {
                 Spacer(Modifier.height(14.dp))
-                PhotoFrameWatermarkEditor(
+                val previewFilter = state.photoFilters
+                    .firstOrNull { it.id == filterDraftId }
+                    ?.takeIf { filterDraftEnabled }
+                    ?.let { PhotoFilterSelection(it, filterDraftIntensity) }
+                val previewWatermark = when {
+                    !frameDraftDecorationEnabled -> PhotoFrameWatermark(enabled = false)
+                    isPro -> watermarkDraft
+                    // 免费版真实导出固定使用默认水印；预览必须走同一规则。
+                    else -> PhotoFrameWatermark()
+                }
+                SettingsCard(
+                    borderColor = colors.accentOrange.copy(alpha = 0.38f),
+                ) {
+                    PhotoEffectsRenderedPreview(
+                        source = rotatedEffectPreviewSource,
+                        onRotate = rotateEffectPreview,
+                        borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
+                        preset = frameDraftPreset,
+                        watermark = previewWatermark,
+                        filter = previewFilter,
+                        onOpen = { bitmap, anchorRect ->
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
+                            expandedEffectsPreview = ExpandedEffectsPreview(bitmap, anchorRect)
+                        },
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        stringResource(R.string.photo_effects_compare_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                PhotoFilterEditor(
                     previewSource = rotatedEffectPreviewSource,
-                    onPreviewRotate = rotateEffectPreview,
-                    borderEnabled = frameDraftBorderEnabled,
+                    filters = state.photoFilters,
+                    selectedId = filterDraftId,
+                    intensityPercent = filterDraftIntensity,
+                    onSelected = {
+                        filterDraftId = it
+                        filterDraftEnabled = true
+                    },
+                    onIntensityChanged = { filterDraftIntensity = it },
+                    hapticsEnabled = state.hapticsEnabled,
+                )
+                Spacer(Modifier.height(10.dp))
+                PhotoFrameWatermarkEditor(
+                    borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
                     preset = frameDraftPreset,
                     // 高级版编辑器必须保留正在输入的原始草稿（包括暂时为空）；若在这里
                     // 经过 effectivePhotoFrameWatermark，空值会在每次重组时立刻变回默认值，
                     // 用户就无法真正清空后重新输入。预览渲染自身仍会使用 displayText。
-                    watermark = if (isPro) watermarkDraft else PhotoFrameWatermark(),
+                    watermark = previewWatermark,
                     isPro = isPro,
                     hapticsEnabled = state.hapticsEnabled,
                     onBorderEnabledChanged = { enabled ->
                         frameDraftBorderEnabled = enabled
+                        frameDraftDecorationEnabled = enabled || (isPro && watermarkDraft.enabled)
                         if (!enabled && !watermarkDraft.position.isPhotoPlacement()) {
                             watermarkDraft = watermarkDraft.copy(
                                 position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
@@ -545,26 +565,21 @@ fun SettingsOverlay(
                     },
                     onPresetChanged = { frameDraftPreset = it },
                     onWatermarkChanged = { updated ->
-                        if (isPro) watermarkDraft = updated
+                        if (isPro) {
+                            watermarkDraft = updated
+                            frameDraftDecorationEnabled = frameDraftBorderEnabled || updated.enabled
+                        }
                     },
                     onWatermarkTextCommitted = { text ->
                         if (isPro) {
                             val updated = watermarkDraft.copy(text = text)
                             watermarkDraft = updated
                             viewModel.setPhotoFrameConfiguration(
-                                frameDraftBorderEnabled,
+                                frameDraftDecorationEnabled && frameDraftBorderEnabled,
                                 frameDraftPreset,
                                 updated,
                             )
                         }
-                    },
-                    onPreviewOpen = { bitmap, anchorRect ->
-                        focusManager.clearFocus()
-                        keyboardController?.hide()
-                        expandedWatermarkPreview = ExpandedWatermarkPreview(
-                            bitmap = bitmap,
-                            anchorRect = anchorRect,
-                        )
                     },
                     imageImporting = watermarkImageImporting,
                     onImageRequested = {
@@ -576,21 +591,6 @@ fun SettingsOverlay(
                             )
                         }
                     },
-                )
-            } else if (page == SettingsPage.FILTER) {
-                Spacer(Modifier.height(14.dp))
-                PhotoFilterEditor(
-                    previewSource = rotatedEffectPreviewSource,
-                    onPreviewRotate = rotateEffectPreview,
-                    filters = state.photoFilters,
-                    selectedId = filterDraftId,
-                    intensityPercent = filterDraftIntensity,
-                    onSelected = {
-                        filterDraftId = it
-                        filterDraftEnabled = true
-                    },
-                    onIntensityChanged = { filterDraftIntensity = it },
-                    hapticsEnabled = state.hapticsEnabled,
                 )
             } else {
             if (showPro) {
@@ -747,37 +747,93 @@ fun SettingsOverlay(
 
             Spacer(Modifier.height(8.dp))
 
-            // ---------- 照片滤镜：原片不改动，只给导出的副本套用；点击卡片进入可视化编辑页 ----------
+            // ---------- 照片效果：统一入口与最终成片预览，主页面保留两个快捷开关 ----------
             val selectedPhotoFilter = state.photoFilters.firstOrNull {
                 it.id == state.selectedPhotoFilterId
             }
-            val openFilterEditor = {
+            val frameChoices = listOf(
+                PhotoFramePreset.MIST to stringResource(R.string.photo_frame_mist),
+                PhotoFramePreset.CINEMA to stringResource(R.string.photo_frame_cinema),
+                PhotoFramePreset.MINIMAL to stringResource(R.string.photo_frame_minimal),
+                PhotoFramePreset.FROSTED to stringResource(R.string.photo_frame_frosted),
+                PhotoFramePreset.PLAQUE to stringResource(R.string.photo_frame_plaque),
+            )
+            val selectedFrameChoice = frameChoices.first { it.first == state.photoFramePreset }
+            val visibleWatermark = if (state.photoFrameEnabled) {
+                effectivePhotoFrameWatermark(
+                    isPro,
+                    state.photoFrameWatermark,
+                    borderEnabled = state.photoFrameBorderEnabled,
+                )
+            } else {
+                PhotoFrameWatermark(enabled = false)
+            }
+            val watermarkSummary = if (visibleWatermark.enabled) {
+                if (visibleWatermark.content == PhotoFrameWatermarkContent.IMAGE) {
+                    stringResource(R.string.photo_frame_image_watermark)
+                } else {
+                    visibleWatermark.displayText
+                }
+            } else {
+                stringResource(R.string.photo_frame_no_watermark)
+            }
+            val openEffectsEditor = {
                 filterDraftId = state.selectedPhotoFilterId
                     ?: state.photoFilters.firstOrNull()?.id
                 filterDraftIntensity = state.photoFilterIntensityPercent
                 filterDraftEnabled = state.photoFilterEnabled
-                settingsPage = SettingsPage.FILTER
+                frameDraftDecorationEnabled = state.photoFrameEnabled
+                // 总开关关闭时 ViewModel 会保留上次的子配置。编辑草稿必须从当前实际
+                // 输出状态开始，避免用户只打开水印时把隐藏的旧边框一起恢复。
+                frameDraftBorderEnabled = state.photoFrameEnabled && state.photoFrameBorderEnabled
+                frameDraftPreset = state.photoFramePreset
+                watermarkDraft = state.photoFrameWatermark.copy(
+                    enabled = state.photoFrameEnabled && state.photoFrameWatermark.enabled,
+                    text = state.photoFrameWatermark.displayText,
+                )
+                settingsPage = SettingsPage.EFFECTS
             }
             SettingsCard(
                 borderColor = colors.accentOrange.copy(
-                    alpha = if (state.photoFilterEnabled) 0.56f else 0.30f
+                    alpha = if (state.photoFilterEnabled || state.photoFrameEnabled) 0.56f
+                    else 0.30f
                 ),
                 pressAccentColor = colors.accentOrange,
-                onClick = openFilterEditor,
+                onClick = openEffectsEditor,
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = colors.accentOrange,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        SectionLabel(
+                            stringResource(R.string.photo_effects),
+                            color = colors.accentOrange,
+                        )
+                        Text(
+                            stringResource(R.string.photo_effects_description),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.Default.ChevronRight,
+                        contentDescription = stringResource(R.string.photo_effects_open_editor),
+                        tint = colors.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                CardDivider()
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 2.dp),
                 ) {
-                    Icon(
-                        Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        tint = colors.accentOrange,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(Modifier.width(10.dp))
                     Column(
                         modifier = Modifier
                             .weight(1f)
@@ -789,7 +845,7 @@ fun SettingsOverlay(
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = selectedPhotoFilter?.let {
+                            text = selectedPhotoFilter?.takeIf { state.photoFilterEnabled }?.let {
                                 stringResource(
                                     R.string.photo_filter_summary,
                                     photoFilterDisplayName(it),
@@ -809,19 +865,6 @@ fun SettingsOverlay(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    GlassButton(
-                        onClick = openFilterEditor,
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = stringResource(R.string.photo_filter_open_editor),
-                            tint = colors.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
                     Spacer(Modifier.width(8.dp))
                     SettingsSwitch(
                         checked = state.photoFilterEnabled,
@@ -829,51 +872,9 @@ fun SettingsOverlay(
                         hapticsEnabled = state.hapticsEnabled,
                     )
                 }
-            }
+                CardDivider()
 
-            Spacer(Modifier.height(8.dp))
-
-            // ---------- 边框水印：主行只保留总开关，点击进入同一面板内的二级编辑页 ----------
-            val frameChoices = listOf(
-                PhotoFramePreset.MIST to stringResource(R.string.photo_frame_mist),
-                PhotoFramePreset.CINEMA to stringResource(R.string.photo_frame_cinema),
-                PhotoFramePreset.MINIMAL to stringResource(R.string.photo_frame_minimal),
-                PhotoFramePreset.FROSTED to stringResource(R.string.photo_frame_frosted),
-                PhotoFramePreset.PLAQUE to stringResource(R.string.photo_frame_plaque),
-            )
-            val selectedFrameChoice = frameChoices.first { it.first == state.photoFramePreset }
-            val visibleWatermark = effectivePhotoFrameWatermark(
-                isPro,
-                state.photoFrameWatermark,
-                borderEnabled = state.photoFrameBorderEnabled,
-            )
-            val watermarkSummary = if (visibleWatermark.enabled) {
-                if (visibleWatermark.content == PhotoFrameWatermarkContent.IMAGE) {
-                    stringResource(R.string.photo_frame_image_watermark)
-                } else {
-                    visibleWatermark.displayText
-                }
-            } else {
-                stringResource(R.string.photo_frame_no_watermark)
-            }
-            val openFrameEditor = {
-                frameDraftBorderEnabled = state.photoFrameBorderEnabled
-                frameDraftPreset = state.photoFramePreset
-                watermarkDraft = state.photoFrameWatermark.let {
-                    // 老版本可能保存过空字符串。进入编辑器时把真正会导出的默认文字放进
-                    // 输入框，用户点进去编辑的就是它本身，不再显示一个假占位文本。
-                    it.copy(text = it.displayText)
-                }
-                settingsPage = SettingsPage.FRAME
-            }
-            SettingsCard(
-                borderColor = colors.accentBlue.copy(
-                    alpha = if (state.photoFrameEnabled) 0.52f else 0.30f
-                ),
-                pressAccentColor = colors.accentBlue,
-                enabled = state.photoFrameEnabled,
-                onClick = openFrameEditor,
-            ) {
+                // 边框与水印共用上方入口，但保留独立状态摘要和快捷总开关。
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -909,7 +910,7 @@ fun SettingsOverlay(
                         Text(
                             stringResource(
                                 R.string.photo_frame_task_label,
-                                if (state.photoFrameBorderEnabled) {
+                                if (state.photoFrameEnabled && state.photoFrameBorderEnabled) {
                                     selectedFrameChoice.second
                                 } else {
                                     stringResource(R.string.photo_frame_off)
@@ -932,32 +933,6 @@ fun SettingsOverlay(
                         )
                     }
                     Spacer(Modifier.width(10.dp))
-                    AnimatedVisibility(
-                        visible = state.photoFrameEnabled,
-                        enter = fadeIn(Motion.overlayExpand),
-                        exit = fadeOut(Motion.overlayCollapse),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            GlassButton(
-                                onClick = {
-                                    if (state.photoFrameEnabled) openFrameEditor()
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(0.dp),
-                                modifier = Modifier.size(32.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.ChevronRight,
-                                    contentDescription = stringResource(
-                                        R.string.photo_frame_open_editor
-                                    ),
-                                    tint = colors.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                            Spacer(Modifier.width(8.dp))
-                        }
-                    }
                     SettingsSwitch(
                         checked = state.photoFrameEnabled,
                         onCheckedChange = viewModel::setPhotoFrameEnabled,
@@ -1171,17 +1146,17 @@ fun SettingsOverlay(
         }
         }
     }
-    expandedWatermarkPreview?.let { preview ->
+    expandedEffectsPreview?.let { preview ->
         SinglePhotoPreviewOverlay(
             bitmap = preview.bitmap.asImageBitmap(),
-            title = stringResource(R.string.photo_frame_preview),
+            title = stringResource(R.string.photo_effects),
             anchorRect = preview.anchorRect,
-            onDismiss = { expandedWatermarkPreview = null },
+            onDismiss = { expandedEffectsPreview = null },
         )
     }
 }
 
-private data class ExpandedWatermarkPreview(
+private data class ExpandedEffectsPreview(
     val bitmap: Bitmap,
     val anchorRect: Rect,
 )
@@ -1189,8 +1164,7 @@ private data class ExpandedWatermarkPreview(
 @Composable
 private fun PhotoFilterEditor(
     previewSource: Bitmap,
-    onPreviewRotate: () -> Unit,
-    filters: List<Np3PhotoFilter>,
+    filters: List<PhotoFilterPreset>,
     selectedId: String?,
     intensityPercent: Int,
     onSelected: (String) -> Unit,
@@ -1216,26 +1190,6 @@ private fun PhotoFilterEditor(
     val normalizedIntensity = normalizePhotoFilterIntensity(intensityPercent)
     val intensityChoices = remember { (100 downTo 0).toList() }
 
-    SettingsCard(
-        borderColor = colors.accentOrange.copy(alpha = 0.42f),
-    ) {
-        PhotoFilterComparePreview(
-            source = source,
-            filter = selected,
-            intensityPercent = normalizedIntensity,
-            onRotate = onPreviewRotate,
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            stringResource(R.string.photo_filter_compare_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-    }
-
-    Spacer(Modifier.height(10.dp))
     SettingsCard {
         SectionLabel(stringResource(R.string.photo_filter))
 
@@ -1301,111 +1255,6 @@ private fun PhotoFilterEditor(
     }
 }
 
-@Composable
-private fun PhotoFilterComparePreview(
-    source: Bitmap,
-    filter: Np3PhotoFilter?,
-    intensityPercent: Int,
-    onRotate: () -> Unit,
-) {
-    val colors = AppTheme.colors
-    var showOriginal by remember(source) { mutableStateOf(false) }
-    var renderFailed by remember(source, filter, intensityPercent) { mutableStateOf(false) }
-    val filtered by produceState<Bitmap?>(
-        initialValue = null,
-        source,
-        filter,
-        intensityPercent,
-    ) {
-        value = null
-        renderFailed = false
-        if (filter != null) {
-            try {
-                value = withContext(Dispatchers.Default) {
-                    val renderContext = currentCoroutineContext()
-                    PhotoFilterRenderer.render(
-                        source,
-                        PhotoFilterSelection(filter, intensityPercent),
-                        isCancelled = { !renderContext.isActive },
-                    )
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Throwable) {
-                // Rendering is an enhancement. Keep the original visible instead of leaving a
-                // permanent loading spinner after an allocation/device-specific failure.
-                renderFailed = true
-            }
-        }
-    }
-    val beforeImage = remember(source) { source.asImageBitmap() }
-    val afterImage = remember(filtered) { filtered?.asImageBitmap() }
-    val shape = RoundedCornerShape(16.dp)
-    val targetAspectRatio = (
-        source.width.toFloat() / source.height.coerceAtLeast(1)
-    ).coerceIn(0.5f, 2.5f)
-    val viewportAspectRatio by animateFloatAsState(
-        targetValue = targetAspectRatio,
-        animationSpec = Motion.overlayExpand,
-        label = "photoFilterPreviewAspectRatio",
-    )
-    val quarterTurn = remember { Animatable(0f) }
-    var previousSource by remember { mutableStateOf(source) }
-    LaunchedEffect(source) {
-        if (source !== previousSource) {
-            previousSource = source
-            // The replacement bitmap has already been rotated left. Starting it at +90° keeps
-            // the first frame aligned with the old bitmap, then turns it into the new direction.
-            quarterTurn.snapTo(90f)
-            quarterTurn.animateTo(0f, Motion.overlayExpand)
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(viewportAspectRatio)
-            .clip(shape)
-            .background(colors.surfaceVariant),
-    ) {
-        FittedRotatingBitmap(
-            image = if (showOriginal || afterImage == null) beforeImage else afterImage,
-            rotationDegrees = quarterTurn.value,
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(source, filter, filtered) {
-                    if (filter == null || filtered == null) return@pointerInput
-                    detectTapGestures(
-                        onPress = {
-                            showOriginal = true
-                            try {
-                                tryAwaitRelease()
-                            } finally {
-                                showOriginal = false
-                            }
-                        },
-                    )
-                },
-        )
-        if (filter != null && filtered == null && !renderFailed) {
-            CircularProgressIndicator(
-                color = colors.accentOrange,
-                strokeWidth = 2.dp,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(24.dp),
-            )
-        }
-        PreviewRotationButton(
-            onClick = onRotate,
-            buttonSize = 38.dp,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(9.dp),
-        )
-    }
-}
-
 /** Draws a bitmap without distortion while its fitted bounds rotate inside a resizing viewport. */
 @Composable
 private fun FittedRotatingBitmap(
@@ -1448,7 +1297,7 @@ private fun FittedRotatingBitmap(
 @Composable
 private fun PhotoFilterFilmCard(
     source: Bitmap,
-    filter: Np3PhotoFilter,
+    filter: PhotoFilterPreset,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -1514,13 +1363,11 @@ private fun PhotoFilterFilmCard(
 }
 
 @Composable
-private fun photoFilterDisplayName(filter: Np3PhotoFilter): String =
+private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
     BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
 @Composable
 private fun PhotoFrameWatermarkEditor(
-    previewSource: Bitmap,
-    onPreviewRotate: () -> Unit,
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
@@ -1530,7 +1377,6 @@ private fun PhotoFrameWatermarkEditor(
     onPresetChanged: (PhotoFramePreset) -> Unit,
     onWatermarkChanged: (PhotoFrameWatermark) -> Unit,
     onWatermarkTextCommitted: (String) -> Unit,
-    onPreviewOpen: (Bitmap, Rect) -> Unit,
     imageImporting: Boolean,
     onImageRequested: () -> Unit,
 ) {
@@ -1599,16 +1445,6 @@ private fun PhotoFrameWatermarkEditor(
         false to stringResource(R.string.photo_frame_off),
         true to stringResource(R.string.photo_frame_on),
     )
-
-    PhotoFrameRenderedPreview(
-        source = previewSource,
-        onRotate = onPreviewRotate,
-        borderEnabled = borderEnabled,
-        preset = preset,
-        watermark = watermark,
-        onOpen = onPreviewOpen,
-    )
-    Spacer(Modifier.height(10.dp))
 
     SettingsCard {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -2002,20 +1838,22 @@ private fun WatermarkTextField(
 }
 
 @Composable
-private fun PhotoFrameRenderedPreview(
+private fun PhotoEffectsRenderedPreview(
     source: Bitmap,
     onRotate: () -> Unit,
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
+    filter: PhotoFilterSelection? = null,
     onOpen: (Bitmap, Rect) -> Unit,
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
-    val rendered = remember { mutableStateOf<RenderedPhotoFramePreview?>(null) }
+    val rendered = remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
     var previewFailed by remember { mutableStateOf(false) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
-    LaunchedEffect(source, borderEnabled, preset, watermark) {
+    var showOriginal by remember(source) { mutableStateOf(false) }
+    LaunchedEffect(source, borderEnabled, preset, watermark, filter) {
         delay(80)
         var pending: Bitmap? = null
         try {
@@ -2024,17 +1862,16 @@ private fun PhotoFrameRenderedPreview(
                 PhotoFrameExporter.renderPreview(
                     context = context,
                     source = source,
-                    metadata = PHOTO_FRAME_PREVIEW_METADATA,
+                    metadata = PHOTO_EFFECTS_PREVIEW_METADATA,
                     preset = preset,
                     watermark = watermark,
                     borderEnabled = borderEnabled,
-                    longEdge = PHOTO_FRAME_PREVIEW_RENDER_LONG_EDGE,
+                    longEdge = PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
+                    filter = filter,
                 )
             }
             ensureActive()
-            rendered.value = RenderedPhotoFramePreview(
-                preset = preset,
-                watermark = watermark,
+            rendered.value = RenderedPhotoEffectsPreview(
                 bitmap = checkNotNull(pending),
             )
             pending = null
@@ -2055,9 +1892,9 @@ private fun PhotoFrameRenderedPreview(
     val preview = rendered.value
     val aspectSource = preview?.bitmap ?: source
     val targetViewportAspectRatio = if (aspectSource.height > aspectSource.width) {
-        PHOTO_FRAME_PREVIEW_PORTRAIT_ASPECT_RATIO
+        PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO
     } else {
-        PHOTO_FRAME_PREVIEW_LANDSCAPE_ASPECT_RATIO
+        PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO
     }
     val viewportAspectRatio by animateFloatAsState(
         targetValue = targetViewportAspectRatio,
@@ -2066,6 +1903,8 @@ private fun PhotoFrameRenderedPreview(
     )
     val quarterTurn = remember { Animatable(0f) }
     var previousPreviewPortrait by remember { mutableStateOf<Boolean?>(null) }
+    val previewForGesture = preview
+    val boundsForGesture = previewBounds
     LaunchedEffect(preview?.bitmap) {
         val currentBitmap = preview?.bitmap ?: return@LaunchedEffect
         val currentPortrait = currentBitmap.height > currentBitmap.width
@@ -2086,16 +1925,38 @@ private fun PhotoFrameRenderedPreview(
             // 横图和竖图各用稳定视口；边框成片在内部 Fit，完整呈现对应方向的留白与铭牌。
             .aspectRatio(viewportAspectRatio)
             .onGloballyPositioned { previewBounds = it.boundsInRoot() }
-            .clickable(
-                enabled = preview != null && previewBounds != null,
-                onClick = {
-                    val currentPreview = preview ?: return@clickable
-                    val currentBounds = previewBounds ?: return@clickable
-                    onOpen(currentPreview.bitmap, currentBounds)
-                },
-            ),
+            .pointerInput(previewForGesture, boundsForGesture) {
+                if (previewForGesture == null || boundsForGesture == null) return@pointerInput
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    val releaseBeforeLongPress = withTimeoutOrNull(
+                        viewConfiguration.longPressTimeoutMillis,
+                    ) {
+                        waitForUpOrCancellation() to Unit
+                    }
+                    if (releaseBeforeLongPress != null) {
+                        if (releaseBeforeLongPress.first != null) {
+                            onOpen(previewForGesture.bitmap, boundsForGesture)
+                        }
+                    } else {
+                        showOriginal = true
+                        try {
+                            waitForUpOrCancellation()
+                        } finally {
+                            showOriginal = false
+                        }
+                    }
+                }
+            },
     ) {
-            if (preview == null && !previewFailed) {
+            if (showOriginal) {
+                FittedRotatingBitmap(
+                    image = remember(source) { source.asImageBitmap() },
+                    rotationDegrees = 0f,
+                    description = stringResource(R.string.photo_frame_preview),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else if (preview == null && !previewFailed) {
                 CircularProgressIndicator(
                     color = colors.accentBlue,
                     modifier = Modifier.size(24.dp),
@@ -2114,7 +1975,7 @@ private fun PhotoFrameRenderedPreview(
                     },
                     contentKey = { it.bitmap },
                     contentAlignment = Alignment.Center,
-                    label = "photoFramePresetPreview",
+                    label = "photoEffectsPreview",
                     modifier = Modifier.fillMaxSize(),
                 ) { frame ->
                     val imageBitmap = remember(frame.bitmap) { frame.bitmap.asImageBitmap() }
@@ -2192,10 +2053,10 @@ private fun PhotoFrameRenderedPreview(
     }
 }
 
-private const val PHOTO_FRAME_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
-private const val PHOTO_FRAME_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
+private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
+private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
 // 比屏幕展示尺寸保留约 3 倍采样余量，同时避免连续调节时堆积过大的过渡位图。
-private const val PHOTO_FRAME_PREVIEW_RENDER_LONG_EDGE = 1080
+private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1080
 // 设置卡片实际显示宽度不足 500px；720 已有充足超采样，同时让切换滤镜保持即时响应。
 private const val PHOTO_FILTER_PREVIEW_LONG_EDGE = 720
 
@@ -2218,13 +2079,11 @@ private fun rotatePreviewBitmap(source: Bitmap, quarterTurns: Int): Bitmap {
     return Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
 }
 
-private data class RenderedPhotoFramePreview(
-    val preset: PhotoFramePreset,
-    val watermark: PhotoFrameWatermark,
+private data class RenderedPhotoEffectsPreview(
     val bitmap: Bitmap,
 )
 
-private val PHOTO_FRAME_PREVIEW_METADATA = PhotoFrameMetadata(
+private val PHOTO_EFFECTS_PREVIEW_METADATA = PhotoFrameMetadata(
     make = "NIKON CORPORATION",
     model = "NIKON Z 8",
     aperture = "2.8",

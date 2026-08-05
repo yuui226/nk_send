@@ -130,7 +130,6 @@
     <string name="photo_frame_no_watermark">No watermark</string>
     <string name="photo_frame_style_short">Frame</string>
     <string name="photo_frame_watermark_short">Watermark</string>
-    <string name="photo_frame_open_editor">Edit frame and watermark</string>
     <string name="photo_frame_preview">Frame and watermark preview</string>
     <string name="photo_frame_preview_unavailable">Preview temporarily unavailable</string>
     <string name="photo_frame_watermark_font">Font</string>
@@ -172,26 +171,21 @@
     <string name="photo_frame_effect_shadow">Shadow</string>
     <string name="photo_frame_effect_outline">Outline</string>
     <string name="photo_filter">Photo filter</string>
-    <string name="photo_filter_none">No filter imported</string>
+    <string name="photo_effects">Photo effects</string>
+    <string name="photo_effects_description">Filter, frame and watermark in one workflow</string>
+    <string name="photo_effects_open_editor">Edit photo effects</string>
+    <string name="photo_effects_compare_hint">Press and hold the image to compare the final result</string>
+    <string name="photo_filter_none">Filter off</string>
     <string name="photo_filter_summary">%1$s · %2$d%%</string>
-    <string name="photo_filter_open_editor">Edit photo filters</string>
-    <string name="photo_filter_import">Import NP3</string>
-    <string name="photo_filter_importing">Importing…</string>
-    <string name="photo_filter_import_result">Imported %1$d · skipped %2$d</string>
-    <string name="photo_filter_import_none">No compatible simple NP3 filters found</string>
-    <string name="photo_filter_description">The original is kept untouched; the filtered copy is saved separately</string>
-    <string name="photo_filter_simple_note">Supports simple NP3 presets without custom curves or three-way grading</string>
+    <string name="photo_filter_description">The filter is applied before the frame and watermark</string>
     <string name="photo_filter_intensity">Intensity</string>
-    <string name="photo_filter_compare_hint">Press and hold the image to compare</string>
     <string name="photo_filter_task_label">Filter: %1$s · %2$d%%</string>
-    <string name="photo_filter_preview">Photo filter preview</string>
     <string name="photo_filter_builtin_natural">Natural Pop</string>
     <string name="photo_filter_builtin_warm_film">Warm Film</string>
     <string name="photo_filter_builtin_teal_cinema">Teal Cinema</string>
     <string name="photo_filter_builtin_soft_portrait">Soft Portrait</string>
     <string name="photo_filter_builtin_documentary_mono">Documentary Mono</string>
     <string name="photo_filter_builtin_note">Built-in presets are tuned and versioned with the app</string>
-    <string name="restore_default">Restore defaults</string>
 
     <!-- Transfer errors -->
     <string name="error_dir_invalid">Transfer folder is no longer valid. Please choose it again</string>
