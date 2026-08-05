@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -86,8 +87,11 @@ fun AnchorPopup(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = progress.value }
-                .then(if (dim) Modifier.background(colors.scrim) else Modifier)
+                // 直接画带进度透明度的遮罩，避免 graphicsLayer(alpha) 为整屏内容分配
+                // 离屏缓冲。首次呼出小面板时这块全屏合成最容易与面板首帧抢 GPU。
+                .drawBehind {
+                    if (dim) drawRect(colors.scrim, alpha = progress.value)
+                }
                 .pointerInput(Unit) { detectTapGestures { startClose() } }
                 .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
         )

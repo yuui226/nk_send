@@ -1,6 +1,12 @@
 package com.ztransfer.viewmodel
 
 import com.ztransfer.frame.PhotoFramePreset
+import com.ztransfer.frame.PhotoFrameWatermark
+import com.ztransfer.frame.PhotoFrameWatermarkColor
+import com.ztransfer.frame.PhotoFrameWatermarkContent
+import com.ztransfer.frame.PhotoFrameWatermarkEffect
+import com.ztransfer.frame.PhotoFrameWatermarkFont
+import com.ztransfer.frame.PhotoFrameWatermarkPosition
 import com.ztransfer.protocol.NikonCamera
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -55,21 +61,134 @@ class TransferStateTest {
     }
 
     @Test
-    fun freeUsersAlwaysKeepBrandingWhileProUsersFollowPreference() {
-        assertEquals(true, photoFrameBrandingVisible(isPro = false, preferenceEnabled = false))
-        assertEquals(true, photoFrameBrandingVisible(isPro = false, preferenceEnabled = true))
-        assertEquals(false, photoFrameBrandingVisible(isPro = true, preferenceEnabled = false))
-        assertEquals(true, photoFrameBrandingVisible(isPro = true, preferenceEnabled = true))
-    }
-
-    @Test
-    fun framesAreGeneratedOnlyForJpegPhotos() {
+    fun framesAreGeneratedOnlyForSupportedBitmapPhotos() {
         assertEquals(true, shouldGeneratePhotoFrame(enabled = true, extension = ".jpg"))
         assertEquals(true, shouldGeneratePhotoFrame(enabled = true, extension = ".JPEG"))
+        assertEquals(true, shouldGeneratePhotoFrame(enabled = true, extension = ".png"))
+        assertEquals(true, shouldGeneratePhotoFrame(enabled = true, extension = ".PNG"))
         assertEquals(false, shouldGeneratePhotoFrame(enabled = true, extension = ".mov"))
         assertEquals(false, shouldGeneratePhotoFrame(enabled = true, extension = ".mp4"))
         assertEquals(false, shouldGeneratePhotoFrame(enabled = true, extension = ".nef"))
         assertEquals(false, shouldGeneratePhotoFrame(enabled = false, extension = ".jpg"))
+        assertEquals(false, shouldGeneratePhotoFrame(enabled = false, extension = ".png"))
+    }
+
+    @Test
+    fun freeEditionAlwaysUsesTheLockedDefaultWatermark() {
+        val customized = PhotoFrameWatermark(
+            enabled = false,
+            text = "My camera",
+            font = PhotoFrameWatermarkFont.BOLD,
+            sizePercent = 200,
+            position = PhotoFrameWatermarkPosition.RIGHT,
+            color = PhotoFrameWatermarkColor.GOLD,
+            opacityPercent = 100,
+            effect = PhotoFrameWatermarkEffect.OUTLINE,
+        )
+
+        val free = effectivePhotoFrameWatermark(false, customized)
+        val pro = effectivePhotoFrameWatermark(true, customized)
+
+        assertEquals(PhotoFrameWatermark(), free)
+        assertEquals(75, free.sizePercent)
+        assertEquals(72, free.opacityPercent)
+        assertEquals(PhotoFrameWatermarkEffect.AUTO, free.effect)
+        assertEquals(customized, pro)
+        assertEquals(200, pro.sizePercent)
+        assertEquals(100, pro.opacityPercent)
+        assertEquals(PhotoFrameWatermarkEffect.OUTLINE, pro.effect)
+    }
+
+    @Test
+    fun transferStateIncludesWatermarkOpacityAndEffect() {
+        val state = TransferState(
+            photoFrameWatermarkOpacityPercent = 41,
+            photoFrameWatermarkEffect = PhotoFrameWatermarkEffect.SHADOW,
+        )
+
+        assertEquals(41, state.photoFrameWatermark.opacityPercent)
+        assertEquals(PhotoFrameWatermarkEffect.SHADOW, state.photoFrameWatermark.effect)
+    }
+
+    @Test
+    fun legacyWatermarkSizeAndOpacityPreferencesMigrateWithoutVisualJumps() {
+        assertEquals(58, restoredPhotoFrameWatermarkSizePercent("SMALL", PhotoFrameWatermarkContent.TEXT))
+        assertEquals(75, restoredPhotoFrameWatermarkSizePercent("MEDIUM", PhotoFrameWatermarkContent.TEXT))
+        assertEquals(47, restoredPhotoFrameWatermarkSizePercent("SMALL", PhotoFrameWatermarkContent.IMAGE))
+        assertEquals(69, restoredPhotoFrameWatermarkSizePercent("MEDIUM", PhotoFrameWatermarkContent.IMAGE))
+        assertEquals(100, restoredPhotoFrameWatermarkSizePercent("LARGE", PhotoFrameWatermarkContent.IMAGE))
+        assertEquals(40, restoredPhotoFrameWatermarkOpacityPercent("SUBTLE"))
+        assertEquals(72, restoredPhotoFrameWatermarkOpacityPercent("STANDARD"))
+        assertEquals(100, restoredPhotoFrameWatermarkOpacityPercent("STRONG"))
+    }
+
+    @Test
+    fun watermarkPercentagesAreClampedAtTheRenderingBoundary() {
+        val effective = effectivePhotoFrameWatermark(
+            isPro = true,
+            preference = PhotoFrameWatermark(sizePercent = 999, opacityPercent = 0),
+        )
+
+        assertEquals(200, effective.sizePercent)
+        assertEquals(1, effective.opacityPercent)
+        assertEquals(1, restoredPhotoFrameWatermarkSizePercent(-4, PhotoFrameWatermarkContent.TEXT))
+        assertEquals(100, restoredPhotoFrameWatermarkOpacityPercent(140))
+    }
+
+    @Test
+    fun imageWatermarkKeepsItsPrivateHashAndUsesOnlyPhotoPositions() {
+        val imageHash = "a".repeat(64)
+        val preference = PhotoFrameWatermark(
+            content = PhotoFrameWatermarkContent.IMAGE,
+            imageHash = imageHash,
+            position = PhotoFrameWatermarkPosition.LEFT,
+        )
+
+        val effective = effectivePhotoFrameWatermark(true, preference)
+
+        assertEquals(PhotoFrameWatermarkContent.IMAGE, effective.content)
+        assertEquals(imageHash, effective.imageHash)
+        assertEquals(PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT, effective.position)
+    }
+
+    @Test
+    fun invalidImageWatermarkFallsBackToTextWithoutChangingItsTextPosition() {
+        val preference = PhotoFrameWatermark(
+            content = PhotoFrameWatermarkContent.IMAGE,
+            imageHash = "not-a-hash",
+            position = PhotoFrameWatermarkPosition.LEFT,
+        )
+
+        val effective = effectivePhotoFrameWatermark(true, preference)
+
+        assertEquals(PhotoFrameWatermarkContent.TEXT, effective.content)
+        assertEquals(null, effective.imageHash)
+        assertEquals(PhotoFrameWatermarkPosition.LEFT, effective.position)
+    }
+
+    @Test
+    fun watermarkOnlyModeForcesTextIntoThePhotoSafeAreaForFreeAndPro() {
+        val preference = PhotoFrameWatermark(position = PhotoFrameWatermarkPosition.LEFT)
+
+        val pro = effectivePhotoFrameWatermark(true, preference, borderEnabled = false)
+        val free = effectivePhotoFrameWatermark(false, preference, borderEnabled = false)
+
+        assertEquals(PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT, pro.position)
+        assertEquals(PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT, free.position)
+    }
+
+    @Test
+    fun queueTaskSnapshotsWhetherTheBorderIsEnabled() {
+        val task = createQueueTasks(
+            files = listOf(file(1)),
+            photoFrameEnabled = true,
+            photoFrameBorderEnabled = false,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = true),
+        ).single()
+
+        assertEquals(false, task.frameBorderRequested)
+        assertEquals(PhotoFramePreset.MIST, task.framePreset)
     }
 
     @Test
@@ -79,19 +198,19 @@ class TransferStateTest {
             files = listOf(jpeg),
             photoFrameEnabled = true,
             photoFramePreset = PhotoFramePreset.MIST,
-            photoFrameBrandingEnabled = true,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = true),
         ).single()
         val cinema = createQueueTasks(
             files = listOf(jpeg),
             photoFrameEnabled = true,
             photoFramePreset = PhotoFramePreset.CINEMA,
-            photoFrameBrandingEnabled = false,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = false),
         ).single()
 
         assertEquals(PhotoFramePreset.MIST, mist.framePreset)
         assertEquals(PhotoFramePreset.CINEMA, cinema.framePreset)
-        assertEquals(true, mist.frameBrandingRequested)
-        assertEquals(false, cinema.frameBrandingRequested)
+        assertEquals(true, mist.frameWatermarkRequested.enabled)
+        assertEquals(false, cinema.frameWatermarkRequested.enabled)
         assertNotEquals(mist.taskId, cinema.taskId)
     }
 
@@ -102,13 +221,13 @@ class TransferStateTest {
             files = listOf(jpeg),
             photoFrameEnabled = true,
             photoFramePreset = PhotoFramePreset.MIST,
-            photoFrameBrandingEnabled = true,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = true),
         ).single()
         val repeated = createQueueTasks(
             files = listOf(jpeg),
             photoFrameEnabled = true,
             photoFramePreset = PhotoFramePreset.MIST,
-            photoFrameBrandingEnabled = true,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = true),
         ).single()
 
         assertEquals(PhotoFramePreset.MIST, first.framePreset)
@@ -123,7 +242,7 @@ class TransferStateTest {
             files = listOf(jpeg, jpeg),
             photoFrameEnabled = false,
             photoFramePreset = PhotoFramePreset.MIST,
-            photoFrameBrandingEnabled = true,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = true),
         )
 
         assertEquals(1, tasks.size)

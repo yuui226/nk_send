@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200"
+     height="360"
+     viewBox="0 0 1200 360"
+     fill="none">
+  <title>ORYS transparent watermark wordmark</title>
+  <g stroke="#111827"
+     stroke-width="30"
+     stroke-linecap="round"
+     stroke-linejoin="round">
+    <!-- O -->
+    <path d="M258 75
+             C174 37 76 80 64 172
+             C52 264 121 315 209 294
+             C297 273 332 171 293 103
+             C279 79 254 66 226 64"/>
+
+    <!-- R -->
+    <path d="M385 293 L425 67"/>
+    <path d="M420 72
+             C493 44 574 61 577 122
+             C580 183 505 207 403 190"/>
+    <path d="M488 194 L572 292"/>
+
+    <!-- Y -->
+    <path d="M650 68 L727 183 L845 67"/>
+    <path d="M727 183 L707 293"/>
+
+    <!-- S -->
+    <path d="M1081 86
+             C1012 39 902 65 892 132
+             C883 194 970 192 1028 206
+             C1086 220 1085 275 1026 294
+             C970 312 904 293 875 261"/>
+  </g>
+
+  <!-- A subtle vector flourish; no raster data and no background rectangle. -->
+  <path d="M349 315 C546 337 771 337 958 311"
+        stroke="#111827"
+        stroke-width="12"
+        stroke-linecap="round"/>
+</svg>

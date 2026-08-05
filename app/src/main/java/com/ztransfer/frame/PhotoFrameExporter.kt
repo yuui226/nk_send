@@ -1,6 +1,7 @@
 package com.ztransfer.frame
 
 import android.content.ContentResolver
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -20,9 +21,12 @@ import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
+import androidx.core.content.res.ResourcesCompat
+import com.ztransfer.R
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 import kotlin.math.min
@@ -46,6 +50,148 @@ enum class PhotoFramePreset(internal val fileSuffix: String) {
     MINIMAL("clean"),
     FROSTED("glass"),
     PLAQUE("plaque"),
+}
+
+/** 自定义水印选项。枚举名称会直接持久化，新增档位可以，已有名称不要修改。 */
+enum class PhotoFrameWatermarkFont { SIGNATURE, ELEGANT, CALLIGRAPHY, SIMPLE, BOLD }
+
+enum class PhotoFrameWatermarkContent { TEXT, IMAGE }
+
+enum class PhotoFrameWatermarkPosition {
+    AUTO,
+    LEFT,
+    CENTER,
+    RIGHT,
+    PHOTO_TOP_LEFT,
+    PHOTO_TOP_CENTER,
+    PHOTO_TOP_RIGHT,
+    PHOTO_CENTER,
+    PHOTO_BOTTOM_LEFT,
+    PHOTO_BOTTOM_CENTER,
+    PHOTO_BOTTOM_RIGHT,
+}
+
+enum class PhotoFrameWatermarkEffect { AUTO, NONE, SHADOW, OUTLINE }
+
+enum class PhotoFrameWatermarkColor {
+    ADAPTIVE,
+    WHITE,
+    BLACK,
+    GOLD,
+    MIST_BLUE,
+    ROSE_GOLD,
+}
+
+data class PhotoFrameWatermark(
+    val enabled: Boolean = true,
+    val content: PhotoFrameWatermarkContent = PhotoFrameWatermarkContent.TEXT,
+    val text: String = DEFAULT_PHOTO_FRAME_WATERMARK_TEXT,
+    val imageHash: String? = null,
+    val font: PhotoFrameWatermarkFont = PhotoFrameWatermarkFont.ELEGANT,
+    val sizePercent: Int = DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
+    val position: PhotoFrameWatermarkPosition = PhotoFrameWatermarkPosition.AUTO,
+    val color: PhotoFrameWatermarkColor = PhotoFrameWatermarkColor.ADAPTIVE,
+    val opacityPercent: Int = DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
+    val effect: PhotoFrameWatermarkEffect = PhotoFrameWatermarkEffect.AUTO,
+) {
+    val displayText: String
+        get() = limitPhotoFrameWatermarkText(text.trim())
+            .ifEmpty { DEFAULT_PHOTO_FRAME_WATERMARK_TEXT }
+}
+
+internal const val DEFAULT_PHOTO_FRAME_WATERMARK_TEXT = "ZTransfer"
+internal const val MAX_PHOTO_FRAME_WATERMARK_LENGTH = 24
+internal const val MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 1
+internal const val MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 200
+internal const val DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 75
+internal const val MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 1
+internal const val MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 100
+internal const val DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 72
+internal const val PHOTO_FRAME_WATERMARK_IMAGE_DIRECTORY = "photo-frame-watermarks"
+private val PHOTO_FRAME_WATERMARK_IMAGE_HASH = Regex("[0-9a-f]{64}")
+private val PHOTO_FRAME_WATERMARK_LINE_BREAKS = Regex("[\\r\\n\\t]+")
+private val PHOTO_FRAME_SOURCE_EXTENSIONS = setOf("jpg", "jpeg", "png")
+
+internal fun isSupportedPhotoFrameSourceExtension(extension: String): Boolean =
+    extension.removePrefix(".").lowercase(Locale.ROOT) in PHOTO_FRAME_SOURCE_EXTENSIONS
+
+/** 保持单行并按 Unicode code point 截断，避免粘贴控制符或切断 emoji 代理对。 */
+internal fun limitPhotoFrameWatermarkText(value: String): String {
+    val singleLine = value
+        .replace(PHOTO_FRAME_WATERMARK_LINE_BREAKS, " ")
+        .filterNot(Char::isISOControl)
+    val count = singleLine.codePointCount(0, singleLine.length)
+    if (count <= MAX_PHOTO_FRAME_WATERMARK_LENGTH) return singleLine
+    return singleLine.substring(
+        0,
+        singleLine.offsetByCodePoints(0, MAX_PHOTO_FRAME_WATERMARK_LENGTH),
+    )
+}
+
+internal fun normalizePhotoFrameWatermarkSizePercent(value: Int): Int =
+    value.coerceIn(
+        MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
+        MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
+    )
+
+internal fun normalizePhotoFrameWatermarkOpacityPercent(value: Int): Int =
+    value.coerceIn(
+        MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
+        MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
+    )
+
+/** 百分比连续变化，同时精确经过旧小/中/大三个尺寸锚点，升级后像素尺寸不跳变。 */
+internal fun photoFrameWatermarkTextSizeFraction(sizePercent: Int): Float =
+    piecewiseWatermarkSizeFraction(
+        sizePercent = sizePercent,
+        smallPercent = 58,
+        smallFraction = 0.0105f,
+        mediumPercent = 75,
+        mediumFraction = 0.0135f,
+        largeFraction = 0.018f,
+    )
+
+internal fun photoFrameWatermarkImageSizeFraction(sizePercent: Int): Float =
+    piecewiseWatermarkSizeFraction(
+        sizePercent = sizePercent,
+        smallPercent = 47,
+        smallFraction = 0.035f,
+        mediumPercent = 69,
+        mediumFraction = 0.052f,
+        largeFraction = 0.075f,
+    )
+
+private fun piecewiseWatermarkSizeFraction(
+    sizePercent: Int,
+    smallPercent: Int,
+    smallFraction: Float,
+    mediumPercent: Int,
+    mediumFraction: Float,
+    largeFraction: Float,
+): Float {
+    val percent = normalizePhotoFrameWatermarkSizePercent(sizePercent)
+    return when {
+        percent <= smallPercent -> smallFraction * percent / smallPercent
+        percent <= mediumPercent -> {
+            val progress = (percent - smallPercent).toFloat() / (mediumPercent - smallPercent)
+            smallFraction + (mediumFraction - smallFraction) * progress
+        }
+        percent <= 100 -> {
+            val progress = (percent - mediumPercent).toFloat() / (100 - mediumPercent)
+            mediumFraction + (largeFraction - mediumFraction) * progress
+        }
+        else -> largeFraction * percent / 100f
+    }
+}
+
+internal fun validPhotoFrameWatermarkImageHash(value: String?): String? =
+    value?.lowercase(Locale.ROOT)?.takeIf(PHOTO_FRAME_WATERMARK_IMAGE_HASH::matches)
+
+internal fun photoFrameWatermarkImageFile(context: Context, imageHash: String): File {
+    val safeHash = requireNotNull(validPhotoFrameWatermarkImageHash(imageHash)) {
+        "Invalid watermark image hash"
+    }
+    return File(File(context.filesDir, PHOTO_FRAME_WATERMARK_IMAGE_DIRECTORY), "$safeHash.image")
 }
 
 data class PhotoFrameExportResult(
@@ -84,11 +230,23 @@ internal data class FrameTextVisualBounds(
     val bottom: Float,
 )
 
+internal data class PhotoWatermarkTextBounds(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+)
+
+internal data class PhotoWatermarkPlacement(
+    val originX: Float,
+    val baseline: Float,
+)
+
 /**
  * 边框导出器：读取已传输原片，在原片外创建新画布并另存 JPG。
  *
- * 首版只接收 JPG/JPEG。Android 原生无法可靠解码各代 NEF，强行支持会在不同手机上产生
- * 黑图或方向错误；RAW+JPEG 拍摄时应选择 JPG 成员生成分享图。
+ * 接收 Android 可稳定解码的 JPG/JPEG/PNG。各代 NEF 无法可靠解码，强行支持会在不同
+ * 手机上产生黑图或方向错误；RAW+JPEG 拍摄时应选择 JPG 成员生成分享图。
  */
 object PhotoFrameExporter {
     // 分享图保留 3200px 长边（常规 4:3 约 7.7MP），手机端观看和二次发布已有
@@ -99,28 +257,32 @@ object PhotoFrameExporter {
     private const val COPY_BUFFER_BYTES = 256 * 1024
     private val EMPTY_METADATA =
         PhotoFrameMetadata(null, null, null, null, null, null)
+    private val bundledTypefaceCache = mutableMapOf<PhotoFrameWatermarkFont, Typeface>()
+    private val watermarkImageCache = linkedMapOf<String, Bitmap>()
 
     internal suspend fun export(
+        context: Context,
         resolver: ContentResolver,
         destination: PhotoFrameDestination,
         sourceUri: Uri,
         sourceName: String,
         preset: PhotoFramePreset,
-        showBranding: Boolean,
+        watermark: PhotoFrameWatermark,
+        borderEnabled: Boolean = true,
     ): Result<PhotoFrameExportResult> {
         return try {
             currentCoroutineContext().ensureActive()
             require(
-                sourceName.substringAfterLast('.', "").lowercase(Locale.ROOT) in
-                    setOf("jpg", "jpeg"),
+                isSupportedPhotoFrameSourceExtension(sourceName.substringAfterLast('.', "")),
             ) {
-                "Only JPG/JPEG can be framed"
+                "Only JPG/JPEG/PNG supports borders or watermarks"
             }
-            val metadata = readMetadata(resolver, sourceUri)
+            val renderedWatermark = watermark.forBorderMode(borderEnabled)
+            val metadata = if (borderEnabled) readMetadata(resolver, sourceUri) else EMPTY_METADATA
             val bitmap = decodeForFraming(resolver, sourceUri)
                 ?: error("Cannot decode transferred original")
             val rendered = try {
-                renderFrame(bitmap, metadata, preset, showBranding)
+                renderFrame(context, bitmap, metadata, preset, renderedWatermark, borderEnabled)
             } finally {
                 bitmap.recycle()
             }
@@ -131,6 +293,8 @@ object PhotoFrameExporter {
                     destination = destination,
                     sourceName = sourceName,
                     preset = preset,
+                    watermark = renderedWatermark,
+                    borderEnabled = borderEnabled,
                     bitmap = rendered,
                 )
             } finally {
@@ -404,16 +568,41 @@ object PhotoFrameExporter {
         return oriented
     }
 
-    private fun renderFrame(
+    internal fun renderPreview(
+        context: Context,
         source: Bitmap,
         metadata: PhotoFrameMetadata,
         preset: PhotoFramePreset,
-        showBranding: Boolean,
+        watermark: PhotoFrameWatermark,
+        borderEnabled: Boolean = true,
+        longEdge: Int = 720,
+    ): Bitmap = renderFrame(
+        context,
+        source,
+        metadata,
+        preset,
+        watermark.forBorderMode(borderEnabled),
+        borderEnabled,
+        longEdge,
+    )
+
+    private fun renderFrame(
+        context: Context,
+        source: Bitmap,
+        metadata: PhotoFrameMetadata,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+        borderEnabled: Boolean,
+        longEdge: Int = 3200,
     ): Bitmap {
+        require(longEdge > 0)
+        if (!borderEnabled) {
+            return renderWatermarkOnly(context, source, watermark, longEdge)
+        }
         val layout = if (preset == PhotoFramePreset.PLAQUE) {
-            calculatePlaqueFrameLayout(source.width, source.height)
+            calculatePlaqueFrameLayout(source.width, source.height, longEdge)
         } else {
-            calculatePhotoFrameLayout(source.width, source.height)
+            calculatePhotoFrameLayout(source.width, source.height, longEdge)
         }
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
@@ -423,7 +612,7 @@ object PhotoFrameExporter {
         try {
             val canvas = Canvas(output)
             if (preset == PhotoFramePreset.PLAQUE) {
-                drawPlaqueFrame(canvas, source, layout, metadata, showBranding)
+                drawPlaqueFrame(context, canvas, source, layout, metadata, watermark)
                 return output
             }
             drawBackdrop(canvas, source, preset)
@@ -448,6 +637,7 @@ object PhotoFrameExporter {
                 photoRect,
                 Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
             )
+            drawPhotoWatermark(context, canvas, photoRect, preset, watermark)
             canvas.restore()
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
@@ -460,7 +650,14 @@ object PhotoFrameExporter {
                 canvas.drawRoundRect(photoRect, radius, radius, this)
             }
 
-            drawMetadata(canvas, layout, metadata, preset, showBranding)
+            drawMetadata(
+                context,
+                canvas,
+                layout,
+                metadata,
+                preset,
+                watermark.withoutPhotoPlacement(),
+            )
             return output
         } catch (error: Throwable) {
             output.recycle()
@@ -746,12 +943,15 @@ object PhotoFrameExporter {
     }
 
     private fun drawMetadata(
+        context: Context,
         canvas: Canvas,
         layout: PhotoFrameLayout,
         metadata: PhotoFrameMetadata,
         preset: PhotoFramePreset,
-        showBranding: Boolean,
+        watermark: PhotoFrameWatermark,
     ) {
+        // 图内水印已在照片裁剪区域中绘制，不能再作为边框信息区的一行参与排版。
+        val metadataWatermark = watermark.withoutPhotoPlacement()
         val lightText =
             preset == PhotoFramePreset.MIST || preset == PhotoFramePreset.CINEMA
         val textColor =
@@ -764,6 +964,18 @@ object PhotoFrameExporter {
         val hasTitle = brand.isNotEmpty() || model.isNotEmpty()
         val hasDetails = details.isNotBlank()
         val centerX = layout.canvasWidth / 2f
+        val contentArea = if (preset == PhotoFramePreset.FROSTED) {
+            frostedMetadataPanelBounds(layout)
+        } else {
+            // 真正可见的下边框从照片底边开始；metadataTop 只是排版预留线，在部分长宽比
+            // 下会比照片底边更低，用它居中正是旧版文字看起来整体偏下的根源。
+            RectF(
+                0f,
+                layout.photoBottom,
+                layout.canvasWidth.toFloat(),
+                layout.canvasHeight.toFloat(),
+            )
+        }
 
         val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = textColor
@@ -807,33 +1019,52 @@ object PhotoFrameExporter {
         } else {
             null
         }
-        val brandingPaint = if (showBranding) createBrandingPaint(canvas, preset) else null
-
-        val titleBounds = if (hasTitle) {
-            listOfNotNull(
-                brand.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, brandPaint) },
-                model.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, modelPaint) },
-            ).reduce(::mergeTextVisualBounds)
+        val watermarkText = metadataWatermark.displayText
+        val watermarkPaint = if (metadataWatermark.enabled) {
+            createWatermarkPaint(
+                context = context,
+                canvas = canvas,
+                preset = preset,
+                watermark = metadataWatermark,
+                maxWidth = contentArea.width() * 0.86f,
+            )
         } else {
             null
         }
-        val detailBounds = detailPaint?.let { textVisualBounds(details, it) }
-        val brandingBounds = brandingPaint?.let { textVisualBounds("ZTransfer", it) }
-        val rowBounds = listOfNotNull(titleBounds, detailBounds, brandingBounds)
-
-        if (rowBounds.isEmpty()) return
-        val contentArea = if (preset == PhotoFramePreset.FROSTED) {
-            drawFrostedMetadataPanel(canvas, layout)
-        } else {
-            // 真正可见的下边框从照片底边开始；metadataTop 只是排版预留线，在部分长宽比
-            // 下会比照片底边更低，用它居中正是旧版文字看起来整体偏下的根源。
-            RectF(
-                0f,
-                layout.photoBottom,
-                layout.canvasWidth.toFloat(),
-                layout.canvasHeight.toFloat(),
+        fun currentRows(): Triple<FrameTextVisualBounds?, FrameTextVisualBounds?, FrameTextVisualBounds?> {
+            val title = if (hasTitle) {
+                listOfNotNull(
+                    brand.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, brandPaint) },
+                    model.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, modelPaint) },
+                ).reduce(::mergeTextVisualBounds)
+            } else {
+                null
+            }
+            return Triple(
+                title,
+                detailPaint?.let { textVisualBounds(details, it) },
+                watermarkPaint?.let { textVisualBounds(watermarkText, it) },
             )
         }
+        var (titleBounds, detailBounds, watermarkBounds) = currentRows()
+        val initialRows = listOfNotNull(titleBounds, detailBounds, watermarkBounds)
+        if (initialRows.isEmpty()) return
+        if (preset == PhotoFramePreset.FROSTED) {
+            drawFrostedMetadataPanel(canvas, layout, contentArea)
+        }
+        val rowScale = frameTextScaleToFit(contentArea.height(), initialRows)
+        if (rowScale < 1f) {
+            brandPaint.textSize *= rowScale
+            modelPaint.textSize *= rowScale
+            detailPaint?.let { it.textSize *= rowScale }
+            watermarkPaint?.let { it.textSize *= rowScale }
+            currentRows().let { fitted ->
+                titleBounds = fitted.first
+                detailBounds = fitted.second
+                watermarkBounds = fitted.third
+            }
+        }
+        val rowBounds = listOfNotNull(titleBounds, detailBounds, watermarkBounds)
         val preferredGap = min(
             layout.canvasWidth * 0.0125f,
             contentArea.height() * 0.09f,
@@ -847,7 +1078,7 @@ object PhotoFrameExporter {
         var rowIndex = 0
         val titleBaseline = if (titleBounds != null) baselines[rowIndex++] else null
         val detailBaseline = if (detailBounds != null) baselines[rowIndex++] else null
-        val brandingBaseline = if (brandingBounds != null) baselines[rowIndex] else null
+        val watermarkBaseline = if (watermarkBounds != null) baselines[rowIndex] else null
 
         titleBaseline?.let { baseline ->
             val totalWidth =
@@ -864,24 +1095,64 @@ object PhotoFrameExporter {
         if (detailPaint != null && detailBaseline != null) {
             canvas.drawText(details, centerX, detailBaseline, detailPaint)
         }
-        if (brandingPaint != null && brandingBaseline != null) {
-            canvas.drawText("ZTransfer", centerX, brandingBaseline, brandingPaint)
+        if (watermarkPaint != null && watermarkBaseline != null) {
+            val (x, align) = watermarkHorizontalPlacement(
+                contentArea,
+                preset,
+                metadataWatermark.position,
+            )
+            watermarkPaint.textAlign = align
+            drawWatermarkText(
+                canvas,
+                watermarkText,
+                x,
+                watermarkBaseline,
+                watermarkPaint,
+                metadataWatermark,
+            )
+        }
+    }
+
+    /** 不创建外框画布，只按原照片比例缩放并在画面安全区内叠加水印。 */
+    private fun renderWatermarkOnly(
+        context: Context,
+        source: Bitmap,
+        watermark: PhotoFrameWatermark,
+        longEdge: Int,
+    ): Bitmap {
+        val scale = min(1f, longEdge.toFloat() / maxOf(source.width, source.height))
+        val width = (source.width * scale).roundToInt().coerceAtLeast(1)
+        val height = (source.height * scale).roundToInt().coerceAtLeast(1)
+        val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        try {
+            val canvas = Canvas(output)
+            val photoRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
+            canvas.drawBitmap(
+                source,
+                null,
+                photoRect,
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+            )
+            // 无边框时“自适应”固定使用带阴影的亮色方案，不受隐藏的边框预设影响。
+            drawPhotoWatermark(
+                context,
+                canvas,
+                photoRect,
+                PhotoFramePreset.MIST,
+                watermark,
+            )
+            return output
+        } catch (error: Throwable) {
+            output.recycle()
+            throw error
         }
     }
 
     private fun drawFrostedMetadataPanel(
         canvas: Canvas,
         layout: PhotoFrameLayout,
-    ): RectF {
-        val bandHeight = layout.canvasHeight - layout.photoBottom
-        val horizontalInset = layout.canvasWidth * 0.072f
-        val verticalInset = bandHeight * 0.08f
-        val panel = RectF(
-            horizontalInset,
-            layout.photoBottom + verticalInset,
-            layout.canvasWidth - horizontalInset,
-            layout.canvasHeight - verticalInset,
-        )
+        panel: RectF,
+    ) {
         val radius = photoFrameCornerRadius(layout)
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(150, 250, 253, 255)
@@ -900,26 +1171,295 @@ object PhotoFrameExporter {
             color = Color.argb(178, 255, 255, 255)
             canvas.drawRoundRect(panel, radius, radius, this)
         }
-        return panel
     }
 
-    private fun createBrandingPaint(
+    private fun frostedMetadataPanelBounds(layout: PhotoFrameLayout): RectF {
+        val bandHeight = layout.canvasHeight - layout.photoBottom
+        val horizontalInset = layout.canvasWidth * 0.072f
+        val verticalInset = bandHeight * 0.08f
+        return RectF(
+            horizontalInset,
+            layout.photoBottom + verticalInset,
+            layout.canvasWidth - horizontalInset,
+            layout.canvasHeight - verticalInset,
+        )
+    }
+
+    private fun createWatermarkPaint(
+        context: Context,
         canvas: Canvas,
         preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+        maxWidth: Float,
     ): Paint {
         val shortEdge = min(canvas.width, canvas.height).toFloat()
         return Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-            color = when (preset) {
-                PhotoFramePreset.MIST,
-                PhotoFramePreset.CINEMA -> Color.argb(108, 250, 252, 253)
-                PhotoFramePreset.MINIMAL,
-                PhotoFramePreset.FROSTED -> Color.argb(82, 24, 31, 38)
-                PhotoFramePreset.PLAQUE -> Color.argb(72, 24, 31, 38)
+            color = when (watermark.color) {
+                // 显式颜色保持低饱和与轻透明，作为照片署名而不是浮在画面上的贴纸。
+                PhotoFrameWatermarkColor.WHITE -> Color.rgb(244, 239, 228)
+                PhotoFrameWatermarkColor.BLACK -> Color.rgb(50, 55, 60)
+                PhotoFrameWatermarkColor.GOLD -> Color.rgb(204, 172, 112)
+                PhotoFrameWatermarkColor.MIST_BLUE -> Color.rgb(132, 157, 180)
+                PhotoFrameWatermarkColor.ROSE_GOLD -> Color.rgb(185, 128, 121)
+                PhotoFrameWatermarkColor.ADAPTIVE -> when (preset) {
+                    PhotoFramePreset.MIST,
+                    PhotoFramePreset.CINEMA -> Color.rgb(250, 252, 253)
+                    PhotoFramePreset.MINIMAL,
+                    PhotoFramePreset.FROSTED -> Color.rgb(24, 31, 38)
+                    PhotoFramePreset.PLAQUE -> Color.rgb(24, 31, 38)
+                }
             }
-            textSize = shortEdge * 0.0135f
-            // 保留紧凑完整的品牌名，只用轻盈的衬线斜体增加摄影签名感。
-            typeface = Typeface.create("serif", Typeface.ITALIC)
+            alpha = watermarkAlpha(watermark.opacityPercent)
+            // 100% 对应旧“大号”，200% 即旧最大尺寸的两倍。
+            textSize = shortEdge * photoFrameWatermarkTextSizeFraction(watermark.sizePercent)
+            typeface = when (watermark.font) {
+                PhotoFrameWatermarkFont.SIGNATURE,
+                PhotoFrameWatermarkFont.ELEGANT,
+                PhotoFrameWatermarkFont.CALLIGRAPHY ->
+                    bundledWatermarkTypeface(context, watermark.font)
+                PhotoFrameWatermarkFont.SIMPLE ->
+                    Typeface.create("sans-serif", Typeface.NORMAL)
+                PhotoFrameWatermarkFont.BOLD ->
+                    Typeface.create("sans-serif", Typeface.BOLD)
+            }
             textAlign = Paint.Align.CENTER
+            val measured = measureText(watermark.displayText)
+            if (measured > maxWidth && measured > 0f) {
+                textSize *= maxWidth / measured
+            }
+        }
+    }
+
+    /**
+     * 三款艺术字体随 APK 离线分发并缓存 Typeface，避免预览连续重绘时重复解析字体文件。
+     * 资源异常时仍回退到系统字体，不能让一张分享图因为字体加载失败而中断导出。
+     */
+    private fun bundledWatermarkTypeface(
+        context: Context,
+        font: PhotoFrameWatermarkFont,
+    ): Typeface = synchronized(bundledTypefaceCache) {
+        bundledTypefaceCache.getOrPut(font) {
+            val resourceId = when (font) {
+                PhotoFrameWatermarkFont.SIGNATURE -> R.font.great_vibes_regular
+                PhotoFrameWatermarkFont.ELEGANT -> R.font.cormorant_garamond_medium_italic
+                PhotoFrameWatermarkFont.CALLIGRAPHY -> R.font.bebas_neue_regular
+                PhotoFrameWatermarkFont.SIMPLE,
+                PhotoFrameWatermarkFont.BOLD -> error("System font does not use bundled resources")
+            }
+            ResourcesCompat.getFont(context.applicationContext, resourceId)
+                ?: Typeface.create("serif", Typeface.NORMAL)
+        }
+    }
+
+    private fun drawPhotoWatermark(
+        context: Context,
+        canvas: Canvas,
+        photoRect: RectF,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+    ) {
+        if (!watermark.enabled || !watermark.position.isPhotoPlacement()) return
+        val safeInset = min(photoRect.width(), photoRect.height()) * 0.04f
+        if (watermark.content == PhotoFrameWatermarkContent.IMAGE) {
+            drawPhotoImageWatermark(
+                context = context,
+                canvas = canvas,
+                photoRect = photoRect,
+                safeInset = safeInset,
+                watermark = watermark,
+            )
+            return
+        }
+        val paint = createWatermarkPaint(
+            context = context,
+            canvas = canvas,
+            preset = preset,
+            watermark = watermark,
+            maxWidth = (photoRect.width() - safeInset * 2f).coerceAtLeast(1f),
+        ).apply {
+            // The placement calculation uses the actual glyph bounds from a left-aligned origin.
+            textAlign = Paint.Align.LEFT
+        }
+        val text = watermark.displayText
+        val bounds = Rect().also { paint.getTextBounds(text, 0, text.length, it) }
+        val placement = calculatePhotoWatermarkPlacement(
+            photoLeft = photoRect.left,
+            photoTop = photoRect.top,
+            photoRight = photoRect.right,
+            photoBottom = photoRect.bottom,
+            textBounds = PhotoWatermarkTextBounds(
+                left = bounds.left.toFloat(),
+                top = bounds.top.toFloat(),
+                right = bounds.right.toFloat(),
+                bottom = bounds.bottom.toFloat(),
+            ),
+            position = watermark.position,
+        )
+        drawWatermarkText(canvas, text, placement.originX, placement.baseline, paint, watermark)
+    }
+
+    private fun drawPhotoImageWatermark(
+        context: Context,
+        canvas: Canvas,
+        photoRect: RectF,
+        safeInset: Float,
+        watermark: PhotoFrameWatermark,
+    ) {
+        val imageHash = requireNotNull(validPhotoFrameWatermarkImageHash(watermark.imageHash)) {
+            "Image watermark has no valid private copy"
+        }
+        val bitmap = loadWatermarkImage(context, imageHash)
+        val shortEdge = min(photoRect.width(), photoRect.height())
+        // 图片与文字采用同一百分比语义：100% 是旧“大号”，最大可到旧值两倍。
+        var targetHeight = shortEdge *
+            photoFrameWatermarkImageSizeFraction(watermark.sizePercent)
+        var targetWidth = targetHeight * bitmap.width / bitmap.height.toFloat()
+        val maxWidth = (photoRect.width() - safeInset * 2f).coerceAtLeast(1f)
+        if (targetWidth > maxWidth) {
+            val scale = maxWidth / targetWidth
+            targetWidth *= scale
+            targetHeight *= scale
+        }
+        val bounds = PhotoWatermarkTextBounds(
+            left = 0f,
+            top = -targetHeight,
+            right = targetWidth,
+            bottom = 0f,
+        )
+        val placement = calculatePhotoWatermarkPlacement(
+            photoLeft = photoRect.left,
+            photoTop = photoRect.top,
+            photoRight = photoRect.right,
+            photoBottom = photoRect.bottom,
+            textBounds = bounds,
+            position = watermark.position,
+        )
+        val destination = RectF(
+            placement.originX,
+            placement.baseline - targetHeight,
+            placement.originX + targetWidth,
+            placement.baseline,
+        )
+        drawDownsampledWatermarkBitmap(
+            canvas = canvas,
+            source = bitmap,
+            destination = destination,
+            alpha = watermarkAlpha(watermark.opacityPercent),
+        )
+    }
+
+    /**
+     * Logo 通常带有细线和透明边缘。一次把大图缩到几十像素会跨过过多源像素，导致细线
+     * 呈断续状；逐级减半相当于建立临时 mip 层，再完成最后一次缩放。源文件和缓存位图
+     * 始终不变，预览与导出共用这一采样路径。
+     */
+    private fun drawDownsampledWatermarkBitmap(
+        canvas: Canvas,
+        source: Bitmap,
+        destination: RectF,
+        alpha: Int,
+    ) {
+        val targetWidth = destination.width().roundToInt().coerceAtLeast(1)
+        val targetHeight = destination.height().roundToInt().coerceAtLeast(1)
+        var sampled = source
+        try {
+            while (sampled.width > targetWidth * 2 && sampled.height > targetHeight * 2) {
+                val next = Bitmap.createScaledBitmap(
+                    sampled,
+                    maxOf(targetWidth, sampled.width / 2),
+                    maxOf(targetHeight, sampled.height / 2),
+                    true,
+                )
+                if (sampled !== source && sampled !== next) sampled.recycle()
+                sampled = next
+            }
+            canvas.drawBitmap(
+                sampled,
+                null,
+                destination,
+                Paint(
+                    Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG,
+                ).apply {
+                    this.alpha = alpha
+                },
+            )
+        } finally {
+            if (sampled !== source) sampled.recycle()
+        }
+    }
+
+    private fun loadWatermarkImage(context: Context, imageHash: String): Bitmap =
+        synchronized(watermarkImageCache) {
+            watermarkImageCache[imageHash]?.let { return@synchronized it }
+            val file = photoFrameWatermarkImageFile(context.applicationContext, imageHash)
+            require(file.isFile) { "Private watermark image is missing" }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+                "Private watermark image cannot be decoded"
+            }
+            var sampleSize = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sampleSize > 2048) {
+                sampleSize *= 2
+            }
+            val bitmap = BitmapFactory.decodeFile(
+                file.absolutePath,
+                BitmapFactory.Options().apply { inSampleSize = sampleSize },
+            ) ?: error("Private watermark image cannot be decoded")
+            watermarkImageCache[imageHash] = bitmap
+            while (watermarkImageCache.size > 3) {
+                watermarkImageCache.remove(watermarkImageCache.keys.first())
+            }
+            bitmap
+        }
+
+    private fun drawWatermarkText(
+        canvas: Canvas,
+        text: String,
+        x: Float,
+        baseline: Float,
+        paint: Paint,
+        watermark: PhotoFrameWatermark,
+    ) {
+        when (resolvedWatermarkEffect(watermark)) {
+            PhotoFrameWatermarkEffect.NONE -> canvas.drawText(text, x, baseline, paint)
+            PhotoFrameWatermarkEffect.SHADOW -> {
+                paint.setShadowLayer(
+                    paint.textSize * 0.12f,
+                    0f,
+                    paint.textSize * 0.06f,
+                    contrastingWatermarkColor(paint.color, paint.alpha),
+                )
+                canvas.drawText(text, x, baseline, paint)
+                paint.clearShadowLayer()
+            }
+            PhotoFrameWatermarkEffect.OUTLINE -> {
+                val outline = Paint(paint).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = maxOf(1f, paint.textSize * 0.075f)
+                    strokeJoin = Paint.Join.ROUND
+                    color = contrastingWatermarkColor(paint.color, paint.alpha)
+                }
+                canvas.drawText(text, x, baseline, outline)
+                canvas.drawText(text, x, baseline, paint)
+            }
+            PhotoFrameWatermarkEffect.AUTO -> error("AUTO must be resolved before drawing")
+        }
+    }
+
+    private fun watermarkHorizontalPlacement(
+        area: RectF,
+        preset: PhotoFramePreset,
+        requested: PhotoFrameWatermarkPosition,
+    ): Pair<Float, Paint.Align> {
+        val position = resolvedWatermarkPosition(preset, requested)
+        val inset = area.width() * if (preset == PhotoFramePreset.PLAQUE) 0.058f else 0.07f
+        return when (position) {
+            PhotoFrameWatermarkPosition.LEFT -> area.left + inset to Paint.Align.LEFT
+            PhotoFrameWatermarkPosition.RIGHT -> area.right - inset to Paint.Align.RIGHT
+            PhotoFrameWatermarkPosition.CENTER,
+            PhotoFrameWatermarkPosition.AUTO -> area.centerX() to Paint.Align.CENTER
+            else -> error("Photo placement must not be drawn in the metadata area")
         }
     }
 
@@ -942,12 +1482,14 @@ object PhotoFrameExporter {
      * 横图查看时出现的上下黑区属于图库查看器，不写进导出文件。
      */
     private fun drawPlaqueFrame(
+        context: Context,
         canvas: Canvas,
         source: Bitmap,
         layout: PhotoFrameLayout,
         metadata: PhotoFrameMetadata,
-        showBranding: Boolean,
+        watermark: PhotoFrameWatermark,
     ) {
+        val metadataWatermark = watermark.withoutPhotoPlacement()
         canvas.drawColor(Color.WHITE)
         val photoRect = RectF(
             layout.photoLeft,
@@ -961,6 +1503,7 @@ object PhotoFrameExporter {
             photoRect,
             Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
         )
+        drawPhotoWatermark(context, canvas, photoRect, PhotoFramePreset.PLAQUE, watermark)
 
         val width = layout.canvasWidth.toFloat()
         val bandTop = layout.metadataTop
@@ -990,7 +1533,7 @@ object PhotoFrameExporter {
         val rightSecondary = date?.takeIf { details != null }
         val hasLeft = leftPrimary != null
         val hasRight = rightPrimary != null
-        val hasLeftBlock = hasLeft || showBranding
+        val hasLeftBlock = hasLeft
 
         val leftX = width * 0.058f
         val leftMaxWidth = width * if (hasRight) 0.46f else 0.884f
@@ -1032,78 +1575,98 @@ object PhotoFrameExporter {
                 typeface = Typeface.create("sans-serif", Typeface.NORMAL),
             )
         }
-        val brandingPaint = if (showBranding) {
-            createBrandingPaint(canvas, PhotoFramePreset.PLAQUE).apply {
-                textAlign = Paint.Align.LEFT
-            }
+        val watermarkText = metadataWatermark.displayText
+        val watermarkPaint = if (metadataWatermark.enabled) {
+            createWatermarkPaint(
+                context = context,
+                canvas = canvas,
+                preset = PhotoFramePreset.PLAQUE,
+                watermark = metadataWatermark,
+                maxWidth = width * 0.884f,
+            )
         } else {
             null
         }
-        val leftPrimaryBounds =
+        var leftPrimaryBounds =
             if (leftPrimary != null && leftPrimaryPaint != null) {
                 textVisualBounds(leftPrimary, leftPrimaryPaint)
             } else {
                 null
             }
-        val leftSecondaryBounds =
+        var leftSecondaryBounds =
             if (leftSecondary != null && leftSecondaryPaint != null) {
                 textVisualBounds(leftSecondary, leftSecondaryPaint)
             } else {
                 null
             }
-        val rightPrimaryBounds =
+        var rightPrimaryBounds =
             if (rightPrimary != null && rightPrimaryPaint != null) {
                 textVisualBounds(rightPrimary, rightPrimaryPaint)
             } else {
                 null
             }
-        val rightSecondaryBounds =
+        var rightSecondaryBounds =
             if (rightSecondary != null && rightSecondaryPaint != null) {
                 textVisualBounds(rightSecondary, rightSecondaryPaint)
             } else {
                 null
             }
-        val brandingBounds = brandingPaint?.let { textVisualBounds("ZTransfer", it) }
-        val leftRows = listOfNotNull(
-            leftPrimaryBounds,
-            leftSecondaryBounds,
-            brandingBounds,
-        )
-        val rightRows = listOfNotNull(rightPrimaryBounds, rightSecondaryBounds)
-        if (leftRows.isEmpty() && rightRows.isEmpty()) return
+        var watermarkBounds = watermarkPaint?.let { textVisualBounds(watermarkText, it) }
+        fun mergedRow(
+            left: FrameTextVisualBounds?,
+            right: FrameTextVisualBounds?,
+        ): FrameTextVisualBounds? = when {
+            left == null -> right
+            right == null -> left
+            else -> mergeTextVisualBounds(left, right)
+        }
+        var primaryRow = mergedRow(leftPrimaryBounds, rightPrimaryBounds)
+        var secondaryRow = mergedRow(leftSecondaryBounds, rightSecondaryBounds)
+        var rows = listOfNotNull(primaryRow, secondaryRow, watermarkBounds)
+        if (rows.isEmpty()) return
+        val rowScale = frameTextScaleToFit(bandHeight, rows)
+        if (rowScale < 1f) {
+            listOfNotNull(
+                leftPrimaryPaint,
+                leftSecondaryPaint,
+                rightPrimaryPaint,
+                rightSecondaryPaint,
+                watermarkPaint,
+            ).forEach { paint -> paint.textSize *= rowScale }
+            leftPrimaryBounds = leftPrimary?.let { text ->
+                leftPrimaryPaint?.let { textVisualBounds(text, it) }
+            }
+            leftSecondaryBounds = leftSecondary?.let { text ->
+                leftSecondaryPaint?.let { textVisualBounds(text, it) }
+            }
+            rightPrimaryBounds = rightPrimary?.let { text ->
+                rightPrimaryPaint?.let { textVisualBounds(text, it) }
+            }
+            rightSecondaryBounds = rightSecondary?.let { text ->
+                rightSecondaryPaint?.let { textVisualBounds(text, it) }
+            }
+            watermarkBounds = watermarkPaint?.let { textVisualBounds(watermarkText, it) }
+            primaryRow = mergedRow(leftPrimaryBounds, rightPrimaryBounds)
+            secondaryRow = mergedRow(leftSecondaryBounds, rightSecondaryBounds)
+            rows = listOfNotNull(primaryRow, secondaryRow, watermarkBounds)
+        }
         val preferredGap = min(width * 0.0115f, bandHeight * 0.095f)
-        val leftBaselines = centeredFrameTextBaselines(
+        val baselines = centeredFrameTextBaselines(
             areaTop = bandTop,
             areaBottom = layout.canvasHeight.toFloat(),
-            rows = leftRows,
+            rows = rows,
             preferredGap = preferredGap,
         )
-        val rightBaselines = centeredFrameTextBaselines(
-            areaTop = bandTop,
-            areaBottom = layout.canvasHeight.toFloat(),
-            rows = rightRows,
-            preferredGap = preferredGap,
-        )
-        var leftIndex = 0
-        val leftPrimaryBaseline =
-            if (leftPrimaryBounds != null) leftBaselines[leftIndex++] else null
-        val leftSecondaryBaseline =
-            if (leftSecondaryBounds != null) leftBaselines[leftIndex++] else null
-        val brandingBaseline =
-            if (brandingBounds != null) leftBaselines[leftIndex] else null
-        var rightIndex = 0
-        val rightPrimaryBaseline =
-            if (rightPrimaryBounds != null) rightBaselines[rightIndex++] else null
-        val rightSecondaryBaseline =
-            if (rightSecondaryBounds != null) rightBaselines[rightIndex] else null
+        var rowIndex = 0
+        val primaryBaseline = if (primaryRow != null) baselines[rowIndex++] else null
+        val secondaryBaseline = if (secondaryRow != null) baselines[rowIndex++] else null
+        val watermarkBaseline = if (watermarkBounds != null) baselines[rowIndex] else null
 
         if (hasLeftBlock && hasRight) {
-            val visualExtents = buildList {
-                plaqueVisualExtent(leftRows, leftBaselines)?.let(::add)
-                plaqueVisualExtent(rightRows, rightBaselines)?.let(::add)
-            }
-            val infoTop = visualExtents.minOf { it.first }
-            val infoBottom = visualExtents.maxOf { it.second }
+            val metadataRows = listOfNotNull(primaryRow, secondaryRow)
+            val metadataBaselines = listOfNotNull(primaryBaseline, secondaryBaseline)
+            val (infoTop, infoBottom) = plaqueVisualExtent(metadataRows, metadataBaselines)
+                ?: (bandTop to layout.canvasHeight.toFloat())
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.rgb(222, 224, 222)
                 strokeWidth = maxOf(1f, width * 0.001f)
@@ -1118,24 +1681,38 @@ object PhotoFrameExporter {
                 )
             }
         }
-        if (leftPrimary != null && leftPrimaryPaint != null && leftPrimaryBaseline != null) {
-            canvas.drawText(leftPrimary, leftX, leftPrimaryBaseline, leftPrimaryPaint)
+        if (leftPrimary != null && leftPrimaryPaint != null && primaryBaseline != null) {
+            canvas.drawText(leftPrimary, leftX, primaryBaseline, leftPrimaryPaint)
         }
-        if (leftSecondary != null && leftSecondaryPaint != null && leftSecondaryBaseline != null) {
-            canvas.drawText(leftSecondary, leftX, leftSecondaryBaseline, leftSecondaryPaint)
+        if (leftSecondary != null && leftSecondaryPaint != null && secondaryBaseline != null) {
+            canvas.drawText(leftSecondary, leftX, secondaryBaseline, leftSecondaryPaint)
         }
-        if (brandingPaint != null && brandingBaseline != null) {
-            canvas.drawText("ZTransfer", leftX, brandingBaseline, brandingPaint)
+        if (watermarkPaint != null && watermarkBaseline != null) {
+            val band = RectF(0f, bandTop, width, layout.canvasHeight.toFloat())
+            val (watermarkX, align) = watermarkHorizontalPlacement(
+                band,
+                PhotoFramePreset.PLAQUE,
+                metadataWatermark.position,
+            )
+            watermarkPaint.textAlign = align
+            drawWatermarkText(
+                canvas,
+                watermarkText,
+                watermarkX,
+                watermarkBaseline,
+                watermarkPaint,
+                metadataWatermark,
+            )
         }
-        if (rightPrimary != null && rightPrimaryPaint != null && rightPrimaryBaseline != null) {
-            canvas.drawText(rightPrimary, rightX, rightPrimaryBaseline, rightPrimaryPaint)
+        if (rightPrimary != null && rightPrimaryPaint != null && primaryBaseline != null) {
+            canvas.drawText(rightPrimary, rightX, primaryBaseline, rightPrimaryPaint)
         }
         if (
             rightSecondary != null &&
             rightSecondaryPaint != null &&
-            rightSecondaryBaseline != null
+            secondaryBaseline != null
         ) {
-            canvas.drawText(rightSecondary, rightX, rightSecondaryBaseline, rightSecondaryPaint)
+            canvas.drawText(rightSecondary, rightX, secondaryBaseline, rightSecondaryPaint)
         }
     }
 
@@ -1169,10 +1746,17 @@ object PhotoFrameExporter {
         destination: PhotoFrameDestination,
         sourceName: String,
         preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+        borderEnabled: Boolean,
         bitmap: Bitmap,
     ): PhotoFrameExportResult {
         val parentUri = destination.directoryUri
-        val preferred = photoFrameOutputName(sourceName, preset)
+        val preferred = photoFrameOutputName(
+            sourceName,
+            preset,
+            watermark,
+            borderEnabled = borderEnabled,
+        )
         val name = uniqueName(preferred, destination.occupiedNames)
         val tempName = photoFrameTempName(System.nanoTime())
         val temp = DocumentsContract.createDocument(
@@ -1180,7 +1764,7 @@ object PhotoFrameExporter {
             parentUri,
             "image/jpeg",
             tempName,
-        ) ?: error("Cannot create framed photo")
+        ) ?: error("Cannot create derived photo")
         var tempStillExists = true
         try {
             val written = resolver.openOutputStream(temp, "w")?.let { raw ->
@@ -1188,7 +1772,7 @@ object PhotoFrameExporter {
                     bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
                 }
             } == true
-            if (!written) error("Cannot write framed photo")
+            if (!written) error("Cannot write derived photo")
             // 压缩是不可中断的阻塞调用；若界面已销毁，在正式改名前响应取消，仅清理隐藏临时文件。
             currentCoroutineContext().ensureActive()
 
@@ -1240,12 +1824,12 @@ object PhotoFrameExporter {
                 parentUri,
                 "image/jpeg",
                 requestedName,
-            ) ?: error("Cannot create framed photo")
+            ) ?: error("Cannot create derived photo")
             val input = resolver.openInputStream(sourceUri)
                 ?: error("Cannot reopen completed frame")
             val copiedBytes = input.use { rawInput ->
                 val output = resolver.openOutputStream(target, "w")
-                    ?: error("Cannot write framed photo")
+                    ?: error("Cannot write derived photo")
                 output.use { rawOutput ->
                     BufferedInputStream(rawInput, COPY_BUFFER_BYTES).use { bufferedInput ->
                         BufferedOutputStream(rawOutput, COPY_BUFFER_BYTES).use { bufferedOutput ->
@@ -1265,7 +1849,7 @@ object PhotoFrameExporter {
             }
             // 某些 Provider 在刚关闭输出流时会短暂报告 0；只把正数当作可信尺寸。
             if (expectedBytes > 0L && copiedBytes != expectedBytes) {
-                error("Incomplete framed photo copy")
+                error("Incomplete derived photo copy")
             }
             return target
         } catch (error: Throwable) {
@@ -1394,12 +1978,144 @@ internal fun calculatePlaqueFrameLayout(
 internal fun photoFrameCornerRadius(layout: PhotoFrameLayout): Float =
     (layout.canvasHeight - layout.metadataTop) * 0.26f
 
+internal fun PhotoFrameWatermarkPosition.isPhotoPlacement(): Boolean = when (this) {
+    PhotoFrameWatermarkPosition.PHOTO_TOP_LEFT,
+    PhotoFrameWatermarkPosition.PHOTO_TOP_CENTER,
+    PhotoFrameWatermarkPosition.PHOTO_TOP_RIGHT,
+    PhotoFrameWatermarkPosition.PHOTO_CENTER,
+    PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT,
+    PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER,
+    PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT -> true
+    PhotoFrameWatermarkPosition.AUTO,
+    PhotoFrameWatermarkPosition.LEFT,
+    PhotoFrameWatermarkPosition.CENTER,
+    PhotoFrameWatermarkPosition.RIGHT -> false
+}
+
+/** 无边框模式只接受照片内位置，并彻底消除隐藏边框样式对渲染身份的影响。 */
+private fun PhotoFrameWatermark.forBorderMode(
+    borderEnabled: Boolean,
+): PhotoFrameWatermark =
+    if (!borderEnabled && !position.isPhotoPlacement()) {
+        copy(position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT)
+    } else {
+        this
+    }
+
+private fun PhotoFrameWatermark.withoutPhotoPlacement(): PhotoFrameWatermark =
+    if (position.isPhotoPlacement() || content == PhotoFrameWatermarkContent.IMAGE) {
+        copy(enabled = false)
+    } else {
+        this
+    }
+
+/**
+ * Calculates the text origin from its actual glyph bounds. The 4% inset is based on the
+ * photo's short edge, so landscape and portrait photos keep the same visual breathing room.
+ */
+internal fun calculatePhotoWatermarkPlacement(
+    photoLeft: Float,
+    photoTop: Float,
+    photoRight: Float,
+    photoBottom: Float,
+    textBounds: PhotoWatermarkTextBounds,
+    position: PhotoFrameWatermarkPosition,
+): PhotoWatermarkPlacement {
+    require(photoRight > photoLeft)
+    require(photoBottom > photoTop)
+    require(textBounds.right >= textBounds.left)
+    require(textBounds.bottom >= textBounds.top)
+    require(position.isPhotoPlacement())
+
+    val safeInset = min(photoRight - photoLeft, photoBottom - photoTop) * 0.04f
+    val minOriginX = photoLeft + safeInset - textBounds.left
+    val maxOriginX = photoRight - safeInset - textBounds.right
+    val minBaseline = photoTop + safeInset - textBounds.top
+    val maxBaseline = photoBottom - safeInset - textBounds.bottom
+    val centeredOriginX = (photoLeft + photoRight - textBounds.left - textBounds.right) / 2f
+    val centeredBaseline = (photoTop + photoBottom - textBounds.top - textBounds.bottom) / 2f
+
+    val requestedX = when (position) {
+        PhotoFrameWatermarkPosition.PHOTO_TOP_LEFT,
+        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT -> minOriginX
+        PhotoFrameWatermarkPosition.PHOTO_TOP_CENTER,
+        PhotoFrameWatermarkPosition.PHOTO_CENTER,
+        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER -> centeredOriginX
+        PhotoFrameWatermarkPosition.PHOTO_TOP_RIGHT,
+        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT -> maxOriginX
+        else -> error("A metadata placement cannot be positioned inside the photo")
+    }
+    val requestedBaseline = when (position) {
+        PhotoFrameWatermarkPosition.PHOTO_TOP_LEFT,
+        PhotoFrameWatermarkPosition.PHOTO_TOP_CENTER,
+        PhotoFrameWatermarkPosition.PHOTO_TOP_RIGHT -> minBaseline
+        PhotoFrameWatermarkPosition.PHOTO_CENTER -> centeredBaseline
+        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT,
+        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER,
+        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT -> maxBaseline
+        else -> error("A metadata placement cannot be positioned inside the photo")
+    }
+    return PhotoWatermarkPlacement(
+        originX = if (minOriginX <= maxOriginX) {
+            requestedX.coerceIn(minOriginX, maxOriginX)
+        } else {
+            centeredOriginX
+        },
+        baseline = if (minBaseline <= maxBaseline) {
+            requestedBaseline.coerceIn(minBaseline, maxBaseline)
+        } else {
+            centeredBaseline
+        },
+    )
+}
+
+/** 用户看到的透明度档位就是最终 Alpha，不再受颜色预设原始透明度二次影响。 */
+internal fun watermarkAlpha(opacityPercent: Int): Int =
+    (normalizePhotoFrameWatermarkOpacityPercent(opacityPercent) * 255f / 100f).roundToInt()
+
+private fun resolvedWatermarkEffect(
+    watermark: PhotoFrameWatermark,
+): PhotoFrameWatermarkEffect = when (watermark.effect) {
+    PhotoFrameWatermarkEffect.AUTO -> if (watermark.position.isPhotoPlacement()) {
+        PhotoFrameWatermarkEffect.SHADOW
+    } else {
+        PhotoFrameWatermarkEffect.NONE
+    }
+    else -> watermark.effect
+}
+
+private fun contrastingWatermarkColor(color: Int, alpha: Int): Int {
+    val perceivedBrightness =
+        (Color.red(color) * 299 + Color.green(color) * 587 + Color.blue(color) * 114) / 1000
+    return if (perceivedBrightness >= 150) {
+        Color.argb(alpha.coerceIn(0, 255), 12, 15, 18)
+    } else {
+        Color.argb(alpha.coerceIn(0, 255), 248, 249, 250)
+    }
+}
+
+/**
+ * 返回让所有文字墨迹高度都能放进信息区的统一缩放比例。绘制端先整体缩小字号，再计算
+ * 基线，因此任意水印字号、字体和相机元数据组合都不会互相覆盖。
+ */
+internal fun frameTextScaleToFit(
+    areaHeight: Float,
+    rows: List<FrameTextVisualBounds>,
+): Float {
+    require(areaHeight >= 0f)
+    rows.forEach { require(it.bottom >= it.top) }
+    val textHeight = rows.sumOf { (it.bottom - it.top).toDouble() }.toFloat()
+    if (textHeight <= 0f || textHeight <= areaHeight) return 1f
+    // 留 2% 抗锯齿余量，避免不同 Android 字体栅格化实现恰好贴边时出现一像素相交。
+    return (areaHeight / textHeight * 0.98f).coerceIn(0f, 1f)
+}
+
 /**
  * 按每行文字的真实可见边界计算基线，使整组文字在指定区域内视觉上下居中。
  *
  * [FrameTextVisualBounds] 来自 Paint.getTextBounds，而不是字体抽象行高，因此大写品牌、
- * 数字参数和斜体 ZTransfer 混排时仍以实际墨迹边界为准。空间不足时只压缩行间距，
- * 不改变字号或顺序。
+ * 数字参数和自定义字体混排时仍以实际墨迹边界为准。调用方先通过
+ * [frameTextScaleToFit] 保证总墨迹高度可容纳；本函数再压缩行间距而不改变顺序。
  */
 internal fun centeredFrameTextBaselines(
     areaTop: Float,
@@ -1508,23 +2224,109 @@ internal fun isCurrentPhotoFrameTempName(name: String): Boolean =
     name.startsWith(PHOTO_FRAME_SESSION_PREFIX)
 
 private val PHOTO_FRAME_OUTPUT_PATTERN = Regex(
-    pattern = "_frame_(${PhotoFramePreset.entries.joinToString("|") { preset ->
+    pattern = "(?:_frame_(${PhotoFramePreset.entries.joinToString("|") { preset ->
         Regex.escape(preset.fileSuffix)
-    }})(?: \\(\\d+\\)|_\\d+)?\\.jpe?g$",
+    }})|_watermark)(?:_w[0-9a-f]{12})?(?: \\(\\d+\\)|_\\d+)?\\.jpe?g$",
     option = RegexOption.IGNORE_CASE,
 )
+
+private const val PHOTO_FRAME_WATERMARK_RENDER_VERSION = 2
 
 internal fun isPhotoFrameOutputName(name: String): Boolean =
     PHOTO_FRAME_OUTPUT_PATTERN.containsMatchIn(name)
 
-/** 同一张本地原片、同一预设对应的首选输出名。 */
+/** 同一张本地原片、同一预设及同一水印配置对应的首选输出名。 */
 internal fun photoFrameOutputName(
     sourceName: String,
     preset: PhotoFramePreset,
-): String = "${File(sourceName).nameWithoutExtension}_frame_${preset.fileSuffix}.jpg"
+    watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
+    borderEnabled: Boolean = true,
+): String {
+    // v2 调整了默认字体与透明度语义，所有成片都带配置摘要，避免误命中升级前旧图。
+    val renderedWatermark = watermark.forBorderMode(borderEnabled)
+    val watermarkSuffix = "_w${photoFrameWatermarkFingerprint(renderedWatermark, preset)}"
+    val styleSuffix = if (borderEnabled) "frame_${preset.fileSuffix}" else "watermark"
+    return "${File(sourceName).nameWithoutExtension}_${styleSuffix}$watermarkSuffix.jpg"
+}
+
+/** 摘要只用于稳定区分成片配置，绝不把用户水印原文写入文件名。 */
+internal fun photoFrameWatermarkFingerprint(
+    watermark: PhotoFrameWatermark,
+    preset: PhotoFramePreset,
+): String {
+    val identity = if (watermark.enabled) {
+        val renderedPosition = resolvedWatermarkPosition(preset, watermark.position)
+        buildList {
+            add("v=$PHOTO_FRAME_WATERMARK_RENDER_VERSION")
+            add("on")
+            add(watermark.content.name)
+            add(watermarkSizeFingerprintToken(watermark))
+            add(renderedPosition.name)
+            add("opacity=${watermarkOpacityFingerprintToken(watermark.opacityPercent)}")
+            when (watermark.content) {
+                PhotoFrameWatermarkContent.TEXT -> {
+                    add(watermark.displayText)
+                    add(watermark.font.name)
+                    add(watermark.color.name)
+                    add("effect=${watermark.effect.name}")
+                }
+                PhotoFrameWatermarkContent.IMAGE -> {
+                    add(requireNotNull(validPhotoFrameWatermarkImageHash(watermark.imageHash)))
+                }
+            }
+        }.joinToString("\u0000")
+    } else {
+        "off"
+    }
+    return MessageDigest.getInstance("SHA-256")
+        .digest(identity.toByteArray(Charsets.UTF_8))
+        .take(6)
+        .joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
+}
+
+/** 旧三档值继续沿用原摘要令牌，升级后不会把像素完全相同的旧成片误判为新配置。 */
+private fun watermarkSizeFingerprintToken(watermark: PhotoFrameWatermark): String {
+    val sizePercent = normalizePhotoFrameWatermarkSizePercent(watermark.sizePercent)
+    return when (watermark.content) {
+        PhotoFrameWatermarkContent.TEXT -> when (sizePercent) {
+            58 -> "SMALL"
+            75 -> "MEDIUM"
+            100 -> "LARGE"
+            else -> "${sizePercent}P"
+        }
+        PhotoFrameWatermarkContent.IMAGE -> when (sizePercent) {
+            47 -> "SMALL"
+            69 -> "MEDIUM"
+            100 -> "LARGE"
+            else -> "${sizePercent}P"
+        }
+    }
+}
+
+private fun watermarkOpacityFingerprintToken(opacityPercent: Int): String =
+    when (val normalized = normalizePhotoFrameWatermarkOpacityPercent(opacityPercent)) {
+        40 -> "SUBTLE"
+        72 -> "STANDARD"
+        100 -> "STRONG"
+        else -> "${normalized}P"
+    }
+
+private fun resolvedWatermarkPosition(
+    preset: PhotoFramePreset,
+    requested: PhotoFrameWatermarkPosition,
+): PhotoFrameWatermarkPosition = when (requested) {
+    PhotoFrameWatermarkPosition.AUTO -> {
+        if (preset == PhotoFramePreset.PLAQUE) {
+            PhotoFrameWatermarkPosition.LEFT
+        } else {
+            PhotoFrameWatermarkPosition.CENTER
+        }
+    }
+    else -> requested
+}
 
 /**
- * 判断目标目录中是否已经有该原片按指定预设生成的成片。
+ * 判断目标目录中是否已经有该原片按指定预设与水印配置生成的成片。
  *
  * 除首选名外也识别导出器为重名冲突生成的 " (n)" / 时间戳副本，避免用户重新点击
  * 已传照片时继续制造同款副本。原片名和扩展名均按 DocumentsProvider 的常见行为
@@ -1533,8 +2335,10 @@ internal fun photoFrameOutputName(
 internal fun PhotoFrameDestination.hasFrameFor(
     sourceName: String,
     preset: PhotoFramePreset,
+    watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
+    borderEnabled: Boolean = true,
 ): Boolean {
-    val pattern = photoFrameOutputPattern(sourceName, preset)
+    val pattern = photoFrameOutputPattern(sourceName, preset, watermark, borderEnabled)
     return occupiedNames.any(pattern::matches)
 }
 
@@ -1542,13 +2346,17 @@ internal fun isPhotoFrameOutputFor(
     name: String,
     sourceName: String,
     preset: PhotoFramePreset,
-): Boolean = photoFrameOutputPattern(sourceName, preset).matches(name)
+    watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
+    borderEnabled: Boolean = true,
+): Boolean = photoFrameOutputPattern(sourceName, preset, watermark, borderEnabled).matches(name)
 
 private fun photoFrameOutputPattern(
     sourceName: String,
     preset: PhotoFramePreset,
+    watermark: PhotoFrameWatermark,
+    borderEnabled: Boolean,
 ): Regex {
-    val preferred = photoFrameOutputName(sourceName, preset)
+    val preferred = photoFrameOutputName(sourceName, preset, watermark, borderEnabled)
     val dot = preferred.lastIndexOf('.')
     val stem = if (dot >= 0) preferred.substring(0, dot) else preferred
     val extension = if (dot >= 0) preferred.substring(dot) else ""

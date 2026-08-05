@@ -702,7 +702,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun registerNetworkCallback() {
         if (_state.value.connectionType == CameraConnectionType.USB) return
-        // ADB reverse 的回环端点不依赖 Wi-Fi；Release 实现恒返回 null。
+        // Debug 内置相机使用进程内回环端点，不依赖 Wi-Fi；Release 实现恒返回 null。
         if (CameraEndpointOverride.hostOrNull() != null) return
         if (wifiHeld) return
         val request = NetworkRequest.Builder()
@@ -811,6 +811,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /** Debug 入口主动开启进程内模拟相机；Release 源集返回 false，因此不会改变正式连接流程。 */
+    fun connectDebugSimulator() {
+        viewModelScope.launch {
+            if (_state.value.isConnectedToCamera || _state.value.isConnecting) return@launch
+            val enabled = withContext(Dispatchers.IO) {
+                CameraEndpointOverride.enableSimulator()
+            }
+            if (!enabled || _state.value.isConnectedToCamera || _state.value.isConnecting) return@launch
+            updateWifiCandidate(candidate = true, rssi = null)
+            connectToCameraWithRetry()
+        }
+    }
+
     /**
      * 更新“疑似相机网络”证据。运行中的真实会话不因 DHCP 的瞬时误报被降级；
      * 未连接时一旦候选特征消失，连接页立即回到无选择的初始状态。
@@ -898,7 +911,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val overrideHost = CameraEndpointOverride.hostOrNull()
             cam.connect(
                 ip = overrideHost ?: PtpConstants.CAMERA_IP,
-                // 回环地址经 adb reverse 走本机 socket；绑定 Wi-Fi Network 会绕开隧道。
+                // Debug 内置相机走进程内回环；绑定 Wi-Fi Network 会错误地绕开该端点。
                 network = if (overrideHost == null) wifiNetwork else null
             ).fold(
                 onSuccess = {

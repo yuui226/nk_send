@@ -322,10 +322,14 @@ fun TransferScreen(
                                     task.framePreset?.let { preset ->
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = stringResource(
-                                                R.string.photo_frame_task_label,
-                                                photoFramePresetLabel(preset),
-                                            ),
+                                            text = if (task.frameBorderRequested) {
+                                                stringResource(
+                                                    R.string.photo_frame_task_label,
+                                                    photoFramePresetLabel(preset),
+                                                )
+                                            } else {
+                                                stringResource(R.string.photo_frame_watermark_only)
+                                            },
                                             style = MaterialTheme.typography.labelSmall,
                                             color = colors.onSurfaceVariant,
                                             maxLines = 1,

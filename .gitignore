@@ -42,3 +42,6 @@ tools/ossutil/**/*.zip
 
 # 本机 AI 工具权限配置
 .claude/settings.local.json
+
+# Local Codex-generated interactive drafts
+.codex/

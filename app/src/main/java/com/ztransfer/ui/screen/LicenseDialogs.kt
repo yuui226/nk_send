@@ -297,6 +297,14 @@ fun ProDialog(
                                     compact = compactTable,
                                 )
                                 CompareRow(
+                                    stringResource(R.string.compare_frames_watermarks),
+                                    stringResource(R.string.compare_watermark_free),
+                                    stringResource(R.string.compare_watermark_pro),
+                                    stringResource(R.string.compare_watermark_pro),
+                                    valueColumnWidth = valueColumnWidth,
+                                    compact = compactTable,
+                                )
+                                CompareRow(
                                     stringResource(R.string.compare_duration),
                                     stringResource(R.string.duration_free),
                                     stringResource(R.string.duration_days, price.annual.periodDays),

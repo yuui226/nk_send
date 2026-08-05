@@ -125,9 +125,11 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class FileGroup(
     val date: String,
@@ -513,6 +515,7 @@ fun FileListScreen(
     val previewSourceIdentity = remember(
         groups, burstIdByHandle, transferState.collapseBurstPhotos, expandedBurstIds
     ) { Any() }
+    val currentPreviewSourceIdentity by rememberUpdatedState(previewSourceIdentity)
     val transfersBusy = transferState.tasks.any {
         it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
     }
@@ -523,6 +526,7 @@ fun FileListScreen(
     var previewIndex by remember { mutableStateOf<Int?>(null) }
     var previewAnchor by remember { mutableStateOf<Rect?>(null) }
     var previewSourceAtOpen by remember { mutableStateOf<Any?>(null) }
+    var previewBuildJob by remember { mutableStateOf<Job?>(null) }
     // 预览会话固定为打开瞬间的展示模型。“未传输”激活时，当前照片在
     // 后台传完会从网格派生列表移除；若预览仍直接引用实时模型，固定下标会
     // 突然指向下一张，末尾项还会直接让 overlay 消失。快照保证当次浏览稳定，
@@ -546,16 +550,25 @@ fun FileListScreen(
         }
     }
     val onPreview: (NikonCamera.FileInfo, Rect) -> Unit = { file, rect ->
-        val snapshot = buildPreviewSnapshot(expandedBurstIds)
-        val idx = snapshot.indexOfFirst {
-            it is PhotoPreviewItem.Photo && it.file.handle == file.handle
-        }
-        if (idx >= 0) {
-            haptics.longPress()
-            previewItems = snapshot
-            previewIndex = idx
-            previewAnchor = rect
-            previewSourceAtOpen = previewSourceIdentity
+        // 几千张照片时构建分页快照会产生一批临时集合；不要把这段 O(n) 工作塞在
+        // 长按手势的主线程回调里，否则动画第一帧会被推迟甚至直接错过。
+        haptics.longPress()
+        val sourceAtOpen = previewSourceIdentity
+        val expandedAtOpen = expandedBurstIds
+        previewBuildJob?.cancel()
+        previewBuildJob = scrollScope.launch {
+            val snapshot = withContext(Dispatchers.Default) {
+                buildPreviewSnapshot(expandedAtOpen)
+            }
+            val idx = snapshot.indexOfFirst {
+                it is PhotoPreviewItem.Photo && it.file.handle == file.handle
+            }
+            if (idx >= 0 && currentPreviewSourceIdentity === sourceAtOpen) {
+                previewItems = snapshot
+                previewIndex = idx
+                previewAnchor = rect
+                previewSourceAtOpen = sourceAtOpen
+            }
         }
     }
     val onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit =
@@ -563,16 +576,23 @@ fun FileListScreen(
             val first = files.firstOrNull() ?: return@onPreviewBurst
             // 快照立即包含目标成员，保证底层展开动画尚未提交时也能直接落到第一张；
             // 向左仍可回到合集页。折叠合集的长按会由卡片先触发同一个展开状态机。
-            val snapshot = buildPreviewSnapshot(expandedBurstIds + burstId)
-            val idx = snapshot.indexOfFirst {
-                it is PhotoPreviewItem.Photo && it.file.handle == first.handle
-            }
-            if (idx >= 0) {
-                haptics.longPress()
-                previewItems = snapshot
-                previewIndex = idx
-                previewAnchor = rect
-                previewSourceAtOpen = previewSourceIdentity
+            haptics.longPress()
+            val sourceAtOpen = previewSourceIdentity
+            val expandedAtOpen = expandedBurstIds + burstId
+            previewBuildJob?.cancel()
+            previewBuildJob = scrollScope.launch {
+                val snapshot = withContext(Dispatchers.Default) {
+                    buildPreviewSnapshot(expandedAtOpen)
+                }
+                val idx = snapshot.indexOfFirst {
+                    it is PhotoPreviewItem.Photo && it.file.handle == first.handle
+                }
+                if (idx >= 0 && currentPreviewSourceIdentity === sourceAtOpen) {
+                    previewItems = snapshot
+                    previewIndex = idx
+                    previewAnchor = rect
+                    previewSourceAtOpen = sourceAtOpen
+                }
             }
         }
 
@@ -839,6 +859,7 @@ fun FileListScreen(
                 onTapFile = onTapFile,
                 onPreview = onPreview,
                 onPreviewBurst = onPreviewBurst,
+                tapToPreview = transferState.tapToPreview,
                 cellBoundsRegistry = cellBoundsRegistry,
                 burstHandles = burstHandles,
                 burstIdByHandle = burstIdByHandle,
@@ -1775,6 +1796,7 @@ private fun ThumbnailGrid(
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
     onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit,
+    tapToPreview: Boolean,
     cellBoundsRegistry: MutableMap<Int, Rect>,
     burstHandles: Set<Int>,
     burstIdByHandle: Map<Int, String>,
@@ -2050,6 +2072,7 @@ private fun ThumbnailGrid(
                                     cameraViewModel = cameraViewModel,
                                     onTapFile = onTapFile,
                                     onPreview = onPreview,
+                                    tapToPreview = tapToPreview,
                                     cellBoundsRegistry = cellBoundsRegistry,
                                     inBurst = file.handle in burstHandles,
                                     inExpandedBurstCollection =
@@ -2263,6 +2286,7 @@ internal fun BurstStackPhoto(
     file: NikonCamera.FileInfo,
     cameraViewModel: CameraViewModel,
     transfersBusy: Boolean,
+    loadEnabled: Boolean = true,
     showPlaceholderIcon: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -2270,8 +2294,8 @@ internal fun BurstStackPhoto(
     var thumbnail by remember(file.handle) {
         mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
     }
-    LaunchedEffect(file.handle, transfersBusy) {
-        if (thumbnail == null) thumbnail = cameraViewModel.loadThumbnail(file)
+    LaunchedEffect(file.handle, transfersBusy, loadEnabled) {
+        if (loadEnabled && thumbnail == null) thumbnail = cameraViewModel.loadThumbnail(file)
     }
     val shape = RoundedCornerShape(10.dp)
 
@@ -2317,6 +2341,7 @@ private fun ThumbnailCell(
     cameraViewModel: CameraViewModel,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
+    tapToPreview: Boolean,
     cellBoundsRegistry: MutableMap<Int, Rect>,
     modifier: Modifier = Modifier,
     inBurst: Boolean = false,
@@ -2406,13 +2431,17 @@ private fun ThumbnailCell(
                     }
                 }
             }
-            // 轻触加入队列；普通下载已入队时父层忽略，已落盘或正在下载的 JPG
-            // 可按新边框预设追加独立任务。
-            // 长按预览大图在任何状态下都可用。
+            // 只在这里交换两个既有动作的手势入口；传输校验、入队和预览逻辑保持单一来源。
             .combinedClickable(
                 enabled = !exiting,
-                onClick = { onTapFile(file) },
-                onLongClick = { cellBounds?.let { onPreview(file, it) } }
+                onClick = {
+                    if (tapToPreview) cellBounds?.let { onPreview(file, it) }
+                    else onTapFile(file)
+                },
+                onLongClick = {
+                    if (tapToPreview) onTapFile(file)
+                    else cellBounds?.let { onPreview(file, it) }
+                }
             )
     ) {
         val image = thumbnail
