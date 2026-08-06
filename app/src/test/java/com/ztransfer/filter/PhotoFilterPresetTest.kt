@@ -1,28 +1,26 @@
 package com.ztransfer.filter
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhotoFilterPresetTest {
     @Test
-    fun colorBandInterpolationWrapsSmoothlyAcrossRed() {
-        val centers = PHOTO_FILTER_COLOR_BAND_CENTERS.toList()
-        val nearEnd = adjacentColorBandWeights(350f, centers)
-        val nearStart = adjacentColorBandWeights(10f, centers)
+    fun toneCurveMapsEndpointsAndInterpolatesBetweenSamples() {
+        val curve = FloatArray(PHOTO_FILTER_TONE_CURVE_POINT_COUNT) { index ->
+            index.toFloat() / (PHOTO_FILTER_TONE_CURVE_POINT_COUNT - 1)
+        }
 
-        assertEquals(7, nearEnd.first)
-        assertEquals(0, nearEnd.second)
-        assertEquals(0, nearStart.first)
-        assertEquals(1, nearStart.second)
-        assertTrue(nearEnd.third in 0f..1f)
-        assertTrue(nearStart.third in 0f..1f)
+        assertEquals(0f, mapPhotoFilterToneCurve(-1f, curve), 0f)
+        assertEquals(0.5f, mapPhotoFilterToneCurve(0.5f, curve), 0.0001f)
+        assertEquals(1f, mapPhotoFilterToneCurve(2f, curve), 0f)
     }
 
     @Test
-    fun intensityIsAlwaysSafeForRendering() {
-        assertEquals(0, normalizePhotoFilterIntensity(-1))
+    fun intensityUsesTwoPercentDetentsAndNeverRepresentsFilterOff() {
+        assertEquals(2, normalizePhotoFilterIntensity(-1))
+        assertEquals(2, normalizePhotoFilterIntensity(0))
         assertEquals(72, normalizePhotoFilterIntensity(72))
+        assertEquals(74, normalizePhotoFilterIntensity(73))
         assertEquals(100, normalizePhotoFilterIntensity(101))
     }
 }

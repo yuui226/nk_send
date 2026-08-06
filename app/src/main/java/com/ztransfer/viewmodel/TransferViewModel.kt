@@ -137,6 +137,10 @@ data class TransferState(
     val filterBurstOnly: Boolean = false,
     // 只看导出目录中尚未存在的照片。与缩略图已传对号共用同一份索引。持久化。
     val filterUntransferredOnly: Boolean = false,
+    // 只看指定卡槽（1/2）。null = 两张卡全部显示。持久化；不可用卡槽在完整扫描后由文件页清除。
+    val filterStorageSlot: Int? = null,
+    // 相机拍摄日期范围（含首尾两天）。null = 不按日期筛选。持久化。
+    val filterDateRange: PhotoDateRange? = null,
     // 预览大图的全局逆时针旋转方向（0..3 个 90°）。跨照片、跨会话持久化。
     val previewRotationQuarterTurns: Int = 0,
     // 开启后：受支持的原图落盘成功，再派生一张带边框和/或水印的分享图。
@@ -165,6 +169,16 @@ data class TransferState(
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
     // 切换后由设置面板触发 Activity.recreate() 生效。
     val appLanguage: String = AppLocale.SYSTEM
+)
+
+/** 文件页所有筛选条件的原子快照，避免筛选项增加后依赖位置参数传递。 */
+data class PhotoFilterCriteria(
+    val extensions: Set<String>? = null,
+    val protectedOnly: Boolean = false,
+    val burstOnly: Boolean = false,
+    val untransferredOnly: Boolean = false,
+    val storageSlot: Int? = null,
+    val dateRange: PhotoDateRange? = null,
 )
 
 internal fun normalizeThumbnailColumns(columns: Int): Int = columns.coerceIn(2, 4)
@@ -478,6 +492,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
                 filterBurstOnly = prefs.getBoolean("filter_burst", false),
                 filterUntransferredOnly = prefs.getBoolean("filter_untransferred", false),
+                filterStorageSlot = prefs.getInt("filter_storage_slot", 0).takeIf { it in 1..2 },
+                filterDateRange = PhotoDateRange.restore(
+                    prefs.getString("filter_date_start", null),
+                    prefs.getString("filter_date_end", null),
+                ),
                 previewRotationQuarterTurns = Math.floorMod(
                     prefs.getInt("preview_rotation_quarter_turns", 0), 4
                 ),
@@ -756,25 +775,33 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(appLanguage = tag) }
     }
 
-    /** 应用筛选（类型/保护/连拍/未传输，面板点击后即时提交）。持久化。 */
-    fun setFilters(
-        exts: Set<String>?,
-        protectedOnly: Boolean,
-        burstOnly: Boolean,
-        untransferredOnly: Boolean
-    ) {
+    /** 应用筛选（类型/保护/连拍/未传输/卡槽/日期）。持久化。 */
+    fun setFilters(criteria: PhotoFilterCriteria) {
         prefs.edit().apply {
-            if (exts == null) remove("filter_exts") else putStringSet("filter_exts", exts)
-            if (protectedOnly) putBoolean("filter_protected", true) else remove("filter_protected")
-            if (burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")
-            if (untransferredOnly) putBoolean("filter_untransferred", true) else remove("filter_untransferred")
+            if (criteria.extensions == null) remove("filter_exts")
+            else putStringSet("filter_exts", criteria.extensions)
+            if (criteria.protectedOnly) putBoolean("filter_protected", true) else remove("filter_protected")
+            if (criteria.burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")
+            if (criteria.untransferredOnly) putBoolean("filter_untransferred", true)
+            else remove("filter_untransferred")
+            if (criteria.storageSlot == null) remove("filter_storage_slot")
+            else putInt("filter_storage_slot", criteria.storageSlot)
+            if (criteria.dateRange == null) {
+                remove("filter_date_start")
+                remove("filter_date_end")
+            } else {
+                putString("filter_date_start", criteria.dateRange.start.toString())
+                putString("filter_date_end", criteria.dateRange.endInclusive.toString())
+            }
         }.apply()
         _state.update {
             it.copy(
-                filterExtensions = exts,
-                filterProtectedOnly = protectedOnly,
-                filterBurstOnly = burstOnly,
-                filterUntransferredOnly = untransferredOnly
+                filterExtensions = criteria.extensions,
+                filterProtectedOnly = criteria.protectedOnly,
+                filterBurstOnly = criteria.burstOnly,
+                filterUntransferredOnly = criteria.untransferredOnly,
+                filterStorageSlot = criteria.storageSlot,
+                filterDateRange = criteria.dateRange,
             )
         }
     }

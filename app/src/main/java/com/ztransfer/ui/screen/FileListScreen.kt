@@ -20,6 +20,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -106,6 +107,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
@@ -115,12 +117,17 @@ import com.ztransfer.ui.util.Haptics
 import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.PhotoFilterCriteria
+import com.ztransfer.viewmodel.PhotoDateRange
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.currentFileProgress
+import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
+import com.ztransfer.viewmodel.latestCaptureLocalDate
 import com.ztransfer.viewmodel.remainingCount
+import com.ztransfer.viewmodel.storageIdsBySlot
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -130,6 +137,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.YearMonth
 
 data class FileGroup(
     val date: String,
@@ -170,8 +179,9 @@ private const val QUEUE_ENTRY_BUTTON_TEXTURE_SEED = 0x2A71E001
 // 缩略图后台填充没有任何窗口/视口参数：未传输=从新到旧全量填充；传输中=完全停止。
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
 
-// 类型筛选下拉面板宽度（位置钳制计算需要显式宽度）。
-private val FILTER_PANEL_WIDTH = 180.dp
+// 主筛选下拉面板需要容纳五列短类型、三列状态与清晰分区；日期编辑页再略微展开。
+private val FILTER_PANEL_WIDTH = 316.dp
+private val DATE_FILTER_PANEL_MAX_WIDTH = 336.dp
 
 // 有彩色角标底（白字）的类型：其余走灰底灰字。提到顶层，避免每个格子每次重组都新建集合。
 private val TYPE_BADGE_COLORED_EXTS = setOf(".jpg", ".nef", ".mov", ".mp4")
@@ -382,7 +392,7 @@ fun FileListScreen(
         bottom = bottomInset + 12.dp
     )
 
-    // 筛选（类型/保护/连拍/未传输）：纯前端过滤——原始 state.files 不动、不触发重新读取；
+    // 筛选（类型/保护/连拍/未传输/卡槽/日期）：纯前端过滤——原始 state.files 不动、不触发重新读取；
     // 预览翻页/分组/网格全部基于过滤后的数据，自然一致。
     //（曾有"横竖构图"筛选,已摘除:ObjectInfo 的宽高是传感器原生方向,竖拍的方向
     // 只在 EXIF Orientation 里且依赖机内"自动旋转图像"设置——ObjectInfo 这条路
@@ -391,7 +401,44 @@ fun FileListScreen(
     val filterProtected = transferState.filterProtectedOnly
     val filterBurst = transferState.filterBurstOnly
     val filterUntransferred = transferState.filterUntransferredOnly
-    val filterActive = filterExts != null || filterProtected || filterBurst || filterUntransferred
+    val filterStorageSlot = transferState.filterStorageSlot
+    val filterDateRange = transferState.filterDateRange
+    val storageIdBySlot = remember(state.storageIds) { storageIdsBySlot(state.storageIds) }
+    val visibleStorageSlots = remember(storageIdBySlot, filterStorageSlot) {
+        when {
+            BuildConfig.DEBUG -> listOf(1, 2)
+            storageIdBySlot.size > 1 -> storageIdBySlot.keys.sorted()
+            filterStorageSlot != null -> listOf(filterStorageSlot)
+            else -> emptyList()
+        }
+    }
+    val selectedStorageIds = filterStorageSlot?.let(storageIdBySlot::get)
+    val filterCriteria = remember(
+        filterExts,
+        filterProtected,
+        filterBurst,
+        filterUntransferred,
+        filterStorageSlot,
+        filterDateRange,
+    ) {
+        PhotoFilterCriteria(
+            extensions = filterExts,
+            protectedOnly = filterProtected,
+            burstOnly = filterBurst,
+            untransferredOnly = filterUntransferred,
+            storageSlot = filterStorageSlot,
+            dateRange = filterDateRange,
+        )
+    }
+    val filterActive = filterExts != null || filterProtected || filterBurst ||
+        filterUntransferred || filterStorageSlot != null || filterDateRange != null
+
+    // 跨相机保留筛选时，完整枚举确认目标卡槽不存在才清除；扫描途中不能误清。
+    LaunchedEffect(state.hasCompletedFileScan, storageIdBySlot, filterStorageSlot) {
+        if (state.hasCompletedFileScan && filterStorageSlot != null && selectedStorageIds == null) {
+            transferViewModel.setFilters(filterCriteria.copy(storageSlot = null))
+        }
+    }
     // 筛选确定后的级联入场（复用分组展开的入场动画）：tick 每次确定递增（重播存量格子）,
     // window 开 600ms（窗口内组成的格子播入场,之后滚动进入的不播——与 recentlyExpanded 同构）。
     var filterRevealTick by remember { mutableStateOf(0) }
@@ -405,6 +452,9 @@ fun FileListScreen(
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
     val availableExts = remember(state.files) {
         state.files.map { it.extension }.distinct().sorted()
+    }
+    val latestKnownDate = remember(state.files) {
+        latestCaptureLocalDate(state.files.asSequence().map { it.captureDate })
     }
     // 连拍检测基于原始列表，只在文件列表变化时重算。角标、筛选和合集都共享这一份
     // 结果，避免三个功能对“哪些照片属于连拍”产生分歧。
@@ -485,6 +535,7 @@ fun FileListScreen(
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
     val groups = remember(
         state.files, filterExts, filterProtected, filterBurst, filterUntransferred,
+        filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
         val files = state.files.asSequence()
@@ -492,6 +543,11 @@ fun FileListScreen(
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
             .filter { !filterUntransferred || it.handle !in filteredExportHandles }
+            .filter { file ->
+                filterStorageSlot == null ||
+                    selectedStorageIds?.any { storageId -> storageId in file.storageIds } == true
+            }
+            .filter { filterDateRange == null || filterDateRange.containsCaptureDate(it.captureDate) }
             .toList()
         groupFilesByDate(files)
     }
@@ -671,7 +727,9 @@ fun FileListScreen(
             }
         }
 
-        if (!state.isLoadingFiles && state.files.isEmpty()) {
+        if (!state.isLoadingFiles && state.files.isEmpty() &&
+            (state.hasCompletedFileScan || !state.isConnectedToCamera)
+        ) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -826,7 +884,7 @@ fun FileListScreen(
             }
 
             // 筛选后无匹配：给出指认原因的空态（原始列表非空，只是被筛掉了）。
-            if (groups.isEmpty()) {
+            if (groups.isEmpty() && state.hasCompletedFileScan) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         // 空态缓慢呼吸（与其余空态同参数）。
@@ -1157,17 +1215,17 @@ fun FileListScreen(
             FilterOverlay(
                 anchorBounds = filterAnchor,
                 availableExts = availableExts,
-                current = filterExts,
-                currentProtected = filterProtected,
-                currentBurst = filterBurst,
-                currentUntransferred = filterUntransferred,
-                onChange = { sel, prot, burst, untransferred ->
+                current = filterCriteria,
+                storageSlots = visibleStorageSlots,
+                suggestedDate = latestKnownDate,
+                hapticsEnabled = transferState.hapticsEnabled,
+                onChange = { criteria ->
                     // FilterOverlay 只在工作状态确实变化时回调；这里每次都提交。
                     // 不能用父层上一帧的 filter* 闭包拦截：快速双击同一项时，第二次
                     // 取消可能在重组前到达，会被误判为“未变化”而无法持久化。
                     filterRevealTick++
                     filterRevealWindow = true
-                    transferViewModel.setFilters(sel, prot, burst, untransferred)
+                    transferViewModel.setFilters(criteria)
                 },
                 onDismiss = { showFilter = false }
             )
@@ -2674,9 +2732,8 @@ private fun formatDateHeader(date: String): String {
 }
 
 /**
- * 类型/标记筛选浮层：从筛选按钮变形弹出、关闭缩回按钮（复用 [AnchorPopup]，与设置面板同款观感）。
- * 类型（自动列出设备上实际存在的，多选 + "全部"）与标记（保护/连拍/未传输）
- * 分两组紧凑胶囊，细线分隔；任意选项点击后立即提交生效。
+ * 类型/标记/日期筛选浮层。主面板保持紧凑；日期胶囊在同一浮层内展开成双端点三波轮，
+ * 编辑期间只改草稿，完成时才一次提交，避免滚动波轮时反复重排列表与后台请求。
  * 类型语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
  * 全不选或凑齐全部现有类型时自动归位"全部"（不允许空集）。
  * 面板随开合重建，每次打开都从当前设置初始化。
@@ -2685,41 +2742,49 @@ private fun formatDateHeader(date: String): String {
 private fun FilterOverlay(
     anchorBounds: Rect?,
     availableExts: List<String>,
-    current: Set<String>?,
-    currentProtected: Boolean,
-    currentBurst: Boolean,
-    currentUntransferred: Boolean,
-    onChange: (Set<String>?, Boolean, Boolean, Boolean) -> Unit,
+    current: PhotoFilterCriteria,
+    storageSlots: List<Int>,
+    suggestedDate: LocalDate?,
+    hapticsEnabled: Boolean,
+    onChange: (PhotoFilterCriteria) -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = AppTheme.colors
     val density = LocalDensity.current
+    var editingDate by remember { mutableStateOf(false) }
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val mainWidth = minOf(FILTER_PANEL_WIDTH, screenWidth - 24.dp)
+    val editorWidth = minOf(DATE_FILTER_PANEL_MAX_WIDTH, screenWidth - 24.dp)
+    val panelWidth by animateDpAsState(
+        targetValue = if (editingDate) editorWidth else mainWidth,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "filterPanelWidth",
+    )
     // 顶边贴按钮下缘 + 8dp；左缘对齐按钮，但不许超出屏幕右缘（信号条展开把按钮推得很靠右/
     // 窄屏时，面板整体向左钳制到贴边 12dp）。
     val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 8.dp } ?: 76.dp
-    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
     val panelStart = (anchorBounds?.let { with(density) { it.left.toDp() } } ?: 12.dp)
-        .coerceAtMost(screenWidth - FILTER_PANEL_WIDTH - 12.dp)
+        .coerceAtMost(screenWidth - panelWidth - 12.dp)
         .coerceAtLeast(12.dp)
 
     var working by remember { mutableStateOf(current) }
-    var workingProtected by remember { mutableStateOf(currentProtected) }
-    var workingBurst by remember { mutableStateOf(currentBurst) }
-    var workingUntransferred by remember { mutableStateOf(currentUntransferred) }
 
     val otherLabel = stringResource(R.string.filter_other)
     fun extLabel(ext: String) = ext.removePrefix(".").uppercase().ifEmpty { otherLabel }
+    fun commit(next: PhotoFilterCriteria) {
+        if (next == working) return
+        working = next
+        onChange(next)
+    }
     fun toggle(ext: String) {
-        val cur = working ?: availableExts.toSet()
+        val cur = working.extensions ?: availableExts.toSet()
         val next = if (ext in cur) cur - ext else cur + ext
         val normalized = when {
             next.isEmpty() -> null                       // 全不选无意义，归位"全部"
             next.containsAll(availableExts) -> null      // 凑齐全部现有类型 = 全部
             else -> next
         }
-        if (normalized == working) return
-        working = normalized
-        onChange(normalized, workingProtected, workingBurst, workingUntransferred)
+        commit(working.copy(extensions = normalized))
     }
 
     AnchorPopup(
@@ -2727,90 +2792,417 @@ private fun FilterOverlay(
         onDismiss = onDismiss,
         panelModifier = Modifier
             .padding(start = panelStart, top = panelTop)
-            .width(FILTER_PANEL_WIDTH),
+            .width(panelWidth),
         shape = RoundedCornerShape(16.dp),
-        dim = false   // 小下拉不压暗全屏（遮罩仍拦点击/滚动）
+        dim = editingDate,
     ) { _ ->
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            // ---- 类型：全部 + 各扩展名，两列胶囊 ----
-            val typeChips: List<Triple<String, Boolean, () -> Unit>> = buildList {
-                add(Triple(stringResource(R.string.filter_all), working == null) {
-                    if (working != null) {
-                        working = null
-                        onChange(null, workingProtected, workingBurst, workingUntransferred)
+        AnimatedContent(
+            targetState = editingDate,
+            transitionSpec = {
+                fadeIn(tween(150)) togetherWith fadeOut(tween(100)) using SizeTransform(clip = false)
+            },
+            label = "filterDateEditor",
+        ) { showDateEditor ->
+            if (showDateEditor) {
+                DateRangeEditor(
+                    current = working.dateRange,
+                    suggestedDate = suggestedDate,
+                    hapticsEnabled = hapticsEnabled,
+                    onBack = { editingDate = false },
+                    onApply = { range ->
+                        commit(working.copy(dateRange = range))
+                        editingDate = false
+                    },
+                )
+            } else {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterMark(
+                            modifier = Modifier.size(18.dp),
+                            color = colors.accentBlue,
+                        )
+                        Text(
+                            text = stringResource(R.string.filter_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.onBackground,
+                        )
                     }
-                })
-                availableExts.forEach { ext ->
-                    add(Triple(extLabel(ext), working?.contains(ext) ?: true) { toggle(ext) })
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                typeChips.chunked(2).forEach { rowChips ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        rowChips.forEach { (label, selected, onClick) ->
-                            FilterChip(label, selected, onClick, Modifier.weight(1f))
+
+                    Spacer(Modifier.height(14.dp))
+
+                    FilterSectionLabel(
+                        label = stringResource(R.string.filter_section_file_type),
+                        icon = Icons.Default.Image,
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    // ---- 类型：全部 + 各扩展名，短标签最多五列，保持原有多选语义 ----
+                    val typeChips: List<Triple<String, Boolean, () -> Unit>> = buildList {
+                        add(Triple(stringResource(R.string.filter_all), working.extensions == null) {
+                            if (working.extensions != null) {
+                                commit(working.copy(extensions = null))
+                            }
+                        })
+                        availableExts.forEach { ext ->
+                            add(Triple(extLabel(ext), working.extensions?.contains(ext) ?: true) { toggle(ext) })
                         }
-                        // 奇数个时补一个占位，保证末行左对齐、胶囊等宽。
-                        if (rowChips.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                    val typeColumnCount = minOf(5, typeChips.size.coerceAtLeast(1))
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        typeChips.chunked(typeColumnCount).forEach { rowChips ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                rowChips.forEach { (label, selected, onClick) ->
+                                    FilterChip(label, selected, onClick, Modifier.weight(1f))
+                                }
+                                repeat(typeColumnCount - rowChips.size) {
+                                    Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+
+                    FilterSectionDivider()
+
+                    FilterSectionLabel(
+                        label = stringResource(R.string.filter_section_status),
+                        icon = Icons.Default.CheckCircle,
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    // ---- 标记：保护 / 连拍 / 未传输（独立开关，与日期和类型叠加）----
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            label = stringResource(R.string.filter_protected),
+                            selected = working.protectedOnly,
+                            onClick = {
+                                commit(working.copy(protectedOnly = !working.protectedOnly))
+                            },
+                            modifier = Modifier.weight(1.2f),
+                            icon = Icons.Default.Key
+                        )
+                        FilterChip(
+                            label = stringResource(R.string.burst_label),
+                            selected = working.burstOnly,
+                            onClick = {
+                                commit(working.copy(burstOnly = !working.burstOnly))
+                            },
+                            modifier = Modifier.weight(0.8f),
+                            leading = { tint -> BurstGlyph(tint = tint) }
+                        )
+                        FilterChip(
+                            label = stringResource(R.string.filter_untransferred),
+                            selected = working.untransferredOnly,
+                            onClick = {
+                                commit(working.copy(untransferredOnly = !working.untransferredOnly))
+                            },
+                            modifier = Modifier.weight(1.6f)
+                        )
+                    }
+
+                    if (storageSlots.isNotEmpty()) {
+                        FilterSectionDivider()
+
+                        FilterSectionLabel(
+                            label = stringResource(R.string.filter_section_storage),
+                            icon = Icons.Default.SdCard,
+                        )
+                        Spacer(Modifier.height(8.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            storageSlots.forEach { slot ->
+                                FilterChip(
+                                    label = stringResource(R.string.filter_storage_slot, slot),
+                                    selected = working.storageSlot == slot,
+                                    onClick = {
+                                        commit(
+                                            working.copy(
+                                                storageSlot = if (working.storageSlot == slot) null else slot
+                                            )
+                                        )
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            if (storageSlots.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+
+                    FilterSectionDivider()
+
+                    FilterSectionLabel(
+                        label = stringResource(R.string.filter_section_date),
+                        icon = Icons.Default.DateRange,
+                    )
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            label = compactDateRangeLabel(working.dateRange)
+                                ?: stringResource(R.string.filter_date),
+                            selected = working.dateRange != null,
+                            onClick = { editingDate = true },
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Default.DateRange,
+                        )
+                        if (working.dateRange != null) {
+                            FilterClearButton(
+                                onClick = { commit(working.copy(dateRange = null)) },
+                            )
+                        }
                     }
                 }
             }
-
-            // 分隔线
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 2.dp)
-                    .height(1.dp)
-                    .background(colors.glassPanelBorder)
-            )
-
-            // ---- 标记：保护 / 连拍（独立开关，与类型叠加生效）----
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    label = stringResource(R.string.filter_protected),
-                    selected = workingProtected,
-                    onClick = {
-                        val next = !workingProtected
-                        workingProtected = next
-                        onChange(working, next, workingBurst, workingUntransferred)
-                    },
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Default.Key   // 钥匙 + "保护"
-                )
-                FilterChip(
-                    label = stringResource(R.string.burst_label),
-                    selected = workingBurst,
-                    onClick = {
-                        val next = !workingBurst
-                        workingBurst = next
-                        onChange(working, workingProtected, next, workingUntransferred)
-                    },
-                    modifier = Modifier.weight(1f),
-                    // 叠帧 + 三条速度线（与缩略图角标同一 BurstGlyph）+ "连拍"
-                    leading = { tint -> BurstGlyph(tint = tint) }
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    label = stringResource(R.string.filter_untransferred),
-                    selected = workingUntransferred,
-                    onClick = {
-                        val next = !workingUntransferred
-                        workingUntransferred = next
-                        onChange(working, workingProtected, workingBurst, next)
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.weight(1f))
-            }
-
         }
     }
 }
+
+@Composable
+private fun FilterSectionLabel(
+    label: String,
+    icon: ImageVector,
+) {
+    val colors = AppTheme.colors
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = colors.onSurfaceVariant,
+            modifier = Modifier.size(15.dp),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun FilterSectionDivider() {
+    val colors = AppTheme.colors
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 13.dp, horizontal = 2.dp)
+            .height(1.dp)
+            .background(colors.glassPanelBorder),
+    )
+}
+
+@Composable
+private fun FilterClearButton(onClick: () -> Unit) {
+    val colors = AppTheme.colors
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(9.dp),
+        color = colors.surfaceVariant,
+        modifier = Modifier.size(38.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = stringResource(R.string.clear),
+                tint = colors.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+private enum class DateRangeEndpoint { START, END }
+
+@Composable
+private fun DateRangeEditor(
+    current: PhotoDateRange?,
+    suggestedDate: LocalDate?,
+    hapticsEnabled: Boolean,
+    onBack: () -> Unit,
+    onApply: (PhotoDateRange?) -> Unit,
+) {
+    val colors = AppTheme.colors
+    val haptics = rememberHaptics(hapticsEnabled)
+    val initial = current?.endInclusive ?: suggestedDate ?: LocalDate.now()
+    // 编辑页进入时快照一次；文件列表仍在渐进加载时 suggestedDate 可能变化，不能把用户
+    // 已经拨到一半的草稿重置掉。
+    var start by remember { mutableStateOf(current?.start ?: initial) }
+    var end by remember { mutableStateOf(current?.endInclusive ?: initial) }
+    var endpoint by remember { mutableStateOf(DateRangeEndpoint.START) }
+    val activeDate = if (endpoint == DateRangeEndpoint.START) start else end
+
+    fun updateActive(next: LocalDate) {
+        if (endpoint == DateRangeEndpoint.START) {
+            start = next
+            if (next.isAfter(end)) end = next
+        } else {
+            end = next
+            if (next.isBefore(start)) start = next
+        }
+    }
+
+    val minYear = minOf(1990, start.year, end.year)
+    val maxYear = maxOf(LocalDate.now().year + 1, start.year, end.year)
+    val years = remember(minYear, maxYear) { (minYear..maxYear).toList() }
+    val months = remember { (1..12).toList() }
+    val days = remember(activeDate.year, activeDate.monthValue) {
+        (1..YearMonth.of(activeDate.year, activeDate.monthValue).lengthOfMonth()).toList()
+    }
+
+    Column(
+        modifier = Modifier.padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
+                Icon(
+                    Icons.Default.ArrowBack,
+                    contentDescription = stringResource(R.string.cd_back),
+                    tint = colors.onBackground,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+            Text(
+                stringResource(R.string.date_range),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onBackground,
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DateEndpointChip(
+                label = stringResource(R.string.date_start),
+                date = start,
+                selected = endpoint == DateRangeEndpoint.START,
+                onClick = { endpoint = DateRangeEndpoint.START },
+                modifier = Modifier.weight(1f),
+            )
+            DateEndpointChip(
+                label = stringResource(R.string.date_end),
+                date = end,
+                selected = endpoint == DateRangeEndpoint.END,
+                onClick = { endpoint = DateRangeEndpoint.END },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ReleaseCommitWheel(
+                options = years,
+                selected = activeDate.year,
+                optionLabel = Int::toString,
+                onValueCommitted = { updateActive(activeDate.withClampedDate(year = it)) },
+                onDetent = haptics::tick,
+                label = stringResource(R.string.date_year),
+                modifier = Modifier.weight(1.3f),
+            )
+            ReleaseCommitWheel(
+                options = months,
+                selected = activeDate.monthValue,
+                optionLabel = { it.toString().padStart(2, '0') },
+                onValueCommitted = { updateActive(activeDate.withClampedDate(month = it)) },
+                onDetent = haptics::tick,
+                label = stringResource(R.string.date_month),
+                modifier = Modifier.weight(1f),
+            )
+            ReleaseCommitWheel(
+                options = days,
+                selected = activeDate.dayOfMonth,
+                optionLabel = { it.toString().padStart(2, '0') },
+                onValueCommitted = { updateActive(activeDate.withClampedDate(day = it)) },
+                onDetent = haptics::tick,
+                label = stringResource(R.string.date_day),
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassButton(
+                onClick = { onApply(null) },
+                modifier = Modifier.weight(1f).height(40.dp),
+                shape = RoundedCornerShape(11.dp),
+                panel = true,
+            ) {
+                Text(stringResource(R.string.clear), color = colors.onSurfaceVariant)
+            }
+            GlassButton(
+                onClick = { onApply(PhotoDateRange.between(start, end)) },
+                modifier = Modifier.weight(1f).height(40.dp),
+                shape = RoundedCornerShape(11.dp),
+                active = true,
+                activeColor = colors.accentBlue,
+            ) {
+                Text(
+                    stringResource(R.string.done),
+                    color = colors.onBackground,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DateEndpointChip(
+    label: String,
+    date: LocalDate,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(11.dp),
+        color = if (selected) colors.accentBlue.copy(alpha = 0.18f) else colors.surfaceVariant,
+        border = BorderStroke(
+            if (selected) 1.5.dp else 1.dp,
+            if (selected) colors.accentBlue else colors.glassPanelBorder,
+        ),
+        modifier = modifier.height(52.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+            )
+            Text(
+                formatLocalDate(date),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onBackground,
+            )
+        }
+    }
+}
+
+private fun LocalDate.withClampedDate(
+    year: Int = this.year,
+    month: Int = this.monthValue,
+    day: Int = this.dayOfMonth,
+): LocalDate {
+    val clampedDay = day.coerceAtMost(YearMonth.of(year, month).lengthOfMonth())
+    return LocalDate.of(year, month, clampedDay)
+}
+
+private fun formatLocalDate(date: LocalDate): String =
+    "${(date.year % 100).twoDigits()}/${date.monthValue.twoDigits()}/${date.dayOfMonth.twoDigits()}"
+
+private fun Int.twoDigits(): String = toString().padStart(2, '0')
 
 /**
  * 筛选面板的选中态胶囊：选中 = 主题蓝底 + 反色加粗字；未选 = surfaceVariant 底。

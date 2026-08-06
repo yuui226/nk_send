@@ -565,7 +565,7 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean = true,
-        longEdge: Int = 720,
+        longEdge: Int,
         filter: PhotoFilterSelection? = null,
     ): Bitmap {
         val input = filter?.let { PhotoFilterRenderer.render(source, it) } ?: source

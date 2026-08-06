@@ -7,7 +7,7 @@ import com.ztransfer.frame.PhotoFrameWatermarkContent
 import com.ztransfer.frame.PhotoFrameWatermarkEffect
 import com.ztransfer.frame.PhotoFrameWatermarkFont
 import com.ztransfer.frame.PhotoFrameWatermarkPosition
-import com.ztransfer.filter.PhotoFilterColorBand
+import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.protocol.NikonCamera
@@ -258,17 +258,13 @@ class TransferStateTest {
             preset = PhotoFilterPreset(
                 id = "abcdef0123456789",
                 name = "Simple",
-                contrast = 0,
-                highlights = 0,
-                shadows = 0,
-                whiteLevel = 0,
-                blackLevel = 0,
-                saturation = 0,
-                colorBands = List(8) { index ->
-                    PhotoFilterColorBand(index * 45f, 0, 0, 0)
-                },
+                parameters = NcpPhotoFilterParameters(
+                    saturationStep = 0,
+                    hueStep = 0,
+                    toneCurve = IntArray(257) { index -> (index * 0x7fff) / 256 },
+                ),
             ),
-            intensityPercent = 63,
+            intensityPercent = 64,
         )
 
         val task = createQueueTasks(
@@ -281,7 +277,7 @@ class TransferStateTest {
 
         assertEquals(null, task.framePreset)
         assertEquals(filter, task.photoFilterRequested)
-        assertEquals(63, task.photoFilterRequested?.normalizedIntensityPercent)
+        assertEquals(64, task.photoFilterRequested?.normalizedIntensityPercent)
     }
 
     @Test

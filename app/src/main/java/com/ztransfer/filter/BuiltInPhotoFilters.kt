@@ -2,175 +2,156 @@ package com.ztransfer.filter
 
 import com.ztransfer.R
 import java.security.MessageDigest
-import java.util.Locale
+import java.util.Base64
 
 /**
- * 由应用自己维护的首发滤镜，不依赖来源不明的外部预设文件。
+ * Built-in presets converted from selected Nikon NCP and NP3 files.
  *
- * 所有参数都严格落在当前渲染器能够完整表达的基础明暗、全局饱和度和八段 HSL 内；
- * 修改任何参数都会产生新的内容 ID，避免旧效果图被错误当成新版结果。
+ * Source tone curves, global controls, and NP3 Flexible Color mixer values are preserved. Nikon's
+ * unpublished RAW development and color-grading pipeline cannot be reproduced pixel-for-pixel on
+ * an already developed sRGB JPEG/FHD preview.
  */
 object BuiltInPhotoFilters {
     val all: List<PhotoFilterPreset> by lazy {
         listOf(
-            preset(
-                key = "natural-v1",
-                internalName = "Natural",
-                contrast = 12,
-                highlights = -18,
-                shadows = 10,
-                whiteLevel = 5,
-                blackLevel = -6,
-                saturation = 7,
-                bands = listOf(
-                    band(0, chroma = 4, brightness = 2),
-                    band(1, hue = -2, chroma = 8, brightness = 5),
-                    band(2, hue = -5, chroma = -2, brightness = 3),
-                    band(3, hue = 8, chroma = 6, brightness = -1),
-                    band(4, hue = -3, chroma = 3, brightness = 2),
-                    band(5, hue = -4, chroma = 7, brightness = -2),
-                    band(6, chroma = -3),
-                    band(7, chroma = -2),
-                ),
+            convertedNcpPreset(
+                sourceSha256 = "e1a017a73e87672949bfaeba946d70aedcf4b4f06f569ec1ec3097a8fa8705aa",
+                sourceName = "Kodak Ektar Green",
+                toneCurveBase64 = KODAK_EKTAR_GREEN_CURVE,
             ),
-            preset(
-                key = "warm-film-v1",
-                internalName = "Warm Film",
-                contrast = -2,
-                highlights = -22,
-                shadows = 14,
-                whiteLevel = -6,
-                blackLevel = 12,
+            convertedNcpPreset(
+                sourceSha256 = "cdd39d33711a509aafb444d6472dc020a819f3b19edd1086ff06a0ed6f5bc29d",
+                sourceName = "Kodak-Sun-Nature-02",
+                toneCurveBase64 = KODAK_SUN_NATURE_CURVE,
+            ),
+            convertedNp3Preset(
+                sourceSha256 = "1be54af9be2e0403524d16d1c64d02fe1832c0d4fde6ca30e0c83c4d9f32a301",
+                sourceName = "MSLT-Portra400-V1",
+                saturation = 0,
+                colorMixerBase64 = PORTRA_400_COLOR_MIXER,
+                toneCurveBase64 = PORTRA_400_CURVE,
+            ),
+            convertedNp3Preset(
+                sourceSha256 = "c3aa853ed066c5dfca2ac2450e8176442026e42b913014d41183fe9bd37dd1cd",
+                sourceName = "cineblue brandon",
                 saturation = -5,
-                bands = listOf(
-                    band(0, hue = -3, chroma = 3, brightness = 4),
-                    band(1, hue = -5, chroma = 10, brightness = 7),
-                    band(2, hue = -8, chroma = -5, brightness = 5),
-                    band(3, hue = 10, chroma = -18, brightness = 2),
-                    band(4, hue = 6, chroma = -15, brightness = 2),
-                    band(5, hue = 8, chroma = -12, brightness = -2),
-                    band(6, chroma = -20),
-                    band(7, chroma = -10),
-                ),
+                colorMixerBase64 = CINE_BLUE_COLOR_MIXER,
+                toneCurveBase64 = CINE_BLUE_CURVE,
             ),
-            preset(
-                key = "teal-cinema-v1",
-                internalName = "Teal Cinema",
-                contrast = 18,
-                highlights = -16,
-                shadows = -4,
-                whiteLevel = 2,
-                blackLevel = -8,
-                saturation = -7,
-                bands = listOf(
-                    band(0, hue = -4, chroma = 8, brightness = 2),
-                    band(1, hue = -6, chroma = 12, brightness = 5),
-                    band(2, hue = -10, chroma = -10),
-                    band(3, hue = 15, chroma = -5, brightness = -4),
-                    band(4, hue = -10, chroma = 14, brightness = -4),
-                    band(5, hue = -18, chroma = 12, brightness = -8),
-                    band(6, hue = -8, chroma = -10, brightness = -6),
-                    band(7, chroma = -6),
-                ),
-            ),
-            preset(
-                key = "soft-portrait-v1",
-                internalName = "Soft Portrait",
-                contrast = -10,
+            convertedNp3Preset(
+                sourceSha256 = "dee50954ceed7af5bc331141da2693485592109f7c857994f30c0112fd2cd95e",
+                sourceName = "britfilm bw",
+                contrast = 3,
                 highlights = -20,
-                shadows = 18,
-                whiteLevel = 4,
-                blackLevel = 10,
-                saturation = -6,
-                bands = listOf(
-                    band(0, hue = -2, chroma = -3, brightness = 4),
-                    band(1, hue = -4, chroma = 6, brightness = 10),
-                    band(2, hue = -6, chroma = -8, brightness = 8),
-                    band(3, chroma = -18, brightness = 5),
-                    band(4, chroma = -20, brightness = 4),
-                    band(5, chroma = -15, brightness = 3),
-                    band(6, chroma = -12),
-                    band(7, chroma = -6, brightness = 3),
-                ),
-            ),
-            preset(
-                key = "documentary-mono-v1",
-                internalName = "Documentary Mono",
-                contrast = 18,
-                highlights = -10,
-                shadows = 4,
-                whiteLevel = 8,
-                blackLevel = -10,
-                saturation = -100,
+                shadows = 31,
+                whites = -34,
+                blacks = -10,
+                saturation = -98,
+                colorMixerBase64 = SILVER_COLOR_MIXER,
             ),
         )
     }
 
     fun nameResId(filterId: String): Int? = when (filterId) {
-        all[0].id -> R.string.photo_filter_builtin_natural
-        all[1].id -> R.string.photo_filter_builtin_warm_film
-        all[2].id -> R.string.photo_filter_builtin_teal_cinema
-        all[3].id -> R.string.photo_filter_builtin_soft_portrait
-        all[4].id -> R.string.photo_filter_builtin_documentary_mono
+        all[0].id -> R.string.photo_filter_builtin_kodak_ektar_green
+        all[1].id -> R.string.photo_filter_builtin_kodak_sun_nature
+        all[2].id -> R.string.photo_filter_builtin_portra
+        all[3].id -> R.string.photo_filter_builtin_cine_blue
+        all[4].id -> R.string.photo_filter_builtin_silver
         else -> null
     }
 
-    private fun preset(
-        key: String,
-        internalName: String,
-        contrast: Int,
-        highlights: Int,
-        shadows: Int,
-        whiteLevel: Int,
-        blackLevel: Int,
+    private fun convertedNcpPreset(
+        sourceSha256: String,
+        sourceName: String,
+        toneCurveBase64: String,
+    ): PhotoFilterPreset = PhotoFilterPreset(
+        id = convertedPresetId(sourceSha256, NCP_SRGB_CONVERTER_VERSION),
+        name = sourceName,
+        parameters = NcpPhotoFilterParameters(
+            saturationStep = 1,
+            hueStep = 1,
+            toneCurve = decodeToneCurve(toneCurveBase64),
+        ),
+    )
+
+    private fun convertedNp3Preset(
+        sourceSha256: String,
+        sourceName: String,
+        contrast: Int = 0,
+        highlights: Int = 0,
+        shadows: Int = 0,
+        whites: Int = 0,
+        blacks: Int = 0,
         saturation: Int,
-        bands: List<PhotoFilterColorBand> = PHOTO_FILTER_COLOR_BAND_CENTERS.map { band(it) },
-    ): PhotoFilterPreset {
-        require(bands.size == PHOTO_FILTER_COLOR_BAND_CENTERS.size)
-        val identity = buildString {
-            append(key)
-            listOf(contrast, highlights, shadows, whiteLevel, blackLevel, saturation)
-                .forEach { append('|').append(it) }
-            bands.forEach { value ->
-                append('|').append(value.centerDegrees)
-                append(',').append(value.hue)
-                append(',').append(value.chroma)
-                append(',').append(value.brightness)
-            }
-        }
-        return PhotoFilterPreset(
-            id = MessageDigest.getInstance("SHA-256")
-                .digest(identity.toByteArray(Charsets.UTF_8))
-                .joinToString("") { byte ->
-                    "%02x".format(Locale.ROOT, byte.toInt() and 0xff)
-                },
-            name = internalName,
+        colorMixerBase64: String,
+        toneCurveBase64: String? = null,
+    ): PhotoFilterPreset = PhotoFilterPreset(
+        id = convertedPresetId(sourceSha256, NP3_SRGB_CONVERTER_VERSION),
+        name = sourceName,
+        parameters = Np3PhotoFilterParameters(
             contrast = contrast,
             highlights = highlights,
             shadows = shadows,
-            whiteLevel = whiteLevel,
-            blackLevel = blackLevel,
+            whites = whites,
+            blacks = blacks,
             saturation = saturation,
-            colorBands = bands,
-        )
-    }
-
-    private fun band(
-        index: Int,
-        hue: Int = 0,
-        chroma: Int = 0,
-        brightness: Int = 0,
-    ): PhotoFilterColorBand = band(
-        PHOTO_FILTER_COLOR_BAND_CENTERS[index],
-        hue,
-        chroma,
-        brightness,
+            colorBands = decodeNp3ColorMixer(colorMixerBase64),
+            toneCurve = toneCurveBase64?.let(::decodeToneCurve),
+        ),
     )
 
-    private fun band(
-        centerDegrees: Float,
-        hue: Int = 0,
-        chroma: Int = 0,
-        brightness: Int = 0,
-    ) = PhotoFilterColorBand(centerDegrees, hue, chroma, brightness)
+    private fun decodeToneCurve(encoded: String): IntArray {
+        val bytes = Base64.getDecoder().decode(encoded)
+        require(bytes.size == TONE_CURVE_BYTE_COUNT)
+        return IntArray(PHOTO_FILTER_TONE_CURVE_POINT_COUNT) { index ->
+            val offset = index * 2
+            ((bytes[offset].toInt() and 0xff) shl 8) or
+                (bytes[offset + 1].toInt() and 0xff)
+        }
+    }
+
+    private fun decodeNp3ColorMixer(encoded: String): List<PhotoFilterColorBand> {
+        val bytes = Base64.getDecoder().decode(encoded)
+        require(bytes.size == NP3_COLOR_MIXER_BYTE_COUNT)
+        return PHOTO_FILTER_COLOR_BAND_CENTERS.mapIndexed { index, center ->
+            val offset = index * NP3_COLOR_MIXER_VALUES_PER_BAND
+            PhotoFilterColorBand(
+                centerDegrees = center,
+                hue = (bytes[offset].toInt() and 0xff) - NP3_NEUTRAL_VALUE,
+                chroma = (bytes[offset + 1].toInt() and 0xff) - NP3_NEUTRAL_VALUE,
+                brightness = (bytes[offset + 2].toInt() and 0xff) - NP3_NEUTRAL_VALUE,
+            )
+        }
+    }
+
+    private fun convertedPresetId(sourceSha256: String, converterVersion: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest("$sourceSha256|$converterVersion".toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte ->
+                (byte.toInt() and 0xff).toString(16).padStart(2, '0')
+            }
+
+    private const val TONE_CURVE_BYTE_COUNT = PHOTO_FILTER_TONE_CURVE_POINT_COUNT * 2
+    private const val NP3_COLOR_MIXER_VALUES_PER_BAND = 3
+    private const val NP3_COLOR_MIXER_BYTE_COUNT = 8 * NP3_COLOR_MIXER_VALUES_PER_BAND
+    private const val NP3_NEUTRAL_VALUE = 128
+    private const val NCP_SRGB_CONVERTER_VERSION = "ncp-srgb-v1"
+    private const val NP3_SRGB_CONVERTER_VERSION = "np3-srgb-v1"
+
+    private const val KODAK_EKTAR_GREEN_CURVE =
+        "BQUFogY/Bt0HeggXCLQJUQnuCosLKAvFDGIM/w2cDjkO1g9zEBAQrBFJEeYSghMfE7sUVxT0FZAWLBbIF2QYABicGTgZ0xpvGwobphxBHNwddx4SHq0fSB/jIH0hFyGyIkwi5iOAJBkksyVMJeYmfycYJ7EoSSjiKXoqEyqrK0Mr2ixyLQktoC43Ls4vZS/7MJIxKDG9MlMy6TN+NBM0qDU8NdE2ZTb5N404IDizOUY52TpsOv47kDwiPLQ9RT3WPmc++D+IQBhAqEE3QcZCVULkQ3JEAESORRtFqEY1RsFHTUfZSGRI70l6SgRKjksXS6BMKUyxTTlNwE5HTs5PVE/ZUF5Q41FnUetSblLxU3NT9VR2VPZVd1X2VnVW9FdyV+9YbFjpWWRZ31paWtRbTVvGXD5ctl0tXaNeGV6OXwJfdl/pYFtgzWE+Ya5iHWKMYvpjaGPVZEFkrGUWZYBl6WZRZrlnH2eFZ+poT2iyaRVpd2nZajlqmWr4a1drtWwSbG5sym0lbYBt2m4zboxu5G88b5Nv6XA/cJRw6XE9cZFx5XI3copy3HMtc35zznQedG50vXUMdVt1qXX3dkR2kXbedyp3dnfCeA14WHijeO55OHmCecx6Fnpfeql68ns6e4N7zHwUfFx8pHzsfTR9fH3Efgt+U36afuJ/KX9wf7h//w=="
+
+    private const val KODAK_SUN_NATURE_CURVE =
+        "A4MDtQPmBBcESAR6BKwE3gURBUQFeAWsBeEGFwZOBoUGvgb3BzIHbQeqB+gIJwhoCKoI7QkyCXkJwQoLClcKpQr0C0YLmQvvDEcMoQz9DVwNvQ4hDocO7w9aD8gQORCtESMRnRIZEpkTGxOhFCoUtxVHFdoWcRcLF6kYSxjwGZkaRhr3G6scYh0dHdsenB9gICYg7yG7IokjWSQrJQAl1iauJ4coYyk/Kh0q/CvcLL0tny6BL2QwRzErMg4y8jPWNLk1nDZ/N2E4QzkjOgM64Tu/PJs9dT5OPyY/+0DPQaBCcEM9RAdEz0WURldHF0fTSI1JQ0n1SqVLUEv4TJ1NPk3cTndPD0+jUDVQw1FPUdhSXlLhU2JT4FRcVNVVTFXBVjNWpFcSV35X6FhRWLdZHFl/WeFaQVqfWv1bWFuzXAxcZFy8XRJdZ127Xg9eYV60XwVfVl+nX/dgR2CWYOZhNWGEYdNiImJyYsJjEWNiY7JkBGRVZKhk+2VOZaNl+GZOZqVm/GdUZ6xoBmhfaLppFWlxac1qKmqHauVrRGujbANsY2zEbSVthm3pbkturm8Sb3Zv2nA/cKRxCnFwcdZyPXKkcwtzc3PbdEN0rHUVdX516HZRdrt3JneQd/t4ZXjQeTx5p3oTen566ntWe8J8LnybfQd9c33gfkx+uX8mf5J//w=="
+
+    private const val PORTRA_400_COLOR_MIXER = "i3+GiICHgICIhHiAgICAcHmLgICAgICA"
+    private const val CINE_BLUE_COLOR_MIXER = "nHKegICAgJ2AgEyAlM6AgOSQgICAgICA"
+    private const val SILVER_COLOR_MIXER = "YTtxgGCAgUZwgICAgICAgICAgICAgICA"
+
+    private const val PORTRA_400_CURVE =
+        "BAQEOwRxBKgE3wUWBU4FhQW+BfYGLwZpBqMG3gcZB1YHkwfRCBAIUAiRCNMJFglbCaAJ5wowCnkKxQsSC2ALsAwCDFUMqg0BDVoNtA4RDm8Ozg8wD5MP+BBfEMgRMhGeEgwSfBLtE2AT1RRMFMUVPxW7FjkWuRc7F74YQxjKGVMZ3RpqGvgbiBwaHK0dQx3aHnMfDh+qIEkg6SGKIi4i0yN6JCIkyyV2JiMm0SeAKDEo4ymWKksrACu3LG8tKC3iLp0vWTAWMNQxkzJSMxMz1DSWNVg2HDbfN6Q4aTkvOfU6uzuCPEk9ET3ZPqE/aUAyQPtBxEKNQ1ZEH0ToRbFGekdDSAxI1EmdSmVLLUv0TLtNgk5ITw5P01CYUVxSIFLjU6VUZlUnVedWpldlWCJY31maWlVbDlvHXH5dNV3qXp1fUGABYLFhYGINYrljZGQMZLRlWmX+ZqFnQmfhaH5pGmm0akxq4mt3bAlsmW0obbRuPm7Gb0xv0HBRcNFxTXHIckBytnMpc5p0CXR1dN51RXWodgp2aHbEdx53dHfJeBt4ani3eQJ5SnmQedV6F3pWepR60HsKe0J7eXute+B8EXxBfG98m3zGfPB9GH0/fWR9iH2sfc59734Ofi1+S35ofoV+oH67ftV+7n8Hfx9/N39Of2V/fH+Sf6h/vn/Uf+l//w=="
+
+    private const val CINE_BLUE_CURVE =
+        "BoYGhgaGBoYGoga+BtoG9gcTBy8HTQdqB4gHpwfHB+cICAgpCEwIcAiUCLoI4QkJCTMJXQmKCbcJ5woYCkoKfwq1Cu0LJwtjC6EL4QwkDGgMrwz5DUUNkw3kDjgOjg7oD0QPoxAFEGoQ0hE9EawSHhKTEwwTiBQHFIsVEhWdFiwWvhdVF+8YjhkxGdcagRsvG+EclR1OHgkexx+IIEshEiHbIqYjcyRCJRQl5ya8J5MoailEKh4q+ivWLLMtkS5wL08wLjENMe0yzDOrNIo1aDZGNyM3/zjaObQ6jTtkPDo9Dz3hPrI/gEBNQRhB4UKoQ21EMETxRbBGbkcpR+JImklQSgNKtUtlTBNMv01pThFOuE9cT/9QoFE+UdtSdlMPU6ZUPFTPVWFV8FZ+VwpXlFgcWKNZJ1mqWipaqVsmW6FcGlySXQdde13tXl1ey184X6JgC2BzYNhhPGGfYf9iX2K8Yxhjc2PMZCNkeWTOZSFlc2XDZhJmYGasZvhnQWeKZ9FoF2hcaKBo42kkaWVppGniah9qXGqXatFrCmtDa3prsWvmbBtsT2yCbLVs5m0XbUdtd22lbdRuAW4ublpuhm6xbtxvBm8vb1lvgW+qb9Fv+XAgcEdwbXCTcLlw33EEcSpxT3F0cZhxvXHhcgZyKnJOcnJycnJycnJycnJycnJycg=="
 }

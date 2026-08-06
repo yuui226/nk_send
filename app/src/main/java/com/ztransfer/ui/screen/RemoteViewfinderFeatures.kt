@@ -345,7 +345,7 @@ internal fun FullscreenEnterMark(modifier: Modifier = Modifier) {
     }
 }
 
-/** 旋转：右侧为视觉主体的开放圆弧，末端用轻量线性箭头延续切线方向。 */
+/** 旋转：开放圆弧末端只保留外侧半边箭翼，小尺寸下比完整箭头更端正。 */
 @Composable
 internal fun RotateMark(modifier: Modifier = Modifier) {
     val c = LocalContentColor.current
@@ -369,7 +369,8 @@ internal fun RotateMark(modifier: Modifier = Modifier) {
             style = Stroke(sw, cap = StrokeCap.Round)
         )
 
-        // 箭头沿弧线末端的顺时针切线展开。使用两根圆头细线，不再用醒目的实心三角形。
+        // 箭头沿弧线末端的顺时针切线展开。只画外侧（下方）箭翼：内侧箭翼会与圆弧
+        // 挤在一起，在 20dp 图标里产生视觉歪斜；单翼仍保留明确的旋转方向。
         val endAngle = startAngle + sweepAngle
         fun pointAt(angle: Float, distance: Float): Offset {
             val radians = Math.toRadians(angle.toDouble())
@@ -382,15 +383,13 @@ internal fun RotateMark(modifier: Modifier = Modifier) {
         val tangentAngle = endAngle + 90f
         val arrowLength = s * 0.16f
         val wingSpread = 32f
-        listOf(tangentAngle + 180f - wingSpread, tangentAngle + 180f + wingSpread)
-            .forEach { wingAngle ->
-                val radians = Math.toRadians(wingAngle.toDouble())
-                val wingEnd = Offset(
-                    x = tip.x + cos(radians).toFloat() * arrowLength,
-                    y = tip.y + sin(radians).toFloat() * arrowLength
-                )
-                drawLine(c, tip, wingEnd, sw, StrokeCap.Round)
-            }
+        val outerWingAngle = tangentAngle + 180f + wingSpread
+        val wingRadians = Math.toRadians(outerWingAngle.toDouble())
+        val wingEnd = Offset(
+            x = tip.x + cos(wingRadians).toFloat() * arrowLength,
+            y = tip.y + sin(wingRadians).toFloat() * arrowLength,
+        )
+        drawLine(c, tip, wingEnd, sw, StrokeCap.Round)
     }
 }
 

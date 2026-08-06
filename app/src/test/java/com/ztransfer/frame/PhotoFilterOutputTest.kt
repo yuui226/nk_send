@@ -1,6 +1,6 @@
 package com.ztransfer.frame
 
-import com.ztransfer.filter.PhotoFilterColorBand
+import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
 import org.junit.Assert.assertEquals
@@ -37,7 +37,7 @@ class PhotoFilterOutputTest {
     fun changingFilterOrIntensityCreatesADifferentDerivedIdentity() {
         val first = PhotoFilterSelection(testFilter("aaaaaaaa11111111"), 40)
         val otherFilter = PhotoFilterSelection(testFilter("bbbbbbbb22222222"), 40)
-        val otherIntensity = first.copy(intensityPercent = 41)
+        val otherIntensity = first.copy(intensityPercent = 42)
 
         val firstName = outputName(first)
         assertTrue(firstName != outputName(otherFilter))
@@ -63,14 +63,10 @@ class PhotoFilterOutputTest {
     private fun testFilter(id: String) = PhotoFilterPreset(
         id = id,
         name = "Test",
-        contrast = 0,
-        highlights = 0,
-        shadows = 0,
-        whiteLevel = 0,
-        blackLevel = 0,
-        saturation = 0,
-        colorBands = List(8) { index ->
-            PhotoFilterColorBand(index * 45f, hue = 0, chroma = 0, brightness = 0)
-        },
+        parameters = NcpPhotoFilterParameters(
+            saturationStep = 0,
+            hueStep = 0,
+            toneCurve = IntArray(257) { index -> (index * 0x7fff) / 256 },
+        ),
     )
 }

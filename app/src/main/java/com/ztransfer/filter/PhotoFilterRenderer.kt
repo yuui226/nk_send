@@ -9,10 +9,13 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 
-/** 在 sRGB 成片上近似 Flexible Color 的轻量渲染器。 */
+/** Applies the supported NCP/NP3 controls to an already developed sRGB image. */
 object PhotoFilterRenderer {
     private const val ROW_CHUNK = 8
-    private const val MAX_HUE_SHIFT_DEGREES = 30f
+    private const val NCP_MAX_MANUAL_STEP = 3f
+    // Nikon does not publish its post-RAW sRGB transform. Manual hue controls are mapped linearly,
+    // while the source tone curves and Flexible Color mixer values remain exact.
+    private const val APPROXIMATE_MAX_HUE_SHIFT_DEGREES = 30f
     private const val MAX_BAND_LIGHTNESS_SHIFT = 0.20f
 
     fun render(
@@ -25,8 +28,6 @@ object PhotoFilterRenderer {
         try {
             if (isCancelled()) throw CancellationException("Photo filter render superseded")
             val strength = selection.normalizedIntensityPercent / 100f
-            if (strength <= 0f) return output
-
             val width = output.width
             val buffer = IntArray(width * min(ROW_CHUNK, output.height))
             var top = 0
@@ -78,59 +79,80 @@ object PhotoFilterRenderer {
                 },
             )
         }
-        var leftIndex = 0
-        var rightIndex = 1
-        var progress = 0f
-        for (index in PHOTO_FILTER_COLOR_BAND_CENTERS.indices) {
-            val next = (index + 1) % PHOTO_FILTER_COLOR_BAND_CENTERS.size
-            val start = PHOTO_FILTER_COLOR_BAND_CENTERS[index]
-            val end = if (next == 0) 360f else PHOTO_FILTER_COLOR_BAND_CENTERS[next]
-            val adjustedHue = if (next == 0 && originalHue < start) originalHue + 360f else originalHue
-            if (adjustedHue in start..end) {
-                leftIndex = index
-                rightIndex = next
-                progress = ((adjustedHue - start) / (end - start)).coerceIn(0f, 1f)
-                break
+        var hue = originalHue
+
+        when (val parameters = preset.parameters) {
+            is NcpPhotoFilterParameters -> {
+                hue = normalizeHue(
+                    originalHue + parameters.hueStep / NCP_MAX_MANUAL_STEP *
+                        APPROXIMATE_MAX_HUE_SHIFT_DEGREES,
+                )
+                saturation *= 1f + parameters.saturationStep / NCP_MAX_MANUAL_STEP
+                lightness = mapPhotoFilterToneCurve(lightness, parameters.normalizedToneCurve)
+            }
+
+            is Np3PhotoFilterParameters -> {
+                var leftIndex = 0
+                var rightIndex = 1
+                var progress = 0f
+                for (index in PHOTO_FILTER_COLOR_BAND_CENTERS.indices) {
+                    val next = (index + 1) % PHOTO_FILTER_COLOR_BAND_CENTERS.size
+                    val start = PHOTO_FILTER_COLOR_BAND_CENTERS[index]
+                    val end = if (next == 0) 360f else PHOTO_FILTER_COLOR_BAND_CENTERS[next]
+                    val adjustedHue = if (next == 0 && originalHue < start) {
+                        originalHue + 360f
+                    } else {
+                        originalHue
+                    }
+                    if (adjustedHue in start..end) {
+                        leftIndex = index
+                        rightIndex = next
+                        progress = ((adjustedHue - start) / (end - start)).coerceIn(0f, 1f)
+                        break
+                    }
+                }
+                val left = parameters.colorBands[leftIndex]
+                val right = parameters.colorBands[rightIndex]
+                val inverseProgress = 1f - progress
+                val hueShift = (left.hue * inverseProgress + right.hue * progress) /
+                    100f * APPROXIMATE_MAX_HUE_SHIFT_DEGREES
+                val chroma = left.chroma * inverseProgress + right.chroma * progress
+                val brightness = left.brightness * inverseProgress + right.brightness * progress
+                hue = normalizeHue(originalHue + hueShift)
+                saturation *= 1f + chroma / 100f
+                saturation *= 1f + parameters.saturation / 100f
+                lightness += brightness / 100f * MAX_BAND_LIGHTNESS_SHIFT
+                lightness = parameters.normalizedToneCurve?.let { curve ->
+                    mapPhotoFilterToneCurve(lightness, curve)
+                } ?: applyNp3TonalControls(lightness, parameters)
             }
         }
-        val left = preset.colorBands[leftIndex]
-        val right = preset.colorBands[rightIndex]
-        val inverseProgress = 1f - progress
-        val hueShift = (left.hue * inverseProgress + right.hue * progress) /
-            100f * MAX_HUE_SHIFT_DEGREES
-        val chroma = left.chroma * inverseProgress + right.chroma * progress
-        val bandBrightness = left.brightness * inverseProgress + right.brightness * progress
-        val hue = normalizeHue(originalHue + hueShift)
-        saturation *= 1f + chroma / 100f
-        saturation *= 1f + preset.saturation / 100f
-        lightness += bandBrightness / 100f * MAX_BAND_LIGHTNESS_SHIFT
 
-        lightness = applyTonalControls(lightness, preset)
         val filtered = hslToRgbPacked(
             hue,
             saturation.coerceIn(0f, 1f),
             lightness.coerceIn(0f, 1f),
         )
-        val filteredR = filtered ushr 16 and 0xff
-        val filteredG = filtered ushr 8 and 0xff
-        val filteredB = filtered and 0xff
         return Color.argb(
             alpha,
-            mixChannel(originalR, filteredR, strength),
-            mixChannel(originalG, filteredG, strength),
-            mixChannel(originalB, filteredB, strength),
+            mixChannel(originalR, filtered ushr 16 and 0xff, strength),
+            mixChannel(originalG, filtered ushr 8 and 0xff, strength),
+            mixChannel(originalB, filtered and 0xff, strength),
         )
     }
 
-    private fun applyTonalControls(value: Float, preset: PhotoFilterPreset): Float {
+    private fun applyNp3TonalControls(
+        value: Float,
+        parameters: Np3PhotoFilterParameters,
+    ): Float {
         var lightness = value.coerceIn(0f, 1f)
         val shadowWeight = 1f - smoothStep(0.18f, 0.72f, lightness)
         val highlightWeight = smoothStep(0.28f, 0.82f, lightness)
-        lightness += preset.blackLevel / 100f * 0.12f * (1f - lightness).pow(3)
-        lightness += preset.shadows / 100f * 0.18f * shadowWeight
-        lightness += preset.highlights / 100f * 0.18f * highlightWeight
-        lightness += preset.whiteLevel / 100f * 0.12f * lightness.pow(3)
-        val contrastScale = 2f.pow(preset.contrast / 100f)
+        lightness += parameters.blacks / 100f * 0.12f * (1f - lightness).pow(3)
+        lightness += parameters.shadows / 100f * 0.18f * shadowWeight
+        lightness += parameters.highlights / 100f * 0.18f * highlightWeight
+        lightness += parameters.whites / 100f * 0.12f * lightness.pow(3)
+        val contrastScale = 2f.pow(parameters.contrast / 100f)
         return ((lightness - 0.5f) * contrastScale + 0.5f).coerceIn(0f, 1f)
     }
 

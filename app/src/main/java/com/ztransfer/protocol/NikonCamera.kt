@@ -438,7 +438,9 @@ class NikonCamera(private val context: Context) {
         /** PTP DateTime 完整串（YYYYMMDDThhmmss…，至少 8 位日期）；分组取前 8 位，组内按完整串排序。 */
         val captureDate: String?,
         /** 机内"保护"(🔑)标记（ObjectInfo ProtectionStatus ≠ 0）。摄影师机内选片的常用手段。 */
-        val isProtected: Boolean = false
+        val isProtected: Boolean = false,
+        /** 文件所在的 PTP StorageID；备份模式去重后可能同时属于两张卡。 */
+        val storageIds: Set<Int> = emptySet(),
     ) {
         /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
         val extension: String
@@ -567,6 +569,7 @@ class NikonCamera(private val context: Context) {
             return null
         }
 
+        val storageId = data.getIntLE(0)
         val format = data.getUShortLE(4)
         // 关联对象（0x3001 = 文件夹）不是文件，一律不收录：常见机型的全量枚举可能不含它，
         // 但换卡/目录滚动时相机新建文件夹会带 ObjectAdded 事件，实时新增路径必须拦住，
@@ -603,7 +606,14 @@ class NikonCamera(private val context: Context) {
         // EXIF Orientation 里且依赖机内"自动旋转图像"设置,判不出构图。）
         val isProtected = data.getUShortLE(6) != 0
 
-        return FileInfo(handle, size, fileName, captureDate, isProtected = isProtected)
+        return FileInfo(
+            handle = handle,
+            size = size,
+            fileName = fileName,
+            captureDate = captureDate,
+            isProtected = isProtected,
+            storageIds = if (storageId == 0 || storageId == -1) emptySet() else setOf(storageId),
+        )
     }
 
     data class DownloadProgress(

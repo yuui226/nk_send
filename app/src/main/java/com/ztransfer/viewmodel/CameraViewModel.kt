@@ -38,11 +38,13 @@ import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,6 +87,66 @@ internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCa
         .filter { it.extension !in EFFECT_PREVIEW_VIDEO_EXTENSIONS }
         .maxWithOrNull(compareBy<NikonCamera.FileInfo>({ it.captureDate.orEmpty() }, { it.handle }))
 
+private fun NikonCamera.FileInfo.logicalIdentity(): String =
+    "$fileName|$size|$captureDate"
+
+/** 双卡备份文件仍只显示一份，但保留它在两张卡上的完整归属。 */
+internal fun mergeStorageMembership(
+    existing: NikonCamera.FileInfo,
+    duplicate: NikonCamera.FileInfo,
+): NikonCamera.FileInfo {
+    if (duplicate.storageIds.all { it in existing.storageIds }) return existing
+    return existing.copy(storageIds = existing.storageIds + duplicate.storageIds)
+}
+
+/**
+ * PTP StorageID 高 16 位是物理存储、低 16 位是其逻辑分区。优先据此识别卡槽；
+ * 对少数非标准编号，按稳定排序补进尚未占用的卡 1/2。
+ */
+internal fun storageIdsBySlot(storageIds: List<Int>): Map<Int, Set<Int>> {
+    val result = sortedMapOf<Int, MutableSet<Int>>()
+    val unassignedGroups = linkedMapOf<Int, MutableSet<Int>>()
+    storageIds.distinct().sorted().forEach { storageId ->
+        val physical = storageId ushr 16 and 0xFFFF
+        val logical = storageId and 0xFFFF
+        val slot = when {
+            physical in 1..2 -> physical
+            physical == 0 && logical in 1..2 -> logical
+            else -> null
+        }
+        if (slot != null) {
+            result.getOrPut(slot) { linkedSetOf() } += storageId
+        } else {
+            val groupKey = if (physical == 0) storageId else physical
+            unassignedGroups.getOrPut(groupKey) { linkedSetOf() } += storageId
+        }
+    }
+    unassignedGroups.values.forEach { ids ->
+        val freeSlot = (1..2).firstOrNull { it !in result } ?: return@forEach
+        result[freeSlot] = ids
+    }
+    return result.mapValues { it.value.toSet() }
+}
+
+/** 日期范围只改变优先级，不改变最终全量填充集合。范围完成后自然接回全局新→旧。 */
+internal fun prioritizedThumbnailFiles(
+    files: List<NikonCamera.FileInfo>,
+    range: PhotoDateRange?,
+): List<NikonCamera.FileInfo> {
+    val ordered = files.sortedWith(
+        compareByDescending<NikonCamera.FileInfo> { it.captureDate.orEmpty() }
+            .thenByDescending { it.handle }
+    )
+    if (range == null) return ordered
+    val prioritized = ArrayList<NikonCamera.FileInfo>(ordered.size)
+    val remaining = ArrayList<NikonCamera.FileInfo>(ordered.size)
+    ordered.forEach { file ->
+        if (range.containsCaptureDate(file.captureDate)) prioritized += file else remaining += file
+    }
+    prioritized.addAll(remaining)
+    return prioritized
+}
+
 data class CameraState(
     /** 网关特征只表示“值得探测”，不能作为已经连上相机的依据。 */
     val isWifiCandidate: Boolean = false,
@@ -94,7 +156,11 @@ data class CameraState(
     val usbConnectionError: String? = null,
     val wifiConnectionStatus: WifiConnectionStatus = WifiConnectionStatus.IDLE,
     val files: List<NikonCamera.FileInfo> = emptyList(),
+    /** 当前相机已插卡的 PTP StorageID；卡槽映射由 [storageIdsBySlot] 统一解释。 */
+    val storageIds: List<Int> = emptyList(),
     val isLoadingFiles: Boolean = false,
+    /** 本轮文件枚举是否完整成功；异常/暂停不能被误认为“范围内确实无照片”。 */
+    val hasCompletedFileScan: Boolean = false,
     /** Latest camera still, quietly prefetched at FHD for the frame/filter settings demos. */
     val effectPreviewBitmap: Bitmap? = null,
     val effectPreviewFileKey: String? = null,
@@ -146,6 +212,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 最后一个等待者取消时连带取消底层请求，保留"滚出屏幕即剪枝"的行为。仅主线程访问。
     private class InflightThumb(val deferred: Deferred<ImageBitmap?>) { var waiters = 0 }
     private val inflightThumbs = HashMap<Int, InflightThumb>()
+    // 后台落盘先于可见格发起时也要共享请求；否则二者会在 remoteThumbGate 两侧各取一次。
+    // value 只负责把字节落盘，不解码入内存，完成后由主线程清理。
+    private val inflightPrefetches = HashMap<Int, CompletableDeferred<Boolean>>()
     // PTP 命令通道本身严格串行；若整屏可见格子都提前排进 NikonCamera.ioMutex，
     // 后来的交互型 FHD 会被十几个 GetThumb 挡住。这里只允许一个远程缩略图进入
     // PTP 等待队列，其余在外层等待；不降低相机吞吐，却给 FHD 留出插队机会。
@@ -595,9 +664,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // "是否有任务在传输"（含等待中）——后台缩略图填充的开关之一，由 UI 层喂入
     //（TransferViewModel 与本 VM 相互独立，经 MainScreen 桥接）。
     private val transfersBusyFlow = MutableStateFlow(false)
+    private val thumbnailPriorityRangeFlow = MutableStateFlow<PhotoDateRange?>(null)
 
     fun setTransfersBusy(busy: Boolean) {
         transfersBusyFlow.value = busy
+    }
+
+    fun setThumbnailPriorityRange(range: PhotoDateRange?) {
+        thumbnailPriorityRangeFlow.value = range
     }
 
     // 遥控页活跃期间同样完全停止填充：监看取帧是连续流量，填充的 GetThumb 会与
@@ -661,10 +735,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 effectPreviewActiveFlow,
             ) { files, busy, remote, fhd, effectPreview ->
                 Quint(files, busy, remote, fhd, effectPreview)
-            }.collectLatest { (files, busy, remote, fhd, effectPreview) ->
+            }.combine(thumbnailPriorityRangeFlow) { inputs, range -> inputs to range }
+                .collectLatest { (inputs, range) ->
+                val (files, busy, remote, fhd, effectPreview) = inputs
                 if (busy || remote || fhd || effectPreview || files.isEmpty()) return@collectLatest
-                // 展示序≈拍摄时间新→旧；无拍摄时间的排最后。
-                val ordered = files.sortedByDescending { it.captureDate ?: "" }
+                // 日期筛选范围优先；范围缓存完后继续全局新→旧，无需额外完成状态。
+                val ordered = prioritizedThumbnailFiles(files, range)
                 log { "THUMB_SWEEP start n=${ordered.size}" }
                 var loaded = 0
                 for (file in ordered) {
@@ -1163,12 +1239,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 got
             }.getOrNull() ?: return@launch
             _state.update { s ->
-                val dup = s.files.any {
+                val duplicateIndex = s.files.indexOfFirst {
                     it.handle == handle ||
-                            (it.fileName == info.fileName && it.size == info.size &&
-                                    it.captureDate == info.captureDate)
+                        it.logicalIdentity() == info.logicalIdentity()
                 }
-                if (dup) s else s.copy(files = listOf(info) + s.files)
+                if (duplicateIndex < 0) {
+                    s.copy(files = listOf(info) + s.files)
+                } else {
+                    val existing = s.files[duplicateIndex]
+                    val merged = mergeStorageMembership(existing, info)
+                    if (merged === existing) s else s.copy(
+                        files = s.files.toMutableList().apply { this[duplicateIndex] = merged }
+                    )
+                }
             }
         }
     }
@@ -1185,7 +1268,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _state.update {
             it.copy(
                 isLoadingFiles = !remoteActiveFlow.value,
+                hasCompletedFileScan = false,
                 files = if (preserveExisting) it.files else emptyList(),
+                storageIds = if (preserveExisting) it.storageIds else emptyList(),
                 effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
                 effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
             )
@@ -1201,17 +1286,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 双卡机型（Z5 II / Z6 III 等）：枚举【所有】存储卡的对象并合并，单卡机型
                 // 行为不变。PTP StorageID 低 16 位为逻辑存储号，0 表示卡槽无卡，跳过；
                 // handle 全机唯一、与卡无关，下载/缩略图等后续链路零改动。
-                val storageIds = cam.getStorageIds().filter { it and 0xFFFF != 0 }
+                val storageIds = cam.getStorageIds()
+                    .filter { it and 0xFFFF != 0 }
+                    .distinct()
+                    .sorted()
+                _state.update { it.copy(storageIds = storageIds) }
                 if (storageIds.isEmpty()) {
                     fileLoadPending = false
-                    _state.update { it.copy(isLoadingFiles = false) }
+                    _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
                     return@launch
                 }
 
                 val handles = storageIds.flatMap { cam.getObjectHandles(it) }.distinct()
                 if (handles.isEmpty()) {
                     fileLoadPending = false
-                    _state.update { it.copy(isLoadingFiles = false) }
+                    _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
                     return@launch
                 }
 
@@ -1228,13 +1317,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val allFiles = existingFiles.toMutableList()
                 // 备份模式下同一张照片在两张卡各有一份（handle 不同）：按 名称+大小+拍摄时间
                 // 去重，列表只显示一份；溢出/RAW+JPG 分卡等模式互不相同，不受影响。
-                val seen = existingFiles.asSequence()
-                    .map { "${it.fileName}|${it.size}|${it.captureDate}" }
-                    .toHashSet()
+                val indexByIdentity = HashMap<String, Int>(existingFiles.size + sortedHandles.size)
+                existingFiles.forEachIndexed { index, file ->
+                    indexByIdentity[file.logicalIdentity()] = index
+                }
 
                 cam.streamFileInfo(sortedHandles, batchSize = 20) { batch, loaded, total ->
-                    val fresh = batch.filter { seen.add("${it.fileName}|${it.size}|${it.captureDate}") }
-                    allFiles.addAll(fresh)
+                    batch.forEach { file ->
+                        val identity = file.logicalIdentity()
+                        val existingIndex = indexByIdentity[identity]
+                        if (existingIndex == null) {
+                            indexByIdentity[identity] = allFiles.size
+                            allFiles += file
+                        } else {
+                            allFiles[existingIndex] = mergeStorageMembership(
+                                allFiles[existingIndex],
+                                file,
+                            )
+                        }
+                    }
                     val snapshot = allFiles.toList()
                     // onBatch 回调运行在 IO 线程，用 update 原子读改写避免与主线程写入竞争。
                     _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
@@ -1242,7 +1343,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                 fileLoadPending = false
                 log { "FILE_SCAN done files=${allFiles.size}" }
-                _state.update { it.copy(isLoadingFiles = false) }
+                _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // 进入监看的正常抢占：保留已加载部分与 pending，退出后继续剩余 handles。
                 throw e
@@ -1311,6 +1412,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val handle = file.handle
         thumbnailCache.get(handle)?.let { return it }
         if (handle in noThumbHandles) return null
+        // 后台可能先一步开始同一 handle 的落盘请求；等它结束后直接从磁盘解码，
+        // 不在 remoteThumbGate 后面再排一条重复 GetThumb。
+        inflightPrefetches[handle]?.let { prefetch ->
+            try {
+                prefetch.await()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // 自己被取消（格子滚出屏幕）要传播；若只是旧后台顺序被日期/列表更新取消，
+                // 当前可见格仍应接手正常加载。
+                if (!currentCoroutineContext().isActive) throw e
+            } catch (_: Exception) {
+                // 瞬时失败不负缓存，继续走正常可见格加载路径重试。
+            }
+            thumbnailCache.get(handle)?.let { return it }
+            if (handle in noThumbHandles) return null
+        }
         // 复用进行中的请求（跳过已被取消但尚未从表中清理的条目）。
         val entry = inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled }
             ?: InflightThumb(viewModelScope.async { fetchAndDecodeThumb(file) })
@@ -1349,6 +1465,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (inflightThumbs[handle]?.deferred?.isCancelled == false) {
             return loadThumbnail(file) != null
         }
+        inflightPrefetches[handle]?.let { return it.await() }
+        val completion = CompletableDeferred<Boolean>()
+        inflightPrefetches[handle] = completion
+        return try {
+            val result = fetchThumbnailToDisk(handle, disk)
+            completion.complete(result)
+            result
+        } catch (e: Throwable) {
+            completion.completeExceptionally(e)
+            throw e
+        } finally {
+            if (inflightPrefetches[handle] === completion) inflightPrefetches.remove(handle)
+        }
+    }
+
+    private suspend fun fetchThumbnailToDisk(
+        handle: Int,
+        disk: File,
+    ): Boolean {
         val cam = camera ?: return false
         val bytes = remoteThumbGate.withPermit {
             cam.getThumbnail(handle)

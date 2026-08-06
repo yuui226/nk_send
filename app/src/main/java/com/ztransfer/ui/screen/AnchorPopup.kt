@@ -12,12 +12,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
@@ -32,6 +30,14 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.Motion
+import kotlinx.coroutines.launch
+
+/** 布局/开合热路径专用的非观察状态；更新它不会让弹窗的大型内容树重新组合。 */
+private class PopupAnimationState(
+    var panelBounds: Rect? = null,
+    var expansionStarted: Boolean = false,
+    var closing: Boolean = false,
+)
 
 /**
  * 通用「从按钮变形弹出」的毛玻璃浮层外壳（设置面板与筛选面板共用）。
@@ -59,28 +65,24 @@ fun AnchorPopup(
     val colors = AppTheme.colors
 
     // 变形动画进度：0=收在按钮处（不可见），1=完全展开。
-    var panelBounds by remember { mutableStateOf<Rect?>(null) }
     val progress = remember { Animatable(0f) }
-    var closing by remember { mutableStateOf(false) }
+    val animationState = remember { PopupAnimationState() }
+    val animationScope = rememberCoroutineScope()
     val currentOnDismiss by rememberUpdatedState(onDismiss)
 
-    // 面板测量完成即入场展开。
-    LaunchedEffect(panelBounds, closing) {
-        if (!closing && panelBounds != null && progress.value < 1f) {
-            progress.animateTo(1f, Motion.overlayExpand)
+    // 关闭只驱动图层动画，不写 Compose State；否则设置面板会在收起首帧整树重组。
+    val startClose: () -> Unit = {
+        if (!animationState.closing) {
+            animationState.closing = true
+            animationScope.launch {
+                progress.animateTo(0f, Motion.overlayCollapse)
+                // 收起期间调用方状态仍可能更新（例如语言选择标记“动画后重建”），始终执行
+                // 最新回调，避免捕获关闭开始前的旧闭包。
+                currentOnDismiss()
+            }
         }
     }
-    // 关闭：反向收回后再真正移除。
-    LaunchedEffect(closing) {
-        if (closing) {
-            progress.animateTo(0f, Motion.overlayCollapse)
-            // 收起期间调用方状态仍可能更新（例如语言选择标记“动画后重建”），始终执行
-            // 最新回调，避免捕获关闭开始前的旧闭包。
-            currentOnDismiss()
-        }
-    }
-    val startClose: () -> Unit = { closing = true }
-    BackHandler(enabled = !closing) { startClose() }
+    BackHandler { startClose() }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // 遮罩：随进度淡入；点击外部收回。拖动一并消费，防止滚动穿透到底下的列表。
@@ -99,9 +101,17 @@ fun AnchorPopup(
         // 面板：以按钮中心为原点缩放展开；毛玻璃底 + 细描边 + 自上而下高光叠层。
         Surface(
             modifier = panelModifier
-                .onGloballyPositioned { panelBounds = it.boundsInRoot() }
+                .onGloballyPositioned { coordinates ->
+                    animationState.panelBounds = coordinates.boundsInRoot()
+                    if (!animationState.expansionStarted && !animationState.closing) {
+                        animationState.expansionStarted = true
+                        animationScope.launch {
+                            progress.animateTo(1f, Motion.overlayExpand)
+                        }
+                    }
+                }
                 .graphicsLayer {
-                    val b = panelBounds
+                    val b = animationState.panelBounds
                     if (b != null && b.width > 0f && b.height > 0f && anchorBounds != null) {
                         // 按钮中心相对于面板自身的比例位置（可超出 0..1，即原点落在面板外）。
                         transformOrigin = TransformOrigin(

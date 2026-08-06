@@ -118,6 +118,11 @@ fun MainScreen(transferViewModel: TransferViewModel) {
         cameraViewModel.setTransfersBusy(transfersBusy)
     }
 
+    // 日期筛选同时是后台缩略图的优先范围；放在共同宿主桥接，离开文件页后仍能继续填充。
+    LaunchedEffect(transferState.filterDateRange) {
+        cameraViewModel.setThumbnailPriorityRange(transferState.filterDateRange)
+    }
+
     // 屏幕常亮（设置项，默认开）：FLAG_KEEP_SCREEN_ON 只在本应用窗口前台可见时生效，
     // 切到后台/其它应用自动失效，不会全局锁屏幕。
     val view = LocalView.current

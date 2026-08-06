@@ -19,7 +19,8 @@ import java.util.zip.Deflater
 /** Minimal Nikon-like PTP/IP camera compiled and started only in Debug builds. */
 internal object DebugCameraSimulator {
     private const val PORT = 15740
-    private const val STORAGE_ID = 0x00010001
+    private const val STORAGE_ID_1 = 0x00010001
+    private const val STORAGE_ID_2 = 0x00020001
     private const val PHOTO_COUNT = 36
 
     private const val INIT_CMD_REQ = 1
@@ -171,10 +172,19 @@ internal object DebugCameraSimulator {
             GET_STORAGE_IDS -> sendData(
                 output,
                 transactionId,
-                littleEndian(8) { putInt(1); putInt(STORAGE_ID) }
+                littleEndian(12) {
+                    putInt(2)
+                    putInt(STORAGE_ID_1)
+                    putInt(STORAGE_ID_2)
+                }
             )
             GET_OBJECT_HANDLES -> {
-                val handles = objects.keys.sortedDescending()
+                val requestedStorageId = params.firstOrNull() ?: -1
+                val handles = objects.values.asSequence()
+                    .filter { requestedStorageId == -1 || it.storageId == requestedStorageId }
+                    .map { it.handle }
+                    .sortedDescending()
+                    .toList()
                 sendData(output, transactionId, littleEndian(4 + handles.size * 4) {
                     putInt(handles.size)
                     handles.forEach(::putInt)
@@ -268,6 +278,7 @@ internal object DebugCameraSimulator {
 
     private data class SimObject(
         val handle: Int,
+        val storageId: Int,
         val fileName: String,
         val captureDate: String,
         val protected: Boolean,
@@ -282,7 +293,7 @@ internal object DebugCameraSimulator {
     ) {
         fun objectInfo(): ByteArray {
             val fixed = littleEndian(52) {
-                putInt(STORAGE_ID)
+                putInt(storageId)
                 putShort(format.toShort())
                 putShort(if (protected) 1 else 0)
                 putInt(image.size)
@@ -323,6 +334,7 @@ internal object DebugCameraSimulator {
             val thumbnail = featuredItem?.thumbnail ?: image
             handle to SimObject(
                 handle = handle,
+                storageId = if (index % 2 == 0) STORAGE_ID_1 else STORAGE_ID_2,
                 fileName = "ZSIM_%04d.%s".format(
                     Locale.US,
                     index + 1,

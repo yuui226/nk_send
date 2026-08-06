@@ -3943,7 +3943,7 @@ private fun AdaptiveRemoteToolBar(
 
 /** 顶栏紧凑切换按钮：保持最小点击尺寸，文字类标记可按固有宽度自然扩展。 */
 @Composable
-private fun TopIconToggle(
+internal fun TopIconToggle(
     active: Boolean,
     contentDescription: String,
     onClick: () -> Unit,

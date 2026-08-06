@@ -1,28 +1,60 @@
 package com.ztransfer.filter
 
-internal val PHOTO_FILTER_COLOR_BAND_CENTERS = floatArrayOf(
-    0f,
-    30f,
-    60f,
-    120f,
-    180f,
-    240f,
-    280f,
-    320f,
-)
-
-/** A filter definition fully understood by the app renderer, independent of any import format. */
 data class PhotoFilterPreset(
     val id: String,
     val name: String,
+    val parameters: PhotoFilterParameters,
+) {
+    init {
+        require(id.isNotBlank())
+        require(name.isNotBlank())
+    }
+}
+
+sealed interface PhotoFilterParameters
+
+/** Controls transferable from a legacy NCP preset to an already developed sRGB image. */
+data class NcpPhotoFilterParameters(
+    val saturationStep: Int,
+    val hueStep: Int,
+    val toneCurve: IntArray,
+) : PhotoFilterParameters {
+    init {
+        require(saturationStep in -3..3)
+        require(hueStep in -3..3)
+        validateToneCurve(toneCurve)
+    }
+
+    internal val normalizedToneCurve = normalizeToneCurve(toneCurve)
+}
+
+/** Supported Flexible Color controls converted from an NP3 preset. */
+data class Np3PhotoFilterParameters(
     val contrast: Int,
     val highlights: Int,
     val shadows: Int,
-    val whiteLevel: Int,
-    val blackLevel: Int,
+    val whites: Int,
+    val blacks: Int,
     val saturation: Int,
     val colorBands: List<PhotoFilterColorBand>,
-)
+    val toneCurve: IntArray? = null,
+) : PhotoFilterParameters {
+    init {
+        listOf(contrast, highlights, shadows, whites, blacks, saturation).forEach {
+            require(it in -100..100)
+        }
+        require(colorBands.size == PHOTO_FILTER_COLOR_BAND_CENTERS.size)
+        colorBands.forEachIndexed { index, band ->
+            require(band.centerDegrees == PHOTO_FILTER_COLOR_BAND_CENTERS[index])
+            require(band.hue in -100..100)
+            require(band.chroma in -100..100)
+            require(band.brightness in -100..100)
+        }
+        toneCurve?.let(::validateToneCurve)
+    }
+
+    internal val normalizedToneCurve = toneCurve?.let(::normalizeToneCurve)
+}
 
 data class PhotoFilterColorBand(
     val centerDegrees: Float,
@@ -39,24 +71,40 @@ data class PhotoFilterSelection(
         get() = normalizePhotoFilterIntensity(intensityPercent)
 }
 
-fun normalizePhotoFilterIntensity(value: Int): Int = value.coerceIn(0, 100)
-
-/** Circular interpolation weights shared by the renderer and JVM tests. */
-internal fun adjacentColorBandWeights(
-    hueDegrees: Float,
-    centers: List<Float>,
-): Triple<Int, Int, Float> {
-    require(centers.size >= 2)
-    val hue = ((hueDegrees % 360f) + 360f) % 360f
-    for (index in centers.indices) {
-        val next = (index + 1) % centers.size
-        val start = centers[index]
-        val end = if (next == 0) centers[0] + 360f else centers[next]
-        val adjustedHue = if (next == 0 && hue < start) hue + 360f else hue
-        if (adjustedHue in start..end) {
-            val progress = ((adjustedHue - start) / (end - start)).coerceIn(0f, 1f)
-            return Triple(index, next, progress)
-        }
-    }
-    return Triple(0, 1, 0f)
+/** Valid intensity detents are 2, 4, ... 100; disabling the filter is represented separately. */
+fun normalizePhotoFilterIntensity(value: Int): Int {
+    val clamped = value.coerceIn(2, 100)
+    return ((clamped + 1) / 2 * 2).coerceAtMost(100)
 }
+
+internal fun mapPhotoFilterToneCurve(value: Float, curve: FloatArray): Float {
+    val position = value.coerceIn(0f, 1f) * (PHOTO_FILTER_TONE_CURVE_POINT_COUNT - 1)
+    val left = position.toInt().coerceIn(0, PHOTO_FILTER_TONE_CURVE_POINT_COUNT - 1)
+    val right = minOf(left + 1, PHOTO_FILTER_TONE_CURVE_POINT_COUNT - 1)
+    val progress = position - left
+    return (curve[left] + (curve[right] - curve[left]) * progress).coerceIn(0f, 1f)
+}
+
+private fun validateToneCurve(curve: IntArray) {
+    require(curve.size == PHOTO_FILTER_TONE_CURVE_POINT_COUNT)
+    require(curve.all { it in 0..PHOTO_FILTER_TONE_CURVE_MAX_VALUE })
+}
+
+private fun normalizeToneCurve(curve: IntArray) =
+    FloatArray(PHOTO_FILTER_TONE_CURVE_POINT_COUNT) { index ->
+        curve[index] / PHOTO_FILTER_TONE_CURVE_MAX_VALUE.toFloat()
+    }
+
+internal val PHOTO_FILTER_COLOR_BAND_CENTERS = floatArrayOf(
+    0f,
+    30f,
+    60f,
+    120f,
+    180f,
+    240f,
+    280f,
+    320f,
+)
+
+internal const val PHOTO_FILTER_TONE_CURVE_POINT_COUNT = 257
+internal const val PHOTO_FILTER_TONE_CURVE_MAX_VALUE = 0x7fff
