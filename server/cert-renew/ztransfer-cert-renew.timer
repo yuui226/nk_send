@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically check the ZTransfer OSS TLS certificate
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+RandomizedDelaySec=30min
+Persistent=true
+Unit=ztransfer-cert-renew.service
+
+[Install]
+WantedBy=timers.target

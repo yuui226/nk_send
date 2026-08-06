@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -42,8 +43,8 @@ private class PopupAnimationState(
 /**
  * 通用「从按钮变形弹出」的毛玻璃浮层外壳（设置面板与筛选面板共用）。
  *
- * 面板以触发按钮 [anchorBounds]（同一 Compose 根坐标系）中心为缩放原点，从约按钮大小（6%）
- * 放大到全尺寸——明显地「从按钮长出来」；关闭时反向缩回按钮再移除（从哪来回哪去）。
+ * 面板以触发按钮 [anchorBounds]（同一 Compose 根坐标系）中心为缩放原点，做轻量缩放淡入；
+ * 关闭时反向收回再移除。避免把复杂面板从极小尺寸逐帧放大，降低首次呼出的图层合成压力。
  * 遮罩随进度淡入，点击遮罩 / 返回键触发收回。
  *
  * 位置与尺寸由调用方经 [panelModifier] 决定（相对根 Box 左上角，用 padding 贴到按钮下方、
@@ -64,7 +65,7 @@ fun AnchorPopup(
 ) {
     val colors = AppTheme.colors
 
-    // 变形动画进度：0=收在按钮处（不可见），1=完全展开。
+    // 入场进度：0=不可见，1=完全展开。
     val progress = remember { Animatable(0f) }
     val animationState = remember { PopupAnimationState() }
     val animationScope = rememberCoroutineScope()
@@ -98,7 +99,7 @@ fun AnchorPopup(
                 .pointerInput(Unit) { detectDragGestures { change, _ -> change.consume() } }
         )
 
-        // 面板：以按钮中心为原点缩放展开；毛玻璃底 + 细描边 + 自上而下高光叠层。
+        // 面板：以按钮中心为原点轻微缩放淡入；毛玻璃底 + 细描边 + 自上而下高光叠层。
         Surface(
             modifier = panelModifier
                 .onGloballyPositioned { coordinates ->
@@ -120,11 +121,14 @@ fun AnchorPopup(
                         )
                     }
                     val p = progress.value
-                    val s = 0.06f + 0.94f * p
+                    // 极端缩放会让整块设置/筛选内容在每帧进行高成本重采样；4% 的形变已经足以
+                    // 表达来源方向，主要动势交给淡入完成。ModulateAlpha 避免为透明度额外创建
+                    // 一块与面板等大的离屏缓冲。
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                    val s = 0.96f + 0.04f * p
                     scaleX = s
                     scaleY = s
-                    // 透明度更快到达不透明，放大过程中面板已清晰可见。
-                    alpha = (p * 2f).coerceAtMost(1f)
+                    alpha = p
                 }
                 // 消费面板内点击，避免穿透到遮罩误关闭。
                 .pointerInput(Unit) { detectTapGestures { } },

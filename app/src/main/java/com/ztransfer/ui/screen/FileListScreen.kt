@@ -2787,7 +2787,7 @@ private fun FilterOverlay(
             .padding(start = panelStart, top = panelTop)
             .width(panelWidth),
         shape = RoundedCornerShape(16.dp),
-        dim = editingDate,
+        dim = false,
     ) { _ ->
         AnimatedContent(
             targetState = editingDate,

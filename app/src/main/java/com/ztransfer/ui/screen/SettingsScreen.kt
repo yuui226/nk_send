@@ -113,6 +113,7 @@ import com.ztransfer.frame.limitPhotoFrameWatermarkText
 import com.ztransfer.frame.isPhotoPlacement
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.license.LicenseManager
@@ -124,7 +125,6 @@ import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
 import com.ztransfer.viewmodel.photoFrameWatermark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.SupervisorJob
@@ -132,6 +132,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
@@ -223,14 +224,16 @@ fun SettingsOverlay(
     // 主设置页不需要效果预览。只有进入效果编辑页且相机预览不可用时，才在后台生成
     // FHD 兜底图；仅进入效果编辑页后按需生成，避免打开设置时同步分配位图。
     val effectPreviewBase by produceState<Bitmap?>(
-        initialValue = effectPreviewSource,
+        initialValue = effectPreviewSource.takeIf { settingsPage == SettingsPage.EFFECTS },
         effectPreviewSource,
         settingsPage,
     ) {
-        value = effectPreviewSource
-        if (value == null && settingsPage == SettingsPage.EFFECTS) {
-            value = withContext(Dispatchers.Default) { createPhotoFramePreviewSource() }
+        if (settingsPage != SettingsPage.EFFECTS) {
+            value = null
+            return@produceState
         }
+        value = effectPreviewSource
+            ?: withContext(Dispatchers.Default) { createPhotoFramePreviewSource() }
     }
     var effectPreviewRotationQuarterTurns by remember(effectPreviewBase) {
         mutableIntStateOf(0)
@@ -245,6 +248,10 @@ fun SettingsOverlay(
             return@produceState
         }
         val requestedQuarterTurns = effectPreviewRotationQuarterTurns
+        if (Math.floorMod(requestedQuarterTurns, 4) == 0) {
+            value = RotatedPreviewSource(source, requestedQuarterTurns)
+            return@produceState
+        }
         val rotatedBitmap = withContext(Dispatchers.Default) {
             rotatePreviewBitmap(source, requestedQuarterTurns)
         }
@@ -519,11 +526,30 @@ fun SettingsOverlay(
                     .firstOrNull { it.id == filterDraftId }
                     ?.takeIf { filterDraftEnabled }
                     ?.let { PhotoFilterSelection(it, filterDraftIntensity) }
-                val previewWatermark = when {
+                val editorWatermark = when {
                     !frameDraftDecorationEnabled -> PhotoFrameWatermark(enabled = false)
                     isPro -> watermarkDraft
                     // 免费版真实导出固定使用默认水印；预览必须走同一规则。
                     else -> PhotoFrameWatermark()
+                }
+                // 文本框每次按键只更新编辑草稿；FHD 预览在短暂停顿后取最新文本，避免为必然
+                // 被下一次按键淘汰的中间字符串反复合成。displayText 归一化也跳过空白等价配置。
+                val requestedRenderWatermark = if (
+                    editorWatermark.content == PhotoFrameWatermarkContent.TEXT
+                ) {
+                    editorWatermark.copy(text = editorWatermark.displayText)
+                } else {
+                    editorWatermark
+                }
+                var renderWatermark by remember {
+                    mutableStateOf(requestedRenderWatermark)
+                }
+                LaunchedEffect(requestedRenderWatermark) {
+                    val previous = renderWatermark
+                    val changesTextOnly = previous.text != requestedRenderWatermark.text &&
+                        previous.copy(text = requestedRenderWatermark.text) == requestedRenderWatermark
+                    if (changesTextOnly) delay(PHOTO_EFFECTS_TEXT_PREVIEW_DELAY_MS)
+                    renderWatermark = requestedRenderWatermark
                 }
                 val previewBase = effectPreviewBase
                 val rotatedPreview = rotatedEffectPreviewSource
@@ -540,10 +566,8 @@ fun SettingsOverlay(
                         onRotate = rotateEffectPreview,
                         borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
                         preset = frameDraftPreset,
-                        watermark = previewWatermark,
+                        watermark = renderWatermark,
                         filter = previewFilter,
-                        availableFilters = state.photoFilters,
-                        previewIntensityPercent = filterDraftIntensity,
                         onOpen = { bitmap, anchorRect ->
                             focusManager.clearFocus()
                             keyboardController?.hide()
@@ -579,7 +603,7 @@ fun SettingsOverlay(
                     // 高级版编辑器必须保留正在输入的原始草稿（包括暂时为空）；若在这里
                     // 经过 effectivePhotoFrameWatermark，空值会在每次重组时立刻变回默认值，
                     // 用户就无法真正清空后重新输入。预览渲染自身仍会使用 displayText。
-                    watermark = previewWatermark,
+                    watermark = editorWatermark,
                     isPro = isPro,
                     hapticsEnabled = state.hapticsEnabled,
                     onBorderEnabledChanged = { enabled ->
@@ -1787,8 +1811,6 @@ private fun PhotoEffectsRenderedPreview(
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
     filter: PhotoFilterSelection? = null,
-    availableFilters: List<PhotoFilterPreset>,
-    previewIntensityPercent: Int,
     onOpen: (Bitmap, Rect) -> Unit,
 ) {
     val colors = AppTheme.colors
@@ -1802,35 +1824,71 @@ private fun PhotoEffectsRenderedPreview(
             preset = preset.takeIf { borderEnabled },
         )
     }
+    val currentFilterKey = PhotoEffectsPreviewCacheKey.from(filter)
     val previewCache = remember(
         source,
         sourceRotationQuarterTurns,
         borderEnabled,
         preset,
         watermark,
+        currentFilterKey,
     ) { PhotoEffectsPreviewCache() }
     DisposableEffect(previewCache) {
         onDispose { previewCache.close() }
     }
-    fun renderPreview(selection: PhotoFilterSelection?): Bitmap =
-        PhotoFrameExporter.renderPreview(
-            context = context,
-            source = source,
-            metadata = PHOTO_EFFECTS_PREVIEW_METADATA,
-            preset = preset,
-            watermark = watermark,
-            borderEnabled = borderEnabled,
-            longEdge = PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
-            filter = selection,
-        )
+    // 对比图不含滤镜，切换滤镜时仍然有效；与主成片分开缓存，避免重复合成相同底图。
+    val comparisonCache = if (filter == null) {
+        null
+    } else remember(
+        source,
+        sourceRotationQuarterTurns,
+        borderEnabled,
+        preset,
+        watermark,
+    ) { PhotoEffectsPreviewCache() }
+    DisposableEffect(comparisonCache) {
+        onDispose { comparisonCache?.close() }
+    }
+    // 滤镜计算只与原图、方向和滤镜参数有关，不应随水印大小、位置或效果一起失效。
+    val filteredSourceCache = if (filter == null) {
+        null
+    } else remember(source, sourceRotationQuarterTurns, currentFilterKey) {
+        PhotoEffectsPreviewCache()
+    }
+    DisposableEffect(filteredSourceCache) {
+        onDispose { filteredSourceCache?.close() }
+    }
+    suspend fun filteredSource(selection: PhotoFilterSelection?): Bitmap {
+        if (selection == null) return source
+        return checkNotNull(filteredSourceCache).getOrRender { isCancelled ->
+            PhotoFilterRenderer.render(source, selection, isCancelled)
+        }
+    }
+    suspend fun renderPreview(selection: PhotoFilterSelection?): Bitmap {
+        val input = filteredSource(selection)
+        val outputCache = if (selection == null && filter != null) {
+            checkNotNull(comparisonCache)
+        } else {
+            previewCache
+        }
+        return outputCache.getOrRender { _ ->
+            PhotoFrameExporter.renderPreview(
+                context = context,
+                source = input,
+                metadata = PHOTO_EFFECTS_PREVIEW_METADATA,
+                preset = preset,
+                watermark = watermark,
+                borderEnabled = borderEnabled,
+                longEdge = PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
+                filter = null,
+            )
+        }
+    }
 
     LaunchedEffect(previewCache, filter) {
         try {
             previewFailed = false
-            val outputKey = PhotoEffectsPreviewCacheKey.from(filter)
-            val output = previewCache.getOrRender(outputKey) {
-                renderPreview(filter)
-            }
+            val output = renderPreview(filter)
             ensureActive()
             rendered.value = RenderedPhotoEffectsPreview(
                 bitmap = output,
@@ -1842,11 +1900,9 @@ private fun PhotoEffectsRenderedPreview(
             // 无滤镜基线同样进入缓存，所有滤镜共用，不再为每次长按重复渲染。
             if (filter != null) {
                 try {
-                    val comparison = previewCache.getOrRender(
-                        PhotoEffectsPreviewCacheKey.NONE,
-                    ) {
-                        renderPreview(null)
-                    }
+                    // 主预览优先显示；继续调参时该延时会被取消，旧对比图不会抢占下一次渲染。
+                    delay(PHOTO_EFFECTS_COMPARISON_DELAY_MS)
+                    val comparison = renderPreview(null)
                     ensureActive()
                     rendered.value = RenderedPhotoEffectsPreview(
                         bitmap = output,
@@ -1874,29 +1930,8 @@ private fun PhotoEffectsRenderedPreview(
             recordPhotoFramePreviewFailure(context, error)
         }
     }
-    val prewarmIntensity = normalizePhotoFilterIntensity(previewIntensityPercent)
-    val selectedFilterId = filter?.preset?.id
-    LaunchedEffect(previewCache, availableFilters, prewarmIntensity, selectedFilterId) {
-        // 先把当前选择和长按基线的首帧让给前台，再顺序预热波轮相邻项。
-        // FHD 位图内存较大，仅保留基线与相邻三项，避免增加分辨率档位或无界占用内存。
-        delay(PHOTO_EFFECTS_PREWARM_DELAY_MS)
-        photoFilterPrewarmPresets(availableFilters, selectedFilterId)
-            .forEach { presetToWarm ->
-                val selection = PhotoFilterSelection(presetToWarm, prewarmIntensity)
-                try {
-                    previewCache.getOrRender(PhotoEffectsPreviewCacheKey.from(selection)) {
-                        renderPreview(selection)
-                    }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (outOfMemory: OutOfMemoryError) {
-                    recordPhotoFramePreviewFailure(context, outOfMemory)
-                } catch (error: Exception) {
-                    recordPhotoFramePreviewFailure(context, error)
-                }
-            }
-    }
     val preview = rendered.value
+    val sourceImage = remember(source) { source.asImageBitmap() }
     val targetViewportAspectRatio = if (requestedPortrait) {
         PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO
     } else {
@@ -2028,10 +2063,12 @@ private fun PhotoEffectsRenderedPreview(
                 },
         ) {
             if (preview == null && !previewFailed) {
-                CircularProgressIndicator(
-                    color = colors.accentBlue,
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp,
+                // FHD 原图已经在内存中，首张效果成片生成前直接展示它；不让用户面对空白转圈。
+                FittedRotatingBitmap(
+                    image = sourceImage,
+                    rotationDegrees = 0f,
+                    description = stringResource(R.string.photo_frame_preview),
+                    modifier = Modifier.fillMaxSize(),
                 )
             } else if (preview != null) {
                 outgoingFrame?.let { frame ->
@@ -2055,7 +2092,7 @@ private fun PhotoEffectsRenderedPreview(
                 }
             } else {
                 Image(
-                    bitmap = remember(source) { source.asImageBitmap() },
+                    bitmap = sourceImage,
                     contentDescription = stringResource(R.string.photo_frame_preview),
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -2119,23 +2156,10 @@ private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
 private val PHOTO_EFFECTS_CONTROL_HEIGHT = 48.dp
 // 与相机后台预取规格保持一致，预览与缓存统一使用 FHD，不引入额外分辨率档位。
 private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_920
-private const val PHOTO_EFFECTS_PREWARM_DELAY_MS = 180L
-// 无滤镜基线、当前滤镜及波轮两侧相邻滤镜。
-private const val PHOTO_EFFECTS_PREVIEW_CACHE_ENTRIES = 4
-
-private fun photoFilterPrewarmPresets(
-    filters: List<PhotoFilterPreset>,
-    selectedFilterId: String?,
-): List<PhotoFilterPreset> {
-    if (filters.size <= 3) return filters
-    val selectedIndex = filters.indexOfFirst { it.id == selectedFilterId }
-    if (selectedIndex < 0) return filters.take(3)
-    return listOf(
-        filters[selectedIndex],
-        filters[(selectedIndex + 1) % filters.size],
-        filters[Math.floorMod(selectedIndex - 1, filters.size)],
-    )
-}
+private const val PHOTO_EFFECTS_COMPARISON_DELAY_MS = 500L
+private const val PHOTO_EFFECTS_TEXT_PREVIEW_DELAY_MS = 140L
+// 边框合成无法在 Canvas 绘制途中取消；全局串行可防止旧 FHD 成片并发拖慢最新预览。
+private val photoEffectsPreviewRenderMutex = Mutex()
 
 private fun rotatePreviewBitmap(source: Bitmap, quarterTurns: Int): Bitmap {
     val normalized = Math.floorMod(quarterTurns, 4)
@@ -2161,61 +2185,53 @@ private data class PhotoEffectsPreviewCacheKey(
     val intensityPercent: Int,
 ) {
     companion object {
-        val NONE = PhotoEffectsPreviewCacheKey(null, 0)
-
         fun from(selection: PhotoFilterSelection?): PhotoEffectsPreviewCacheKey =
             selection?.let {
                 PhotoEffectsPreviewCacheKey(
                     filterId = it.preset.id,
                     intensityPercent = it.normalizedIntensityPercent,
                 )
-            } ?: NONE
+            } ?: PhotoEffectsPreviewCacheKey(null, 0)
     }
 }
 
 /**
- * 单次照片效果编辑会话的有界成片缓存。
+ * 单个明确渲染目标的一帧缓存。
  *
- * 同一滤镜的前台请求和后台预热共享一个 [Deferred]，不会重复做逐像素 HSL 与边框合成；
- * 配置或方向变化时 Compose 会销毁整个实例并取消未完成任务。淘汰位图只解除引用而不主动
- * recycle，避免仍在 Compose 渲染线程中的旧帧纹理被提前回收。
+ * 同一目标的请求共享一个 [Deferred]；依赖变化时由 remember 销毁整个实例，不维护多键
+ * LRU，也不缓存不会显示的投机成片。不同实例通过全局渲染锁串行，取消的等待任务不会
+ * 继续抢 CPU。位图只解除引用而不主动 recycle，避免 Compose 仍在使用旧帧纹理。
  */
 private class PhotoEffectsPreviewCache {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutex = Mutex()
-    private val completed = LinkedHashMap<PhotoEffectsPreviewCacheKey, Bitmap>(
-        PHOTO_EFFECTS_PREVIEW_CACHE_ENTRIES,
-        0.75f,
-        true,
-    )
-    private val running = mutableMapOf<PhotoEffectsPreviewCacheKey, Deferred<Bitmap>>()
+    private var completed: Bitmap? = null
+    private var running: Deferred<Bitmap>? = null
 
     suspend fun getOrRender(
-        key: PhotoEffectsPreviewCacheKey,
-        render: () -> Bitmap,
+        render: (isCancelled: () -> Boolean) -> Bitmap,
     ): Bitmap {
         val task = mutex.withLock {
-            completed[key]?.let { CompletableDeferred(it) }
-                ?: running.getOrPut(key) { scope.async { render() } }
+            completed?.let { return it }
+            running ?: scope.async {
+                photoEffectsPreviewRenderMutex.withLock {
+                    ensureActive()
+                    render { !isActive }
+                }
+            }.also { running = it }
         }
         val bitmap = try {
             task.await()
         } catch (error: Throwable) {
             mutex.withLock {
-                if (running[key] === task) running.remove(key)
+                if (running === task) running = null
             }
             throw error
         }
         return mutex.withLock {
-            completed[key] ?: bitmap.also {
-                if (running[key] === task) running.remove(key)
-                completed[key] = it
-                while (completed.size > PHOTO_EFFECTS_PREVIEW_CACHE_ENTRIES) {
-                    completed.entries.iterator().run {
-                        next()
-                        remove()
-                    }
-                }
+            completed ?: bitmap.also {
+                if (running === task) running = null
+                completed = it
             }
         }
     }
