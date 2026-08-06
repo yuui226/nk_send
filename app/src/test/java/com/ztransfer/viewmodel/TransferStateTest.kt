@@ -82,7 +82,7 @@ class TransferStateTest {
             enabled = false,
             text = "My camera",
             font = PhotoFrameWatermarkFont.BOLD,
-            sizePercent = 200,
+            sizePercent = 300,
             position = PhotoFrameWatermarkPosition.RIGHT,
             color = PhotoFrameWatermarkColor.GOLD,
             opacityPercent = 100,
@@ -93,11 +93,11 @@ class TransferStateTest {
         val pro = effectivePhotoFrameWatermark(true, customized)
 
         assertEquals(PhotoFrameWatermark(), free)
-        assertEquals(75, free.sizePercent)
+        assertEquals(26, free.sizePercent)
         assertEquals(72, free.opacityPercent)
         assertEquals(PhotoFrameWatermarkEffect.AUTO, free.effect)
         assertEquals(customized, pro)
-        assertEquals(200, pro.sizePercent)
+        assertEquals(300, pro.sizePercent)
         assertEquals(100, pro.opacityPercent)
         assertEquals(PhotoFrameWatermarkEffect.OUTLINE, pro.effect)
     }
@@ -115,11 +115,20 @@ class TransferStateTest {
 
     @Test
     fun legacyWatermarkSizeAndOpacityPreferencesMigrateWithoutVisualJumps() {
-        assertEquals(58, restoredPhotoFrameWatermarkSizePercent("SMALL", PhotoFrameWatermarkContent.TEXT))
-        assertEquals(75, restoredPhotoFrameWatermarkSizePercent("MEDIUM", PhotoFrameWatermarkContent.TEXT))
-        assertEquals(47, restoredPhotoFrameWatermarkSizePercent("SMALL", PhotoFrameWatermarkContent.IMAGE))
-        assertEquals(69, restoredPhotoFrameWatermarkSizePercent("MEDIUM", PhotoFrameWatermarkContent.IMAGE))
-        assertEquals(100, restoredPhotoFrameWatermarkSizePercent("LARGE", PhotoFrameWatermarkContent.IMAGE))
+        assertEquals(9, restoredPhotoFrameWatermarkSizePercent("SMALL", PhotoFrameWatermarkContent.TEXT))
+        assertEquals(26, restoredPhotoFrameWatermarkSizePercent("MEDIUM", PhotoFrameWatermarkContent.TEXT))
+        assertEquals(1, restoredPhotoFrameWatermarkSizePercent("SMALL", PhotoFrameWatermarkContent.IMAGE))
+        assertEquals(20, restoredPhotoFrameWatermarkSizePercent("MEDIUM", PhotoFrameWatermarkContent.IMAGE))
+        assertEquals(51, restoredPhotoFrameWatermarkSizePercent("LARGE", PhotoFrameWatermarkContent.IMAGE))
+        assertEquals(
+            151,
+            restoredPhotoFrameWatermarkSizePercent(
+                200,
+                PhotoFrameWatermarkContent.TEXT,
+                usesLegacyScale = true,
+            ),
+        )
+        assertEquals(300, restoredPhotoFrameWatermarkSizePercent(300, PhotoFrameWatermarkContent.TEXT))
         assertEquals(40, restoredPhotoFrameWatermarkOpacityPercent("SUBTLE"))
         assertEquals(72, restoredPhotoFrameWatermarkOpacityPercent("STANDARD"))
         assertEquals(100, restoredPhotoFrameWatermarkOpacityPercent("STRONG"))
@@ -132,7 +141,7 @@ class TransferStateTest {
             preference = PhotoFrameWatermark(sizePercent = 999, opacityPercent = 0),
         )
 
-        assertEquals(200, effective.sizePercent)
+        assertEquals(300, effective.sizePercent)
         assertEquals(1, effective.opacityPercent)
         assertEquals(1, restoredPhotoFrameWatermarkSizePercent(-4, PhotoFrameWatermarkContent.TEXT))
         assertEquals(100, restoredPhotoFrameWatermarkOpacityPercent(140))

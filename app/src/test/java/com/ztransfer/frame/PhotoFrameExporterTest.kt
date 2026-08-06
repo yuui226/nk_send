@@ -550,15 +550,22 @@ class PhotoFrameExporterTest {
     }
 
     @Test
-    fun watermarkSizePercentKeepsLegacyAnchorsAndDoublesTheOldMaximum() {
-        assertEquals(0.0105f, photoFrameWatermarkTextSizeFraction(58), 0.000001f)
-        assertEquals(0.0135f, photoFrameWatermarkTextSizeFraction(75), 0.000001f)
-        assertEquals(0.018f, photoFrameWatermarkTextSizeFraction(100), 0.000001f)
-        assertEquals(0.036f, photoFrameWatermarkTextSizeFraction(200), 0.000001f)
-        assertEquals(0.035f, photoFrameWatermarkImageSizeFraction(47), 0.000001f)
-        assertEquals(0.052f, photoFrameWatermarkImageSizeFraction(69), 0.000001f)
-        assertEquals(0.075f, photoFrameWatermarkImageSizeFraction(100), 0.000001f)
-        assertEquals(0.15f, photoFrameWatermarkImageSizeFraction(200), 0.000001f)
+    fun watermarkSizeScaleStartsAtTheFormerFiftyPercentAndExtendsToThreeHundred() {
+        assertEquals(0.0105f * 50f / 58f, photoFrameWatermarkTextSizeFraction(1), 0.000001f)
+        assertEquals(0.0105f, photoFrameWatermarkTextSizeFraction(9), 0.000001f)
+        assertEquals(0.0135f, photoFrameWatermarkTextSizeFraction(26), 0.000001f)
+        assertEquals(0.018f, photoFrameWatermarkTextSizeFraction(51), 0.000001f)
+        assertEquals(0.036f, photoFrameWatermarkTextSizeFraction(151), 0.000001f)
+        assertEquals(0.018f * 3.49f, photoFrameWatermarkTextSizeFraction(300), 0.000001f)
+        assertEquals(
+            0.035f + (0.052f - 0.035f) * 3f / 22f,
+            photoFrameWatermarkImageSizeFraction(1),
+            0.000001f,
+        )
+        assertEquals(0.052f, photoFrameWatermarkImageSizeFraction(20), 0.000001f)
+        assertEquals(0.075f, photoFrameWatermarkImageSizeFraction(51), 0.000001f)
+        assertEquals(0.15f, photoFrameWatermarkImageSizeFraction(151), 0.000001f)
+        assertEquals(0.075f * 3.49f, photoFrameWatermarkImageSizeFraction(300), 0.000001f)
     }
 
     @Test
@@ -573,7 +580,7 @@ class PhotoFrameExporterTest {
         assertTrue(defaultName != "DSC_frame_mist.jpg")
 
         val subtle = baseline.copy(opacityPercent = 40)
-        val maximumSize = baseline.copy(sizePercent = 200)
+        val maximumSize = baseline.copy(sizePercent = 300)
         val outlined = baseline.copy(effect = PhotoFrameWatermarkEffect.OUTLINE)
         val onPhoto = baseline.copy(position = PhotoFrameWatermarkPosition.PHOTO_TOP_LEFT)
         assertTrue(photoFrameWatermarkFingerprint(subtle, PhotoFramePreset.MIST) !=

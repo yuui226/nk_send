@@ -41,6 +41,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -133,7 +134,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.math.abs
@@ -205,6 +205,7 @@ fun SettingsOverlay(
     var showSwitchDevice by remember { mutableStateOf(false) }
     var settingsPage by remember { mutableStateOf(SettingsPage.MAIN) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
+    var photoEffectsInfoViewed by remember { mutableStateOf(false) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var expandedEffectsPreview by remember {
         mutableStateOf<ExpandedEffectsPreview?>(null)
@@ -258,6 +259,7 @@ fun SettingsOverlay(
     LaunchedEffect(settingsPage) {
         showPhotoEffectsInfo = false
         if (settingsPage == SettingsPage.EFFECTS) {
+            photoEffectsInfoViewed = false
             photoEffectsEditorScroll.scrollTo(0)
         }
     }
@@ -473,18 +475,6 @@ fun SettingsOverlay(
                     fontWeight = FontWeight.Bold,
                     color = colors.onBackground
                 )
-                if (page == SettingsPage.EFFECTS) {
-                    Spacer(Modifier.width(7.dp))
-                    TipLightbulbButton(
-                        onClick = { showPhotoEffectsInfo = true },
-                        contentDescription = stringResource(R.string.photo_effects_info_title),
-                        modifier = Modifier
-                            .size(28.dp)
-                            .onGloballyPositioned {
-                                photoEffectsInfoAnchorBounds = it.boundsInRoot()
-                            },
-                    )
-                }
                 Spacer(Modifier.weight(1f))
                 if (page == SettingsPage.MAIN) {
                     // 未解锁：金徽标"解锁高级版"，点击开介绍弹窗。
@@ -506,6 +496,20 @@ fun SettingsOverlay(
                     IconButton(onClick = close, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_close), tint = colors.onSurfaceVariant)
                     }
+                } else {
+                    TipLightbulbButton(
+                        onClick = {
+                            photoEffectsInfoViewed = true
+                            showPhotoEffectsInfo = true
+                        },
+                        contentDescription = stringResource(R.string.photo_effects_info_title),
+                        attention = !photoEffectsInfoViewed,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .onGloballyPositioned {
+                                photoEffectsInfoAnchorBounds = it.boundsInRoot()
+                            },
+                    )
                 }
             }
 
@@ -1133,11 +1137,19 @@ private fun PhotoEffectsInfoBubble(
                 modifier = Modifier.size(17.dp),
             )
             Spacer(Modifier.width(8.dp))
-            Text(
-                stringResource(R.string.photo_effects_info_description),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.photo_effects_info_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(7.dp))
+                Text(
+                    stringResource(R.string.photo_effects_gesture_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -1215,6 +1227,7 @@ private fun PhotoFilterEditor(
                 },
                 onDetent = haptics::tick,
                 label = stringResource(R.string.photo_filter),
+                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 modifier = Modifier.weight(1f),
             )
             ReleaseCommitWheel(
@@ -1225,6 +1238,7 @@ private fun PhotoFilterEditor(
                 onDetent = haptics::tick,
                 label = stringResource(R.string.photo_filter_intensity),
                 enabled = enabled && selected != null,
+                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -1381,6 +1395,7 @@ private fun PhotoFrameWatermarkEditor(
                     },
                     onDetent = haptics::tick,
                     label = stringResource(R.string.photo_frame_style_short),
+                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                     modifier = Modifier.width(headerWheelWidth),
                 )
                 ReleaseCommitWheel(
@@ -1396,6 +1411,7 @@ private fun PhotoFrameWatermarkEditor(
                     onDetent = haptics::tick,
                     label = stringResource(R.string.photo_frame_watermark_short),
                     enabled = isPro,
+                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                     modifier = Modifier.width(headerWheelWidth),
                 )
             }
@@ -1444,6 +1460,7 @@ private fun PhotoFrameWatermarkEditor(
                             onDetent = haptics::tick,
                             label = stringResource(R.string.photo_frame_watermark_content),
                             enabled = isPro && !imageImporting,
+                            wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                             modifier = Modifier.width(contentWheelWidth),
                         )
                         if (watermark.content == PhotoFrameWatermarkContent.TEXT) {
@@ -1467,7 +1484,7 @@ private fun PhotoFrameWatermarkEditor(
                                 shape = RoundedCornerShape(13.dp),
                                 modifier = Modifier
                                     .width(editorWidth)
-                                    .height(54.dp),
+                                    .height(PHOTO_EFFECTS_CONTROL_HEIGHT),
                             ) {
                                 if (imageImporting) {
                                     CircularProgressIndicator(
@@ -1510,6 +1527,7 @@ private fun PhotoFrameWatermarkEditor(
                                 onDetent = haptics::tick,
                                 label = stringResource(R.string.photo_frame_watermark_font),
                                 enabled = isPro,
+                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                                 modifier = Modifier.width(wheelWidth),
                             )
                             ReleaseCommitWheel(
@@ -1523,6 +1541,7 @@ private fun PhotoFrameWatermarkEditor(
                                 onDetent = haptics::tick,
                                 label = stringResource(R.string.photo_frame_watermark_size),
                                 enabled = isPro,
+                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                                 modifier = Modifier.width(wheelWidth),
                             )
                             ReleaseCommitWheel(
@@ -1538,6 +1557,7 @@ private fun PhotoFrameWatermarkEditor(
                                 onDetent = haptics::tick,
                                 label = stringResource(R.string.photo_frame_watermark_opacity),
                                 enabled = isPro,
+                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                                 modifier = Modifier.width(wheelWidth),
                             )
                             }
@@ -1555,6 +1575,7 @@ private fun PhotoFrameWatermarkEditor(
                                 onDetent = haptics::tick,
                                 label = stringResource(R.string.photo_frame_watermark_position),
                                 enabled = isPro,
+                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                                 modifier = Modifier.width(wheelWidth),
                             )
                             ReleaseCommitWheel(
@@ -1568,6 +1589,7 @@ private fun PhotoFrameWatermarkEditor(
                                 onDetent = haptics::tick,
                                 label = stringResource(R.string.photo_frame_watermark_color),
                                 enabled = isPro,
+                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                                 modifier = Modifier.width(wheelWidth),
                             )
                             ReleaseCommitWheel(
@@ -1581,6 +1603,7 @@ private fun PhotoFrameWatermarkEditor(
                                 onDetent = haptics::tick,
                                 label = stringResource(R.string.photo_frame_watermark_effect),
                                 enabled = isPro,
+                                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                                 modifier = Modifier.width(wheelWidth),
                             )
                             }
@@ -1598,6 +1621,7 @@ private fun PhotoFrameWatermarkEditor(
                                     onDetent = haptics::tick,
                                     label = stringResource(R.string.photo_frame_watermark_size),
                                     enabled = isPro,
+                                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                                     modifier = Modifier.width(wheelWidth),
                                 )
                                 ReleaseCommitWheel(
@@ -1612,6 +1636,7 @@ private fun PhotoFrameWatermarkEditor(
                                     onDetent = haptics::tick,
                                     label = stringResource(R.string.photo_frame_watermark_opacity),
                                     enabled = isPro,
+                                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                                     modifier = Modifier.width(wheelWidth),
                                 )
                                 ReleaseCommitWheel(
@@ -1626,6 +1651,7 @@ private fun PhotoFrameWatermarkEditor(
                                     onDetent = haptics::tick,
                                     label = stringResource(R.string.photo_frame_watermark_position),
                                     enabled = isPro,
+                                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                                     modifier = Modifier.width(wheelWidth),
                                 )
                             }
@@ -1695,7 +1721,7 @@ private fun WatermarkTextField(
     )
     val shape = RoundedCornerShape(20.dp)
     Box(
-        modifier = modifier.height(54.dp),
+        modifier = modifier.height(PHOTO_EFFECTS_CONTROL_HEIGHT),
         contentAlignment = Alignment.CenterStart,
     ) {
         BasicTextField(
@@ -1771,6 +1797,11 @@ private fun PhotoEffectsRenderedPreview(
     var previewFailed by remember { mutableStateOf(false) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var showUnfiltered by remember(source) { mutableStateOf(false) }
+    val requestedFrameLayout = remember(borderEnabled, preset) {
+        PhotoEffectsPreviewFrameLayout(
+            preset = preset.takeIf { borderEnabled },
+        )
+    }
     val previewCache = remember(
         source,
         sourceRotationQuarterTurns,
@@ -1804,6 +1835,7 @@ private fun PhotoEffectsRenderedPreview(
             rendered.value = RenderedPhotoEffectsPreview(
                 bitmap = output,
                 rotationQuarterTurns = sourceRotationQuarterTurns,
+                frameLayout = requestedFrameLayout,
             )
 
             // 对比图只跳过滤镜，继续使用完全相同的边框、水印、尺寸和元数据。
@@ -1820,6 +1852,7 @@ private fun PhotoEffectsRenderedPreview(
                         bitmap = output,
                         unfilteredBitmap = comparison,
                         rotationQuarterTurns = sourceRotationQuarterTurns,
+                        frameLayout = requestedFrameLayout,
                     )
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -1874,23 +1907,33 @@ private fun PhotoEffectsRenderedPreview(
         animationSpec = Motion.overlayExpand,
         label = "photoFramePreviewAspectRatio",
     )
-    val rotationVisibility = remember { Animatable(1f) }
+    val replacementVisibility = remember { Animatable(1f) }
     var visibleFrame by remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
     var outgoingFrame by remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
     val frameTransition = remember { Animatable(1f) }
     val previewForGesture = preview
     val boundsForGesture = previewBounds
-    LaunchedEffect(requestedRotationQuarterTurns, visibleFrame?.rotationQuarterTurns) {
+    val latestOnRotate by rememberUpdatedState(onRotate)
+    val latestOnOpen by rememberUpdatedState(onOpen)
+    LaunchedEffect(
+        requestedRotationQuarterTurns,
+        requestedFrameLayout,
+        visibleFrame?.rotationQuarterTurns,
+        visibleFrame?.frameLayout,
+    ) {
         val current = visibleFrame ?: return@LaunchedEffect
-        if (current.rotationQuarterTurns != requestedRotationQuarterTurns) {
-            rotationVisibility.animateTo(
+        val awaitingReplacement =
+            current.rotationQuarterTurns != requestedRotationQuarterTurns ||
+                current.frameLayout != requestedFrameLayout
+        if (awaitingReplacement) {
+            replacementVisibility.animateTo(
                 targetValue = 0f,
                 animationSpec = tween(durationMillis = 110, easing = LinearEasing),
             )
         } else {
-            // 新方向成片先进入组合树一帧，纹理就绪后再柔和出现。
+            // 新方向或新边框成片先进入组合树一帧，纹理就绪后再柔和出现。
             withFrameNanos { }
-            rotationVisibility.animateTo(
+            replacementVisibility.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing),
             )
@@ -1911,10 +1954,12 @@ private fun PhotoEffectsRenderedPreview(
                 next.rotationQuarterTurns - current.rotationQuarterTurns,
                 4,
             )
-            if (renderedRotationDelta != 0) {
-                // 旋转场景不复用监看的画面转动动画：旧方向完全淡出后，
-                // 才切到已经按新方向真实渲染的成片；随后由方向状态触发淡入。
-                rotationVisibility.animateTo(
+            val replacesCanvas = renderedRotationDelta != 0 ||
+                current.frameLayout != next.frameLayout
+            if (replacesCanvas) {
+                // 旋转和边框画布变化都先让旧成片完全淡出，再换入已经按新布局渲染的
+                // 成片；避免无边框、铭牌等不同比例画布直接叠加造成僵硬跳变。
+                replacementVisibility.animateTo(
                     targetValue = 0f,
                     animationSpec = tween(durationMillis = 110, easing = LinearEasing),
                 )
@@ -1944,8 +1989,8 @@ private fun PhotoEffectsRenderedPreview(
     }
     LaunchedEffect(previewFailed) {
         if (previewFailed) {
-            // 新方向渲染失败时恢复旧成片并展示错误提示，避免预览永久停在透明状态。
-            rotationVisibility.animateTo(
+            // 新方向或新边框渲染失败时恢复旧成片，避免预览永久停在透明状态。
+            replacementVisibility.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing),
             )
@@ -1962,32 +2007,24 @@ private fun PhotoEffectsRenderedPreview(
                 .onGloballyPositioned { previewBounds = it.boundsInRoot() }
                 .pointerInput(previewForGesture, boundsForGesture) {
                     if (previewForGesture == null || boundsForGesture == null) return@pointerInput
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        if (previewForGesture.unfilteredBitmap == null) {
-                            if (waitForUpOrCancellation() != null) {
-                                onOpen(previewForGesture.bitmap, boundsForGesture)
-                            }
-                            return@awaitEachGesture
-                        }
-                        val releaseBeforeLongPress = withTimeoutOrNull(
-                            viewConfiguration.longPressTimeoutMillis,
-                        ) {
-                            waitForUpOrCancellation() to Unit
-                        }
-                        if (releaseBeforeLongPress != null) {
-                            if (releaseBeforeLongPress.first != null) {
-                                onOpen(previewForGesture.bitmap, boundsForGesture)
-                            }
-                        } else {
-                            showUnfiltered = true
+                    detectTapGestures(
+                        onPress = {
                             try {
-                                waitForUpOrCancellation()
+                                tryAwaitRelease()
                             } finally {
                                 showUnfiltered = false
                             }
-                        }
-                    }
+                        },
+                        onTap = {
+                            latestOnOpen(previewForGesture.bitmap, boundsForGesture)
+                        },
+                        onDoubleTap = { latestOnRotate() },
+                        onLongPress = {
+                            if (previewForGesture.unfilteredBitmap != null) {
+                                showUnfiltered = true
+                            }
+                        },
+                    )
                 },
         ) {
             if (preview == null && !previewFailed) {
@@ -2003,7 +2040,7 @@ private fun PhotoEffectsRenderedPreview(
                         showUnfiltered = showUnfiltered,
                         // 旧帧保持不透明作为底层，新帧只负责渐入；总画面始终不透底，
                         // 避免普通双向淡化在中点产生一次明显的亮度闪烁。
-                        alpha = rotationVisibility.value,
+                        alpha = replacementVisibility.value,
                         description = null,
                     )
                 }
@@ -2011,7 +2048,7 @@ private fun PhotoEffectsRenderedPreview(
                     PhotoEffectsPreviewLayer(
                         frame = frame,
                         showUnfiltered = showUnfiltered,
-                        alpha = rotationVisibility.value *
+                        alpha = replacementVisibility.value *
                             if (outgoingFrame == null) 1f else frameTransition.value,
                         description = stringResource(R.string.photo_frame_preview),
                     )
@@ -2051,37 +2088,6 @@ private fun PhotoEffectsRenderedPreview(
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                stringResource(
-                    if (filter == null) R.string.photo_effects_preview_hint
-                    else R.string.photo_effects_compare_hint
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            if (preview != null) {
-                TopIconToggle(
-                    active = false,
-                    contentDescription = stringResource(R.string.cd_remote_fullscreen_enter),
-                    onClick = {
-                        val currentBounds = previewBounds
-                        if (currentBounds != null) onOpen(preview.bitmap, currentBounds)
-                    },
-                ) { FullscreenEnterMark(Modifier.size(17.dp)) }
-            }
-            TopIconToggle(
-                active = false,
-                contentDescription = stringResource(R.string.cd_remote_rotate),
-                onClick = onRotate,
-            ) { RotateMark(Modifier.size(20.dp)) }
-        }
     }
 }
 
@@ -2110,6 +2116,7 @@ private fun PhotoEffectsPreviewLayer(
 
 private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
 private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
+private val PHOTO_EFFECTS_CONTROL_HEIGHT = 48.dp
 // 与相机后台预取规格保持一致，预览与缓存统一使用 FHD，不引入额外分辨率档位。
 private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_920
 private const val PHOTO_EFFECTS_PREWARM_DELAY_MS = 180L
@@ -2141,6 +2148,12 @@ private data class RenderedPhotoEffectsPreview(
     val bitmap: Bitmap,
     val unfilteredBitmap: Bitmap? = null,
     val rotationQuarterTurns: Int,
+    val frameLayout: PhotoEffectsPreviewFrameLayout,
+)
+
+/** 只有真正改变输出画布的边框样式才走完整淡出淡入；无边框时忽略保留的预设草稿。 */
+private data class PhotoEffectsPreviewFrameLayout(
+    val preset: PhotoFramePreset?,
 )
 
 private data class PhotoEffectsPreviewCacheKey(

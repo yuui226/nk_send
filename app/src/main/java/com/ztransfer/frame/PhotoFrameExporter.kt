@@ -104,8 +104,9 @@ data class PhotoFrameWatermark(
 internal const val DEFAULT_PHOTO_FRAME_WATERMARK_TEXT = "ZTransfer"
 internal const val MAX_PHOTO_FRAME_WATERMARK_LENGTH = 24
 internal const val MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 1
-internal const val MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 200
-internal const val DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 75
+internal const val MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 300
+internal const val DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 26
+private const val PHOTO_FRAME_WATERMARK_SIZE_PERCENT_OFFSET = 49
 internal const val MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 1
 internal const val MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 100
 internal const val DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 72
@@ -135,6 +136,14 @@ internal fun normalizePhotoFrameWatermarkSizePercent(value: Int): Int =
         MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
         MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
     )
+
+/** New 1% starts at the former 50% visual size; every following step keeps the old spacing. */
+internal fun legacyPhotoFrameWatermarkSizePercent(value: Int): Int =
+    normalizePhotoFrameWatermarkSizePercent(value) + PHOTO_FRAME_WATERMARK_SIZE_PERCENT_OFFSET
+
+/** Converts a persisted value from the former 1..200 scale without changing its rendered size. */
+internal fun migratedPhotoFrameWatermarkSizePercent(value: Int): Int =
+    normalizePhotoFrameWatermarkSizePercent(value - PHOTO_FRAME_WATERMARK_SIZE_PERCENT_OFFSET)
 
 internal fun normalizePhotoFrameWatermarkOpacityPercent(value: Int): Int =
     value.coerceIn(
@@ -171,7 +180,7 @@ private fun piecewiseWatermarkSizeFraction(
     mediumFraction: Float,
     largeFraction: Float,
 ): Float {
-    val percent = normalizePhotoFrameWatermarkSizePercent(sizePercent)
+    val percent = legacyPhotoFrameWatermarkSizePercent(sizePercent)
     return when {
         percent <= smallPercent -> smallFraction * percent / smallPercent
         percent <= mediumPercent -> {
@@ -2302,7 +2311,7 @@ internal fun photoFrameWatermarkFingerprint(
 
 /** 旧三档值继续沿用原摘要令牌，升级后不会把像素完全相同的旧成片误判为新配置。 */
 private fun watermarkSizeFingerprintToken(watermark: PhotoFrameWatermark): String {
-    val sizePercent = normalizePhotoFrameWatermarkSizePercent(watermark.sizePercent)
+    val sizePercent = legacyPhotoFrameWatermarkSizePercent(watermark.sizePercent)
     return when (watermark.content) {
         PhotoFrameWatermarkContent.TEXT -> when (sizePercent) {
             58 -> "SMALL"

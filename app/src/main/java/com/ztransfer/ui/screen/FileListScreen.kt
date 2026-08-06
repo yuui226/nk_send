@@ -20,7 +20,6 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -179,9 +178,9 @@ private const val QUEUE_ENTRY_BUTTON_TEXTURE_SEED = 0x2A71E001
 // 缩略图后台填充没有任何窗口/视口参数：未传输=从新到旧全量填充；传输中=完全停止。
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
 
-// 主筛选下拉面板需要容纳五列短类型、三列状态与清晰分区；日期编辑页再略微展开。
+// 主筛选与日期编辑共用固定宽度，切页时不横向重排面板。
 private val FILTER_PANEL_WIDTH = 316.dp
-private val DATE_FILTER_PANEL_MAX_WIDTH = 336.dp
+private val DATE_FILTER_WHEEL_HEIGHT = 48.dp
 
 // 有彩色角标底（白字）的类型：其余走灰底灰字。提到顶层，避免每个格子每次重组都新建集合。
 private val TYPE_BADGE_COLORED_EXTS = setOf(".jpg", ".nef", ".mov", ".mp4")
@@ -2732,7 +2731,7 @@ private fun formatDateHeader(date: String): String {
 }
 
 /**
- * 类型/标记/日期筛选浮层。主面板保持紧凑；日期胶囊在同一浮层内展开成双端点三波轮，
+ * 类型/标记/日期筛选浮层。主面板保持紧凑；日期页上下同时展示开始、结束两组三波轮，
  * 编辑期间只改草稿，完成时才一次提交，避免滚动波轮时反复重排列表与后台请求。
  * 类型语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
  * 全不选或凑齐全部现有类型时自动归位"全部"（不允许空集）。
@@ -2753,13 +2752,7 @@ private fun FilterOverlay(
     val density = LocalDensity.current
     var editingDate by remember { mutableStateOf(false) }
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-    val mainWidth = minOf(FILTER_PANEL_WIDTH, screenWidth - 24.dp)
-    val editorWidth = minOf(DATE_FILTER_PANEL_MAX_WIDTH, screenWidth - 24.dp)
-    val panelWidth by animateDpAsState(
-        targetValue = if (editingDate) editorWidth else mainWidth,
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
-        label = "filterPanelWidth",
-    )
+    val panelWidth = minOf(FILTER_PANEL_WIDTH, screenWidth - 24.dp)
     // 顶边贴按钮下缘 + 8dp；左缘对齐按钮，但不许超出屏幕右缘（信号条展开把按钮推得很靠右/
     // 窄屏时，面板整体向左钳制到贴边 12dp）。
     val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 8.dp } ?: 76.dp
@@ -2838,7 +2831,6 @@ private fun FilterOverlay(
 
                     FilterSectionLabel(
                         label = stringResource(R.string.filter_section_file_type),
-                        icon = Icons.Default.Image,
                     )
                     Spacer(Modifier.height(8.dp))
 
@@ -2871,7 +2863,6 @@ private fun FilterOverlay(
 
                     FilterSectionLabel(
                         label = stringResource(R.string.filter_section_status),
-                        icon = Icons.Default.CheckCircle,
                     )
                     Spacer(Modifier.height(8.dp))
 
@@ -2883,7 +2874,7 @@ private fun FilterOverlay(
                             onClick = {
                                 commit(working.copy(protectedOnly = !working.protectedOnly))
                             },
-                            modifier = Modifier.weight(1.2f),
+                            modifier = Modifier.weight(1f),
                             icon = Icons.Default.Key
                         )
                         FilterChip(
@@ -2892,7 +2883,7 @@ private fun FilterOverlay(
                             onClick = {
                                 commit(working.copy(burstOnly = !working.burstOnly))
                             },
-                            modifier = Modifier.weight(0.8f),
+                            modifier = Modifier.weight(1f),
                             leading = { tint -> BurstGlyph(tint = tint) }
                         )
                         FilterChip(
@@ -2901,7 +2892,8 @@ private fun FilterOverlay(
                             onClick = {
                                 commit(working.copy(untransferredOnly = !working.untransferredOnly))
                             },
-                            modifier = Modifier.weight(1.6f)
+                            modifier = Modifier.weight(1f),
+                            leading = { tint -> UntransferredGlyph(tint = tint) },
                         )
                     }
 
@@ -2910,7 +2902,6 @@ private fun FilterOverlay(
 
                         FilterSectionLabel(
                             label = stringResource(R.string.filter_section_storage),
-                            icon = Icons.Default.SdCard,
                         )
                         Spacer(Modifier.height(8.dp))
 
@@ -2937,7 +2928,6 @@ private fun FilterOverlay(
 
                     FilterSectionLabel(
                         label = stringResource(R.string.filter_section_date),
-                        icon = Icons.Default.DateRange,
                     )
                     Spacer(Modifier.height(8.dp))
 
@@ -2965,26 +2955,14 @@ private fun FilterOverlay(
 @Composable
 private fun FilterSectionLabel(
     label: String,
-    icon: ImageVector,
 ) {
     val colors = AppTheme.colors
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = colors.onSurfaceVariant,
-            modifier = Modifier.size(15.dp),
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = colors.onSurfaceVariant,
-        )
-    }
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = colors.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -3019,8 +2997,6 @@ private fun FilterClearButton(onClick: () -> Unit) {
     }
 }
 
-private enum class DateRangeEndpoint { START, END }
-
 @Composable
 private fun DateRangeEditor(
     current: PhotoDateRange?,
@@ -3036,26 +3012,20 @@ private fun DateRangeEditor(
     // 已经拨到一半的草稿重置掉。
     var start by remember { mutableStateOf(current?.start ?: initial) }
     var end by remember { mutableStateOf(current?.endInclusive ?: initial) }
-    var endpoint by remember { mutableStateOf(DateRangeEndpoint.START) }
-    val activeDate = if (endpoint == DateRangeEndpoint.START) start else end
 
-    fun updateActive(next: LocalDate) {
-        if (endpoint == DateRangeEndpoint.START) {
-            start = next
-            if (next.isAfter(end)) end = next
-        } else {
-            end = next
-            if (next.isBefore(start)) start = next
-        }
+    fun updateStart(next: LocalDate) {
+        start = next
+        if (next.isAfter(end)) end = next
+    }
+
+    fun updateEnd(next: LocalDate) {
+        end = next
+        if (next.isBefore(start)) start = next
     }
 
     val minYear = minOf(1990, start.year, end.year)
     val maxYear = maxOf(LocalDate.now().year + 1, start.year, end.year)
     val years = remember(minYear, maxYear) { (minYear..maxYear).toList() }
-    val months = remember { (1..12).toList() }
-    val days = remember(activeDate.year, activeDate.monthValue) {
-        (1..YearMonth.of(activeDate.year, activeDate.monthValue).lengthOfMonth()).toList()
-    }
 
     Column(
         modifier = Modifier.padding(14.dp),
@@ -3079,52 +3049,21 @@ private fun DateRangeEditor(
             )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DateEndpointChip(
-                label = stringResource(R.string.date_start),
-                date = start,
-                selected = endpoint == DateRangeEndpoint.START,
-                onClick = { endpoint = DateRangeEndpoint.START },
-                modifier = Modifier.weight(1f),
-            )
-            DateEndpointChip(
-                label = stringResource(R.string.date_end),
-                date = end,
-                selected = endpoint == DateRangeEndpoint.END,
-                onClick = { endpoint = DateRangeEndpoint.END },
-                modifier = Modifier.weight(1f),
-            )
-        }
+        DateEndpointWheels(
+            label = stringResource(R.string.date_start),
+            date = start,
+            years = years,
+            onDateChanged = ::updateStart,
+            onDetent = haptics::tick,
+        )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ReleaseCommitWheel(
-                options = years,
-                selected = activeDate.year,
-                optionLabel = Int::toString,
-                onValueCommitted = { updateActive(activeDate.withClampedDate(year = it)) },
-                onDetent = haptics::tick,
-                label = stringResource(R.string.date_year),
-                modifier = Modifier.weight(1.3f),
-            )
-            ReleaseCommitWheel(
-                options = months,
-                selected = activeDate.monthValue,
-                optionLabel = { it.toString().padStart(2, '0') },
-                onValueCommitted = { updateActive(activeDate.withClampedDate(month = it)) },
-                onDetent = haptics::tick,
-                label = stringResource(R.string.date_month),
-                modifier = Modifier.weight(1f),
-            )
-            ReleaseCommitWheel(
-                options = days,
-                selected = activeDate.dayOfMonth,
-                optionLabel = { it.toString().padStart(2, '0') },
-                onValueCommitted = { updateActive(activeDate.withClampedDate(day = it)) },
-                onDetent = haptics::tick,
-                label = stringResource(R.string.date_day),
-                modifier = Modifier.weight(1f),
-            )
-        }
+        DateEndpointWheels(
+            label = stringResource(R.string.date_end),
+            date = end,
+            years = years,
+            onDateChanged = ::updateEnd,
+            onDetent = haptics::tick,
+        )
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GlassButton(
@@ -3153,38 +3092,66 @@ private fun DateRangeEditor(
 }
 
 @Composable
-private fun DateEndpointChip(
+private fun DateEndpointWheels(
     label: String,
     date: LocalDate,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
+    years: List<Int>,
+    onDateChanged: (LocalDate) -> Unit,
+    onDetent: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(11.dp),
-        color = if (selected) colors.accentBlue.copy(alpha = 0.18f) else colors.surfaceVariant,
-        border = BorderStroke(
-            if (selected) 1.5.dp else 1.dp,
-            if (selected) colors.accentBlue else colors.glassPanelBorder,
-        ),
-        modifier = modifier.height(52.dp),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.Center,
+    val months = remember { (1..12).toList() }
+    val days = remember(date.year, date.monthValue) {
+        (1..YearMonth.of(date.year, date.monthValue).lengthOfMonth()).toList()
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
                 label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onBackground,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                formatLocalDate(date),
                 style = MaterialTheme.typography.labelSmall,
                 color = colors.onSurfaceVariant,
             )
-            Text(
-                formatLocalDate(date),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.onBackground,
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ReleaseCommitWheel(
+                options = years,
+                selected = date.year,
+                optionLabel = Int::toString,
+                onValueCommitted = { onDateChanged(date.withClampedDate(year = it)) },
+                onDetent = onDetent,
+                label = stringResource(R.string.date_year),
+                wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
+                modifier = Modifier.weight(1.3f),
+            )
+            ReleaseCommitWheel(
+                options = months,
+                selected = date.monthValue,
+                optionLabel = { it.toString().padStart(2, '0') },
+                onValueCommitted = { onDateChanged(date.withClampedDate(month = it)) },
+                onDetent = onDetent,
+                label = stringResource(R.string.date_month),
+                wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
+                modifier = Modifier.weight(1f),
+            )
+            ReleaseCommitWheel(
+                options = days,
+                selected = date.dayOfMonth,
+                optionLabel = { it.toString().padStart(2, '0') },
+                onValueCommitted = { onDateChanged(date.withClampedDate(day = it)) },
+                onDetent = onDetent,
+                label = stringResource(R.string.date_day),
+                wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
+                modifier = Modifier.weight(1f),
             )
         }
     }
@@ -3286,6 +3253,62 @@ internal fun BurstGlyph(
                 )
             }
         }
+    }
+}
+
+/** “未传”标志：向下箭头落入接收槽，表达照片仍等待传入手机。 */
+@Composable
+private fun UntransferredGlyph(
+    tint: Color,
+    modifier: Modifier = Modifier,
+    iconSize: Dp = 14.dp,
+) {
+    Canvas(modifier = modifier.size(iconSize)) {
+        val stroke = size.minDimension * 0.11f
+        val centerX = size.width * 0.5f
+        val arrowTipY = size.height * 0.58f
+        drawLine(
+            color = tint,
+            start = Offset(centerX, size.height * 0.12f),
+            end = Offset(centerX, arrowTipY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = tint,
+            start = Offset(size.width * 0.31f, size.height * 0.40f),
+            end = Offset(centerX, arrowTipY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = tint,
+            start = Offset(size.width * 0.69f, size.height * 0.40f),
+            end = Offset(centerX, arrowTipY),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = tint,
+            start = Offset(size.width * 0.18f, size.height * 0.67f),
+            end = Offset(size.width * 0.18f, size.height * 0.84f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = tint,
+            start = Offset(size.width * 0.18f, size.height * 0.84f),
+            end = Offset(size.width * 0.82f, size.height * 0.84f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = tint,
+            start = Offset(size.width * 0.82f, size.height * 0.84f),
+            end = Offset(size.width * 0.82f, size.height * 0.67f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Round,
+        )
     }
 }
 

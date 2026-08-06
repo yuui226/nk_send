@@ -35,8 +35,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -78,6 +79,7 @@ internal fun <T> ReleaseCommitWheel(
     label: String? = null,
     onDetent: () -> Unit = {},
     enabled: Boolean = true,
+    wheelHeight: Dp = 54.dp,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
@@ -124,7 +126,7 @@ internal fun <T> ReleaseCommitWheel(
     }
     Box(
         modifier = enabledModifier
-            .height(54.dp)
+            .height(wheelHeight)
             .clip(shape)
             .background(colors.glassSurface)
             .background(

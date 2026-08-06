@@ -28,6 +28,7 @@ import com.ztransfer.frame.isCurrentPhotoFrameTempName
 import com.ztransfer.frame.isPhotoFrameOutputName
 import com.ztransfer.frame.isPhotoPlacement
 import com.ztransfer.frame.isSupportedPhotoFrameSourceExtension
+import com.ztransfer.frame.migratedPhotoFrameWatermarkSizePercent
 import com.ztransfer.frame.normalizePhotoFrameWatermarkOpacityPercent
 import com.ztransfer.frame.normalizePhotoFrameWatermarkSizePercent
 import com.ztransfer.frame.importPhotoFrameWatermarkImage as storePhotoFrameWatermarkImage
@@ -66,6 +67,9 @@ enum class TransferStatus {
 }
 
 private val transferTaskIds = AtomicLong(0L)
+private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION = 2
+private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY =
+    "photo_frame_watermark_size_scale_version"
 
 data class TransferTask(
     val file: NikonCamera.FileInfo,
@@ -183,22 +187,29 @@ data class PhotoFilterCriteria(
 
 internal fun normalizeThumbnailColumns(columns: Int): Int = columns.coerceIn(2, 4)
 
-/** 兼容旧版 SMALL/MEDIUM/LARGE 字符串，并让升级前的实际像素大小保持不变。 */
+/** 迁移旧尺寸刻度；旧 50% 及以上保持视觉大小，低于 50% 的值归入新的最小档。 */
 internal fun restoredPhotoFrameWatermarkSizePercent(
     persisted: Any?,
     content: PhotoFrameWatermarkContent,
+    usesLegacyScale: Boolean = false,
 ): Int {
+    if (persisted == null) return DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
+    val isLegacyNamedValue = persisted is String && persisted.toIntOrNull() == null
     val rawPercent = when (persisted) {
         is Number -> persisted.toInt()
         is String -> persisted.toIntOrNull() ?: when (persisted) {
             "SMALL" -> if (content == PhotoFrameWatermarkContent.IMAGE) 47 else 58
             "MEDIUM" -> if (content == PhotoFrameWatermarkContent.IMAGE) 69 else 75
             "LARGE" -> 100
-            else -> DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
+            else -> 75
         }
         else -> DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
     }
-    return normalizePhotoFrameWatermarkSizePercent(rawPercent)
+    return if (usesLegacyScale || isLegacyNamedValue) {
+        migratedPhotoFrameWatermarkSizePercent(rawPercent)
+    } else {
+        normalizePhotoFrameWatermarkSizePercent(rawPercent)
+    }
 }
 
 /** 兼容旧版 SUBTLE/STANDARD/STRONG 字符串；新版本直接持久化百分比。 */
@@ -454,22 +465,32 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
         val storedPreferences = prefs.all
         val storedWatermarkSize = storedPreferences["photo_frame_watermark_size"]
+        val usesLegacyWatermarkSizeScale = prefs.getInt(
+            PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY,
+            1,
+        ) < PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION
         val restoredWatermarkSizePercent = restoredPhotoFrameWatermarkSizePercent(
             storedWatermarkSize,
             restoredWatermarkContent,
+            usesLegacyWatermarkSizeScale,
         )
         val storedWatermarkOpacity = storedPreferences["photo_frame_watermark_opacity"]
         val restoredWatermarkOpacityPercent =
             restoredPhotoFrameWatermarkOpacityPercent(storedWatermarkOpacity)
-        val sizeNeedsMigration = storedWatermarkSize != null &&
-            (storedWatermarkSize !is Number ||
-                storedWatermarkSize.toInt() != restoredWatermarkSizePercent)
+        val sizeNeedsMigration = usesLegacyWatermarkSizeScale ||
+            (storedWatermarkSize != null &&
+                (storedWatermarkSize !is Number ||
+                    storedWatermarkSize.toInt() != restoredWatermarkSizePercent))
         val opacityNeedsMigration = storedWatermarkOpacity != null &&
             (storedWatermarkOpacity !is Number ||
                 storedWatermarkOpacity.toInt() != restoredWatermarkOpacityPercent)
         if (sizeNeedsMigration || opacityNeedsMigration) {
             prefs.edit()
                 .putInt("photo_frame_watermark_size", restoredWatermarkSizePercent)
+                .putInt(
+                    PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY,
+                    PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION,
+                )
                 .putInt("photo_frame_watermark_opacity", restoredWatermarkOpacityPercent)
                 .apply()
         }
@@ -672,6 +693,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 }
                 putString("photo_frame_watermark_font", it.font.name)
                 putInt("photo_frame_watermark_size", it.sizePercent)
+                putInt(
+                    PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY,
+                    PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION,
+                )
                 putString("photo_frame_watermark_position", it.position.name)
                 putString("photo_frame_watermark_color", it.color.name)
                 putInt("photo_frame_watermark_opacity", it.opacityPercent)
