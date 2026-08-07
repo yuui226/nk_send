@@ -29,7 +29,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.ztransfer.ui.screen.*
 import com.ztransfer.ui.theme.AppTheme
@@ -42,7 +41,6 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
-import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -104,8 +102,6 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     val navController = rememberNavController()
     val cameraViewModel: CameraViewModel = viewModel()
 
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
     val cameraState by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
 
@@ -133,20 +129,6 @@ fun MainScreen(transferViewModel: TransferViewModel) {
         onDispose { window?.clearFlags(flag) }
     }
 
-    // 相机连接成功后：连接页先保持"连接中"脉冲一小会（列表与缩略图此间已在全速加载），
-    // 再播成功爆发收尾，播完直接进照片列表——绿色对号 = 马上进入。
-    // 时长与 HomeScreen 的庆祝延迟严格对齐（同一对常量）。
-    LaunchedEffect(cameraState.isConnectedToCamera) {
-        if (cameraState.isConnectedToCamera && currentRoute == Screen.Home.route) {
-            delay(CONNECT_CELEBRATE_DELAY_MS + CONNECT_SUCCESS_ANIM_MS)
-            navController.navigate(Screen.Files.route) {
-                popUpTo(Screen.Home.route) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
-        }
-    }
-
     // 页面底色：纵向微渐变（顶部略亮→底部略暗）替代纯平色，各页共用这一处，
     // 换一处全局生效。恒黑页（遥控/预览）自绘黑底不受影响。
     val backgroundBrush = rememberAppBackgroundBrush()
@@ -170,7 +152,20 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                 composable(Screen.Home.route) {
                     HomeScreen(
                         viewModel = cameraViewModel,
-                        transferViewModel = transferViewModel
+                        transferViewModel = transferViewModel,
+                        onConnectionCelebrationFinished = {
+                            // 由成功动画自身通知结束，避免系统动画倍率改变后固定 delay
+                            // 提前切页。断线或已经离开连接页时丢弃迟到回调。
+                            if (cameraState.isConnectedToCamera &&
+                                navController.currentDestination?.route == Screen.Home.route
+                            ) {
+                                navController.navigate(Screen.Files.route) {
+                                    popUpTo(Screen.Home.route) { saveState = true }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                            }
+                        },
                     )
                 }
                 composable(

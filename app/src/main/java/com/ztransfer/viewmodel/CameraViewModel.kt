@@ -939,6 +939,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         Bitmap.Config.ARGB_8888,
                         honorExifOrientation = true,
                         maxLongEdge = EFFECT_PREVIEW_SOURCE_EDGE,
+                        // 后台预取遇忙立即让路；用户已经打开照片效果页时才做有限重试。
+                        retryDeviceBusy = requestedKey == key,
                     )
                     // A real camera response (including unsupported/null) is one completed
                     // attempt. Cancellation by a foreground task is not latched, so idle time
@@ -2020,6 +2022,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             file,
             Bitmap.Config.RGB_565,
             honorExifOrientation = false,
+            retryDeviceBusy = true,
         )?.asImageBitmap()
     }
 
@@ -2033,12 +2036,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         file: NikonCamera.FileInfo,
         config: Bitmap.Config,
         honorExifOrientation: Boolean,
+        retryDeviceBusy: Boolean,
         maxLongEdge: Int = MAX_FHD_PREVIEW_EDGE,
     ): Bitmap? {
         val cam = camera ?: return null
         val startedAt = android.os.SystemClock.elapsedRealtime()
         val bytes = try {
-            cam.getFhdPicture(file.handle)
+            cam.getFhdPicture(file.handle, retryDeviceBusy = retryDeviceBusy)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (_: Exception) {

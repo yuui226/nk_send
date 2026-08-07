@@ -38,6 +38,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,7 +85,8 @@ import kotlin.math.sin
 @Composable
 fun HomeScreen(
     viewModel: CameraViewModel,
-    transferViewModel: TransferViewModel
+    transferViewModel: TransferViewModel,
+    onConnectionCelebrationFinished: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
@@ -110,7 +112,7 @@ fun HomeScreen(
     val colors = AppTheme.colors
     val connected = state.isConnectedToCamera
     val usbError = state.usbConnectionError
-    // 会话真正就绪后再触发卡片内成功动画；MainScreen 使用同一组常量等待动画结束再跳转。
+    // 会话真正就绪后再触发卡片内成功动画；动画完成时主动通知 MainScreen 跳转。
     var celebrate by remember { mutableStateOf(false) }
     LaunchedEffect(connected) {
         if (connected) {
@@ -266,7 +268,8 @@ fun HomeScreen(
                         error = usbError?.takeIf {
                             selectedConnection == CameraConnectionType.USB
                         },
-                        goldBurst = isPro
+                        goldBurst = isPro,
+                        onSuccessAnimationFinished = onConnectionCelebrationFinished,
                     )
 
                     ConnectionMethodCard(
@@ -291,6 +294,7 @@ fun HomeScreen(
                         attentionPhaseOffset = 0.5f,
                         selectionScene = selectionScene.value,
                         goldBurst = isPro,
+                        onSuccessAnimationFinished = onConnectionCelebrationFinished,
                         feedback = wifiFeedback,
                         footer = {
                             TipLightbulbButton(
@@ -551,6 +555,7 @@ private fun ConnectionMethodCard(
     attentionActive: Boolean,
     attentionPhaseOffset: Float,
     selectionScene: Float,
+    onSuccessAnimationFinished: () -> Unit,
     error: String? = null,
     goldBurst: Boolean = false,
     feedback: ConnectionCardFeedback? = null,
@@ -876,6 +881,7 @@ private fun ConnectionMethodCard(
             ConnectionSuccessOverlay(
                 success = success,
                 goldBurst = goldBurst,
+                onFinished = onSuccessAnimationFinished,
                 modifier = Modifier
                     .align(Alignment.Center)
                     .requiredSize(220.dp)
@@ -922,10 +928,12 @@ private fun ConnectionStep(index: Int, text: String, accent: Color) {
 private fun ConnectionSuccessOverlay(
     success: Boolean,
     goldBurst: Boolean,
+    onFinished: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
     val progress = remember { Animatable(0f) }
+    val currentOnFinished by rememberUpdatedState(onFinished)
     LaunchedEffect(success) {
         if (success) {
             progress.snapTo(0f)
@@ -933,6 +941,7 @@ private fun ConnectionSuccessOverlay(
                 targetValue = 1f,
                 animationSpec = tween(760, easing = FastOutSlowInEasing)
             )
+            currentOnFinished()
         } else {
             progress.snapTo(0f)
         }
@@ -1087,10 +1096,9 @@ private fun PremiumSuccessEffect(
     }
 }
 
-// 连接成功后的入场节奏：先保持当前卡片 [CONNECT_CELEBRATE_DELAY_MS]，再播放
-// [CONNECT_SUCCESS_ANIM_MS] 的卡片内成功动画；动画结束后由 MainScreen 跳到照片列表。
+// 连接成功后的入场节奏：先保持当前卡片 [CONNECT_CELEBRATE_DELAY_MS]，再播放卡片内
+// 成功动画；动画协程完成后直接通知 MainScreen 跳转，不再用另一套固定时钟猜结束时刻。
 const val CONNECT_CELEBRATE_DELAY_MS = 500L
-const val CONNECT_SUCCESS_ANIM_MS = 850L
 private const val WIFI_SETTINGS_BUTTON_TEXTURE_SEED = 0x1457A102
 
 /** 布局热路径专用的非观察容器；更新坐标不触发 Compose 重组。 */

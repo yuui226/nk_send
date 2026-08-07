@@ -11,6 +11,7 @@ import com.ztransfer.diagnostics.FileOrderProbe
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -65,6 +66,34 @@ internal fun selectNewestFileHeadIndex(
  * 续传偏移的输出流，故绝不静默降级——抛此异常让调用方删掉半成品、从头重下。
  */
 class ResumeUnavailableException : Exception()
+
+/**
+ * FHD 能力判断只区分协议明确不支持与可恢复失败。相机忙、handle 失效、空数据以及厂商
+ * 临时错误都不能被升级成整场会话不支持，否则后台预取的一次失败会毒化后续大图预览。
+ */
+internal enum class FhdResponseDisposition {
+    SUCCESS,
+    TRANSIENT_FAILURE,
+    UNSUPPORTED,
+}
+
+internal fun classifyFhdResponse(
+    responseCode: Int,
+    hasPayload: Boolean,
+): FhdResponseDisposition = when {
+    responseCode == PtpConstants.RESPONSE_OK && hasPayload -> FhdResponseDisposition.SUCCESS
+    responseCode == PtpConstants.OPERATION_NOT_SUPPORTED -> FhdResponseDisposition.UNSUPPORTED
+    else -> FhdResponseDisposition.TRANSIENT_FAILURE
+}
+
+internal fun updateFhdSupport(
+    current: Boolean?,
+    disposition: FhdResponseDisposition,
+): Boolean? = when (disposition) {
+    FhdResponseDisposition.SUCCESS -> true
+    FhdResponseDisposition.UNSUPPORTED -> if (current == true) true else false
+    FhdResponseDisposition.TRANSIENT_FAILURE -> current
+}
 
 /**
  * 单命令通道的轻量调度器。普通命令仍直接使用 [mutex]；交互式大图/EXIF 在排队前
@@ -169,12 +198,11 @@ class NikonCamera(private val context: Context) {
     // 仅首块明确返回 Operation_Not_Supported 时置 false 并回退全量；瞬时错误不熔断。
     // 标准 PTP 0x101B 在 Nikon 机身上不被识别，须用此专有操作码。
     @Volatile private var partialObjectSupported: Boolean? = null
-    // FHD 预览(0x920F)支持探测：null=未知, true=支持, false=不支持（整会话不再尝试）。
-    // 精准熔断：明确 Operation_Not_Supported 立即熔断，其它非 OK 累计 2 次才熔断，
-    // 一次成功即永久置 true——避免把"临时忙"的支持机型误降级为只缩略图。
+    // FHD 预览(0x920F)支持探测：null=未知, true=支持, false=明确不支持。
+    // 只有标准 Operation_Not_Supported 才能整会话熔断；DeviceBusy 等暂态响应不得污染
+    // 能力状态。一次成功后保持 true，避免后续单个 handle 的异常推翻已验证能力。
     // 每次 connect 新建 NikonCamera 实例，故换相机自动重新探测。仅 ioMutex 内访问。
     @Volatile private var fhdSupported: Boolean? = null
-    private var fhdFailCount = 0
     // 遥控监看的取帧操作码：首次取帧从 DeviceInfo 解析并缓存。
     // 新机优先 0x9428（带 Display Information Data），不支持时回退 0x9203。
     // 每次连接都会新建 NikonCamera，因此不会把上一台机身的判断带进新会话。
@@ -225,6 +253,8 @@ class NikonCamera(private val context: Context) {
         const val CHUNK_SIZE = 2L * 1024 * 1024
         const val LARGE_FILE_THRESHOLD = 512L * 1024 * 1024
         const val LARGE_FILE_CHUNK_SIZE = 32L * 1024 * 1024
+        private const val FHD_DEVICE_BUSY_RETRIES = 2
+        private const val FHD_DEVICE_BUSY_RETRY_DELAY_MS = 160L
     }
 
     /** 仅 debug 构建输出协议日志，避免 release 包泄露 handle/size 并拖慢热路径。 */
@@ -628,36 +658,63 @@ class NikonCamera(private val context: Context) {
 
     /**
      * 获取 FHD (1920×1080) 预览图 JPEG 字节。与 [getThumbnail] 共用 [ioMutex] 串行化。
-     * 任何失败（固件不支持、IO 异常、非 OK 响应）均返回 null，调用方静默回退到缩略图。
-     * 不抛异常——这是纯体验增强功能，失败不应打扰用户。
+     * 仅相机明确返回“不支持”时才记住该会话无 FHD 能力；忙、对象异常和空数据都按临时失败处理。
+     * 临时失败返回 null，调用方静默回退到缩略图，不影响后续照片再次尝试。
      */
-    suspend fun getFhdPicture(handle: Int): ByteArray? = ioGate.withInteractive {
+    suspend fun getFhdPicture(
+        handle: Int,
+        retryDeviceBusy: Boolean = true,
+    ): ByteArray? = ioGate.withInteractive {
         withContext(Dispatchers.IO) {
             val startedAt = android.os.SystemClock.elapsedRealtime()
             // 已判定不支持：直接返回，免去每页一次注定失败的往返（预览秒回退缩略图）。
             if (fhdSupported == false) return@withContext null
             try {
-                sendCmd(PtpConstants.NK_GET_FHD_PICTURE, handle)
-                val (respCode, data) = recvRespWithPayload()
-                if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) {
-                    fhdSupported = true      // 一次成功即永久支持，关闭熔断计数
-                    fhdFailCount = 0
-                    log {
-                        "GetFhdPicture handle=$handle bytes=${data.size} " +
-                            "network=${android.os.SystemClock.elapsedRealtime() - startedAt}ms"
+                var busyRetriesRemaining = if (retryDeviceBusy) FHD_DEVICE_BUSY_RETRIES else 0
+                var result: ByteArray? = null
+                requestLoop@ while (true) {
+                    sendCmd(PtpConstants.NK_GET_FHD_PICTURE, handle)
+                    val (respCode, data) = recvRespWithPayload()
+                    val disposition = classifyFhdResponse(respCode, data?.isNotEmpty() == true)
+                    fhdSupported = updateFhdSupport(fhdSupported, disposition)
+                    when (disposition) {
+                        FhdResponseDisposition.SUCCESS -> {
+                            val payload = checkNotNull(data)
+                            log {
+                                "GetFhdPicture handle=$handle bytes=${payload.size} " +
+                                    "network=${android.os.SystemClock.elapsedRealtime() - startedAt}ms"
+                            }
+                            result = payload
+                            break@requestLoop
+                        }
+                        FhdResponseDisposition.UNSUPPORTED -> {
+                            // 已经成功过的会话不因单个对象的异常响应推翻能力；未知状态下收到
+                            // 标准不支持才熔断。
+                            log {
+                                "GetFhdPicture unsupported (resp=0x${respCode.toString(16)}), " +
+                                    "latched=${fhdSupported == false}"
+                            }
+                            break@requestLoop
+                        }
+                        FhdResponseDisposition.TRANSIENT_FAILURE -> {
+                            if (respCode == PtpConstants.DEVICE_BUSY && busyRetriesRemaining > 0) {
+                                busyRetriesRemaining--
+                                log {
+                                    "GetFhdPicture busy handle=$handle, retrying " +
+                                        "remaining=$busyRetriesRemaining"
+                                }
+                                delay(FHD_DEVICE_BUSY_RETRY_DELAY_MS)
+                                continue
+                            }
+                            log {
+                                "GetFhdPicture transient handle=$handle " +
+                                    "resp=0x${respCode.toString(16)} bytes=${data?.size ?: 0}"
+                            }
+                            break@requestLoop
+                        }
                     }
-                    return@withContext data
                 }
-                // 相机明确回了响应但非 OK：判定是否熔断。
-                if (fhdSupported == null) {
-                    fhdFailCount++
-                    if (respCode == PtpConstants.OPERATION_NOT_SUPPORTED || fhdFailCount >= 2) {
-                        fhdSupported = false
-                        log { "GetFhdPicture unsupported (resp=0x${respCode.toString(16)}), latched off for session" }
-                    }
-                }
-                log { "GetFhdPicture handle=$handle resp=0x${respCode.toString(16)}" }
-                null
+                result
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
