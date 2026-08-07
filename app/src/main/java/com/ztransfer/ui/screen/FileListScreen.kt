@@ -1259,6 +1259,7 @@ fun FileListScreen(
                     anchorRect = previewAnchor.takeIf { previewSourceAtOpen === previewSourceIdentity },
                     cameraViewModel = cameraViewModel,
                     hapticsEnabled = transferState.hapticsEnabled,
+                    transfersBusy = transfersBusy,
                     initialRotationQuarterTurns = transferState.previewRotationQuarterTurns,
                     burstHandles = burstHandles,
                     onTransfer = onTapFile,
@@ -2452,7 +2453,7 @@ private fun ThumbnailCell(
         // 避免先画一帧占位图、下一帧再换回缩略图造成列表闪烁。
         mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
     }
-    // 传输中仍允许取图，远程请求排到文件间隙；大图打开后只读本地缓存，不再向相机
+    // 传输中仍允许取图，远程请求排到分块间隙；大图打开后只读本地缓存，不再向相机
     // 发 GetThumb。关闭大图时 allowRemoteThumbnail 变回 true，缺图格子自动恢复。
     LaunchedEffect(file.handle, transfersBusy, allowRemoteThumbnail) {
         if (thumbnail == null) {

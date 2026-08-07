@@ -226,11 +226,8 @@
     <!-- PTP 回應碼 -->
     <string name="ptp_invalid_parameter">參數無效</string>
     <string name="ptp_operation_not_supported">操作不支援</string>
-    <string name="ptp_insufficient_storage">儲存空間不足</string>
     <string name="ptp_object_not_exist">指定的物件不存在</string>
     <string name="ptp_storage_full">儲存空間已滿</string>
-    <string name="ptp_file_exists">檔案已存在</string>
-    <string name="ptp_no_filename">未指定檔案名稱</string>
     <string name="ptp_file_protected">檔案受保護</string>
     <string name="ptp_session_not_open">工作階段未開啟</string>
     <string name="ptp_transfer_cancelled">傳輸已取消</string>

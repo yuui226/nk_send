@@ -226,11 +226,8 @@
     <!-- PTP response codes -->
     <string name="ptp_invalid_parameter">Invalid parameter</string>
     <string name="ptp_operation_not_supported">Operation not supported</string>
-    <string name="ptp_insufficient_storage">Not enough storage</string>
     <string name="ptp_object_not_exist">Object does not exist</string>
     <string name="ptp_storage_full">Storage full</string>
-    <string name="ptp_file_exists">File already exists</string>
-    <string name="ptp_no_filename">No file name specified</string>
     <string name="ptp_file_protected">File is protected</string>
     <string name="ptp_session_not_open">Session not open</string>
     <string name="ptp_transfer_cancelled">Transfer cancelled</string>

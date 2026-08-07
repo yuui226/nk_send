@@ -1156,7 +1156,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             fileDocUri = partFile.uri
                             log { "DL_RESUME: ${task.file.fileName} partSize=$partSize resumeOffset=$resumeOffset" }
                         } else {
-                            // 太小（<64MB）或异常半成品，删掉重建。
+                            // 不足一个续传块（当前 2MB）或异常半成品，删掉重建。
                             deleteQuietly(partFile.uri)
                         }
                     }
@@ -1200,7 +1200,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     handle, out,
                                     onProgress = { progress ->
                                         val speed = if (progress.elapsed > 0) {
-                                            (progress.downloaded / progress.elapsed).toLong()
+                                            ((progress.downloaded - resumeOffset).coerceAtLeast(0L) /
+                                                progress.elapsed).toLong()
                                         } else 0
                                         _state.update { state ->
                                             state.copy(
@@ -1278,8 +1279,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     val framePreset = task.framePreset
                                     val photoFilter = task.photoFilterRequested
                                     val shouldGenerateFrame = framePreset != null || photoFilter != null
-                                    // 起点由协议层在取得相机 IO 独占权后记录；这里仍是正式文件
-                                    // 已落盘并完成改名/复制后的完成点。
+                                    // 起点由协议层在本文件进入下载流程时记录（包含为大图/EXIF
+                                    // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
                                     val elapsed = android.os.SystemClock.elapsedRealtime() -
                                         stats.startedAtElapsedMs
                                     // 免费额度按"真正传输完成"计数(此处是唯一完成点;

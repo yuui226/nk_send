@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -150,6 +151,7 @@ internal fun allowPreviewRemoteThumbnailFallback(
 /**
  * 全屏预览层：普通页显示缓存缩略图的**未裁切**（Fit）完整画面；折叠连拍在分页中
  * 保持为一个合集页，只有用户主动展开才把成员插入其后。
+ * 传输中只抢占当前 FHD + EXIF；邻页等真正翻到时再升级为当前页。
  * 整体从被长按格子 [anchorRect] 的位置缩放展开，关闭时反向缩回（从哪来回哪去）。
  * 不下载原图（缩略图低清但瞬开、不抢传输通道）。
  * 本层在深浅两种主题下都保持黑底沉浸式（照片查看器惯例，黑底最衬照片），
@@ -163,6 +165,7 @@ internal fun PhotoPreviewOverlay(
     anchorRect: Rect?,
     cameraViewModel: CameraViewModel,
     hapticsEnabled: Boolean,
+    transfersBusy: Boolean,
     // 全局持久化方向：0..3 个逆时针 90°。只用作本次 overlay 初始值；
     // overlay 内部保留不取模的连续角度，保证 270°→0° 时仍是向左短转 90°。
     initialRotationQuarterTurns: Int = 0,
@@ -184,6 +187,8 @@ internal fun PhotoPreviewOverlay(
     val pagerState = rememberPagerState(initialPage = initialIndex) { previewItems.size }
     val previewScope = rememberCoroutineScope()
     val cameraState by cameraViewModel.state.collectAsState()
+    val currentTransfersBusy by rememberUpdatedState(transfersBusy)
+    var previousTransfersBusy by remember { mutableStateOf(transfersBusy) }
     var overlayBounds by remember { mutableStateOf<Rect?>(null) }
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
@@ -333,10 +338,33 @@ internal fun PhotoPreviewOverlay(
     ) {
         if (!deferredLoadsEnabled || !cameraState.isConnectedToCamera) return@LaunchedEffect
         val cp = pagerState.currentPage
-        if (loadFhdPage(cp, awaitExisting = true)) haptics.tick()
-        loadExifPage(cp)
+        cameraViewModel.withInteractivePreviewPriority {
+            if (loadFhdPage(cp, awaitExisting = true)) haptics.tick()
+            loadExifPage(cp)
+        }
+        if (!currentTransfersBusy) {
+            if (cp > 0) loadFhdPage(cp - 1)
+            if (cp < previewItems.lastIndex && !currentTransfersBusy) {
+                loadFhdPage(cp + 1)
+            }
+        }
+    }
+
+    // 上面的主加载不能把 transfersBusy 放进 key，否则状态变化会取消正在读取的 PTP
+    // 事务。这里仅监听“忙→闲”，在用户仍停留当前页时补上此前跳过的邻页预取。
+    LaunchedEffect(transfersBusy) {
+        val shouldResumePrefetch = previousTransfersBusy && !transfersBusy
+        previousTransfersBusy = transfersBusy
+        if (!shouldResumePrefetch || !deferredLoadsEnabled ||
+            !cameraState.isConnectedToCamera
+        ) {
+            return@LaunchedEffect
+        }
+        val cp = pagerState.currentPage
         if (cp > 0) loadFhdPage(cp - 1)
-        if (cp < previewItems.lastIndex) loadFhdPage(cp + 1)
+        if (cp < previewItems.lastIndex && !currentTransfersBusy) {
+            loadFhdPage(cp + 1)
+        }
     }
 
     Box(

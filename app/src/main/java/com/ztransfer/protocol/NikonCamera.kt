@@ -11,6 +11,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -33,6 +36,56 @@ class CameraRefusedException(message: String) : Exception(message)
  */
 class ResumeUnavailableException : Exception()
 
+/**
+ * 单命令通道的轻量调度器。普通命令仍直接使用 [mutex]；交互式大图/EXIF 在排队前
+ * 登记，分块传输在每个完整 PTP 事务之间检查登记，让交互请求先取得下一段通道。
+ */
+internal class CameraIoGate(
+    val mutex: Mutex = Mutex(),
+) {
+    private val interactiveWaiters = MutableStateFlow(0)
+
+    suspend fun <T> withInteractivePriority(block: suspend () -> T): T {
+        interactiveWaiters.update { it + 1 }
+        try {
+            return block()
+        } finally {
+            interactiveWaiters.update { it - 1 }
+        }
+    }
+
+    suspend fun <T> withInteractive(block: suspend () -> T): T =
+        withInteractivePriority { mutex.withLock { block() } }
+
+    suspend fun <T> withTransferSlice(block: suspend () -> T): T {
+        while (true) {
+            interactiveWaiters.first { it == 0 }
+            mutex.lock()
+            if (interactiveWaiters.value == 0) {
+                try {
+                    return block()
+                } finally {
+                    mutex.unlock()
+                }
+            }
+            mutex.unlock()
+        }
+    }
+}
+
+internal fun shouldUsePartialObjectDownload(
+    partialObjectSupported: Boolean?,
+    effectiveSize: Long,
+): Boolean = partialObjectSupported != false &&
+    effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN
+
+internal fun downloadChunkSize(effectiveSize: Long): Long =
+    if (effectiveSize > NikonCamera.LARGE_FILE_THRESHOLD) {
+        NikonCamera.LARGE_FILE_CHUNK_SIZE
+    } else {
+        NikonCamera.CHUNK_SIZE
+    }
+
 class NikonCamera(private val context: Context) {
     private var cmdSocket: Socket? = null
     private var evtSocket: Socket? = null
@@ -48,7 +101,9 @@ class NikonCamera(private val context: Context) {
     private var evtThread: Thread? = null
     // internal 而非 private:遥控实验(RemoteLab.kt)以扩展函数复用同一互斥与收发原语,
     // 保证实验命令与传输/缩略图/心跳严格串行,不引入第二条 IO 路径。
-    internal val ioMutex = Mutex()
+    private val ioGate = CameraIoGate()
+    internal val ioMutex: Mutex
+        get() = ioGate.mutex
     // 一次自动对焦由多条独立 PTP 事务组成。对焦流程和普通遥控命令仍须严格串行，
     // 只有 Live View 取帧绕过此锁；因此不会为了释放 ioMutex 引入参数/拍摄命令穿插。
     internal val focusMutex = Mutex()
@@ -56,7 +111,7 @@ class NikonCamera(private val context: Context) {
     // 避免在握手中途失败时空等 CloseSession 响应（最长可达 soTimeout）。
     @Volatile private var sessionOpen = false
     // Nikon GetPartialObjectEx (0x9431) 支持探测：null=未探测, true=支持, false=不支持。
-    // 仅首块失败时置为 false 并回退到全量下载；同一会话后续大文件不再试探。
+    // 仅首块明确返回 Operation_Not_Supported 时置 false 并回退全量；瞬时错误不熔断。
     // 标准 PTP 0x101B 在 Nikon 机身上不被识别，须用此专有操作码。
     @Volatile private var partialObjectSupported: Boolean? = null
     // FHD 预览(0x920F)支持探测：null=未知, true=支持, false=不支持（整会话不再尝试）。
@@ -107,13 +162,14 @@ class NikonCamera(private val context: Context) {
         // 60s 超时会抱着 ioMutex 白等一分钟——重试的首个下载全程被挡住，表现为
         // "停止后重试卡半天没速度"。静默 3s 即认定连接不可用，断开走自动重连。
         const val CANCEL_DRAIN_TIMEOUT_MS = 3_000
-        // 大于此阈值的文件走分块下载 (GetPartialObject)，防止相机 PTP 事务超时断连。
-        // Nikon 相机单次 PTP 事务通常有 2-3 分钟超时，大视频全量下载容易触发。
-        const val CHUNK_DOWNLOAD_THRESHOLD = 128L * 1024 * 1024  // 128 MB
-        // 每块大小：足够大以最小化块间命令开销，足够小以远低于相机超时 (64MB @2MB/s ≈32s)。
-        // 也是断点续传的检查点粒度——传输中断后最多重传当前块。
+        // 所有大小已知的文件都优先走 GetPartialObjectEx。普通文件每块 2MB；超过
+        // LARGE_FILE_THRESHOLD 的巨大文件改用 32MB，避免视频产生数百次命令往返。
+        // 每块仍是独立 PTP 事务，块间释放相机通道供当前 FHD / EXIF 使用。
+        // 也是断点续传的检查点粒度；旧版本留下的 64MB 对齐半成品仍天然兼容。
         // internal: TransferViewModel 引用此值做续传偏移对齐。
-        const val CHUNK_SIZE = 64L * 1024 * 1024                 // 64 MB
+        const val CHUNK_SIZE = 2L * 1024 * 1024
+        const val LARGE_FILE_THRESHOLD = 512L * 1024 * 1024
+        const val LARGE_FILE_CHUNK_SIZE = 32L * 1024 * 1024
     }
 
     /** 仅 debug 构建输出协议日志，避免 release 包泄露 handle/size 并拖慢热路径。 */
@@ -474,7 +530,7 @@ class NikonCamera(private val context: Context) {
      * 任何失败（固件不支持、IO 异常、非 OK 响应）均返回 null，调用方静默回退到缩略图。
      * 不抛异常——这是纯体验增强功能，失败不应打扰用户。
      */
-    suspend fun getFhdPicture(handle: Int): ByteArray? = ioMutex.withLock {
+    suspend fun getFhdPicture(handle: Int): ByteArray? = ioGate.withInteractive {
         withContext(Dispatchers.IO) {
             val startedAt = android.os.SystemClock.elapsedRealtime()
             // 已判定不支持：直接返回，免去每页一次注定失败的往返（预览秒回退缩略图）。
@@ -503,8 +559,10 @@ class NikonCamera(private val context: Context) {
                 null
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
-                // IO/网络异常：不计数、不熔断（是连接问题，非机型不支持）。
+            } catch (e: Exception) {
+                // 未完整收完响应的连接不可再复用，否则下一条命令可能读到本事务残包。
+                log { "GetFhdPicture transport failed: ${e.javaClass.simpleName}: ${e.message}" }
+                closeQuietly()
                 null
             }
         }
@@ -515,23 +573,33 @@ class NikonCamera(private val context: Context) {
      * [maxSize] 字节（默认 128KB，足以覆盖绝大多数 JPEG 的 EXIF 段）；与 [ioMutex]
      * 串行化。任何失败返回 null——EXIF 是纯体验增强，不应为失败产生视觉噪音。
      */
-    suspend fun readExifHeader(handle: Int, maxSize: Int = 128 * 1024): ByteArray? = ioMutex.withLock {
-        withContext(Dispatchers.IO) {
-            try {
-                sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
-                val (respCode, data) = recvRespWithPayload()
-                if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) data
-                else {
-                    log { "ReadExifHeader handle=$handle resp=0x${respCode.toString(16)} len=${data?.size ?: 0}" }
+    suspend fun readExifHeader(handle: Int, maxSize: Int = 128 * 1024): ByteArray? =
+        ioGate.withInteractive {
+            withContext(Dispatchers.IO) {
+                try {
+                    sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
+                    val (respCode, data) = recvRespWithPayload()
+                    if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) data
+                    else {
+                        log { "ReadExifHeader handle=$handle resp=0x${respCode.toString(16)} len=${data?.size ?: 0}" }
+                        null
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    log { "ReadExifHeader transport failed: ${e.javaClass.simpleName}: ${e.message}" }
+                    closeQuietly()
                     null
                 }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                null
             }
         }
-    }
+
+    /**
+     * 为当前大图的 FHD + EXIF 组合保留交互优先级，但不持续占用 [ioMutex]：两项之间的
+     * 手机解码仍可并行进行，只是不允许原片传输抢先开始下一块。
+     */
+    internal suspend fun <T> withInteractivePreviewPriority(block: suspend () -> T): T =
+        ioGate.withInteractivePriority(block)
 
     suspend fun streamFileInfo(
         handles: List<Int>,
@@ -622,40 +690,24 @@ class NikonCamera(private val context: Context) {
         val elapsed: Float
     )
 
-    /**
-     * 查询文件真实 64 位大小（字节）。当 ObjectInfo 对 >4GB 文件报 SIZE_UNKNOWN (0xFFFFFFFF)
-     * 时调用此方法获取精确值，以便分块下载和完整性校验。
-     * 返回 null 表示操作码不支持或 IO 失败——调用方应回退到 SIZE_UNKNOWN 路径。
-     *
-     * 通过 [ioMutex] 与其它命令串行。downloadToFile 内部调用时走 [getObjectSizeInternal]
-     * 避免重复获取同一 Mutex（kotlinx Mutex 不可重入）。
-     */
-    suspend fun getObjectSize(handle: Int): Long? = ioMutex.withLock {
-        withContext(Dispatchers.IO) { getObjectSizeInternal(handle) }
-    }
-
-    /** 不持锁的 [getObjectSize] 实现，仅供已持有 [ioMutex] 的上下文（如 downloadToFile）调用。 */
+    /** 查询 >4GB 文件的真实大小；仅由下载事务在相机通道保护内调用。 */
     private fun getObjectSizeInternal(handle: Int): Long? {
-        try {
-            sendCmd(PtpConstants.NK_GET_OBJECT_SIZE, handle)
-            val (respCode, data) = recvRespWithPayload()
-            if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 8) {
-                log { "GetObjectSize failed: resp=0x${respCode.toString(16)}" }
-                return null
-            }
-            val size = data.getLongLE(0)
-            log { "GetObjectSize handle=$handle size=$size" }
-            return if (size > 0) size else null
-        } catch (_: Exception) {
+        sendCmd(PtpConstants.NK_GET_OBJECT_SIZE, handle)
+        val (respCode, data) = recvRespWithPayload()
+        if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 8) {
+            log { "GetObjectSize failed: resp=0x${respCode.toString(16)}" }
             return null
         }
+        val size = data.getLongLE(0)
+        log { "GetObjectSize handle=$handle size=$size" }
+        return if (size > 0) size else null
     }
 
     /** 单文件下载完成后的下载速度（MB/s，1024 进制，与 UI formatSpeed 同口径；纯网络读取吞吐）。 */
     data class DownloadStats(
         val bytes: Long,
         val mbps: Float,
-        /** 已取得相机 IO 独占权、开始处理本文件的单调时钟时间戳。 */
+        /** 本文件进入协议下载流程的单调时钟时间戳（包含块间让路时间）。 */
         val startedAtElapsedMs: Long
     )
 
@@ -664,9 +716,9 @@ class NikonCamera(private val context: Context) {
      * [resumeOffset] 非零时从该偏移续传（调用方须已把 output 定位到该偏移）。
      *
      * 两条数据相位路径共用同一个 [pump] 循环，只是驱动它的命令不同：
-     * - 分块（GetPartialObjectEx）：文件 >128MB 或需要续传时；按【实收字节】推进偏移，
-     *   逐块 + 全文件双重完整性校验。
-     * - 全量（GetObject）：仅 resumeOffset==0 时使用；分块不支持时从 0 回退到这里。
+     * - 分块（GetPartialObjectEx）：所有大小已知且机型支持的文件；每块是完整 PTP 事务，
+     *   块间释放通道供 FHD / EXIF 插入，并按【实收字节】推进偏移。
+     * - 全量（GetObject）：仅 resumeOffset==0 且分块不支持或大小未知时回退。
      *
      * 续传是一等契约：若请求了 resumeOffset 但走不了分块（相机不支持 / 大小未知），
      * 绝不用"从 0 全量"去填一个已定位到偏移的流（会写出错位的损坏文件），而是抛
@@ -678,12 +730,11 @@ class NikonCamera(private val context: Context) {
         onProgress: ((DownloadProgress) -> Unit)? = null,
         resumeOffset: Long = 0L,
         totalSize: Long = 0L
-    ): Result<DownloadStats> = ioMutex.withLock {
-        withContext(Dispatchers.IO) {
+    ): Result<DownloadStats> = withContext(Dispatchers.IO) {
             val scope = this
             var totalDownloaded = resumeOffset
-            // 放在 ioMutex 内：锁外可能有缩略图/事件命令尚未结束，那段排队时间不属于
-            // 本文件传输。时间戳随成功结果交给保存层，让关闭流、改名/复制仍计入总耗时。
+            // 从任务真正进入协议层开始计时；分块之间为 FHD / EXIF 让路的时间属于用户
+            // 感知到的本文件总耗时。纯网络吞吐仍由 readNanos 单独统计，不被让路时间稀释。
             val startTime = android.os.SystemClock.elapsedRealtime()
             var lastProgressTime = startTime
             var readNanos = 0L
@@ -767,10 +818,10 @@ class NikonCamera(private val context: Context) {
                 }
             }
 
-            // 取消路径共用：发 Cancel 请求相机停发 → 收紧超时排空在途数据 → 保住连接或兜底断开。
-            suspend fun drainOnCancel() {
+            // 事务异常共用：发 Cancel 请求相机停发 → 收紧超时排空在途数据 → 保住连接或兜底断开。
+            suspend fun abortActiveTransaction() {
                 if (usbPtp != null) {
-                    // A cancelled coroutine may stop in the middle of a single USB data container.
+                    // An aborted transaction may stop in the middle of a single USB data container.
                     // The next 12 bytes are therefore not guaranteed to be a container header;
                     // closing is the only safe way to avoid reusing a desynchronised PTP stream.
                     closeQuietly()
@@ -783,7 +834,7 @@ class NikonCamera(private val context: Context) {
                         if (drainCmdResponse(CANCEL_DRAIN_BUDGET)) {
                             cmdSocket?.soTimeout = SO_TIMEOUT_MS
                         } else {
-                            log { "DL_CANCEL drain budget exceeded, closing" }
+                            log { "DL_ABORT drain budget exceeded, closing" }
                             closeQuietly()
                         }
                     }
@@ -792,52 +843,68 @@ class NikonCamera(private val context: Context) {
                 }
             }
 
-            // 对 >4GB 文件（ObjectInfo 报 SIZE_UNKNOWN）用 GetObjectSize 取真实 64 位大小。
-            // internal 版本：当前已持 ioMutex，不可重入。
-            var effectiveSize = totalSize
-            if (totalSize == PtpConstants.SIZE_UNKNOWN || totalSize <= 0L) {
-                getObjectSizeInternal(handle)?.takeIf { it > 0 }?.let {
-                    effectiveSize = it
-                    log { "DL_SIZE resolved: $totalSize -> $it via GetObjectSize" }
+            // 一个完整下载事务的安全边界。任何异常若发生在数据相位内，都必须仍持有
+            // 通道锁完成 Cancel/排空；否则下一条 FHD/EXIF 可能读到上一事务遗留的数据包。
+            suspend fun <T> transferTransaction(block: suspend () -> T): T =
+                ioGate.withTransferSlice {
+                    try {
+                        block()
+                    } catch (e: Exception) {
+                        abortActiveTransaction()
+                        throw e
+                    }
                 }
-            }
-            val sizeKnown = effectiveSize > 0 && effectiveSize != PtpConstants.SIZE_UNKNOWN
-            // 分块路径条件：相机支持 + 大小已知 + （需要续传 或 超过阈值）。
-            val usePartial = partialObjectSupported != false && sizeKnown &&
-                (resumeOffset > 0 || effectiveSize > CHUNK_DOWNLOAD_THRESHOLD)
-
-            // 请求了续传却走不了分块：全量只能从 0 填，会写坏已定位的流。拒绝，让调用方重下。
-            if (resumeOffset > 0 && !usePartial) {
-                return@withContext Result.failure(ResumeUnavailableException())
-            }
 
             try {
+                // 对 >4GB 文件（ObjectInfo 报 SIZE_UNKNOWN）用 GetObjectSize 取真实 64 位大小。
+                var effectiveSize = totalSize
+                if (totalSize == PtpConstants.SIZE_UNKNOWN || totalSize <= 0L) {
+                    transferTransaction { getObjectSizeInternal(handle) }?.takeIf { it > 0 }?.let {
+                        effectiveSize = it
+                        log { "DL_SIZE resolved: $totalSize -> $it via GetObjectSize" }
+                    }
+                }
+                val sizeKnown = effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN
+                // 普通照片也走既有分块协议；这是在 PTP 事务边界插入大图请求的前提。
+                val usePartial = shouldUsePartialObjectDownload(partialObjectSupported, effectiveSize)
+
+                // 请求了续传却走不了分块：全量只能从 0 填，会写坏已定位的流。拒绝，让调用方重下。
+                if (resumeOffset > 0 && !usePartial) {
+                    return@withContext Result.failure(ResumeUnavailableException())
+                }
+
                 if (usePartial) {
                     // ===== 分块路径 =====
                     var offset = resumeOffset
                     var first = true
                     var fellBack = false
+                    val chunkSize = downloadChunkSize(effectiveSize)
                     while (offset < effectiveSize) {
                         scope.ensureActive()
-                        val reqSize = minOf(CHUNK_SIZE, effectiveSize - offset).toInt()
+                        val reqSize = minOf(chunkSize, effectiveSize - offset).toInt()
                         log { "DL_CHUNK offset=$offset size=$reqSize" }
-                        sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle,
-                            (offset and 0xFFFFFFFFL).toInt(), (offset ushr 32).toInt(), reqSize, 0)
-                        val (resp, got, chunkExpected) = pump(effectiveSize)
+                        val (resp, got, chunkExpected) = transferTransaction {
+                            sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle,
+                                (offset and 0xFFFFFFFFL).toInt(),
+                                (offset ushr 32).toInt(), reqSize, 0)
+                            pump(effectiveSize)
+                        }
                         log { "DL_CHUNK_RESP resp=0x${resp.toString(16)} got=$got" }
 
                         if (resp != PtpConstants.RESPONSE_OK) {
-                            // 首块、尚未写入任何字节、且是全新下载（无续传偏移）→ 判定为
-                            // 操作码不支持，安全回退全量（流仍在 0）。其它情形一律失败，
-                            // 绝不在已写入字节后回退（无法回卷 → 文件膨胀损坏）。
-                            if (first && got == 0L && resumeOffset == 0L) {
+                            // 只有相机明确表示不支持操作码，且流仍在 0，才能安全回退全量。
+                            // 设备忙等瞬时错误直接失败，绝不把当前文件降级成不可插队的整传。
+                            if (first && got == 0L && resumeOffset == 0L &&
+                                resp == PtpConstants.OPERATION_NOT_SUPPORTED
+                            ) {
                                 partialObjectSupported = false
                                 fellBack = true
-                                log { "DL_PARTIAL unsupported (resp=0x${resp.toString(16)}), full fallback" }
+                                log { "DL_PARTIAL unsupported, full fallback" }
                                 break
                             }
                             return@withContext failed(resp)
                         }
+                        partialObjectSupported = true
                         // 逐块校验：声明长度与实收不符 = 短读，立即失败（不吞不跳）。
                         if (chunkExpected > 0 && got != chunkExpected) return@withContext incomplete(got, chunkExpected)
                         // OK 但零字节：相机不再推进，避免死循环。
@@ -855,8 +922,10 @@ class NikonCamera(private val context: Context) {
                 }
 
                 // ===== 全量路径（仅 resumeOffset==0：全新下载 或 分块不支持回退）=====
-                sendCmd(PtpConstants.GET_OBJECT, handle)
-                val (resp, _, expected) = pump(if (sizeKnown) effectiveSize else 0L)
+                val (resp, _, expected) = transferTransaction {
+                    sendCmd(PtpConstants.GET_OBJECT, handle)
+                    pump(if (sizeKnown) effectiveSize else 0L)
+                }
                 log { "DL_FULL resp=0x${resp.toString(16)} total=$totalDownloaded" }
                 if (resp != PtpConstants.RESPONSE_OK) return@withContext failed(resp)
                 // 相机异常提前结束数据阶段：声明大小与实收不符则判残缺。SIZE_UNKNOWN/未声明放行。
@@ -864,15 +933,13 @@ class NikonCamera(private val context: Context) {
                     return@withContext incomplete(totalDownloaded, expected)
                 }
                 Result.success(buildStats())
-            } catch (e: OutputWriteException) {
-                Result.failure(e)
             } catch (e: CancellationException) {
-                drainOnCancel()
-                throw e   // 取消须向上传播，不能包装成失败结果
+                // 数据相位内的取消已由 transferTransaction 在持锁状态排空；块间取消没有
+                // 在途协议数据，直接传播即可。
+                throw e
             } catch (e: Exception) {
                 Result.failure(e)
             }
-        }
     }
 
     /**

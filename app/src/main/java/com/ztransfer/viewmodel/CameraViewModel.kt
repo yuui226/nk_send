@@ -1500,8 +1500,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * [allowRemote] 为 false 时只走内存/磁盘路径；用于大图打开期间暂停底层网格的
      * GetThumb，关闭后调用方以 true 重试即可恢复。
      *
-     * 传输进行中也允许请求：ioMutex 在单个文件下载期间被持有，缩略图请求只会排队到
-     * 当前文件传完的间隙执行，不会拖慢传输中的文件本身。
+     * 传输进行中也允许请求：大小已知且支持分块的普通文件每 2MB、超过 512MB 的文件
+     * 每 32MB 释放一次相机通道，缩略图可在块间穿插；兼容整传路径仍需等待当前文件完成。
      */
     suspend fun loadThumbnail(
         file: NikonCamera.FileInfo,
@@ -1783,6 +1783,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             Bitmap.Config.RGB_565,
             honorExifOrientation = false,
         )?.asImageBitmap()
+    }
+
+    /** 当前照片的 FHD 与 EXIF 共用一次优先窗口，避免传输块插入两者之间。 */
+    suspend fun <T> withInteractivePreviewPriority(block: suspend () -> T): T {
+        val cam = camera
+        return if (cam != null) cam.withInteractivePreviewPriority(block) else block()
     }
 
     private suspend fun loadFhdBitmap(

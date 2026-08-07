@@ -47,6 +47,7 @@ object PtpConstants {
     // PTP 规范 0x2005 Operation_Not_Supported：机型不支持该操作码时返回。
     // 用于 FHD 预览的会话级熔断（明确不支持才熔断，瞬时错误不误伤）。
     const val OPERATION_NOT_SUPPORTED = 0x2005
+    const val DEVICE_BUSY = 0x2019
     const val SESSION_ALREADY_OPEN = 0x201E
     // PTP 规范：0x2009 Invalid_Object_Handle / 0x2010 No_Thumbnail_Present。
     // 用于区分"确认无缩略图"（可负缓存）与"瞬时失败"（如设备忙，绝不能负缓存）。
@@ -90,21 +91,23 @@ object PtpConstants {
 
     // 响应码 -> 文案资源 ID（随系统语言本地化，仅错误路径调用，不在热路径上）。
     private val RESPONSE_MESSAGES = mapOf(
-        0x2002 to R.string.ptp_invalid_parameter,
-        0x2003 to R.string.ptp_operation_not_supported,
-        0x2004 to R.string.ptp_insufficient_storage,
-        0x2005 to R.string.ptp_object_not_exist,
-        0x2006 to R.string.ptp_storage_full,
-        0x2007 to R.string.ptp_file_exists,
-        0x2008 to R.string.ptp_no_filename,
-        0x2009 to R.string.ptp_file_protected,
-        0x200A to R.string.ptp_session_not_open,
-        0x200B to R.string.ptp_transfer_cancelled,
-        0x200C to R.string.ptp_no_object,
-        0x200D to R.string.ptp_incompatible_spec,
-        0x200F to R.string.ptp_device_busy,
-        0x2010 to R.string.ptp_no_parent,
+        0x2003 to R.string.ptp_session_not_open,
+        OPERATION_NOT_SUPPORTED to R.string.ptp_operation_not_supported,
+        0x2006 to R.string.ptp_invalid_parameter,
+        INVALID_OBJECT_HANDLE to R.string.ptp_object_not_exist,
+        0x200A to R.string.ptp_operation_not_supported,
+        0x200B to R.string.ptp_incompatible_spec,
+        0x200C to R.string.ptp_storage_full,
+        0x200D to R.string.ptp_file_protected,
+        0x200E to R.string.ptp_file_protected,
+        0x2013 to R.string.ptp_storage_unavailable,
+        0x2014 to R.string.ptp_incompatible_spec,
+        0x2015 to R.string.ptp_no_object,
+        DEVICE_BUSY to R.string.ptp_device_busy,
+        0x201A to R.string.ptp_no_parent,
+        0x201D to R.string.ptp_invalid_parameter,
         0x201E to R.string.ptp_session_already_open,
+        0x201F to R.string.ptp_transfer_cancelled,
         0xA801 to R.string.ptp_firmware_error,
         0xA802 to R.string.ptp_storage_unavailable
     )
