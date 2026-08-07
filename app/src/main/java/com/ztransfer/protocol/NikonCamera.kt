@@ -74,6 +74,7 @@ internal class CameraIoGate(
     val mutex: Mutex = Mutex(),
 ) {
     private val interactiveWaiters = MutableStateFlow(0)
+    private val activeDownloads = MutableStateFlow(0)
 
     suspend fun <T> withInteractivePriority(block: suspend () -> T): T {
         interactiveWaiters.update { it + 1 }
@@ -99,6 +100,30 @@ internal class CameraIoGate(
                 }
             }
             mutex.unlock()
+        }
+    }
+
+    /**
+     * 登记一整个协议下载，而不是某一个分块。下载在块间释放 [mutex] 时仍保持登记，
+     * 让只应在空闲期执行的连接探测不会误插入下一块之前。
+     */
+    suspend fun <T> withDownloadActivity(block: suspend () -> T): T {
+        activeDownloads.update { it + 1 }
+        try {
+            return block()
+        } finally {
+            activeDownloads.update { (it - 1).coerceAtLeast(0) }
+        }
+    }
+
+    /**
+     * 只在没有协议下载时执行普通命令。锁外快速判断避免无意义排队；拿到锁后必须再次
+     * 判断，封住“心跳先判断空闲、下载随后开始、心跳排到某个分块后面”的竞态窗口。
+     */
+    suspend fun <T> withIdleCommand(skippedValue: T, block: suspend () -> T): T {
+        if (activeDownloads.value > 0) return skippedValue
+        return mutex.withLock {
+            if (activeDownloads.value > 0) skippedValue else block()
         }
     }
 }
@@ -532,7 +557,7 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    suspend fun keepalive(): Boolean = ioMutex.withLock {
+    suspend fun keepalive(): Boolean = ioGate.withIdleCommand(skippedValue = true) {
         withContext(Dispatchers.IO) {
             try {
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
@@ -896,7 +921,8 @@ class NikonCamera(private val context: Context) {
         onProgress: ((DownloadProgress) -> Unit)? = null,
         resumeOffset: Long = 0L,
         totalSize: Long = 0L
-    ): Result<DownloadStats> = withContext(Dispatchers.IO) {
+    ): Result<DownloadStats> = ioGate.withDownloadActivity {
+        withContext(Dispatchers.IO) {
             val scope = this
             var totalDownloaded = resumeOffset
             // 从任务真正进入协议层开始计时；分块之间为 FHD / EXIF 让路的时间属于用户
@@ -1106,6 +1132,7 @@ class NikonCamera(private val context: Context) {
             } catch (e: Exception) {
                 Result.failure(e)
             }
+        }
     }
 
     /**

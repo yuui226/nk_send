@@ -6,6 +6,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
@@ -86,6 +87,100 @@ class CameraIoGateTest {
         withTimeout(1_000) {
             gate.withTransferSlice { }
         }
+    }
+
+    @Test
+    fun idleCommandIsSkippedForWholeDownloadIncludingSliceGaps() = runBlocking {
+        val gate = CameraIoGate()
+        val betweenSlices = CompletableDeferred<Unit>()
+        val finishDownload = CompletableDeferred<Unit>()
+        var idleCommandRuns = 0
+
+        val download = launch {
+            gate.withDownloadActivity {
+                gate.withTransferSlice { }
+                betweenSlices.complete(Unit)
+                finishDownload.await()
+                gate.withTransferSlice { }
+            }
+        }
+        betweenSlices.await()
+
+        val result = gate.withIdleCommand(skippedValue = "skipped") {
+            idleCommandRuns++
+            "ran"
+        }
+        assertEquals("skipped", result)
+        assertEquals(0, idleCommandRuns)
+
+        finishDownload.complete(Unit)
+        download.join()
+        assertEquals(
+            "ran",
+            gate.withIdleCommand(skippedValue = "skipped") {
+                idleCommandRuns++
+                "ran"
+            },
+        )
+        assertEquals(1, idleCommandRuns)
+    }
+
+    @Test
+    fun idleCommandRechecksActivityAfterWaitingForMutex() = runBlocking {
+        val gate = CameraIoGate()
+        val mutexHeld = CompletableDeferred<Unit>()
+        val releaseMutex = CompletableDeferred<Unit>()
+        val downloadRegistered = CompletableDeferred<Unit>()
+        val finishDownload = CompletableDeferred<Unit>()
+        var idleCommandRuns = 0
+
+        val holder = launch {
+            gate.mutex.withLock {
+                mutexHeld.complete(Unit)
+                releaseMutex.await()
+            }
+        }
+        mutexHeld.await()
+        val idleCommand = launch {
+            assertEquals(
+                "skipped",
+                gate.withIdleCommand(skippedValue = "skipped") {
+                    idleCommandRuns++
+                    "ran"
+                },
+            )
+        }
+        yield()
+        val download = launch {
+            gate.withDownloadActivity {
+                downloadRegistered.complete(Unit)
+                finishDownload.await()
+            }
+        }
+        downloadRegistered.await()
+
+        releaseMutex.complete(Unit)
+        joinAll(holder, idleCommand)
+        assertEquals(0, idleCommandRuns)
+
+        finishDownload.complete(Unit)
+        download.join()
+    }
+
+    @Test
+    fun cancelledDownloadAlwaysRestoresIdleCommands() = runBlocking {
+        val gate = CameraIoGate()
+        val registered = CompletableDeferred<Unit>()
+        val download = launch {
+            gate.withDownloadActivity {
+                registered.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        registered.await()
+        download.cancelAndJoin()
+
+        assertTrue(gate.withIdleCommand(skippedValue = false) { true })
     }
 
     @Test

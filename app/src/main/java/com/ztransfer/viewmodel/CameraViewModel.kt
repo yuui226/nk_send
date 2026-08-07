@@ -1255,7 +1255,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     /**
      * 周期性心跳：空闲时每 [KEEPALIVE_INTERVAL_MS] 探测一次相机，及时发现掉线并更新状态。
-     * keepalive() 走 ioMutex，与下载/命令互斥，不会与进行中的传输产生并发冲突。
+     * keepalive() 与普通命令互斥；若协议下载正在进行（包括分块之间的短暂空窗），本轮
+     * 直接视为连接活跃并跳过主动命令。下载数据本身已证明连接有效，不能再让心跳插队。
      */
     private fun startKeepalive() {
         keepaliveJob?.cancel()
