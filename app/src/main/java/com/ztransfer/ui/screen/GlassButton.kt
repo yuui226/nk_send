@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -46,6 +47,7 @@ import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
 import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.theme.SkinPreset
+import kotlin.math.ceil
 import kotlin.math.max
 
 private fun Outline.toMaterialPath(): Path = when (this) {
@@ -144,11 +146,11 @@ private fun Modifier.liquidGlassOptics(
 }
 
 /**
- * 纯净磨砂按钮的扁鹅卵石光场。
+ * 稳定的磨砂玻璃材质。
  *
- * 不使用噪声、彩色分光或镜面窄光带；半透明底色负责透底，宽缓的顶部散射、
- * 侧边与底部收暗只负责把平面塑造成圆润厚玻璃。所有渐变覆盖整块表面，
- * 不画闭合描边，避免边缘重新变得锋利。
+ * 不绘制方位光场、镜面高光或彩色分光。半透明底色和均匀雾化层负责散射，
+ * 非平铺的确定性微颗粒负责磨砂，宽暗内缘与极细外缘共同交代玻璃厚度。
+ * 颗粒直接生成在最终 shape 内，不使用位图 tile，避免某些 GPU 显示矩形接缝。
  */
 private fun Modifier.frostedPebbleOptics(
     shape: Shape,
@@ -162,87 +164,77 @@ private fun Modifier.frostedPebbleOptics(
     val outlinePath = shape.createOutline(size, layoutDirection, this).toMaterialPath()
     val width = size.width.coerceAtLeast(1f)
     val height = size.height.coerceAtLeast(1f)
-    val longest = max(width, height)
     val press = pressProgress.coerceIn(0f, 1f)
     val active = activeProgress.coerceIn(0f, 1f)
-    val panelFactor = if (panel) 0.68f else 1f
-    val volume = 1f - 0.58f * press
-    val frostLight = if (dark) Color(0xFFF1FBFF) else Color.White
-    val frostShadow = if (dark) Color(0xFF030C13) else Color(0xFF7B93A2)
-    val lightFactor = if (showSheen) 1f else 0.64f
+    val materialStrength = if (panel) 0.66f else 1f
+    val definitionStrength = if (showSheen) 1f else 0.72f
+    val volume = 1f - 0.48f * press
 
-    val crown = Brush.radialGradient(
-        colorStops = arrayOf(
-            0.00f to frostLight.copy(
-                alpha = (if (dark) 0.115f else 0.16f) *
-                    panelFactor * volume * lightFactor
-            ),
-            0.35f to frostLight.copy(
-                alpha = (if (dark) 0.072f else 0.10f) *
-                    panelFactor * volume * lightFactor
-            ),
-            0.62f to frostLight.copy(
-                alpha = (if (dark) 0.030f else 0.040f) *
-                    panelFactor * volume * lightFactor
-            ),
-            0.82f to frostShadow.copy(alpha = 0.028f * panelFactor * volume),
-            1.00f to frostShadow.copy(
-                alpha = (if (dark) 0.070f else 0.050f) * panelFactor * volume
-            )
-        ),
-        center = Offset(width * 0.42f, height * 0.34f),
-        radius = max(width * 0.52f, height * 1.90f)
+    // 这层是均匀雾化，不表达光源方向；深色模式稍微提亮介质，浅色模式增加乳白散射。
+    val diffusionVeil = if (dark) {
+        Color(0xFFD6E2E8).copy(alpha = 0.050f * materialStrength)
+    } else {
+        Color.White.copy(alpha = 0.105f * materialStrength)
+    }
+    val activeVeil = activeColor.copy(alpha = 0.14f * active)
+    val pressedVeil = (if (dark) Color.Black else Color(0xFF40515C)).copy(
+        alpha = 0.045f * press * materialStrength
     )
-    val topRoll = Brush.verticalGradient(
-        colorStops = arrayOf(
-            0.00f to frostLight.copy(
-                alpha = (if (dark) 0.105f else 0.15f) *
-                    panelFactor * volume * lightFactor
-            ),
-            0.24f to frostLight.copy(
-                alpha = (if (dark) 0.045f else 0.070f) *
-                    panelFactor * volume * lightFactor
-            ),
-            0.50f to Color.Transparent,
-            1.00f to Color.Transparent
-        )
+
+    // 两层边缘都沿整个轮廓均匀分布，不做“上亮下暗”。宽内缘提供厚度，细外缘负责定界。
+    val innerEdge = (if (dark) Color(0xFF02080C) else Color(0xFF61717B)).copy(
+        alpha = (if (dark) 0.24f else 0.13f) * materialStrength * volume
     )
-    val sideRoll = Brush.horizontalGradient(
-        colorStops = arrayOf(
-            0.00f to frostLight.copy(alpha = 0.025f * panelFactor * volume),
-            0.22f to Color.Transparent,
-            0.70f to Color.Transparent,
-            1.00f to frostShadow.copy(
-                alpha = (if (dark) 0.090f else 0.060f) * panelFactor * volume
-            )
-        )
+    val outerEdge = Color.White.copy(
+        alpha = (if (dark) 0.24f else 0.66f) *
+            materialStrength * volume * definitionStrength
     )
-    val bottomRoll = Brush.verticalGradient(
-        colorStops = arrayOf(
-            0.00f to Color.Transparent,
-            0.50f to Color.Transparent,
-            0.72f to frostShadow.copy(alpha = 0.025f * panelFactor * volume),
-            1.00f to frostShadow.copy(
-                alpha = (if (dark) 0.185f else 0.105f) * panelFactor * volume
-            )
-        )
+    val innerEdgeWidth = 3.2.dp.toPx()
+    val outerEdgeWidth = 1.dp.toPx()
+
+    // 每格仅一个亚像素级颗粒，数量随按钮面积线性增长。颗粒在 draw cache 中合并成
+    // 明暗两个 Path，实际每帧只有两次 drawPath，而不是逐颗粒提交数百条绘制命令。
+    // 哈希包含格子坐标和当前尺寸，因此没有随机状态、没有动画抖动，也没有平铺接缝。
+    val grainStep = 5.5.dp.toPx().coerceAtLeast(1f)
+    val columns = ceil(width / grainStep).toInt().coerceAtLeast(1)
+    val rows = ceil(height / grainStep).toInt().coerceAtLeast(1)
+    val lightGrainPath = Path()
+    val darkGrainPath = Path()
+    for (row in 0 until rows) {
+        for (column in 0 until columns) {
+            var hash = column * 0x1F123BB5 + row * 0x05491333 +
+                columns * 0x0127A5D9 + rows * 0x001B8735
+            hash = (hash xor (hash ushr 16)) * 0x45D9F3B
+            hash = hash xor (hash ushr 16)
+            val xJitter = (hash and 0xFF) / 255f
+            val yJitter = ((hash ushr 8) and 0xFF) / 255f
+            val radiusJitter = ((hash ushr 16) and 0x7F) / 127f
+            val x = (column + 0.18f + 0.64f * xJitter) * grainStep
+            val y = (row + 0.18f + 0.64f * yJitter) * grainStep
+            val radius = (0.24f + 0.24f * radiusJitter).dp.toPx()
+            val particle = Rect(x - radius, y - radius, x + radius, y + radius)
+            if ((hash and 0x01000000) == 0) {
+                lightGrainPath.addOval(particle)
+            } else {
+                darkGrainPath.addOval(particle)
+            }
+        }
+    }
+    val lightGrain = Color.White.copy(
+        alpha = (if (dark) 0.040f else 0.075f) * materialStrength * definitionStrength
     )
-    val activeBloom = Brush.radialGradient(
-        colors = listOf(
-            activeColor.copy(alpha = 0.20f * active),
-            activeColor.copy(alpha = 0.06f * active),
-            Color.Transparent
-        ),
-        center = Offset(width * 0.18f, height * 0.90f),
-        radius = longest * 0.92f
+    val darkGrain = (if (dark) Color(0xFF071016) else Color(0xFF6A7B85)).copy(
+        alpha = (if (dark) 0.045f else 0.038f) * materialStrength * definitionStrength
     )
 
     onDrawBehind {
-        drawPath(outlinePath, crown)
-        drawPath(outlinePath, topRoll)
-        drawPath(outlinePath, sideRoll)
-        drawPath(outlinePath, bottomRoll)
-        if (active > 0.001f) drawPath(outlinePath, activeBloom)
+        drawPath(outlinePath, diffusionVeil)
+        if (active > 0.001f) drawPath(outlinePath, activeVeil)
+        if (press > 0.001f) drawPath(outlinePath, pressedVeil)
+        drawPath(lightGrainPath, lightGrain)
+        drawPath(darkGrainPath, darkGrain)
+        drawPath(outlinePath, innerEdge, style = Stroke(width = innerEdgeWidth))
+        drawPath(outlinePath, outerEdge, style = Stroke(width = outerEdgeWidth))
     }
 }
 
@@ -611,7 +603,7 @@ fun GlassSurface(
 }
 
 /**
- * 统一的材质悬浮按钮。毛玻璃使用半透明冷色底与纯净鹅卵石光场；钛合金使用喷砂拉丝
+ * 统一的材质悬浮按钮。毛玻璃使用半透明雾化底、微颗粒与双层柔边；钛合金使用喷砂拉丝
  * 与圆润金属体积；木纹使用稳定随机纹理与硬质微弧木面。
  * 三种材质都不额外改变调用方提供的 shape。
  * 与 "Z传" 悬浮按钮同款视觉。全局悬浮控件（返回/标题/清空/重试等）复用，保证设计语言一致。
@@ -621,15 +613,15 @@ fun GlassSurface(
  *
  * [panel]：面板内变体。默认样式的投影是为悬浮在照片/内容之上设计的，
  * 放进平整的玻璃弹窗（如高级版/换机弹窗）里显得突兀；panel 为真时改用
- * 面板内卡片的同一玻璃语言——淡底、顶部微高光、无投影，
+ * 面板内卡片的同一玻璃语言——淡底、低对比材质、无投影，
  * 浅色/深色主题各自取 onBackground 同族色，两套主题都贴着面板长。
  *
- * [active]：持续选中态。保留毛玻璃基底和按压手感，叠加强调色淡光与稍高投影，
+ * [active]：持续选中态。保留毛玻璃基底和按压手感，叠加强调色淡层；实体材质稍抬高投影，
  * 供筛选等“离开页面后仍持续生效”的状态使用；不画强调色轮廓圈。
  * [activeColor] 可让有明确语义色的按钮复用同一套激活动画，不另造组件。
  *
- * [showSheen]：控制未激活时的白色顶部高光。紧凑按钮可关闭它，避免高光在
- * 小面积圆角表面上看起来像一圈白框；激活色淡光仍会正常显示。
+ * [showSheen]：控制实体材质的顶部高光；毛玻璃没有方位高光，此参数只降低其边缘和颗粒
+ * 定义度。紧凑按钮可关闭它，避免小面积圆角表面看起来像一圈白框。
  *
  * [titaniumStampColor]：仅在钛合金主题中为凹刻内容填色，同时保留钢印内壁的明暗切面。
  * 适合品牌标志等需要成为视觉焦点的内容；普通按钮保持默认的深灰金属钢印。
@@ -690,7 +682,7 @@ fun GlassButton(
         else colors.buttonHighlightBottom
     val highlightTop = lerp(normalHighlightTop, resolvedActiveColor.copy(alpha = 0.30f), activeProgress)
     val highlightBottom = lerp(normalHighlightBottom, resolvedActiveColor.copy(alpha = 0.12f), activeProgress)
-    // 只有实体材质使用可平铺画刷；纯净毛玻璃不叠噪声纹理。
+    // 只有实体材质使用可平铺位图画刷；毛玻璃的非平铺微颗粒由绘制层直接生成。
     val baseElevation = shadowElevation ?: when {
         panel -> 0.dp
         isWoodButton -> (8f + 2f * activeProgress).dp
@@ -745,12 +737,6 @@ fun GlassButton(
             modifier = transformedModifier
                 .clip(shape)
                 .background(containerColor)
-                .buttonMaterialBase(
-                    shape = shape,
-                    texture = null,
-                    highlightTop = highlightTop,
-                    highlightBottom = highlightBottom
-                )
                 .frostedPebbleOptics(
                     shape = shape,
                     dark = dark,

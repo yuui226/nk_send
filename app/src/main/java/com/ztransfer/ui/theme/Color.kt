@@ -102,13 +102,13 @@ data class AppColors(
     val glassSheen: Color,
     // ---- 按钮专属材质 token：皮肤（钛合金/木纹）只覆写下面这 4 个字段 ----
     // GlassButton 读 button*，面板/弹窗/提示条读 glass*，因此换皮肤只换按钮，
-    // 面板在三款皮肤下逐字节一致；默认毛玻璃按钮也可单独调出更轻、更透的光学质感。
+    // 面板在三款皮肤下逐字节一致；默认毛玻璃按钮也可单独调出更轻、更透的磨砂质感。
     /** 玻璃按钮底色（非 panel 变体的基底填充）。 */
     val buttonSurface: Color,
-    /** 玻璃按钮高光渐变（自上而下，上亮下淡）。 */
+    /** 实体按钮表面渐变；默认毛玻璃不消费此 token。 */
     val buttonHighlightTop: Color,
     val buttonHighlightBottom: Color,
-    /** panel 变体按钮的顶部高光叠层（对应面板的 glassSheen）。 */
+    /** 实体 panel 变体按钮的顶部叠层；默认毛玻璃不消费此 token。 */
     val buttonSheen: Color,
     /** 全屏遮罩（弹层背后压暗）。 */
     val scrim: Color,
@@ -142,8 +142,9 @@ val DarkAppColors = AppColors(
     glassBorderBottom = Color.White.copy(alpha = 0.1f),
     glassPanelBorder = Color.White.copy(alpha = 0.15f),
     glassSheen = Color.White.copy(alpha = 0.08f),
-    // 深色按钮是 40% 冷灰半透明磨砂；宽缓鹅卵石光场由 GlassButton 绘制。
-    buttonSurface = Color(0xFF25313B).copy(alpha = 0.40f),
+    // 深色按钮用浅冷灰低密度雾化背景：保留透底，同时由 GlassButton 的微颗粒与双层柔边
+    // 提供磨砂和厚度；不再依赖方位光场或镜面高光。
+    buttonSurface = Color(0xFF8999A4).copy(alpha = 0.20f),
     buttonHighlightTop = Color.White.copy(alpha = 0.025f),
     buttonHighlightBottom = Color.Transparent,
     buttonSheen = Color.White.copy(alpha = 0.025f),
@@ -180,9 +181,9 @@ val LightAppColors = AppColors(
     glassBorderBottom = Color.Black.copy(alpha = 0.08f),
     glassPanelBorder = Color.Black.copy(alpha = 0.10f),
     glassSheen = Color.White.copy(alpha = 0.55f),
-    // 浅色液态玻璃增加冷雾蓝密度与顶部散射：在浅灰页面上仍能明确看出一层磨砂玻璃，
-    // 但保持半透明，不退化成不透明的白色塑料按钮。
-    buttonSurface = Color(0xFFEAF4FA).copy(alpha = 0.86f),
+    // 浅色按钮降低原先近乎不透明的冷蓝底，改为中性乳白雾化；复杂背景仍能透出色彩，
+    // 细节由磨砂颗粒打散，不再像一块实心白塑料。
+    buttonSurface = Color.White.copy(alpha = 0.62f),
     buttonHighlightTop = Color.White.copy(alpha = 0.12f),
     buttonHighlightBottom = Color(0xFFB8D5E5).copy(alpha = 0.025f),
     buttonSheen = Color.White.copy(alpha = 0.10f),
