@@ -87,6 +87,7 @@ fun HomeScreen(
     viewModel: CameraViewModel,
     transferViewModel: TransferViewModel,
     onConnectionCelebrationFinished: () -> Unit,
+    onOpenLocalPhotoEffects: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
@@ -358,6 +359,36 @@ fun HomeScreen(
                     )
                 }
                 Spacer(Modifier.weight(1f))
+
+                // 工作台在空间关系上位于连接页下方，入口贴近屏幕底部提示下滑方向。
+                GlassButton(
+                    onClick = onOpenLocalPhotoEffects,
+                    shape = RoundedCornerShape(16.dp),
+                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                    modifier = Modifier.height(44.dp),
+                ) {
+                    Icon(
+                        Icons.Default.PhotoFilter,
+                        contentDescription = null,
+                        tint = colors.accentBlue,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.local_photo_effects_entry),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onBackground,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = colors.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Spacer(Modifier.height(18.dp))
             }
         }
 

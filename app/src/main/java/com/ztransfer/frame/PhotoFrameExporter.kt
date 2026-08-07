@@ -1,6 +1,9 @@
 package com.ztransfer.frame
 
+import android.annotation.SuppressLint
 import android.content.ContentResolver
+import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -18,6 +21,7 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.exifinterface.media.ExifInterface
 import androidx.core.content.res.ResourcesCompat
@@ -52,6 +56,7 @@ enum class PhotoFramePreset(internal val fileSuffix: String) {
     MINIMAL("clean"),
     FROSTED("glass"),
     PLAQUE("plaque"),
+    IMMERSIVE("immersive"),
 }
 
 /** 自定义水印选项。枚举名称会直接持久化，新增档位可以，已有名称不要修改。 */
@@ -214,6 +219,21 @@ internal data class PhotoFrameDestination(
     val occupiedNames: MutableSet<String>,
 )
 
+/** A phone photo together with the MediaStore album in which derived photos must be saved. */
+internal data class PhotoFrameMediaStoreSource(
+    val sourceUri: Uri,
+    val displayName: String,
+    val collectionUri: Uri,
+    val relativePath: String,
+    val occupiedNames: MutableSet<String>,
+)
+
+private data class PhotoFrameMediaStoreRow(
+    val displayName: String,
+    val relativePath: String?,
+    val volumeName: String?,
+)
+
 internal data class PhotoFrameLayout(
     val canvasWidth: Int,
     val canvasHeight: Int,
@@ -290,23 +310,15 @@ object PhotoFrameExporter {
                 "Only JPG/JPEG/PNG supports borders or watermarks"
             }
             val renderedWatermark = watermark.forBorderMode(borderEnabled)
-            val metadata = if (borderEnabled) readMetadata(resolver, sourceUri) else EMPTY_METADATA
-            val decoded = decodeForFraming(resolver, sourceUri)
-                ?: error("Cannot decode transferred original")
-            val bitmap = if (filter == null) {
-                decoded
-            } else {
-                try {
-                    PhotoFilterRenderer.render(decoded, filter)
-                } finally {
-                    decoded.recycle()
-                }
-            }
-            val rendered = try {
-                renderFrame(context, bitmap, metadata, preset, renderedWatermark, borderEnabled)
-            } finally {
-                bitmap.recycle()
-            }
+            val rendered = renderSource(
+                context = context,
+                resolver = resolver,
+                sourceUri = sourceUri,
+                preset = preset,
+                watermark = renderedWatermark,
+                borderEnabled = borderEnabled,
+                filter = filter,
+            )
             val saved = try {
                 currentCoroutineContext().ensureActive()
                 saveRendered(
@@ -330,6 +342,194 @@ object PhotoFrameExporter {
             Result.failure(outOfMemory)
         } catch (error: Exception) {
             Result.failure(error)
+        }
+    }
+
+    /**
+     * Exports a user-picked phone photo back into its own MediaStore album. The row stays pending
+     * until JPEG compression succeeds, so gallery apps never observe a partially written image.
+     */
+    internal suspend fun exportBesideSource(
+        context: Context,
+        resolver: ContentResolver,
+        source: PhotoFrameMediaStoreSource,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+        borderEnabled: Boolean = true,
+        filter: PhotoFilterSelection? = null,
+    ): Result<PhotoFrameExportResult> {
+        return try {
+            currentCoroutineContext().ensureActive()
+            val renderedWatermark = watermark.forBorderMode(borderEnabled)
+            val rendered = renderSource(
+                context = context,
+                resolver = resolver,
+                sourceUri = source.sourceUri,
+                preset = preset,
+                watermark = renderedWatermark,
+                borderEnabled = borderEnabled,
+                filter = filter,
+            )
+            val saved = try {
+                currentCoroutineContext().ensureActive()
+                saveRenderedToMediaStore(
+                    resolver = resolver,
+                    source = source,
+                    preset = preset,
+                    watermark = renderedWatermark,
+                    borderEnabled = borderEnabled,
+                    filter = filter,
+                    bitmap = rendered,
+                )
+            } finally {
+                rendered.recycle()
+            }
+            Result.success(saved)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (outOfMemory: OutOfMemoryError) {
+            Result.failure(outOfMemory)
+        } catch (error: Exception) {
+            Result.failure(error)
+        }
+    }
+
+    /** Resolves the selected image and the exact MediaStore directory needed for same-album output. */
+    @SuppressLint("NewApi") // The first statement rejects pre-Q devices before any Q API runs.
+    internal fun prepareMediaStoreSource(
+        context: Context,
+        resolver: ContentResolver,
+        sourceUri: Uri,
+    ): Result<PhotoFrameMediaStoreSource> = runCatching {
+        check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            "Saving beside the source requires Android 10 or newer"
+        }
+        val lookupUris = buildList {
+            add(sourceUri)
+            runCatching { MediaStore.getMediaUri(context, sourceUri) }
+                .getOrNull()
+                ?.takeIf { it != sourceUri }
+                ?.let(::add)
+            resolveMediaDocumentUri(sourceUri)?.takeIf { it != sourceUri }?.let(::add)
+        }.distinct()
+        val row = lookupUris.asSequence()
+            .mapNotNull { lookupUri -> queryMediaStoreRow(resolver, lookupUri) }
+            .firstOrNull { !it.relativePath.isNullOrBlank() }
+            ?: error("The selected photo is not stored in a writable phone album")
+        val relativePath = row.relativePath
+            ?.takeIf { it.isNotBlank() }
+            ?: error("Cannot determine the selected photo's album")
+        val volumeName = row.volumeName
+            ?.takeIf { it.isNotBlank() }
+            ?: "external_primary"
+        val collectionUri = MediaStore.Images.Media.getContentUri(volumeName)
+        // Android 13+ may grant only the picked item's read permission rather than collection-wide
+        // access. Name discovery is therefore best-effort; MediaStore itself resolves any physical
+        // filename collision during insert, and the inserted row is queried again after publish.
+        val occupiedNames = runCatching {
+            resolver.query(
+                collectionUri,
+                arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+                arrayOf(relativePath),
+                null,
+            )?.use { cursor ->
+                val nameColumn = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                buildSet {
+                    if (nameColumn >= 0) {
+                        while (cursor.moveToNext()) {
+                            cursor.getString(nameColumn)?.let(::add)
+                        }
+                    }
+                }
+            }.orEmpty()
+        }.getOrDefault(emptySet()).toMutableSet()
+        PhotoFrameMediaStoreSource(
+            sourceUri = sourceUri,
+            displayName = row.displayName,
+            collectionUri = collectionUri,
+            relativePath = relativePath,
+            occupiedNames = occupiedNames,
+        )
+    }
+
+    private fun resolveMediaDocumentUri(uri: Uri): Uri? {
+        if (uri.authority != "com.android.providers.media.documents") return null
+        val documentId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
+            ?: return null
+        val parts = documentId.split(':', limit = 2)
+        if (parts.size != 2 || parts[0] != "image") return null
+        val mediaId = parts[1].toLongOrNull() ?: return null
+        return ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, mediaId)
+    }
+
+    private fun queryMediaStoreRow(
+        resolver: ContentResolver,
+        uri: Uri,
+    ): PhotoFrameMediaStoreRow? = runCatching {
+        resolver.query(
+            uri,
+            arrayOf(
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.RELATIVE_PATH,
+                MediaStore.MediaColumns.VOLUME_NAME,
+            ),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val nameColumn = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+            val pathColumn = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+            val volumeColumn = cursor.getColumnIndex(MediaStore.MediaColumns.VOLUME_NAME)
+            val displayName = if (nameColumn >= 0) cursor.getString(nameColumn) else null
+            displayName?.let {
+                PhotoFrameMediaStoreRow(
+                    displayName = it,
+                    relativePath = if (pathColumn >= 0) cursor.getString(pathColumn) else null,
+                    volumeName = if (volumeColumn >= 0) cursor.getString(volumeColumn) else null,
+                )
+            }
+        }
+    }.getOrNull()
+
+    /** Decodes a correctly oriented, bounded preview without changing or retaining the source. */
+    internal fun decodePreview(
+        resolver: ContentResolver,
+        sourceUri: Uri,
+        maxEdge: Int = 1_920,
+    ): Bitmap? = decodeBounded(resolver, sourceUri, maxEdge)
+
+    internal fun readPreviewMetadata(
+        resolver: ContentResolver,
+        sourceUri: Uri,
+    ): PhotoFrameMetadata = readMetadata(resolver, sourceUri)
+
+    private fun renderSource(
+        context: Context,
+        resolver: ContentResolver,
+        sourceUri: Uri,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+        borderEnabled: Boolean,
+        filter: PhotoFilterSelection?,
+    ): Bitmap {
+        val metadata = if (borderEnabled) readMetadata(resolver, sourceUri) else EMPTY_METADATA
+        val decoded = decodeBounded(resolver, sourceUri, MAX_SOURCE_EDGE)
+            ?: error("Cannot decode source photo")
+        val bitmap = if (filter == null) {
+            decoded
+        } else {
+            try {
+                PhotoFilterRenderer.render(decoded, filter)
+            } finally {
+                decoded.recycle()
+            }
+        }
+        return try {
+            renderFrame(context, bitmap, metadata, preset, watermark, borderEnabled)
+        } finally {
+            bitmap.recycle()
         }
     }
 
@@ -506,7 +706,12 @@ object PhotoFrameExporter {
         )
     }
 
-    private fun decodeForFraming(resolver: ContentResolver, uri: Uri): Bitmap? {
+    private fun decodeBounded(
+        resolver: ContentResolver,
+        uri: Uri,
+        maxEdge: Int,
+    ): Bitmap? {
+        require(maxEdge > 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
                 return ImageDecoder.decodeBitmap(
@@ -514,7 +719,7 @@ object PhotoFrameExporter {
                 ) { decoder, info, _ ->
                     val width = info.size.width
                     val height = info.size.height
-                    val scale = min(1f, MAX_SOURCE_EDGE.toFloat() / maxOf(width, height))
+                    val scale = min(1f, maxEdge.toFloat() / maxOf(width, height))
                     decoder.setTargetSize(
                         (width * scale).roundToInt().coerceAtLeast(1),
                         (height * scale).roundToInt().coerceAtLeast(1),
@@ -538,7 +743,7 @@ object PhotoFrameExporter {
         }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
-        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > MAX_SOURCE_EDGE) {
+        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > maxEdge) {
             sample *= 2
         }
         val decoded = resolver.openFileDescriptor(uri, "r")?.use {
@@ -606,10 +811,12 @@ object PhotoFrameExporter {
         if (!borderEnabled) {
             return renderWatermarkOnly(context, source, watermark, longEdge)
         }
-        val layout = if (preset == PhotoFramePreset.PLAQUE) {
-            calculatePlaqueFrameLayout(source.width, source.height, longEdge)
-        } else {
-            calculatePhotoFrameLayout(source.width, source.height, longEdge)
+        val layout = when (preset) {
+            PhotoFramePreset.PLAQUE ->
+                calculatePlaqueFrameLayout(source.width, source.height, longEdge)
+            PhotoFramePreset.IMMERSIVE ->
+                calculateImmersiveFrameLayout(source.width, source.height, longEdge)
+            else -> calculatePhotoFrameLayout(source.width, source.height, longEdge)
         }
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
@@ -620,6 +827,10 @@ object PhotoFrameExporter {
             val canvas = Canvas(output)
             if (preset == PhotoFramePreset.PLAQUE) {
                 drawPlaqueFrame(context, canvas, source, layout, metadata, watermark)
+                return output
+            }
+            if (preset == PhotoFramePreset.IMMERSIVE) {
+                drawImmersiveFrame(context, canvas, source, layout, metadata, watermark)
                 return output
             }
             drawBackdrop(canvas, source, preset)
@@ -688,6 +899,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.MINIMAL -> 0.78f
             PhotoFramePreset.MIST, PhotoFramePreset.FROSTED -> 1f
             PhotoFramePreset.PLAQUE -> 0f
+            PhotoFramePreset.IMMERSIVE -> 0f
         }
         // ShadowLayer 在 3200px 画布上直接做两次软件模糊代价很高。阴影本身没有
         // 高频细节，先在 1/4 尺寸透明代理图渲染，再双线性放大，视觉一致而参与
@@ -864,9 +1076,11 @@ object PhotoFrameExporter {
                     }
                     PhotoFramePreset.MINIMAL -> Unit
                     PhotoFramePreset.PLAQUE -> Unit
+                    PhotoFramePreset.IMMERSIVE -> Unit
                 }
             }
             PhotoFramePreset.PLAQUE -> canvas.drawColor(Color.WHITE)
+            PhotoFramePreset.IMMERSIVE -> Unit
         }
     }
 
@@ -1214,6 +1428,7 @@ object PhotoFrameExporter {
                     PhotoFramePreset.MINIMAL,
                     PhotoFramePreset.FROSTED -> Color.rgb(24, 31, 38)
                     PhotoFramePreset.PLAQUE -> Color.rgb(24, 31, 38)
+                    PhotoFramePreset.IMMERSIVE -> Color.rgb(250, 252, 253)
                 }
             }
             alpha = watermarkAlpha(watermark.opacityPercent)
@@ -1485,6 +1700,216 @@ object PhotoFrameExporter {
     )
 
     /**
+     * Full-bleed signature treatment inspired by in-camera sharing watermarks. Camera identity and
+     * the AUTO text watermark share the first line; exposure details sit below. The restrained
+     * gradient is only a contrast aid and never turns into a visible panel or border.
+     */
+    private fun drawImmersiveFrame(
+        context: Context,
+        canvas: Canvas,
+        source: Bitmap,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        watermark: PhotoFrameWatermark,
+    ) {
+        val photoRect = RectF(0f, 0f, layout.canvasWidth.toFloat(), layout.canvasHeight.toFloat())
+        canvas.drawBitmap(
+            source,
+            null,
+            photoRect,
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+        )
+
+        val metadataWatermark = watermark.withoutPhotoPlacement()
+        val brand = normalizeCameraMake(metadata.make)
+        val model = normalizeCameraModel(metadata.make, metadata.model)
+        val cameraName = listOf(brand, model)
+            .filter(String::isNotBlank)
+            .joinToString(" ")
+        val details = immersiveFrameDetailLine(metadata)
+        val inlineWatermark = metadataWatermark.takeIf {
+            it.enabled && it.content == PhotoFrameWatermarkContent.TEXT &&
+                it.position == PhotoFrameWatermarkPosition.AUTO
+        }
+        val separateWatermark = metadataWatermark.takeIf {
+            it.enabled && it.content == PhotoFrameWatermarkContent.TEXT &&
+                it.position != PhotoFrameWatermarkPosition.AUTO
+        }
+        val inlineWatermarkText = inlineWatermark?.displayText.orEmpty()
+        val separateWatermarkText = separateWatermark?.displayText.orEmpty()
+
+        val shortEdge = min(photoRect.width(), photoRect.height())
+        val cameraPaint = cameraName.takeIf(String::isNotEmpty)?.let {
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+                color = Color.rgb(250, 251, 252)
+                textSize = shortEdge * 0.030f
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setShadowLayer(textSize * 0.11f, 0f, textSize * 0.055f, Color.argb(178, 0, 0, 0))
+            }
+        }
+        val detailPaint = details.takeIf(String::isNotEmpty)?.let {
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+                color = Color.rgb(247, 249, 251)
+                textSize = shortEdge * 0.0235f
+                textAlign = Paint.Align.CENTER
+                typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+                setShadowLayer(textSize * 0.12f, 0f, textSize * 0.06f, Color.argb(188, 0, 0, 0))
+            }
+        }
+        val inlineWatermarkPaint = inlineWatermark?.let {
+            createWatermarkPaint(
+                context = context,
+                canvas = canvas,
+                preset = PhotoFramePreset.IMMERSIVE,
+                watermark = it,
+                maxWidth = photoRect.width() * 0.38f,
+            ).apply {
+                textSize *= 1.35f
+                textAlign = Paint.Align.LEFT
+            }
+        }
+        val separateWatermarkPaint = separateWatermark?.let {
+            createWatermarkPaint(
+                context = context,
+                canvas = canvas,
+                preset = PhotoFramePreset.IMMERSIVE,
+                watermark = it,
+                maxWidth = photoRect.width() * 0.86f,
+            )
+        }
+
+        val divider = "|"
+        val dividerPaint = if (cameraPaint != null && inlineWatermarkPaint != null) {
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+                color = Color.argb(205, 248, 250, 252)
+                textSize = shortEdge * 0.025f
+                typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            }
+        } else {
+            null
+        }
+        var componentGap = shortEdge * 0.014f
+        fun firstRowWidth(): Float =
+            (cameraPaint?.measureText(cameraName) ?: 0f) +
+                (inlineWatermarkPaint?.measureText(inlineWatermarkText) ?: 0f) +
+                (dividerPaint?.measureText(divider) ?: 0f) +
+                if (dividerPaint != null) componentGap * 2f else 0f
+
+        val maxLineWidth = photoRect.width() * 0.86f
+        val originalFirstRowWidth = firstRowWidth()
+        if (originalFirstRowWidth > maxLineWidth) {
+            val scale = maxLineWidth / originalFirstRowWidth
+            cameraPaint?.let { it.textSize *= scale }
+            inlineWatermarkPaint?.let { it.textSize *= scale }
+            dividerPaint?.let { it.textSize *= scale }
+            componentGap *= scale
+        }
+        detailPaint?.let { paint ->
+            val measured = paint.measureText(details)
+            if (measured > maxLineWidth) paint.textSize *= maxLineWidth / measured
+        }
+
+        fun firstRowBounds(): FrameTextVisualBounds? {
+            val bounds = buildList {
+                cameraPaint?.let { add(textVisualBounds(cameraName, it)) }
+                inlineWatermarkPaint?.let {
+                    add(textVisualBounds(inlineWatermarkText, it))
+                }
+                dividerPaint?.let { add(textVisualBounds(divider, it)) }
+            }
+            return bounds.reduceOrNull(::mergeTextVisualBounds)
+        }
+
+        val titleBounds = firstRowBounds()
+        val detailBounds = detailPaint?.let { textVisualBounds(details, it) }
+        val separateBounds = separateWatermarkPaint?.let {
+            textVisualBounds(separateWatermarkText, it)
+        }
+        val rows = listOfNotNull(titleBounds, detailBounds, separateBounds)
+
+        if (rows.isNotEmpty()) {
+            val preferredGap = shortEdge * 0.013f
+            val textHeight = rows.sumOf { (it.bottom - it.top).toDouble() }.toFloat()
+            val blockHeight = textHeight + preferredGap * (rows.size - 1)
+            val safeBottom = maxOf(shortEdge * 0.045f, photoRect.height() * 0.025f)
+            val blockBottom = photoRect.bottom - safeBottom
+            val blockTop = blockBottom - blockHeight
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                shader = LinearGradient(
+                    0f,
+                    (blockTop - shortEdge * 0.10f).coerceAtLeast(photoRect.height() * 0.58f),
+                    0f,
+                    photoRect.bottom,
+                    Color.TRANSPARENT,
+                    Color.argb(118, 0, 0, 0),
+                    Shader.TileMode.CLAMP,
+                )
+                canvas.drawRect(0f, photoRect.height() * 0.52f, photoRect.right, photoRect.bottom, this)
+            }
+
+            // Explicit in-photo placement remains above the contrast veil and below metadata.
+            drawPhotoWatermark(context, canvas, photoRect, PhotoFramePreset.IMMERSIVE, watermark)
+
+            val baselines = centeredFrameTextBaselines(
+                areaTop = blockTop,
+                areaBottom = blockBottom,
+                rows = rows,
+                preferredGap = preferredGap,
+            )
+            var rowIndex = 0
+            val titleBaseline = if (titleBounds != null) baselines[rowIndex++] else null
+            val detailBaseline = if (detailBounds != null) baselines[rowIndex++] else null
+            val separateBaseline = if (separateBounds != null) baselines[rowIndex] else null
+
+            titleBaseline?.let { baseline ->
+                var x = photoRect.centerX() - firstRowWidth() / 2f
+                cameraPaint?.let { paint ->
+                    canvas.drawText(cameraName, x, baseline, paint)
+                    x += paint.measureText(cameraName)
+                }
+                dividerPaint?.let { paint ->
+                    x += componentGap
+                    canvas.drawText(divider, x, baseline, paint)
+                    x += paint.measureText(divider) + componentGap
+                }
+                inlineWatermarkPaint?.let { paint ->
+                    val renderedWatermark = checkNotNull(inlineWatermark)
+                    drawWatermarkText(
+                        canvas,
+                        inlineWatermarkText,
+                        x,
+                        baseline,
+                        paint,
+                        renderedWatermark,
+                    )
+                }
+            }
+            if (detailPaint != null && detailBaseline != null) {
+                canvas.drawText(details, photoRect.centerX(), detailBaseline, detailPaint)
+            }
+            if (separateWatermarkPaint != null && separateBaseline != null) {
+                val renderedWatermark = checkNotNull(separateWatermark)
+                val (x, align) = watermarkHorizontalPlacement(
+                    photoRect,
+                    PhotoFramePreset.IMMERSIVE,
+                    renderedWatermark.position,
+                )
+                separateWatermarkPaint.textAlign = align
+                drawWatermarkText(
+                    canvas,
+                    separateWatermarkText,
+                    x,
+                    separateBaseline,
+                    separateWatermarkPaint,
+                    renderedWatermark,
+                )
+            }
+        } else {
+            drawPhotoWatermark(context, canvas, photoRect, PhotoFramePreset.IMMERSIVE, watermark)
+        }
+    }
+
+    /**
      * “铭牌”预设严格沿用参考图的结构：照片无裁切铺满宽度，底部接一整条白色信息带。
      * 横图查看时出现的上下黑区属于图库查看器，不写进导出文件。
      */
@@ -1748,6 +2173,56 @@ object PhotoFrameExporter {
             if (measured > maxWidth) textSize *= maxWidth / measured
         }
 
+    private suspend fun saveRenderedToMediaStore(
+        resolver: ContentResolver,
+        source: PhotoFrameMediaStoreSource,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+        borderEnabled: Boolean,
+        filter: PhotoFilterSelection?,
+        bitmap: Bitmap,
+    ): PhotoFrameExportResult {
+        val preferred = photoFrameOutputName(
+            source.displayName,
+            preset,
+            watermark,
+            borderEnabled = borderEnabled,
+            filter = filter,
+        )
+        val name = uniqueName(preferred, source.occupiedNames)
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, source.relativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val target = resolver.insert(source.collectionUri, values)
+            ?: error("Cannot create derived photo beside the source")
+        var keepTarget = false
+        try {
+            val written = resolver.openOutputStream(target, "w")?.let { raw ->
+                BufferedOutputStream(raw, COPY_BUFFER_BYTES).use { output ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
+                }
+            } == true
+            if (!written) error("Cannot write derived photo")
+            currentCoroutineContext().ensureActive()
+            val published = resolver.update(
+                target,
+                ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
+                null,
+                null,
+            )
+            if (published <= 0) error("Cannot publish derived photo")
+            keepTarget = true
+            val publishedName = displayNameOf(resolver, target) ?: name
+            source.occupiedNames.add(publishedName)
+            return PhotoFrameExportResult(displayName = publishedName)
+        } finally {
+            if (!keepTarget) runCatching { resolver.delete(target, null, null) }
+        }
+    }
+
     private suspend fun saveRendered(
         resolver: ContentResolver,
         destination: PhotoFrameDestination,
@@ -1983,6 +2458,28 @@ internal fun calculatePlaqueFrameLayout(
     )
 }
 
+/** Full-bleed output keeps the source aspect ratio and only caps its longest edge. */
+internal fun calculateImmersiveFrameLayout(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    longEdge: Int = 3200,
+): PhotoFrameLayout {
+    require(sourceWidth > 0 && sourceHeight > 0)
+    require(longEdge > 0)
+    val scale = min(1f, longEdge.toFloat() / maxOf(sourceWidth, sourceHeight))
+    val canvasWidth = (sourceWidth * scale).roundToInt().coerceAtLeast(1)
+    val canvasHeight = (sourceHeight * scale).roundToInt().coerceAtLeast(1)
+    return PhotoFrameLayout(
+        canvasWidth = canvasWidth,
+        canvasHeight = canvasHeight,
+        photoLeft = 0f,
+        photoTop = 0f,
+        photoRight = canvasWidth.toFloat(),
+        photoBottom = canvasHeight.toFloat(),
+        metadataTop = canvasHeight.toFloat(),
+    )
+}
+
 /** 照片与毛玻璃参数卡共用的圆角，随底部信息区高度等比缩放。 */
 internal fun photoFrameCornerRadius(layout: PhotoFrameLayout): Float =
     (layout.canvasHeight - layout.metadataTop) * 0.26f
@@ -2193,6 +2690,17 @@ internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
         metadata.iso,
     ).joinToString("   ")
 
+/** Compact two-space rhythm used by the full-bleed signature preset. */
+internal fun immersiveFrameDetailLine(metadata: PhotoFrameMetadata): String =
+    listOfNotNull(
+        metadata.focalLength,
+        metadata.aperture?.let {
+            if (it.startsWith("f/", ignoreCase = true)) it.lowercase(Locale.ROOT) else "f/$it"
+        },
+        metadata.shutter?.let { if (it.endsWith("s", ignoreCase = true)) it else "${it}s" },
+        metadata.iso,
+    ).joinToString("  ")
+
 internal fun normalizeCaptureDateTime(value: String?): String? {
     val trimmed = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
     val isExifDate =
@@ -2341,10 +2849,11 @@ private fun resolvedWatermarkPosition(
     requested: PhotoFrameWatermarkPosition,
 ): PhotoFrameWatermarkPosition = when (requested) {
     PhotoFrameWatermarkPosition.AUTO -> {
-        if (preset == PhotoFramePreset.PLAQUE) {
-            PhotoFrameWatermarkPosition.LEFT
-        } else {
-            PhotoFrameWatermarkPosition.CENTER
+        when (preset) {
+            PhotoFramePreset.PLAQUE -> PhotoFrameWatermarkPosition.LEFT
+            // AUTO is an inline signature in this preset, while CENTER is a separate row.
+            PhotoFramePreset.IMMERSIVE -> PhotoFrameWatermarkPosition.AUTO
+            else -> PhotoFrameWatermarkPosition.CENTER
         }
     }
     else -> requested

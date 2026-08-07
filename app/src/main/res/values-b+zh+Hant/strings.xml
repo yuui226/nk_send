@@ -137,6 +137,7 @@
     <string name="photo_frame_minimal">簡白</string>
     <string name="photo_frame_frosted">毛玻璃</string>
     <string name="photo_frame_plaque">銘牌</string>
+    <string name="photo_frame_immersive">沉浸</string>
     <string name="photo_frame_task_label">邊框：%1$s</string>
     <string name="photo_frame_watermark_summary">浮水印：%1$s</string>
     <string name="photo_frame_watermark_pro_only">僅高級版可用</string>
@@ -415,4 +416,14 @@
     <string name="update_manual_copied">請手動更新，已複製到剪貼簿</string>
     <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">開啟下載頁</string>
+    <string name="local_photo_effects_entry">邊框 · 浮水印 · 濾鏡</string>
+    <string name="local_photo_choose_short">選擇圖片</string>
+    <string name="local_photo_replace">更換圖片</string>
+    <string name="local_photo_preview_prompt">選擇照片後在這裡預覽效果</string>
+    <string name="local_photo_same_folder_hint">成片將儲存到原照片所在目錄</string>
+    <string name="local_photo_generate">產生並儲存</string>
+    <string name="local_photo_generating">正在產生…</string>
+    <string name="local_photo_saved">已儲存：%1$s</string>
+    <string name="local_photo_select_failed">請選擇儲存在本機相簿中且可寫入的照片</string>
+    <string name="local_photo_save_failed">產生失敗，原照片未受影響</string>
 </resources>

@@ -836,6 +836,7 @@ fun SettingsOverlay(
                 PhotoFramePreset.MINIMAL to stringResource(R.string.photo_frame_minimal),
                 PhotoFramePreset.FROSTED to stringResource(R.string.photo_frame_frosted),
                 PhotoFramePreset.PLAQUE to stringResource(R.string.photo_frame_plaque),
+                PhotoFramePreset.IMMERSIVE to stringResource(R.string.photo_frame_immersive),
             )
             val selectedFrameChoice = frameChoices.first { it.first == state.photoFramePreset }
             val visibleWatermark = if (state.photoFrameEnabled) {
@@ -1248,7 +1249,7 @@ private fun PhotoEffectSummaryItem(
 }
 
 @Composable
-private fun PhotoFilterEditor(
+internal fun PhotoFilterEditor(
     filters: List<PhotoFilterPreset>,
     selectedId: String?,
     enabled: Boolean,
@@ -1350,7 +1351,7 @@ private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
     BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
 @Composable
-private fun PhotoFrameWatermarkEditor(
+internal fun PhotoFrameWatermarkEditor(
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
@@ -1375,6 +1376,7 @@ private fun PhotoFrameWatermarkEditor(
         PhotoFramePreset.MINIMAL to stringResource(R.string.photo_frame_minimal),
         PhotoFramePreset.FROSTED to stringResource(R.string.photo_frame_frosted),
         PhotoFramePreset.PLAQUE to stringResource(R.string.photo_frame_plaque),
+        PhotoFramePreset.IMMERSIVE to stringResource(R.string.photo_frame_immersive),
     )
     val fontChoices = listOf(
         PhotoFrameWatermarkFont.SIGNATURE to stringResource(R.string.photo_frame_font_signature),
@@ -1884,22 +1886,29 @@ private fun PhotoEffectsPreviewLoadingPlaceholder() {
 }
 
 @Composable
-private fun PhotoEffectsRenderedPreview(
+internal fun PhotoEffectsRenderedPreview(
     source: Bitmap,
+    hideSourceWhileRendering: Boolean = false,
+    metadata: PhotoFrameMetadata = PHOTO_EFFECTS_PREVIEW_METADATA,
     sourceRotationQuarterTurns: Int,
     requestedRotationQuarterTurns: Int,
     requestedPortrait: Boolean,
-    onRotate: () -> Unit,
+    onRotate: (() -> Unit)?,
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
     filter: PhotoFilterSelection? = null,
-    onOpen: (Bitmap, Rect) -> Unit,
+    onOpen: ((Bitmap, Rect) -> Unit)?,
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
-    val rendered = remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
-    var previewFailed by remember { mutableStateOf(false) }
+    // Keep the connected-camera frame stable during FHD upgrades. The phone-photo workbench keys
+    // these states by source so a replacement cannot reveal the raw or previously selected photo.
+    val sourceRenderIdentity: Any = if (hideSourceWhileRendering) source else Unit
+    val rendered = remember(sourceRenderIdentity) {
+        mutableStateOf<RenderedPhotoEffectsPreview?>(null)
+    }
+    var previewFailed by remember(sourceRenderIdentity) { mutableStateOf(false) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var showUnfiltered by remember(source) { mutableStateOf(false) }
     val requestedFrameLayout = remember(borderEnabled, preset) {
@@ -1910,6 +1919,7 @@ private fun PhotoEffectsRenderedPreview(
     val currentFilterKey = PhotoEffectsPreviewCacheKey.from(filter)
     val previewCache = remember(
         source,
+        metadata,
         sourceRotationQuarterTurns,
         borderEnabled,
         preset,
@@ -1924,6 +1934,7 @@ private fun PhotoEffectsRenderedPreview(
         null
     } else remember(
         source,
+        metadata,
         sourceRotationQuarterTurns,
         borderEnabled,
         preset,
@@ -1958,7 +1969,7 @@ private fun PhotoEffectsRenderedPreview(
             PhotoFrameExporter.renderPreview(
                 context = context,
                 source = input,
-                metadata = PHOTO_EFFECTS_PREVIEW_METADATA,
+                metadata = metadata,
                 preset = preset,
                 watermark = watermark,
                 borderEnabled = borderEnabled,
@@ -2025,13 +2036,17 @@ private fun PhotoEffectsRenderedPreview(
         animationSpec = Motion.overlayExpand,
         label = "photoFramePreviewAspectRatio",
     )
-    // 只在这个预览组件真正首次出现时渐显一次。旋转或高清源升级不能重置，否则会
-    // 再露出原片，形成“原片 → 带边框成片”的二次渲染观感。
-    val firstFrameVisibility = remember { Animatable(0f) }
-    val replacementVisibility = remember { Animatable(1f) }
-    var visibleFrame by remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
-    var outgoingFrame by remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
-    val frameTransition = remember { Animatable(1f) }
+    // 相机预览只在组件首次出现时渐显；手机工作台按新照片重置并从占位直接渐入成片。
+    // 旋转或同一照片的高清源升级不会重置，避免再次露出原片。
+    val firstFrameVisibility = remember(sourceRenderIdentity) { Animatable(0f) }
+    val replacementVisibility = remember(sourceRenderIdentity) { Animatable(1f) }
+    var visibleFrame by remember(sourceRenderIdentity) {
+        mutableStateOf<RenderedPhotoEffectsPreview?>(null)
+    }
+    var outgoingFrame by remember(sourceRenderIdentity) {
+        mutableStateOf<RenderedPhotoEffectsPreview?>(null)
+    }
+    val frameTransition = remember(sourceRenderIdentity) { Animatable(1f) }
     val previewForGesture = preview
     val boundsForGesture = previewBounds
     val latestOnRotate by rememberUpdatedState(onRotate)
@@ -2144,9 +2159,9 @@ private fun PhotoEffectsRenderedPreview(
                             }
                         },
                         onTap = {
-                            latestOnOpen(previewForGesture.bitmap, boundsForGesture)
+                            latestOnOpen?.invoke(previewForGesture.bitmap, boundsForGesture)
                         },
-                        onDoubleTap = { latestOnRotate() },
+                        onDoubleTap = { latestOnRotate?.invoke() },
                         onLongPress = {
                             if (previewForGesture.unfilteredBitmap != null) {
                                 showUnfiltered = true
@@ -2156,21 +2171,29 @@ private fun PhotoEffectsRenderedPreview(
                 },
         ) {
             if (preview == null && !previewFailed) {
-                // FHD 原图已经在内存中，首张效果成片生成前直接展示它；不让用户面对空白转圈。
-                FittedRotatingBitmap(
-                    image = sourceImage,
-                    rotationDegrees = 0f,
-                    description = stringResource(R.string.photo_frame_preview),
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else if (preview != null) {
-                if (firstFrameVisibility.value < 1f) {
+                // 相机设置预览继续用 FHD 托底；手机工作台等待成片后再一次显示，避免原图闪现。
+                if (hideSourceWhileRendering) {
+                    PhotoEffectsPreviewRenderPlaceholder()
+                } else {
                     FittedRotatingBitmap(
                         image = sourceImage,
                         rotationDegrees = 0f,
-                        description = null,
+                        description = stringResource(R.string.photo_frame_preview),
                         modifier = Modifier.fillMaxSize(),
                     )
+                }
+            } else if (preview != null) {
+                if (firstFrameVisibility.value < 1f) {
+                    if (hideSourceWhileRendering) {
+                        PhotoEffectsPreviewRenderPlaceholder()
+                    } else {
+                        FittedRotatingBitmap(
+                            image = sourceImage,
+                            rotationDegrees = 0f,
+                            description = null,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
                 outgoingFrame?.let { frame ->
                     PhotoEffectsPreviewLayer(
@@ -2226,6 +2249,23 @@ private fun PhotoEffectsRenderedPreview(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PhotoEffectsPreviewRenderPlaceholder() {
+    val colors = AppTheme.colors
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.glassSurface.copy(alpha = 0.38f)),
+    ) {
+        CircularProgressIndicator(
+            color = colors.accentBlue.copy(alpha = 0.78f),
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(22.dp),
+        )
     }
 }
 

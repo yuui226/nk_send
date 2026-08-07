@@ -626,6 +626,7 @@ private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringReso
         PhotoFramePreset.MINIMAL -> R.string.photo_frame_minimal
         PhotoFramePreset.FROSTED -> R.string.photo_frame_frosted
         PhotoFramePreset.PLAQUE -> R.string.photo_frame_plaque
+        PhotoFramePreset.IMMERSIVE -> R.string.photo_frame_immersive
     }
 )
 

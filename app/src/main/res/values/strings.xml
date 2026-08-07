@@ -137,6 +137,7 @@
     <string name="photo_frame_minimal">Minimal</string>
     <string name="photo_frame_frosted">Frosted</string>
     <string name="photo_frame_plaque">Plaque</string>
+    <string name="photo_frame_immersive">Immersive</string>
     <string name="photo_frame_task_label">Frame: %1$s</string>
     <string name="photo_frame_watermark_summary">Watermark: %1$s</string>
     <string name="photo_frame_watermark_pro_only">Available in Pro only</string>
@@ -417,4 +418,14 @@
     <string name="update_manual_copied">Update manually. Copied to clipboard</string>
     <string name="update_failure_manual">%1$s. %2$s</string>
     <string name="update_open_download_page">Open download page</string>
+    <string name="local_photo_effects_entry">Frame · Watermark · Filter</string>
+    <string name="local_photo_choose_short">Choose photo</string>
+    <string name="local_photo_replace">Replace photo</string>
+    <string name="local_photo_preview_prompt">Choose a photo to preview the result</string>
+    <string name="local_photo_same_folder_hint">The result will be saved beside the original</string>
+    <string name="local_photo_generate">Generate and save</string>
+    <string name="local_photo_generating">Generating…</string>
+    <string name="local_photo_saved">Saved: %1$s</string>
+    <string name="local_photo_select_failed">Choose a writable photo stored on this phone</string>
+    <string name="local_photo_save_failed">Couldn’t generate the photo. The original is unchanged.</string>
 </resources>

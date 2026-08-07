@@ -150,8 +150,8 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                 popExitTransition = { scaleOut(targetScale = 0.90f, animationSpec = tween(Motion.NAV_EXIT_MS)) + fadeOut(tween(Motion.NAV_EXIT_MS)) }
             ) {
                 composable(Screen.Home.route) {
-                    HomeScreen(
-                        viewModel = cameraViewModel,
+                    HomeWorkspacePager(
+                        cameraViewModel = cameraViewModel,
                         transferViewModel = transferViewModel,
                         onConnectionCelebrationFinished = {
                             // 由成功动画自身通知结束，避免系统动画倍率改变后固定 delay

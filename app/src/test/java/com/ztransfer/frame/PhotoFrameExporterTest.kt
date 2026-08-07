@@ -19,6 +19,25 @@ class PhotoFrameExporterTest {
     fun frostedPresetKeepsItsStablePersistenceKey() {
         assertEquals(PhotoFramePreset.FROSTED, PhotoFramePreset.valueOf("FROSTED"))
         assertEquals(PhotoFramePreset.PLAQUE, PhotoFramePreset.valueOf("PLAQUE"))
+        assertEquals(PhotoFramePreset.IMMERSIVE, PhotoFramePreset.valueOf("IMMERSIVE"))
+    }
+
+    @Test
+    fun immersivePresetKeepsTheOriginalAspectRatioWithoutAddingABorder() {
+        val landscape = calculateImmersiveFrameLayout(6000, 4000)
+        val portrait = calculateImmersiveFrameLayout(4000, 6000)
+        val alreadySmall = calculateImmersiveFrameLayout(1200, 800)
+
+        assertEquals(3200 to 2133, landscape.canvasWidth to landscape.canvasHeight)
+        assertEquals(2133 to 3200, portrait.canvasWidth to portrait.canvasHeight)
+        assertEquals(1200 to 800, alreadySmall.canvasWidth to alreadySmall.canvasHeight)
+        listOf(landscape, portrait, alreadySmall).forEach { layout ->
+            assertEquals(0f, layout.photoLeft, 0.001f)
+            assertEquals(0f, layout.photoTop, 0.001f)
+            assertEquals(layout.canvasWidth.toFloat(), layout.photoRight, 0.001f)
+            assertEquals(layout.canvasHeight.toFloat(), layout.photoBottom, 0.001f)
+            assertEquals(layout.photoBottom, layout.metadataTop, 0.001f)
+        }
     }
 
     @Test
@@ -225,6 +244,19 @@ class PhotoFrameExporterTest {
         assertEquals(
             "Z 5",
             normalizeCameraModel("NIKON CORPORATION", "NIKON Z 5"),
+        )
+        assertEquals(
+            "26mm  f/4.2  1/125s  ISO400",
+            immersiveFrameDetailLine(
+                PhotoFrameMetadata(
+                    make = "NIKON CORPORATION",
+                    model = "NIKON Z 5",
+                    aperture = "f/4.2",
+                    shutter = "1/125",
+                    iso = "ISO400",
+                    focalLength = "26mm",
+                ),
+            ),
         )
     }
 
@@ -591,6 +623,17 @@ class PhotoFrameExporterTest {
             photoFrameWatermarkFingerprint(baseline, PhotoFramePreset.MIST))
         assertTrue(photoFrameWatermarkFingerprint(onPhoto, PhotoFramePreset.MIST) !=
             photoFrameWatermarkFingerprint(baseline, PhotoFramePreset.MIST))
+    }
+
+    @Test
+    fun immersiveInlineAutoWatermarkDiffersFromASeparateCenteredRow() {
+        val automatic = PhotoFrameWatermark(position = PhotoFrameWatermarkPosition.AUTO)
+        val centered = automatic.copy(position = PhotoFrameWatermarkPosition.CENTER)
+
+        assertTrue(
+            photoFrameWatermarkFingerprint(automatic, PhotoFramePreset.IMMERSIVE) !=
+                photoFrameWatermarkFingerprint(centered, PhotoFramePreset.IMMERSIVE),
+        )
     }
 
     @Test
