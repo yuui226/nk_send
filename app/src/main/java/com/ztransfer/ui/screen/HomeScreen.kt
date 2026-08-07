@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import android.content.Intent
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -12,12 +13,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -36,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -72,6 +71,7 @@ import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.WifiConnectionStatus
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -564,21 +564,24 @@ private fun ConnectionMethodCard(
     val colors = AppTheme.colors
     val shape = RoundedCornerShape(24.dp)
     val view = LocalView.current
-    // State 只在 graphicsLayer 中读取：每帧只更新卡片图层，不触发 HomeScreen 重组。
-    // 系统关闭动画时 Compose 会停止该过渡，下面的静态 tint/描边仍保留等待提示。
-    val attentionPhase = if (attentionActive) {
-        val transition = rememberInfiniteTransition(label = "connectionCardAttention")
-        transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(CONNECTION_ATTENTION_MS, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "connectionCardAttentionPhase"
-        )
-    } else {
-        null
+    // 这是连接页最基本的状态提示，不再依赖 Compose 的动画帧时钟。若某些 Android 16
+    // 设备上该时钟停滞，InfiniteTransition 会始终留在首帧。用单调系统时间
+    // 以 30fps 左右更新，只在未选定连接方式的短暂页面存活期运行。
+    var attentionPhase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(attentionActive, attentionPhaseOffset) {
+        if (!attentionActive) {
+            attentionPhase = 0f
+            return@LaunchedEffect
+        }
+        val startedAt = SystemClock.uptimeMillis()
+        while (isActive) {
+            val elapsed = SystemClock.uptimeMillis() - startedAt
+            attentionPhase = (
+                (elapsed % CONNECTION_ATTENTION_MS).toFloat() / CONNECTION_ATTENTION_MS +
+                    attentionPhaseOffset
+                ).mod(1f)
+            delay(CONNECTION_ATTENTION_FRAME_MS)
+        }
     }
     var iconCenterInRoot by remember { mutableStateOf<Offset?>(null) }
     var cardPressed by remember { mutableStateOf(false) }
@@ -617,9 +620,7 @@ private fun ConnectionMethodCard(
             .zIndex(if (selected) 3f else 0f)
             // 呼吸和按压放在共同父层：玻璃卡、文字、按钮、模式图标始终同步形变。
             .graphicsLayer {
-                val attention = attentionPhase?.value?.let { phase ->
-                    connectionAttention((phase + attentionPhaseOffset).mod(1f))
-                } ?: 0f
+                val attention = if (attentionActive) connectionAttention(attentionPhase) else 0f
                 val breathingScale = 1f + attention * 0.04f
                 val deformation = pressDeformation
                 scaleX = breathingScale * (1f + deformation * 0.012f)
@@ -932,23 +933,28 @@ private fun ConnectionSuccessOverlay(
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
-    val progress = remember { Animatable(0f) }
+    var progress by remember { mutableFloatStateOf(0f) }
     val currentOnFinished by rememberUpdatedState(onFinished)
     LaunchedEffect(success) {
         if (success) {
-            progress.snapTo(0f)
-            progress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(760, easing = FastOutSlowInEasing)
-            )
-            currentOnFinished()
+            progress = 0f
+            val startedAt = SystemClock.uptimeMillis()
+            while (isActive) {
+                val elapsed = SystemClock.uptimeMillis() - startedAt
+                val linearProgress =
+                    (elapsed.toFloat() / CONNECTION_SUCCESS_DURATION_MS).coerceIn(0f, 1f)
+                progress = FastOutSlowInEasing.transform(linearProgress)
+                if (linearProgress >= 1f) break
+                delay(CONNECTION_SUCCESS_FRAME_MS)
+            }
+            if (isActive) currentOnFinished()
         } else {
-            progress.snapTo(0f)
+            progress = 0f
         }
     }
-    if (!success && progress.value == 0f) return
+    if (!success && progress == 0f) return
 
-    val p = progress.value
+    val p = progress
     Box(
         modifier = modifier
             .graphicsLayer { alpha = (p * 5f).coerceAtMost(1f) },
@@ -1099,6 +1105,9 @@ private fun PremiumSuccessEffect(
 // 连接成功后的入场节奏：先保持当前卡片 [CONNECT_CELEBRATE_DELAY_MS]，再播放卡片内
 // 成功动画；动画协程完成后直接通知 MainScreen 跳转，不再用另一套固定时钟猜结束时刻。
 const val CONNECT_CELEBRATE_DELAY_MS = 500L
+private const val CONNECTION_ATTENTION_FRAME_MS = 32L
+private const val CONNECTION_SUCCESS_DURATION_MS = 760L
+private const val CONNECTION_SUCCESS_FRAME_MS = 16L
 private const val WIFI_SETTINGS_BUTTON_TEXTURE_SEED = 0x1457A102
 
 /** 布局热路径专用的非观察容器；更新坐标不触发 Compose 重组。 */

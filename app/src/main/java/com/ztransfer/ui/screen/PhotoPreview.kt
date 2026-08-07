@@ -1,5 +1,6 @@
 package com.ztransfer.ui.screen
 
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -78,6 +79,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
@@ -90,6 +92,9 @@ import com.ztransfer.viewmodel.PhotoExif
 // 视频扩展名：无高清封面，预览走"压暗缩略图 + 视频占位"分支。
 // 注意与 CameraViewModel.VIDEO_EXTENSIONS（封面黑边兜底）保持同步。
 private val VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
+private const val PREVIEW_DEFERRED_LOAD_DELAY_MS = 340L
+private const val FHD_REVEAL_DURATION_MS = 300L
+private const val FHD_REVEAL_FRAME_MS = 16L
 
 /** 预览分页模型与列表展示模型同构：合集是独立页面，不伪装成其中某张照片。 */
 internal sealed interface PhotoPreviewItem {
@@ -192,14 +197,19 @@ internal fun PhotoPreviewOverlay(
     var overlayBounds by remember { mutableStateOf<Rect?>(null) }
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
-    // 高清图/EXIF 到位会触发大位图纹理上传与预览子树更新。等展开动画结束再启动，
-    // 避免网络较快时恰好在变形动画中途上屏，造成偶发掉帧。
+    // 高清图/EXIF 到位会触发大位图纹理上传与预览子树更新，因此稍延后启动。
+    // 这个功能门绝不能依赖 progress.animateTo 返回：某些设备动画帧时钟停滞时，
+    // 等动画完成会让 FHD、EXIF 和远程缩略图全部永久不启动。
     var deferredLoadsEnabled by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(PREVIEW_DEFERRED_LOAD_DELAY_MS)
+        if (!closing) deferredLoadsEnabled = true
+    }
 
     LaunchedEffect(overlayBounds, closing) {
         if (!closing && overlayBounds != null && progress.value < 1f) {
             progress.animateTo(1f, Motion.overlayExpand)
-            deferredLoadsEnabled = true
         }
     }
     LaunchedEffect(closing) {
@@ -969,13 +979,27 @@ private fun PreviewPage(
 
     // FHD 到位后覆盖在缩略图上淡入。缩略图在过渡完成前始终保持不透明，避免两张图
     // 的有效画面边界略有差异时交叉淡出露出背景，视觉上只发生一次连续的“变清晰”。
-    val fhdAlpha = remember { Animatable(0f) }
+    var fhdAlpha by remember(file.handle) { mutableFloatStateOf(0f) }
     LaunchedEffect(fhdBitmap) {
         if (fhdBitmap != null) {
-            if (thumbnail != null) fhdAlpha.animateTo(1f, tween(300))
-            else fhdAlpha.snapTo(1f)
+            if (thumbnail == null) {
+                fhdAlpha = 1f
+            } else {
+                // FHD 是否可见不能依赖 Compose 动画帧时钟：部分设备上该时钟可能不推进，
+                // Animatable 会一直停在 0，造成 FHD 已加载却始终被透明隐藏。
+                fhdAlpha = 0f
+                val startedAt = SystemClock.uptimeMillis()
+                while (isActive) {
+                    val elapsed = SystemClock.uptimeMillis() - startedAt
+                    val linearProgress =
+                        (elapsed.toFloat() / FHD_REVEAL_DURATION_MS).coerceIn(0f, 1f)
+                    fhdAlpha = FastOutSlowInEasing.transform(linearProgress)
+                    if (linearProgress >= 1f) break
+                    delay(FHD_REVEAL_FRAME_MS)
+                }
+            }
         } else {
-            fhdAlpha.snapTo(0f)
+            fhdAlpha = 0f
         }
     }
 
@@ -993,7 +1017,7 @@ private fun PreviewPage(
         val thumb = thumbnail  // 本地变量，delegate 属性无法被编译器 smart cast
         // 若 FHD 比缩略图先到，直接显示 FHD；不能等待 LaunchedEffect 下一帧再 snap，
         // 否则仍会产生一帧全透明图片区。
-        val effectiveFhdAlpha = if (thumb == null) 1f else fhdAlpha.value
+        val effectiveFhdAlpha = if (thumb == null) 1f else fhdAlpha
         val anyLoading = isLoadingFhd || (!noThumb && thumbnail == null)
         when {
             isVideo -> {
