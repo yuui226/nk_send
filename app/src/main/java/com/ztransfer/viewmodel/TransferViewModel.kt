@@ -141,7 +141,7 @@ data class TransferState(
     val filterBurstOnly: Boolean = false,
     // 只看导出目录中尚未存在的照片。与缩略图已传对号共用同一份索引。持久化。
     val filterUntransferredOnly: Boolean = false,
-    // 只看指定卡槽（1/2）。null = 两张卡全部显示。持久化；不可用卡槽在完整扫描后由文件页清除。
+    // 只看指定卡槽（1/2）。null = 两张卡全部显示。仅当前进程生效；下次启动恢复全部卡槽。
     val filterStorageSlot: Int? = null,
     // 相机拍摄日期范围（含首尾两天）。null = 不按日期筛选。持久化。
     val filterDateRange: PhotoDateRange? = null,
@@ -464,6 +464,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
         }
         val storedPreferences = prefs.all
+        // 卡槽筛选只属于当前相机会话。清掉旧版本曾持久化的值，避免升级后继续恢复单卡状态。
+        if ("filter_storage_slot" in storedPreferences) {
+            prefs.edit().remove("filter_storage_slot").apply()
+        }
         val storedWatermarkSize = storedPreferences["photo_frame_watermark_size"]
         val usesLegacyWatermarkSizeScale = prefs.getInt(
             PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY,
@@ -513,7 +517,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 filterProtectedOnly = prefs.getBoolean("filter_protected", false),
                 filterBurstOnly = prefs.getBoolean("filter_burst", false),
                 filterUntransferredOnly = prefs.getBoolean("filter_untransferred", false),
-                filterStorageSlot = prefs.getInt("filter_storage_slot", 0).takeIf { it in 1..2 },
                 filterDateRange = PhotoDateRange.restore(
                     prefs.getString("filter_date_start", null),
                     prefs.getString("filter_date_end", null),
@@ -800,7 +803,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(appLanguage = tag) }
     }
 
-    /** 应用筛选（类型/保护/连拍/未传输/卡槽/日期）。持久化。 */
+    /** 应用筛选（类型/保护/连拍/未传输/卡槽/日期）；卡槽仅当前进程生效，其余持久化。 */
     fun setFilters(criteria: PhotoFilterCriteria) {
         prefs.edit().apply {
             if (criteria.extensions == null) remove("filter_exts")
@@ -809,8 +812,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             if (criteria.burstOnly) putBoolean("filter_burst", true) else remove("filter_burst")
             if (criteria.untransferredOnly) putBoolean("filter_untransferred", true)
             else remove("filter_untransferred")
-            if (criteria.storageSlot == null) remove("filter_storage_slot")
-            else putInt("filter_storage_slot", criteria.storageSlot)
+            // 卡槽不跨进程保存；顺手清理旧版本可能遗留的值。
+            remove("filter_storage_slot")
             if (criteria.dateRange == null) {
                 remove("filter_date_start")
                 remove("filter_date_end")

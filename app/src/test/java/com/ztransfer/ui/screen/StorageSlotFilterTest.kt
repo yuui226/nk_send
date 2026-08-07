@@ -52,4 +52,46 @@ class StorageSlotFilterTest {
             ),
         )
     }
+
+    @Test
+    fun `storage filter is hidden unless two cards are available`() {
+        assertTrue(storageFilterSlots(emptyList()).isEmpty())
+        assertTrue(storageFilterSlots(listOf(2)).isEmpty())
+        assertEquals(listOf(1, 2), storageFilterSlots(listOf(2, 1, 2)))
+    }
+
+    @Test
+    fun `single card selection returns to all after scan completes`() {
+        assertNull(
+            normalizeStorageSlotFilter(
+                selectedSlot = 2,
+                availableSlots = emptyList(),
+                hasCompletedFileScan = true,
+            )
+        )
+    }
+
+    @Test
+    fun `selection is not cleared while card scan is incomplete`() {
+        assertEquals(
+            2,
+            normalizeStorageSlotFilter(
+                selectedSlot = 2,
+                availableSlots = emptyList(),
+                hasCompletedFileScan = false,
+            )
+        )
+    }
+
+    @Test
+    fun `valid dual card selection remains active for current process`() {
+        assertEquals(
+            2,
+            normalizeStorageSlotFilter(
+                selectedSlot = 2,
+                availableSlots = slots,
+                hasCompletedFileScan = true,
+            )
+        )
+    }
 }

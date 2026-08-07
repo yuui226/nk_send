@@ -106,7 +106,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
@@ -405,13 +404,8 @@ fun FileListScreen(
     val filterStorageSlot = transferState.filterStorageSlot
     val filterDateRange = transferState.filterDateRange
     val storageIdBySlot = remember(state.storageIds) { storageIdsBySlot(state.storageIds) }
-    val visibleStorageSlots = remember(storageIdBySlot, filterStorageSlot) {
-        when {
-            BuildConfig.DEBUG -> listOf(1, 2)
-            storageIdBySlot.size > 1 -> storageIdBySlot.keys.sorted()
-            filterStorageSlot != null -> listOf(filterStorageSlot)
-            else -> emptyList()
-        }
+    val visibleStorageSlots = remember(storageIdBySlot) {
+        storageFilterSlots(storageIdBySlot.keys)
     }
     val selectedStorageIds = filterStorageSlot?.let(storageIdBySlot::get)
     val filterCriteria = remember(
@@ -434,10 +428,16 @@ fun FileListScreen(
     val filterActive = filterExts != null || filterProtected || filterBurst ||
         filterUntransferred || filterStorageSlot != null || filterDateRange != null
 
-    // 跨相机保留筛选时，完整枚举确认目标卡槽不存在才清除；扫描途中不能误清。
-    LaunchedEffect(state.hasCompletedFileScan, storageIdBySlot, filterStorageSlot) {
-        if (state.hasCompletedFileScan && filterStorageSlot != null && selectedStorageIds == null) {
-            transferViewModel.setFilters(filterCriteria.copy(storageSlot = null))
+    // 扫描途中保留当前选择；完整扫描后只有确认存在双卡才允许卡槽筛选。
+    // 单卡时筛选没有意义，归回“全部”也能保证入口按钮不会卡在激活状态。
+    LaunchedEffect(state.hasCompletedFileScan, visibleStorageSlots, filterStorageSlot) {
+        val normalized = normalizeStorageSlotFilter(
+            selectedSlot = filterStorageSlot,
+            availableSlots = visibleStorageSlots,
+            hasCompletedFileScan = state.hasCompletedFileScan,
+        )
+        if (normalized != filterStorageSlot) {
+            transferViewModel.setFilters(filterCriteria.copy(storageSlot = normalized))
         }
     }
     // 筛选确定后的级联入场（复用分组展开的入场动画）：tick 每次确定递增（重播存量格子）,
@@ -1227,7 +1227,15 @@ fun FileListScreen(
                     // 取消可能在重组前到达，会被误判为“未变化”而无法持久化。
                     filterRevealTick++
                     filterRevealWindow = true
-                    transferViewModel.setFilters(criteria)
+                    transferViewModel.setFilters(
+                        criteria.copy(
+                            storageSlot = normalizeStorageSlotFilter(
+                                selectedSlot = criteria.storageSlot,
+                                availableSlots = visibleStorageSlots,
+                                hasCompletedFileScan = true,
+                            )
+                        )
+                    )
                 },
                 onDismiss = { showFilter = false }
             )
@@ -2749,6 +2757,20 @@ private fun formatDateHeader(date: String): String {
  */
 internal fun isStorageSlotSelected(selectedSlot: Int?, slot: Int): Boolean =
     selectedSlot == null || selectedSlot == slot
+
+/** 只有当前相机明确存在至少两个卡槽时，卡槽筛选才有可表达的意义。 */
+internal fun storageFilterSlots(availableSlots: Collection<Int>): List<Int> =
+    availableSlots.distinct().sorted().takeIf { it.size > 1 }.orEmpty()
+
+/** 扫描完成后将单卡、无卡或无效选择归回“全部”；扫描途中不根据暂缺数据误清。 */
+internal fun normalizeStorageSlotFilter(
+    selectedSlot: Int?,
+    availableSlots: List<Int>,
+    hasCompletedFileScan: Boolean,
+): Int? {
+    if (selectedSlot == null || !hasCompletedFileScan) return selectedSlot
+    return selectedSlot.takeIf { availableSlots.size > 1 && it in availableSlots }
+}
 
 internal fun toggleStorageSlotSelection(
     selectedSlot: Int?,
