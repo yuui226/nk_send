@@ -17,12 +17,14 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.SystemClock
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
+import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
 import com.ztransfer.protocol.CameraRefusedException
@@ -133,10 +135,9 @@ internal fun prioritizedThumbnailFiles(
     files: List<NikonCamera.FileInfo>,
     range: PhotoDateRange?,
 ): List<NikonCamera.FileInfo> {
-    val ordered = files.sortedWith(
-        compareByDescending<NikonCamera.FileInfo> { it.captureDate.orEmpty() }
-            .thenByDescending { it.handle }
-    )
+    // Kotlin 的排序稳定：同一拍摄时间保留文件枚举时的相机自然顺序，让 JPG/RAW 配对
+    // 继续相邻。不能再用 handle 打破平局，其高位在 Nikon 上含格式特征。
+    val ordered = files.sortedByDescending { it.captureDate.orEmpty() }
     if (range == null) return ordered
     val prioritized = ArrayList<NikonCamera.FileInfo>(ordered.size)
     val remaining = ArrayList<NikonCamera.FileInfo>(ordered.size)
@@ -147,19 +148,65 @@ internal fun prioritizedThumbnailFiles(
     return prioritized
 }
 
+/** 单个 PTP StorageID 内由新到旧的 handle 顺序；顺序来自相机原始数组的反序。 */
+internal data class StorageHandleOrder(
+    val storageId: Int,
+    val newestFirstHandles: List<Int>,
+)
+
+/**
+ * Nikon 返回的单卡 handle 数组在实机上是旧到新，并且天然把同次拍摄的 JPG/RAW、视频
+ * 按拍摄顺序交错排列。只反转每张卡，不能再按 handle 数值排序：handle 高位含格式特征，
+ * 数值排序会把 MP4/JPG/RAW 拆成大块。跨卡重复 handle 仍按第一张卡出现的位置保留一次。
+ */
+internal fun newestFirstHandleOrders(
+    rawHandlesByStorage: List<Pair<Int, List<Int>>>,
+): List<StorageHandleOrder> {
+    val seen = HashSet<Int>()
+    return rawHandlesByStorage.map { (storageId, rawHandles) ->
+        StorageHandleOrder(
+            storageId = storageId,
+            newestFirstHandles = rawHandles.asReversed().filter { seen.add(it) },
+        )
+    }
+}
+
 /**
  * 一次相机会话内的整卡枚举快照。大图预览只暂停 ObjectInfo 阶段，关闭后可直接复用
- * 已经取得的 handles；相机会话一旦更换，handle 不再可信，必须重新枚举。
+ * 已经取得的每卡 handles；相机会话一旦更换，handle 不再可信，必须重新枚举。
  */
 internal data class FileScanHandleSnapshot(
     val sessionToken: Any,
     val storageIds: List<Int>,
-    val sortedHandles: List<Int>,
+    val handleOrders: List<StorageHandleOrder>,
 ) {
+    // 备份模式下第二张卡的副本会合并进第一条，状态列表不再保留它自己的 handle；单靠
+    // existingHandles 无法知道它已读过。快照额外记住真正发布过的 handle，FHD 恢复时
+    // 才不会重复读取这些已合并副本。
+    private val processedHandles = HashSet<Int>()
+
     fun belongsTo(sessionToken: Any): Boolean = this.sessionToken === sessionToken
 
-    fun remainingAfter(existingHandles: Set<Int>): List<Int> =
-        sortedHandles.filterNot { it in existingHandles }
+    val totalHandleCount: Int
+        get() = handleOrders.sumOf { it.newestFirstHandles.size }
+
+    fun markProcessed(handles: Collection<Int>) {
+        synchronized(processedHandles) { processedHandles.addAll(handles) }
+    }
+
+    fun remainingAfter(existingHandles: Set<Int>): List<StorageHandleOrder> {
+        val skipped = synchronized(processedHandles) {
+            HashSet<Int>(existingHandles.size + processedHandles.size).apply {
+                addAll(existingHandles)
+                addAll(processedHandles)
+            }
+        }
+        return handleOrders.map { order ->
+            order.copy(
+                newestFirstHandles = order.newestFirstHandles.filterNot { it in skipped }
+            )
+        }
+    }
 }
 
 data class CameraState(
@@ -748,7 +795,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (snapshot != null) {
                 log {
                     "FILE_SCAN resume after FHD from handle snapshot " +
-                        "loaded=${_state.value.files.size} handles=${snapshot.sortedHandles.size}"
+                        "loaded=${_state.value.files.size} handles=${snapshot.totalHandleCount}"
                 }
                 loadFiles(preserveExisting = true, resumeSnapshot = snapshot)
             } else {
@@ -1337,6 +1384,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 监看和交互式大图都先于列表枚举：保留待加载标记，不向 ioMutex 排队。
         if (isFileScanPaused()) return
 
+        if (FileOrderProbe.enabled) {
+            if (resumeSnapshot == null) {
+                FileOrderProbe.beginScan(
+                    "fresh preserveExisting=$preserveExisting existing=${_state.value.files.size}"
+                )
+            } else {
+                FileOrderProbe.addNote(
+                    "resume existing handle snapshot; loaded=${_state.value.files.size}"
+                )
+            }
+        }
+
         log {
             "FILE_SCAN start preserve=$preserveExisting snapshot=${resumeSnapshot != null} " +
                 "existing=${_state.value.files.size}"
@@ -1348,12 +1407,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
                 val reusableSnapshot = resumeSnapshot?.takeIf { it.belongsTo(cam) }
                 val storageIds: List<Int>
-                val sortedHandles: List<Int>
+                val remainingHandleOrders: List<StorageHandleOrder>
                 val activeSnapshot: FileScanHandleSnapshot
                 if (reusableSnapshot != null) {
                     // 大图预览只是同会话短暂停顿：StorageID/handles 已在开局取得，直接继续。
                     storageIds = reusableSnapshot.storageIds
-                    sortedHandles = reusableSnapshot.remainingAfter(existingHandles)
+                    remainingHandleOrders = reusableSnapshot.remainingAfter(existingHandles)
                     activeSnapshot = reusableSnapshot
                 } else {
                     // 双卡机型（Z5 II / Z6 III 等）：枚举【所有】存储卡的对象并合并，单卡机型
@@ -1363,51 +1422,107 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         .distinct()
                         .sorted()
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
+                    if (FileOrderProbe.enabled) FileOrderProbe.recordStorageIds(storageIds)
                     _state.update { it.copy(storageIds = storageIds) }
                     if (storageIds.isEmpty()) {
                         fileScanHandleSnapshot = null
                         fileLoadPending = false
                         _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                        if (FileOrderProbe.enabled) {
+                            FileOrderProbe.finishScan("complete: no usable storage")
+                        }
                         return@launch
                     }
 
-                    val handles = storageIds.flatMap { cam.getObjectHandles(it) }.distinct()
+                    val rawHandlesByStorage = storageIds.map { storageId ->
+                        val startedAtMs = if (FileOrderProbe.enabled) {
+                            SystemClock.elapsedRealtime()
+                        } else {
+                            0L
+                        }
+                        val rawHandles = cam.getObjectHandles(storageId)
+                        if (FileOrderProbe.enabled) {
+                            FileOrderProbe.recordRawHandles(
+                                storageId = storageId,
+                                handles = rawHandles,
+                                elapsedMs = SystemClock.elapsedRealtime() - startedAtMs,
+                            )
+                        }
+                        storageId to rawHandles
+                    }
+                    val handleOrders = newestFirstHandleOrders(rawHandlesByStorage)
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
-                    if (handles.isEmpty()) {
+                    if (handleOrders.all { it.newestFirstHandles.isEmpty() }) {
                         fileScanHandleSnapshot = null
                         fileLoadPending = false
                         _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                        if (FileOrderProbe.enabled) FileOrderProbe.finishScan("complete: no handles")
                         return@launch
                     }
 
-                    // handle 降序 ≈ 拍摄时间由新到旧；保存完整快照供同会话大图暂停后复用。
+                    // 每张卡只反转相机的自然顺序。单卡可直接流式读取；双卡稍后用每卡
+                    // 当前 head 的真实拍摄时间归并，不能把不透明 handle 做全局数值排序。
                     activeSnapshot = FileScanHandleSnapshot(
                         sessionToken = cam,
                         storageIds = storageIds,
-                        sortedHandles = handles.sortedDescending(),
+                        handleOrders = handleOrders,
                     )
                     fileScanHandleSnapshot = activeSnapshot
-                    sortedHandles = activeSnapshot.remainingAfter(existingHandles)
+                    if (FileOrderProbe.enabled) {
+                        val nonEmptyOrders = handleOrders.filter {
+                            it.newestFirstHandles.isNotEmpty()
+                        }
+                        if (nonEmptyOrders.size == 1) {
+                            FileOrderProbe.recordScheduledHandles(
+                                nonEmptyOrders.single().newestFirstHandles
+                            )
+                        } else {
+                            FileOrderProbe.recordScheduledHandles(emptyList())
+                            FileOrderProbe.addNote(
+                                "dual-card schedule is resolved incrementally by captureDate"
+                            )
+                        }
+                    }
+                    remainingHandleOrders = activeSnapshot.remainingAfter(existingHandles)
                 }
 
                 if (fileLoadGeneration != generation || camera !== cam) return@launch
                 _state.update { it.copy(storageIds = storageIds) }
-                if (sortedHandles.isEmpty()) {
+                val nonEmptyRemainingOrders = remainingHandleOrders.filter {
+                    it.newestFirstHandles.isNotEmpty()
+                }
+                val remainingHandleCount = nonEmptyRemainingOrders.sumOf {
+                    it.newestFirstHandles.size
+                }
+                if (remainingHandleCount == 0) {
                     if (fileScanHandleSnapshot === activeSnapshot) fileScanHandleSnapshot = null
                     fileLoadPending = false
                     _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                    if (FileOrderProbe.enabled) {
+                        FileOrderProbe.finishScan("complete: nothing remaining")
+                    }
                     return@launch
                 }
 
                 val allFiles = existingFiles.toMutableList()
                 // 备份模式下同一张照片在两张卡各有一份（handle 不同）：按 名称+大小+拍摄时间
                 // 去重，列表只显示一份；溢出/RAW+JPG 分卡等模式互不相同，不受影响。
-                val indexByIdentity = HashMap<String, Int>(existingFiles.size + sortedHandles.size)
+                val indexByIdentity = HashMap<String, Int>(
+                    existingFiles.size + remainingHandleCount
+                )
                 existingFiles.forEachIndexed { index, file ->
                     indexByIdentity[file.logicalIdentity()] = index
                 }
 
-                cam.streamFileInfo(sortedHandles, batchSize = 20) { batch, loaded, total ->
+                val dynamicDualCardSchedule = activeSnapshot.handleOrders.count {
+                    it.newestFirstHandles.isNotEmpty()
+                } > 1
+                val publishBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
+                    { batch, loaded, total ->
+                    activeSnapshot.markProcessed(batch.map { it.handle })
+                    if (FileOrderProbe.enabled && dynamicDualCardSchedule) {
+                        FileOrderProbe.appendScheduledHandles(batch.map { it.handle })
+                    }
                     batch.forEach { file ->
                         val identity = file.logicalIdentity()
                         val existingIndex = indexByIdentity[identity]
@@ -1427,22 +1542,46 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
                     }
                 }
+                if (nonEmptyRemainingOrders.size == 1) {
+                    cam.streamFileInfo(
+                        handles = nonEmptyRemainingOrders.single().newestFirstHandles,
+                        batchSize = 20,
+                        onBatch = publishBatch,
+                    )
+                } else {
+                    cam.streamMergedFileInfo(
+                        newestFirstHandlesByStorage = nonEmptyRemainingOrders.map {
+                            it.newestFirstHandles
+                        },
+                        batchSize = 20,
+                        onBatch = publishBatch,
+                    )
+                }
 
                 if (fileLoadGeneration != generation || camera !== cam) return@launch
                 if (fileScanHandleSnapshot === activeSnapshot) fileScanHandleSnapshot = null
                 fileLoadPending = false
                 log { "FILE_SCAN done files=${allFiles.size}" }
                 _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                if (FileOrderProbe.enabled) {
+                    FileOrderProbe.finishScan("complete: files=${allFiles.size}")
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 // 进入监看/大图的正常抢占：保留已加载部分与 pending。大图同会话复用 handles；
                 // 监看退出仍重新获取 handles，以包含监看期间新增的照片。
+                if (FileOrderProbe.enabled) FileOrderProbe.finishScan("paused/cancelled")
                 throw e
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // 扫描中断（掉线/读超时）：保留已加载的部分，掉线由心跳发现并触发重连。
                 if (fileLoadGeneration == generation && camera === cam) {
                     fileScanHandleSnapshot = null
                     fileLoadPending = false
                     _state.update { it.copy(isLoadingFiles = false) }
+                }
+                if (FileOrderProbe.enabled) {
+                    FileOrderProbe.finishScan(
+                        "failed: ${e.javaClass.simpleName}: ${e.message.orEmpty()}"
+                    )
                 }
             } finally {
                 // 新会话可能已启动了下一轮加载；旧任务的迟到 finally 不得把新任务的
@@ -1590,7 +1729,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ): Boolean {
         val cam = camera ?: return false
         val bytes = remoteThumbGate.withPermit {
-            cam.getThumbnail(handle)
+            if (FileOrderProbe.enabled) {
+                getRemoteThumbnailProbed(cam, handle, "background")
+            } else {
+                cam.getThumbnail(handle)
+            }
         }   // 瞬时失败会抛出，由扫描循环按单张失败处理
         if (bytes == null || bytes.isEmpty()) {
             noThumbHandles.add(handle)
@@ -1599,6 +1742,44 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         withContext(Dispatchers.IO) { writeAtomic(disk, bytes) }
         diskIndex?.add(disk.name)
         return true
+    }
+
+    /** 仅包裹现有 GetThumb 事务记录实际进相机通道的顺序；Debug 不增加任何相机请求。 */
+    private suspend fun getRemoteThumbnailProbed(
+        cam: NikonCamera,
+        handle: Int,
+        lane: String,
+    ): ByteArray? {
+        val sequence = if (FileOrderProbe.enabled) {
+            FileOrderProbe.beginThumbnail(handle, lane)
+        } else {
+            -1
+        }
+        return try {
+            val bytes = cam.getThumbnail(handle)
+            if (FileOrderProbe.enabled) {
+                FileOrderProbe.finishThumbnail(
+                    sequence = sequence,
+                    outcome = if (bytes == null || bytes.isEmpty()) "no-thumbnail" else "ok",
+                    byteCount = bytes?.size,
+                )
+            }
+            bytes
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            if (FileOrderProbe.enabled) {
+                FileOrderProbe.finishThumbnail(sequence, "cancelled", null)
+            }
+            throw e
+        } catch (e: Exception) {
+            if (FileOrderProbe.enabled) {
+                FileOrderProbe.finishThumbnail(
+                    sequence,
+                    "error:${e.javaClass.simpleName}",
+                    null,
+                )
+            }
+            throw e
+        }
     }
 
     /**
@@ -1716,7 +1897,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val disk = diskFile(file)
             val bytes = remoteThumbGate.withPermit {
                 val cam = camera ?: return@withPermit null
-                cam.getThumbnail(handle)
+                if (FileOrderProbe.enabled) {
+                    getRemoteThumbnailProbed(cam, handle, "visible")
+                } else {
+                    cam.getThumbnail(handle)
+                }
             }
             if (bytes == null || bytes.isEmpty()) {
                 noThumbHandles.add(handle)   // 相机明确表示无缩略图：负缓存，不再重试

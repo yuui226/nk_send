@@ -1317,6 +1317,9 @@ fun FileListScreen(
             state = fireworks,
             hapticsEnabled = transferState.hapticsEnabled,
         )
+
+        // Debug 构建显示文件发现顺序探测入口；Release 为同名空实现，不产生节点。
+        DebugFileOrderProbePanel(modifier = Modifier.fillMaxSize())
     }
 }
 

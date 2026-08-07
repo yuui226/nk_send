@@ -7,6 +7,7 @@ import android.net.Network
 import android.os.SystemClock
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.diagnostics.FileOrderProbe
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -28,6 +29,35 @@ class OutputWriteException(message: String, cause: Throwable) : Exception(messag
 
 /** PTP/IP 已响应但相机明确拒绝初始化；区别于普通网络不可达。 */
 class CameraRefusedException(message: String) : Exception(message)
+
+/**
+ * 多卡流式归并时选择下一条。每张卡自己的 head 已经是该卡当前最新文件；跨卡只比较
+ * ObjectInfo 拍摄时间。日期缺失的 head 优先弹出，避免它挡住同卡后续所有正常文件。
+ * 时间相同保持卡槽输入顺序稳定，不再拿不透明的 handle 数值打破平局。
+ */
+internal fun selectNewestFileHeadIndex(
+    heads: List<NikonCamera.FileInfo?>,
+): Int? {
+    var selected = -1
+    heads.forEachIndexed { index, candidate ->
+        if (candidate == null) return@forEachIndexed
+        if (selected < 0) {
+            selected = index
+            return@forEachIndexed
+        }
+        val selectedFile = heads[selected] ?: return@forEachIndexed
+        val candidateDate = candidate.captureDate
+        val selectedDate = selectedFile.captureDate
+        val candidateIsNewer = when {
+            candidateDate == null && selectedDate != null -> true
+            candidateDate != null && selectedDate == null -> false
+            candidateDate == null -> false
+            else -> candidateDate > checkNotNull(selectedDate)
+        }
+        if (candidateIsNewer) selected = index
+    }
+    return selected.takeIf { it >= 0 }
+}
 
 /**
  * 续传无法进行：已有半成品，但本次下载走不了分块路径（相机不支持 GetPartialObjectEx，
@@ -187,6 +217,7 @@ class NikonCamera(private val context: Context) {
         network: Network? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            if (FileOrderProbe.enabled) FileOrderProbe.beginConnection("PTP/IP")
             // 经 Wi-Fi Network 的 socketFactory 建 socket：相机热点没有互联网，系统验证失败后
             // 常把【默认网络】切回蜂窝数据——普通 Socket() 走默认路由，连 192.168.1.1 的包进蜂窝
             // 黑洞，每次尝试烧满连接超时，直到系统把默认网切回 Wi-Fi 才能成功（用户感知
@@ -250,6 +281,30 @@ class NikonCamera(private val context: Context) {
             }
             sessionOpen = true
 
+            if (FileOrderProbe.enabled) {
+                try {
+                    sendCmd(PtpConstants.GET_DEVICE_INFO)
+                    val (deviceInfoResp, deviceInfoData) = recvRespWithPayload()
+                    if (deviceInfoResp == PtpConstants.RESPONSE_OK && deviceInfoData != null) {
+                        val info = parseDeviceInfo(deviceInfoData)
+                        FileOrderProbe.recordCapabilities(
+                            manufacturer = info.manufacturer,
+                            model = info.model,
+                            deviceVersion = info.deviceVersion,
+                            operations = info.operations,
+                        )
+                    } else {
+                        FileOrderProbe.recordCapabilityFailure(
+                            "response=0x${deviceInfoResp.toString(16)} data=${deviceInfoData?.size ?: 0}B"
+                        )
+                    }
+                } catch (e: Exception) {
+                    FileOrderProbe.recordCapabilityFailure(
+                        "${e.javaClass.simpleName}: ${e.message.orEmpty()}"
+                    )
+                }
+            }
+
             startEvtThread()
 
             Result.success(Unit)
@@ -265,6 +320,7 @@ class NikonCamera(private val context: Context) {
         device: UsbDevice
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            if (FileOrderProbe.enabled) FileOrderProbe.beginConnection("USB")
             log { "USB_CONNECT open device=${device.deviceName}" }
             tid = -1
             val transport = UsbPtpConnection.open(manager, device).getOrThrow()
@@ -289,7 +345,7 @@ class NikonCamera(private val context: Context) {
 
             log { "USB_CONNECT device-info" }
             sendCmd(PtpConstants.GET_DEVICE_INFO)
-            val (deviceInfoResp, _) = recvRespWithPayload()
+            val (deviceInfoResp, deviceInfoData) = recvRespWithPayload()
             log { "USB_CONNECT device-info response=0x${deviceInfoResp.toString(16)}" }
             if (deviceInfoResp != PtpConstants.RESPONSE_OK) {
                 throw Exception(
@@ -298,6 +354,26 @@ class NikonCamera(private val context: Context) {
                         PtpConstants.translateResponse(context, deviceInfoResp)
                     )
                 )
+            }
+            if (FileOrderProbe.enabled) {
+                if (deviceInfoData != null) {
+                    runCatching { parseDeviceInfo(deviceInfoData) }
+                        .onSuccess { info ->
+                            FileOrderProbe.recordCapabilities(
+                                manufacturer = info.manufacturer,
+                                model = info.model,
+                                deviceVersion = info.deviceVersion,
+                                operations = info.operations,
+                            )
+                        }
+                        .onFailure { error ->
+                            FileOrderProbe.recordCapabilityFailure(
+                                "${error.javaClass.simpleName}: ${error.message.orEmpty()}"
+                            )
+                        }
+                } else {
+                    FileOrderProbe.recordCapabilityFailure("response OK but payload is empty")
+                }
             }
 
             transport.readTimeoutMs = SO_TIMEOUT_MS
@@ -610,6 +686,7 @@ class NikonCamera(private val context: Context) {
         val total = handles.size
         var loaded = 0
         handles.chunked(batchSize).forEach { batch ->
+            val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
             // 每批单独持锁，批间释放 ioMutex：缩略图模式下缩略图请求可在批间插入，
             // 从而随列表一起渐进出图，而不是等整份列表加载完才开始。
             // 批内每个 ObjectInfo 之间也检查取消：进入监看时最多等当前一条事务收尾，
@@ -623,9 +700,98 @@ class NikonCamera(private val context: Context) {
                     getObjectInfoInternal(handle)
                 }
             }
+            if (FileOrderProbe.enabled) {
+                FileOrderProbe.recordObjectInfoBatch(
+                    requestedHandles = batch,
+                    files = files,
+                    elapsedMs = SystemClock.elapsedRealtime() - probeStartedAtMs,
+                )
+            }
             loaded += files.size
             if (files.isNotEmpty()) {
                 onBatch(files, loaded, total)
+            }
+        }
+    }
+
+    /**
+     * 双卡 ObjectInfo 流式归并。每组 handle 已按各自卡内的新到旧排列；这里只为每张卡
+     * 保留一个已读取的 head，用其真实 captureDate 选择全机下一条。因此不会先扫完一张卡，
+     * 也不需要把全部 ObjectInfo 读完才显示。每个 handle 仍只请求一次，每次持锁最多
+     * 读取 [batchSize] 条 ObjectInfo 便释放 [ioMutex]，与单卡枚举的通道占用粒度一致。
+     */
+    suspend fun streamMergedFileInfo(
+        newestFirstHandlesByStorage: List<List<Int>>,
+        batchSize: Int = 20,
+        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+    ) = withContext(Dispatchers.IO) {
+        require(batchSize > 0) { "batchSize must be positive" }
+        val groups = newestFirstHandlesByStorage.filter { it.isNotEmpty() }
+        if (groups.isEmpty()) return@withContext
+
+        val loadContext = coroutineContext
+        val total = groups.sumOf { it.size }
+        val cursors = IntArray(groups.size)
+        val heads = MutableList<FileInfo?>(groups.size) { null }
+        var completed = 0
+
+        while (completed < total) {
+            val requestedHandles = ArrayList<Int>(batchSize)
+            val observedFiles = ArrayList<FileInfo>(batchSize)
+            val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
+            val completedBeforeBatch = completed
+
+            val output = ioMutex.withLock {
+                var objectInfoRequests = 0
+                buildList {
+                    while (size < batchSize && completed < total) {
+                        groups.indices.forEach { groupIndex ->
+                            if (heads[groupIndex] != null) return@forEach
+                            val handles = groups[groupIndex]
+                            while (cursors[groupIndex] < handles.size) {
+                                if (objectInfoRequests >= batchSize) return@forEach
+                                loadContext.ensureActive()
+                                val handle = handles[cursors[groupIndex]++]
+                                objectInfoRequests++
+                                requestedHandles += handle
+                                val file = getObjectInfoInternal(handle)
+                                if (file == null) {
+                                    completed++
+                                } else {
+                                    observedFiles += file
+                                    heads[groupIndex] = file
+                                    break
+                                }
+                            }
+                        }
+
+                        // 还有一张卡的下一个文件尚未读到时，不能拿其它卡的旧 head 先输出，
+                        // 否则跨卡顺序失去依据。请求预算用完就先释放锁，下批补齐 head。
+                        val hasUnresolvedGroup = groups.indices.any { groupIndex ->
+                            heads[groupIndex] == null &&
+                                cursors[groupIndex] < groups[groupIndex].size
+                        }
+                        if (hasUnresolvedGroup) break
+
+                        val selected = selectNewestFileHeadIndex(heads) ?: break
+                        add(checkNotNull(heads[selected]))
+                        heads[selected] = null
+                        completed++
+                    }
+                }
+            }
+
+            if (FileOrderProbe.enabled && requestedHandles.isNotEmpty()) {
+                FileOrderProbe.recordObjectInfoBatch(
+                    requestedHandles = requestedHandles,
+                    files = observedFiles,
+                    elapsedMs = SystemClock.elapsedRealtime() - probeStartedAtMs,
+                )
+            }
+            if (output.isNotEmpty()) {
+                onBatch(output, completed, total)
+            } else if (completed == completedBeforeBatch && requestedHandles.isEmpty()) {
+                error("Merged ObjectInfo scan made no progress")
             }
         }
     }

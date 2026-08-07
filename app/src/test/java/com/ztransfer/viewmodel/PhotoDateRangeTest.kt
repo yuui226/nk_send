@@ -62,6 +62,18 @@ class PhotoDateRangeTest {
     }
 
     @Test
+    fun `equal-time thumbnails preserve camera order instead of format-coded handle order`() {
+        val raw = file(0x091961BF, "20260806T120000")
+        val jpeg = file(0x291961BF, "20260806T120000")
+        val movie = file(0x611961BD, "20260806T115959")
+
+        assertEquals(
+            listOf(raw.handle, jpeg.handle, movie.handle),
+            prioritizedThumbnailFiles(listOf(raw, jpeg, movie), null).map { it.handle },
+        )
+    }
+
+    @Test
     fun `latest capture date ignores malformed values`() {
         assertEquals(
             LocalDate.of(2026, 8, 6),
