@@ -139,6 +139,15 @@ internal fun collapsePreviewBurst(
     items.filterNot { it is PhotoPreviewItem.Photo && it.burstId == burstId }
 
 /**
+ * 大图期间默认禁止远程缩略图；只有当前页 FHD 已确认不可用且 EXIF 已收尾时才兜底。
+ */
+internal fun allowPreviewRemoteThumbnailFallback(
+    isCurrent: Boolean,
+    fhdUnavailable: Boolean,
+    exifFinished: Boolean,
+): Boolean = isCurrent && fhdUnavailable && exifFinished
+
+/**
  * 全屏预览层：普通页显示缓存缩略图的**未裁切**（Fit）完整画面；折叠连拍在分页中
  * 保持为一个合集页，只有用户主动展开才把成员插入其后。
  * 整体从被长按格子 [anchorRect] 的位置缩放展开，关闭时反向缩回（从哪来回哪去）。
@@ -201,8 +210,12 @@ internal fun PhotoPreviewOverlay(
     // 状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放）。
     val fhdBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
     val fhdLoading = remember { mutableStateMapOf<Int, Boolean>() }
+    // 只有当前照片的 FHD 确认不可用、且当前 EXIF 已经读取完毕后，才允许向相机请求
+    // 一张缩略图兜底。这样占位图不会跑到 FHD / EXIF 前面争抢相机通道。
+    val fhdUnavailable = remember { mutableStateMapOf<Int, Boolean>() }
     val exifData = remember { mutableStateMapOf<Int, PhotoExif?>() }
     val exifLoading = remember { mutableStateMapOf<Int, Boolean>() }
+    val exifFinished = remember { mutableStateMapOf<Int, Boolean>() }
     // 初始方向来自全局偏好；本 overlay 内不取模，每次继续减 90°，
     // 动画始终沿逆时针最短方向旋转。翻页不重置，所有照片共用。
     var rotationDegrees by remember {
@@ -246,10 +259,16 @@ internal fun PhotoPreviewOverlay(
     suspend fun loadFhdPage(page: Int, awaitExisting: Boolean = false): Boolean {
         val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
             ?: return false
-        // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
-        if (file.extension in VIDEO_EXTENSIONS) return false
         val h = file.handle
-        if (h in fhdBitmaps) return false
+        // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
+        if (file.extension in VIDEO_EXTENSIONS) {
+            fhdUnavailable[h] = true
+            return false
+        }
+        if (h in fhdBitmaps) {
+            fhdUnavailable.remove(h)
+            return false
+        }
         if (fhdLoading.containsKey(h)) {
             if (!awaitExisting) return false
             // 当前页可能正由上一页的预取任务加载。等待它完成；若它因翻页被取消，
@@ -257,10 +276,15 @@ internal fun PhotoPreviewOverlay(
             while (fhdLoading.containsKey(h) && h !in fhdBitmaps) delay(16)
             if (h in fhdBitmaps) return false
         }
+        fhdUnavailable.remove(h)
         fhdLoading[h] = true
         try {
-            val res = cameraViewModel.loadFhdPreview(file) ?: return false
+            val res = cameraViewModel.loadFhdPreview(file) ?: run {
+                fhdUnavailable[h] = true
+                return false
+            }
             fhdBitmaps[h] = res
+            fhdUnavailable.remove(h)
             return true
         } finally {
             fhdLoading.remove(h)
@@ -273,9 +297,11 @@ internal fun PhotoPreviewOverlay(
             ?: return
         val h = file.handle
         if (h in exifData || exifLoading.containsKey(h)) return
+        exifFinished.remove(h)
         exifLoading[h] = true
         try {
             exifData[h] = cameraViewModel.loadExif(file)
+            exifFinished[h] = true
         } finally {
             exifLoading.remove(h)
         }
@@ -290,7 +316,9 @@ internal fun PhotoPreviewOverlay(
             (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file?.handle
         }.toSet()
         fhdBitmaps.keys.filter { it !in keepH }.forEach { fhdBitmaps.remove(it) }
+        fhdUnavailable.keys.filter { it !in keepH }.forEach { fhdUnavailable.remove(it) }
         exifData.keys.filter { it !in keepH }.forEach { exifData.remove(it) }
+        exifFinished.keys.filter { it !in keepH }.forEach { exifFinished.remove(it) }
     }
 
     // 当前页拥有最高优先级。连接状态纳入 key：停留在预览页断线后原地重连，
@@ -378,6 +406,11 @@ internal fun PhotoPreviewOverlay(
                         cameraViewModel = cameraViewModel,
                         fhdBitmap = fhdBitmaps[file.handle],
                         isLoadingFhd = fhdLoading.containsKey(file.handle),
+                        allowRemoteThumbnailFallback = allowPreviewRemoteThumbnailFallback(
+                            isCurrent = page == pagerState.currentPage,
+                            fhdUnavailable = fhdUnavailable[file.handle] == true,
+                            exifFinished = exifFinished[file.handle] == true,
+                        ),
                         loadEnabled = deferredLoadsEnabled,
                         rotationDegrees = rotationDegrees,
                         isCurrent = page == pagerState.currentPage,
@@ -881,6 +914,7 @@ private fun PreviewPage(
     cameraViewModel: CameraViewModel,
     fhdBitmap: ImageBitmap?,
     isLoadingFhd: Boolean,
+    allowRemoteThumbnailFallback: Boolean,
     loadEnabled: Boolean,
     rotationDegrees: Float,
     isCurrent: Boolean,
@@ -894,10 +928,14 @@ private fun PreviewPage(
     }
     // 取过仍为 null → 该文件确实没有缩略图（如部分视频）。
     var noThumb by remember(file.handle) { mutableStateOf(false) }
-    LaunchedEffect(file.handle, loadEnabled) {
+    LaunchedEffect(file.handle, loadEnabled, allowRemoteThumbnailFallback) {
         if (loadEnabled && thumbnail == null && !noThumb) {
-            val t = cameraViewModel.loadThumbnail(file)
-            if (t != null) thumbnail = t else noThumb = true
+            val t = cameraViewModel.loadThumbnail(
+                file = file,
+                allowRemote = allowRemoteThumbnailFallback,
+            )
+            if (t != null) thumbnail = t
+            else if (allowRemoteThumbnailFallback) noThumb = true
         }
     }
 

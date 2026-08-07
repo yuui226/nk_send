@@ -912,6 +912,7 @@ fun FileListScreen(
                 columns = transferState.thumbnailColumns,
                 isLoading = state.isLoadingFiles,
                 transfersBusy = transfersBusy,
+                allowRemoteThumbnails = allowGridRemoteThumbnails(previewIndex != null),
                 collapsedDates = collapsedDates,
                 cameraViewModel = cameraViewModel,
                 onTransferGroup = onTransferGroup,
@@ -1850,6 +1851,7 @@ private fun ThumbnailGrid(
     columns: Int,
     isLoading: Boolean,
     transfersBusy: Boolean,
+    allowRemoteThumbnails: Boolean,
     collapsedDates: MutableMap<String, Boolean>,
     cameraViewModel: CameraViewModel,
     onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
@@ -2113,6 +2115,7 @@ private fun ThumbnailGrid(
                                     files = item.files,
                                     expanded = expanded,
                                     transfersBusy = transfersBusy,
+                                    allowRemoteThumbnails = allowRemoteThumbnails,
                                     cameraViewModel = cameraViewModel,
                                     onTransferGroup = onTransferGroup,
                                     onToggle = { toggleBurstCollection(item.id) },
@@ -2129,6 +2132,7 @@ private fun ThumbnailGrid(
                                     task = queuedByHandle[file.handle],
                                     alreadyExported = file.handle in exportedHandles,
                                     transfersBusy = transfersBusy,
+                                    allowRemoteThumbnail = allowRemoteThumbnails,
                                     cameraViewModel = cameraViewModel,
                                     onTapFile = onTapFile,
                                     onPreview = onPreview,
@@ -2166,6 +2170,7 @@ private fun BurstCollectionCell(
     files: List<NikonCamera.FileInfo>,
     expanded: Boolean,
     transfersBusy: Boolean,
+    allowRemoteThumbnails: Boolean,
     cameraViewModel: CameraViewModel,
     onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
     onToggle: () -> Unit,
@@ -2234,6 +2239,7 @@ private fun BurstCollectionCell(
                 file = file,
                 cameraViewModel = cameraViewModel,
                 transfersBusy = transfersBusy,
+                allowRemoteThumbnail = allowRemoteThumbnails,
                 showPlaceholderIcon = index == last,
                 modifier = Modifier
                     .fillMaxSize(0.86f)
@@ -2347,6 +2353,7 @@ internal fun BurstStackPhoto(
     cameraViewModel: CameraViewModel,
     transfersBusy: Boolean,
     loadEnabled: Boolean = true,
+    allowRemoteThumbnail: Boolean = true,
     showPlaceholderIcon: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -2354,8 +2361,10 @@ internal fun BurstStackPhoto(
     var thumbnail by remember(file.handle) {
         mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
     }
-    LaunchedEffect(file.handle, transfersBusy, loadEnabled) {
-        if (loadEnabled && thumbnail == null) thumbnail = cameraViewModel.loadThumbnail(file)
+    LaunchedEffect(file.handle, transfersBusy, loadEnabled, allowRemoteThumbnail) {
+        if (loadEnabled && thumbnail == null) {
+            thumbnail = cameraViewModel.loadThumbnail(file, allowRemoteThumbnail)
+        }
     }
     val shape = RoundedCornerShape(10.dp)
 
@@ -2398,6 +2407,7 @@ private fun ThumbnailCell(
     task: TransferTask?,
     alreadyExported: Boolean,
     transfersBusy: Boolean,
+    allowRemoteThumbnail: Boolean,
     cameraViewModel: CameraViewModel,
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
@@ -2442,11 +2452,11 @@ private fun ThumbnailCell(
         // 避免先画一帧占位图、下一帧再换回缩略图造成列表闪烁。
         mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
     }
-    // 可见格子始终允许取图（传输中请求排到文件间隙执行，见 loadThumbnail 注释）。
-    // transfersBusy 仅作为重试键：传输结束时对瞬时失败（如短暂掉线）的格子再补一次。
-    LaunchedEffect(file.handle, transfersBusy) {
+    // 传输中仍允许取图，远程请求排到文件间隙；大图打开后只读本地缓存，不再向相机
+    // 发 GetThumb。关闭大图时 allowRemoteThumbnail 变回 true，缺图格子自动恢复。
+    LaunchedEffect(file.handle, transfersBusy, allowRemoteThumbnail) {
         if (thumbnail == null) {
-            thumbnail = cameraViewModel.loadThumbnail(file)
+            thumbnail = cameraViewModel.loadThumbnail(file, allowRemoteThumbnail)
         }
     }
     // 记录本格子在根坐标系中的位置，供长按预览"从格子位置放大"用。
@@ -2752,6 +2762,9 @@ internal fun toggleStorageSlotSelection(
         else -> null // 补选另一张卡，恢复默认的“全部卡槽”状态
     }
 }
+
+/** 大图打开时，底层照片网格只能读本地缓存，不能继续向相机取缩略图。 */
+internal fun allowGridRemoteThumbnails(previewOpen: Boolean): Boolean = !previewOpen
 
 /**
  * 类型/标记/日期筛选浮层。主面板保持紧凑；日期页上下同时展示开始、结束两组三波轮，
