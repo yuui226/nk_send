@@ -402,7 +402,7 @@ const RATE_WINDOW_MS = 60_000;
 //   poll  付款页每 2 秒查一次单 = 30/分钟。给到 4 倍余量:多个用户挤在同一个
 //         运营商 NAT 后面是常态,额度卡太死会把正在付款的人自己拦住
 //   read  检查更新/定价的小响应;检查更新会多做一次聚合 UPSERT
-//   download 用户确认更新时解析一次临时直链;独立分桶,避免检查更新耗尽解析额度
+//   download 用户确认更新时领取当前版本地址;独立分桶,避免检查更新耗尽下载入口额度
 //   stats 安装器触发上报,只做一次聚合 UPSERT
 //   admin 你在菜单里手点,一分钟 60 次绰绰有余
 //
@@ -1402,7 +1402,9 @@ function send(res, status, obj) {
 // resolveLanzou 仅为已经发布的旧记录保留兼容，等所有用户跨过旧版本后可以彻底删除。
 const APP_LATEST_PATH = path.join(path.dirname(CONFIG_PATH), 'app-latest.json');
 const LANZOU_PARSER_URL = String(cfg.lanzouParserUrl || 'https://lz.qaiu.top/json/parser');
-const OSS_UPDATE_HOST = String(cfg.ossUpdateHost || 'ztransfer.oss-cn-beijing.aliyuncs.com').toLowerCase();
+const OSS_UPDATE_HOST = 'apk.ztransfer.top';
+const LEGACY_OSS_UPDATE_HOST = 'ztransfer.oss-cn-beijing.aliyuncs.com';
+const UPDATE_PUBLISH_PROTOCOL = 2;
 // 紧急下载灾备：蓝奏云临时域名在部分用户网络中被解析到 127.0.0.1。
 // 仅覆盖明确列出的发布版本；发布下一 versionCode 后自动回落到常规解析流程，
 // 避免把旧 APK 误发给新版本。APK 内容仍由 App 按大小、SHA-256、包名、版本和签名校验。
@@ -1417,13 +1419,43 @@ function isOssReleaseUrl(value) {
             url.hostname.toLowerCase() === OSS_UPDATE_HOST &&
             !url.username &&
             !url.password &&
+            !url.port &&
             !url.search &&
             !url.hash &&
-            url.pathname.startsWith('/releases/') &&
-            url.pathname.toLowerCase().endsWith('.bin');
+            /^\/releases\/ZTransfer-v[1-9]\d*-[a-f0-9]{12}\.apk$/i.test(url.pathname);
     } catch {
         return false;
     }
+}
+
+// 仅用于读取迁移前已经发布的永久对象。管理端发布仍只接受 isOssReleaseUrl 的新格式。
+function isLegacyOssReleaseUrl(value) {
+    try {
+        const url = new URL(String(value || ''));
+        return url.protocol === 'https:' &&
+            url.hostname.toLowerCase() === LEGACY_OSS_UPDATE_HOST &&
+            !url.username &&
+            !url.password &&
+            !url.port &&
+            !url.search &&
+            !url.hash &&
+            /^\/releases\/ZTransfer-v[1-9]\d*-[a-f0-9]{12}\.bin$/i.test(url.pathname);
+    } catch {
+        return false;
+    }
+}
+
+function isOssReleaseMetadataValid(release) {
+    if (!release || !isOssReleaseUrl(release.url) ||
+        !Number.isInteger(release.versionCode) || release.versionCode <= 0 ||
+        !String(release.versionName || '').trim() ||
+        !/^[0-9a-f]{64}$/.test(String(release.sha256 || '')) ||
+        !Number.isSafeInteger(release.sizeBytes) || release.sizeBytes <= 0 ||
+        String(release.password || '')) {
+        return false;
+    }
+    const expectedPath = `/releases/ZTransfer-v${release.versionCode}-${release.sha256.slice(0, 12)}.apk`;
+    return new URL(release.url).pathname === expectedPath;
 }
 
 function normalizeRelease(j) {
@@ -1580,6 +1612,9 @@ async function resolveReleaseDownload(release) {
     if (isOssReleaseUrl(release.url)) {
         return { url: release.url, source: 'OSS' };
     }
+    if (isLegacyOssReleaseUrl(release.url)) {
+        return { url: release.url, source: 'OSS_LEGACY' };
+    }
     const direct = await resolveLanzou(release);
     return { ...direct, source: 'LANZOU_LEGACY' };
 }
@@ -1589,7 +1624,7 @@ async function apiAppDownload(body) {
     if (!release) return { ok: false, err: 'NO_VERSION_INFO' };
     const requestedVersion = Number(body.versionCode);
     if (!Number.isInteger(requestedVersion) || requestedVersion !== release.versionCode) {
-        // 防止本接口被当成任意蓝奏云解析代理,同时避免用旧弹窗下载已经撤回的包。
+        // 防止领取任意地址，同时避免用旧弹窗下载已经撤回的包。
         return { ok: false, err: 'VERSION_CHANGED', latestVersionCode: release.versionCode };
     }
     const overrideUrl = APP_DOWNLOAD_OVERRIDES.get(release.versionCode);
@@ -1623,7 +1658,13 @@ function writeJsonAtomic(target, value) {
 
 function adminGetUpdate() {
     const release = releaseInfo();
-    return release ? { ok: true, release } : { ok: false, err: 'NO_VERSION_INFO' };
+    const capability = {
+        publishProtocol: UPDATE_PUBLISH_PROTOCOL,
+        ossUpdateHost: OSS_UPDATE_HOST,
+    };
+    return release
+        ? { ok: true, release, ...capability }
+        : { ok: false, err: 'NO_VERSION_INFO', ...capability };
 }
 
 function adminGetUpdateStats() {
@@ -1711,7 +1752,14 @@ function adminPublishUpdate(body) {
             return {
                 ok: false,
                 err: 'OSS_URL_REQUIRED',
-                detail: `url 必须是 https://${OSS_UPDATE_HOST}/releases/*.bin 的无参数永久地址`,
+                detail: `url 必须是 https://${OSS_UPDATE_HOST}/releases/*.apk 的无参数永久地址`,
+            };
+        }
+        if (!isOssReleaseMetadataValid(next)) {
+            return {
+                ok: false,
+                err: 'OSS_METADATA_MISMATCH',
+                detail: '版本号、SHA-256、文件大小、版本名或 URL 文件名不一致',
             };
         }
         const current = releaseInfo();
@@ -1881,12 +1929,15 @@ module.exports = {
         pricing,
         apiPricing,
         adminSetPricing,
+        adminGetUpdate,
+        adminPublishUpdate,
         adminListCodes,
         apiRestore,
         apiOrderCreate,
         apiOrderStatus,
         apiPayNotify,
         isOssReleaseUrl,
+        isOssReleaseMetadataValid,
         resolveReleaseDownload,
         confirmPaid,
         reserveOrder,

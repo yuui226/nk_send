@@ -52,7 +52,7 @@ import com.ztransfer.ui.screen.GlassSurface
 import com.ztransfer.ui.theme.AppTheme
 import java.util.Locale
 
-/** 全局更新弹窗。硬更新不可关闭；自动更新失败时转为蓝奏云手动更新。 */
+/** 全局更新弹窗。硬更新不可关闭；自动更新失败时转为浏览器手动下载。 */
 @Composable
 fun AppUpdateHost(
     cameraUsesWifi: Boolean

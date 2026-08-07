@@ -20,11 +20,12 @@ https://apk.ztransfer.top/<安装包文件名>.apk
 ## 推荐链路
 
 ```text
-官网的下载链接 / App 的更新地址
-                ↓
-https://apk.ztransfer.top/releases/ZTransfer-<版本>.apk
-                ↓
-香港 OSS 直接返回安装包
+官网和新用户                       App 自动更新
+      ↓                               ↓
+https://apk.ztransfer.top/ZTransfer.apk   服务端返回当前 releases/*.apk
+      └───────────────┬───────────────┘
+                      ↓
+               香港 OSS 直接返回安装包
 ```
 
 官网部署在 GitHub Pages 不影响该方案。官网只保存普通链接，安装包内容不会经过 GitHub Pages、
@@ -32,17 +33,17 @@ https://apk.ztransfer.top/releases/ZTransfer-<版本>.apk
 
 ## 发布约定
 
-建议所有后续正式安装包统一使用 `.apk` 后缀并放在 `releases/` 目录，例如：
+所有正式安装包统一使用 `.apk` 后缀。管理工具同时维护：
 
 ```text
-releases/ZTransfer-1.58.apk
-releases/ZTransfer-1.59.apk
+releases/ZTransfer-v27-<SHA前12位>.apk  # App，不覆盖
+ZTransfer.apk                           # 新用户，每次覆盖
 ```
 
-服务端发布记录和官网链接应返回自定义域名地址，不再返回 OSS 默认域名：
+服务端发布记录使用版本地址：
 
 ```text
-https://apk.ztransfer.top/releases/ZTransfer-1.59.apk
+https://apk.ztransfer.top/releases/ZTransfer-v27-<SHA前12位>.apk
 ```
 
 使用 `.apk` 的原因：
@@ -52,17 +53,23 @@ https://apk.ztransfer.top/releases/ZTransfer-1.59.apk
 - 不再依赖不同手机对 `.bin` 文件内容的猜测；
 - OSS 自定义域名允许分发 APK。
 
+官网固定使用：
+
+```text
+https://apk.ztransfer.top/ZTransfer.apk
+```
+
 ## 与更新服务的关系
 
-官网和 App 可以使用同一个安装包 URL，但“最新版是谁”仍由发布流程或服务端版本记录决定。
+官网和 App 不使用同一个对象。官网固定对象会被覆盖，App 使用不可变版本对象，避免下载期间内容
+变化或命中旧缓存。
 
 OSS 只负责保存并传输文件，不会自动判断最新版。因此发布新版本时需要完成：
 
-1. 将正式 APK 上传到 `ztransfer-hk` 的 `releases/` 目录；
-2. 确认对象允许用户读取；
-3. 用手机浏览器验证自定义域名 URL；
-4. 将服务端发布记录中的下载地址更新为该 URL；
-5. 如官网展示固定下载按钮，同时更新官网链接。
+1. 上传并验证 `releases/` 下的版本对象；
+2. 覆盖并验证固定 `ZTransfer.apk`；
+3. 将服务端发布记录更新为版本对象 URL；
+4. 官网链接保持不变。
 
 不要先修改服务端地址再上传文件，否则用户会在这段时间收到 `NoSuchKey`。
 
@@ -98,9 +105,8 @@ server/cert-renew/README.md
 不建议一开始就设置“同一 IP 只能下载一次”。移动运营商出口 IP 可能被多人共享，浏览器也会使用
 Range、重试或断点续传，过严限制容易误伤正常用户。
 
-如果将来增加 `download.ztransfer.top/latest` 动态入口，它可以统计下载意图并跳转到当前版本，
-但只要最终 OSS URL 是永久公共地址，用户仍然可以绕过入口直接下载。真正的强限制需要私有对象和
-短期签名地址。
+当前不新增下载域名或动态跳转服务。固定链接和实际文件请求通过 OSS 访问日志统计。真正的强限制
+需要私有对象和短期签名地址，但暂不增加这层复杂度。
 
 ## 故障判断
 

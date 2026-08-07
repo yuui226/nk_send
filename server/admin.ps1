@@ -28,9 +28,12 @@ $ErrorActionPreference = 'Stop'
 $Server = if ($env:ZT_SERVER) { $env:ZT_SERVER } else { "https://106.15.239.203:8443" }
 $TokenFile = Join-Path $PSScriptRoot "admin-token.txt"
 $MaxPriceFen = 10000000
-$OssBucket = if ($env:ZT_OSS_BUCKET) { $env:ZT_OSS_BUCKET } else { "ztransfer" }
-$OssRegion = if ($env:ZT_OSS_REGION) { $env:ZT_OSS_REGION } else { "cn-beijing" }
-$OssEndpoint = if ($env:ZT_OSS_ENDPOINT) { $env:ZT_OSS_ENDPOINT } else { "https://oss-cn-beijing.aliyuncs.com" }
+$OssBucket = "ztransfer-hk"
+$OssRegion = "cn-hongkong"
+$OssEndpoint = "https://oss-cn-hongkong.aliyuncs.com"
+$OssPublicBaseUrl = "https://apk.ztransfer.top"
+$OssLatestObjectKey = "ZTransfer.apk"
+$ExpectedApkSignerSha256 = "388c6ea56aa0b3fc0cc78ab878285d6223763b822a55514b6eb267058829072b"
 $OssUtilBundled = Join-Path (Split-Path $PSScriptRoot -Parent) "tools\ossutil\2.3.0\ossutil-2.3.0-windows-amd64\ossutil.exe"
 $OssSetupDoc = Join-Path $PSScriptRoot "OSS发布设置.md"
 $OssCredentialDir = Join-Path $env:LOCALAPPDATA "ZTransfer"
@@ -545,6 +548,24 @@ function Get-UpdateInfo {
     return $resp.release
 }
 
+function Get-UpdatePublishState {
+    $resp = Call "GET" "/admin/update" $null
+    if (-not $resp) {
+        Write-Host "无法确认服务端更新状态，已停止发布。" -ForegroundColor Red
+        return $null
+    }
+    if ([int]$resp.publishProtocol -lt 2 -or
+        [string]$resp.ossUpdateHost -ne ([uri]$OssPublicBaseUrl).Host) {
+        Write-Host "服务端尚未支持香港 OSS 双地址发布，请先部署新版服务端。未上传任何文件。" -ForegroundColor Red
+        return $null
+    }
+    if (-not $resp.ok -and $resp.err -ne "NO_VERSION_INFO") {
+        Show-Error $resp
+        return $null
+    }
+    return @{ Current = $(if ($resp.ok) { $resp.release } else { $null }) }
+}
+
 function Show-UpdateInfo($release) {
     if (-not $release) { return }
     $mode = if ($release.minSupportedVersionCode -ge $release.versionCode) { "硬更新" } else { "软更新" }
@@ -640,6 +661,28 @@ function Read-ApkVersionInfo($apkPath) {
         }
     }
     return $null
+}
+
+function Read-ApkSignerSha256($apkPath) {
+    $apksigner = Find-AndroidTool @("apksigner.bat", "apksigner.exe") @(
+        "build-tools\*\apksigner.bat", "build-tools\*\apksigner.exe"
+    )
+    if (-not $apksigner) { return $null }
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = (& $apksigner verify --print-certs $apkPath 2>&1) -join "`n"
+        $verifyExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+    if ($verifyExit -ne 0) { return $null }
+    $matches = [regex]::Matches(
+        $output,
+        'Signer #\d+ certificate SHA-256 digest:\s*([0-9a-fA-F]{64})'
+    )
+    if ($matches.Count -ne 1) { return $null }
+    return $matches[0].Groups[1].Value.ToLowerInvariant()
 }
 
 function Get-OssUtilPath {
@@ -778,34 +821,61 @@ function Read-LocalApkMetadata($apkPath) {
         Write-Host ("包名不正确: {0}；期望 com.ztransfer。未发布。" -f $version.PackageName) -ForegroundColor Red
         return $null
     }
+    $signerSha256 = Read-ApkSignerSha256 $apkPath
+    if (-not $signerSha256) {
+        Write-Host "无法验证 APK 签名。请确认 apksigner 可用且 APK 签名完整。未发布。" -ForegroundColor Red
+        return $null
+    }
+    if ($signerSha256 -ne $ExpectedApkSignerSha256) {
+        Write-Host "APK 不是 ZTransfer 正式签名，可能误选了 Debug 包。未发布。" -ForegroundColor Red
+        return $null
+    }
     return @{
         SizeBytes = [long]$file.Length
         Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $apkPath).Hash.ToLowerInvariant()
         VersionCode = [int]$version.VersionCode
         VersionName = [string]$version.VersionName
         PackageName = [string]$version.PackageName
+        SignerSha256 = $signerSha256
     }
 }
 
 function New-OssReleaseTarget($meta) {
+    if ([int]$meta.VersionCode -le 0 -or
+        ([string]$meta.Sha256) -notmatch '^[0-9a-f]{64}$') {
+        throw "APK 版本或 SHA-256 元数据无效"
+    }
     if ($OssBucket -notmatch '^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$') {
-        throw "ZT_OSS_BUCKET 格式无效"
+        throw "OSS Bucket 配置格式无效"
     }
     $endpointUri = [uri]$OssEndpoint
-    if ($endpointUri.Scheme -ne "https" -or -not $endpointUri.Host) {
-        throw "ZT_OSS_ENDPOINT 必须是 HTTPS 地址"
+    if ($endpointUri.Scheme -ne "https" -or -not $endpointUri.Host -or
+        $endpointUri.UserInfo -or -not $endpointUri.IsDefaultPort -or
+        ($endpointUri.AbsolutePath -and $endpointUri.AbsolutePath -ne "/") -or
+        $endpointUri.Query -or $endpointUri.Fragment) {
+        throw "OSS Endpoint 必须是仅含域名的标准 HTTPS 地址"
+    }
+    $publicBaseUri = [uri]$OssPublicBaseUrl
+    if ($publicBaseUri.Scheme -ne "https" -or -not $publicBaseUri.Host -or
+        $publicBaseUri.UserInfo -or -not $publicBaseUri.IsDefaultPort -or
+        ($publicBaseUri.AbsolutePath -and $publicBaseUri.AbsolutePath -ne "/") -or
+        $publicBaseUri.Query -or $publicBaseUri.Fragment) {
+        throw "OSS 公网下载地址必须是仅含域名的 HTTPS 地址"
     }
     $hashPrefix = $meta.Sha256.Substring(0, 12)
-    $objectKey = "releases/ZTransfer-v{0}-{1}.bin" -f $meta.VersionCode, $hashPrefix
+    $objectKey = "releases/ZTransfer-v{0}-{1}.apk" -f $meta.VersionCode, $hashPrefix
     $escapedKey = (($objectKey -split "/") | ForEach-Object { [uri]::EscapeDataString($_) }) -join "/"
     return @{
         ObjectKey = $objectKey
         OssUri = "oss://$OssBucket/$objectKey"
-        PublicUrl = "https://$OssBucket.$($endpointUri.Host)/$escapedKey"
+        PublicUrl = "$OssPublicBaseUrl/$escapedKey"
+        LatestObjectKey = $OssLatestObjectKey
+        LatestOssUri = "oss://$OssBucket/$OssLatestObjectKey"
+        LatestPublicUrl = "$OssPublicBaseUrl/$OssLatestObjectKey"
     }
 }
 
-function Upload-ApkToOss($apkPath, $meta, $target) {
+function Upload-ApkToOss($apkPath, $meta, $ossUri, $cacheControl, $contentDisposition) {
     $ossutil = Get-OssUtilPath
     if (-not $ossutil) {
         Write-Host "项目内未找到 ossutil.exe，请重新下载项目工具包。" -ForegroundColor Red
@@ -817,14 +887,15 @@ function Upload-ApkToOss($apkPath, $meta, $target) {
         if ($configure -ne "y" -or -not (Invoke-OssSetup)) { return $false }
     }
 
-    Write-Host ("正在上传到 {0}..." -f $target.OssUri) -ForegroundColor DarkGray
+    Write-Host ("正在上传到 {0}..." -f $ossUri) -ForegroundColor DarkGray
     $uploadArgs = @(
-        "cp", $apkPath, $target.OssUri,
+        "cp", $apkPath, $ossUri,
         "--region", $OssRegion,
         "--endpoint", $OssEndpoint,
         "--acl", "public-read",
-        "--content-type", "application/octet-stream",
-        "--cache-control", "public, max-age=31536000, immutable",
+        "--content-type", "application/vnd.android.package-archive",
+        "--cache-control", $cacheControl,
+        "--content-disposition", $contentDisposition,
         "--metadata", "sha256=$($meta.Sha256)",
         "--force",
         "--no-progress"
@@ -844,7 +915,7 @@ function Test-PublicOssApk($url, $expectedMeta) {
         $previousErrorAction = $ErrorActionPreference
         try {
             $ErrorActionPreference = "Continue"
-            & curl.exe -f -sS -L --max-time 300 -o $tmp -- $url
+            & curl.exe -f -sS -L --max-time 300 -H "Cache-Control: no-cache" -o $tmp -- $url
             $curlExit = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousErrorAction
@@ -872,9 +943,9 @@ function Test-PublicOssApk($url, $expectedMeta) {
 function Invoke-UpdateValidate {
     $release = Get-UpdateInfo
     if (-not $release) { return }
-    $expectedPrefix = "https://$OssBucket.$(([uri]$OssEndpoint).Host)/"
+    $expectedPrefix = "$OssPublicBaseUrl/releases/"
     if (-not ([string]$release.url).StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        Write-Host "当前发布仍是旧下载源；下一次发布将自动切换到 OSS。" -ForegroundColor Yellow
+        Write-Host "当前发布仍是旧下载源；下一次发布将自动切换到香港 OSS。" -ForegroundColor Yellow
         return
     }
     $expected = @{
@@ -883,13 +954,17 @@ function Invoke-UpdateValidate {
         VersionCode = [int]$release.versionCode
         VersionName = [string]$release.versionName
     }
-    if (Test-PublicOssApk $release.url $expected) {
-        Write-Host "当前 OSS 下载地址有效。" -ForegroundColor Green
+    if (-not (Test-PublicOssApk $release.url $expected)) { return }
+    $latestUrl = "$OssPublicBaseUrl/$OssLatestObjectKey"
+    if (Test-PublicOssApk $latestUrl $expected) {
+        Write-Host "当前版本地址和新用户固定下载地址均有效。" -ForegroundColor Green
     }
 }
 
 function Invoke-UpdatePublish {
-    $current = Get-UpdateInfo
+    $publishState = Get-UpdatePublishState
+    if (-not $publishState) { return }
+    $current = $publishState.Current
     if ($current) { Show-UpdateInfo $current }
 
     $apkPath = Select-ApkFile
@@ -918,12 +993,29 @@ function Invoke-UpdatePublish {
     Write-Host ("待发布: {0} (versionCode {1}), {2:N2} MiB" -f $versionName, $versionCode, ($meta.SizeBytes / 1MB)) -ForegroundColor Cyan
     Write-Host ("策略: {0}" -f $(if ($minSupported -eq $versionCode) { "硬更新" } else { "软更新" }))
     Write-Host ("OSS 地址: {0}" -f $target.PublicUrl)
+    Write-Host ("固定下载: {0}" -f $target.LatestPublicUrl)
     Write-Host ("SHA-256: {0}" -f $meta.Sha256) -ForegroundColor DarkGray
     $confirm = (Read-Host "确认上传并发布？输入 y").Trim().ToLowerInvariant()
     if ($confirm -ne "y") { Write-Host "已取消"; return }
 
-    if (-not (Upload-ApkToOss $apkPath $meta $target)) { return }
+    if (-not (Upload-ApkToOss $apkPath $meta $target.OssUri `
+        "public, max-age=31536000, immutable" `
+        ("attachment; filename=`"ZTransfer-v{0}.apk`"" -f $versionCode))) { return }
     if (-not (Test-PublicOssApk $target.PublicUrl $meta)) { return }
+
+    $latestState = Get-UpdatePublishState
+    if (-not $latestState) { return }
+    $initialVersionCode = if ($current) { [int]$current.versionCode } else { 0 }
+    $latestVersionCode = if ($latestState.Current) { [int]$latestState.Current.versionCode } else { 0 }
+    if ($latestVersionCode -ne $initialVersionCode) {
+        Write-Host "上传期间服务端版本已变化；为避免覆盖错误的固定下载包，已停止发布。" -ForegroundColor Red
+        return
+    }
+    Write-Host "正在更新新用户固定下载地址..." -ForegroundColor DarkGray
+    if (-not (Upload-ApkToOss $apkPath $meta $target.LatestOssUri `
+        "no-cache, no-store, must-revalidate" `
+        "attachment; filename=`"ZTransfer.apk`"")) { return }
+    if (-not (Test-PublicOssApk $target.LatestPublicUrl $meta)) { return }
     $draft = @{
         versionCode = $versionCode
         versionName = $versionName
@@ -937,11 +1029,13 @@ function Invoke-UpdatePublish {
     }
     $resp = Call "POST" "/admin/update/publish" $draft
     if ($resp -and $resp.ok) {
-        Write-Host "发布成功，App 将直接从 OSS 下载；无需重启服务。" -ForegroundColor Green
-        Write-Host ("公网下载链接: {0}" -f $target.PublicUrl) -ForegroundColor Cyan
+        Write-Host "发布成功，App 将从版本地址下载；无需重启服务。" -ForegroundColor Green
+        Write-Host ("App 版本地址: {0}" -f $target.PublicUrl) -ForegroundColor DarkGray
+        Write-Host ("新用户固定地址: {0}" -f $target.LatestPublicUrl) -ForegroundColor Cyan
     } else {
         Show-Error $resp
-        Write-Host ("APK 已上传但版本信息未发布，可保留或稍后在 OSS 删除: {0}" -f $target.OssUri) -ForegroundColor Yellow
+        Write-Host "版本 APK 和固定下载对象已上传，但服务端版本信息未发布。" -ForegroundColor Yellow
+        Write-Host ("排查后可重新发布，或在 OSS 中处理: {0}" -f $target.OssUri) -ForegroundColor Yellow
     }
 }
 

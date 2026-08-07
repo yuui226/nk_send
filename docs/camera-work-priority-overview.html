@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ZTransfer 相机任务协作与优先级全景</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071018;
+      --panel: #0d1924;
+      --panel-2: #101f2c;
+      --line: #263a49;
+      --text: #edf7ff;
+      --muted: #91a8b8;
+      --cyan: #56d8e4;
+      --blue: #72a7ff;
+      --green: #72dea6;
+      --amber: #ffc86a;
+      --red: #ff7b7b;
+      --violet: #c69cff;
+      --shadow: 0 20px 55px rgba(0,0,0,.28);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 15% -10%, rgba(86,216,228,.14), transparent 32rem),
+        radial-gradient(circle at 95% 20%, rgba(114,167,255,.10), transparent 36rem),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      line-height: 1.58;
+    }
+    a { color: var(--cyan); text-underline-offset: 3px; }
+    button { font: inherit; }
+    .shell { width: min(1500px, 100%); margin: 0 auto; padding: 24px; }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 34px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: linear-gradient(135deg, rgba(16,31,44,.96), rgba(8,19,28,.96));
+      box-shadow: var(--shadow);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      right: -100px;
+      top: -160px;
+      width: 420px;
+      height: 420px;
+      border-radius: 50%;
+      border: 1px solid rgba(86,216,228,.18);
+      box-shadow: 0 0 0 42px rgba(86,216,228,.025), 0 0 0 96px rgba(114,167,255,.02);
+      pointer-events: none;
+    }
+    .eyebrow { color: var(--cyan); letter-spacing: .12em; text-transform: uppercase; font-size: 12px; }
+    h1 { max-width: 980px; margin: 9px 0 12px; font-size: clamp(30px, 5vw, 58px); line-height: 1.08; letter-spacing: -.035em; }
+    h2 { margin: 0 0 16px; font-size: clamp(22px, 3vw, 34px); line-height: 1.2; }
+    h3 { margin: 0 0 9px; font-size: 18px; }
+    p { margin: 0; }
+    .lead { max-width: 980px; color: #c6d8e4; font-size: 17px; }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; }
+    .pill, .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.035);
+      padding: 6px 10px;
+      color: #c9dbe7;
+      font-size: 12px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 14px currentColor; }
+    .toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+    .toc a { padding: 8px 11px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--line); text-decoration: none; color: #c9dbe7; font-size: 13px; }
+    section { margin-top: 52px; scroll-margin-top: 16px; }
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
+    .section-head p { max-width: 760px; color: var(--muted); }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(16,31,44,.92), rgba(10,23,33,.94));
+      box-shadow: 0 14px 40px rgba(0,0,0,.16);
+      padding: 18px;
+    }
+    .card p, .card li { color: #b9ccd9; }
+    .card strong { color: var(--text); }
+    .num { color: var(--cyan); font-size: 29px; line-height: 1; margin-bottom: 12px; }
+    .accent-cyan { border-top: 3px solid var(--cyan); }
+    .accent-amber { border-top: 3px solid var(--amber); }
+    .accent-violet { border-top: 3px solid var(--violet); }
+    .callout {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--amber);
+      border-radius: 0 12px 12px 0;
+      background: rgba(255,200,106,.08);
+      color: #f6ddb1;
+    }
+    .architecture {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(7,16,24,.72);
+      padding: 12px;
+    }
+    .architecture svg { display: block; width: 100%; min-width: 980px; height: auto; }
+    .architecture .node { fill: var(--panel-2); stroke: var(--line); stroke-width: 1.5; }
+    .architecture .node.hot { fill: rgba(86,216,228,.10); stroke: var(--cyan); }
+    .architecture .node.lock { fill: rgba(255,200,106,.12); stroke: var(--amber); stroke-width: 2; }
+    .architecture .node.camera { fill: rgba(114,222,166,.10); stroke: var(--green); stroke-width: 2; }
+    .architecture text { fill: var(--text); font-family: inherit; }
+    .architecture .small { fill: var(--muted); font-size: 12px; }
+    .architecture .label { font-size: 14px; font-weight: 600; }
+    .architecture .edge { fill: none; stroke: #526d7f; stroke-width: 2; marker-end: url(#arrow); }
+    .architecture .edge.stop { stroke: var(--red); stroke-dasharray: 7 5; }
+    .architecture .edge.gate { stroke: var(--violet); }
+    .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+    .legend span { display: inline-flex; align-items: center; gap: 7px; }
+    .line-key { width: 28px; height: 0; border-top: 2px solid #526d7f; }
+    .line-key.red { border-color: var(--red); border-top-style: dashed; }
+    .line-key.violet { border-color: var(--violet); }
+    .priority-stack { display: grid; gap: 11px; }
+    .priority-row { display: grid; grid-template-columns: 92px 1fr 1.1fr; gap: 14px; align-items: stretch; }
+    .rank { display: grid; place-items: center; min-height: 104px; border-radius: 16px; border: 1px solid var(--line); font-weight: 700; font-size: 20px; }
+    .rank.s { color: var(--red); background: rgba(255,123,123,.09); }
+    .rank.a { color: var(--amber); background: rgba(255,200,106,.08); }
+    .rank.b { color: var(--cyan); background: rgba(86,216,228,.08); }
+    .rank.c { color: var(--blue); background: rgba(114,167,255,.08); }
+    .rank.d { color: var(--muted); background: rgba(145,168,184,.06); }
+    .priority-main, .priority-note { border: 1px solid var(--line); border-radius: 16px; padding: 15px; background: rgba(13,25,36,.74); }
+    .priority-main b { display: block; margin-bottom: 5px; }
+    .priority-note { color: #b9ccd9; }
+    .scenario-wrap { border: 1px solid var(--line); border-radius: 20px; background: rgba(7,16,24,.6); padding: 16px; }
+    .scenario-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .scenario-tabs button {
+      cursor: pointer;
+      color: #bed0dc;
+      background: rgba(255,255,255,.035);
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 9px 12px;
+    }
+    .scenario-tabs button:hover { border-color: #4d697c; }
+    .scenario-tabs button[aria-selected="true"] { color: #041216; background: var(--cyan); border-color: var(--cyan); }
+    .scenario-summary { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; margin-bottom: 14px; }
+    .scenario-summary p { color: var(--muted); max-width: 900px; }
+    .scenario-rule { color: #f7d79f; border: 1px solid rgba(255,200,106,.35); background: rgba(255,200,106,.07); padding: 8px 11px; border-radius: 11px; font-size: 13px; }
+    .task-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+    .task {
+      min-height: 118px;
+      padding: 13px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(16,31,44,.7);
+    }
+    .task-top { display: flex; justify-content: space-between; align-items: start; gap: 8px; }
+    .task-name { font-weight: 650; }
+    .task p { margin-top: 8px; color: var(--muted); font-size: 13px; }
+    .status { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 8px; font-size: 11px; border: 1px solid currentColor; white-space: nowrap; }
+    .status.run { color: var(--green); background: rgba(114,222,166,.08); }
+    .status.pause { color: var(--red); background: rgba(255,123,123,.08); }
+    .status.wait { color: var(--amber); background: rgba(255,200,106,.08); }
+    .status.ondemand { color: var(--cyan); background: rgba(86,216,228,.08); }
+    .status.off { color: var(--muted); background: rgba(145,168,184,.06); }
+    .status.local { color: var(--violet); background: rgba(198,156,255,.08); }
+    .timeline { position: relative; margin-left: 13px; padding-left: 26px; border-left: 2px solid var(--line); }
+    .step { position: relative; padding: 0 0 20px; }
+    .step:last-child { padding-bottom: 0; }
+    .step::before { content: ""; position: absolute; left: -34px; top: 5px; width: 14px; height: 14px; border-radius: 50%; background: var(--bg); border: 3px solid var(--cyan); }
+    .step b { display: block; margin-bottom: 3px; }
+    .step p { color: var(--muted); font-size: 13px; }
+    .matrix-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 18px; }
+    table { width: 100%; min-width: 1050px; border-collapse: collapse; background: rgba(7,16,24,.62); }
+    th, td { padding: 12px 13px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 13px; }
+    th { position: sticky; top: 0; z-index: 1; background: #10202c; color: #dfeef7; }
+    td:first-child, th:first-child { min-width: 190px; }
+    tbody tr:hover { background: rgba(255,255,255,.025); }
+    .yes { color: var(--green); }
+    .no { color: var(--red); }
+    .maybe { color: var(--amber); }
+    .neutral { color: var(--muted); }
+    .decision { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; align-items: center; }
+    .decision-node { min-height: 128px; border: 1px solid var(--line); border-radius: 15px; padding: 13px; background: rgba(16,31,44,.75); }
+    .decision-node .q { color: var(--cyan); font-size: 12px; margin-bottom: 6px; }
+    .decision-arrow { text-align: center; color: var(--muted); font-size: 24px; }
+    .facts { margin: 0; padding-left: 18px; }
+    .facts li + li { margin-top: 8px; }
+    .code-map code { color: #bdeff4; }
+    footer { margin: 52px 0 14px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    @media (max-width: 980px) {
+      .grid-3, .task-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .priority-row { grid-template-columns: 74px 1fr; }
+      .priority-note { grid-column: 2; }
+      .decision { grid-template-columns: 1fr; }
+      .decision-arrow { transform: rotate(90deg); }
+    }
+    @media (max-width: 680px) {
+      .shell { padding: 12px; }
+      .hero { padding: 23px 19px; border-radius: 18px; }
+      section { margin-top: 38px; }
+      .section-head { align-items: start; flex-direction: column; }
+      .grid-3, .grid-2, .task-grid { grid-template-columns: 1fr; }
+      .scenario-summary { grid-template-columns: 1fr; }
+      .priority-row { grid-template-columns: 62px 1fr; gap: 8px; }
+      .rank { min-height: 88px; }
+      .priority-note { grid-column: 1 / -1; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header class="hero">
+    <div class="eyebrow">Current implementation · 2026-08-06</div>
+    <h1>ZTransfer 相机任务协作与优先级全景</h1>
+    <p class="lead">从连接后的照片枚举，到可见缩略图、后台缩略图填充、FHD 大图、EXIF、原片传输、监看取帧、事件与心跳，统一映射到同一条相机命令通道。本文展示的是当前代码的真实行为，不是理想化设计。</p>
+    <div class="hero-meta">
+      <span class="pill"><span class="dot" style="color:var(--amber)"></span>核心瓶颈：单个 ioMutex</span>
+      <span class="pill"><span class="dot" style="color:var(--red)"></span>锁内任务不可抢占</span>
+      <span class="pill"><span class="dot" style="color:var(--green)"></span>内存/磁盘命中不占相机</span>
+      <span class="pill"><span class="dot" style="color:var(--cyan)"></span>监看入口在传输忙时被阻止</span>
+    </div>
+    <nav class="toc" aria-label="本文目录">
+      <a href="#model">三层模型</a><a href="#architecture">总架构</a><a href="#priority">实际优先级</a><a href="#scenarios">场景切换</a><a href="#timelines">关键时序</a><a href="#matrix">影响矩阵</a><a href="#caveats">边界与结论</a><a href="#sources">代码依据</a>
+    </nav>
+  </header>
+
+  <section id="model">
+    <div class="section-head">
+      <div><div class="eyebrow">Mental model</div><h2>先分清三种“优先”</h2></div>
+      <p>代码没有一个能给任务打 1、2、3 分的全局优先级队列。最终谁先执行，由下面三层叠加决定。</p>
+    </div>
+    <div class="grid-3">
+      <article class="card accent-cyan">
+        <div class="num">01</div><h3>入口与状态硬互斥</h3>
+        <p>传输队列存在 <strong>WAITING / TRANSFERING</strong> 时，照片页直接阻止进入监看。进入监看后又显式取消整卡枚举，并关闭后台缩略图、效果预览和全局事件轮询。</p>
+      </article>
+      <article class="card accent-amber">
+        <div class="num">02</div><h3>任务主动暂停 / 取消</h3>
+        <p><strong>remoteActive、fhdActive、transfersBusy</strong> 只影响被代码明确订阅这些状态的任务。没有订阅的任务不会自动停，例如大图预览不会取消整卡文件枚举。</p>
+      </article>
+      <article class="card accent-violet">
+        <div class="num">03</div><h3>ioMutex 不可抢占串行</h3>
+        <p>一项相机事务拿到锁后，后来者只能等待。整文件下载会持锁到当前文件完成；文件枚举最多 20 条为一个锁段，但每条 ObjectInfo 后都有取消检查；FHD、EXIF、缩略图、帧和普通遥控命令按单次事务持锁。</p>
+      </article>
+    </div>
+    <div class="callout"><strong>最重要的判断：</strong>“监看优先级最高”在正常 UI 路径上成立，是因为传输忙时根本不允许进入监看，而且进入后主动清场；它不是靠 ioMutex 把正在下载的文件强行抢断。</div>
+  </section>
+
+  <section id="architecture">
+    <div class="section-head">
+      <div><div class="eyebrow">Architecture</div><h2>所有相机 IO 如何汇入同一通道</h2></div>
+      <p>缓存命中、位图解码、派生图导出以及下载后的改名/复制不占相机锁；原片接收过程中向输出流写数据属于整文件下载锁段。只有确实需要向相机取数据或发命令的路径才进入通道。</p>
+    </div>
+    <div class="architecture">
+      <svg viewBox="0 0 1320 690" role="img" aria-labelledby="arch-title arch-desc">
+        <title id="arch-title">ZTransfer 相机命令通道协作图</title>
+        <desc id="arch-desc">各类任务经过状态门和缩略图信号量，最终由 ioMutex 串行访问相机。监看、传输、大图预览和效果预览会暂停不同的后台任务。</desc>
+        <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#526d7f"/></marker></defs>
+
+        <text x="30" y="30" class="small">需求来源</text>
+        <rect class="node" x="30" y="50" width="240" height="68" rx="13"/><text x="48" y="78" class="label">整卡照片枚举</text><text x="48" y="100" class="small">Storage → Handles → ObjectInfo ≤20/锁段</text>
+        <rect class="node" x="30" y="132" width="240" height="68" rx="13"/><text x="48" y="160" class="label">可见格 / 预览缩略图</text><text x="48" y="182" class="small">内存 → 磁盘 → 缺失才 GetThumb</text>
+        <rect class="node" x="30" y="214" width="240" height="68" rx="13"/><text x="48" y="242" class="label">后台缩略图全量填充</text><text x="48" y="264" class="small">只落磁盘，按日期范围优先</text>
+        <rect class="node" x="30" y="296" width="240" height="68" rx="13"/><text x="48" y="324" class="label">大图预览</text><text x="48" y="346" class="small">当前 FHD → EXIF → 前页 FHD → 后页 FHD</text>
+        <rect class="node" x="30" y="378" width="240" height="68" rx="13"/><text x="48" y="406" class="label">原片传输</text><text x="48" y="428" class="small">GetObject / PartialObject，整文件持锁</text>
+        <rect class="node hot" x="30" y="460" width="240" height="68" rx="13"/><text x="48" y="488" class="label">监看与遥控</text><text x="48" y="510" class="small">Live View 帧、参数、AF、快门、事件</text>
+        <rect class="node" x="30" y="542" width="240" height="68" rx="13"/><text x="48" y="570" class="label">低频维护</text><text x="48" y="592" class="small">全局事件 2s / 心跳 10s / 效果 FHD</text>
+
+        <text x="365" y="30" class="small">策略门</text>
+        <rect class="node" x="350" y="63" width="260" height="92" rx="14"/><text x="370" y="92" class="label">remoteActive</text><text x="370" y="115" class="small">取消整卡枚举；停止后台填充</text><text x="370" y="136" class="small">停止效果 FHD 与全局事件轮询</text>
+        <rect class="node" x="350" y="174" width="260" height="92" rx="14"/><text x="370" y="203" class="label">transfersBusy</text><text x="370" y="226" class="small">WAITING / TRANSFERING 即为 true</text><text x="370" y="247" class="small">阻止监看入口；停后台与全局事件</text>
+        <rect class="node" x="350" y="285" width="260" height="92" rx="14"/><text x="370" y="314" class="label">fhdActive</text><text x="370" y="337" class="small">大图 overlay 存活期间为 true</text><text x="370" y="358" class="small">停后台缩略图、效果 FHD、全局事件</text>
+        <rect class="node" x="350" y="396" width="260" height="92" rx="14"/><text x="370" y="425" class="label">页面组合 / 缓存命中</text><text x="370" y="448" class="small">不可见格取消等待；内存/磁盘命中</text><text x="370" y="469" class="small">不占相机命令通道</text>
+        <rect class="node" x="350" y="507" width="260" height="78" rx="14"/><text x="370" y="536" class="label">effectPreviewActive</text><text x="370" y="559" class="small">设置演示 FHD 实际请求期间</text><text x="370" y="578" class="small">只暂停后台缩略图 sweep</text>
+
+        <text x="710" y="30" class="small">排队控制</text>
+        <rect class="node hot" x="700" y="150" width="230" height="94" rx="15"/><text x="722" y="182" class="label">remoteThumbGate = 1</text><text x="722" y="205" class="small">最多只让 1 个远程 GetThumb</text><text x="722" y="226" class="small">进入 ioMutex 等待队列</text>
+        <rect class="node" x="700" y="286" width="230" height="94" rx="15"/><text x="722" y="318" class="label">本地 CPU / 磁盘路径</text><text x="722" y="341" class="small">解码、滤镜、边框、SAF、缓存</text><text x="722" y="362" class="small">与相机 IO 可并行</text>
+
+        <rect class="node lock" x="1020" y="226" width="230" height="130" rx="20"/><text x="1050" y="269" class="label">NikonCamera.ioMutex</text><text x="1050" y="296" class="small">单命令通道 · 严格串行</text><text x="1050" y="319" class="small">没有抢占、没有数字优先级</text><text x="1050" y="342" class="small">当前持锁事务先完成</text>
+        <rect class="node camera" x="1050" y="470" width="180" height="98" rx="30"/><text x="1095" y="511" class="label">Nikon 相机</text><text x="1082" y="538" class="small">Wi‑Fi PTP/IP / USB PTP</text>
+
+        <path class="edge" d="M270 84 C760 84 780 256 1020 256"/>
+        <path class="edge gate" d="M270 166 C500 166 570 189 700 189"/>
+        <path class="edge gate" d="M270 248 C500 248 570 207 700 207"/>
+        <path class="edge" d="M270 330 C690 330 780 286 1020 286"/>
+        <path class="edge" d="M270 412 C680 412 800 310 1020 310"/>
+        <path class="edge" d="M270 494 C680 494 800 332 1020 332"/>
+        <path class="edge" d="M270 576 C680 576 820 346 1020 346"/>
+        <path class="edge" d="M930 197 C982 197 982 267 1020 267"/>
+        <path class="edge" d="M1135 356 L1138 470"/>
+        <path class="edge" d="M270 177 C330 177 330 432 350 432"/>
+        <path class="edge" d="M610 442 L700 333"/>
+
+        <path class="edge stop" d="M350 105 C315 105 315 84 270 84"/>
+        <path class="edge stop" d="M350 211 C315 211 315 248 270 248"/>
+        <path class="edge stop" d="M350 322 C315 322 315 248 270 248"/>
+        <path class="edge stop" d="M350 546 C315 546 315 248 270 248"/>
+        <text x="642" y="635" class="small">红色虚线 = 典型暂停/取消关系；完整且精确的门控映射见下表。它们都不会从 ioMutex 中抢断。</text>
+      </svg>
+    </div>
+    <div class="legend"><span><i class="line-key"></i>进入相机命令队列</span><span><i class="line-key violet"></i>GetThumb 先过单许可门</span><span><i class="line-key red"></i>显式暂停 / 取消</span></div>
+    <div class="matrix-wrap" style="margin-top:16px"><table>
+      <thead><tr><th>策略状态</th><th>何时成立</th><th>明确暂停 / 取消</th><th>明确不会因此停止</th></tr></thead>
+      <tbody>
+        <tr><td><strong>transfersBusy</strong></td><td>存在 WAITING 或 TRANSFERING</td><td>后台缩略图 sweep、设置演示 FHD、全局事件 GetEvent；照片页阻止进入监看</td><td>整卡枚举、可见项缩略图、已打开的大图 FHD / EXIF</td></tr>
+        <tr><td><strong>remoteActive</strong></td><td>RemoteScreen 存活</td><td>取消整卡枚举并保留 pending；暂停后台 sweep、设置演示 FHD、全局事件 GetEvent</td><td>监看自己的帧、命令、事件、心跳；ObjectAdded 的单对象 ObjectInfo</td></tr>
+        <tr><td><strong>fhdActive</strong></td><td>大图 overlay 存活</td><td>后台 sweep、设置演示 FHD、全局事件 GetEvent</td><td>整卡枚举、可见项缩略图、原片传输、心跳</td></tr>
+        <tr><td><strong>effectPreviewActive</strong></td><td>设置演示 FHD 已过 900ms 静默期并实际加载</td><td>仅后台缩略图 sweep</td><td>整卡枚举、全局事件、心跳；三类前台状态出现时反而会取消它</td></tr>
+        <tr><td><strong>isLoadingFiles</strong></td><td>整卡元数据仍在加载</td><td>仅全局事件 GetEvent</td><td>可见项缩略图、后台 sweep；每批 files 更新会让 sweep 重排重启</td></tr>
+        <tr><td><strong>页面组合 / 连接</strong></td><td>格子离开组合，或相机断开</td><td>最后一个等待者离开会取消未完成的可见缩略图请求；断线阻止新的远程缺失路径</td><td>内存/磁盘缓存、本地派生任务；监看会话等待重连</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="priority">
+    <div class="section-head">
+      <div><div class="eyebrow">Effective priority</div><h2>当前代码的实际优先级梯队</h2></div>
+      <p>同一梯队内部没有稳定的“谁一定先拿锁”承诺。表中的优先级是状态门和持锁粒度共同形成的有效结果。</p>
+    </div>
+    <div class="priority-stack">
+      <div class="priority-row"><div class="rank s">S</div><div class="priority-main"><b>监看页面（正常入口）</b>进入前要求没有 WAITING / TRANSFERING；进入后取消整卡枚举，停后台缩略图、效果 FHD、全局事件轮询。帧、参数、AF、快门和监看自己的事件循环继续共享 ioMutex。</div><div class="priority-note"><strong>不是抢占：</strong>它靠“禁止与传输同时进入 + 主动清场”获得最高有效优先级。监看事件中的 ObjectAdded 仍会临时取一次 ObjectInfo。</div></div>
+      <div class="priority-row"><div class="rank a">A</div><div class="priority-main"><b>已拿到锁的当前事务</b>任何任务一旦进入 ioMutex 都不能被后来者抢断。原片传输最重：当前文件（即使分块）全程持锁；整卡枚举最多 20 条为一个锁段。</div><div class="priority-note">这是最高的<strong>运行时事实</strong>。监看取消枚举时，每条 ObjectInfo 后的取消检查可提前结束锁段；未取消它的 FHD / 传输则仍要等当前批结束。</div></div>
+      <div class="priority-row"><div class="rank b">B</div><div class="priority-main"><b>已经发起的前台请求</b>原片传输、大图 FHD / EXIF、可见格缺失缩略图和监看控制命令之间没有业务级重排。大图自己的协程固定为：当前 FHD → 当前 EXIF → 左邻 FHD → 右邻 FHD。</div><div class="priority-note">请求真正到达锁的时机决定等待关系。FHD 请求发出时，remoteThumbGate 只能保证同时已进入或等待 ioMutex 的远程 GetThumb 至多一条；它不能越过其它任务。</div></div>
+      <div class="priority-row"><div class="rank c">C</div><div class="priority-main"><b>渐进列表与事件增量</b>整卡枚举按 handle 降序（通常对应新→旧），最多 20 条一批并在批间释放锁；ObjectAdded 只读取该 handle 的一条 ObjectInfo。</div><div class="priority-note">传输或大图打开时，整卡枚举不会被它们显式停止；只会在 ioMutex 上等待。监看是唯一会取消完整枚举的前台状态。</div></div>
+      <div class="priority-row"><div class="rank d">D</div><div class="priority-main"><b>后台与维护任务</b>后台缩略图 sweep、设置效果 FHD、全局事件轮询、10 秒心跳。sweep 受三大前台状态和 effectPreviewActive 控制；效果 FHD还会等 files 安静 900ms。</div><div class="priority-note">心跳不参与这些暂停门，仍会排 ioMutex；设置效果 FHD 也不会暂停枚举或事件，只在自己实际加载时让 sweep 停下。缓存命中和本地派生不占相机通道。</div></div>
+    </div>
+  </section>
+
+  <section id="scenarios">
+    <div class="section-head">
+      <div><div class="eyebrow">Interactive scenarios</div><h2>切换场景，看每项任务此刻在做什么</h2></div>
+      <p>“等待”表示代码没有主动暂停，但需要等 ioMutex；“暂停”表示状态门明确不再发请求；“按需”表示只有缓存缺失或事件发生时才访问相机。</p>
+    </div>
+    <div class="scenario-wrap">
+      <div class="scenario-tabs" role="tablist" aria-label="运行场景" id="scenario-tabs"></div>
+      <div class="scenario-summary"><div><h3 id="scenario-title"></h3><p id="scenario-description"></p></div><div class="scenario-rule" id="scenario-rule"></div></div>
+      <div class="task-grid" id="task-grid" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section id="timelines">
+    <div class="section-head">
+      <div><div class="eyebrow">Timelines</div><h2>四条最关键的真实时序</h2></div>
+      <p>这些顺序解释了为什么有些行为看似“停住”，实质是在等待当前锁持有者收尾。</p>
+    </div>
+    <div class="grid-2">
+      <article class="card"><h3>连接成功 → 照片页</h3><div class="timeline">
+        <div class="step"><b>建立相机会话</b><p>成功态先发布，立即启动 keepalive、loadFiles 和事件轮询。</p></div>
+        <div class="step"><b>枚举存储与 handles</b><p>读取卡槽和全部对象句柄；新会话清内存缩略图/负缓存与效果预览，磁盘缩略图保留。</p></div>
+        <div class="step"><b>ObjectInfo 最多每 20 条发布</b><p>照片列表渐进出现；每次 files 更新会重启后台缩略图扫描与效果预览 900ms 静默计时。</p></div>
+        <div class="step"><b>连接庆祝后进入照片页</b><p>页面出现前列表和后台缩略图已经工作；可见格开始内存/磁盘/远程三级加载。</p></div>
+      </div></article>
+      <article class="card"><h3>打开大图预览</h3><div class="timeline">
+        <div class="step"><b>固定当前展示模型快照</b><p>只复制当时已经加载且经过筛选/合集展开的条目；后续列表新增不会把当前页换掉。</p></div>
+        <div class="step"><b>fhdActive = true</b><p>暂停后台缩略图、效果 FHD、全局事件轮询；不暂停整卡枚举、传输或底层仍在组合的可见格。</p></div>
+        <div class="step"><b>先完成展开动画</b><p>动画结束才开始高清图与 EXIF，避免大位图上传影响动画。</p></div>
+        <div class="step"><b>当前 FHD → 当前 EXIF → 邻页 FHD</b><p>同一协程严格串行。视频跳过 FHD；当前页变化会取消旧序列并按新页重启。</p></div>
+        <div class="step"><b>关闭 overlay</b><p>fhdActive = false，后台缩略图和全局事件恢复；大图会话内缓存随 overlay 释放。</p></div>
+      </div></article>
+      <article class="card"><h3>加入传输队列</h3><div class="timeline">
+        <div class="step"><b>任务先成为 WAITING</b><p>transfersBusy 立即为 true：停后台缩略图、效果 FHD、全局事件，并阻止进入监看。</p></div>
+        <div class="step"><b>先做本地目录与已存在检查</b><p>命中本地原片可直接完成或生成派生图，不访问相机；这段短时间仍因 WAITING 而触发 busy 门。</p></div>
+        <div class="step"><b>下载拿到 ioMutex</b><p>当前整文件的数据接收与输出流写入都在锁段内；大文件的 PartialObject 分块也不在块间释放。其它远程请求等待。</p></div>
+        <div class="step"><b>数据阶段结束后释放相机</b><p>输出流关闭/冲刷、改名/复制以及边框/滤镜不再占相机锁。派生图在低优先级线程进行，任务已 COMPLETED，不再算 transfersBusy。</p></div>
+        <div class="step"><b>处理下一 WAITING</b><p>队列清空后 busy 门解除，后台工作恢复。失败任务当前需要用户手动重试。</p></div>
+      </div></article>
+      <article class="card"><h3>进入 / 退出监看</h3><div class="timeline">
+        <div class="step"><b>入口先检查传输忙</b><p>只要有 WAITING / TRANSFERING 就不给进入，因此正常路径下不会与原片下载并行。</p></div>
+        <div class="step"><b>remoteActive = true</b><p>取消 fileLoadJob 并保留 pending；若正在读 ObjectInfo，最多让当前一条事务收尾。后台缩略图、效果 FHD、全局事件停止，照片页离开组合。</p></div>
+        <div class="step"><b>参数优先，随后启动 Live View</b><p>先读取模式与参数，再 StartLiveView；帧获取和解码并行，帧通道只保留最新一帧。</p></div>
+        <div class="step"><b>监看自己的事件循环接管</b><p>全局 GetEvent 已停。监看约 600ms 轮询；ObjectAdded 会转交 VM 单独读取该对象信息并插入列表。</p></div>
+        <div class="step"><b>退出后恢复未完成枚举</b><p>页面销毁会取消 LV 会话并令 remoteActive = false；两项清理没有额外业务顺序，仍由 ioMutex 串行。若 fileLoadPending，则保留已发布条目、重新取 handles、跳过已有 handle 后继续。</p></div>
+      </div></article>
+    </div>
+  </section>
+
+  <section id="matrix">
+    <div class="section-head">
+      <div><div class="eyebrow">Impact matrix</div><h2>所有相互影响逻辑一览</h2></div>
+      <p>表内“继续”不等于马上获得相机，它仍可能在 ioMutex 等待；“本地可用”表示缓存/CPU/磁盘路径不受相机锁影响。</p>
+    </div>
+    <div class="matrix-wrap"><table>
+      <thead><tr><th>任务</th><th>传输 WAITING / TRANSFERING</th><th>大图 overlay</th><th>监看页面</th><th>整卡枚举期间</th><th>离开照片页</th><th>断线</th></tr></thead>
+      <tbody>
+        <tr><td><strong>整卡照片枚举</strong><br><span class="neutral">ObjectInfo 最多 20/锁段</span></td><td class="maybe">不取消；下载持锁时等待，批次也可能让下载先等</td><td class="maybe">不取消；与 FHD / EXIF 争锁</td><td class="no">cancel 并标 pending；批内在当前 ObjectInfo 后检查取消</td><td class="yes">自身运行</td><td class="yes">继续，页面无关</td><td class="no">异常中止；重连调用 loadFiles 刷新</td></tr>
+        <tr><td><strong>可见格缩略图</strong><br><span class="neutral">内存→磁盘→GetThumb</span></td><td class="maybe">仍允许；本地命中立即，远程通常等文件间隙</td><td class="maybe">底层格仍组合；已有请求不强杀，最多 1 条远程 thumb 排队</td><td class="no">照片页离开组合；请求无人等待时取消</td><td class="yes">批间可插入；同样受 ioMutex</td><td class="no">格子销毁；最后等待者会取消未完成请求</td><td class="yes">内存/磁盘仍显示；远程不可用</td></tr>
+        <tr><td><strong>后台缩略图填充</strong><br><span class="neutral">全量只落磁盘</span></td><td class="no">collectLatest 取消</td><td class="no">fhdActive 暂停</td><td class="no">remoteActive 暂停</td><td class="maybe">随 files 每批更新取消重启；可在批间取图</td><td class="yes">继续，页面无关</td><td class="no">检测断线后退出</td></tr>
+        <tr><td><strong>交互式 FHD 大图</strong><br><span class="neutral">当前页与邻页</span></td><td class="maybe">不取消；若下载先持锁则等当前文件完成</td><td class="yes">主任务</td><td class="no">路由互斥，正常 UI 不共存</td><td class="maybe">不暂停枚举；通常等当前最多 20 条的锁段</td><td class="no">overlay 随照片页销毁</td><td class="no">停止远程；重连后当前页 key 触发重试</td></tr>
+        <tr><td><strong>当前页 EXIF</strong><br><span class="neutral">128KB / RAW 2MB 文件头</span></td><td class="maybe">与传输争锁</td><td class="yes">当前 FHD 后执行；不预取邻页</td><td class="no">路由互斥</td><td class="maybe">与枚举争锁</td><td class="no">overlay 销毁</td><td class="neutral">稳定身份缓存命中可返回；未命中失败</td></tr>
+        <tr><td><strong>原片传输</strong><br><span class="neutral">整文件持有 ioMutex</span></td><td class="yes">队列主任务；停止操作只撤下 WAITING，不中断当前文件</td><td class="maybe">可从预览按钮发起；双方没有硬优先级，先拿锁者先执行</td><td class="no">正常入口明确阻止 busy 队列</td><td class="maybe">不取消枚举；实际到锁顺序决定谁先</td><td class="yes">后台继续，TransferService 保活</td><td class="no">当前任务失败；后续任务逐个取最新 camera，无连接则失败，已重连则可继续；失败项不自动重试</td></tr>
+        <tr><td><strong>监看帧与遥控命令</strong></td><td class="no">正常入口被阻止</td><td class="no">路由互斥</td><td class="yes">连续取帧；AF 流程间帧可穿插，录像启动原子序列会短时独占锁</td><td class="no">进入时取消枚举</td><td class="yes">监看页自身即前台页面；本地监看录制复用解码帧</td><td class="maybe">会话循环等待新 camera，重连后恢复 LV</td></tr>
+        <tr><td><strong>全局事件轮询</strong><br><span class="neutral">每 2 秒 GetEvent</span></td><td class="no">跳过 GetEvent；解除后再消费相机仍保留的事件</td><td class="no">跳过 GetEvent</td><td class="no">停用，避免与监看页争夺消费型事件</td><td class="no">isLoadingFiles 时跳过</td><td class="yes">继续，页面无关</td><td class="no">旧循环退出；重连新建循环</td></tr>
+        <tr><td><strong>监看事件处理</strong><br><span class="neutral">稳定后约 600ms</span></td><td class="neutral">不会正常共存</td><td class="neutral">不会共存</td><td class="yes">取代全局消费者；ObjectAdded 转交列表，录像收尾可临时加快轮询</td><td class="neutral">完整枚举已停；可单取新增对象信息</td><td class="yes">属于监看页</td><td class="no">等待 camera / LV 稳定</td></tr>
+        <tr><td><strong>设置效果演示 FHD</strong></td><td class="no">取消 / 不启动</td><td class="no">交互 FHD 出现即取消</td><td class="no">取消 / 不启动</td><td class="maybe">files 变化重置 900ms；若安静后启动，会与枚举/事件争一次锁</td><td class="yes">成功位图留在 VM，设置页只消费本地位图</td><td class="no">不请求；重连 loadFiles 会重置尝试状态</td></tr>
+        <tr><td><strong>心跳</strong><br><span class="neutral">每 10 秒</span></td><td class="maybe">继续排队，不打断下载</td><td class="maybe">继续排队</td><td class="maybe">继续排队；持续帧本身也在保活</td><td class="maybe">继续排队</td><td class="yes">继续</td><td class="no">发现失败后触发重连</td></tr>
+        <tr><td><strong>边框 / 滤镜派生图</strong><br><span class="neutral">本地 CPU + SAF</span></td><td class="yes">可与下一文件下载并行</td><td class="yes">不占相机</td><td class="yes">允许；isGeneratingFrame 不计 transfersBusy</td><td class="yes">不占相机</td><td class="yes">继续</td><td class="yes">原片已落盘即可继续</td></tr>
+        <tr><td><strong>日期筛选</strong></td><td class="neutral">后台已暂停</td><td class="neutral">大图使用打开时快照</td><td class="neutral">后台已暂停</td><td class="yes">不改变最终枚举；只改后台缩略图先扫范围</td><td class="yes">优先范围仍由 MainScreen 桥接</td><td class="neutral">不访问相机</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="caveats">
+    <div class="section-head">
+      <div><div class="eyebrow">Decision & caveats</div><h2>判断“下一项是谁”的最短路径</h2></div>
+      <p>先判断是否需要相机，再看硬门，最后才看 ioMutex。这样比背一张静态优先级表更准确。</p>
+    </div>
+    <div class="decision" aria-label="任务执行决策路径">
+      <div class="decision-node"><div class="q">STEP 1</div><strong>内存 / 磁盘已经命中？</strong><p style="color:var(--muted);margin-top:8px">是：立即完成，不参与相机优先级。</p></div><div class="decision-arrow">→</div>
+      <div class="decision-node"><div class="q">STEP 2</div><strong>任务被当前状态门暂停？</strong><p style="color:var(--muted);margin-top:8px">remote / busy / FHD 只暂停各自订阅者。</p></div><div class="decision-arrow">→</div>
+      <div class="decision-node"><div class="q">STEP 3</div><strong>是否是 GetThumb？</strong><p style="color:var(--muted);margin-top:8px">是：先过 1 许可门，避免堆满锁队列。</p></div>
+    </div>
+    <div class="grid-2" style="margin-top:14px">
+      <article class="card"><h3>必须知道的边界</h3><ul class="facts">
+        <li><strong>ioMutex 不是优先队列。</strong>代码没有保证 FHD、下载、ObjectInfo 谁在锁释放后的下一拍必定先拿到。</li>
+        <li><strong>下载不可被监看抢断。</strong>正常 UI 在下载开始前就阻止进入监看，因此用不到抢断。</li>
+        <li><strong>大图不是全局最高优先。</strong>它只暂停后台缩略图、效果预览和全局事件；整卡枚举与传输仍可能挡在前面。</li>
+        <li><strong>缩略图有两类。</strong>后台全量填充会停；可见格按需加载不会因 transfer busy 自动停。</li>
+        <li><strong>监看不是“列表永远零更新”。</strong>完整枚举停止，但监看事件收到 ObjectAdded 后会单独读取新对象信息并插入列表。</li>
+        <li><strong>页面 ≠ 后台任务。</strong>去队列页会销毁可见格加载，但空闲时后台缩略图扫盘仍继续。</li>
+        <li><strong>筛选/折叠只改变前台组合。</strong>被过滤或折叠的格子不会触发可见项加载；后台仍扫描全部 files，只有日期范围会改变其先后顺序。</li>
+        <li><strong>“停止传输”不打断当前文件。</strong>它只把尚未开始的 WAITING 改为 CANCELLED；TRANSFERING 会自然完成，因此监看入口继续被挡到该文件结束。</li>
+        <li><strong>断点续传只保证当前 App 会话内的普通失败。</strong>多数失败保留 .nkpart_ 供手动重试；无法续传/保存失败可能删除它，重新启动 App 还会清扫上次遗留的半成品。</li>
+        <li><strong>监看内部还有两层锁。</strong>AF 用 focusMutex 固定整套流程，帧可在 AF 轮询间穿插；USB 录像启动使用 focusMutex + ioMutex 原子序列，期间帧也要等待。</li>
+      </ul></article>
+      <article class="card"><h3>当前实现形成的全貌</h3><ul class="facts">
+        <li><strong>监看：</strong>最强硬互斥，正常情况下独占“业务流量”，仅保留自身命令、事件、心跳和新增对象的单条信息读取。</li>
+        <li><strong>传输：</strong>对后台任务有硬暂停；对整卡枚举、大图和可见缩略图只有锁层面的等待关系。</li>
+        <li><strong>大图：</strong>前台体验优先于后台扫盘，但没有压过下载或 ObjectInfo 批次。</li>
+        <li><strong>列表：</strong>元数据最多 20 条共用一个锁段、每条后检查取消；缩略图每次一条远程请求，普通竞争者在批间协作，监看取消可在当前 ObjectInfo 后生效。</li>
+        <li><strong>本地后处理：</strong>边框、滤镜、解码、磁盘缓存和 SAF 操作不占相机通道，可与相机任务并行。</li>
+      </ul></article>
+    </div>
+  </section>
+
+  <section id="sources">
+    <div class="section-head"><div><div class="eyebrow">Traceability</div><h2>代码依据</h2></div><p>行号以生成本文时的工作区为准。后续改动逻辑时，应同步更新本文。</p></div>
+    <div class="grid-2 code-map">
+      <article class="card"><h3>相机任务与状态门</h3><ul class="facts">
+        <li><code>CameraViewModel.kt:666–692</code>：transfersBusy、remoteActive、监看取消/恢复文件枚举。</li>
+        <li><code>CameraViewModel.kt:699–817</code>：fhdActive、后台缩略图 sweep、效果 FHD 900ms 与互斥条件。</li>
+        <li><code>CameraViewModel.kt:1206–1255</code>：全局事件轮询门控与 ObjectAdded 单对象插入。</li>
+        <li><code>CameraViewModel.kt:1259–1364</code>：新会话清理、ObjectInfo 渐进加载、监看 pending 恢复。</li>
+        <li><code>CameraViewModel.kt:1399–1668</code>：三级缩略图缓存、remoteThumbGate、FHD 加载。</li>
+      </ul></article>
+      <article class="card"><h3>协议锁、页面与传输</h3><ul class="facts">
+        <li><code>NikonCamera.kt:51</code>：全局 ioMutex；<code>536–563</code>：20 条 ObjectInfo 锁段与逐条取消检查；<code>675–876</code>：整文件下载持锁。</li>
+        <li><code>PhotoPreview.kt:172–312</code>：快照、fhdActive、动画后加载、当前/邻页顺序。</li>
+        <li><code>FileListScreen.kt:576–578, 945–970</code>：busy 定义与监看入口阻止；<code>2439–2450</code>：可见格在传输中仍允许加载。</li>
+        <li><code>TransferViewModel.kt:583–587, 900–1401, 1621–1737, 1769–1879</code>：半成品清扫、队列/续传、派生并行、停止与手动重试。</li>
+        <li><code>RemoteScreen.kt:710–893, 1009–1075, 1170–1240</code>：LV 会话、参数后启动、remoteActive、监看事件接管。</li>
+        <li><code>RemoteLab.kt:227–247, 859–965, 1171–1185, 1297–1345</code>：focusMutex、AF/录像锁粒度与逐帧 ioMutex。</li>
+        <li><code>MainActivity.kt:112–123</code>：Transfer VM → Camera VM busy 桥接与日期优先范围。</li>
+      </ul></article>
+    </div>
+  </section>
+
+  <footer>文档范围：当前 Android 客户端相机 IO、照片列表、缩略图、大图预览、传输、监看、事件与本地派生任务。生成日期：2026-08-06（Asia/Shanghai）。</footer>
+</main>
+
+<script>
+  const taskNames = {
+    scan: "整卡照片枚举",
+    visible: "可见缩略图",
+    sweep: "后台缩略图填充",
+    effect: "设置效果 FHD",
+    preview: "大图 FHD / EXIF",
+    transfer: "原片传输",
+    remote: "监看帧与遥控",
+    events: "事件轮询",
+    heartbeat: "10 秒心跳",
+    local: "本地边框 / 滤镜"
+  };
+  const statusLabels = { run: "运行", pause: "暂停", wait: "等待锁", ondemand: "按需", off: "未启用", local: "本地并行" };
+  const scenarios = [
+    {
+      id: "connect", label: "刚连接 / 首轮加载", title: "连接成功，列表与缩略图同时渐进",
+      description: "loadFiles 立即开始，早于连接庆祝动画结束和照片页导航。ObjectInfo 最多每 20 条发布一次；可见缩略图与后台扫盘可在批间获得 ioMutex。",
+      rule: "事件轮询因 isLoadingFiles 暂停",
+      tasks: {
+        scan:["run","最多 20 条 ObjectInfo 共用一个锁段；每条后检查取消，批间释放锁。"], visible:["ondemand","照片页出现后，缓存缺失才发 GetThumb。"], sweep:["run","每次 files 批次更新都会取消并按新列表重启。"], effect:["wait","等待 files 连续 900ms 不变化后才尝试一次。"], preview:["off","用户尚未打开。"], transfer:["off","未入队。"], remote:["off","可进入；进入会取消扫描。"], events:["pause","isLoadingFiles 为 true 时不 GetEvent。"], heartbeat:["run","每 10 秒排队，不抢断当前锁段。"], local:["local","列表分组、筛选、位图解码不占相机。"]
+      }
+    },
+    {
+      id: "idle", label: "照片页空闲", title: "空闲态：后台把整卡缩略图逐步补齐",
+      description: "完整列表已加载且没有传输、预览或监看。可见格优先受用户滚动驱动；后台 sweep 按日期筛选范围优先，随后继续全局新到旧。",
+      rule: "相机通道由短事务共享",
+      tasks: {
+        scan:["off","已完成；新连接或监看恢复时才重启。"], visible:["ondemand","内存/磁盘命中立即；缺失时远程 GetThumb。"], sweep:["run","全量只落盘；remoteThumbGate 保证一次只排 1 条。"], effect:["ondemand","最新照片未缓存演示图时，安静 900ms 后取一次 FHD。"], preview:["off","未打开。"], transfer:["off","无 WAITING / TRANSFERING。"], remote:["off","入口可用。"], events:["run","每 2 秒轮询 ObjectAdded。"], heartbeat:["run","每 10 秒检查连接。"], local:["local","缓存解码与 UI 处理可并行。"]
+      }
+    },
+    {
+      id: "transfer", label: "正在传输", title: "传输忙：后台清场，但整卡枚举和可见格没有硬停",
+      description: "从任务进入 WAITING 起 transfersBusy 就为 true。当前文件拿到 ioMutex 后持有到整文件完成；其它远程请求只能等待。",
+      rule: "监看入口被阻止",
+      tasks: {
+        scan:["wait","若首轮枚举尚未完成，它不会被取消；下载持锁时等待。"], visible:["wait","本地缓存仍立即；缺失 GetThumb 等当前文件间隙。"], sweep:["pause","transfersBusy 触发 collectLatest 取消。"], effect:["pause","不启动或被取消。"], preview:["wait","若预览已开或此时打开，FHD 不被取消，但要和下载争锁。"], transfer:["run","当前整文件独占 ioMutex；分块路径也不在块间释放。"], remote:["pause","照片页入口显示阻止提示。"], events:["pause","全局 GetEvent 完全停。"], heartbeat:["wait","仍运行计时，到点后排在下载之后。"], local:["local","落盘后边框/滤镜可与下一下载并行。"]
+      }
+    },
+    {
+      id: "preview", label: "大图预览", title: "大图打开：前台 FHD 优先于后台，但不抢断扫描或传输",
+      description: "overlay 打开即设置 fhdActive；先完成展开动画，再依次取当前 FHD、当前 EXIF和相邻页 FHD。底层照片网格仍在组合。",
+      rule: "FHD 发起时，至多 1 个远程 GetThumb 已进入锁队列",
+      tasks: {
+        scan:["wait","不被 fhdActive 暂停；FHD 通常等当前未取消的 ObjectInfo 锁段结束。"], visible:["ondemand","底层可见格和预览占位图仍可加载；既有请求不强杀。"], sweep:["pause","fhdActive 明确暂停。"], effect:["pause","交互式 FHD 出现时取消设置演示 FHD。"], preview:["run","当前页优先，然后 EXIF，再左邻/右邻；翻页取消旧序列。"], transfer:["ondemand","可从预览按钮入队；如果启动，与 FHD 按实际到锁顺序执行。"], remote:["off","预览属于照片页，不能同时在监看路由。"], events:["pause","fhdActive 期间全局轮询停止。"], heartbeat:["wait","照常排队。"], local:["local","动画、缩放、解码和已有缓存不占相机。"]
+      }
+    },
+    {
+      id: "remote", label: "进入监看", title: "监看态：完整列表工作被主动撤下",
+      description: "正常入口已确保队列不忙。RemoteScreen 存活即 remoteActive=true，取消 fileLoadJob，停止后台扫盘、效果 FHD 和全局事件；随后先读参数再启 Live View。",
+      rule: "最高有效优先级来自硬互斥和主动清场",
+      tasks: {
+        scan:["pause","cancel；若已在批内，当前 ObjectInfo 后生效。已发布 files 保留，pending=true。"], visible:["off","离开照片页后格子退出组合。"], sweep:["pause","remoteActive 明确暂停。"], effect:["pause","remoteActive 明确取消。"], preview:["off","路由互斥，overlay 已销毁。"], transfer:["off","正常入口要求无 WAITING / TRANSFERING。"], remote:["run","帧逐次取；AF 轮询间帧可穿插，录像启动原子序列会短时独占。"], events:["run","监看页接管事件；稳定后通常约 600ms，录像收尾可更快。"], heartbeat:["wait","仍每 10 秒排队；帧流本身也持续保活。"], local:["local","帧解码与下一帧网络 IO 并行，慢时丢旧帧；本地录制不另取帧。"]
+      }
+    },
+    {
+      id: "capture", label: "监看中拍照", title: "监看拍照：全量扫描停，但新照片仍能进列表",
+      description: "监看事件循环是唯一 GetEvent 消费者。收到 ObjectAdded 后转交 CameraViewModel，对该 handle 单独执行一次 ObjectInfo，再插入 files 顶部。",
+      rule: "这是“监看时列表停止”的唯一增量例外",
+      tasks: {
+        scan:["pause","完整卡扫描仍停。"], visible:["off","照片页未组合，不取新照片缩略图。"], sweep:["pause","remoteActive 仍阻止缩略图扫盘。"], effect:["pause","不生成设置演示图。"], preview:["off","不共存。"], transfer:["off","不从监看直接创建照片传输任务。"], remote:["run","帧、拍摄命令和完成事件继续。"], events:["run","ObjectAdded → 单对象 ObjectInfo，与帧逐事务争锁。"], heartbeat:["wait","照常排队。"], local:["local","新 FileInfo 更新列表状态，但暂不组合照片网格。"]
+      }
+    },
+    {
+      id: "frame", label: "仅派生图处理中", title: "边框 / 滤镜生成：相机通道已经释放",
+      description: "原片完成后任务状态已经是 COMPLETED，isGeneratingFrame 单独标记。MainScreen 的 transfersBusy 不包含它，因此后台缩略图恢复、监看入口也可用。",
+      rule: "本地 CPU / SAF 与相机任务并行",
+      tasks: {
+        scan:["run","若尚未完成可继续。"], visible:["ondemand","正常加载。"], sweep:["run","没有 WAITING / TRANSFERING 时恢复。"], effect:["ondemand","满足空闲条件即可运行。"], preview:["ondemand","可正常打开。"], transfer:["off","相机下载已完成；下一 WAITING 若存在则另当别论。"], remote:["ondemand","入口允许。"], events:["run","全局轮询恢复。"], heartbeat:["run","正常。"], local:["local","低优先级线程生成派生文件，不回滚原片。"]
+      }
+    },
+    {
+      id: "disconnect", label: "断线 / 重连", title: "断线：远程任务退出，本地缓存继续；重连按页面恢复",
+      description: "文件列表在心跳发现断线时先保留；新连接建立后 loadFiles 先清空旧会话列表。普通页面立即重扫；若仍在监看，remoteActive 会让它保持 pending，退出监看后才扫。磁盘缩略图使用稳定身份键，可跨会话命中。",
+      rule: "失败传输当前需要手动重试",
+      tasks: {
+        scan:["pause","IO 异常终止；重连调用 loadFiles，监看中则只留 pending。"], visible:["local","内存/磁盘缩略图可继续显示，远程缺失无法补。"], sweep:["pause","检测 connected=false 后退出。"], effect:["pause","不请求；新会话重置尝试键。"], preview:["wait","缩略图可看；重连会按 connected key 用当前快照 handle 重试 FHD。"], transfer:["pause","当前任务失败；后续逐项取最新 camera，无连接则失败、已重连则继续。失败项须手动重试；普通半成品仅本次 App 会话可续。"], remote:["wait","会话循环等待新的 camera，重连后恢复 Live View。"], events:["pause","旧循环退出，重连新建。"], heartbeat:["run","心跳失败是触发断线状态与重连的路径之一。"], local:["local","已落盘派生图继续，不依赖相机。"]
+      }
+    }
+  ];
+
+  const tabs = document.getElementById("scenario-tabs");
+  const grid = document.getElementById("task-grid");
+  const title = document.getElementById("scenario-title");
+  const description = document.getElementById("scenario-description");
+  const rule = document.getElementById("scenario-rule");
+
+  function renderScenario(id) {
+    const scenario = scenarios.find(item => item.id === id) || scenarios[0];
+    tabs.querySelectorAll("button").forEach(button => {
+      const selected = button.dataset.id === scenario.id;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
+    title.textContent = scenario.title;
+    description.textContent = scenario.description;
+    rule.textContent = scenario.rule;
+    grid.innerHTML = Object.entries(taskNames).map(([key, name]) => {
+      const [status, detail] = scenario.tasks[key];
+      return `<article class="task"><div class="task-top"><div class="task-name">${name}</div><span class="status ${status}"><span class="dot"></span>${statusLabels[status]}</span></div><p>${detail}</p></article>`;
+    }).join("");
+  }
+
+  scenarios.forEach((scenario, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.role = "tab";
+    button.dataset.id = scenario.id;
+    button.textContent = scenario.label;
+    button.setAttribute("aria-selected", String(index === 0));
+    button.addEventListener("click", () => renderScenario(scenario.id));
+    button.addEventListener("keydown", event => {
+      if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+      event.preventDefault();
+      const delta = event.key === "ArrowRight" ? 1 : -1;
+      const next = (scenarios.findIndex(item => item.id === scenario.id) + delta + scenarios.length) % scenarios.length;
+      renderScenario(scenarios[next].id);
+      tabs.querySelector(`[data-id="${scenarios[next].id}"]`).focus();
+    });
+    tabs.appendChild(button);
+  });
+  renderScenario(scenarios[0].id);
+</script>
+</body>
+</html>

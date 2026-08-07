@@ -1,26 +1,35 @@
-# OSS 自动发布一次性设置
+# 香港 OSS 自动发布一次性设置
 
-管理工具使用固定配置：
+管理工具默认使用：
 
-- Bucket：`ztransfer`
-- 地域：北京 `cn-beijing`
-- 上传目录：`releases/`
-- 公网域名：`ztransfer.oss-cn-beijing.aliyuncs.com`
+- Bucket：`ztransfer-hk`
+- 地域：香港 `cn-hongkong`
+- Endpoint：`https://oss-cn-hongkong.aliyuncs.com`
+- 自定义公网域名：`https://apk.ztransfer.top`
+- App 版本目录：`releases/`
+- 新用户固定对象：`ZTransfer.apk`
 
 ## 1. Bucket 设置
 
-1. 在 OSS 控制台确认账号级和 `ztransfer` Bucket 级的“阻止公共访问”均已关闭。
-2. Bucket ACL 建议保持“私有”，不要设成“公共读写”。
-3. 管理工具只把 `releases/` 下的新版本对象单独设为“公共读”。
-4. 不需要设置 CORS、静态网站、传输加速或自定义域名。
+1. 确认 `ztransfer-hk` 允许目标对象设置为公共读。
+2. Bucket ACL 可以保持私有，不要设成公共读写。
+3. 管理工具只把 `releases/*.apk` 和根目录 `ZTransfer.apk` 设置为公共读。
+4. `apk.ztransfer.top` 必须继续绑定到该 Bucket，并保持有效 HTTPS 证书。
+5. 建议开启 OSS 访问日志、流量和费用告警。
 
-“公共读”是为了让 Android 客户端使用永久、无签名、无过期时间的 HTTPS 地址直接下载。
+两个下载地址用途不同：
 
-## 2. 创建专用 RAM 用户
+```text
+https://apk.ztransfer.top/releases/ZTransfer-v27-<SHA前12位>.apk
+    App 更新专用；发布后永不覆盖，可以长期缓存。
 
-不要使用阿里云主账号 AccessKey。创建一个只供 ZTransfer 发布使用的 RAM 用户，并为它创建 AccessKey。
+https://apk.ztransfer.top/ZTransfer.apk
+    官网和新用户专用；每次发布覆盖，禁止缓存旧版本。
+```
 
-创建自定义权限策略，将下面 JSON 原样粘贴：
+## 2. RAM 最小权限
+
+继续使用专用上传用户，不要使用阿里云主账号 AccessKey。将 `<阿里云账号ID>` 替换为主账号 ID：
 
 ```json
 {
@@ -28,17 +37,14 @@
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": [
-        "oss:ListObjects"
-      ],
-      "Resource": [
-        "acs:oss:*:*:ztransfer"
-      ],
+      "Action": ["oss:ListObjects"],
+      "Resource": "acs:oss:*:<阿里云账号ID>:ztransfer-hk",
       "Condition": {
         "StringLike": {
           "oss:Prefix": [
             "releases",
-            "releases/*"
+            "releases/*",
+            "ZTransfer.apk"
           ]
         }
       }
@@ -52,42 +58,66 @@
         "oss:PutObjectAcl"
       ],
       "Resource": [
-        "acs:oss:*:*:ztransfer/releases/*"
+        "acs:oss:*:<阿里云账号ID>:ztransfer-hk/releases/*",
+        "acs:oss:*:<阿里云账号ID>:ztransfer-hk/ZTransfer.apk"
       ]
     }
   ]
 }
 ```
 
-把这条自定义策略授权给刚创建的 RAM 用户。该用户不能访问别的 Bucket，也不能删除文件。
+该用户不需要删除对象、修改 Bucket、管理证书或访问其他 Bucket 的权限。
 
-## 3. 在管理工具录入一次凭证
+## 3. 在管理工具录入凭证
 
 1. 双击 `激活码管理.bat`。
 2. 进入“App 更新管理”。
 3. 选择“配置 / 测试 OSS 上传”。
-4. 输入 RAM 用户的 AccessKey ID。
-5. 输入 AccessKey Secret。
+4. 输入专用 RAM 用户的 AccessKey ID 和 AccessKey Secret。
 
-认证方式固定为 `AK`，凭证固定加密，不再询问。凭证由 Windows 当前账号加密后保存在
-`%LOCALAPPDATA%\ZTransfer\oss-upload-credential.json`，只有同一台电脑上的同一 Windows
-用户可以解密，不会写入项目。项目固定使用的 Windows `ossutil.exe` 已加入 Git，克隆项目
-后可直接运行；下载压缩包仍被忽略。换设备后只需重新录入 AccessKey。
+凭证由 Windows 当前账号加密保存在：
 
-## 4. 以后发布
+```text
+%LOCALAPPDATA%\ZTransfer\oss-upload-credential.json
+```
 
-选择“发布新版本”，挑选本地 APK 即可。管理工具会自动：
+它不会写入项目。换电脑或轮换 AccessKey 后需要重新录入。
 
-1. 读取包名、versionName 和 versionCode；
-2. 计算文件大小与 SHA-256；
-3. 以 `.bin` 后缀和 `application/octet-stream` 上传；
-4. 设置对象为公共读；
-5. 从公网完整下载一次并核对内容；
-6. 校验通过后才把版本信息发布到服务端。
+## 4. 发布流程
 
-官方参考：
+选择“发布新版本”并选择正式 APK。管理工具会自动：
 
-- [ossutil 配置](https://help.aliyun.com/en/oss/developer-reference/config-create-configuration-file)
-- [RAM 目录级权限](https://help.aliyun.com/en/oss/user-guide/access-control-base-on-ram-policy)
-- [阻止公共访问](https://help.aliyun.com/en/oss/user-guide/block-public-access)
-- [固定公网 URL](https://help.aliyun.com/en/oss/use-a-fixed-file-url-to-access-a-file)
+1. 确认服务端支持香港 OSS 双地址发布；旧服务端会在上传前被拒绝；
+2. 校验包名、正式签名，并读取 `versionCode`、`versionName`；
+3. 计算大小和 SHA-256；
+4. 上传不可变的 `releases/ZTransfer-v{versionCode}-{SHA前12位}.apk`；
+5. 设置 APK Content-Type、公共读和一年不可变缓存；
+6. 从 `apk.ztransfer.top` 完整下载并校验版本和 SHA-256；
+7. 再次确认服务端当前版本没有在上传期间变化；
+8. 覆盖固定对象 `ZTransfer.apk`，设置为禁止缓存；
+9. 再次完整下载固定地址并校验；
+10. 两个对象都通过后，才向服务端发布新的版本信息。
+
+如果任一步失败，管理工具不会继续提交服务端版本信息。跨 OSS 和业务服务不存在分布式事务；如果
+两个对象已经上传但最后的服务端请求失败，按工具提示排查后重新发布，不要手工猜测版本数据。
+
+## 5. 发布后检查
+
+```text
+App 版本地址：
+https://apk.ztransfer.top/releases/ZTransfer-v<versionCode>-<hash>.apk
+
+新用户固定地址：
+https://apk.ztransfer.top/ZTransfer.apk
+```
+
+管理工具“验证当前 OSS 下载”会同时验证这两个地址。固定地址下载出的 `versionCode`、文件大小和
+SHA-256 必须与服务端当前发布一致。
+
+## 6. 不要做的事情
+
+- 不要让 App 自动更新使用会被覆盖的 `ZTransfer.apk`；
+- 不要恢复 `.bin` 后缀或 `application/octet-stream`；
+- 不要把 AccessKey 写进项目、批处理或文档；
+- 不要在版本对象上传并验证前修改服务端发布记录；
+- 不要删除仍可能被旧客户端使用的历史版本对象。

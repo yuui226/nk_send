@@ -271,8 +271,10 @@ fun FileListScreen(
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
     var showFilter by remember { mutableStateOf(false) }
     var filterAnchor by remember { mutableStateOf<Rect?>(null) }
-    // 网格滚动状态提升到页面层：回到顶部按钮需要读取滚动位置/方向并驱动滚动。
-    val gridState = rememberLazyGridState()
+    // 网格滚动状态提升到页面层供回顶按钮使用，但不能跨“列表被连接流程清空”保留。
+    // 用空/非空作为状态槽身份：新连接的第一批照片会自然拿到全新的 0 位置状态；
+    // 普通重组、继续分批加载以及离开子页面再返回都仍复用当前状态。
+    val gridState = key(state.files.isEmpty()) { rememberLazyGridState() }
     val scrollScope = rememberCoroutineScope()
     val atTop by remember {
         derivedStateOf {
@@ -2731,6 +2733,27 @@ private fun formatDateHeader(date: String): String {
 }
 
 /**
+ * null 表示全部可用卡槽都选中；非 null 表示只选中了该卡槽。
+ * 相机最多有两个卡槽，因此这两个状态即可完整表达“默认多选 / 筛选时单选”。
+ */
+internal fun isStorageSlotSelected(selectedSlot: Int?, slot: Int): Boolean =
+    selectedSlot == null || selectedSlot == slot
+
+internal fun toggleStorageSlotSelection(
+    selectedSlot: Int?,
+    toggledSlot: Int,
+    availableSlots: List<Int>,
+): Int? {
+    val slots = availableSlots.distinct()
+    if (toggledSlot !in slots) return selectedSlot
+    return when {
+        selectedSlot == null -> slots.singleOrNull { it != toggledSlot }
+        selectedSlot == toggledSlot -> selectedSlot // 至少保留一张卡，不能筛成空集
+        else -> null // 补选另一张卡，恢复默认的“全部卡槽”状态
+    }
+}
+
+/**
  * 类型/标记/日期筛选浮层。主面板保持紧凑；日期页上下同时展示开始、结束两组三波轮，
  * 编辑期间只改草稿，完成时才一次提交，避免滚动波轮时反复重排列表与后台请求。
  * 类型语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
@@ -2909,11 +2932,15 @@ private fun FilterOverlay(
                             storageSlots.forEach { slot ->
                                 FilterChip(
                                     label = stringResource(R.string.filter_storage_slot, slot),
-                                    selected = working.storageSlot == slot,
+                                    selected = isStorageSlotSelected(working.storageSlot, slot),
                                     onClick = {
                                         commit(
                                             working.copy(
-                                                storageSlot = if (working.storageSlot == slot) null else slot
+                                                storageSlot = toggleStorageSlotSelection(
+                                                    selectedSlot = working.storageSlot,
+                                                    toggledSlot = slot,
+                                                    availableSlots = storageSlots,
+                                                )
                                             )
                                         )
                                     },

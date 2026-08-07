@@ -91,27 +91,66 @@ function queryResponse(order, status = 'WP', overrides = {}) {
     };
 }
 
-test('OSS 更新地址只接受固定 Bucket 下的永久 bin 对象', () => {
+test('OSS 更新地址只接受 apk.ztransfer.top 下的永久版本 APK', () => {
+    const status = api.adminGetUpdate();
+    assert.equal(status.publishProtocol, 2);
+    assert.equal(status.ossUpdateHost, 'apk.ztransfer.top');
     assert.equal(
-        api.isOssReleaseUrl('https://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a1b2c3d4e5f6.bin'),
+        api.isOssReleaseUrl('https://apk.ztransfer.top/releases/ZTransfer-v27-a1b2c3d4e5f6.apk'),
         true,
     );
     for (const url of [
-        'http://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a.bin',
-        'https://other.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a.bin',
-        'https://ztransfer.oss-cn-beijing.aliyuncs.com/ZTransfer-v15-a.bin',
-        'https://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a.apk',
-        'https://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a.bin?Expires=123',
+        'http://apk.ztransfer.top/releases/ZTransfer-v27-a.apk',
+        'https://apk.ztransfer.top:8443/releases/ZTransfer-v27-a1b2c3d4e5f6.apk',
+        'https://ztransfer.oss-cn-hongkong.aliyuncs.com/releases/ZTransfer-v27-a.apk',
+        'https://apk.ztransfer.top/ZTransfer.apk',
+        'https://apk.ztransfer.top/releases/other.apk',
+        'https://apk.ztransfer.top/releases/ZTransfer-v27-a.apk',
+        'https://apk.ztransfer.top/releases/ZTransfer-v27-a.bin',
+        'https://apk.ztransfer.top/releases/ZTransfer-v27-a.apk?Expires=123',
     ]) {
         assert.equal(api.isOssReleaseUrl(url), false, url);
     }
 });
 
 test('OSS 更新地址直接下发，不调用蓝奏云解析', async () => {
-    const url = 'https://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v15-a1b2c3d4e5f6.bin';
+    const url = 'https://apk.ztransfer.top/releases/ZTransfer-v27-a1b2c3d4e5f6.apk';
     assert.deepEqual(
         await api.resolveReleaseDownload({ url, password: '' }),
         { url, source: 'OSS' },
+    );
+
+    const legacyUrl = 'https://ztransfer.oss-cn-beijing.aliyuncs.com/releases/ZTransfer-v26-7d30093f669c.bin';
+    assert.deepEqual(
+        await api.resolveReleaseDownload({ url: legacyUrl, password: '' }),
+        { url: legacyUrl, source: 'OSS_LEGACY' },
+    );
+});
+
+test('OSS 发布元数据必须与版本化文件名严格一致', () => {
+    const sha256 = 'a1b2c3d4e5f6' + '0'.repeat(52);
+    const valid = {
+        versionCode: 27,
+        versionName: '1.57',
+        url: 'https://apk.ztransfer.top/releases/ZTransfer-v27-a1b2c3d4e5f6.apk',
+        password: '',
+        sha256,
+        sizeBytes: 2_018_435,
+    };
+    assert.equal(api.isOssReleaseMetadataValid(valid), true);
+    for (const override of [
+        { versionCode: 28 },
+        { versionName: ' ' },
+        { sha256: 'b'.repeat(64) },
+        { sha256: '' },
+        { sizeBytes: 0 },
+        { password: 'legacy' },
+    ]) {
+        assert.equal(api.isOssReleaseMetadataValid({ ...valid, ...override }), false);
+    }
+    assert.equal(
+        api.adminPublishUpdate({ ...valid, sha256: 'b'.repeat(64) }).err,
+        'OSS_METADATA_MISMATCH',
     );
 });
 

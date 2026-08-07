@@ -201,7 +201,7 @@
     <article class="section">
       <div class="section-head"><h2>完整主流程</h2><p>正常情况只有这一条路径。</p></div>
       <div class="flow">
-        <div class="card admin"><span class="label">你</span><h3>上传并复制</h3><p>上传 APK，复制蓝奏云分享文本。</p></div>
+        <div class="card admin"><span class="label">你</span><h3>选择正式 APK</h3><p>管理工具上传香港 OSS 并完成校验。</p></div>
         <div class="card admin"><span class="label">管理工具</span><h3>发布</h3><p>填写说明，选择软/硬，确认。</p></div>
         <div class="card server"><span class="label">服务端</span><h3>保存版本</h3><p>自动读取版本、大小和 SHA-256。</p></div>
         <div class="card client"><span class="label">App</span><h3>提示更新</h3><p>自动检查或手动检查。</p></div>
@@ -215,18 +215,18 @@
         <div class="card ok"><h3>软更新</h3><p>立即更新 / 稍后 / 忽略此版本。</p></div>
         <div class="card fail"><h3>硬更新</h3><p>只能更新；弹窗不可关闭。</p></div>
         <div class="card server"><h3>正常下载</h3><p>App 内下载、校验、打开系统安装器。</p></div>
-        <div class="card warn"><h3>自动更新失败</h3><p>复制链接和密码，提示手动更新。</p></div>
+        <div class="card warn"><h3>自动更新失败</h3><p>打开版本化 OSS 地址手动下载。</p></div>
       </div>
     </article>
   </section>
 
   <section id="admin" class="panel" data-testid="panel-admin">
     <article class="section">
-      <div class="section-head"><h2>我发布一次更新</h2><p>只粘贴蓝奏云复制文本；版本自动读取。</p></div>
+      <div class="section-head"><h2>我发布一次更新</h2><p>选择正式 APK，其余信息自动读取。</p></div>
       <div class="steps">
-        <div class="step"><div><b>准备 APK</b><span>提高 versionCode，签名并上传蓝奏云。</span></div></div>
-        <div class="step"><div><b>复制分享文本</b><span>例如：链接 + “密码:zzzz”。</span></div></div>
-        <div class="step"><div><b>选择“发布新版本”</b><span>工具自动读取剪贴板中的链接和密码。</span></div></div>
+        <div class="step"><div><b>准备 APK</b><span>提高 versionCode 并完成正式签名。</span></div></div>
+        <div class="step"><div><b>选择 APK</b><span>管理工具自动读取版本、大小和 SHA-256。</span></div></div>
+        <div class="step"><div><b>上传并验证</b><span>同时维护版本地址和新用户固定地址。</span></div></div>
         <div class="step"><div><b>填写更新说明，选择软更新或硬更新</b><span>软更新默认。</span></div></div>
         <div class="step"><div><b>确认发布</b><span>工具已自动解析、下载并校验 APK。</span></div></div>
       </div>
@@ -275,10 +275,10 @@
       <div class="tree">
         <div class="row"><div class="decision warn s12"><h3>仍连接相机 Wi-Fi？</h3><p>是：提示“请断开相机 Wi-Fi”，不自动断开。用户断开后再点一次。</p></div></div>
         <div class="down">↓ 否</div>
-        <div class="row"><div class="card server s12"><h3>获取临时直链并下载</h3></div></div>
+        <div class="row"><div class="card server s12"><h3>领取版本化 OSS 地址并下载</h3></div></div>
         <div class="down">↓</div>
         <div class="row">
-          <div class="card fail s4"><span class="choice no">失败</span><h3>手动更新</h3><p>自动复制蓝奏云链接和密码。</p></div>
+          <div class="card fail s4"><span class="choice no">失败</span><h3>手动更新</h3><p>在浏览器打开版本化 OSS 地址。</p></div>
           <div class="decision server s8"><span class="choice yes">成功</span><h3>校验 APK</h3><p>大小、SHA-256、包名、版本号、签名。</p></div>
         </div>
         <div class="down">↓ 通过</div>
@@ -329,7 +329,7 @@
     </article>
 
     <article class="section">
-      <div class="note"><b>自动更新失败：</b>复制蓝奏云链接和密码，用户打开下载页。</div>
+      <div class="note"><b>自动更新失败：</b>用户可在浏览器打开当前版本 OSS 地址。</div>
     </article>
   </section>
 

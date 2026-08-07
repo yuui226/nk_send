@@ -42,14 +42,15 @@ class DebugCameraSimulatorTest {
 
                 sendCommand(cmd, operation = 0x1004, transactionId = 1)
                 val storage = readDataResponse(cmd, transactionId = 1)
-                assertEquals(1, storage.intLe(0))
+                assertEquals(2, storage.intLe(0))
                 assertEquals(0x00010001, storage.intLe(4))
+                assertEquals(0x00020001, storage.intLe(8))
 
                 sendCommand(
                     cmd,
                     operation = 0x1007,
                     transactionId = 2,
-                    0x00010001,
+                    -1,
                     -1,
                     0
                 )

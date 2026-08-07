@@ -754,7 +754,7 @@ object LicenseManager {
 
     // ---------------------------------------------------------------- 检查更新
 
-    /** 服务器描述的最新版本；分享链接/密码仅作为解析服务故障时的浏览器灾备。 */
+    /** 服务器描述的最新版本；fallback 字段保留旧发布兼容，新发布中 URL 是版本化 OSS 地址。 */
     data class UpdateInfo(
         val versionCode: Int,
         val versionName: String,
@@ -801,7 +801,7 @@ object LicenseManager {
             )
         }
 
-    /** 为当前已发布版本换取一次短期下载直链。服务端会拒绝任意/过期 versionCode。 */
+    /** 领取当前已发布版本的下载地址。服务端会拒绝任意或过期 versionCode。 */
     suspend fun resolveAppDownload(versionCode: Int): String? =
         withContext(Dispatchers.IO) {
             val resp = post("/v1/app/download-url", JSONObject().put("versionCode", versionCode))
@@ -841,7 +841,7 @@ object LicenseManager {
                 // 证书本身已由 pin 唯一确认,无需再校验主机名(自签证书对裸 IP 签发)
                 conn.hostnameVerifier = HostnameVerifier { _, _ -> true }
                 conn.connectTimeout = 8000
-                // 直链解析还包含一次第三方请求,给它更完整的响应窗口;其它小接口保持 8 秒。
+                // 兼容旧发布记录时可能仍需解析第三方地址；下载入口保留更完整的响应窗口。
                 conn.readTimeout = if (path == "/v1/app/download-url") 20_000 else 8000
                 if (body != null) {
                     conn.requestMethod = "POST"

@@ -33,9 +33,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * App 自更新的唯一状态机：检查元数据 → 临时直链 → 直接下载 → 轻量版本预检 →
- * 系统安装确认。蓝奏云分享信息只作为自动更新失败时的灾备，也不会尝试绕过 Android
- * 的安装授权。
+ * App 自更新的唯一状态机：检查元数据 → 领取版本地址 → 直接下载 → 轻量版本预检 →
+ * 系统安装确认。旧发布的蓝奏云字段只保留兼容，也不会尝试绕过 Android 的安装授权。
  */
 object AppUpdateManager {
     private const val TAG = "AppUpdate"
@@ -133,7 +132,7 @@ object AppUpdateManager {
         downloadJob = scope.launch {
             val direct = LicenseManager.resolveAppDownload(info.versionCode)
             if (direct == null) {
-                // 发布版本可能已变化；刷新一次元数据。版本没变才按真正的解析失败处理。
+                // 发布版本可能已变化；刷新一次元数据。版本没变才按真正的地址领取失败处理。
                 when (val refreshed = check(force = false)) {
                     LicenseManager.UpdateResult.UpToDate -> return@launch
                     is LicenseManager.UpdateResult.Available -> {
