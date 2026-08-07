@@ -6,7 +6,7 @@ ZTransfer 的正式 APK 统一发布到香港 OSS：
 
 | 用途 | 地址 |
 | --- | --- |
-| App 自动更新 | `https://apk.ztransfer.top/releases/ZTransfer-v<versionCode>-<hash>.apk` |
+| App 自动更新 | `https://apk.ztransfer.top/releases/ZTransfer-v<versionName>-<hash>.apk` |
 | 官网和新用户 | `https://apk.ztransfer.top/ZTransfer.apk` |
 
 用户下载不需要密码，不经过蓝奏云，安装包流量不经过业务服务器。
@@ -40,7 +40,7 @@ App 版本地址: https://apk.ztransfer.top/releases/....apk
 [3] 仅上传测试包（不发布、不覆盖固定地址）
 ```
 
-该入口只上传并校验不可变的 `releases/ZTransfer-v{versionCode}-{SHA前12位}.apk`，不会覆盖
+该入口只上传并校验不可变的 `releases/ZTransfer-v{versionName}-{SHA前12位}.apk`，不会覆盖
 `ZTransfer.apk`，也不会调用服务端 `/admin/update/publish`。App 的当前更新版本和下载地址保持
 原样。工具会输出独立测试地址，可直接在手机浏览器下载安装验证。
 
@@ -73,7 +73,7 @@ App 版本地址: https://apk.ztransfer.top/releases/....apk
 对象名：
 
 ```text
-releases/ZTransfer-v{versionCode}-{SHA256前12位}.apk
+releases/ZTransfer-v{versionName}-{SHA256前12位}.apk
 ```
 
 属性：

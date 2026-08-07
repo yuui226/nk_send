@@ -36,14 +36,14 @@ https://apk.ztransfer.top/ZTransfer.apk   服务端返回当前 releases/*.apk
 所有正式安装包统一使用 `.apk` 后缀。管理工具同时维护：
 
 ```text
-releases/ZTransfer-v27-<SHA前12位>.apk  # App，不覆盖
+releases/ZTransfer-v1.57-<SHA前12位>.apk  # App，不覆盖
 ZTransfer.apk                           # 新用户，每次覆盖
 ```
 
 服务端发布记录使用版本地址：
 
 ```text
-https://apk.ztransfer.top/releases/ZTransfer-v27-<SHA前12位>.apk
+https://apk.ztransfer.top/releases/ZTransfer-v1.57-<SHA前12位>.apk
 ```
 
 使用 `.apk` 的原因：

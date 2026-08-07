@@ -554,9 +554,9 @@ function Get-UpdatePublishState {
         Write-Host "无法确认服务端更新状态，已停止发布。" -ForegroundColor Red
         return $null
     }
-    if ([int]$resp.publishProtocol -lt 2 -or
+    if ([int]$resp.publishProtocol -lt 3 -or
         [string]$resp.ossUpdateHost -ne ([uri]$OssPublicBaseUrl).Host) {
-        Write-Host "服务端尚未支持香港 OSS 双地址发布，请先部署新版服务端。未上传任何文件。" -ForegroundColor Red
+        Write-Host "服务端尚未支持版本名 OSS 地址，请先部署新版服务端。未上传任何文件。" -ForegroundColor Red
         return $null
     }
     if (-not $resp.ok -and $resp.err -ne "NO_VERSION_INFO") {
@@ -842,6 +842,7 @@ function Read-LocalApkMetadata($apkPath) {
 
 function New-OssReleaseTarget($meta) {
     if ([int]$meta.VersionCode -le 0 -or
+        ([string]$meta.VersionName).Trim() -notmatch '^[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$' -or
         ([string]$meta.Sha256) -notmatch '^[0-9a-f]{64}$') {
         throw "APK 版本或 SHA-256 元数据无效"
     }
@@ -863,7 +864,8 @@ function New-OssReleaseTarget($meta) {
         throw "OSS 公网下载地址必须是仅含域名的 HTTPS 地址"
     }
     $hashPrefix = $meta.Sha256.Substring(0, 12)
-    $objectKey = "releases/ZTransfer-v{0}-{1}.apk" -f $meta.VersionCode, $hashPrefix
+    $versionLabel = ([string]$meta.VersionName).Trim()
+    $objectKey = "releases/ZTransfer-v{0}-{1}.apk" -f $versionLabel, $hashPrefix
     $escapedKey = (($objectKey -split "/") | ForEach-Object { [uri]::EscapeDataString($_) }) -join "/"
     return @{
         ObjectKey = $objectKey
@@ -907,7 +909,7 @@ function Upload-ApkToOss(
         "--metadata", "sha256=$($meta.Sha256)",
         "--no-progress"
     )
-    # 版本化对象由 versionCode + 内容哈希命名，存在后必须保持不可变；固定地址才允许覆盖。
+    # 版本化对象由用户可见版本名 + 内容哈希命名，存在后必须保持不可变；固定地址才允许覆盖。
     $uploadArgs += if ($allowOverwrite) { "--force" } else { "--ignore-existing" }
     if ((Invoke-OssUtilAuthenticated $ossutil $uploadArgs) -ne 0) {
         Write-Host "OSS 上传失败；尚未发布版本信息。" -ForegroundColor Red
@@ -923,12 +925,12 @@ function Upload-VersionedApkToOss($apkPath, $meta, $target) {
         [string]$target.OssUri -ne [string]$expected.OssUri -or
         [string]$target.PublicUrl -ne [string]$expected.PublicUrl -or
         [string]$target.ObjectKey -eq $OssLatestObjectKey -or
-        ([string]$target.ObjectKey) -notmatch '^releases/ZTransfer-v[1-9][0-9]*-[0-9a-f]{12}\.apk$') {
+        ([string]$target.ObjectKey) -notmatch '^releases/ZTransfer-v[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?-[0-9a-f]{12}\.apk$') {
         throw "版本 APK 目标不安全，已拒绝上传"
     }
     return Upload-ApkToOss $apkPath $meta $target.OssUri `
         "public, max-age=31536000, immutable" `
-        ("attachment; filename=`"ZTransfer-v{0}.apk`"" -f $meta.VersionCode) `
+        ("attachment; filename=`"ZTransfer-v{0}.apk`"" -f $meta.VersionName) `
         $false
 }
 

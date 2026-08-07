@@ -30,6 +30,7 @@ test('测试上传与服务端发布和固定地址保持硬隔离', () => {
 
 test('版本上传包装器只接受确定的 releases 哈希地址', () => {
     const upload = functionSource('Upload-VersionedApkToOss');
+    const target = functionSource('New-OssReleaseTarget');
 
     assert.match(upload, /New-OssReleaseTarget/);
     assert.match(upload, /target\.ObjectKey[^\n]+expected\.ObjectKey/);
@@ -37,7 +38,11 @@ test('版本上传包装器只接受确定的 releases 哈希地址', () => {
     assert.match(upload, /target\.PublicUrl[^\n]+expected\.PublicUrl/);
     assert.match(upload, /\^releases\/ZTransfer-v/);
     assert.match(upload, /Upload-ApkToOss[^\n]+target\.OssUri/);
+    assert.match(upload, /filename=.*meta\.VersionName/);
     assert.match(upload, /\$false/);
+    assert.match(target, /versionLabel\s*=\s*\(\[string\]\$meta\.VersionName\)/);
+    assert.match(target, /ZTransfer-v\{0\}-\{1\}\.apk[^\n]+versionLabel/);
+    assert.doesNotMatch(target, /ZTransfer-v\{0\}-\{1\}\.apk[^\n]+VersionCode/);
 });
 
 test('版本对象禁止覆盖而固定地址必须显式允许覆盖', () => {

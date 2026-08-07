@@ -8,7 +8,7 @@
 
 ```text
 App 自动更新：
-https://apk.ztransfer.top/releases/ZTransfer-v<versionCode>-<SHA前12位>.apk
+https://apk.ztransfer.top/releases/ZTransfer-v<versionName>-<SHA前12位>.apk
 
 官网和新用户：
 https://apk.ztransfer.top/ZTransfer.apk
@@ -64,7 +64,7 @@ https://apk.ztransfer.top/ZTransfer.apk
   "versionCode": 27,
   "versionName": "1.57",
   "minSupportedVersionCode": 1,
-  "url": "https://apk.ztransfer.top/releases/ZTransfer-v27-a1b2c3d4e5f6.apk",
+  "url": "https://apk.ztransfer.top/releases/ZTransfer-v1.57-a1b2c3d4e5f6.apk",
   "password": "",
   "notes": "更新说明",
   "sha256": "APK 的 64 位十六进制 SHA-256",
@@ -105,7 +105,7 @@ https://apk.ztransfer.top/ZTransfer.apk
 2. 校验包名必须为 `com.ztransfer`，且签名证书必须是正式签名；
 3. 读取版本并确认 versionCode 高于当前发布；
 4. 计算大小和 SHA-256；
-5. 上传 `releases/ZTransfer-v{versionCode}-{SHA前12位}.apk`；
+5. 上传 `releases/ZTransfer-v{versionName}-{SHA前12位}.apk`；
 6. 设置公共读、APK Content-Type 和不可变缓存；
 7. 从自定义域名完整下载版本对象并校验；
 8. 再次确认服务端当前版本没有变化；

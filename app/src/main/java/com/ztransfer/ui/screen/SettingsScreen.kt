@@ -559,8 +559,9 @@ fun SettingsOverlay(
                 }
                 val rotatedPreview = rotatedEffectPreviewSource
                 AnimatedContent(
-                    targetState = rotatedPreview,
-                    contentKey = { it?.bitmap },
+                    // 只为“等待图片 → 有图片”做进场动画。旋转、缩略图升级 FHD、
+                    // 兜底切真实图都必须复用同一个渲染组件，让旧成片保持到新成片就绪。
+                    targetState = rotatedPreview != null,
                     transitionSpec = {
                         (fadeIn(tween(220, easing = FastOutSlowInEasing)) togetherWith
                             fadeOut(tween(140, easing = LinearEasing))).using(
@@ -575,28 +576,34 @@ fun SettingsOverlay(
                     contentAlignment = Alignment.TopCenter,
                     label = "photoEffectsPreviewSource",
                     modifier = Modifier.fillMaxWidth(),
-                ) { previewSource ->
-                    if (previewSource != null) {
-                        PhotoEffectsRenderedPreview(
-                            source = previewSource.bitmap,
-                            sourceRotationQuarterTurns = previewSource.quarterTurns,
-                            requestedRotationQuarterTurns = effectPreviewRotationQuarterTurns,
-                            requestedPortrait = if (effectPreviewRotationQuarterTurns % 2 == 0) {
-                                previewSource.bitmap.height > previewSource.bitmap.width
-                            } else {
-                                previewSource.bitmap.width > previewSource.bitmap.height
-                            },
-                            onRotate = rotateEffectPreview,
-                            borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
-                            preset = frameDraftPreset,
-                            watermark = renderWatermark,
-                            filter = previewFilter,
-                            onOpen = { bitmap, anchorRect ->
-                                focusManager.clearFocus()
-                                keyboardController?.hide()
-                                expandedEffectsPreview = ExpandedEffectsPreview(bitmap, anchorRect)
-                            },
-                        )
+                ) { hasPreview ->
+                    if (hasPreview) {
+                        val previewSource = rotatedEffectPreviewSource
+                        if (previewSource != null) {
+                            PhotoEffectsRenderedPreview(
+                                source = previewSource.bitmap,
+                                sourceRotationQuarterTurns = previewSource.quarterTurns,
+                                requestedRotationQuarterTurns = effectPreviewRotationQuarterTurns,
+                                // previewSource 已经完成物理旋转，直接看当前宽高；不能再按
+                                // quarterTurns 交换一次，否则 90°/270° 会把横竖方向算反。
+                                requestedPortrait = previewSource.bitmap.height >
+                                    previewSource.bitmap.width,
+                                onRotate = rotateEffectPreview,
+                                borderEnabled =
+                                    frameDraftDecorationEnabled && frameDraftBorderEnabled,
+                                preset = frameDraftPreset,
+                                watermark = renderWatermark,
+                                filter = previewFilter,
+                                onOpen = { bitmap, anchorRect ->
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                    expandedEffectsPreview =
+                                        ExpandedEffectsPreview(bitmap, anchorRect)
+                                },
+                            )
+                        } else {
+                            PhotoEffectsPreviewLoadingPlaceholder()
+                        }
                     } else {
                         PhotoEffectsPreviewLoadingPlaceholder()
                     }
@@ -1140,8 +1147,12 @@ fun SettingsOverlay(
         }
     }
     expandedEffectsPreview?.let { preview ->
+        // asImageBitmap() 每次调用都会创建包装对象；若直接在参数里调用，设置页动画或
+        // 高清源升级引发重组时会改变 ZoomablePreviewViewport 的 stateKey，把用户正在
+        // 进行的双指缩放重置为 1x。按底层 Bitmap 身份固定包装对象，缩放状态才稳定。
+        val previewImage = remember(preview.bitmap) { preview.bitmap.asImageBitmap() }
         SinglePhotoPreviewOverlay(
-            bitmap = preview.bitmap.asImageBitmap(),
+            bitmap = previewImage,
             title = stringResource(R.string.photo_effects),
             anchorRect = preview.anchorRect,
             onDismiss = { expandedEffectsPreview = null },
@@ -2014,7 +2025,9 @@ private fun PhotoEffectsRenderedPreview(
         animationSpec = Motion.overlayExpand,
         label = "photoFramePreviewAspectRatio",
     )
-    val firstFrameVisibility = remember(source) { Animatable(0f) }
+    // 只在这个预览组件真正首次出现时渐显一次。旋转或高清源升级不能重置，否则会
+    // 再露出原片，形成“原片 → 带边框成片”的二次渲染观感。
+    val firstFrameVisibility = remember { Animatable(0f) }
     val replacementVisibility = remember { Animatable(1f) }
     var visibleFrame by remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
     var outgoingFrame by remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
@@ -2242,8 +2255,8 @@ private fun PhotoEffectsPreviewLayer(
 private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
 private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
 private val PHOTO_EFFECTS_CONTROL_HEIGHT = 48.dp
-// 仅服务设置面板显示；1280px 已高于实际视口，可显著降低滤镜与边框首帧计算量。
-private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_280
+// 与相机 FHD 预览源保持一致，避免高密度屏幕或放大查看时出现二次缩放模糊。
+private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_920
 private const val PHOTO_EFFECTS_COMPARISON_DELAY_MS = 500L
 private const val PHOTO_EFFECTS_TEXT_PREVIEW_DELAY_MS = 140L
 private const val PHOTO_EFFECTS_FALLBACK_GRACE_MS = 2_200L

@@ -2292,7 +2292,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val WIFI_BACKGROUND_RETRY_INTERVAL_MS = 3_000L
         const val WATCH_INTERVAL_MS = 1_000L
         const val EFFECT_PREVIEW_SETTLE_MS = 600L
-        const val EFFECT_PREVIEW_SOURCE_EDGE = 1_280
+        const val EFFECT_PREVIEW_SOURCE_EDGE = 1_920
         const val MAX_FHD_PREVIEW_EDGE = 1_920
         // 黑边判定：近黑像素的通道上限（JPEG 压缩后黑条并非纯黑，留噪声余量）；
         // 黑边占边长的上限——3:2 塞 4:3 为 5.6%、16:9 为 12.5%，超过 15% 视为画面本身偏暗。

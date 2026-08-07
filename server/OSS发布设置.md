@@ -20,7 +20,7 @@
 两个下载地址用途不同：
 
 ```text
-https://apk.ztransfer.top/releases/ZTransfer-v27-<SHA前12位>.apk
+https://apk.ztransfer.top/releases/ZTransfer-v1.57-<SHA前12位>.apk
     App 更新专用；发布后永不覆盖，可以长期缓存。
 
 https://apk.ztransfer.top/ZTransfer.apk
@@ -35,6 +35,11 @@ https://apk.ztransfer.top/ZTransfer.apk
 {
   "Version": "1",
   "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["oss:GetBucketInfo"],
+      "Resource": "acs:oss:*:<阿里云账号ID>:ztransfer-hk"
+    },
     {
       "Effect": "Allow",
       "Action": ["oss:ListObjects"],
@@ -90,7 +95,7 @@ https://apk.ztransfer.top/ZTransfer.apk
 1. 确认服务端支持香港 OSS 双地址发布；旧服务端会在上传前被拒绝；
 2. 校验包名、正式签名，并读取 `versionCode`、`versionName`；
 3. 计算大小和 SHA-256；
-4. 上传不可变的 `releases/ZTransfer-v{versionCode}-{SHA前12位}.apk`；
+4. 上传不可变的 `releases/ZTransfer-v{versionName}-{SHA前12位}.apk`；
 5. 设置 APK Content-Type、公共读和一年不可变缓存；
 6. 从 `apk.ztransfer.top` 完整下载并校验版本和 SHA-256；
 7. 再次确认服务端当前版本没有在上传期间变化；
@@ -105,7 +110,7 @@ https://apk.ztransfer.top/ZTransfer.apk
 
 ```text
 App 版本地址：
-https://apk.ztransfer.top/releases/ZTransfer-v<versionCode>-<hash>.apk
+https://apk.ztransfer.top/releases/ZTransfer-v<versionName>-<hash>.apk
 
 新用户固定地址：
 https://apk.ztransfer.top/ZTransfer.apk

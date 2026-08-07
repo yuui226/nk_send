@@ -1404,7 +1404,7 @@ const APP_LATEST_PATH = path.join(path.dirname(CONFIG_PATH), 'app-latest.json');
 const LANZOU_PARSER_URL = String(cfg.lanzouParserUrl || 'https://lz.qaiu.top/json/parser');
 const OSS_UPDATE_HOST = 'apk.ztransfer.top';
 const LEGACY_OSS_UPDATE_HOST = 'ztransfer.oss-cn-beijing.aliyuncs.com';
-const UPDATE_PUBLISH_PROTOCOL = 2;
+const UPDATE_PUBLISH_PROTOCOL = 3;
 // 紧急下载灾备：蓝奏云临时域名在部分用户网络中被解析到 127.0.0.1。
 // 仅覆盖明确列出的发布版本；发布下一 versionCode 后自动回落到常规解析流程，
 // 避免把旧 APK 误发给新版本。APK 内容仍由 App 按大小、SHA-256、包名、版本和签名校验。
@@ -1422,7 +1422,7 @@ function isOssReleaseUrl(value) {
             !url.port &&
             !url.search &&
             !url.hash &&
-            /^\/releases\/ZTransfer-v[1-9]\d*-[a-f0-9]{12}\.apk$/i.test(url.pathname);
+            /^\/releases\/ZTransfer-v(?:[1-9]\d*|\d+(?:\.\d+){1,3}(?:-[0-9a-z][0-9a-z.-]*)?)-[a-f0-9]{12}\.apk$/i.test(url.pathname);
     } catch {
         return false;
     }
@@ -1448,13 +1448,16 @@ function isLegacyOssReleaseUrl(value) {
 function isOssReleaseMetadataValid(release) {
     if (!release || !isOssReleaseUrl(release.url) ||
         !Number.isInteger(release.versionCode) || release.versionCode <= 0 ||
-        !String(release.versionName || '').trim() ||
+        !/^[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/.test(
+            String(release.versionName || '').trim()
+        ) ||
         !/^[0-9a-f]{64}$/.test(String(release.sha256 || '')) ||
         !Number.isSafeInteger(release.sizeBytes) || release.sizeBytes <= 0 ||
         String(release.password || '')) {
         return false;
     }
-    const expectedPath = `/releases/ZTransfer-v${release.versionCode}-${release.sha256.slice(0, 12)}.apk`;
+    const versionLabel = String(release.versionName).trim();
+    const expectedPath = `/releases/ZTransfer-v${versionLabel}-${release.sha256.slice(0, 12)}.apk`;
     return new URL(release.url).pathname === expectedPath;
 }
 

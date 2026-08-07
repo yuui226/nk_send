@@ -93,8 +93,13 @@ function queryResponse(order, status = 'WP', overrides = {}) {
 
 test('OSS 更新地址只接受 apk.ztransfer.top 下的永久版本 APK', () => {
     const status = api.adminGetUpdate();
-    assert.equal(status.publishProtocol, 2);
+    assert.equal(status.publishProtocol, 3);
     assert.equal(status.ossUpdateHost, 'apk.ztransfer.top');
+    assert.equal(
+        api.isOssReleaseUrl('https://apk.ztransfer.top/releases/ZTransfer-v1.57-a1b2c3d4e5f6.apk'),
+        true,
+    );
+    // 已上传或发布的旧 versionCode 命名对象继续允许读取，不影响历史版本。
     assert.equal(
         api.isOssReleaseUrl('https://apk.ztransfer.top/releases/ZTransfer-v27-a1b2c3d4e5f6.apk'),
         true,
@@ -108,13 +113,14 @@ test('OSS 更新地址只接受 apk.ztransfer.top 下的永久版本 APK', () =>
         'https://apk.ztransfer.top/releases/ZTransfer-v27-a.apk',
         'https://apk.ztransfer.top/releases/ZTransfer-v27-a.bin',
         'https://apk.ztransfer.top/releases/ZTransfer-v27-a.apk?Expires=123',
+        'https://apk.ztransfer.top/releases/ZTransfer-v1..57-a1b2c3d4e5f6.apk',
     ]) {
         assert.equal(api.isOssReleaseUrl(url), false, url);
     }
 });
 
 test('OSS 更新地址直接下发，不调用蓝奏云解析', async () => {
-    const url = 'https://apk.ztransfer.top/releases/ZTransfer-v27-a1b2c3d4e5f6.apk';
+    const url = 'https://apk.ztransfer.top/releases/ZTransfer-v1.57-a1b2c3d4e5f6.apk';
     assert.deepEqual(
         await api.resolveReleaseDownload({ url, password: '' }),
         { url, source: 'OSS' },
@@ -132,15 +138,15 @@ test('OSS 发布元数据必须与版本化文件名严格一致', () => {
     const valid = {
         versionCode: 27,
         versionName: '1.57',
-        url: 'https://apk.ztransfer.top/releases/ZTransfer-v27-a1b2c3d4e5f6.apk',
+        url: 'https://apk.ztransfer.top/releases/ZTransfer-v1.57-a1b2c3d4e5f6.apk',
         password: '',
         sha256,
         sizeBytes: 2_018_435,
     };
     assert.equal(api.isOssReleaseMetadataValid(valid), true);
     for (const override of [
-        { versionCode: 28 },
         { versionName: ' ' },
+        { versionName: '1.58' },
         { sha256: 'b'.repeat(64) },
         { sha256: '' },
         { sizeBytes: 0 },
