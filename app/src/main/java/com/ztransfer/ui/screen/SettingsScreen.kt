@@ -122,6 +122,7 @@ import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
+import com.ztransfer.viewmodel.freeEditionPhotoFrameWatermark
 import com.ztransfer.viewmodel.photoFrameWatermark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -314,6 +315,7 @@ fun SettingsOverlay(
         }
     }
     val watermarkImageImportFailed = stringResource(R.string.photo_frame_image_import_failed)
+    val watermarkProOnlyHint = stringResource(R.string.photo_frame_watermark_pro_only)
     val watermarkImagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -530,7 +532,7 @@ fun SettingsOverlay(
                     !frameDraftDecorationEnabled -> PhotoFrameWatermark(enabled = false)
                     isPro -> watermarkDraft
                     // 免费版真实导出固定使用默认水印；预览必须走同一规则。
-                    else -> PhotoFrameWatermark()
+                    else -> freeEditionPhotoFrameWatermark()
                 }
                 // 文本框每次按键只更新编辑草稿；FHD 预览在短暂停顿后取最新文本，避免为必然
                 // 被下一次按键淘汰的中间字符串反复合成。displayText 归一化也跳过空白等价配置。
@@ -634,6 +636,7 @@ fun SettingsOverlay(
                         }
                     },
                     imageImporting = watermarkImageImporting,
+                    onProRequired = { showFooterHint(watermarkProOnlyHint) },
                     onImageRequested = {
                         if (!watermarkImageImporting && isPro) {
                             watermarkImagePicker.launch(
@@ -1329,11 +1332,13 @@ private fun PhotoFrameWatermarkEditor(
     onWatermarkChanged: (PhotoFrameWatermark) -> Unit,
     onWatermarkTextCommitted: (String) -> Unit,
     imageImporting: Boolean,
+    onProRequired: () -> Unit,
     onImageRequested: () -> Unit,
 ) {
     val colors = AppTheme.colors
     val haptics = rememberHaptics(hapticsEnabled)
     val focusManager = LocalFocusManager.current
+    val proLockInteractionSource = remember { MutableInteractionSource() }
     val frameChoices = listOf(
         null to stringResource(R.string.photo_frame_off),
         PhotoFramePreset.MIST to stringResource(R.string.photo_frame_mist),
@@ -1422,22 +1427,36 @@ private fun PhotoFrameWatermarkEditor(
                     wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                     modifier = Modifier.width(headerWheelWidth),
                 )
-                ReleaseCommitWheel(
-                    options = watermarkEnabledChoices,
-                    selected = watermarkEnabledChoices.first {
-                        it.first == watermark.enabled
-                    },
-                    optionLabel = { it.second },
-                    onValueCommitted = {
-                        focusManager.clearFocus()
-                        onWatermarkChanged(watermark.copy(enabled = it.first))
-                    },
-                    onDetent = haptics::tick,
-                    label = stringResource(R.string.photo_frame_watermark_short),
-                    enabled = isPro,
-                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                    modifier = Modifier.width(headerWheelWidth),
-                )
+                Box(modifier = Modifier.width(headerWheelWidth)) {
+                    ReleaseCommitWheel(
+                        options = watermarkEnabledChoices,
+                        selected = watermarkEnabledChoices.first {
+                            it.first == watermark.enabled
+                        },
+                        optionLabel = { it.second },
+                        onValueCommitted = {
+                            focusManager.clearFocus()
+                            onWatermarkChanged(watermark.copy(enabled = it.first))
+                        },
+                        onDetent = haptics::tick,
+                        label = stringResource(R.string.photo_frame_watermark_short),
+                        enabled = isPro,
+                        wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (!isPro) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clip(RoundedCornerShape(13.dp))
+                                .clickable(
+                                    interactionSource = proLockInteractionSource,
+                                    indication = null,
+                                    onClick = onProRequired,
+                                ),
+                        )
+                    }
+                }
             }
         }
 
@@ -1446,7 +1465,14 @@ private fun PhotoFrameWatermarkEditor(
             enter = fadeIn() + expandVertically(),
             exit = fadeOut() + shrinkVertically(),
         ) {
-            Column {
+            Column(
+                modifier = Modifier.clickable(
+                    enabled = !isPro,
+                    interactionSource = proLockInteractionSource,
+                    indication = null,
+                    onClick = onProRequired,
+                ),
+            ) {
                 CardDivider()
                 BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                     val contentWheelWidth = (maxWidth - 8.dp) / 3f
@@ -1685,7 +1711,6 @@ private fun PhotoFrameWatermarkEditor(
             }
         }
     }
-
 }
 
 /**

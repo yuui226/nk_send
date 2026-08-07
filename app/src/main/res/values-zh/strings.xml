@@ -139,6 +139,7 @@
     <string name="photo_frame_plaque">铭牌</string>
     <string name="photo_frame_task_label">边框：%1$s</string>
     <string name="photo_frame_watermark_summary">水印：%1$s</string>
+    <string name="photo_frame_watermark_pro_only">仅高级版可用</string>
     <string name="photo_frame_watermark_only">仅水印</string>
     <string name="photo_frame_no_watermark">无水印</string>
     <string name="photo_frame_style_short">边框</string>

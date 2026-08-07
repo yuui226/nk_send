@@ -139,6 +139,7 @@
     <string name="photo_frame_plaque">銘牌</string>
     <string name="photo_frame_task_label">邊框：%1$s</string>
     <string name="photo_frame_watermark_summary">浮水印：%1$s</string>
+    <string name="photo_frame_watermark_pro_only">僅高級版可用</string>
     <string name="photo_frame_watermark_only">僅浮水印</string>
     <string name="photo_frame_no_watermark">無浮水印</string>
     <string name="photo_frame_style_short">邊框</string>

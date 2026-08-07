@@ -241,6 +241,15 @@ internal val TransferState.photoFrameWatermark: PhotoFrameWatermark
         effect = photoFrameWatermarkEffect,
     )
 
+private const val FREE_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 42
+private const val FREE_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 80
+
+/** 免费版固定品牌水印；与高级版的默认偏好分开，避免产品水印调整覆盖用户设置。 */
+internal fun freeEditionPhotoFrameWatermark(): PhotoFrameWatermark = PhotoFrameWatermark(
+    sizePercent = FREE_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
+    opacityPercent = FREE_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
+)
+
 internal val TransferState.photoFilterSelection: PhotoFilterSelection?
     get() {
         if (!photoFilterEnabled) return null
@@ -270,7 +279,7 @@ internal fun effectivePhotoFrameWatermark(
     preference: PhotoFrameWatermark,
     borderEnabled: Boolean = true,
 ): PhotoFrameWatermark {
-    val permitted = if (isPro) preference else PhotoFrameWatermark()
+    val permitted = if (isPro) preference else freeEditionPhotoFrameWatermark()
     val imageHash = validPhotoFrameWatermarkImageHash(permitted.imageHash)
     val content = if (
         permitted.content == PhotoFrameWatermarkContent.IMAGE && imageHash != null

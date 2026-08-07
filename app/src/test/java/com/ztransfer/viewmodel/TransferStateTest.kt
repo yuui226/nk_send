@@ -92,9 +92,9 @@ class TransferStateTest {
         val free = effectivePhotoFrameWatermark(false, customized)
         val pro = effectivePhotoFrameWatermark(true, customized)
 
-        assertEquals(PhotoFrameWatermark(), free)
-        assertEquals(26, free.sizePercent)
-        assertEquals(72, free.opacityPercent)
+        assertEquals(freeEditionPhotoFrameWatermark(), free)
+        assertEquals(42, free.sizePercent)
+        assertEquals(80, free.opacityPercent)
         assertEquals(PhotoFrameWatermarkEffect.AUTO, free.effect)
         assertEquals(customized, pro)
         assertEquals(300, pro.sizePercent)

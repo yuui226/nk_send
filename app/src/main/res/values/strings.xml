@@ -139,6 +139,7 @@
     <string name="photo_frame_plaque">Plaque</string>
     <string name="photo_frame_task_label">Frame: %1$s</string>
     <string name="photo_frame_watermark_summary">Watermark: %1$s</string>
+    <string name="photo_frame_watermark_pro_only">Available in Pro only</string>
     <string name="photo_frame_watermark_only">Watermark only</string>
     <string name="photo_frame_no_watermark">No watermark</string>
     <string name="photo_frame_style_short">Frame</string>
