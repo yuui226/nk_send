@@ -159,6 +159,7 @@ private enum class SettingsPage { MAIN, EFFECTS }
 fun SettingsOverlay(
     viewModel: TransferViewModel,
     effectPreviewSource: Bitmap? = null,
+    onEffectPreviewRequested: () -> Unit = {},
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
     // 已解锁时右上角徽标点击的回调（放烟花彩蛋）；由承载页提供其页面级 FireworksState。
@@ -222,41 +223,44 @@ fun SettingsOverlay(
     var filterDraftIntensity by remember {
         mutableIntStateOf(state.photoFilterIntensityPercent)
     }
-    // 主设置页不需要效果预览。只有进入效果编辑页且相机预览不可用时，才在后台生成
-    // FHD 兜底图；仅进入效果编辑页后按需生成，避免打开设置时同步分配位图。
-    val effectPreviewBase by produceState<Bitmap?>(
-        initialValue = effectPreviewSource.takeIf { settingsPage == SettingsPage.EFFECTS },
-        effectPreviewSource,
-        settingsPage,
-    ) {
-        if (settingsPage != SettingsPage.EFFECTS) {
-            value = null
-            return@produceState
+    // 真实相机图始终直接复用，不能在主设置页主动清空，否则进入效果页的第一帧会无谓闪空。
+    // 兜底图延迟生成：给内存缩略图和按需 FHD 足够时间，绝大多数已连接场景不会看见假图。
+    var generatedEffectPreviewFallback by remember { mutableStateOf<Bitmap?>(null) }
+    var effectPreviewFallbackVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(settingsPage, effectPreviewSource) {
+        effectPreviewFallbackVisible = false
+        if (settingsPage != SettingsPage.EFFECTS || effectPreviewSource != null) return@LaunchedEffect
+        delay(PHOTO_EFFECTS_FALLBACK_GRACE_MS)
+        if (generatedEffectPreviewFallback == null) {
+            generatedEffectPreviewFallback = withContext(Dispatchers.Default) {
+                createPhotoFramePreviewSource()
+            }
         }
-        value = effectPreviewSource
-            ?: withContext(Dispatchers.Default) { createPhotoFramePreviewSource() }
+        effectPreviewFallbackVisible = true
     }
-    var effectPreviewRotationQuarterTurns by remember(effectPreviewBase) {
-        mutableIntStateOf(0)
+    val effectPreviewBase = effectPreviewSource
+        ?: generatedEffectPreviewFallback.takeIf { effectPreviewFallbackVisible }
+    // 缩略图升级为 FHD 或兜底切换为真实图时保留用户刚做的旋转，不让源升级重置界面。
+    var effectPreviewRotationQuarterTurns by remember { mutableIntStateOf(0) }
+    // 保留当前可见帧，等新照片或旋转结果在后台准备好后再一次性交给 AnimatedContent。
+    // 不使用 keyed produceState 的 initialValue，避免每次旋转都先短暂跳回 0°。
+    var rotatedEffectPreviewSource by remember {
+        mutableStateOf(effectPreviewBase?.let { RotatedPreviewSource(it, 0) })
     }
-    val rotatedEffectPreviewSource by produceState(
-        initialValue = effectPreviewBase?.let { RotatedPreviewSource(it, 0) },
-        effectPreviewBase,
-        effectPreviewRotationQuarterTurns,
-    ) {
+    LaunchedEffect(effectPreviewBase, effectPreviewRotationQuarterTurns) {
         val source = effectPreviewBase ?: run {
-            value = null
-            return@produceState
+            rotatedEffectPreviewSource = null
+            return@LaunchedEffect
         }
         val requestedQuarterTurns = effectPreviewRotationQuarterTurns
         if (Math.floorMod(requestedQuarterTurns, 4) == 0) {
-            value = RotatedPreviewSource(source, requestedQuarterTurns)
-            return@produceState
+            rotatedEffectPreviewSource = RotatedPreviewSource(source, requestedQuarterTurns)
+            return@LaunchedEffect
         }
         val rotatedBitmap = withContext(Dispatchers.Default) {
             rotatePreviewBitmap(source, requestedQuarterTurns)
         }
-        value = RotatedPreviewSource(rotatedBitmap, requestedQuarterTurns)
+        rotatedEffectPreviewSource = RotatedPreviewSource(rotatedBitmap, requestedQuarterTurns)
     }
     val rotateEffectPreview = {
         effectPreviewRotationQuarterTurns = (effectPreviewRotationQuarterTurns + 1) % 4
@@ -553,35 +557,48 @@ fun SettingsOverlay(
                     if (changesTextOnly) delay(PHOTO_EFFECTS_TEXT_PREVIEW_DELAY_MS)
                     renderWatermark = requestedRenderWatermark
                 }
-                val previewBase = effectPreviewBase
                 val rotatedPreview = rotatedEffectPreviewSource
-                if (previewBase != null && rotatedPreview != null) {
-                    PhotoEffectsRenderedPreview(
-                        source = rotatedPreview.bitmap,
-                        sourceRotationQuarterTurns = rotatedPreview.quarterTurns,
-                        requestedRotationQuarterTurns = effectPreviewRotationQuarterTurns,
-                        requestedPortrait = if (effectPreviewRotationQuarterTurns % 2 == 0) {
-                            previewBase.height > previewBase.width
-                        } else {
-                            previewBase.width > previewBase.height
-                        },
-                        onRotate = rotateEffectPreview,
-                        borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
-                        preset = frameDraftPreset,
-                        watermark = renderWatermark,
-                        filter = previewFilter,
-                        onOpen = { bitmap, anchorRect ->
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
-                            expandedEffectsPreview = ExpandedEffectsPreview(bitmap, anchorRect)
-                        },
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(180.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(color = colors.accentBlue)
+                AnimatedContent(
+                    targetState = rotatedPreview,
+                    contentKey = { it?.bitmap },
+                    transitionSpec = {
+                        (fadeIn(tween(220, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(tween(140, easing = LinearEasing))).using(
+                            SizeTransform(
+                                clip = false,
+                                sizeAnimationSpec = { _, _ ->
+                                    tween(240, easing = FastOutSlowInEasing)
+                                },
+                            )
+                        )
+                    },
+                    contentAlignment = Alignment.TopCenter,
+                    label = "photoEffectsPreviewSource",
+                    modifier = Modifier.fillMaxWidth(),
+                ) { previewSource ->
+                    if (previewSource != null) {
+                        PhotoEffectsRenderedPreview(
+                            source = previewSource.bitmap,
+                            sourceRotationQuarterTurns = previewSource.quarterTurns,
+                            requestedRotationQuarterTurns = effectPreviewRotationQuarterTurns,
+                            requestedPortrait = if (effectPreviewRotationQuarterTurns % 2 == 0) {
+                                previewSource.bitmap.height > previewSource.bitmap.width
+                            } else {
+                                previewSource.bitmap.width > previewSource.bitmap.height
+                            },
+                            onRotate = rotateEffectPreview,
+                            borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
+                            preset = frameDraftPreset,
+                            watermark = renderWatermark,
+                            filter = previewFilter,
+                            onOpen = { bitmap, anchorRect ->
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                                expandedEffectsPreview = ExpandedEffectsPreview(bitmap, anchorRect)
+                            },
+                        )
+                    } else {
+                        PhotoEffectsPreviewLoadingPlaceholder()
                     }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -867,6 +884,7 @@ fun SettingsOverlay(
                     enabled = state.photoFrameEnabled && state.photoFrameWatermark.enabled,
                     text = state.photoFrameWatermark.displayText,
                 )
+                onEffectPreviewRequested()
                 settingsPage = SettingsPage.EFFECTS
             }
             SettingsCard(
@@ -1826,6 +1844,35 @@ private fun WatermarkTextField(
 }
 
 @Composable
+private fun PhotoEffectsPreviewLoadingPlaceholder() {
+    val colors = AppTheme.colors
+    val pulse = rememberInfiniteTransition(label = "photoEffectsPreviewLoading")
+    val highlightAlpha by pulse.animateFloat(
+        initialValue = 0.28f,
+        targetValue = 0.62f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "photoEffectsPreviewLoadingAlpha",
+    )
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO)
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.glassSurface.copy(alpha = highlightAlpha)),
+    ) {
+        CircularProgressIndicator(
+            color = colors.accentBlue.copy(alpha = 0.76f),
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
 private fun PhotoEffectsRenderedPreview(
     source: Bitmap,
     sourceRotationQuarterTurns: Int,
@@ -1967,6 +2014,7 @@ private fun PhotoEffectsRenderedPreview(
         animationSpec = Motion.overlayExpand,
         label = "photoFramePreviewAspectRatio",
     )
+    val firstFrameVisibility = remember(source) { Animatable(0f) }
     val replacementVisibility = remember { Animatable(1f) }
     var visibleFrame by remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
     var outgoingFrame by remember { mutableStateOf<RenderedPhotoEffectsPreview?>(null) }
@@ -2006,6 +2054,13 @@ private fun PhotoEffectsRenderedPreview(
             visibleFrame = next
             outgoingFrame = null
             frameTransition.snapTo(1f)
+            firstFrameVisibility.snapTo(0f)
+            // 原图继续稳稳托底；等效果纹理进入组合树一帧后再渐显，避免首张成片硬切。
+            withFrameNanos { }
+            firstFrameVisibility.animateTo(
+                1f,
+                tween(durationMillis = 220, easing = FastOutSlowInEasing),
+            )
         } else if (current.bitmap === next.bitmap) {
             // 无滤镜对比图稍后补齐时只更新数据，不触发第二次画面过渡。
             visibleFrame = next
@@ -2096,13 +2151,21 @@ private fun PhotoEffectsRenderedPreview(
                     modifier = Modifier.fillMaxSize(),
                 )
             } else if (preview != null) {
+                if (firstFrameVisibility.value < 1f) {
+                    FittedRotatingBitmap(
+                        image = sourceImage,
+                        rotationDegrees = 0f,
+                        description = null,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
                 outgoingFrame?.let { frame ->
                     PhotoEffectsPreviewLayer(
                         frame = frame,
                         showUnfiltered = showUnfiltered,
                         // 旧帧保持不透明作为底层，新帧只负责渐入；总画面始终不透底，
                         // 避免普通双向淡化在中点产生一次明显的亮度闪烁。
-                        alpha = replacementVisibility.value,
+                        alpha = firstFrameVisibility.value * replacementVisibility.value,
                         description = null,
                     )
                 }
@@ -2110,7 +2173,7 @@ private fun PhotoEffectsRenderedPreview(
                     PhotoEffectsPreviewLayer(
                         frame = frame,
                         showUnfiltered = showUnfiltered,
-                        alpha = replacementVisibility.value *
+                        alpha = firstFrameVisibility.value * replacementVisibility.value *
                             if (outgoingFrame == null) 1f else frameTransition.value,
                         description = stringResource(R.string.photo_frame_preview),
                     )
@@ -2179,10 +2242,11 @@ private fun PhotoEffectsPreviewLayer(
 private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
 private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
 private val PHOTO_EFFECTS_CONTROL_HEIGHT = 48.dp
-// 与相机后台预取规格保持一致，预览与缓存统一使用 FHD，不引入额外分辨率档位。
-private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_920
+// 仅服务设置面板显示；1280px 已高于实际视口，可显著降低滤镜与边框首帧计算量。
+private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_280
 private const val PHOTO_EFFECTS_COMPARISON_DELAY_MS = 500L
 private const val PHOTO_EFFECTS_TEXT_PREVIEW_DELAY_MS = 140L
+private const val PHOTO_EFFECTS_FALLBACK_GRACE_MS = 2_200L
 // 边框合成无法在 Canvas 绘制途中取消；全局串行可防止旧 FHD 成片并发拖慢最新预览。
 private val photoEffectsPreviewRenderMutex = Mutex()
 

@@ -22,6 +22,15 @@ class EffectPreviewSelectionTest {
         assertEquals(higher, latestEffectPreviewFile(listOf(higher, lower)))
     }
 
+    @Test
+    fun `older file batches do not replace the first newest candidate`() {
+        val newest = file(50, "DSC_0050.JPG", "20260805T150000")
+        val older = file(49, "DSC_0049.JPG", "20260805T140000")
+
+        assertEquals(newest, latestEffectPreviewFile(listOf(newest)))
+        assertEquals(newest, latestEffectPreviewFile(listOf(newest, older)))
+    }
+
     private fun file(handle: Int, name: String, capturedAt: String?) = NikonCamera.FileInfo(
         handle = handle,
         size = 1_024L,

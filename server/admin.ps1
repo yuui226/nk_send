@@ -784,12 +784,12 @@ function Invoke-OssSetup {
     return $true
 }
 
-function Select-ApkFile {
+function Select-ApkFile($dialogTitle = "选择要发布的 ZTransfer APK") {
     try {
         Add-Type -AssemblyName System.Windows.Forms
         $dialog = New-Object System.Windows.Forms.OpenFileDialog
         try {
-            $dialog.Title = "选择要发布的 ZTransfer APK"
+            $dialog.Title = $dialogTitle
             $dialog.Filter = "Android 安装包 (*.apk)|*.apk|所有文件 (*.*)|*.*"
             $dialog.CheckFileExists = $true
             $dialog.Multiselect = $false
@@ -875,7 +875,14 @@ function New-OssReleaseTarget($meta) {
     }
 }
 
-function Upload-ApkToOss($apkPath, $meta, $ossUri, $cacheControl, $contentDisposition) {
+function Upload-ApkToOss(
+    $apkPath,
+    $meta,
+    $ossUri,
+    $cacheControl,
+    $contentDisposition,
+    [bool]$allowOverwrite
+) {
     $ossutil = Get-OssUtilPath
     if (-not $ossutil) {
         Write-Host "项目内未找到 ossutil.exe，请重新下载项目工具包。" -ForegroundColor Red
@@ -887,7 +894,8 @@ function Upload-ApkToOss($apkPath, $meta, $ossUri, $cacheControl, $contentDispos
         if ($configure -ne "y" -or -not (Invoke-OssSetup)) { return $false }
     }
 
-    Write-Host ("正在上传到 {0}..." -f $ossUri) -ForegroundColor DarkGray
+    $action = if ($allowOverwrite) { "正在覆盖上传" } else { "正在上传（目标已存在则保留原对象）" }
+    Write-Host ("{0}到 {1}..." -f $action, $ossUri) -ForegroundColor DarkGray
     $uploadArgs = @(
         "cp", $apkPath, $ossUri,
         "--region", $OssRegion,
@@ -897,15 +905,31 @@ function Upload-ApkToOss($apkPath, $meta, $ossUri, $cacheControl, $contentDispos
         "--cache-control", $cacheControl,
         "--content-disposition", $contentDisposition,
         "--metadata", "sha256=$($meta.Sha256)",
-        "--force",
         "--no-progress"
     )
+    # 版本化对象由 versionCode + 内容哈希命名，存在后必须保持不可变；固定地址才允许覆盖。
+    $uploadArgs += if ($allowOverwrite) { "--force" } else { "--ignore-existing" }
     if ((Invoke-OssUtilAuthenticated $ossutil $uploadArgs) -ne 0) {
         Write-Host "OSS 上传失败；尚未发布版本信息。" -ForegroundColor Red
         return $false
     }
     Write-Host "OSS 上传完成。" -ForegroundColor Green
     return $true
+}
+
+function Upload-VersionedApkToOss($apkPath, $meta, $target) {
+    $expected = New-OssReleaseTarget $meta
+    if ([string]$target.ObjectKey -ne [string]$expected.ObjectKey -or
+        [string]$target.OssUri -ne [string]$expected.OssUri -or
+        [string]$target.PublicUrl -ne [string]$expected.PublicUrl -or
+        [string]$target.ObjectKey -eq $OssLatestObjectKey -or
+        ([string]$target.ObjectKey) -notmatch '^releases/ZTransfer-v[1-9][0-9]*-[0-9a-f]{12}\.apk$') {
+        throw "版本 APK 目标不安全，已拒绝上传"
+    }
+    return Upload-ApkToOss $apkPath $meta $target.OssUri `
+        "public, max-age=31536000, immutable" `
+        ("attachment; filename=`"ZTransfer-v{0}.apk`"" -f $meta.VersionCode) `
+        $false
 }
 
 function Test-PublicOssApk($url, $expectedMeta) {
@@ -961,6 +985,38 @@ function Invoke-UpdateValidate {
     }
 }
 
+function Invoke-UpdateStage {
+    Write-Host ""
+    Write-Host "仅上传测试包（不会正式发布）" -ForegroundColor Cyan
+    Write-Host "  会做：上传并校验带版本号和 SHA 的 releases/*.apk" -ForegroundColor Green
+    Write-Host "  不会：覆盖 ZTransfer.apk" -ForegroundColor Yellow
+    Write-Host "  不会：调用服务端更新发布接口" -ForegroundColor Yellow
+    Write-Host "  不会：改变 App 当前收到的版本或下载地址" -ForegroundColor Yellow
+    Write-Host ""
+
+    $apkPath = Select-ApkFile "选择仅上传测试、不正式发布的 ZTransfer APK"
+    if (-not $apkPath) { Write-Host "已取消"; return }
+    Write-Host "正在读取本地 APK..." -ForegroundColor DarkGray
+    $meta = Read-LocalApkMetadata $apkPath
+    if (-not $meta) { return }
+    $target = New-OssReleaseTarget $meta
+
+    Write-Host ("测试包: {0} (versionCode {1}), {2:N2} MiB" -f `
+        $meta.VersionName, $meta.VersionCode, ($meta.SizeBytes / 1MB)) -ForegroundColor Cyan
+    Write-Host ("测试地址: {0}" -f $target.PublicUrl)
+    Write-Host ("SHA-256: {0}" -f $meta.Sha256) -ForegroundColor DarkGray
+    Write-Host "再次确认：此操作只写上面的版本化地址，不碰服务端和固定下载地址。" -ForegroundColor Yellow
+    $confirm = (Read-Host "输入 UPLOAD 继续").Trim()
+    if ($confirm -cne "UPLOAD") { Write-Host "已取消"; return }
+
+    if (-not (Upload-VersionedApkToOss $apkPath $meta $target)) { return }
+    if (-not (Test-PublicOssApk $target.PublicUrl $meta)) { return }
+
+    Write-Host "测试包已上传并校验通过。" -ForegroundColor Green
+    Write-Host ("测试下载地址: {0}" -f $target.PublicUrl) -ForegroundColor Cyan
+    Write-Host "服务端当前版本、App 更新地址和 ZTransfer.apk 均未改变。" -ForegroundColor Green
+}
+
 function Invoke-UpdatePublish {
     $publishState = Get-UpdatePublishState
     if (-not $publishState) { return }
@@ -995,12 +1051,11 @@ function Invoke-UpdatePublish {
     Write-Host ("OSS 地址: {0}" -f $target.PublicUrl)
     Write-Host ("固定下载: {0}" -f $target.LatestPublicUrl)
     Write-Host ("SHA-256: {0}" -f $meta.Sha256) -ForegroundColor DarkGray
-    $confirm = (Read-Host "确认上传并发布？输入 y").Trim().ToLowerInvariant()
-    if ($confirm -ne "y") { Write-Host "已取消"; return }
+    Write-Host "警告：正式发布会覆盖固定下载地址，并切换服务端当前版本。" -ForegroundColor Yellow
+    $confirm = (Read-Host "确认正式发布？输入 PUBLISH").Trim()
+    if ($confirm -cne "PUBLISH") { Write-Host "已取消"; return }
 
-    if (-not (Upload-ApkToOss $apkPath $meta $target.OssUri `
-        "public, max-age=31536000, immutable" `
-        ("attachment; filename=`"ZTransfer-v{0}.apk`"" -f $versionCode))) { return }
+    if (-not (Upload-VersionedApkToOss $apkPath $meta $target)) { return }
     if (-not (Test-PublicOssApk $target.PublicUrl $meta)) { return }
 
     $latestState = Get-UpdatePublishState
@@ -1014,7 +1069,8 @@ function Invoke-UpdatePublish {
     Write-Host "正在更新新用户固定下载地址..." -ForegroundColor DarkGray
     if (-not (Upload-ApkToOss $apkPath $meta $target.LatestOssUri `
         "no-cache, no-store, must-revalidate" `
-        "attachment; filename=`"ZTransfer.apk`"")) { return }
+        "attachment; filename=`"ZTransfer.apk`"" `
+        $true)) { return }
     if (-not (Test-PublicOssApk $target.LatestPublicUrl $meta)) { return }
     $draft = @{
         versionCode = $versionCode
@@ -1063,21 +1119,23 @@ function Invoke-UpdateMenu {
         Write-Host "=============== App 更新管理 ===============" -ForegroundColor Cyan
         Write-Host "  [1] 查看当前发布"
         Write-Host "  [2] 配置 / 测试 OSS 上传"
-        Write-Host "  [3] 发布新版本"
-        Write-Host "  [4] 验证当前 OSS 下载"
-        Write-Host "  [5] 修改软/硬更新策略"
-        Write-Host "  [6] 查看更新统计"
+        Write-Host "  [3] 仅上传测试包（不发布、不覆盖固定地址）" -ForegroundColor Green
+        Write-Host "  [4] 正式发布新版本（会切换服务端）" -ForegroundColor Yellow
+        Write-Host "  [5] 验证当前 OSS 下载"
+        Write-Host "  [6] 修改软/硬更新策略"
+        Write-Host "  [7] 查看更新统计"
         Write-Host "  [0] 返回"
         $choice = Read-Host "选择"
         switch ($choice.Trim()) {
             "1" { Invoke-UpdateStatus }
             "2" { [void](Invoke-OssSetup) }
-            "3" { Invoke-UpdatePublish }
-            "4" { Invoke-UpdateValidate }
-            "5" { Invoke-UpdatePolicy }
-            "6" { Invoke-UpdateStats }
+            "3" { Invoke-UpdateStage }
+            "4" { Invoke-UpdatePublish }
+            "5" { Invoke-UpdateValidate }
+            "6" { Invoke-UpdatePolicy }
+            "7" { Invoke-UpdateStats }
             "0" { return }
-            default { Write-Host "输入 0-6" -ForegroundColor Yellow }
+            default { Write-Host "输入 0-7" -ForegroundColor Yellow }
         }
     }
 }

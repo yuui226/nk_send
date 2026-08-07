@@ -20,6 +20,7 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -774,7 +775,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // Separate from interactive FHD preview: while this one-shot request runs, the thumbnail
     // sweep yields the PTP channel, but opening/closing the full-screen preview cannot clobber it.
     private val effectPreviewActiveFlow = MutableStateFlow(false)
+    private val effectPreviewRequestedKeyFlow = MutableStateFlow<String?>(null)
     private var effectPreviewAttemptKey: String? = null
+    private var effectPreviewLoadingKey: String? = null
 
     fun setFhdActive(active: Boolean) {
         val wasActive = fhdActiveFlow.value
@@ -803,6 +806,31 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 log { "FILE_SCAN resume after FHD with fresh handles" }
                 loadFiles()
             }
+        }
+    }
+
+    /**
+     * 用户即将打开照片效果页：先同步发布内存中的真实缩略图，再让同一张照片的 FHD
+     * 预取跳过后台静置等待。它仍然服从传输和监看的高优先级，不会抢占这些前台任务。
+     */
+    fun requestEffectPreview() {
+        val latest = latestEffectPreviewFile(_state.value.files) ?: return
+        val key = effectPreviewKey(latest)
+        if (_state.value.effectPreviewFileKey != key) {
+            thumbnailCache.get(latest.handle)?.asAndroidBitmap()?.let { thumbnail ->
+                _state.update {
+                    it.copy(
+                        effectPreviewBitmap = thumbnail,
+                        // 缩略图只是立即可见的真实占位；null 保证后续仍会升级为 FHD。
+                        effectPreviewFileKey = null,
+                    )
+                }
+            }
+        }
+        if (_state.value.effectPreviewFileKey != key &&
+            effectPreviewAttemptKey != key && effectPreviewLoadingKey != key
+        ) {
+            effectPreviewRequestedKeyFlow.value = key
         }
     }
 
@@ -869,53 +897,75 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     private fun startEffectPreviewPrefetch() {
         viewModelScope.launch {
+            // 文件从新到旧发布，第一批通常已经包含最新照片。只观察候选身份而不是整个
+            // files 列表，后续枚举批次就不会反复取消同一张照片的静置等待和 FHD 请求。
+            val latestStillFlow = state
+                .map { latestEffectPreviewFile(it.files) }
+                .distinctUntilChanged { previous, next ->
+                    previous?.let(::effectPreviewKey) == next?.let(::effectPreviewKey)
+                }
             combine(
-                state.map { it.files }.distinctUntilChanged(),
+                latestStillFlow,
                 transfersBusyFlow,
                 remoteActiveFlow,
                 fhdActiveFlow,
-            ) { files, busy, remote, fhd -> Quad(files, busy, remote, fhd) }
-                .collectLatest { (files, busy, remote, fhd) ->
-                    if (busy || remote || fhd || files.isEmpty()) return@collectLatest
-                    val latest = latestEffectPreviewFile(files) ?: return@collectLatest
-                    val key = effectPreviewKey(latest)
-                    if (_state.value.effectPreviewFileKey == key || effectPreviewAttemptKey == key) {
-                        return@collectLatest
-                    }
-
-                    // File batches and the first visible thumbnails get priority over this demo.
-                    delay(EFFECT_PREVIEW_SETTLE_MS)
-                    if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
-                        !_state.value.isConnectedToCamera ||
-                        effectPreviewKey(latestEffectPreviewFile(_state.value.files) ?: return@collectLatest) != key
-                    ) {
-                        return@collectLatest
-                    }
-
-                    effectPreviewActiveFlow.value = true
-                    try {
-                        val bitmap = loadFhdBitmap(
-                            latest,
-                            Bitmap.Config.ARGB_8888,
-                            honorExifOrientation = true,
-                        )
-                        // A real camera response (including unsupported/null) is one completed
-                        // attempt. Cancellation by a foreground task is not latched, so idle time
-                        // can retry later.
-                        effectPreviewAttemptKey = key
-                        bitmap ?: return@collectLatest
-                        if (_state.value.isConnectedToCamera &&
-                            effectPreviewKey(latestEffectPreviewFile(_state.value.files) ?: return@collectLatest) == key
-                        ) {
-                            _state.update {
-                                it.copy(effectPreviewBitmap = bitmap, effectPreviewFileKey = key)
-                            }
-                            log { "EFFECT_PREVIEW ready handle=${latest.handle} ${bitmap.width}x${bitmap.height}" }
-                        }
-                    } finally {
-                        effectPreviewActiveFlow.value = false
-                    }
+                effectPreviewRequestedKeyFlow,
+            ) { latest, busy, remote, fhd, requestedKey ->
+                Quint(latest, busy, remote, fhd, requestedKey)
+            }.collectLatest { (latest, busy, remote, fhd, requestedKey) ->
+                latest ?: return@collectLatest
+                if (busy || remote || fhd) return@collectLatest
+                val key = effectPreviewKey(latest)
+                if (_state.value.effectPreviewFileKey == key || effectPreviewAttemptKey == key) {
+                    return@collectLatest
                 }
+
+                // 后台预取稍让第一屏缩略图；用户已经点进效果页时取消这段人为等待。
+                if (requestedKey != key) delay(EFFECT_PREVIEW_SETTLE_MS)
+                if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
+                    !_state.value.isConnectedToCamera ||
+                    effectPreviewKey(
+                        latestEffectPreviewFile(_state.value.files) ?: return@collectLatest
+                    ) != key
+                ) {
+                    return@collectLatest
+                }
+
+                effectPreviewActiveFlow.value = true
+                effectPreviewLoadingKey = key
+                try {
+                    val bitmap = loadFhdBitmap(
+                        latest,
+                        Bitmap.Config.ARGB_8888,
+                        honorExifOrientation = true,
+                        maxLongEdge = EFFECT_PREVIEW_SOURCE_EDGE,
+                    )
+                    // A real camera response (including unsupported/null) is one completed
+                    // attempt. Cancellation by a foreground task is not latched, so idle time
+                    // can retry later.
+                    effectPreviewAttemptKey = key
+                    bitmap ?: return@collectLatest
+                    if (_state.value.isConnectedToCamera &&
+                        effectPreviewKey(
+                            latestEffectPreviewFile(_state.value.files) ?: return@collectLatest
+                        ) == key
+                    ) {
+                        _state.update {
+                            it.copy(effectPreviewBitmap = bitmap, effectPreviewFileKey = key)
+                        }
+                        log {
+                            "EFFECT_PREVIEW ready handle=${latest.handle} " +
+                                "${bitmap.width}x${bitmap.height}"
+                        }
+                    }
+                } finally {
+                    effectPreviewLoadingKey = null
+                    if (effectPreviewRequestedKeyFlow.value == key) {
+                        effectPreviewRequestedKeyFlow.value = null
+                    }
+                    effectPreviewActiveFlow.value = false
+                }
+            }
         }
     }
 
@@ -1371,6 +1421,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
             noThumbHandles.clear()      // handle 跨会话可能复用，负缓存一并作废
             effectPreviewAttemptKey = null
+            effectPreviewRequestedKeyFlow.value = null
+            effectPreviewLoadingKey = null
         }
         _state.update {
             it.copy(
@@ -1981,6 +2033,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         file: NikonCamera.FileInfo,
         config: Bitmap.Config,
         honorExifOrientation: Boolean,
+        maxLongEdge: Int = MAX_FHD_PREVIEW_EDGE,
     ): Bitmap? {
         val cam = camera ?: return null
         val startedAt = android.os.SystemClock.elapsedRealtime()
@@ -2005,7 +2058,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
                 var sampleSize = 1
                 while (maxOf(bounds.outWidth, bounds.outHeight) / (sampleSize * 2) >=
-                    MAX_FHD_PREVIEW_EDGE
+                    maxLongEdge
                 ) {
                     sampleSize *= 2
                 }
@@ -2027,10 +2080,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (honorExifOrientation) applyExifOrientation(decoded, orientation) else decoded
                 }?.let { displayBitmap ->
                     val longEdge = maxOf(displayBitmap.width, displayBitmap.height)
-                    if (longEdge <= MAX_FHD_PREVIEW_EDGE) {
+                    if (longEdge <= maxLongEdge) {
                         displayBitmap
                     } else {
-                        val scale = MAX_FHD_PREVIEW_EDGE.toFloat() / longEdge
+                        val scale = maxLongEdge.toFloat() / longEdge
                         val scaled = Bitmap.createScaledBitmap(
                             displayBitmap,
                             (displayBitmap.width * scale).roundToInt().coerceAtLeast(1),
@@ -2238,7 +2291,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val RETRY_INTERVAL_MS = 1_000L
         const val WIFI_BACKGROUND_RETRY_INTERVAL_MS = 3_000L
         const val WATCH_INTERVAL_MS = 1_000L
-        const val EFFECT_PREVIEW_SETTLE_MS = 900L
+        const val EFFECT_PREVIEW_SETTLE_MS = 600L
+        const val EFFECT_PREVIEW_SOURCE_EDGE = 1_280
         const val MAX_FHD_PREVIEW_EDGE = 1_920
         // 黑边判定：近黑像素的通道上限（JPEG 压缩后黑条并非纯黑，留噪声余量）；
         // 黑边占边长的上限——3:2 塞 4:3 为 5.6%、16:9 为 12.5%，超过 15% 视为画面本身偏暗。
@@ -2258,7 +2312,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val RAW_EXTENSIONS = setOf(".nef", ".nrw", ".tif", ".tiff")
     }
 
-    private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
     private data class Quint<A, B, C, D, E>(
         val first: A,
         val second: B,
