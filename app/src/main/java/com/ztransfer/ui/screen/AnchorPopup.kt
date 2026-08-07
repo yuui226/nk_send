@@ -122,9 +122,15 @@ fun AnchorPopup(
                     }
                     val p = progress.value
                     // 极端缩放会让整块设置/筛选内容在每帧进行高成本重采样；4% 的形变已经足以
-                    // 表达来源方向，主要动势交给淡入完成。ModulateAlpha 避免为透明度额外创建
-                    // 一块与面板等大的离屏缓冲。
-                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                    // 表达来源方向，主要动势交给淡入完成。展开时继续使用 ModulateAlpha，
+                    // 避免为整块面板分配离屏缓冲；收起时改为整体合成后统一淡出。否则金色
+                    // 高级版按钮这类包含底色、扫光、文字和阴影的重叠图层会被分别调制透明度，
+                    // 低 alpha 阶段叠加后仍比普通内容明显，视觉上像是关闭后残留了一拍。
+                    compositingStrategy = if (animationState.closing) {
+                        CompositingStrategy.Offscreen
+                    } else {
+                        CompositingStrategy.ModulateAlpha
+                    }
                     val s = 0.96f + 0.04f * p
                     scaleX = s
                     scaleY = s

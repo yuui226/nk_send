@@ -272,7 +272,6 @@ fun LocalPhotoEffectsPage(
                             modifier = Modifier.size(19.dp),
                         )
                     }
-                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = stringResource(
                             if (selection == null) R.string.local_photo_choose_short
@@ -434,7 +433,6 @@ fun LocalPhotoEffectsPage(
                         modifier = Modifier.size(19.dp),
                     )
                 }
-                Spacer(Modifier.width(8.dp))
                 Text(
                     text = stringResource(
                         if (saving) R.string.local_photo_generating else R.string.local_photo_generate
