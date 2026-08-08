@@ -26,6 +26,9 @@ data class LiveViewFocusFrame(
 data class LiveViewMetadata(
     val focusJudgement: LiveViewFocusJudgement,
     val selectedFocusFrame: LiveViewFocusFrame?,
+    /** `StartTracking(x, y)` 与 AF 框记录共同使用的完整画面坐标系。 */
+    val trackingCoordinateWidth: Int,
+    val trackingCoordinateHeight: Int,
     /** `ChangeAfArea(x, y)` 使用的相机显示坐标网格；未知头型时由 UI 回退 JPEG 尺寸。 */
     val focusCoordinateWidth: Int?,
     val focusCoordinateHeight: Int?
@@ -66,8 +69,8 @@ private fun ByteArray.be32(offset: Int): Long =
  * Z8/Z9/Z6iii 等 Expeed 7 世代可能在扩展 LV 信息块中携带机身姿态（roll/pitch），
  * 尚未抓包验证——拿到真机样本后再决定是否从此处解析，届时可免去 0xD067 轮询开销。
  *
- * 未知版本/长度一律返回 null；尚未验证的多框布局只保留对焦判断、不解析框位。
- * 宁可由 UI 使用应用已知的点击位置，也不凭错误偏移乱画框。
+ * 未知版本/长度一律返回 null。AF 框记录使用同一份头部声明的数量与选中索引；
+ * 只有完整记录区、索引和坐标都通过边界校验时才把框位交给 UI。
  */
 internal fun parseLiveViewMetadata(
     payload: ByteArray,
@@ -112,13 +115,17 @@ internal fun parseLiveViewMetadata(
 
     val frameCount = payload[44].toInt() and 0xFF
     val selectedIndex = payload[45].toInt() and 0xFF
-    // 抓包只独立验证过单框布局。多框机型的 selectedIndex/记录步长可能有不同语义，
-    // 在拿到对应真机样本前不猜格式，保留 judgement 并由 UI 使用请求点回退。
-    val selectedFrame = if (
-        frameCount == 1 &&
-        selectedIndex == 0
-    ) {
-        val offset = 48
+    val focusFrameOffset = 48
+    val focusFrameStride = 8
+    val maxFrameCount = (jpegOffset - focusFrameOffset) / focusFrameStride
+    // 主体追踪时机身可能同时保留多个候选框；此前只接受单框，导致相机选中的
+    // 追踪框被丢弃，UI 一直停在最初点击点。先校验整个记录区，再只解析选中项。
+    val completeFrameTable =
+        frameCount in 1..maxFrameCount &&
+            selectedIndex < frameCount &&
+            focusFrameOffset + frameCount * focusFrameStride <= jpegOffset
+    val selectedFrame = if (completeFrameTable) {
+        val offset = focusFrameOffset + selectedIndex * focusFrameStride
         val width = payload.be16(offset)
         val height = payload.be16(offset + 2)
         val centerX = payload.be16(offset + 4)
@@ -151,6 +158,8 @@ internal fun parseLiveViewMetadata(
     return LiveViewMetadata(
         focusJudgement = judgement,
         selectedFocusFrame = selectedFrame,
+        trackingCoordinateWidth = coordinateWidth,
+        trackingCoordinateHeight = coordinateHeight,
         focusCoordinateWidth = focusCoordinateWidth.takeIf { validFocusCoordinateGrid },
         focusCoordinateHeight = focusCoordinateHeight.takeIf { validFocusCoordinateGrid }
     )

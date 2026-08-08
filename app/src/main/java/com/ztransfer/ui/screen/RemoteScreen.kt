@@ -104,6 +104,7 @@ import com.ztransfer.protocol.LiveViewFocusJudgement
 import com.ztransfer.protocol.LiveViewMetadata
 import com.ztransfer.protocol.LiveViewPacket
 import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.RcParam
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
@@ -117,6 +118,7 @@ import com.ztransfer.protocol.rcFocusAt
 import com.ztransfer.protocol.rcChangeApplicationMode
 import com.ztransfer.protocol.rcCanonicalExposureProp
 import com.ztransfer.protocol.rcEndMovie
+import com.ztransfer.protocol.rcEndSubjectTracking
 import com.ztransfer.protocol.rcFormat
 import com.ztransfer.protocol.rcGetAngleLevel
 import com.ztransfer.protocol.rcGetCompatibleParam
@@ -185,6 +187,7 @@ private val ALL_AUTO_ISO_PROPS =
 private const val USB_LIVE_VIEW_STABLE_FRAMES = 8
 private const val TAP_FOCUS_LOCKED_FEEDBACK_MS = 1800L
 private const val TAP_FOCUS_MARKER_VISIBLE_MS = 3_000L
+private const val TRACKING_CANCEL_EXIT_MS = 220L
 
 internal fun shouldPollMovieModeDuringLiveViewRecovery(
     initialLoaded: Boolean,
@@ -234,8 +237,13 @@ private data class RemoteLiveFrame(
 
 private data class ConfirmedFocusMarker(
     val fallbackPoint: Offset,
-    val confirmedAtElapsedMs: Long
+    val confirmedAtElapsedMs: Long,
+    /** true 时框的位置随每一帧的相机追踪结果更新，直到追踪会话结束。 */
+    val subjectTracking: Boolean = false
 )
+
+/** 绘制侧最近一次相机 AF 框；不是 UI 状态，更新它不应额外触发一轮重组。 */
+private class FocusFrameCache(var frame: LiveViewFocusFrame? = null)
 
 private class HistogramThrottle {
     var lastCalculatedAtMs: Long = 0L
@@ -249,6 +257,10 @@ private class ZebraThrottle {
 }
 
 private data class ViewfinderTap(
+    val trackingX: Int,
+    val trackingY: Int,
+    val trackingCoordinateWidth: Int,
+    val trackingCoordinateHeight: Int,
     val focusX: Int,
     val focusY: Int,
     val focusCoordinateWidth: Int,
@@ -443,6 +455,9 @@ private fun RemoteContent(
     var focusModeProp by remember { mutableStateOf<Int?>(null) }
     var focusModeManual by remember { mutableStateOf(false) }
     var focusModeQueried by remember { mutableStateOf(false) }
+    // 只表示本页面成功启动且仍存续的主体追踪。协议端另有相机级状态负责成对结束命令；
+    // 这里用于决定是否持续绘制相机每帧返回的移动框。
+    var subjectTrackingActive by remember { mutableStateOf(false) }
     val params = remember { mutableStateMapOf<Int, RcParam>() }
     // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
     val pendingSets = remember { mutableMapOf<Int, Job>() }
@@ -720,6 +735,7 @@ private fun RemoteContent(
         val prev = lvJob
         lvJob = scope.launch {
             prev?.cancelAndJoin()
+            subjectTrackingActive = false
             liveViewStable = false
             startupEventBaselinePending = suppressStartupPropertyEvents
             var adoptedCamera = adoptActiveLiveView
@@ -881,7 +897,10 @@ private fun RemoteContent(
                     // 关闭失败无所谓（可能本就已掉出 LV）。
                     fps = 0f
                     liveViewStable = false
-                    if (isActive) runCatching { cam.labEndLiveView() }
+                    if (isActive) {
+                        runCatching { cam.labEndLiveView() }
+                        subjectTrackingActive = false
+                    }
                     delay(2000)
                 }
             } finally {
@@ -889,6 +908,7 @@ private fun RemoteContent(
                 withContext(NonCancellable) {
                     runCatching { cameraViewModel.getCamera()?.labEndLiveView() }
                 }
+                subjectTrackingActive = false
             }
         }
     }
@@ -1413,6 +1433,7 @@ private fun RemoteContent(
         tapFocusHideJob?.cancel()
         tapFocusFeedback = TapFocusFeedback.IDLE
         confirmedFocusMarker = null
+        subjectTrackingActive = false
         afHeld = true
         afLocked = false
         val requestedPoint = focusAreaPoint
@@ -1476,6 +1497,7 @@ private fun RemoteContent(
             tapFocusBusy = false
             tapFocusFeedback = TapFocusFeedback.IDLE
             confirmedFocusMarker = null
+            subjectTrackingActive = false
             tapFocusPoint = Offset(0.5f, 0.5f)
             focusAreaPoint = Offset(0.5f, 0.5f)
             focusModeQueried = false
@@ -1530,6 +1552,7 @@ private fun RemoteContent(
     val recFailHint = stringResource(R.string.remote_rec_start_failed)
     val recStopFailHint = stringResource(R.string.remote_rec_stop_failed)
     val manualFocusHint = stringResource(R.string.remote_tap_focus_manual)
+    val trackingAreaModeHint = stringResource(R.string.remote_tracking_area_mode_required)
 
     fun focusAt(tap: ViewfinderTap) {
         if (!connected || capturing || tapFocusBusy || afHeld || probing || afJob?.isActive == true) return
@@ -1540,6 +1563,46 @@ private fun RemoteContent(
         }
         val cam = cameraViewModel.getCamera() ?: return
         tapFocusHideJob?.cancel()
+        if (subjectTrackingActive) {
+            // 追踪中的再次点击定义为“取消”：先驱动 UI 退场，同时独立结束机身追踪，
+            // 不在同一次手势中重新选择主体。
+            subjectTrackingActive = false
+            tapFocusFeedback = TapFocusFeedback.IDLE
+            tapFocusNonce++
+            tapFocusBusy = true
+            haptics.tick()
+            devLog("subject tracking cancel requested")
+            val cancelNonce = tapFocusNonce
+            tapFocusHideJob = scope.launch {
+                delay(TRACKING_CANCEL_EXIT_MS)
+                if (tapFocusNonce == cancelNonce && !subjectTrackingActive) {
+                    confirmedFocusMarker = null
+                }
+            }
+            tapFocusJob = scope.launch {
+                try {
+                    val rc = cam.rcEndSubjectTracking()
+                    if (
+                        rc == null || rc == Lab.OK ||
+                        rc == PtpConstants.OPERATION_NOT_SUPPORTED ||
+                        rc == Lab.NK_INVALID_STATUS
+                    ) {
+                        devLog("subject tracking cancelled")
+                    } else {
+                        devLog("!! EndTracking resp=0x%04X".format(rc and 0xFFFF))
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (e is SocketTimeoutException) cameraViewModel.onCameraTransportLost(cam)
+                    devLog("!! EndTracking exception: ${e.message}")
+                } finally {
+                    tapFocusBusy = false
+                    tapFocusJob = null
+                }
+            }
+            return
+        }
         confirmedFocusMarker = null
         tapFocusPoint = tap.normalized
         tapFocusFeedback = TapFocusFeedback.FOCUSING
@@ -1547,20 +1610,73 @@ private fun RemoteContent(
         tapFocusBusy = true
         haptics.tick()
         devLog(
-            "tap AF point=(${tap.focusX},${tap.focusY}) " +
-                "grid=${tap.focusCoordinateWidth}x${tap.focusCoordinateHeight}"
+            "tap tracking=(${tap.trackingX},${tap.trackingY})/" +
+                "${tap.trackingCoordinateWidth}x${tap.trackingCoordinateHeight} " +
+                "focus=(${tap.focusX},${tap.focusY})/" +
+                "${tap.focusCoordinateWidth}x${tap.focusCoordinateHeight}"
         )
         tapFocusJob = scope.launch {
             try {
-                val result = cam.rcFocusAt(tap.focusX, tap.focusY)
+                val result = cam.rcFocusAt(
+                    trackingX = tap.trackingX,
+                    trackingY = tap.trackingY,
+                    focusX = tap.focusX,
+                    focusY = tap.focusY
+                )
                 val af = result.afResult
-                if (result.moveResponseCode == Lab.OK) {
+                if (result.trackingStarted || result.moveResponseCode == Lab.OK) {
                     focusAreaPoint = tap.normalized
                 }
-                tapFocusFeedback = if (result.moveResponseCode != Lab.OK || af == null) {
+                tapFocusFeedback = if (result.trackingStarted) {
+                    subjectTrackingActive = true
+                    val suffix = af?.let { "polls=${it.polls} elapsed=${it.elapsedMs}ms" }
+                    if (af?.responseCode == Lab.OK) {
+                        devLog("subject tracking focused ($suffix)")
+                        haptics.tick()
+                        confirmedFocusMarker = ConfirmedFocusMarker(
+                            fallbackPoint = tap.normalized,
+                            confirmedAtElapsedMs = SystemClock.elapsedRealtime(),
+                            subjectTracking = true
+                        )
+                        TapFocusFeedback.LOCKED
+                    } else {
+                        devLog(
+                            "!! subject tracking AF " +
+                                if (af == null) {
+                                    "unavailable"
+                                } else {
+                                    "result=0x%04X ($suffix)".format(
+                                        af.responseCode and 0xFFFF
+                                    )
+                                }
+                        )
+                        TapFocusFeedback.FAILED
+                    }
+                } else if (
+                    result.trackingResponseCode != null &&
+                    result.trackingResponseCode != PtpConstants.OPERATION_NOT_SUPPORTED
+                ) {
+                    if (result.trackingResponseCode == Lab.NK_INVALID_STATUS) {
+                        showHint(trackingAreaModeHint)
+                    }
+                    devLog(
+                        "!! StartTracking resp=0x%04X".format(
+                            result.trackingResponseCode and 0xFFFF
+                        )
+                    )
+                    TapFocusFeedback.FAILED
+                } else if (result.moveResponseCode == null) {
+                    result.endTrackingResponseCode?.let {
+                        devLog("!! EndTracking resp=0x%04X".format(it and 0xFFFF))
+                    }
+                    TapFocusFeedback.FAILED
+                } else if (result.moveResponseCode != Lab.OK) {
                     devLog(
                         "!! ChangeAfArea resp=0x%04X".format(result.moveResponseCode and 0xFFFF)
                     )
+                    TapFocusFeedback.FAILED
+                } else if (af == null) {
+                    devLog("!! tap AF fallback unavailable")
                     TapFocusFeedback.FAILED
                 } else {
                     val suffix = "polls=${af.polls} elapsed=${af.elapsedMs}ms"
@@ -1594,12 +1710,13 @@ private fun RemoteContent(
                 }
                 val completedNonce = tapFocusNonce
                 val focusLocked = tapFocusFeedback == TapFocusFeedback.LOCKED
+                val trackingStarted = result.trackingStarted
                 tapFocusHideJob = scope.launch {
                     delay(if (focusLocked) TAP_FOCUS_LOCKED_FEEDBACK_MS else 1_300L)
                     if (tapFocusNonce == completedNonce) {
                         tapFocusFeedback = TapFocusFeedback.IDLE
                     }
-                    if (focusLocked) {
+                    if (focusLocked && !trackingStarted) {
                         delay(TAP_FOCUS_MARKER_VISIBLE_MS - TAP_FOCUS_LOCKED_FEEDBACK_MS)
                         if (tapFocusNonce == completedNonce) {
                             confirmedFocusMarker = null
@@ -1612,6 +1729,7 @@ private fun RemoteContent(
                 if (e is SocketTimeoutException) cameraViewModel.onCameraTransportLost(cam)
                 tapFocusFeedback = TapFocusFeedback.FAILED
                 confirmedFocusMarker = null
+                subjectTrackingActive = false
                 devLog("!! tap AF exception: ${e.message}")
                 val completedNonce = tapFocusNonce
                 tapFocusHideJob = scope.launch {
@@ -2175,6 +2293,7 @@ private fun RemoteContent(
                 tapFocusPoint = tapFocusPoint,
                 tapFocusNonce = tapFocusNonce,
                 confirmedFocusMarker = confirmedFocusMarker,
+                subjectTrackingActive = subjectTrackingActive,
                 onTapFocus = { focusAt(it) },
                 showFps = showFps,
                 fps = fps,
@@ -2459,6 +2578,7 @@ private fun RemoteContent(
                     tapFocusPoint = tapFocusPoint,
                     tapFocusNonce = tapFocusNonce,
                     confirmedFocusMarker = confirmedFocusMarker,
+                    subjectTrackingActive = subjectTrackingActive,
                     onTapFocus = { focusAt(it) },
                     showFps = showFps,
                     fps = fps,
@@ -2891,7 +3011,12 @@ private fun RemoteContent(
                             color = colors.onBackground
                         )
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.lab_tracking_probe_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 8.dp)
+                    )
                     // 日志跟尾：面板刚打开（尚无布局信息）直接跳到底；此后新行到来时，
                     // 停在底部附近才跟到底，用户上翻查看时不打扰。
                     val logState = rememberLazyListState()
@@ -2959,6 +3084,7 @@ private fun RemoteViewfinderPanel(
     tapFocusPoint: Offset,
     tapFocusNonce: Int,
     confirmedFocusMarker: ConfirmedFocusMarker?,
+    subjectTrackingActive: Boolean,
     onTapFocus: (ViewfinderTap) -> Unit,
     showFps: Boolean,
     fps: Float,
@@ -2987,6 +3113,7 @@ private fun RemoteViewfinderPanel(
             afLocked = afLocked,
             afFocusPoint = afFocusPoint,
             confirmedFocusMarker = confirmedFocusMarker,
+            subjectTrackingActive = subjectTrackingActive,
             onTapFocus = onTapFocus,
             showZebra = showZebra
         )
@@ -3107,6 +3234,7 @@ private fun ViewfinderImage(
     afLocked: Boolean,
     afFocusPoint: Offset,
     confirmedFocusMarker: ConfirmedFocusMarker?,
+    subjectTrackingActive: Boolean,
     onTapFocus: (ViewfinderTap) -> Unit,
     showZebra: Boolean
 ) {
@@ -3115,8 +3243,12 @@ private fun ViewfinderImage(
         if (liveFrame != null) {
             val imageWidth = liveFrame.image.width
             val imageHeight = liveFrame.image.height
-            // ChangeAfArea 的坐标基准由增强帧头 +28/+30 声明，未必等于当前
-            // 解码 JPEG 尺寸（例如低清监看仍可能沿用 XGA AF 网格）。
+            // StartTracking 使用增强帧头 +16/+18 的完整画面坐标；普通 ChangeAfArea
+            // 使用 +28/+30 的显示 AF 网格。两套坐标纵横比接近但量级完全不同，不能混用。
+            val trackingCoordinateWidth =
+                liveFrame.metadata?.trackingCoordinateWidth ?: imageWidth
+            val trackingCoordinateHeight =
+                liveFrame.metadata?.trackingCoordinateHeight ?: imageHeight
             val focusCoordinateWidth =
                 liveFrame.metadata?.focusCoordinateWidth ?: imageWidth
             val focusCoordinateHeight =
@@ -3128,6 +3260,8 @@ private fun ViewfinderImage(
                     .pointerInput(
                         imageWidth,
                         imageHeight,
+                        trackingCoordinateWidth,
+                        trackingCoordinateHeight,
                         focusCoordinateWidth,
                         focusCoordinateHeight
                     ) {
@@ -3146,6 +3280,14 @@ private fun ViewfinderImage(
                                     ((tap.y - imageRect.top) / imageRect.height).coerceIn(0f, 1f)
                                 currentTapHandler(
                                     ViewfinderTap(
+                                        trackingX = (
+                                            normalizedX * (trackingCoordinateWidth - 1)
+                                            ).roundToInt(),
+                                        trackingY = (
+                                            normalizedY * (trackingCoordinateHeight - 1)
+                                            ).roundToInt(),
+                                        trackingCoordinateWidth = trackingCoordinateWidth,
+                                        trackingCoordinateHeight = trackingCoordinateHeight,
                                         focusX = (
                                             normalizedX * (focusCoordinateWidth - 1)
                                             ).roundToInt(),
@@ -3218,18 +3360,27 @@ private fun ViewfinderImage(
                     imageAspectRatio = imageWidth.toFloat() / imageHeight,
                     modifier = Modifier.matchParentSize()
                 )
-            } else if (confirmedFocusMarker != null) {
+            }
+            val retainedFocusMarker = confirmedFocusMarker
+            retainedFocusMarker?.let { marker ->
+                val markerVisible =
+                    tapFocusFeedback == TapFocusFeedback.IDLE &&
+                        !afHeld &&
+                        (!marker.subjectTracking || subjectTrackingActive)
                 val cameraFrame = liveFrame.metadata
                     ?.takeIf {
-                        liveFrame.receivedAtElapsedMs >=
-                            confirmedFocusMarker.confirmedAtElapsedMs &&
-                            it.focusJudgement == LiveViewFocusJudgement.FOCUSED
+                        liveFrame.receivedAtElapsedMs >= marker.confirmedAtElapsedMs &&
+                            (
+                                marker.subjectTracking ||
+                                    it.focusJudgement == LiveViewFocusJudgement.FOCUSED
+                                )
                     }
                     ?.selectedFocusFrame
                 ConfirmedFocusReticleOverlay(
-                    fallbackPoint = confirmedFocusMarker.fallbackPoint,
+                    fallbackPoint = marker.fallbackPoint,
                     cameraFrame = cameraFrame,
-                    nonce = confirmedFocusMarker.confirmedAtElapsedMs,
+                    nonce = marker.confirmedAtElapsedMs,
+                    visible = markerVisible,
                     imageAspectRatio = imageWidth.toFloat() / imageHeight,
                     modifier = Modifier.matchParentSize()
                 )
@@ -3784,30 +3935,42 @@ private fun ConfirmedFocusReticleOverlay(
     fallbackPoint: Offset,
     cameraFrame: LiveViewFocusFrame?,
     nonce: Long,
+    visible: Boolean,
     imageAspectRatio: Float,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
     val appearScale = remember { Animatable(1.12f) }
+    // 增强取景头可能偶发一帧不带 AF 框。追踪期间保留最近一次相机确认的位置，避免
+    // 框瞬间跳回最初点击点；一旦新框到达仍在当前帧立即采用，不增加跟随延迟。
+    val cameraFrameCache = remember(nonce) { FocusFrameCache() }
+    cameraFrame?.let { cameraFrameCache.frame = it }
+    val displayedCameraFrame = cameraFrame ?: cameraFrameCache.frame
     LaunchedEffect(nonce) {
         appearScale.snapTo(1.12f)
         appearScale.animateTo(1f, tween(160))
     }
+    val visibility by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(200, easing = FastOutSlowInEasing),
+        label = "confirmedFocusVisibility"
+    )
 
     Canvas(modifier) {
         val imageRect = fitCenterRect(size.width, size.height, imageAspectRatio)
         if (imageRect.width <= 0f || imageRect.height <= 0f) return@Canvas
-        val point = cameraFrame?.let { Offset(it.centerX, it.centerY) } ?: fallbackPoint
+        val point = displayedCameraFrame?.let { Offset(it.centerX, it.centerY) } ?: fallbackPoint
         val fallbackHalf = 25.dp.toPx()
         val minHalf = 13.dp.toPx()
+        val exitScale = 0.82f + 0.18f * visibility
         // 动画缩放后再封顶，确保全画幅/边缘 AF 框也不会产生反向 coerceIn 区间。
         val halfWidth = (
-            (cameraFrame?.let { imageRect.width * it.width / 2f } ?: fallbackHalf) *
-                appearScale.value
+            (displayedCameraFrame?.let { imageRect.width * it.width / 2f } ?: fallbackHalf) *
+                appearScale.value * exitScale
             ).coerceIn(minOf(minHalf, imageRect.width / 2f), imageRect.width / 2f)
         val halfHeight = (
-            (cameraFrame?.let { imageRect.height * it.height / 2f } ?: fallbackHalf) *
-                appearScale.value
+            (displayedCameraFrame?.let { imageRect.height * it.height / 2f } ?: fallbackHalf) *
+                appearScale.value * exitScale
             ).coerceIn(minOf(minHalf, imageRect.height / 2f), imageRect.height / 2f)
         val requestedCenter = Offset(
             imageRect.left + imageRect.width * point.x.coerceIn(0f, 1f),
@@ -3837,7 +4000,7 @@ private fun ConfirmedFocusReticleOverlay(
             halfWidth = halfWidth,
             halfHeight = halfHeight,
             cornerLength = cornerLength,
-            color = colors.statusConnected.copy(alpha = 0.85f),   // green confirmation, not red
+            color = colors.statusConnected.copy(alpha = 0.85f * visibility),
             strokeWidth = 1.8.dp.toPx()
         )
     }

@@ -257,6 +257,7 @@
     <string name="remote_rec_no_audio">无麦克风权限，录制无声音</string>
     <string name="remote_rec_pro_only">端侧录制是高级版功能</string>
     <string name="remote_tap_focus_manual">请将相机切换到自动对焦后使用点按对焦</string>
+    <string name="remote_tracking_area_mode_required">请将相机切换到自动区域 AF 或主体跟踪 AF 后重试</string>
     <string name="dev_panel_title">开发者</string>
     <string name="dev_hd_liveview">高清监看 (XGA)</string>
     <string name="cd_remote_histogram">监看直方图</string>
@@ -266,6 +267,7 @@
     <string name="cd_remote_fullscreen_exit">退出全屏</string>
     <string name="dev_fps_overlay">帧率显示</string>
     <string name="lab_run_probe">完整探测</string>
+    <string name="lab_tracking_probe_hint">追踪探测开始后，让有纹理的主体位于画面中央并缓慢移动</string>
     <string name="lab_copy_log">复制日志</string>
     <string name="cd_remote_zebra">斑马纹</string>
     <string name="cd_remote_level">水平仪</string>

@@ -54,6 +54,8 @@ class LiveViewMetadataTest {
 
         assertNotNull(metadata)
         assertEquals(LiveViewFocusJudgement.FOCUSED, metadata?.focusJudgement)
+        assertEquals(5568, metadata?.trackingCoordinateWidth)
+        assertEquals(3712, metadata?.trackingCoordinateHeight)
         assertEquals(1024, metadata?.focusCoordinateWidth)
         assertEquals(680, metadata?.focusCoordinateHeight)
         val frame = metadata?.selectedFocusFrame
@@ -118,9 +120,48 @@ class LiveViewMetadataTest {
     }
 
     @Test
-    fun doesNotGuessUnverifiedMultiFrameLayout() {
+    fun parsesSelectedFrameFromMultiFrameTrackingHeader() {
+        val packet = z30Packet(frameCount = 2, selectedIndex = 1).also {
+            putBe16(it, 48, 120)
+            putBe16(it, 50, 80)
+            putBe16(it, 52, 200)
+            putBe16(it, 54, 160)
+            putBe16(it, 56, 300)
+            putBe16(it, 58, 180)
+            putBe16(it, 60, 700)
+            putBe16(it, 62, 420)
+        }
         val metadata = parseLiveViewMetadata(
-            z30Packet(frameCount = 2, selectedIndex = 1),
+            packet,
+            jpegOffset = 512,
+            operation = Lab.NK_GET_LIVE_VIEW_IMG_EX
+        )
+
+        val frame = metadata?.selectedFocusFrame
+        assertEquals(LiveViewFocusJudgement.FOCUSED, metadata?.focusJudgement)
+        assertNotNull(frame)
+        assertEquals(700f / 5568f, frame!!.centerX, 0.0001f)
+        assertEquals(420f / 3712f, frame.centerY, 0.0001f)
+        assertEquals(300f / 5568f, frame.width, 0.0001f)
+        assertEquals(180f / 3712f, frame.height, 0.0001f)
+    }
+
+    @Test
+    fun rejectsOutOfRangeSelectedFrameIndex() {
+        val metadata = parseLiveViewMetadata(
+            z30Packet(frameCount = 2, selectedIndex = 2),
+            jpegOffset = 512,
+            operation = Lab.NK_GET_LIVE_VIEW_IMG_EX
+        )
+
+        assertEquals(LiveViewFocusJudgement.FOCUSED, metadata?.focusJudgement)
+        assertNull(metadata?.selectedFocusFrame)
+    }
+
+    @Test
+    fun rejectsFrameTableThatWouldRunIntoJpeg() {
+        val metadata = parseLiveViewMetadata(
+            z30Packet(frameCount = 59, selectedIndex = 0),
             jpegOffset = 512,
             operation = Lab.NK_GET_LIVE_VIEW_IMG_EX
         )

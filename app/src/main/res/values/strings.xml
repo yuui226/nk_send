@@ -257,6 +257,7 @@
     <string name="remote_rec_no_audio">No microphone permission — recording without sound</string>
     <string name="remote_rec_pro_only">On-device recording is a Pro feature</string>
     <string name="remote_tap_focus_manual">Switch the camera to autofocus to use tap focus</string>
+    <string name="remote_tracking_area_mode_required">Use Auto-area AF or Subject-tracking AF on the camera, then try again</string>
     <string name="dev_panel_title">Developer</string>
     <string name="dev_hd_liveview">XGA live view</string>
     <string name="cd_remote_histogram">Live view histogram</string>
@@ -266,6 +267,7 @@
     <string name="cd_remote_fullscreen_exit">Exit fullscreen</string>
     <string name="dev_fps_overlay">FPS overlay</string>
     <string name="lab_run_probe">Probe</string>
+    <string name="lab_tracking_probe_hint">When tracking probe starts, keep a textured subject near center and move it slowly</string>
     <string name="lab_copy_log">Copy log</string>
     <string name="cd_remote_zebra">Zebra stripes</string>
     <string name="cd_remote_level">Level</string>

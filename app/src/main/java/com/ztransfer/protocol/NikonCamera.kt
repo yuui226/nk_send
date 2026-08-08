@@ -211,6 +211,11 @@ class NikonCamera(private val context: Context) {
     // 传感器/编码器的启动预热窗口；即使页面先读取参数再接管已开启的 LV，也只等待
     // 尚未覆盖的那部分时间，不会重复写死一整段延迟。
     @Volatile internal var liveViewReadyAtElapsedMs = 0L
+    // Nikon 主体追踪操作码（StartTracking/EndTracking）的会话级能力与生命周期。
+    // null=尚未实际尝试，false=明确返回 Operation_Not_Supported；瞬时错误不熔断。
+    // 两个字段只在 focusMutex 内读写；实际 Start/End 命令再按 focusMutex -> ioMutex 串行。
+    internal var subjectTrackingSupported: Boolean? = null
+    internal var subjectTrackingActive = false
     // 增强取帧偶发空/坏帧不能等同于“不支持”；连续两次才降级，成功即清零。
     // 仅在 ioMutex 内访问。
     internal var liveViewEnhancedFailureCount = 0

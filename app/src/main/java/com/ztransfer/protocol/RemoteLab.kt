@@ -33,6 +33,8 @@ object Lab {
     const val NK_MF_DRIVE = 0x9204
     const val NK_CHANGE_AF_AREA = 0x9205
     const val NK_AF_DRIVE = 0x90C1
+    const val NK_START_TRACKING = 0x9424
+    const val NK_END_TRACKING = 0x9425
     const val NK_CAPTURE_REC_IN_MEDIA = 0x9207
     const val NK_CAPTURE_REC_IN_SDRAM = 0x90C0
     const val NK_SET_CONTROL_MODE = 0x90C2
@@ -62,6 +64,7 @@ object Lab {
     const val ACCESS_DENIED = 0x200F
     const val DEVICE_BUSY = 0x2019
     const val NK_OUT_OF_FOCUS = 0xA002   // AfDrive 未能合焦
+    const val NK_INVALID_STATUS = 0xA004
     const val NK_NOT_LIVE_VIEW = 0xA00B
 
     // ---- 关注的属性 ----
@@ -88,6 +91,8 @@ object Lab {
     const val PROP_NK_ISO_CONTROL_SENSITIVITY = 0xD0B5
     const val PROP_NK_AUTO_ISO_ALT = 0xD16A
     const val PROP_NK_AF_MODE = 0xD161
+    const val PROP_NK_STILL_FOCUS_METERING_MODE = 0xD05D
+    const val PROP_NK_STILL_FOCUS_MODE = 0xD061
     const val PROP_NK_ANGLE_LEVEL = 0xD067       // 机身电子水平仪滚转角，只读
                                                  // libgphoto2 ptp.h: PTP_DPC_NIKON_AngleLevel
                                                  // Z 30/Z 50/Z 8/Z 9/Z 6iii 全世代共用此 DPC
@@ -130,6 +135,8 @@ object Lab {
         0x90CB to "AfCaptureSDRAM",
         0x90C1 to "AfDrive",
         0x9205 to "ChangeAfArea",
+        NK_START_TRACKING to "StartTracking",
+        NK_END_TRACKING to "EndTracking",
         0x920C to "TerminateCapture(Bulb)",
         0x920A to "StartMovieRec",
         0x920B to "EndMovieRec",
@@ -163,6 +170,8 @@ object Lab {
         PROP_WHITE_BALANCE to "WhiteBalance",
         PROP_FOCUS_MODE to "FocusMode",
         PROP_NK_AF_MODE to "NikonAutofocusMode",
+        PROP_NK_STILL_FOCUS_METERING_MODE to "StillFocusMeteringMode",
+        PROP_NK_STILL_FOCUS_MODE to "StillFocusMode",
         PROP_NK_ANGLE_LEVEL to "AngleLevel",
         PROP_NK_RECORDING_MEDIA to "RecordingMedia",
         PROP_NK_LV_STATUS to "LiveViewStatus",
@@ -830,8 +839,25 @@ data class RcAfResult(
 )
 
 data class RcTapFocusResult(
-    val moveResponseCode: Int,
+    val endTrackingResponseCode: Int?,
+    /** null 表示直接由 StartTracking(x,y) 接受坐标，或旧追踪未能结束。 */
+    val moveResponseCode: Int?,
+    val trackingResponseCode: Int?,
+    val trackingStarted: Boolean,
     val afResult: RcAfResult?
+)
+
+internal data class RcTapFocusStartResult(
+    val moveResponseCode: Int?,
+    val trackingResponseCode: Int?,
+    val afStartResponseCode: Int?
+)
+
+private fun timedOutAfResult(startedAt: Long, now: Long, polls: Int = 0) = RcAfResult(
+    responseCode = Lab.DEVICE_BUSY,
+    polls = polls,
+    elapsedMs = now - startedAt,
+    timedOut = true
 )
 
 private fun NikonCamera.recvFocusResponse(deadlineMs: Long): Pair<Int, ByteArray?> {
@@ -869,40 +895,111 @@ private suspend fun NikonCamera.focusCommand(
     vararg params: Int
 ): Pair<Int, ByteArray?>? = withContext(Dispatchers.IO) {
     ioMutex.withLock {
-        if (SystemClock.elapsedRealtime() >= deadlineMs) return@withLock null
-        sendCmd(code, *params)
-        recvFocusResponse(deadlineMs)
+        focusCommandLocked(code, deadlineMs, *params)
     }
 }
 
-internal suspend fun runAfDriveAndWait(
+/** 调用方必须在 I/O 调度器持有 [NikonCamera.ioMutex]，用于组成严格时序的 AF 原子段。 */
+private fun NikonCamera.focusCommandLocked(
+    code: Int,
+    deadlineMs: Long,
+    vararg params: Int
+): Pair<Int, ByteArray?>? {
+    if (SystemClock.elapsedRealtime() >= deadlineMs) return null
+    sendCmd(code, *params)
+    return recvFocusResponse(deadlineMs)
+}
+
+/**
+ * 移动 AF 点并启动主体追踪。明确不支持 StartTracking 的机身才回退一次普通 AF。
+ * 调用方在整个函数外持有 I/O 锁，确保 80ms 应用窗口内不会被连续的 Live View
+ * 取帧插入；普通 AF 回退启动后的就绪轮询仍可释放锁。
+ */
+internal suspend fun runTapFocusStart(
+    trackingX: Int,
+    trackingY: Int,
+    focusX: Int,
+    focusY: Int,
+    tryTracking: Boolean,
+    command: suspend (code: Int, params: IntArray) -> Int?,
+    pause: suspend (Long) -> Unit
+): RcTapFocusStartResult {
+    if (tryTracking) {
+        // Z 30 实机探测确认坐标属于 StartTracking 本身：无参调用返回 0x2006，
+        // StartTracking(x,y) 返回 OK，并使增强帧开始携带选中 AF 框。
+        val trackingRc = command(Lab.NK_START_TRACKING, intArrayOf(trackingX, trackingY))
+            ?: return RcTapFocusStartResult(null, Lab.DEVICE_BUSY, null)
+        if (trackingRc == Lab.OK) {
+            // StartTracking 只选中主体并显示追踪框，不会驱动镜头。让机身先采用目标，
+            // 再像普通点按 AF 一样只发送一次 AfDrive；最终状态仍由 DeviceReady 判定。
+            pause(80)
+            return RcTapFocusStartResult(
+                moveResponseCode = null,
+                trackingResponseCode = trackingRc,
+                afStartResponseCode = command(Lab.NK_AF_DRIVE, intArrayOf())
+            )
+        }
+        if (trackingRc != PtpConstants.OPERATION_NOT_SUPPORTED) {
+            return RcTapFocusStartResult(null, trackingRc, null)
+        }
+        // 只有机身明确不支持追踪操作码时才继续走普通点按 AF。InvalidStatus/Busy 等
+        // 状态错误直接上报，避免擅自改变用户预期。
+    }
+
+    val trackingUnsupported = if (tryTracking) {
+        PtpConstants.OPERATION_NOT_SUPPORTED
+    } else {
+        null
+    }
+    val moveRc = command(Lab.NK_CHANGE_AF_AREA, intArrayOf(focusX, focusY))
+        ?: return RcTapFocusStartResult(Lab.DEVICE_BUSY, trackingUnsupported, null)
+    if (moveRc != Lab.OK) {
+        return RcTapFocusStartResult(moveRc, trackingUnsupported, null)
+    }
+
+    // Z 30 / SnapBridge 实抓表明 ChangeAfArea 的新坐标需要约 80ms 才被机身采用。
+    pause(80)
+    return RcTapFocusStartResult(
+        moveResponseCode = moveRc,
+        trackingResponseCode = trackingUnsupported,
+        afStartResponseCode = command(Lab.NK_AF_DRIVE, intArrayOf())
+    )
+}
+
+/** 调用方必须持有 focusMutex -> ioMutex；没有活动追踪时不发送冗余命令。 */
+private fun NikonCamera.endSubjectTrackingLocked(deadlineMs: Long): Int? {
+    if (!subjectTrackingActive) return null
+    sendCmd(Lab.NK_END_TRACKING)
+    val response = recvFocusResponse(deadlineMs).first
+    if (
+        response == Lab.OK ||
+        response == PtpConstants.OPERATION_NOT_SUPPORTED ||
+        response == Lab.NK_INVALID_STATUS // 机身侧已经不处于可结束的追踪状态
+    ) {
+        subjectTrackingActive = false
+    }
+    return response
+}
+
+private suspend fun runAfReadyWait(
     startedAt: Long,
     deadlineMs: Long,
+    startResponseCode: Int,
     elapsedRealtime: () -> Long,
     command: suspend (Int) -> Int?,
     pause: suspend (Long) -> Unit
 ): RcAfResult {
-    fun timeoutResult(polls: Int) = RcAfResult(
-        responseCode = Lab.DEVICE_BUSY,
-        polls = polls,
-        elapsedMs = elapsedRealtime() - startedAt,
-        timedOut = true
-    )
-
-    if (elapsedRealtime() >= deadlineMs) {
-        return timeoutResult(polls = 0)
-    }
-    val startRc = command(Lab.NK_AF_DRIVE) ?: return timeoutResult(polls = 0)
-    if (startRc != Lab.OK) {
-        return RcAfResult(startRc, 0, elapsedRealtime() - startedAt, false)
+    if (startResponseCode != Lab.OK) {
+        return RcAfResult(startResponseCode, 0, elapsedRealtime() - startedAt, false)
     }
 
     var polls = 0
     while (true) {
         if (elapsedRealtime() >= deadlineMs) {
-            return timeoutResult(polls)
+            return timedOutAfResult(startedAt, elapsedRealtime(), polls)
         }
-        val readyRc = command(Lab.NK_DEVICE_READY) ?: return timeoutResult(polls)
+        val readyRc = command(Lab.NK_DEVICE_READY)
+            ?: return timedOutAfResult(startedAt, elapsedRealtime(), polls)
         polls++
         if (readyRc != Lab.DEVICE_BUSY) {
             return RcAfResult(
@@ -913,10 +1010,32 @@ internal suspend fun runAfDriveAndWait(
             )
         }
         if (elapsedRealtime() >= deadlineMs) {
-            return timeoutResult(polls)
+            return timedOutAfResult(startedAt, elapsedRealtime(), polls)
         }
         pause(150)
     }
+}
+
+internal suspend fun runAfDriveAndWait(
+    startedAt: Long,
+    deadlineMs: Long,
+    elapsedRealtime: () -> Long,
+    command: suspend (Int) -> Int?,
+    pause: suspend (Long) -> Unit
+): RcAfResult {
+    if (elapsedRealtime() >= deadlineMs) {
+        return timedOutAfResult(startedAt, elapsedRealtime())
+    }
+    val startRc = command(Lab.NK_AF_DRIVE)
+        ?: return timedOutAfResult(startedAt, elapsedRealtime())
+    return runAfReadyWait(
+        startedAt = startedAt,
+        deadlineMs = deadlineMs,
+        startResponseCode = startRc,
+        elapsedRealtime = elapsedRealtime,
+        command = command,
+        pause = pause
+    )
 }
 
 private suspend fun NikonCamera.afDriveAndWait(
@@ -943,25 +1062,128 @@ private suspend fun NikonCamera.afDriveAndWait(
 suspend fun NikonCamera.rcAfDriveAndWait(timeoutMs: Long = 6_000L): RcAfResult =
     focusMutex.withLock {
         val startedAt = SystemClock.elapsedRealtime()
-        afDriveAndWait(startedAt, startedAt + timeoutMs)
+        val deadlineMs = startedAt + timeoutMs
+        val endRc = withContext(Dispatchers.IO) {
+            ioMutex.withLock { endSubjectTrackingLocked(deadlineMs) }
+        }
+        if (endRc != null && subjectTrackingActive) {
+            RcAfResult(endRc, 0, SystemClock.elapsedRealtime() - startedAt, false)
+        } else {
+            afDriveAndWait(startedAt, deadlineMs)
+        }
     }
 
-/** 移动 AF 区域并立即执行一次完整 AF；命令顺序固定，但等待间隔允许 Live View 取帧。 */
+/** 结束当前主体追踪；未处于追踪状态时不发送多余命令。 */
+suspend fun NikonCamera.rcEndSubjectTracking(timeoutMs: Long = 6_000L): Int? =
+    focusMutex.withLock {
+        val deadlineMs = SystemClock.elapsedRealtime() + timeoutMs
+        withContext(Dispatchers.IO) {
+            ioMutex.withLock { endSubjectTrackingLocked(deadlineMs) }
+        }
+    }
+
+/**
+ * 在点击位置启动 Nikon 主体追踪；机身明确不支持 0x9424 时才回退单次点对焦。
+ * 重新点击会先结束旧追踪，避免两个追踪生命周期互相覆盖。
+ */
 suspend fun NikonCamera.rcFocusAt(
-    x: Int,
-    y: Int,
+    trackingX: Int,
+    trackingY: Int,
+    focusX: Int,
+    focusY: Int,
     timeoutMs: Long = 6_000L
 ): RcTapFocusResult = focusMutex.withLock {
     val startedAt = SystemClock.elapsedRealtime()
     val deadlineMs = startedAt + timeoutMs
-    val moveRc = focusCommand(Lab.NK_CHANGE_AF_AREA, deadlineMs, x, y)?.first
-        ?: return@withLock RcTapFocusResult(Lab.DEVICE_BUSY, null)
-    if (moveRc != Lab.OK) RcTapFocusResult(moveRc, null)
-    else {
-        // 实抓三次均为 ChangeAfArea OK 后 80–84ms 再发 AfDrive；给相机时间
-        // 把新坐标应用到 AF 区域，避免驱动仍落在上一个点位。
-        delay(80)
-        RcTapFocusResult(moveRc, afDriveAndWait(startedAt, deadlineMs))
+    val (endTrackingRc, start) = withContext(Dispatchers.IO) {
+        ioMutex.withLock {
+            val endRc = endSubjectTrackingLocked(deadlineMs)
+            val startResult = if (subjectTrackingActive) {
+                null
+            } else {
+                runTapFocusStart(
+                    trackingX = trackingX,
+                    trackingY = trackingY,
+                    focusX = focusX,
+                    focusY = focusY,
+                    tryTracking = subjectTrackingSupported != false,
+                    command = { code, params ->
+                        focusCommandLocked(code, deadlineMs, *params)?.first
+                    },
+                    pause = { durationMs -> delay(durationMs) }
+                )
+            }
+            endRc to startResult
+        }
+    }
+    if (start == null) {
+        return@withLock RcTapFocusResult(
+            endTrackingResponseCode = endTrackingRc,
+            moveResponseCode = null,
+            trackingResponseCode = null,
+            trackingStarted = false,
+            afResult = null
+        )
+    }
+    when (start.trackingResponseCode) {
+        Lab.OK -> {
+            subjectTrackingSupported = true
+            subjectTrackingActive = true
+        }
+        PtpConstants.OPERATION_NOT_SUPPORTED -> subjectTrackingSupported = false
+    }
+    val startRc = start.afStartResponseCode
+    suspend fun waitForStartedAf(): RcAfResult = if (startRc == null) {
+        timedOutAfResult(startedAt, SystemClock.elapsedRealtime())
+    } else {
+        runAfReadyWait(
+            startedAt = startedAt,
+            deadlineMs = deadlineMs,
+            startResponseCode = startRc,
+            elapsedRealtime = SystemClock::elapsedRealtime,
+            command = { code -> focusCommand(code, deadlineMs)?.first },
+            pause = { durationMs -> delay(durationMs) }
+        )
+    }
+    if (start.trackingResponseCode == Lab.OK) {
+        RcTapFocusResult(
+            endTrackingResponseCode = endTrackingRc,
+            moveResponseCode = start.moveResponseCode,
+            trackingResponseCode = start.trackingResponseCode,
+            trackingStarted = true,
+            afResult = waitForStartedAf()
+        )
+    } else if (start.moveResponseCode != null && start.moveResponseCode != Lab.OK) {
+        RcTapFocusResult(
+            endTrackingResponseCode = endTrackingRc,
+            moveResponseCode = start.moveResponseCode,
+            trackingResponseCode = start.trackingResponseCode,
+            trackingStarted = false,
+            afResult = null
+        )
+    } else if (startRc == null) {
+        RcTapFocusResult(
+            endTrackingResponseCode = endTrackingRc,
+            moveResponseCode = start.moveResponseCode,
+            trackingResponseCode = start.trackingResponseCode,
+            trackingStarted = false,
+            afResult = if (
+                start.trackingResponseCode == null ||
+                start.trackingResponseCode == PtpConstants.OPERATION_NOT_SUPPORTED
+            ) {
+                timedOutAfResult(startedAt, SystemClock.elapsedRealtime())
+            } else {
+                null
+            }
+        )
+    } else {
+        RcTapFocusResult(
+            endTrackingResponseCode = endTrackingRc,
+            moveResponseCode = start.moveResponseCode,
+            trackingResponseCode = start.trackingResponseCode,
+            trackingStarted = false,
+            afResult = waitForStartedAf()
+        )
     }
 }
 
@@ -1289,7 +1511,27 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
 }
 
 suspend fun NikonCamera.labEndLiveView(): Int {
-    val rc = runCatching { labCommand(Lab.NK_END_LIVE_VIEW).first }.getOrDefault(-1)
+    val rc = focusMutex.withLock {
+        ioMutex.withLock {
+            withContext(Dispatchers.IO) {
+                // EndLiveView 会隐式终止画面，但不能依赖它替我们闭合追踪会话；否则下次
+                // 开 LV 时机身仍可能保留旧目标。错误响应不阻止继续关 LV；但若一次事务
+                // 没收完整响应，流边界已不可信，必须中止连接，不能再发下一条命令误读迟到包。
+                val deadlineMs = SystemClock.elapsedRealtime() + 6_000L
+                try {
+                    endSubjectTrackingLocked(deadlineMs)
+                    subjectTrackingActive = false
+                    focusCommandLocked(Lab.NK_END_LIVE_VIEW, deadlineMs)?.first ?: -1
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    subjectTrackingActive = false
+                    abortProtocolTransport()
+                    -1
+                }
+            }
+        }
+    }
     liveViewReadyAtElapsedMs = 0L
     return rc
 }
@@ -1358,6 +1600,306 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
         }
     }
 
+internal fun trackingMotionDetected(frames: List<LiveViewFocusFrame>): Boolean {
+    if (frames.size < 3) return false
+    val xRange = frames.maxOf { it.centerX } - frames.minOf { it.centerX }
+    val yRange = frames.maxOf { it.centerY } - frames.minOf { it.centerY }
+    // 小于约 1.5% 画幅的变化可能只是机身框坐标取整/轻微抖动，不能作为追踪成立证据。
+    return xRange >= 0.015f || yRange >= 0.015f
+}
+
+private data class TrackingProbeCapture(
+    val packets: List<LiveViewPacket>,
+    val selectedFrames: List<LiveViewFocusFrame>
+) {
+    val motionConfirmed: Boolean get() = trackingMotionDetected(selectedFrames)
+}
+
+private data class TrackingProbeVariantResult(
+    val name: String,
+    val commands: List<String>,
+    val capture: TrackingProbeCapture
+)
+
+private fun trackingHeaderDiff(
+    baseline: ByteArray?,
+    packets: List<LiveViewPacket>
+): String {
+    if (baseline == null || packets.isEmpty()) return "<unavailable>"
+    val headerSize = minOf(baseline.size, packets.minOf { it.jpegOffset })
+    val changes = buildList {
+        for (offset in 0 until headerSize) {
+            val before = baseline[offset].toInt() and 0xFF
+            val after = packets.map { it.bytes[offset].toInt() and 0xFF }.toSet()
+            if (after.size != 1 || before !in after) {
+                add(
+                    "+$offset:%02X>%s".format(
+                        before,
+                        after.take(6).joinToString("/") { "%02X".format(it) } +
+                            if (after.size > 6) "/..." else ""
+                    )
+                )
+            }
+        }
+    }
+    if (changes.isEmpty()) return "<none>"
+    return changes.take(80).joinToString(" ") +
+        if (changes.size > 80) " ... (${changes.size} offsets total)" else ""
+}
+
+/**
+ * Read the focus-mode context before live view starts, keeping the timed tracking section limited
+ * to live-view frames and tracking commands.
+ */
+private suspend fun NikonCamera.logTrackingFocusProperties(
+    log: suspend (String) -> Unit
+) {
+    suspend fun read(prop: Int, name: String) {
+        val (descRc, desc) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
+        val (valueRc, value) = labCommand(Lab.GET_DEVICE_PROP_VALUE, prop)
+        val parsedDesc = if (descRc == Lab.OK && desc != null) {
+            runCatching { parsePropDesc(prop, desc) }.getOrElse { "parse-failed:${it.message}" }
+        } else {
+            "unavailable"
+        }
+        log(
+            "TRACKING PROP ${hex4(prop)} $name desc=${hex4(descRc)} $parsedDesc " +
+                "value=${hex4(valueRc)} raw=${probeHex(value)}"
+        )
+    }
+
+    read(Lab.PROP_NK_STILL_FOCUS_METERING_MODE, "StillFocusMeteringMode")
+    read(Lab.PROP_NK_STILL_FOCUS_MODE, "StillFocusMode")
+    read(Lab.PROP_FOCUS_MODE, "FocusMode(std)")
+}
+
+/**
+ * 完整探测中的主体追踪专检。这里故意尝试几种参数/顺序组合，但只使用机身自己
+ * 广告的 StartTracking/EndTracking/ChangeAfArea/AfDrive。StartTracking 使用增强帧
+ * +16/+18 的完整坐标系，ChangeAfArea 使用 +28/+30 的 AF 网格。仅在 StartTracking
+ * 明确成功后发送 EndTracking，避免无意义的状态命令；
+ * finally 只清理已经开始的追踪状态。每条协议事务自行获取 focusMutex，外层不得重复持锁。
+ *
+ * 判定标准不是响应码：至少三帧带相机 AF 框，且框中心跨帧移动超过 1.5% 画幅，
+ * 才标记 CAMERA_FRAME_MOTION_CONFIRMED。用户应在这段探测期间缓慢移动中央主体。
+ */
+private suspend fun NikonCamera.runSubjectTrackingProbe(
+    advertisedOps: Set<Int>,
+    log: suspend (String) -> Unit,
+    onFrame: suspend (ByteArray) -> Unit
+): List<TrackingProbeVariantResult> {
+    log("--- subject tracking controlled probe ---")
+    log("ACTION: keep a textured subject near the center and move it slowly until this section ends.")
+    log("SUCCESS RULE: an OK response alone is not success; camera AF-frame motion must be observed.")
+
+    val required = setOf(Lab.NK_CHANGE_AF_AREA, Lab.NK_START_TRACKING, Lab.NK_END_TRACKING)
+    val missing = required.filterNot { it in advertisedOps }
+    if (missing.isNotEmpty()) {
+        log("TRACKING SKIP missing advertised ops=${missing.joinToString(" ") { hex4(it) }}")
+        return emptyList()
+    }
+
+    suspend fun grabPackets(count: Int): TrackingProbeCapture {
+        val packets = mutableListOf<LiveViewPacket>()
+        var attempts = 0
+        while (packets.size < count && attempts < count * 4) {
+            attempts++
+            val packet = labGrabFrame()
+            if (packet == null) {
+                delay(40)
+                continue
+            }
+            packets += packet
+            if (packets.size == 1 || packets.size % 4 == 0) {
+                onFrame(packet.bytes.copyOfRange(packet.jpegOffset, packet.bytes.size))
+            }
+        }
+        return TrackingProbeCapture(
+            packets = packets,
+            selectedFrames = packets.mapNotNull { it.metadata?.selectedFocusFrame }
+        )
+    }
+
+    var trackingMayBeActive = false
+
+    suspend fun runTrackingCommand(
+        label: String,
+        code: Int,
+        vararg params: Int
+    ): Int {
+        log(
+            "TRACKING COMMAND $label send op=${hex4(code)} params=" +
+                params.joinToString(",", prefix = "[", postfix = "]")
+        )
+        val rc = labCommand(code, *params).first
+        if (code == Lab.NK_START_TRACKING && rc == Lab.OK) {
+            trackingMayBeActive = true
+            subjectTrackingActive = true
+        }
+        log("TRACKING COMMAND $label resp=${hex4(rc)}")
+        return rc
+    }
+
+    suspend fun endTracking(label: String): Int? {
+        if (!trackingMayBeActive) {
+            log("TRACKING $label EndTracking SKIP reason=not-started")
+            return null
+        }
+        log("TRACKING COMMAND $label EndTracking send op=${hex4(Lab.NK_END_TRACKING)}")
+        val rc = labCommand(Lab.NK_END_TRACKING).first
+        log("TRACKING $label EndTracking resp=${hex4(rc)}")
+        if (rc == Lab.OK) {
+            trackingMayBeActive = false
+            subjectTrackingActive = false
+        }
+        delay(160)
+        return rc
+    }
+
+    val baseline = grabPackets(5)
+    val first = baseline.packets.firstOrNull()
+    val trackingWidth = first?.metadata?.trackingCoordinateWidth
+    val trackingHeight = first?.metadata?.trackingCoordinateHeight
+    val focusWidth = first?.metadata?.focusCoordinateWidth
+    val focusHeight = first?.metadata?.focusCoordinateHeight
+    if (
+        trackingWidth == null || trackingHeight == null ||
+        focusWidth == null || focusHeight == null ||
+        trackingWidth < 2 || trackingHeight < 2 || focusWidth < 2 || focusHeight < 2
+    ) {
+        log(
+            "TRACKING SKIP enhanced AF coordinate grid unavailable; " +
+                "frames=${baseline.packets.size} metadata=${baseline.packets.count { it.metadata != null }}"
+        )
+        return emptyList()
+    }
+    val trackingX = (trackingWidth - 1) / 2
+    val trackingY = (trackingHeight - 1) / 2
+    val focusX = (focusWidth - 1) / 2
+    val focusY = (focusHeight - 1) / 2
+    val baselinePacket = checkNotNull(first)
+    val baselineHeader = baselinePacket.bytes.copyOfRange(0, baselinePacket.jpegOffset)
+    log(
+        "TRACKING baseline frames=${baseline.packets.size} selected=${baseline.selectedFrames.size} " +
+            "trackingGrid=${trackingWidth}x$trackingHeight target=($trackingX,$trackingY) " +
+            "focusGrid=${focusWidth}x$focusHeight target=($focusX,$focusY)"
+    )
+    delay(1_200)
+
+    val results = mutableListOf<TrackingProbeVariantResult>()
+
+    suspend fun runVariant(
+        name: String,
+        commands: suspend (MutableList<String>) -> Unit
+    ) {
+        val commandLog = mutableListOf<String>()
+        commands(commandLog)
+        val capture = grabPackets(18)
+        val centers = capture.selectedFrames
+        val xRange = centers.takeIf { it.isNotEmpty() }
+            ?.let { it.maxOf { f -> f.centerX } - it.minOf { f -> f.centerX } }
+        val yRange = centers.takeIf { it.isNotEmpty() }
+            ?.let { it.maxOf { f -> f.centerY } - it.minOf { f -> f.centerY } }
+        val frameCounts = capture.packets.mapNotNull { packet ->
+            packet.bytes.takeIf { packet.jpegOffset > 45 }?.get(44)?.toInt()?.and(0xFF)
+        }.groupingBy { it }.eachCount()
+        val selectedIndices = capture.packets.mapNotNull { packet ->
+            packet.bytes.takeIf { packet.jpegOffset > 45 }?.get(45)?.toInt()?.and(0xFF)
+        }.toSet()
+        log(
+            "TRACKING RESULT $name commands=${commandLog.joinToString(",")} " +
+                "frames=${capture.packets.size} metadata=${capture.packets.count { it.metadata != null }} " +
+                "selected=${centers.size} frameCounts=$frameCounts selectedIndices=$selectedIndices " +
+                "range=${xRange?.let { "%.4f".format(it) } ?: "n/a"}," +
+                "${yRange?.let { "%.4f".format(it) } ?: "n/a"} verdict=" +
+                if (capture.motionConfirmed) "CAMERA_FRAME_MOTION_CONFIRMED" else "NOT_CONFIRMED"
+        )
+        log("TRACKING HEADER_DIFF $name ${trackingHeaderDiff(baselineHeader, capture.packets)}")
+        results += TrackingProbeVariantResult(name, commandLog, capture)
+        val cleanupRc = endTracking("$name/cleanup")
+        check(cleanupRc == null || cleanupRc == Lab.OK) {
+            "$name EndTracking failed: ${hex4(checkNotNull(cleanupRc))}"
+        }
+    }
+
+    try {
+        runVariant("MOVE_THEN_START") { commands ->
+            val move = runTrackingCommand(
+                "MOVE_THEN_START/ChangeAfArea",
+                Lab.NK_CHANGE_AF_AREA,
+                focusX,
+                focusY
+            )
+            commands += "ChangeAfArea=${hex4(move)}"
+            delay(80)
+            val start = runTrackingCommand(
+                "MOVE_THEN_START/StartTracking",
+                Lab.NK_START_TRACKING
+            )
+            commands += "StartTracking()=${hex4(start)}"
+        }
+        runVariant("START_THEN_MOVE") { commands ->
+            val start = runTrackingCommand(
+                "START_THEN_MOVE/StartTracking",
+                Lab.NK_START_TRACKING
+            )
+            commands += "StartTracking()=${hex4(start)}"
+            delay(80)
+            val move = runTrackingCommand(
+                "START_THEN_MOVE/ChangeAfArea",
+                Lab.NK_CHANGE_AF_AREA,
+                focusX,
+                focusY
+            )
+            commands += "ChangeAfArea=${hex4(move)}"
+        }
+        runVariant("START_WITH_XY") { commands ->
+            val start = runTrackingCommand(
+                "START_WITH_XY/StartTracking",
+                Lab.NK_START_TRACKING,
+                trackingX,
+                trackingY
+            )
+            commands += "StartTracking(x,y)=${hex4(start)}"
+        }
+        runVariant("MOVE_START_AF") { commands ->
+            val move = runTrackingCommand(
+                "MOVE_START_AF/ChangeAfArea",
+                Lab.NK_CHANGE_AF_AREA,
+                focusX,
+                focusY
+            )
+            commands += "ChangeAfArea=${hex4(move)}"
+            delay(80)
+            val start = runTrackingCommand(
+                "MOVE_START_AF/StartTracking",
+                Lab.NK_START_TRACKING
+            )
+            commands += "StartTracking()=${hex4(start)}"
+            if (Lab.NK_AF_DRIVE in advertisedOps) {
+                delay(80)
+                val af = runTrackingCommand("MOVE_START_AF/AfDrive", Lab.NK_AF_DRIVE)
+                commands += "AfDrive=${hex4(af)}"
+            } else {
+                commands += "AfDrive=NOT_ADVERTISED"
+            }
+        }
+    } finally {
+        withContext(NonCancellable) {
+            if (trackingMayBeActive) {
+                runCatching { endTracking("final-cleanup") }
+            }
+        }
+    }
+
+    val confirmed = results.filter { it.capture.motionConfirmed }.map { it.name }
+    log(
+        "TRACKING VERDICT confirmed=" +
+            if (confirmed.isEmpty()) "<none>" else confirmed.joinToString(",")
+    )
+    return results
+}
+
 // ============================ 一次性完整探测 ============================
 
 /**
@@ -1379,9 +1921,10 @@ suspend fun NikonCamera.runLabProbe(
     onFrame: suspend (ByteArray) -> Unit
 ) {
     val t0 = System.currentTimeMillis()
-    log("=== ZTransfer capability probe v4 ===")
+    log("=== ZTransfer capability probe v9 ===")
     log(
-        "scope=u32-vendor-codes+u32-property-params+live-view-digital-zoom-roundtrip " +
+        "scope=priority-subject-tracking-command-matrix+camera-frame-proof+" +
+            "u32-vendor-codes+u32-property-params+live-view-digital-zoom-roundtrip " +
             "mode=zoom-only-temporary-writes-with-restore"
     )
 
@@ -1476,6 +2019,47 @@ suspend fun NikonCamera.runLabProbe(
     )
 
     // ---- 4. 所有已广告属性 + App 已知隐藏属性的 GetDevicePropDesc/GetDevicePropValue ----
+    // Subject tracking is why this probe is currently being run. Keep it ahead of the exhaustive
+    // property survey: that survey can take several minutes on bodies with hundreds of vendor
+    // properties, so a report copied before completion must still contain the tracking evidence.
+    var lvOk = false
+    var trackingProbeResults: List<TrackingProbeVariantResult> = emptyList()
+    log("--- priority subject-tracking live view test ---")
+    if (Lab.NK_START_LIVE_VIEW !in ops) {
+        log("StartLiveView not advertised - trying anyway")
+    }
+    logTrackingFocusProperties(log)
+    if (labStartLiveView(log)) {
+        lvOk = true
+        try {
+            trackingProbeResults = runSubjectTrackingProbe(ops, log, onFrame)
+        } finally {
+            withContext(NonCancellable) {
+                val endRc = runCatching { labEndLiveView() }.getOrNull()
+                log(
+                    if (endRc != null) {
+                        "Priority tracking EndLiveView(0x9202) resp=${hex4(endRc)}"
+                    } else {
+                        "!! Priority tracking EndLiveView(0x9202) failed"
+                    }
+                )
+            }
+        }
+    }
+    val earlyConfirmedTracking = trackingProbeResults
+        .filter { it.capture.motionConfirmed }
+        .joinToString(",") { it.name }
+    log(
+        "PRIORITY TRACKING SUMMARY: " +
+            if (earlyConfirmedTracking.isNotEmpty()) {
+                "CAMERA_FRAME_MOTION_CONFIRMED via=$earlyConfirmedTracking"
+            } else if (trackingProbeResults.isNotEmpty()) {
+                "NOT_CONFIRMED (inspect TRACKING RESULT/HEADER_DIFF above)"
+            } else {
+                "NOT_TESTED"
+            }
+    )
+
     val probeProps = (advertised + Lab.INTEREST_PROPS.keys).sorted()
     var descOkCount = 0
     var valueOkCount = 0
@@ -1839,7 +2423,6 @@ suspend fun NikonCamera.runLabProbe(
     // ---- 8. Live View 试取帧 ----
     log("--- live view test ---")
     if (Lab.NK_START_LIVE_VIEW !in ops) log("StartLiveView not advertised - trying anyway")
-    var lvOk = false
     if (labStartLiveView(log)) {
         lvOk = true
         try {
@@ -1902,6 +2485,19 @@ suspend fun NikonCamera.runLabProbe(
             }
     )
     log("live view:      ${if (lvOk) "YES" else "NO"}")
+    val confirmedTracking = trackingProbeResults
+        .filter { it.capture.motionConfirmed }
+        .joinToString(",") { it.name }
+    log(
+        "subject tracking: " +
+            if (confirmedTracking.isNotEmpty()) {
+                "CAMERA_FRAME_MOTION_CONFIRMED via=$confirmedTracking"
+            } else if (trackingProbeResults.isNotEmpty()) {
+                "NOT_CONFIRMED (inspect TRACKING RESULT/HEADER_DIFF)"
+            } else {
+                "NOT_TESTED"
+            }
+    )
     log(
         "live-view zoom: " +
             if (digitalZoomDesc[Lab.PROP_NK_LV_IMAGE_ZOOM_RATIO]?.startsWith("OK ") == true) {
