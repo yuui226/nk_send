@@ -422,7 +422,7 @@
     <string name="local_photo_choose_short">選擇圖片</string>
     <string name="local_photo_replace">更換圖片</string>
     <string name="local_photo_preview_prompt">選擇照片後在這裡預覽效果</string>
-    <string name="local_photo_same_folder_hint">成片將儲存到原照片所在目錄</string>
+    <string name="local_photo_same_folder_hint">優先儲存到原目錄；無法寫入時自動儲存到 Pictures/ZTransfer</string>
     <string name="local_photo_generate">產生並儲存</string>
     <string name="local_photo_generating">正在產生…</string>
     <string name="local_photo_saved">已儲存：%1$s</string>

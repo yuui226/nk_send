@@ -424,7 +424,7 @@
     <string name="local_photo_choose_short">Choose photo</string>
     <string name="local_photo_replace">Replace photo</string>
     <string name="local_photo_preview_prompt">Choose a photo to preview the result</string>
-    <string name="local_photo_same_folder_hint">The result will be saved beside the original</string>
+    <string name="local_photo_same_folder_hint">Saved beside the original, or to Pictures/ZTransfer when needed</string>
     <string name="local_photo_generate">Generate and save</string>
     <string name="local_photo_generating">Generating…</string>
     <string name="local_photo_saved">Saved: %1$s</string>

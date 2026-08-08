@@ -43,6 +43,7 @@ import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.ResumeUnavailableException
+import com.ztransfer.protocol.endToEndBytesPerSecond
 import com.ztransfer.service.TransferService
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.ThemeMode
@@ -113,7 +114,6 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
     val isTransferring: Boolean = false,
-    val currentSpeed: Long = 0,
     val transferDirUri: String? = null,
     /** 导出目录内完整文件：归一化文件名 -> 已有大小集合，用于相机列表直接标记已传照片。 */
     val existingExportFiles: Map<String, Set<Long>> = emptyMap(),
@@ -1168,7 +1168,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             fileDocUri = partFile.uri
                             log { "DL_RESUME: ${task.file.fileName} partSize=$partSize resumeOffset=$resumeOffset" }
                         } else {
-                            // 不足一个续传块（当前 2MB）或异常半成品，删掉重建。
+                            // 不足一个续传块（当前 4MB）或异常半成品，删掉重建。
                             deleteQuietly(partFile.uri)
                         }
                     }
@@ -1211,13 +1211,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 camera.downloadToFile(
                                     handle, out,
                                     onProgress = { progress ->
-                                        val speed = if (progress.elapsed > 0) {
-                                            ((progress.downloaded - resumeOffset).coerceAtLeast(0L) /
-                                                progress.elapsed).toLong()
-                                        } else 0
+                                        val speed = progress.bytesPerSecond
                                         _state.update { state ->
                                             state.copy(
-                                                currentSpeed = speed,
                                                 tasks = state.tasks.map { t ->
                                                     if (t.taskId == taskId && t.status == TransferStatus.TRANSFERING) {
                                                         t.copy(
@@ -1295,6 +1291,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     // 让路的块间时间）；这里仍是正式文件已落盘并完成改名/复制后的完成点。
                                     val elapsed = android.os.SystemClock.elapsedRealtime() -
                                         stats.startedAtElapsedMs
+                                    val endToEndMBps = endToEndBytesPerSecond(
+                                        transferredBytes = stats.transferredBytes,
+                                        elapsedMs = elapsed,
+                                    ) / (1024f * 1024f)
                                     // 免费额度按"真正传输完成"计数(此处是唯一完成点;
                                     // 跳过/续传改名捷径都不经过这里,不计)。
                                     LicenseManager.recordTransferDone()
@@ -1302,7 +1302,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         it.copy(
                                             status = TransferStatus.COMPLETED, progress = 1f,
                                             downloaded = stats.bytes, speed = 0,
-                                            downloadMBps = stats.mbps,
+                                            downloadMBps = endToEndMBps,
                                             elapsedMs = elapsed,
                                             isGeneratingFrame = shouldGenerateFrame,
                                         )
@@ -1407,7 +1407,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 仅当本协程仍是当前传输 job 时才收尾，避免误停新队列的前台服务/误清传输
                     // 状态（旧队列收尾期间新队列可能已启动并接管 transferJob）。
                     if (transferJob === self) {
-                        _state.update { it.copy(isTransferring = false, currentSpeed = 0) }
+                        _state.update { it.copy(isTransferring = false) }
                         stopTransferServiceIfIdle()
                     }
                 }

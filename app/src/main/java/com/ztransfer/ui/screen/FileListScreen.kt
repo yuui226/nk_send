@@ -171,6 +171,15 @@ internal sealed interface ThumbnailGridItem {
 /** 展开后的队列胶囊内容：完成短标 / 计数（速度+剩余数）；入口图标由主题按钮独立绘制。 */
 private enum class PillMode { DONE, COUNTING }
 
+internal fun queuePillDisplayRemaining(actualRemaining: Int, heldCount: Int): Int {
+    val actual = actualRemaining.coerceAtLeast(0)
+    if (actual == 0) return 0
+    val afterFlightHold = (actual - heldCount.coerceAtLeast(0)).coerceAtLeast(0)
+    // If the animation hold covers every remaining task, showing zero would falsely imply that
+    // the queue completed. Prefer the real count until the flight releases its hold.
+    return afterFlightHold.takeIf { it > 0 } ?: actual
+}
+
 /** 队列入口收起为普通按钮时使用固定材质种子，保证木纹/金属微纹在重组后保持一致。 */
 private const val QUEUE_ENTRY_BUTTON_TEXTURE_SEED = 0x2A71E001
 
@@ -1334,9 +1343,18 @@ fun QueuePill(
     heldCount: Int = 0
 ) {
     val colors = AppTheme.colors
-    val remaining = (transferState.remainingCount - heldCount).coerceAtLeast(0)
-    val allDone = remaining == 0
+    val actualRemaining = transferState.remainingCount
+    val remaining = queuePillDisplayRemaining(actualRemaining, heldCount)
+    // Flight animation bookkeeping may delay the displayed count, but it must never turn a
+    // real non-empty queue into the completed state and collapse the pill.
+    val allDone = actualRemaining == 0
     val transferring = transferState.isTransferring
+    // The pill reads the active task directly, just like the queue screen. Keeping a second
+    // independently updated speed value can leave the two surfaces briefly inconsistent.
+    val activeSpeed = transferState.tasks
+        .firstOrNull { it.status == TransferStatus.TRANSFERING }
+        ?.speed
+        ?: 0L
     val hasActive = transferState.tasks.any {
         it.status == TransferStatus.TRANSFERING || it.isGeneratingFrame
     }
@@ -1393,10 +1411,19 @@ fun QueuePill(
     // 不会因为图标态改用 GlassButton 而丢掉原先的胶囊变形手感。
     val density = LocalDensity.current
     var contentWidthPx by remember { mutableStateOf(0) }
+    var activeQueueMaxWidthPx by remember { mutableStateOf(0) }
+    LaunchedEffect(allDone) {
+        if (allDone) activeQueueMaxWidthPx = 0
+    }
     val collapsedWidthPx = with(density) { 46.dp.toPx() } // 22dp 图标 + 左右各 12dp
     val widthAnim = remember { Animatable(0f) }
     var firstMeasure by remember { mutableStateOf(true) }
-    val targetWidthPx = if (collapsedToIcon) collapsedWidthPx else contentWidthPx.toFloat()
+    val stableContentWidthPx = if (allDone) {
+        contentWidthPx
+    } else {
+        maxOf(contentWidthPx, activeQueueMaxWidthPx)
+    }
+    val targetWidthPx = if (collapsedToIcon) collapsedWidthPx else stableContentWidthPx.toFloat()
     LaunchedEffect(targetWidthPx) {
         if (targetWidthPx > 0f) {
             if (firstMeasure) {
@@ -1494,7 +1521,12 @@ fun QueuePill(
 
             // 3) 内容：以自然宽度测量(unbounded)、靠右对齐；宽度动画滞后时左侧溢出被圆角裁掉。
             Box(modifier = Modifier.wrapContentWidth(Alignment.End, unbounded = true)) {
-                Box(modifier = Modifier.onGloballyPositioned { contentWidthPx = it.size.width }) {
+                Box(modifier = Modifier.onGloballyPositioned {
+                    contentWidthPx = it.size.width
+                    if (!allDone && it.size.width > activeQueueMaxWidthPx) {
+                        activeQueueMaxWidthPx = it.size.width
+                    }
+                }) {
                     // 胶囊内部的 Done / 计数切换用交叉淡化 + 轻微缩放过渡，不硬切。
                     // 尺寸动画交给外层的弹性宽度弹簧（snap 禁用 AnimatedContent 自带的尺寸
                     // 动画，避免两套叠加）；计数态内部的数字/速度更新不触发转场，原地刷新。
@@ -1535,9 +1567,9 @@ fun QueuePill(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     // 速度在前（仅传输且有速度时显示）。tnum：等宽数字，位数相同则宽度恒定。
-                                    if (transferring && transferState.currentSpeed > 0) {
+                                    if (transferring && activeSpeed > 0) {
                                         Text(
-                                            text = formatSpeed(transferState.currentSpeed),
+                                            text = formatSpeed(activeSpeed),
                                             style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                             color = colors.accentBlue,
                                             fontWeight = FontWeight.Bold

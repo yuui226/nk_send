@@ -1,10 +1,42 @@
 package com.ztransfer.frame
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhotoFrameExporterTest {
+    @Test
+    fun localPhotoOutputRecognizesStandardAndRestrictedImageDirectories() {
+        assertTrue(isStandardImageRelativePath("DCIM/Camera/"))
+        assertTrue(isStandardImageRelativePath("pictures/Screenshots"))
+        assertTrue(!isStandardImageRelativePath("Download/ZTransfer"))
+        assertTrue(!isStandardImageRelativePath("CameraImports"))
+
+        assertTrue(canCreateDerivedImageInOriginalPath("DCIM/Camera", false, 29))
+        assertTrue(!canCreateDerivedImageInOriginalPath("Download/ZTransfer", true, 29))
+        assertTrue(!canCreateDerivedImageInOriginalPath("Download/ZTransfer", false, 30))
+        assertTrue(canCreateDerivedImageInOriginalPath("Download/ZTransfer", true, 30))
+        assertEquals("Pictures/ZTransfer", LOCAL_PHOTO_FALLBACK_RELATIVE_PATH)
+    }
+
+    @Test
+    fun localPhotoOutputNeverUsesTheSyntheticExternalVolumeForInsertion() {
+        val writable = setOf("external_primary", "1234-5678")
+
+        assertEquals(
+            "external_primary",
+            resolveWritableMediaVolume("external", "external_primary", writable),
+        )
+        assertEquals(
+            "1234-5678",
+            resolveWritableMediaVolume("1234-5678", "external", writable),
+        )
+        assertNull(resolveWritableMediaVolume("external", "external", writable))
+        assertEquals("external_primary", defaultWritableMediaVolume(writable))
+        assertEquals("1234-5678", defaultWritableMediaVolume(setOf("1234-5678")))
+    }
+
     @Test
     fun supportedFrameSourcesIncludeJpegAndPngOnly() {
         assertTrue(isSupportedPhotoFrameSourceExtension(".jpg"))

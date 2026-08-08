@@ -20,9 +20,11 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import androidx.core.content.res.ResourcesCompat
 import com.ztransfer.R
@@ -214,17 +216,22 @@ data class PhotoFrameExportResult(
     val displayName: String,
 )
 
+internal const val LOCAL_PHOTO_FALLBACK_RELATIVE_PATH = "Pictures/ZTransfer"
+private const val PHOTO_FRAME_EXPORT_TAG = "PhotoFrameExporter"
+
 internal data class PhotoFrameDestination(
     val directoryUri: Uri,
     val occupiedNames: MutableSet<String>,
 )
 
-/** A phone photo together with the MediaStore album in which derived photos must be saved. */
+/** A phone photo together with its preferred MediaStore album and a reliable fallback album. */
 internal data class PhotoFrameMediaStoreSource(
     val sourceUri: Uri,
     val displayName: String,
     val collectionUri: Uri,
-    val relativePath: String,
+    val fallbackCollectionUri: Uri,
+    val relativePath: String?,
+    val relatedMediaUri: Uri?,
     val occupiedNames: MutableSet<String>,
 )
 
@@ -233,6 +240,38 @@ private data class PhotoFrameMediaStoreRow(
     val relativePath: String?,
     val volumeName: String?,
 )
+
+internal fun resolveWritableMediaVolume(
+    reportedVolume: String?,
+    uriVolume: String?,
+    writableVolumes: Set<String>,
+): String? = sequenceOf(reportedVolume, uriVolume)
+    .filterNotNull()
+    .mapNotNull { candidate ->
+        writableVolumes.firstOrNull { it.equals(candidate, ignoreCase = true) }
+    }
+    .firstOrNull()
+
+internal fun defaultWritableMediaVolume(writableVolumes: Set<String>): String? =
+    writableVolumes.firstOrNull {
+        it.equals(MediaStore.VOLUME_EXTERNAL_PRIMARY, ignoreCase = true)
+    } ?: writableVolumes.sorted().firstOrNull()
+
+internal fun isStandardImageRelativePath(relativePath: String): Boolean {
+    val primaryDirectory = relativePath
+        .trimStart('/', '\\')
+        .substringBefore('/')
+        .substringBefore('\\')
+    return primaryDirectory.equals("DCIM", ignoreCase = true) ||
+        primaryDirectory.equals("Pictures", ignoreCase = true)
+}
+
+internal fun canCreateDerivedImageInOriginalPath(
+    relativePath: String,
+    hasRelatedMediaUri: Boolean,
+    sdkInt: Int,
+): Boolean = isStandardImageRelativePath(relativePath) ||
+    (sdkInt >= Build.VERSION_CODES.R && hasRelatedMediaUri)
 
 internal data class PhotoFrameLayout(
     val canvasWidth: Int,
@@ -390,11 +429,16 @@ object PhotoFrameExporter {
         } catch (outOfMemory: OutOfMemoryError) {
             Result.failure(outOfMemory)
         } catch (error: Exception) {
+            Log.e(
+                PHOTO_FRAME_EXPORT_TAG,
+                "Local photo export failed (authority=${source.sourceUri.authority})",
+                error,
+            )
             Result.failure(error)
         }
     }
 
-    /** Resolves the selected image and the exact MediaStore directory needed for same-album output. */
+    /** Resolves the source album when possible and always prepares a specific writable fallback. */
     @SuppressLint("NewApi") // The first statement rejects pre-Q devices before any Q API runs.
     internal fun prepareMediaStoreSource(
         context: Context,
@@ -412,44 +456,72 @@ object PhotoFrameExporter {
                 ?.let(::add)
             resolveMediaDocumentUri(sourceUri)?.takeIf { it != sourceUri }?.let(::add)
         }.distinct()
-        val row = lookupUris.asSequence()
-            .mapNotNull { lookupUri -> queryMediaStoreRow(resolver, lookupUri) }
-            .firstOrNull { !it.relativePath.isNullOrBlank() }
-            ?: error("The selected photo is not stored in a writable phone album")
-        val relativePath = row.relativePath
-            ?.takeIf { it.isNotBlank() }
-            ?: error("Cannot determine the selected photo's album")
-        val volumeName = row.volumeName
-            ?.takeIf { it.isNotBlank() }
-            ?: "external_primary"
+        val resolvedRows = lookupUris.mapNotNull { lookupUri ->
+            queryMediaStoreRow(resolver, lookupUri)?.let { row -> lookupUri to row }
+        }
+        val resolved = resolvedRows.firstOrNull { (lookupUri, row) ->
+            lookupUri.authority == MediaStore.AUTHORITY && !row.relativePath.isNullOrBlank()
+        } ?: resolvedRows.firstOrNull { (_, row) -> !row.relativePath.isNullOrBlank() }
+        val relatedMediaUri = resolvedRows.firstOrNull { (lookupUri, _) ->
+            lookupUri.authority == MediaStore.AUTHORITY
+        }?.first
+        val writableVolumes = runCatching { MediaStore.getExternalVolumeNames(context) }
+            .getOrDefault(emptySet())
+        val reportedVolume = resolved?.second?.volumeName
+        val uriVolume = relatedMediaUri?.pathSegments?.firstOrNull()
+        val sourceVolume = resolveWritableMediaVolume(
+            reportedVolume = reportedVolume,
+            uriVolume = uriVolume,
+            writableVolumes = writableVolumes,
+        )
+        val fallbackVolumeName = defaultWritableMediaVolume(writableVolumes)
+            ?: MediaStore.VOLUME_EXTERNAL_PRIMARY
+        val volumeName = sourceVolume ?: fallbackVolumeName
         val collectionUri = MediaStore.Images.Media.getContentUri(volumeName)
+        val fallbackCollectionUri = MediaStore.Images.Media.getContentUri(fallbackVolumeName)
+        val relativePath = resolved?.second?.relativePath
+            ?.takeIf { sourceVolume != null && it.isNotBlank() }
+        val displayName = resolved?.second?.displayName
+            ?: resolvedRows.firstOrNull()?.second?.displayName
+            ?: displayNameOf(resolver, sourceUri)
+            ?: "photo.jpg"
         // Android 13+ may grant only the picked item's read permission rather than collection-wide
         // access. Name discovery is therefore best-effort; MediaStore itself resolves any physical
         // filename collision during insert, and the inserted row is queried again after publish.
-        val occupiedNames = runCatching {
-            resolver.query(
-                collectionUri,
-                arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
-                "${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
-                arrayOf(relativePath),
-                null,
-            )?.use { cursor ->
-                val nameColumn = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
-                buildSet {
-                    if (nameColumn >= 0) {
-                        while (cursor.moveToNext()) {
-                            cursor.getString(nameColumn)?.let(::add)
+        val occupiedNames = relativePath?.let { path ->
+            runCatching {
+                resolver.query(
+                    collectionUri,
+                    arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
+                    "${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+                    arrayOf(path),
+                    null,
+                )?.use { cursor ->
+                    val nameColumn = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                    buildSet {
+                        if (nameColumn >= 0) {
+                            while (cursor.moveToNext()) {
+                                cursor.getString(nameColumn)?.let(::add)
+                            }
                         }
                     }
-                }
-            }.orEmpty()
-        }.getOrDefault(emptySet()).toMutableSet()
+                }.orEmpty()
+            }.getOrDefault(emptySet())
+        }?.toMutableSet() ?: mutableSetOf()
         PhotoFrameMediaStoreSource(
             sourceUri = sourceUri,
-            displayName = row.displayName,
+            displayName = displayName,
             collectionUri = collectionUri,
+            fallbackCollectionUri = fallbackCollectionUri,
             relativePath = relativePath,
+            relatedMediaUri = relatedMediaUri,
             occupiedNames = occupiedNames,
+        )
+    }.onFailure { error ->
+        Log.w(
+            PHOTO_FRAME_EXPORT_TAG,
+            "Cannot resolve local photo destination (authority=${sourceUri.authority}): " +
+                "${error.javaClass.simpleName}: ${error.message}",
         )
     }
 
@@ -2190,14 +2262,96 @@ object PhotoFrameExporter {
             filter = filter,
         )
         val name = uniqueName(preferred, source.occupiedNames)
+        val originalPath = source.relativePath
+        val canTryOriginal = originalPath != null && canCreateDerivedImageInOriginalPath(
+            relativePath = originalPath,
+            hasRelatedMediaUri = source.relatedMediaUri != null,
+            sdkInt = Build.VERSION.SDK_INT,
+        )
+        var originalFailure: Exception? = null
+        if (canTryOriginal) {
+            try {
+                return writeRenderedToMediaStore(
+                    resolver = resolver,
+                    collectionUri = source.collectionUri,
+                    relativePath = checkNotNull(originalPath),
+                    relatedMediaUri = source.relatedMediaUri,
+                    name = name,
+                    bitmap = bitmap,
+                    occupiedNames = source.occupiedNames,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                originalFailure = error
+                Log.w(
+                    PHOTO_FRAME_EXPORT_TAG,
+                    "Cannot save beside source; falling back to $LOCAL_PHOTO_FALLBACK_RELATIVE_PATH " +
+                        "(path=$originalPath, volume=${source.collectionUri}, " +
+                        "error=${error.javaClass.simpleName}: ${error.message})",
+                )
+            }
+        } else if (originalPath != null) {
+            Log.w(
+                PHOTO_FRAME_EXPORT_TAG,
+                "Source album is not directly writable; using " +
+                    "$LOCAL_PHOTO_FALLBACK_RELATIVE_PATH (path=$originalPath)",
+            )
+        }
+        if (
+            originalPath.equals(LOCAL_PHOTO_FALLBACK_RELATIVE_PATH, ignoreCase = true) &&
+            source.collectionUri == source.fallbackCollectionUri
+        ) {
+            throw originalFailure ?: IllegalStateException("Cannot write to the fallback album")
+        }
+        return try {
+            writeRenderedToMediaStore(
+                resolver = resolver,
+                collectionUri = source.fallbackCollectionUri,
+                relativePath = LOCAL_PHOTO_FALLBACK_RELATIVE_PATH,
+                relatedMediaUri = null,
+                name = name,
+                bitmap = bitmap,
+                occupiedNames = source.occupiedNames,
+            )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (fallbackFailure: Exception) {
+            originalFailure?.let(fallbackFailure::addSuppressed)
+            throw fallbackFailure
+        }
+    }
+
+    private suspend fun writeRenderedToMediaStore(
+        resolver: ContentResolver,
+        collectionUri: Uri,
+        relativePath: String,
+        relatedMediaUri: Uri?,
+        name: String,
+        bitmap: Bitmap,
+        occupiedNames: MutableSet<String>,
+    ): PhotoFrameExportResult {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, source.relativePath)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        val target = resolver.insert(source.collectionUri, values)
-            ?: error("Cannot create derived photo beside the source")
+        val target = if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && relatedMediaUri != null &&
+            !isStandardImageRelativePath(relativePath)
+        ) {
+            resolver.insert(
+                collectionUri,
+                values,
+                Bundle().apply {
+                    putParcelable(MediaStore.QUERY_ARG_RELATED_URI, relatedMediaUri)
+                },
+            )
+        } else {
+            resolver.insert(collectionUri, values)
+        }
+            ?: error("Cannot create derived photo")
         var keepTarget = false
         try {
             val written = resolver.openOutputStream(target, "w")?.let { raw ->
@@ -2216,7 +2370,7 @@ object PhotoFrameExporter {
             if (published <= 0) error("Cannot publish derived photo")
             keepTarget = true
             val publishedName = displayNameOf(resolver, target) ?: name
-            source.occupiedNames.add(publishedName)
+            occupiedNames.add(publishedName)
             return PhotoFrameExportResult(displayName = publishedName)
         } finally {
             if (!keepTarget) runCatching { resolver.delete(target, null, null) }

@@ -163,12 +163,27 @@ internal fun shouldUsePartialObjectDownload(
 ): Boolean = partialObjectSupported != false &&
     effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN
 
-internal fun downloadChunkSize(effectiveSize: Long): Long =
-    if (effectiveSize > NikonCamera.LARGE_FILE_THRESHOLD) {
+internal fun downloadChunkSize(effectiveSize: Long, isUsbConnection: Boolean = false): Long =
+    if (isUsbConnection) {
+        NikonCamera.USB_CHUNK_SIZE
+    } else if (effectiveSize > NikonCamera.LARGE_FILE_THRESHOLD) {
         NikonCamera.LARGE_FILE_CHUNK_SIZE
     } else {
         NikonCamera.CHUNK_SIZE
     }
+
+internal fun endToEndBytesPerSecond(
+    transferredBytes: Long,
+    elapsedMs: Long,
+): Long {
+    if (transferredBytes <= 0L || elapsedMs <= 0L) return 0L
+    return (transferredBytes.toDouble() * 1_000.0 / elapsedMs.toDouble())
+        .toLong()
+        .coerceAtLeast(0L)
+}
+
+internal fun transferredBytesThisAttempt(downloaded: Long, resumeOffset: Long): Long =
+    (downloaded - resumeOffset).coerceAtLeast(0L)
 
 class NikonCamera(private val context: Context) {
     private var cmdSocket: Socket? = null
@@ -250,12 +265,15 @@ class NikonCamera(private val context: Context) {
         // 60s 超时会抱着 ioMutex 白等一分钟——重试的首个下载全程被挡住，表现为
         // "停止后重试卡半天没速度"。静默 3s 即认定连接不可用，断开走自动重连。
         const val CANCEL_DRAIN_TIMEOUT_MS = 3_000
-        // 所有大小已知的文件都优先走 GetPartialObjectEx。普通文件每块 2MB；超过
-        // LARGE_FILE_THRESHOLD 的巨大文件改用 32MB，避免视频产生数百次命令往返。
+        // 所有大小已知的文件都优先走 GetPartialObjectEx。USB 固定每块 64MB，避免有线
+        // 模式反复承担相机准备/命令往返；Wi-Fi 普通文件使用 4MB，超过
+        // LARGE_FILE_THRESHOLD 的巨大文件为 32MB。
         // 每块仍是独立 PTP 事务，块间释放相机通道供当前 FHD / EXIF 使用。
         // 也是断点续传的检查点粒度；旧版本留下的 64MB 对齐半成品仍天然兼容。
         // internal: TransferViewModel 引用此值做续传偏移对齐。
-        const val CHUNK_SIZE = 2L * 1024 * 1024
+        const val CHUNK_SIZE = 4L * 1024 * 1024
+        /** USB avoids repeated camera-side PartialObject setup; Wi-Fi keeps its existing policy. */
+        const val USB_CHUNK_SIZE = 64L * 1024 * 1024
         const val LARGE_FILE_THRESHOLD = 512L * 1024 * 1024
         const val LARGE_FILE_CHUNK_SIZE = 32L * 1024 * 1024
         private const val FHD_DEVICE_BUSY_RETRIES = 2
@@ -940,7 +958,7 @@ class NikonCamera(private val context: Context) {
     data class DownloadProgress(
         val downloaded: Long,
         val total: Long,
-        val elapsed: Float
+        val bytesPerSecond: Long,
     )
 
     /** 查询 >4GB 文件的真实大小；仅由下载事务在相机通道保护内调用。 */
@@ -956,10 +974,11 @@ class NikonCamera(private val context: Context) {
         return if (size > 0) size else null
     }
 
-    /** 单文件下载完成后的下载速度（MB/s，1024 进制，与 UI formatSpeed 同口径；纯网络读取吞吐）。 */
+    /** 单文件下载完成后的统计；速度由保存层按同一端到端时间范围计算。 */
     data class DownloadStats(
         val bytes: Long,
-        val mbps: Float,
+        /** 本次实际从相机读取的字节数，不包含续传前已经存在的部分。 */
+        val transferredBytes: Long,
         /** 本文件进入协议下载流程的单调时钟时间戳（包含块间让路时间）。 */
         val startedAtElapsedMs: Long
     )
@@ -987,16 +1006,35 @@ class NikonCamera(private val context: Context) {
         withContext(Dispatchers.IO) {
             val scope = this
             var totalDownloaded = resumeOffset
-            // 从任务真正进入协议层开始计时；分块之间为 FHD / EXIF 让路的时间属于用户
-            // 感知到的本文件总耗时。纯网络吞吐仍由 readNanos 单独统计，不被让路时间稀释。
+            // 从任务真正进入协议层开始计时；相机准备、分块事务、写入，以及分块之间为
+            // FHD / EXIF 让路的时间都属于用户实际等待时间，实时速度必须使用这条时间线。
             val startTime = android.os.SystemClock.elapsedRealtime()
             var lastProgressTime = startTime
-            var readNanos = 0L
 
             fun buildStats(): DownloadStats {
-                val netBytes = totalDownloaded - resumeOffset
-                val mbps = if (readNanos > 0) netBytes / (readNanos / 1e9f) / (1024f * 1024f) else 0f
-                return DownloadStats(totalDownloaded, mbps, startTime)
+                return DownloadStats(
+                    bytes = totalDownloaded,
+                    transferredBytes = transferredBytesThisAttempt(totalDownloaded, resumeOffset),
+                    startedAtElapsedMs = startTime,
+                )
+            }
+
+            fun progressSnapshot(total: Long, now: Long) =
+                DownloadProgress(
+                    downloaded = totalDownloaded,
+                    total = total,
+                    bytesPerSecond = endToEndBytesPerSecond(
+                        transferredBytes = transferredBytesThisAttempt(totalDownloaded, resumeOffset),
+                        elapsedMs = now - startTime,
+                    ),
+                )
+
+            fun emitProgress(total: Long, force: Boolean = false) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (force || now - lastProgressTime >= 200L) {
+                    onProgress?.invoke(progressSnapshot(total, now))
+                    lastProgressTime = now
+                }
             }
             fun incomplete(got: Long, want: Long) =
                 Result.failure<DownloadStats>(Exception(context.getString(R.string.error_incomplete_data, got, want)))
@@ -1010,7 +1048,11 @@ class NikonCamera(private val context: Context) {
             // 不再遗留污染下一事务。本地写盘失败抛 OutputWriteException（由外层归为单文件失败）。
             fun pump(progressTotalHint: Long): Triple<Int, Long, Long> {
                 usbPtp?.let { usb ->
-                    val result = usb.receiveDataTo(tid) { bytes, offset, count ->
+                    val total = if (progressTotalHint > 0) progressTotalHint else 0L
+                    val result = usb.receiveDataTo(
+                        expectedTransactionId = tid,
+                        onDataStart = { emitProgress(total, force = true) },
+                    ) { bytes, offset, count ->
                         scope.ensureActive()
                         try {
                             output.write(bytes, offset, count)
@@ -1018,16 +1060,8 @@ class NikonCamera(private val context: Context) {
                             throw OutputWriteException(context.getString(R.string.error_write_file, e.message), e)
                         }
                         totalDownloaded += count
-                        val now = android.os.SystemClock.elapsedRealtime()
-                        if (now - lastProgressTime >= 200) {
-                            val total = if (progressTotalHint > 0) progressTotalHint else 0L
-                            onProgress?.invoke(
-                                DownloadProgress(totalDownloaded, total, (now - startTime) / 1000f)
-                            )
-                            lastProgressTime = now
-                        }
+                        emitProgress(total)
                     }
-                    readNanos += result.readNanos
                     return Triple(result.responseCode, result.written, result.expected)
                 }
 
@@ -1035,9 +1069,7 @@ class NikonCamera(private val context: Context) {
                 var written = 0L
                 while (true) {
                     scope.ensureActive()
-                    val rt0 = System.nanoTime()
                     val packet = cmdReader.readPacketRaw(cmdInput!!)
-                    readNanos += System.nanoTime() - rt0
                     val buf = packet.buffer
                     val len = packet.payloadLen
                     when (packet.type) {
@@ -1049,6 +1081,8 @@ class NikonCamera(private val context: Context) {
                                 len >= 8 -> buf.getIntLE(4).toLong() and 0xFFFFFFFFL
                                 else -> 0L
                             }
+                            val total = if (progressTotalHint > 0) progressTotalHint else expected
+                            emitProgress(total, force = true)
                         }
                         PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
                             if (len > 4) {
@@ -1059,12 +1093,8 @@ class NikonCamera(private val context: Context) {
                                 }
                                 written += len - 4
                                 totalDownloaded += len - 4
-                                val now = android.os.SystemClock.elapsedRealtime()
-                                if (now - lastProgressTime >= 200) {
-                                    val total = if (progressTotalHint > 0) progressTotalHint else expected
-                                    onProgress?.invoke(DownloadProgress(totalDownloaded, total, (now - startTime) / 1000f))
-                                    lastProgressTime = now
-                                }
+                                val total = if (progressTotalHint > 0) progressTotalHint else expected
+                                emitProgress(total)
                             }
                         }
                         PtpConstants.PING -> sendPong(cmdOutput)
@@ -1132,7 +1162,10 @@ class NikonCamera(private val context: Context) {
                     var offset = resumeOffset
                     var first = true
                     var fellBack = false
-                    val chunkSize = downloadChunkSize(effectiveSize)
+                    val chunkSize = downloadChunkSize(
+                        effectiveSize = effectiveSize,
+                        isUsbConnection = usbPtp != null,
+                    )
                     while (offset < effectiveSize) {
                         scope.ensureActive()
                         val reqSize = minOf(chunkSize, effectiveSize - offset).toInt()

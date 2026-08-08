@@ -185,7 +185,7 @@ class CameraIoGateTest {
 
     @Test
     fun allKnownSizesPreferExistingPartialObjectPath() {
-        assertEquals(2L * 1024 * 1024, NikonCamera.CHUNK_SIZE)
+        assertEquals(4L * 1024 * 1024, NikonCamera.CHUNK_SIZE)
         assertEquals(0L, (64L * 1024 * 1024) % NikonCamera.CHUNK_SIZE)
         assertTrue(shouldUsePartialObjectDownload(null, 1L))
         assertTrue(shouldUsePartialObjectDownload(true, 48L * 1024 * 1024))
@@ -198,15 +198,38 @@ class CameraIoGateTest {
     fun hugeFilesUseLargerChunksWithoutChangingResumeAlignment() {
         assertEquals(
             NikonCamera.CHUNK_SIZE,
-            downloadChunkSize(NikonCamera.LARGE_FILE_THRESHOLD),
+            downloadChunkSize(
+                effectiveSize = NikonCamera.LARGE_FILE_THRESHOLD,
+                isUsbConnection = false,
+            ),
         )
         assertEquals(
             NikonCamera.LARGE_FILE_CHUNK_SIZE,
-            downloadChunkSize(NikonCamera.LARGE_FILE_THRESHOLD + 1L),
+            downloadChunkSize(
+                effectiveSize = NikonCamera.LARGE_FILE_THRESHOLD + 1L,
+                isUsbConnection = false,
+            ),
         )
         assertEquals(
             0L,
             NikonCamera.LARGE_FILE_CHUNK_SIZE % NikonCamera.CHUNK_SIZE,
+        )
+    }
+
+    @Test
+    fun usbAlwaysUsesOne64MbTransferSliceWhileWifiPolicyIsUnchanged() {
+        assertEquals(64L * 1024L * 1024L, NikonCamera.USB_CHUNK_SIZE)
+        assertEquals(
+            NikonCamera.USB_CHUNK_SIZE,
+            downloadChunkSize(effectiveSize = 26L * 1024L * 1024L, isUsbConnection = true),
+        )
+        assertEquals(
+            NikonCamera.USB_CHUNK_SIZE,
+            downloadChunkSize(effectiveSize = 1L * 1024L * 1024L * 1024L, isUsbConnection = true),
+        )
+        assertEquals(
+            NikonCamera.CHUNK_SIZE,
+            downloadChunkSize(effectiveSize = 26L * 1024L * 1024L, isUsbConnection = false),
         )
     }
 }

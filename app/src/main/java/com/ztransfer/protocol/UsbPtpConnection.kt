@@ -39,7 +39,6 @@ internal class UsbPtpConnection private constructor(
         val responseCode: Int,
         val written: Long,
         val expected: Long,
-        val readNanos: Long
     )
 
     private data class Header(
@@ -166,26 +165,28 @@ internal class UsbPtpConnection private constructor(
      */
     fun receiveDataTo(
         expectedTransactionId: Int,
+        onDataStart: () -> Unit = {},
         onChunk: (ByteArray, Int, Int) -> Unit
     ): StreamResult {
         val first = readHeader()
         checkTransaction(first, expectedTransactionId)
         if (first.type == TYPE_RESPONSE) {
             discardPayload(first.payloadLength)
-            return StreamResult(first.code, 0L, -1L, 0L)
+            return StreamResult(first.code, 0L, -1L)
         }
         if (first.type != TYPE_DATA) {
             throw IOException("Expected PTP/USB data container, got ${first.type}")
         }
+        // readHeader() includes the camera-side preparation wait and may prefetch payload bytes.
+        // Notify the caller here so its wall-clock rate accounts for that wait before buffered
+        // payload is copied at memory speed.
+        onDataStart()
 
         var remaining = first.payloadLength
         var written = 0L
-        var readNanos = 0L
         while (remaining > 0L) {
             val want = minOf(remaining, ioBuffer.size.toLong()).toInt()
-            val started = System.nanoTime()
             val count = readSome(ioBuffer, 0, want)
-            readNanos += System.nanoTime() - started
             onChunk(ioBuffer, 0, count)
             remaining -= count
             written += count
@@ -197,7 +198,7 @@ internal class UsbPtpConnection private constructor(
             throw IOException("Expected PTP/USB response container, got ${response.type}")
         }
         discardPayload(response.payloadLength)
-        return StreamResult(response.code, written, first.payloadLength, readNanos)
+        return StreamResult(response.code, written, first.payloadLength)
     }
 
     override fun close() {
