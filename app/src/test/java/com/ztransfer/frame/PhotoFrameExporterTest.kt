@@ -1,11 +1,31 @@
 package com.ztransfer.frame
 
+import androidx.exifinterface.media.ExifInterface
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhotoFrameExporterTest {
+    @Test
+    fun derivedPhotosUseTheHighestJpegQuality() {
+        assertEquals(100, PHOTO_FRAME_JPEG_QUALITY)
+    }
+
+    @Test
+    fun originalPhotoRegionsKeepWorkingMemoryBounded() {
+        listOf(4000, 6000, 8256, 12000).forEach { width ->
+            val rows = photoFrameRegionRows(width)
+            val regionPixels = width.toLong() * rows
+            assertTrue(rows > 0)
+            assertTrue(regionPixels <= PHOTO_FRAME_REGION_TARGET_PIXELS)
+        }
+        val full24MpBytes = 6000L * 4000L * 4L
+        val regionAndFilterBytes =
+            6000L * photoFrameRegionRows(6000) * 4L * 2L
+        assertTrue(regionAndFilterBytes < full24MpBytes / 10L)
+    }
+
     @Test
     fun localPhotoOutputRecognizesStandardAndRestrictedImageDirectories() {
         assertTrue(isStandardImageRelativePath("DCIM/Camera/"))
@@ -106,6 +126,88 @@ class PhotoFrameExporterTest {
         assertTrue(landscape.photoBottom < landscape.metadataTop)
         assertTrue(portrait.photoTop >= 0f)
         assertTrue(portrait.photoBottom < portrait.metadataTop)
+    }
+
+    @Test
+    fun originalQualityFramesKeepThePhotoAtOneToOnePixels() {
+        listOf(
+            6000 to 4000,
+            4000 to 6000,
+            8256 to 5504,
+            8000 to 3000,
+            2000 to 5000,
+        ).forEach { (width, height) ->
+            val layout = calculateOriginalQualityPhotoFrameLayout(width, height)
+            assertEquals(width.toFloat(), layout.photoRight - layout.photoLeft, 0.001f)
+            assertEquals(height.toFloat(), layout.photoBottom - layout.photoTop, 0.001f)
+            assertTrue(layout.canvasWidth >= width)
+            assertTrue(layout.canvasHeight >= height)
+            assertTrue(layout.photoBottom <= layout.metadataTop)
+        }
+        assertTrue(calculateOriginalQualityPhotoFrameLayout(6000, 4000).canvasWidth > 3200)
+    }
+
+    @Test
+    fun originalQualityPlaqueAddsBandWithoutShrinkingPhoto() {
+        val landscape = calculateOriginalQualityPlaqueLayout(6000, 4000)
+        val portrait = calculateOriginalQualityPlaqueLayout(4000, 6000)
+
+        assertEquals(6000 to 4720, landscape.canvasWidth to landscape.canvasHeight)
+        assertEquals(6000f, landscape.photoRight - landscape.photoLeft, 0.001f)
+        assertEquals(4000f, landscape.photoBottom - landscape.photoTop, 0.001f)
+        assertEquals(4000 to 6480, portrait.canvasWidth to portrait.canvasHeight)
+        assertEquals(4000f, portrait.photoRight - portrait.photoLeft, 0.001f)
+        assertEquals(6000f, portrait.photoBottom - portrait.photoTop, 0.001f)
+    }
+
+    @Test
+    fun regionCoordinatesCoverEveryExifOrientationWithoutResizingPixels() {
+        val raw = intArrayOf(500, 100, 2500, 300)
+        val expected = mapOf(
+            ExifInterface.ORIENTATION_NORMAL to OrientedPhotoRegion(500, 100, 2500, 300),
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL to
+                OrientedPhotoRegion(3500, 100, 5500, 300),
+            ExifInterface.ORIENTATION_ROTATE_180 to
+                OrientedPhotoRegion(3500, 3700, 5500, 3900),
+            ExifInterface.ORIENTATION_FLIP_VERTICAL to
+                OrientedPhotoRegion(500, 3700, 2500, 3900),
+            ExifInterface.ORIENTATION_TRANSPOSE to
+                OrientedPhotoRegion(100, 500, 300, 2500),
+            ExifInterface.ORIENTATION_ROTATE_90 to
+                OrientedPhotoRegion(3700, 500, 3900, 2500),
+            ExifInterface.ORIENTATION_TRANSVERSE to
+                OrientedPhotoRegion(3700, 3500, 3900, 5500),
+            ExifInterface.ORIENTATION_ROTATE_270 to
+                OrientedPhotoRegion(100, 3500, 300, 5500),
+        )
+
+        expected.forEach { (orientation, mapped) ->
+            assertEquals(
+                mapped,
+                orientedPhotoRegion(
+                    rawLeft = raw[0],
+                    rawTop = raw[1],
+                    rawRight = raw[2],
+                    rawBottom = raw[3],
+                    rawWidth = 6000,
+                    rawHeight = 4000,
+                    orientation = orientation,
+                ),
+            )
+            val swapsAxes = orientation in setOf(
+                ExifInterface.ORIENTATION_TRANSPOSE,
+                ExifInterface.ORIENTATION_ROTATE_90,
+                ExifInterface.ORIENTATION_TRANSVERSE,
+                ExifInterface.ORIENTATION_ROTATE_270,
+            )
+            assertEquals(if (swapsAxes) 200 else 2000, mapped.width)
+            assertEquals(if (swapsAxes) 2000 else 200, mapped.height)
+        }
+        assertEquals(OrientedPhotoSize(6000, 4000), orientedPhotoSize(6000, 4000, 1))
+        assertEquals(
+            OrientedPhotoSize(4000, 6000),
+            orientedPhotoSize(6000, 4000, ExifInterface.ORIENTATION_ROTATE_90),
+        )
     }
 
     @Test

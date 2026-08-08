@@ -71,6 +71,7 @@ private val transferTaskIds = AtomicLong(0L)
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION = 2
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY =
     "photo_frame_watermark_size_scale_version"
+internal const val PHOTO_FRAME_EXPORT_PARALLELISM = 2
 
 data class TransferTask(
     val file: NikonCamera.FileInfo,
@@ -114,6 +115,8 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
     val isTransferring: Boolean = false,
+    /** Last valid speed in the active original-transfer batch; retained across file switches. */
+    val currentSpeed: Long = 0L,
     val transferDirUri: String? = null,
     /** 导出目录内完整文件：归一化文件名 -> 已有大小集合，用于相机列表直接标记已传照片。 */
     val existingExportFiles: Map<String, Set<Long>> = emptyMap(),
@@ -147,7 +150,7 @@ data class TransferState(
     val filterDateRange: PhotoDateRange? = null,
     // 预览大图的全局逆时针旋转方向（0..3 个 90°）。跨照片、跨会话持久化。
     val previewRotationQuarterTurns: Int = 0,
-    // 开启后：受支持的原图落盘成功，再派生一张带边框和/或水印的分享图。
+    // 开启后：受支持的原图落盘成功，再派生一张保留原片细节的边框/水印效果图。
     val photoFrameEnabled: Boolean = false,
     // 总开关开启时，边框与水印可以独立组合；false 允许只在原照片上叠水印。
     val photoFrameBorderEnabled: Boolean = true,
@@ -158,7 +161,7 @@ data class TransferState(
     val photoFrameWatermarkContent: PhotoFrameWatermarkContent = PhotoFrameWatermarkContent.TEXT,
     val photoFrameWatermarkText: String = "ZTransfer",
     val photoFrameWatermarkImageHash: String? = null,
-    val photoFrameWatermarkFont: PhotoFrameWatermarkFont = PhotoFrameWatermarkFont.ELEGANT,
+    val photoFrameWatermarkFont: PhotoFrameWatermarkFont = PhotoFrameWatermarkFont.CALLIGRAPHY,
     val photoFrameWatermarkSizePercent: Int = DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
     val photoFrameWatermarkPosition: PhotoFrameWatermarkPosition = PhotoFrameWatermarkPosition.AUTO,
     val photoFrameWatermarkColor: PhotoFrameWatermarkColor = PhotoFrameWatermarkColor.ADAPTIVE,
@@ -174,6 +177,9 @@ data class TransferState(
     // 切换后由设置面板触发 Activity.recreate() 生效。
     val appLanguage: String = AppLocale.SYSTEM
 )
+
+internal fun retainLastValidTransferSpeed(previous: Long, sample: Long): Long =
+    if (sample > 0L) sample else previous.coerceAtLeast(0L)
 
 /** 文件页所有筛选条件的原子快照，避免筛选项增加后依赖位置参数传递。 */
 data class PhotoFilterCriteria(
@@ -241,7 +247,8 @@ internal val TransferState.photoFrameWatermark: PhotoFrameWatermark
         effect = photoFrameWatermarkEffect,
     )
 
-private const val FREE_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 42
+private const val FREE_PHOTO_FRAME_WATERMARK_SIZE_PERCENT =
+    DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
 private const val FREE_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 80
 
 /** 免费版固定品牌水印；与高级版的默认偏好分开，避免产品水印调整覆盖用户设置。 */
@@ -257,13 +264,15 @@ internal val TransferState.photoFilterSelection: PhotoFilterSelection?
         return PhotoFilterSelection(preset, photoFilterIntensityPercent)
     }
 
-/** 队列剩余待处理数量（正在传、等待传或正在生成派生图）。供顶栏药丸等复用。 */
-val TransferState.remainingCount: Int
+/** 尚未完成下载的原片数量；不包含并行执行的照片效果任务。 */
+val TransferState.downloadRemainingCount: Int
     get() = tasks.count {
-        it.status == TransferStatus.WAITING ||
-            it.status == TransferStatus.TRANSFERING ||
-            it.isGeneratingFrame
+        it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
     }
+
+/** 尚未生成完成的效果图数量，包含等待线程和正在生成的任务。 */
+val TransferState.generationRemainingCount: Int
+    get() = tasks.count { it.isGeneratingFrame }
 
 /**
  * 当前处理项的进度（0..1）。派生图没有廉价而准确的分段进度，原片已完整落盘后保持满格，
@@ -304,7 +313,7 @@ internal fun effectivePhotoFrameWatermark(
     )
 }
 
-/** 只允许 JPG/JPEG/PNG 派生分享图；视频、RAW 和未知类型始终保持原样传输。 */
+/** 只允许 JPG/JPEG/PNG 派生效果图；视频、RAW 和未知类型始终保持原样传输。 */
 internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Boolean =
     enabled && isSupportedPhotoFrameSourceExtension(extension)
 
@@ -348,25 +357,41 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     val state: StateFlow<TransferState> = _state.asStateFlow()
 
     private var transferJob: Job? = null
+    @Volatile
+    private var transferScreenVisible: Boolean = false
     private val prefs = application.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
     private val contentResolver = application.contentResolver
     /**
-     * 边框渲染使用独立、低优先级、单并发线程：与下一张相机传输并行，但不会同时展开
-     * 多张 3200px 位图争抢内存。相机网络/USB 传输仍留在原来的高优先级通道。
+     * 原图品质效果导出使用两个低优先级工作线程：既能并行生成，又把完整位图的并发
+     * 内存峰值限制在两张，不随 CPU 核数盲目扩大。相机传输仍使用原来的高优先级通道。
      */
-    private val photoFrameDispatcher = Executors.newSingleThreadExecutor { task ->
+    private val photoFrameWorkerIds = AtomicInteger(0)
+    private val photoFrameDispatcher = Executors.newFixedThreadPool(
+        PHOTO_FRAME_EXPORT_PARALLELISM,
+    ) { task ->
         Thread(
             {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
                 task.run()
             },
-            "photo-frame-export",
+            "photo-frame-export-${photoFrameWorkerIds.incrementAndGet()}",
         )
     }.asCoroutineDispatcher()
     private val activePhotoFrameExports = AtomicInteger(0)
     // 第一张派生图才创建/扫描专用子目录；同一根目录后续任务复用，避免逐张遍历文件夹。
     private val photoFrameDestinations =
         ConcurrentHashMap<String, PhotoFrameDestination>()
+
+    private fun getOrPreparePhotoFrameDestination(treeUri: Uri): PhotoFrameDestination {
+        val key = treeUri.toString()
+        photoFrameDestinations[key]?.let { return it }
+        return synchronized(photoFrameDestinations) {
+            photoFrameDestinations[key] ?: PhotoFrameExporter.prepareDestination(
+                resolver = contentResolver,
+                treeUri = treeUri,
+            ).also { photoFrameDestinations[key] = it }
+        }
+    }
 
     /** 用户可见文案（错误信息等）统一走字符串资源；经 AppLocale.wrap 与应用内语言一致。 */
     private fun str(resId: Int, vararg args: Any?): String =
@@ -423,6 +448,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val size: Long,
         val uri: Uri,
     )
+
+    /**
+     * 由导航宿主同步传输页是否位于用户当前视角。该值不持久化，也不修改正在传输的文件；
+     * 每张文件在调用协议层前只读取一次，因此离开页面后从下一张开始恢复无线小分块。
+     */
+    fun setTransferScreenVisible(visible: Boolean) {
+        transferScreenVisible = visible
+    }
 
     private sealed interface FrameExportOutcome {
         data class Saved(val displayName: String) : FrameExportOutcome
@@ -551,10 +584,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     PhotoFrameWatermarkFont.valueOf(
                         prefs.getString(
                             "photo_frame_watermark_font",
-                            PhotoFrameWatermarkFont.ELEGANT.name,
-                        ) ?: PhotoFrameWatermarkFont.ELEGANT.name,
+                            PhotoFrameWatermarkFont.CALLIGRAPHY.name,
+                        ) ?: PhotoFrameWatermarkFont.CALLIGRAPHY.name,
                     )
-                }.getOrDefault(PhotoFrameWatermarkFont.ELEGANT),
+                }.getOrDefault(PhotoFrameWatermarkFont.CALLIGRAPHY),
                 photoFrameWatermarkSizePercent = restoredWatermarkSizePercent,
                 photoFrameWatermarkPosition = runCatching {
                     PhotoFrameWatermarkPosition.valueOf(
@@ -1007,18 +1040,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             } else {
                                 PhotoFrameWatermark(enabled = false)
                             }
-                            val destinationKey = uri.toString()
                             val frameExists = withContext(photoFrameDispatcher) {
-                                val destination = photoFrameDestinations[destinationKey]
-                                    ?: PhotoFrameExporter.prepareDestination(
-                                        resolver = contentResolver,
-                                        treeUri = uri,
-                                    ).let { prepared ->
-                                        photoFrameDestinations.putIfAbsent(
-                                            destinationKey,
-                                            prepared,
-                                        ) ?: prepared
-                                    }
+                                val destination = getOrPreparePhotoFrameDestination(uri)
                                 destination.hasFrameFor(
                                     localOriginal.displayName,
                                     effectivePreset,
@@ -1214,6 +1237,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         val speed = progress.bytesPerSecond
                                         _state.update { state ->
                                             state.copy(
+                                                currentSpeed = retainLastValidTransferSpeed(
+                                                    previous = state.currentSpeed,
+                                                    sample = speed,
+                                                ),
                                                 tasks = state.tasks.map { t ->
                                                     if (t.taskId == taskId && t.status == TransferStatus.TRANSFERING) {
                                                         t.copy(
@@ -1229,7 +1256,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         }
                                     },
                                     resumeOffset = resumeOffset,
-                                    totalSize = task.file.size
+                                    totalSize = task.file.size,
+                                    // 协议层在首个数据命令前读取一次，随后整张文件固定该策略。
+                                    preferHighThroughputAtStart = { transferScreenVisible },
                                 )
                             }
                         }
@@ -1309,7 +1338,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     }
                                     if (shouldGenerateFrame) {
                                         // 派生严格发生在正式原片落盘之后。导出器只读取原片并创建
-                                        // 新文件；独立低优先级线程立即接管，传输循环直接处理下一张。
+                                        // 新文件；独立低优先级工作池立即接管，传输循环直接处理下一张。
                                         // 无论解码/写入是否失败，都不回滚、不删除原片。
                                         launchPhotoFrameExport(
                                             taskId = taskId,
@@ -1407,7 +1436,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 仅当本协程仍是当前传输 job 时才收尾，避免误停新队列的前台服务/误清传输
                     // 状态（旧队列收尾期间新队列可能已启动并接管 transferJob）。
                     if (transferJob === self) {
-                        _state.update { it.copy(isTransferring = false) }
+                        _state.update { it.copy(isTransferring = false, currentSpeed = 0L) }
                         stopTransferServiceIfIdle()
                     }
                 }
@@ -1632,8 +1661,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * 把原片派生移出相机传输协程。单线程调度器保证位图内存峰值可控，低线程优先级让
-     * 相机 IO 优先；任务数单独计数，使最后一张边框完成前前台服务不会被提前停止。
+     * 把原片派生移出相机传输协程。双线程工作池提供受控并行，低线程优先级让相机 IO
+     * 优先；任务数单独计数，使最后一张效果图完成前前台服务不会被提前停止。
      */
     private fun launchPhotoFrameExport(
         taskId: Long,
@@ -1652,13 +1681,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val job = viewModelScope.launch(photoFrameDispatcher) {
             val destinationKey = treeUri.toString()
             val outcome = try {
-                val destination = photoFrameDestinations[destinationKey]
-                    ?: PhotoFrameExporter.prepareDestination(
-                        resolver = contentResolver,
-                        treeUri = treeUri,
-                    ).let { prepared ->
-                        photoFrameDestinations.putIfAbsent(destinationKey, prepared) ?: prepared
-                    }
+                val destination = getOrPreparePhotoFrameDestination(treeUri)
                 // 在真正轮到渲染时重新判定授权：排队期间若高级版到期，免费版默认
                 // 水印立即恢复；查重与导出必须使用同一份生效配置。
                 val effectiveBorder = decorationRequested && borderEnabled

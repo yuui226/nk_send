@@ -3,6 +3,7 @@ package com.ztransfer.ui.screen
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkContent
+import com.ztransfer.frame.PhotoFrameWatermarkFont
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -17,6 +18,8 @@ class LocalPhotoEffectsPreferencesTest {
         assertEquals(true, defaults.borderEnabled)
         assertEquals(PhotoFramePreset.MIST, defaults.preset)
         assertEquals(PhotoFrameWatermark(), defaults.watermark)
+        assertEquals(PhotoFrameWatermarkFont.CALLIGRAPHY, defaults.watermark.font)
+        assertEquals(80, defaults.watermark.sizePercent)
         assertEquals("forest", defaults.filterId)
         assertFalse(defaults.filterEnabled)
         assertEquals(100, defaults.filterIntensityPercent)

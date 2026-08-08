@@ -5,6 +5,26 @@ import org.junit.Test
 
 class QueuePillStateTest {
     @Test
+    fun transferDisplayTakesPriorityOverConcurrentEffectGeneration() {
+        assertEquals(
+            PillMode.COUNTING,
+            queuePillMode(downloadRemaining = 8, generationRemaining = 5),
+        )
+    }
+
+    @Test
+    fun effectGenerationIsShownOnlyAfterTransferFinishes() {
+        assertEquals(
+            PillMode.GENERATING,
+            queuePillMode(downloadRemaining = 0, generationRemaining = 5),
+        )
+        assertEquals(
+            PillMode.DONE,
+            queuePillMode(downloadRemaining = 0, generationRemaining = 0),
+        )
+    }
+
+    @Test
     fun flightHoldCannotMakeANonEmptyQueueLookEmpty() {
         assertEquals(24, queuePillDisplayRemaining(actualRemaining = 24, heldCount = 24))
         assertEquals(18, queuePillDisplayRemaining(actualRemaining = 18, heldCount = 24))

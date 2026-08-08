@@ -184,7 +184,7 @@ class CameraIoGateTest {
     }
 
     @Test
-    fun allKnownSizesPreferExistingPartialObjectPath() {
+    fun wifiKnownSizesPreferPartialObjectPath() {
         assertEquals(4L * 1024 * 1024, NikonCamera.CHUNK_SIZE)
         assertEquals(0L, (64L * 1024 * 1024) % NikonCamera.CHUNK_SIZE)
         assertTrue(shouldUsePartialObjectDownload(null, 1L))
@@ -217,15 +217,78 @@ class CameraIoGateTest {
     }
 
     @Test
-    fun usbAlwaysUsesOne64MbTransferSliceWhileWifiPolicyIsUnchanged() {
-        assertEquals(64L * 1024L * 1024L, NikonCamera.USB_CHUNK_SIZE)
+    fun highThroughputModeUsesFullObjectFastPathForOrdinaryNewFiles() {
+        assertEquals(128L * 1024L * 1024L, NikonCamera.HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD)
+        assertFalse(
+            shouldUsePartialObjectDownload(
+                partialObjectSupported = null,
+                effectiveSize = 26L * 1024L * 1024L,
+                isUsbConnection = true,
+            ),
+        )
+        assertFalse(
+            shouldUsePartialObjectDownload(
+                partialObjectSupported = null,
+                effectiveSize = NikonCamera.HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD,
+                isUsbConnection = true,
+            ),
+        )
+        assertTrue(
+            shouldUsePartialObjectDownload(
+                partialObjectSupported = null,
+                effectiveSize = NikonCamera.HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD + 1L,
+                isUsbConnection = true,
+            ),
+        )
+        assertTrue(
+            shouldUsePartialObjectDownload(
+                partialObjectSupported = true,
+                effectiveSize = 26L * 1024L * 1024L,
+                resumeOffset = NikonCamera.CHUNK_SIZE,
+                isUsbConnection = true,
+            ),
+        )
+        assertFalse(
+            shouldUsePartialObjectDownload(
+                partialObjectSupported = null,
+                effectiveSize = 26L * 1024L * 1024L,
+                preferHighThroughput = true,
+            ),
+        )
+        assertTrue(
+            shouldUsePartialObjectDownload(
+                partialObjectSupported = true,
+                effectiveSize = 26L * 1024L * 1024L,
+                resumeOffset = NikonCamera.CHUNK_SIZE,
+                preferHighThroughput = true,
+            ),
+        )
+        assertTrue(
+            shouldUsePartialObjectDownload(
+                partialObjectSupported = true,
+                effectiveSize = NikonCamera.HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD + 1L,
+                preferHighThroughput = true,
+            ),
+        )
+    }
+
+    @Test
+    fun highThroughputPartialPathUses64MbSlicesWhileWifiBrowsePolicyIsUnchanged() {
+        assertEquals(64L * 1024L * 1024L, NikonCamera.HIGH_THROUGHPUT_CHUNK_SIZE)
         assertEquals(
-            NikonCamera.USB_CHUNK_SIZE,
+            NikonCamera.HIGH_THROUGHPUT_CHUNK_SIZE,
             downloadChunkSize(effectiveSize = 26L * 1024L * 1024L, isUsbConnection = true),
         )
         assertEquals(
-            NikonCamera.USB_CHUNK_SIZE,
+            NikonCamera.HIGH_THROUGHPUT_CHUNK_SIZE,
             downloadChunkSize(effectiveSize = 1L * 1024L * 1024L * 1024L, isUsbConnection = true),
+        )
+        assertEquals(
+            NikonCamera.HIGH_THROUGHPUT_CHUNK_SIZE,
+            downloadChunkSize(
+                effectiveSize = 26L * 1024L * 1024L,
+                preferHighThroughput = true,
+            ),
         )
         assertEquals(
             NikonCamera.CHUNK_SIZE,

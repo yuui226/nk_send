@@ -1763,8 +1763,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * [allowRemote] 为 false 时只走内存/磁盘路径；用于大图打开期间暂停底层网格的
      * GetThumb，关闭后调用方以 true 重试即可恢复。
      *
-     * 传输进行中也允许请求：无线普通文件每 4MB、无线超过 512MB 的文件每 32MB、
-     * USB 每 64MB 释放一次相机通道；缩略图可在块间穿插，兼容整传路径仍需等待当前文件完成。
+     * 传输进行中也允许请求：离开传输页时，无线普通文件每 4MB、超过 512MB 每 32MB 让路；
+     * USB 与传输页内的无线高吞吐模式，大文件/续传每 64MB 让路，普通文件 GetObject 需等当前文件。
      */
     suspend fun loadThumbnail(
         file: NikonCamera.FileInfo,

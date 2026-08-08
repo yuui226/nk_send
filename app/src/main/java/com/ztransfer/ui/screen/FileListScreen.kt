@@ -122,9 +122,10 @@ import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.currentFileProgress
 import com.ztransfer.viewmodel.compactDateRangeLabel
+import com.ztransfer.viewmodel.downloadRemainingCount
+import com.ztransfer.viewmodel.generationRemainingCount
 import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.latestCaptureLocalDate
-import com.ztransfer.viewmodel.remainingCount
 import com.ztransfer.viewmodel.storageIdsBySlot
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -168,8 +169,17 @@ internal sealed interface ThumbnailGridItem {
     }
 }
 
-/** 展开后的队列胶囊内容：完成短标 / 计数（速度+剩余数）；入口图标由主题按钮独立绘制。 */
-private enum class PillMode { DONE, COUNTING }
+/** 展开后的队列胶囊内容；入口图标由主题按钮独立绘制。 */
+internal enum class PillMode { DONE, GENERATING, COUNTING }
+
+internal fun queuePillMode(
+    downloadRemaining: Int,
+    generationRemaining: Int,
+): PillMode = when {
+    downloadRemaining > 0 -> PillMode.COUNTING
+    generationRemaining > 0 -> PillMode.GENERATING
+    else -> PillMode.DONE
+}
 
 internal fun queuePillDisplayRemaining(actualRemaining: Int, heldCount: Int): Int {
     val actual = actualRemaining.coerceAtLeast(0)
@@ -178,6 +188,33 @@ internal fun queuePillDisplayRemaining(actualRemaining: Int, heldCount: Int): In
     // If the animation hold covers every remaining task, showing zero would falsely imply that
     // the queue completed. Prefer the real count until the flight releases its hold.
     return afterFlightHold.takeIf { it > 0 } ?: actual
+}
+
+@Composable
+private fun AnimatedQueuePillCount(
+    count: Int,
+    color: Color,
+    label: String,
+) {
+    AnimatedContent(
+        targetState = count,
+        transitionSpec = {
+            val dir = if (targetState < initialState) 1 else -1
+            (slideInVertically { it / 2 * dir } + fadeIn(tween(160)))
+                .togetherWith(
+                    slideOutVertically { -it / 2 * dir } + fadeOut(tween(120)),
+                )
+                .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() }))
+        },
+        label = label,
+    ) { value ->
+        Text(
+            text = "$value",
+            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+            color = color,
+            fontWeight = FontWeight.Bold,
+        )
+    }
 }
 
 /** 队列入口收起为普通按钮时使用固定材质种子，保证木纹/金属微纹在重组后保持一致。 */
@@ -1343,18 +1380,20 @@ fun QueuePill(
     heldCount: Int = 0
 ) {
     val colors = AppTheme.colors
-    val actualRemaining = transferState.remainingCount
-    val remaining = queuePillDisplayRemaining(actualRemaining, heldCount)
+    val downloadRemaining = transferState.downloadRemainingCount
+    val generationRemaining = transferState.generationRemainingCount
+    val remaining = if (downloadRemaining > 0) {
+        queuePillDisplayRemaining(downloadRemaining, heldCount)
+    } else {
+        generationRemaining
+    }
     // Flight animation bookkeeping may delay the displayed count, but it must never turn a
     // real non-empty queue into the completed state and collapse the pill.
-    val allDone = actualRemaining == 0
+    val allDone = downloadRemaining == 0 && generationRemaining == 0
     val transferring = transferState.isTransferring
-    // The pill reads the active task directly, just like the queue screen. Keeping a second
-    // independently updated speed value can leave the two surfaces briefly inconsistent.
-    val activeSpeed = transferState.tasks
-        .firstOrNull { it.status == TransferStatus.TRANSFERING }
-        ?.speed
-        ?: 0L
+    val showingGeneration = downloadRemaining == 0 && generationRemaining > 0
+    // Keep the last valid batch speed across the short preparation gap between two files.
+    val activeSpeed = transferState.currentSpeed
     val hasActive = transferState.tasks.any {
         it.status == TransferStatus.TRANSFERING || it.isGeneratingFrame
     }
@@ -1418,7 +1457,7 @@ fun QueuePill(
     val collapsedWidthPx = with(density) { 46.dp.toPx() } // 22dp 图标 + 左右各 12dp
     val widthAnim = remember { Animatable(0f) }
     var firstMeasure by remember { mutableStateOf(true) }
-    val stableContentWidthPx = if (allDone) {
+    val stableContentWidthPx = if (allDone || showingGeneration) {
         contentWidthPx
     } else {
         maxOf(contentWidthPx, activeQueueMaxWidthPx)
@@ -1523,14 +1562,14 @@ fun QueuePill(
             Box(modifier = Modifier.wrapContentWidth(Alignment.End, unbounded = true)) {
                 Box(modifier = Modifier.onGloballyPositioned {
                     contentWidthPx = it.size.width
-                    if (!allDone && it.size.width > activeQueueMaxWidthPx) {
+                    if (!allDone && !showingGeneration && it.size.width > activeQueueMaxWidthPx) {
                         activeQueueMaxWidthPx = it.size.width
                     }
                 }) {
                     // 胶囊内部的 Done / 计数切换用交叉淡化 + 轻微缩放过渡，不硬切。
                     // 尺寸动画交给外层的弹性宽度弹簧（snap 禁用 AnimatedContent 自带的尺寸
                     // 动画，避免两套叠加）；计数态内部的数字/速度更新不触发转场，原地刷新。
-                    val mode = if (allDone) PillMode.DONE else PillMode.COUNTING
+                    val mode = queuePillMode(downloadRemaining, generationRemaining)
                     AnimatedContent(
                         targetState = mode,
                         // 胶囊右缘钉死、向左伸缩：新旧内容必须都锚定右缘（CenterEnd），
@@ -1560,6 +1599,24 @@ fun QueuePill(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 18.dp)
                                 )
+                            PillMode.GENERATING ->
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 18.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.queue_pill_generating),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = colors.accentBlue,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    AnimatedQueuePillCount(
+                                        count = generationRemaining,
+                                        color = colors.onBackground,
+                                        label = "generationCount",
+                                    )
+                                }
                             PillMode.COUNTING ->
                                 Row(
                                     modifier = Modifier.padding(horizontal = 18.dp),
@@ -1567,7 +1624,7 @@ fun QueuePill(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     // 速度在前（仅传输且有速度时显示）。tnum：等宽数字，位数相同则宽度恒定。
-                                    if (transferring && activeSpeed > 0) {
+                                    if (transferring && activeSpeed > 0L) {
                                         Text(
                                             text = formatSpeed(activeSpeed),
                                             style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
@@ -1577,23 +1634,11 @@ fun QueuePill(
                                     }
                                     // 数字滚动：减少（传输推进）时旧数上滑、新数自下滑入；增加（新入队）反向。
                                     // 尺寸仍 snap 交给外层宽度弹簧；clip 让滑动的数字在行内裁切，像里程表。
-                                    AnimatedContent(
-                                        targetState = remaining,
-                                        transitionSpec = {
-                                            val dir = if (targetState < initialState) 1 else -1
-                                            (slideInVertically { it / 2 * dir } + fadeIn(tween(160)))
-                                                .togetherWith(slideOutVertically { -it / 2 * dir } + fadeOut(tween(120)))
-                                                .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() }))
-                                        },
-                                        label = "count"
-                                    ) { n ->
-                                        Text(
-                                            text = "$n",
-                                            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-                                            color = colors.onBackground,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
+                                    AnimatedQueuePillCount(
+                                        count = remaining,
+                                        color = colors.onBackground,
+                                        label = "downloadCount",
+                                    )
                                 }
                         }
                     }

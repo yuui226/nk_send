@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.ztransfer.ui.screen.*
 import com.ztransfer.ui.theme.AppTheme
@@ -101,6 +102,17 @@ sealed class Screen(val route: String) {
 fun MainScreen(transferViewModel: TransferViewModel) {
     val navController = rememberNavController()
     val cameraViewModel: CameraViewModel = viewModel()
+
+    // 传输页只影响“下一张开始的文件”所采用的无线下载策略。页面切换时同步更新，
+    // TransferViewModel 会在每个文件真正进入协议层前冻结一次快照，不会中途改当前文件。
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val transferScreenVisible = currentBackStackEntry?.destination?.route == Screen.Transfer.route
+    DisposableEffect(transferScreenVisible) {
+        transferViewModel.setTransferScreenVisible(transferScreenVisible)
+        onDispose {
+            if (transferScreenVisible) transferViewModel.setTransferScreenVisible(false)
+        }
+    }
 
     val cameraState by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()

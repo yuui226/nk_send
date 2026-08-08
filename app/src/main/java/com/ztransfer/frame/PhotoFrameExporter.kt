@@ -7,6 +7,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorSpace
@@ -37,6 +38,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -47,6 +49,8 @@ import kotlinx.coroutines.ensureActive
 /** 未完成的边框派生文件；仅在完整写入后改成正式名称，App 下次启动会清理遗留项。 */
 internal const val PHOTO_FRAME_PART_PREFIX = ".nkframe_"
 internal const val PHOTO_FRAME_OUTPUT_DIRECTORY = "ZTFrames"
+internal const val PHOTO_FRAME_JPEG_QUALITY = 100
+internal const val PHOTO_FRAME_REGION_TARGET_PIXELS = 1024 * 1024
 private val PHOTO_FRAME_SESSION_PREFIX =
     "$PHOTO_FRAME_PART_PREFIX${UUID.randomUUID().toString().take(8)}_"
 private const val PLAQUE_BAND_TO_WIDTH = 0.12f
@@ -96,7 +100,7 @@ data class PhotoFrameWatermark(
     val content: PhotoFrameWatermarkContent = PhotoFrameWatermarkContent.TEXT,
     val text: String = DEFAULT_PHOTO_FRAME_WATERMARK_TEXT,
     val imageHash: String? = null,
-    val font: PhotoFrameWatermarkFont = PhotoFrameWatermarkFont.ELEGANT,
+    val font: PhotoFrameWatermarkFont = PhotoFrameWatermarkFont.CALLIGRAPHY,
     val sizePercent: Int = DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
     val position: PhotoFrameWatermarkPosition = PhotoFrameWatermarkPosition.AUTO,
     val color: PhotoFrameWatermarkColor = PhotoFrameWatermarkColor.ADAPTIVE,
@@ -112,7 +116,7 @@ internal const val DEFAULT_PHOTO_FRAME_WATERMARK_TEXT = "ZTransfer"
 internal const val MAX_PHOTO_FRAME_WATERMARK_LENGTH = 24
 internal const val MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 1
 internal const val MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 300
-internal const val DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 26
+internal const val DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 80
 private const val PHOTO_FRAME_WATERMARK_SIZE_PERCENT_OFFSET = 49
 internal const val MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 1
 internal const val MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 100
@@ -224,6 +228,14 @@ internal data class PhotoFrameDestination(
     val occupiedNames: MutableSet<String>,
 )
 
+private fun concurrentPhotoFrameNames(names: Collection<String>): MutableSet<String> =
+    ConcurrentHashMap.newKeySet<String>().apply { addAll(names) }
+
+private fun reservePhotoFrameName(preferred: String, occupiedNames: MutableSet<String>): String =
+    synchronized(occupiedNames) {
+        uniqueName(preferred, occupiedNames).also(occupiedNames::add)
+    }
+
 /** A phone photo together with its preferred MediaStore album and a reliable fallback album. */
 internal data class PhotoFrameMediaStoreSource(
     val sourceUri: Uri,
@@ -283,6 +295,98 @@ internal data class PhotoFrameLayout(
     val metadataTop: Float,
 )
 
+internal data class OrientedPhotoSize(val width: Int, val height: Int)
+internal data class OrientedPhotoRegion(
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+) {
+    val width: Int get() = right - left
+    val height: Int get() = bottom - top
+}
+
+internal fun orientedPhotoSize(
+    rawWidth: Int,
+    rawHeight: Int,
+    orientation: Int,
+): OrientedPhotoSize {
+    require(rawWidth > 0 && rawHeight > 0)
+    val swapsAxes = orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
+        orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+        orientation == ExifInterface.ORIENTATION_TRANSVERSE ||
+        orientation == ExifInterface.ORIENTATION_ROTATE_270
+    return if (swapsAxes) {
+        OrientedPhotoSize(rawHeight, rawWidth)
+    } else {
+        OrientedPhotoSize(rawWidth, rawHeight)
+    }
+}
+
+internal fun photoFrameRegionRows(sourceWidth: Int): Int {
+    require(sourceWidth > 0)
+    return (PHOTO_FRAME_REGION_TARGET_PIXELS / sourceWidth).coerceAtLeast(1)
+}
+
+internal fun orientedRegionRect(
+    rawRegion: Rect,
+    rawWidth: Int,
+    rawHeight: Int,
+    orientation: Int,
+): Rect {
+    val mapped = orientedPhotoRegion(
+        rawLeft = rawRegion.left,
+        rawTop = rawRegion.top,
+        rawRight = rawRegion.right,
+        rawBottom = rawRegion.bottom,
+        rawWidth = rawWidth,
+        rawHeight = rawHeight,
+        orientation = orientation,
+    )
+    return Rect(mapped.left, mapped.top, mapped.right, mapped.bottom)
+}
+
+internal fun orientedPhotoRegion(
+    rawLeft: Int,
+    rawTop: Int,
+    rawRight: Int,
+    rawBottom: Int,
+    rawWidth: Int,
+    rawHeight: Int,
+    orientation: Int,
+): OrientedPhotoRegion {
+    require(rawLeft >= 0 && rawTop >= 0)
+    require(rawRight <= rawWidth && rawBottom <= rawHeight)
+    require(rawRight > rawLeft && rawBottom > rawTop)
+    return when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL ->
+            OrientedPhotoRegion(rawWidth - rawRight, rawTop, rawWidth - rawLeft, rawBottom)
+        ExifInterface.ORIENTATION_ROTATE_180 ->
+            OrientedPhotoRegion(
+                rawWidth - rawRight,
+                rawHeight - rawBottom,
+                rawWidth - rawLeft,
+                rawHeight - rawTop,
+            )
+        ExifInterface.ORIENTATION_FLIP_VERTICAL ->
+            OrientedPhotoRegion(rawLeft, rawHeight - rawBottom, rawRight, rawHeight - rawTop)
+        ExifInterface.ORIENTATION_TRANSPOSE ->
+            OrientedPhotoRegion(rawTop, rawLeft, rawBottom, rawRight)
+        ExifInterface.ORIENTATION_ROTATE_90 ->
+            OrientedPhotoRegion(rawHeight - rawBottom, rawLeft, rawHeight - rawTop, rawRight)
+        ExifInterface.ORIENTATION_TRANSVERSE ->
+            OrientedPhotoRegion(
+                rawHeight - rawBottom,
+                rawWidth - rawRight,
+                rawHeight - rawTop,
+                rawWidth - rawLeft,
+            )
+        ExifInterface.ORIENTATION_ROTATE_270 ->
+            OrientedPhotoRegion(rawTop, rawWidth - rawRight, rawBottom, rawWidth - rawLeft)
+        else -> OrientedPhotoRegion(rawLeft, rawTop, rawRight, rawBottom)
+    }
+}
+
 internal data class PhotoFrameMetadata(
     val make: String?,
     val model: String?,
@@ -316,19 +420,42 @@ internal data class PhotoWatermarkPlacement(
  * 边框导出器：读取已传输原片，在原片外创建新画布并另存 JPG。
  *
  * 接收 Android 可稳定解码的 JPG/JPEG/PNG。各代 NEF 无法可靠解码，强行支持会在不同
- * 手机上产生黑图或方向错误；RAW+JPEG 拍摄时应选择 JPG 成员生成分享图。
+ * 手机上产生黑图或方向错误；RAW+JPEG 拍摄时应选择 JPG 成员生成效果图。
  */
 object PhotoFrameExporter {
-    // 分享图保留 3200px 长边（常规 4:3 约 7.7MP），手机端观看和二次发布已有
-    // 充足余量；相比 4096px 可把“解码原片 + 输出画布”的峰值内存降低约 39%，
-    // 对 128/192MB heap 的旧机和定制系统更可靠。原片本身始终无损保留。
-    private const val MAX_SOURCE_EDGE = 3200
-    private const val JPEG_QUALITY = 95
+    // 派生图是原片的高品质版本，不允许静默缩成分享图。JPEG 仍必须重新编码，但使用
+    // Android 编码器的最高质量档，照片主体的像素尺寸由原图完整保留。
     private const val COPY_BUFFER_BYTES = 256 * 1024
+    // Preserve photographic/capture metadata but intentionally do not copy GPS location or the
+    // source orientation (the pixels have already been normalized during decode).
+    private val COPIED_EXIF_TAGS = arrayOf(
+        ExifInterface.TAG_MAKE,
+        ExifInterface.TAG_MODEL,
+        ExifInterface.TAG_SOFTWARE,
+        ExifInterface.TAG_DATETIME,
+        ExifInterface.TAG_DATETIME_ORIGINAL,
+        ExifInterface.TAG_DATETIME_DIGITIZED,
+        ExifInterface.TAG_EXPOSURE_TIME,
+        ExifInterface.TAG_F_NUMBER,
+        ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
+        ExifInterface.TAG_FOCAL_LENGTH,
+        ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+        ExifInterface.TAG_LENS_MAKE,
+        ExifInterface.TAG_LENS_MODEL,
+        ExifInterface.TAG_EXPOSURE_PROGRAM,
+        ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
+        ExifInterface.TAG_METERING_MODE,
+        ExifInterface.TAG_FLASH,
+        ExifInterface.TAG_WHITE_BALANCE,
+        ExifInterface.TAG_COLOR_SPACE,
+    )
     private val EMPTY_METADATA =
         PhotoFrameMetadata(null, null, null, null, null, null)
     private val bundledTypefaceCache = mutableMapOf<PhotoFrameWatermarkFont, Typeface>()
     private val watermarkImageCache = linkedMapOf<String, Bitmap>()
+
+    private class RegionDecodeUnavailableException(cause: Throwable?) :
+        Exception("Source provider does not support region decoding", cause)
 
     internal suspend fun export(
         context: Context,
@@ -363,6 +490,7 @@ object PhotoFrameExporter {
                 saveRendered(
                     resolver = resolver,
                     destination = destination,
+                    sourceUri = sourceUri,
                     sourceName = sourceName,
                     preset = preset,
                     watermark = renderedWatermark,
@@ -577,7 +705,7 @@ object PhotoFrameExporter {
         sourceUri: Uri,
     ): PhotoFrameMetadata = readMetadata(resolver, sourceUri)
 
-    private fun renderSource(
+    private suspend fun renderSource(
         context: Context,
         resolver: ContentResolver,
         sourceUri: Uri,
@@ -587,27 +715,42 @@ object PhotoFrameExporter {
         filter: PhotoFilterSelection?,
     ): Bitmap {
         val metadata = if (borderEnabled) readMetadata(resolver, sourceUri) else EMPTY_METADATA
-        val decoded = decodeBounded(resolver, sourceUri, MAX_SOURCE_EDGE)
-            ?: error("Cannot decode source photo")
-        val bitmap = if (filter == null) {
-            decoded
-        } else {
-            try {
-                PhotoFilterRenderer.render(decoded, filter)
-            } finally {
-                decoded.recycle()
-            }
+        if (borderEnabled && preset != PhotoFramePreset.IMMERSIVE) {
+            return renderOriginalFrameByRegions(
+                context = context,
+                resolver = resolver,
+                sourceUri = sourceUri,
+                metadata = metadata,
+                preset = preset,
+                watermark = watermark,
+                filter = filter,
+            )
         }
+        val decoded = decodeOriginal(resolver, sourceUri)
+            ?: error("Cannot decode source photo")
         return try {
-            renderFrame(context, bitmap, metadata, preset, watermark, borderEnabled)
-        } finally {
-            bitmap.recycle()
+            if (filter != null) {
+                PhotoFilterRenderer.renderInPlace(decoded, filter)
+            }
+            val rendered = renderFrame(
+                context,
+                decoded,
+                metadata,
+                preset,
+                watermark,
+                borderEnabled,
+            )
+            if (rendered !== decoded) decoded.recycle()
+            rendered
+        } catch (error: Throwable) {
+            decoded.recycle()
+            throw error
         }
     }
 
     /**
      * 在用户选择的保存目录下复用或创建固定成片目录，并只在首次准备时扫描一次已有名称。
-     * 调用方按根目录缓存结果；边框线程单并发，后续名称由 [saveRendered] 增量登记。
+     * 调用方按根目录缓存结果；名称集合支持并行导出，后续名称由 [saveRendered] 原子预留。
      */
     internal fun prepareDestination(
         resolver: ContentResolver,
@@ -625,7 +768,9 @@ object PhotoFrameExporter {
             ?: error("Cannot create frame output directory")
         return PhotoFrameDestination(
             directoryUri = directoryUri,
-            occupiedNames = listChildNames(resolver, treeUri, directoryUri).toMutableSet(),
+            occupiedNames = concurrentPhotoFrameNames(
+                listChildNames(resolver, treeUri, directoryUri),
+            ),
         )
     }
 
@@ -782,8 +927,20 @@ object PhotoFrameExporter {
         resolver: ContentResolver,
         uri: Uri,
         maxEdge: Int,
+    ): Bitmap? = decodeBitmap(resolver, uri, maxEdge = maxEdge, mutable = false)
+
+    private fun decodeOriginal(
+        resolver: ContentResolver,
+        uri: Uri,
+    ): Bitmap? = decodeBitmap(resolver, uri, maxEdge = null, mutable = true)
+
+    private fun decodeBitmap(
+        resolver: ContentResolver,
+        uri: Uri,
+        maxEdge: Int?,
+        mutable: Boolean,
     ): Bitmap? {
-        require(maxEdge > 0)
+        require(maxEdge == null || maxEdge > 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
                 return ImageDecoder.decodeBitmap(
@@ -791,12 +948,15 @@ object PhotoFrameExporter {
                 ) { decoder, info, _ ->
                     val width = info.size.width
                     val height = info.size.height
-                    val scale = min(1f, maxEdge.toFloat() / maxOf(width, height))
-                    decoder.setTargetSize(
-                        (width * scale).roundToInt().coerceAtLeast(1),
-                        (height * scale).roundToInt().coerceAtLeast(1),
-                    )
+                    if (maxEdge != null) {
+                        val scale = min(1f, maxEdge.toFloat() / maxOf(width, height))
+                        decoder.setTargetSize(
+                            (width * scale).roundToInt().coerceAtLeast(1),
+                            (height * scale).roundToInt().coerceAtLeast(1),
+                        )
+                    }
                     decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.isMutableRequired = mutable
                     // 分享平台最终普遍以 sRGB 展示；显式色彩管理也能避免广色域 JPEG
                     // 被解成 RGBA_F16，令解码位图内存意外翻倍。
                     decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
@@ -815,8 +975,10 @@ object PhotoFrameExporter {
         }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
-        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > maxEdge) {
-            sample *= 2
+        if (maxEdge != null) {
+            while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > maxEdge) {
+                sample *= 2
+            }
         }
         val decoded = resolver.openFileDescriptor(uri, "r")?.use {
             BitmapFactory.decodeFileDescriptor(
@@ -825,6 +987,7 @@ object PhotoFrameExporter {
                 BitmapFactory.Options().apply {
                     inSampleSize = sample
                     inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inMutable = mutable
                 },
             )
         } ?: return null
@@ -836,10 +999,21 @@ object PhotoFrameExporter {
                 )
             } ?: ExifInterface.ORIENTATION_NORMAL
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        var oriented: Bitmap? = null
         return try {
-            applyExifOrientation(decoded, orientation)
+            oriented = applyExifOrientation(decoded, orientation)
+            val normalized = checkNotNull(oriented)
+            if (mutable && !normalized.isMutable) {
+                val mutableCopy = normalized.copy(Bitmap.Config.ARGB_8888, true)
+                    ?: error("Cannot create mutable source photo")
+                normalized.recycle()
+                mutableCopy
+            } else {
+                normalized
+            }
         } catch (error: Throwable) {
-            decoded.recycle()
+            oriented?.takeIf { it !== decoded && !it.isRecycled }?.recycle()
+            if (!decoded.isRecycled) decoded.recycle()
             throw error
         }
     }
@@ -857,13 +1031,15 @@ object PhotoFrameExporter {
         val input = filter?.let { PhotoFilterRenderer.render(source, it) } ?: source
         return try {
             renderFrame(
-                context,
-                input,
-                metadata,
-                preset,
-                watermark.forBorderMode(borderEnabled),
-                borderEnabled,
-                longEdge,
+                context = context,
+                source = input,
+                metadata = metadata,
+                preset = preset,
+                watermark = watermark.forBorderMode(borderEnabled),
+                borderEnabled = borderEnabled,
+                // Preview must match export: filter only the photo, never the frame backdrop.
+                backdropSource = source,
+                longEdge = longEdge,
             )
         } finally {
             if (input !== source) input.recycle()
@@ -877,18 +1053,54 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean,
-        longEdge: Int = 3200,
+        backdropSource: Bitmap = source,
+        longEdge: Int? = null,
     ): Bitmap {
-        require(longEdge > 0)
+        require(longEdge == null || longEdge > 0)
         if (!borderEnabled) {
-            return renderWatermarkOnly(context, source, watermark, longEdge)
+            return renderWatermarkOnly(
+                context,
+                source,
+                watermark,
+                longEdge ?: maxOf(source.width, source.height),
+            )
         }
-        val layout = when (preset) {
-            PhotoFramePreset.PLAQUE ->
-                calculatePlaqueFrameLayout(source.width, source.height, longEdge)
-            PhotoFramePreset.IMMERSIVE ->
-                calculateImmersiveFrameLayout(source.width, source.height, longEdge)
-            else -> calculatePhotoFrameLayout(source.width, source.height, longEdge)
+        val layout = if (longEdge != null) {
+            when (preset) {
+                PhotoFramePreset.PLAQUE ->
+                    calculatePlaqueFrameLayout(source.width, source.height, longEdge)
+                PhotoFramePreset.IMMERSIVE ->
+                    calculateImmersiveFrameLayout(source.width, source.height, longEdge)
+                else -> calculatePhotoFrameLayout(source.width, source.height, longEdge)
+            }
+        } else {
+            when (preset) {
+                PhotoFramePreset.PLAQUE ->
+                    calculateOriginalQualityPlaqueLayout(source.width, source.height)
+                PhotoFramePreset.IMMERSIVE ->
+                    calculateImmersiveFrameLayout(
+                        source.width,
+                        source.height,
+                        maxOf(source.width, source.height),
+                    )
+                else -> calculateOriginalQualityPhotoFrameLayout(source.width, source.height)
+            }
+        }
+        if (
+            longEdge == null &&
+            preset == PhotoFramePreset.IMMERSIVE &&
+            source.isMutable
+        ) {
+            drawImmersiveFrame(
+                context = context,
+                canvas = Canvas(source),
+                source = source,
+                layout = layout,
+                metadata = metadata,
+                watermark = watermark,
+                drawSource = false,
+            )
+            return source
         }
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
@@ -905,7 +1117,7 @@ object PhotoFrameExporter {
                 drawImmersiveFrame(context, canvas, source, layout, metadata, watermark)
                 return output
             }
-            drawBackdrop(canvas, source, preset)
+            drawBackdrop(canvas, backdropSource, preset)
 
             val photoRect = RectF(
                 layout.photoLeft,
@@ -973,7 +1185,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.PLAQUE -> 0f
             PhotoFramePreset.IMMERSIVE -> 0f
         }
-        // ShadowLayer 在 3200px 画布上直接做两次软件模糊代价很高。阴影本身没有
+        // ShadowLayer 在原尺寸高像素画布上直接做两次软件模糊代价很高。阴影本身没有
         // 高频细节，先在 1/4 尺寸透明代理图渲染，再双线性放大，视觉一致而参与
         // 模糊的像素数约为原来的 1/16。
         val proxyScale = 0.25f
@@ -1416,6 +1628,17 @@ object PhotoFrameExporter {
         val scale = min(1f, longEdge.toFloat() / maxOf(source.width, source.height))
         val width = (source.width * scale).roundToInt().coerceAtLeast(1)
         val height = (source.height * scale).roundToInt().coerceAtLeast(1)
+        if (width == source.width && height == source.height && source.isMutable) {
+            val photoRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
+            drawPhotoWatermark(
+                context,
+                Canvas(source),
+                photoRect,
+                PhotoFramePreset.MIST,
+                watermark,
+            )
+            return source
+        }
         val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         try {
             val canvas = Canvas(output)
@@ -1526,7 +1749,7 @@ object PhotoFrameExporter {
 
     /**
      * 三款艺术字体随 APK 离线分发并缓存 Typeface，避免预览连续重绘时重复解析字体文件。
-     * 资源异常时仍回退到系统字体，不能让一张分享图因为字体加载失败而中断导出。
+     * 资源异常时仍回退到系统字体，不能让一张效果图因为字体加载失败而中断导出。
      */
     private fun bundledWatermarkTypeface(
         context: Context,
@@ -1783,14 +2006,17 @@ object PhotoFrameExporter {
         layout: PhotoFrameLayout,
         metadata: PhotoFrameMetadata,
         watermark: PhotoFrameWatermark,
+        drawSource: Boolean = true,
     ) {
         val photoRect = RectF(0f, 0f, layout.canvasWidth.toFloat(), layout.canvasHeight.toFloat())
-        canvas.drawBitmap(
-            source,
-            null,
-            photoRect,
-            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
-        )
+        if (drawSource) {
+            canvas.drawBitmap(
+                source,
+                null,
+                photoRect,
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+            )
+        }
 
         val metadataWatermark = watermark.withoutPhotoPlacement()
         val brand = normalizeCameraMake(metadata.make)
@@ -1981,6 +2207,331 @@ object PhotoFrameExporter {
         }
     }
 
+    private fun copyRenderedExif(
+        resolver: ContentResolver,
+        sourceUri: Uri,
+        targetUri: Uri,
+        width: Int,
+        height: Int,
+    ) {
+        val attributes = runCatching {
+            resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
+                val source = ExifInterface(descriptor.fileDescriptor)
+                COPIED_EXIF_TAGS.mapNotNull { tag ->
+                    source.getAttribute(tag)?.let { value -> tag to value }
+                }
+            }
+        }.getOrNull() ?: return
+
+        runCatching {
+            resolver.openFileDescriptor(targetUri, "rw")?.use { descriptor ->
+                val target = ExifInterface(descriptor.fileDescriptor)
+                attributes.forEach { (tag, value) -> target.setAttribute(tag, value) }
+                target.setAttribute(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL.toString(),
+                )
+                target.setAttribute(ExifInterface.TAG_IMAGE_WIDTH, width.toString())
+                target.setAttribute(ExifInterface.TAG_IMAGE_LENGTH, height.toString())
+                target.setAttribute(ExifInterface.TAG_PIXEL_X_DIMENSION, width.toString())
+                target.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION, height.toString())
+                target.saveAttributes()
+            }
+        }.onFailure { error ->
+            // Some cloud/custom DocumentsProviders expose writable streams but not seekable rw
+            // descriptors. The high-quality image is still valid; metadata copying is best effort.
+            Log.w(
+                PHOTO_FRAME_EXPORT_TAG,
+                "Cannot preserve derived EXIF (${error.javaClass.simpleName}: ${error.message})",
+            )
+        }
+    }
+
+    /**
+     * Memory-bounded original-quality frame path. The unfiltered preview is used only to generate
+     * the decorative backdrop. Full-resolution regions are filtered independently and drawn into
+     * the 1:1 photo rectangle; frame graphics and watermarks are always drawn afterwards.
+     */
+    private suspend fun renderOriginalFrameByRegions(
+        context: Context,
+        resolver: ContentResolver,
+        sourceUri: Uri,
+        metadata: PhotoFrameMetadata,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+        filter: PhotoFilterSelection?,
+    ): Bitmap = withRegionDecoder(context, resolver, sourceUri) { decoder ->
+        val orientation = readSourceOrientation(resolver, sourceUri)
+        val orientedSize = orientedPhotoSize(decoder.width, decoder.height, orientation)
+        val layout = when (preset) {
+            PhotoFramePreset.PLAQUE ->
+                calculateOriginalQualityPlaqueLayout(orientedSize.width, orientedSize.height)
+            else -> calculateOriginalQualityPhotoFrameLayout(orientedSize.width, orientedSize.height)
+        }
+        val output = Bitmap.createBitmap(
+            layout.canvasWidth,
+            layout.canvasHeight,
+            Bitmap.Config.ARGB_8888,
+        )
+        try {
+            val canvas = Canvas(output)
+            val photoRect = RectF(
+                layout.photoLeft,
+                layout.photoTop,
+                layout.photoRight,
+                layout.photoBottom,
+            )
+            if (preset == PhotoFramePreset.PLAQUE) {
+                canvas.drawColor(Color.WHITE)
+                drawPhotoRegions(
+                    decoder = decoder,
+                    canvas = canvas,
+                    photoRect = photoRect,
+                    orientation = orientation,
+                    filter = filter,
+                )
+                // The complete plaque band and both watermark modes are composited after filtering.
+                drawPlaqueDecoration(context, canvas, layout, metadata, watermark)
+                return@withRegionDecoder output
+            }
+
+            // Backdrop color/blur must describe the original photo, not the filtered photo layer.
+            val unfilteredPreview = decodeRegionPreview(decoder, orientation)
+            try {
+                drawBackdrop(canvas, unfilteredPreview, preset)
+            } finally {
+                unfilteredPreview.recycle()
+            }
+            val radius = photoFrameCornerRadius(layout)
+            drawPhotoElevation(canvas, photoRect, radius, preset)
+            val clip = Path().apply {
+                addRoundRect(photoRect, radius, radius, Path.Direction.CW)
+            }
+            canvas.save()
+            canvas.clipPath(clip)
+            drawPhotoRegions(
+                decoder = decoder,
+                canvas = canvas,
+                photoRect = photoRect,
+                orientation = orientation,
+                filter = filter,
+            )
+            // Watermark is intentionally after the filtered photo tiles and is never filtered.
+            drawPhotoWatermark(context, canvas, photoRect, preset, watermark)
+            canvas.restore()
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = maxOf(1f, layout.canvasWidth * 0.0012f)
+                color = if (preset != PhotoFramePreset.MINIMAL) {
+                    Color.argb(70, 255, 255, 255)
+                } else {
+                    Color.argb(45, 20, 28, 35)
+                }
+                canvas.drawRoundRect(photoRect, radius, radius, this)
+            }
+            drawMetadata(
+                context,
+                canvas,
+                layout,
+                metadata,
+                preset,
+                watermark.withoutPhotoPlacement(),
+            )
+            output
+        } catch (error: Throwable) {
+            output.recycle()
+            throw error
+        }
+    }
+
+    private fun readSourceOrientation(resolver: ContentResolver, uri: Uri): Int =
+        runCatching {
+            resolver.openFileDescriptor(uri, "r")?.use { descriptor ->
+                ExifInterface(descriptor.fileDescriptor).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL,
+                )
+            } ?: ExifInterface.ORIENTATION_NORMAL
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+    @Suppress("DEPRECATION")
+    private suspend fun <T> withRegionDecoder(
+        context: Context,
+        resolver: ContentResolver,
+        uri: Uri,
+        block: suspend (BitmapRegionDecoder) -> T,
+    ): T {
+        var descriptorFailure: Exception? = null
+        val descriptor = try {
+            resolver.openFileDescriptor(uri, "r")
+        } catch (error: Exception) {
+            descriptorFailure = error
+            null
+        }
+        descriptor?.let {
+            try {
+                val decoder = try {
+                    BitmapRegionDecoder.newInstance(it.fileDescriptor, false)
+                } catch (error: Exception) {
+                    descriptorFailure = error
+                    null
+                }
+                if (decoder != null) {
+                    try {
+                        return block(decoder)
+                    } finally {
+                        decoder.recycle()
+                    }
+                }
+            } finally {
+                it.close()
+            }
+        }
+
+        var streamFailure: Exception? = null
+        val input = try {
+            resolver.openInputStream(uri)
+        } catch (error: Exception) {
+            streamFailure = error
+            null
+        }
+        input?.buffered()?.use { buffered ->
+            val decoder = try {
+                BitmapRegionDecoder.newInstance(buffered, false)
+            } catch (error: Exception) {
+                streamFailure = error
+                null
+            }
+            if (decoder != null) {
+                try {
+                    return block(decoder)
+                } finally {
+                    decoder.recycle()
+                }
+            }
+        }
+
+        // Last compatibility path: materialize the provider stream in private cache, then region
+        // decode that seekable file. This is slower but keeps the same bounded-memory behaviour.
+        val temporary = File.createTempFile("frame_source_", ".img", context.cacheDir)
+        try {
+            try {
+                resolver.openInputStream(uri)?.use { source ->
+                    temporary.outputStream().buffered().use { target ->
+                        source.copyTo(target, COPY_BUFFER_BYTES)
+                    }
+                } ?: error("Cannot reopen source photo")
+            } catch (error: Exception) {
+                descriptorFailure?.let(error::addSuppressed)
+                streamFailure?.let(error::addSuppressed)
+                throw RegionDecodeUnavailableException(error)
+            }
+            val decoder = try {
+                BitmapRegionDecoder.newInstance(temporary.absolutePath, false)
+            } catch (error: Exception) {
+                descriptorFailure?.let(error::addSuppressed)
+                streamFailure?.let(error::addSuppressed)
+                throw RegionDecodeUnavailableException(error)
+            }
+            try {
+                return block(decoder)
+            } finally {
+                decoder.recycle()
+            }
+        } finally {
+            if (!temporary.delete()) {
+                Log.w(PHOTO_FRAME_EXPORT_TAG, "Cannot remove temporary region source")
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun decodeRegionPreview(
+        decoder: BitmapRegionDecoder,
+        orientation: Int,
+    ): Bitmap {
+        var sample = 1
+        while (maxOf(decoder.width / sample, decoder.height / sample) > 192) sample *= 2
+        val preview = decoder.decodeRegion(
+            Rect(0, 0, decoder.width, decoder.height),
+            BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
+            },
+        ) ?: error("Cannot decode source preview")
+        return applyExifOrientation(preview, orientation)
+    }
+
+    @Suppress("DEPRECATION")
+    private suspend fun drawPhotoRegions(
+        decoder: BitmapRegionDecoder,
+        canvas: Canvas,
+        photoRect: RectF,
+        orientation: Int,
+        filter: PhotoFilterSelection?,
+    ) {
+        val rowsPerRegion = photoFrameRegionRows(decoder.width)
+        val paint = Paint(Paint.DITHER_FLAG)
+        val filterScratch = filter?.let {
+            IntArray(maxOf(PHOTO_FRAME_REGION_TARGET_PIXELS, decoder.width))
+        }
+        var rawTop = 0
+        while (rawTop < decoder.height) {
+            currentCoroutineContext().ensureActive()
+            val rawBottom = minOf(decoder.height, rawTop + rowsPerRegion)
+            val rawRegion = Rect(0, rawTop, decoder.width, rawBottom)
+            var tile = decoder.decodeRegion(
+                rawRegion,
+                BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inMutable = filter != null
+                    inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
+                },
+            ) ?: error("Cannot decode source photo region")
+            try {
+                if (filter != null) {
+                    if (!tile.isMutable) {
+                        val mutable = tile.copy(Bitmap.Config.ARGB_8888, true)
+                            ?: error("Cannot create mutable photo region")
+                        tile.recycle()
+                        tile = mutable
+                    }
+                    // Only this source-photo region is filtered. No frame pixel exists yet here.
+                    PhotoFilterRenderer.renderInPlace(
+                        source = tile,
+                        selection = filter,
+                        scratchPixels = filterScratch,
+                    )
+                }
+                tile = applyExifOrientation(tile, orientation)
+                val mapped = orientedRegionRect(
+                    rawRegion = rawRegion,
+                    rawWidth = decoder.width,
+                    rawHeight = decoder.height,
+                    orientation = orientation,
+                )
+                check(tile.width == mapped.width() && tile.height == mapped.height()) {
+                    "Oriented photo region size mismatch"
+                }
+                canvas.drawBitmap(
+                    tile,
+                    null,
+                    RectF(
+                        photoRect.left + mapped.left,
+                        photoRect.top + mapped.top,
+                        photoRect.left + mapped.right,
+                        photoRect.top + mapped.bottom,
+                    ),
+                    paint,
+                )
+            } finally {
+                if (!tile.isRecycled) tile.recycle()
+            }
+            rawTop = rawBottom
+        }
+    }
+
     /**
      * “铭牌”预设严格沿用参考图的结构：照片无裁切铺满宽度，底部接一整条白色信息带。
      * 横图查看时出现的上下黑区属于图库查看器，不写进导出文件。
@@ -1993,7 +2544,6 @@ object PhotoFrameExporter {
         metadata: PhotoFrameMetadata,
         watermark: PhotoFrameWatermark,
     ) {
-        val metadataWatermark = watermark.withoutPhotoPlacement()
         canvas.drawColor(Color.WHITE)
         val photoRect = RectF(
             layout.photoLeft,
@@ -2006,6 +2556,24 @@ object PhotoFrameExporter {
             null,
             photoRect,
             Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+        )
+        drawPlaqueDecoration(context, canvas, layout, metadata, watermark)
+    }
+
+    /** Drawn after the photo layer, so neither the plaque band nor its text/watermark is filtered. */
+    private fun drawPlaqueDecoration(
+        context: Context,
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        watermark: PhotoFrameWatermark,
+    ) {
+        val metadataWatermark = watermark.withoutPhotoPlacement()
+        val photoRect = RectF(
+            layout.photoLeft,
+            layout.photoTop,
+            layout.photoRight,
+            layout.photoBottom,
         )
         drawPhotoWatermark(context, canvas, photoRect, PhotoFramePreset.PLAQUE, watermark)
 
@@ -2273,6 +2841,7 @@ object PhotoFrameExporter {
             try {
                 return writeRenderedToMediaStore(
                     resolver = resolver,
+                    sourceUri = source.sourceUri,
                     collectionUri = source.collectionUri,
                     relativePath = checkNotNull(originalPath),
                     relatedMediaUri = source.relatedMediaUri,
@@ -2307,6 +2876,7 @@ object PhotoFrameExporter {
         return try {
             writeRenderedToMediaStore(
                 resolver = resolver,
+                sourceUri = source.sourceUri,
                 collectionUri = source.fallbackCollectionUri,
                 relativePath = LOCAL_PHOTO_FALLBACK_RELATIVE_PATH,
                 relatedMediaUri = null,
@@ -2324,6 +2894,7 @@ object PhotoFrameExporter {
 
     private suspend fun writeRenderedToMediaStore(
         resolver: ContentResolver,
+        sourceUri: Uri,
         collectionUri: Uri,
         relativePath: String,
         relatedMediaUri: Uri?,
@@ -2356,10 +2927,17 @@ object PhotoFrameExporter {
         try {
             val written = resolver.openOutputStream(target, "w")?.let { raw ->
                 BufferedOutputStream(raw, COPY_BUFFER_BYTES).use { output ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_FRAME_JPEG_QUALITY, output)
                 }
             } == true
             if (!written) error("Cannot write derived photo")
+            copyRenderedExif(
+                resolver = resolver,
+                sourceUri = sourceUri,
+                targetUri = target,
+                width = bitmap.width,
+                height = bitmap.height,
+            )
             currentCoroutineContext().ensureActive()
             val published = resolver.update(
                 target,
@@ -2380,6 +2958,7 @@ object PhotoFrameExporter {
     private suspend fun saveRendered(
         resolver: ContentResolver,
         destination: PhotoFrameDestination,
+        sourceUri: Uri,
         sourceName: String,
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
@@ -2395,22 +2974,36 @@ object PhotoFrameExporter {
             borderEnabled = borderEnabled,
             filter = filter,
         )
-        val name = uniqueName(preferred, destination.occupiedNames)
+        // Reserve before touching the provider so concurrent exporters never select the same name.
+        val name = reservePhotoFrameName(preferred, destination.occupiedNames)
         val tempName = photoFrameTempName(System.nanoTime())
-        val temp = DocumentsContract.createDocument(
-            resolver,
-            parentUri,
-            "image/jpeg",
-            tempName,
-        ) ?: error("Cannot create derived photo")
+        val temp = try {
+            DocumentsContract.createDocument(
+                resolver,
+                parentUri,
+                "image/jpeg",
+                tempName,
+            ) ?: error("Cannot create derived photo")
+        } catch (error: Throwable) {
+            destination.occupiedNames.remove(name)
+            throw error
+        }
         var tempStillExists = true
+        var keepReservedName = false
         try {
             val written = resolver.openOutputStream(temp, "w")?.let { raw ->
                 BufferedOutputStream(raw, COPY_BUFFER_BYTES).use { output ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_FRAME_JPEG_QUALITY, output)
                 }
             } == true
             if (!written) error("Cannot write derived photo")
+            copyRenderedExif(
+                resolver = resolver,
+                sourceUri = sourceUri,
+                targetUri = temp,
+                width = bitmap.width,
+                height = bitmap.height,
+            )
             // 压缩是不可中断的阻塞调用；若界面已销毁，在正式改名前响应取消，仅清理隐藏临时文件。
             currentCoroutineContext().ensureActive()
 
@@ -2423,9 +3016,12 @@ object PhotoFrameExporter {
             }
             if (renamed != null) {
                 tempStillExists = false
-                return PhotoFrameExportResult(
+                val result = PhotoFrameExportResult(
                     displayName = displayNameOf(resolver, renamed) ?: name,
-                ).also { destination.occupiedNames.add(it.displayName) }
+                )
+                destination.occupiedNames.add(result.displayName)
+                keepReservedName = true
+                return result
             }
 
             val copied = copyCompletedFrame(
@@ -2434,13 +3030,17 @@ object PhotoFrameExporter {
                 sourceUri = temp,
                 requestedName = name,
             )
-            return PhotoFrameExportResult(
+            val result = PhotoFrameExportResult(
                 displayName = displayNameOf(resolver, copied) ?: name,
-            ).also { destination.occupiedNames.add(it.displayName) }
+            )
+            destination.occupiedNames.add(result.displayName)
+            keepReservedName = true
+            return result
         } finally {
             if (tempStillExists) {
                 runCatching { DocumentsContract.deleteDocument(resolver, temp) }
             }
+            if (!keepReservedName) destination.occupiedNames.remove(name)
         }
     }
 
@@ -2580,8 +3180,76 @@ internal fun calculatePhotoFrameLayout(
 }
 
 /**
+ * Builds the decorative canvas around a 1:1 source-photo rectangle. The canvas grows until the
+ * existing preset margins and metadata band can contain every original source pixel; it never
+ * shrinks the photo to a fixed sharing resolution.
+ */
+internal fun calculateOriginalQualityPhotoFrameLayout(
+    sourceWidth: Int,
+    sourceHeight: Int,
+): PhotoFrameLayout {
+    require(sourceWidth > 0 && sourceHeight > 0)
+
+    fun fits(longEdge: Int): Boolean {
+        val layout = calculatePhotoFrameLayout(sourceWidth, sourceHeight, longEdge)
+        return layout.photoRight - layout.photoLeft >= sourceWidth.toFloat() &&
+            layout.photoBottom - layout.photoTop >= sourceHeight.toFloat()
+    }
+
+    var low = maxOf(sourceWidth, sourceHeight)
+    var high = low
+    while (!fits(high)) {
+        check(high <= Int.MAX_VALUE / 2) { "Original photo is too large to frame" }
+        high *= 2
+    }
+    while (low < high) {
+        val middle = low + (high - low) / 2
+        if (fits(middle)) high = middle else low = middle + 1
+    }
+
+    val base = calculatePhotoFrameLayout(sourceWidth, sourceHeight, low)
+    val left = ((base.canvasWidth - sourceWidth) / 2f)
+        .roundToInt()
+        .coerceIn(0, base.canvasWidth - sourceWidth)
+        .toFloat()
+    val desiredTop = (
+        (base.photoTop + base.photoBottom) / 2f - sourceHeight / 2f
+        ).roundToInt()
+    val maxTop = minOf(
+        base.canvasHeight - sourceHeight,
+        (base.metadataTop - sourceHeight).toInt(),
+    ).coerceAtLeast(0)
+    val top = desiredTop.coerceIn(0, maxTop).toFloat()
+    return base.copy(
+        photoLeft = left,
+        photoTop = top,
+        photoRight = left + sourceWidth,
+        photoBottom = top + sourceHeight,
+    )
+}
+
+/** The plaque adds its information band outside the original 1:1 photo rectangle. */
+internal fun calculateOriginalQualityPlaqueLayout(
+    sourceWidth: Int,
+    sourceHeight: Int,
+): PhotoFrameLayout {
+    require(sourceWidth > 0 && sourceHeight > 0)
+    val bandHeight = (sourceWidth * PLAQUE_BAND_TO_WIDTH).roundToInt().coerceAtLeast(1)
+    check(sourceHeight <= Int.MAX_VALUE - bandHeight) { "Original photo is too large to frame" }
+    return PhotoFrameLayout(
+        canvasWidth = sourceWidth,
+        canvasHeight = sourceHeight + bandHeight,
+        photoLeft = 0f,
+        photoTop = 0f,
+        photoRight = sourceWidth.toFloat(),
+        photoBottom = sourceHeight.toFloat(),
+        metadataTop = sourceHeight.toFloat(),
+    )
+}
+
+/**
  * “铭牌”不建立固定比例的装饰画布，只在原片下方增加宽度约 12% 的信息带。
- * 最终长边仍限制在 [longEdge] 内，竖图会连同信息带一起缩放，避免输出意外超过 3200px。
+ * 预览成片的长边限制在 [longEdge] 内；原品质导出使用独立的 1:1 布局函数。
  */
 internal fun calculatePlaqueFrameLayout(
     sourceWidth: Int,

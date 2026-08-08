@@ -15,6 +15,8 @@ import java.util.concurrent.RecursiveAction
 object PhotoFilterRenderer {
     private const val PARALLEL_PIXEL_THRESHOLD = 512 * 512
     private const val PIXELS_PER_TASK = 64 * 1024
+    /** Export stripes stay small even for 45MP originals while still feeding all filter workers. */
+    private const val IN_PLACE_PIXELS_PER_STRIPE = 1024 * 1024
     private const val CANCELLATION_CHECK_INTERVAL = 4 * 1024
     private const val NCP_MAX_MANUAL_STEP = 3f
     // Nikon does not publish its post-RAW sRGB transform. Manual hue controls are mapped linearly,
@@ -72,6 +74,77 @@ object PhotoFilterRenderer {
         } catch (error: Throwable) {
             output.recycle()
             throw error
+        }
+    }
+
+    /**
+     * Applies a filter to a mutable export bitmap without allocating another full-resolution
+     * bitmap and full-image [IntArray]. Only one bounded stripe is resident at a time; pixel work
+     * inside that stripe still uses the filter pool. This is the original-resolution export path.
+     */
+    fun renderInPlace(
+        source: Bitmap,
+        selection: PhotoFilterSelection,
+        isCancelled: () -> Boolean = { false },
+        scratchPixels: IntArray? = null,
+    ): Bitmap {
+        require(source.isMutable) { "Original-quality filter source must be mutable" }
+        if (isCancelled()) throw CancellationException("Photo filter render superseded")
+        val width = source.width
+        val height = source.height
+        val rowsPerStripe = (IN_PLACE_PIXELS_PER_STRIPE / width).coerceAtLeast(1)
+        val requiredPixels = width * min(rowsPerStripe, height)
+        val pixels = scratchPixels?.also {
+            require(it.size >= requiredPixels) { "Filter scratch buffer is too small" }
+        } ?: IntArray(requiredPixels)
+        val strength = selection.normalizedIntensityPercent / 100f
+        var top = 0
+        while (top < height) {
+            if (isCancelled()) throw CancellationException("Photo filter render superseded")
+            val rows = min(rowsPerStripe, height - top)
+            val count = width * rows
+            source.getPixels(pixels, 0, width, 0, top, width, rows)
+            filterPixels(
+                pixels = pixels,
+                count = count,
+                preset = selection.preset,
+                strength = strength,
+                isCancelled = isCancelled,
+            )
+            if (isCancelled()) throw CancellationException("Photo filter render superseded")
+            source.setPixels(pixels, 0, width, 0, top, width, rows)
+            top += rows
+        }
+        return source
+    }
+
+    private fun filterPixels(
+        pixels: IntArray,
+        count: Int,
+        preset: PhotoFilterPreset,
+        strength: Float,
+        isCancelled: () -> Boolean,
+    ) {
+        if (filterParallelism > 1 && count >= PARALLEL_PIXEL_THRESHOLD) {
+            filterPool.invoke(
+                FilterPixelsAction(
+                    pixels = pixels,
+                    start = 0,
+                    end = count,
+                    preset = preset,
+                    strength = strength,
+                    isCancelled = isCancelled,
+                ),
+            )
+        } else {
+            filterPixelRange(
+                pixels = pixels,
+                start = 0,
+                end = count,
+                preset = preset,
+                strength = strength,
+                isCancelled = isCancelled,
+            )
         }
     }
 

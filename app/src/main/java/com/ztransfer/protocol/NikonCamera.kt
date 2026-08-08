@@ -160,12 +160,24 @@ internal class CameraIoGate(
 internal fun shouldUsePartialObjectDownload(
     partialObjectSupported: Boolean?,
     effectiveSize: Long,
+    resumeOffset: Long = 0L,
+    isUsbConnection: Boolean = false,
+    preferHighThroughput: Boolean = false,
 ): Boolean = partialObjectSupported != false &&
-    effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN
+    effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN &&
+    (
+        !(isUsbConnection || preferHighThroughput) ||
+            resumeOffset > 0L ||
+            effectiveSize > NikonCamera.HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD
+        )
 
-internal fun downloadChunkSize(effectiveSize: Long, isUsbConnection: Boolean = false): Long =
-    if (isUsbConnection) {
-        NikonCamera.USB_CHUNK_SIZE
+internal fun downloadChunkSize(
+    effectiveSize: Long,
+    isUsbConnection: Boolean = false,
+    preferHighThroughput: Boolean = false,
+): Long =
+    if (isUsbConnection || preferHighThroughput) {
+        NikonCamera.HIGH_THROUGHPUT_CHUNK_SIZE
     } else if (effectiveSize > NikonCamera.LARGE_FILE_THRESHOLD) {
         NikonCamera.LARGE_FILE_CHUNK_SIZE
     } else {
@@ -265,15 +277,15 @@ class NikonCamera(private val context: Context) {
         // 60s 超时会抱着 ioMutex 白等一分钟——重试的首个下载全程被挡住，表现为
         // "停止后重试卡半天没速度"。静默 3s 即认定连接不可用，断开走自动重连。
         const val CANCEL_DRAIN_TIMEOUT_MS = 3_000
-        // 所有大小已知的文件都优先走 GetPartialObjectEx。USB 固定每块 64MB，避免有线
-        // 模式反复承担相机准备/命令往返；Wi-Fi 普通文件使用 4MB，超过
-        // LARGE_FILE_THRESHOLD 的巨大文件为 32MB。
+        // Wi-Fi 浏览模式的已知大小文件优先走 GetPartialObjectEx，以便在块间让路；USB 以及
+        // 用户停留传输页时的无线传输，普通新文件走 GetObject，续传/大文件走 64MB 分块。
         // 每块仍是独立 PTP 事务，块间释放相机通道供当前 FHD / EXIF 使用。
         // 也是断点续传的检查点粒度；旧版本留下的 64MB 对齐半成品仍天然兼容。
         // internal: TransferViewModel 引用此值做续传偏移对齐。
         const val CHUNK_SIZE = 4L * 1024 * 1024
-        /** USB avoids repeated camera-side PartialObject setup; Wi-Fi keeps its existing policy. */
-        const val USB_CHUNK_SIZE = 64L * 1024 * 1024
+        const val HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD = 128L * 1024 * 1024
+        /** USB and the visible transfer screen avoid repeated camera-side PartialObject setup. */
+        const val HIGH_THROUGHPUT_CHUNK_SIZE = 64L * 1024 * 1024
         const val LARGE_FILE_THRESHOLD = 512L * 1024 * 1024
         const val LARGE_FILE_CHUNK_SIZE = 32L * 1024 * 1024
         private const val FHD_DEVICE_BUSY_RETRIES = 2
@@ -986,11 +998,12 @@ class NikonCamera(private val context: Context) {
     /**
      * 下载文件到 [output]。[totalSize] 为 ObjectInfo 中的文件大小（0/SIZE_UNKNOWN=未知）；
      * [resumeOffset] 非零时从该偏移续传（调用方须已把 output 定位到该偏移）。
+     * [preferHighThroughputAtStart] 在首个文件数据命令前仅取值一次，之后页面切换不会改变当前文件。
      *
      * 两条数据相位路径共用同一个 [pump] 循环，只是驱动它的命令不同：
-     * - 分块（GetPartialObjectEx）：所有大小已知且机型支持的文件；每块是完整 PTP 事务，
-     *   块间释放通道供 FHD / EXIF 插入，并按【实收字节】推进偏移。
-     * - 全量（GetObject）：仅 resumeOffset==0 且分块不支持或大小未知时回退。
+     * - 分块（GetPartialObjectEx）：浏览模式的 Wi-Fi 已知大小文件，以及高吞吐模式下的
+     *   大文件/续传；每块是完整 PTP 事务，块间可供 FHD / EXIF 插入。
+     * - 全量（GetObject）：高吞吐模式的普通新文件，或分块不支持/大小未知时的回退。
      *
      * 续传是一等契约：若请求了 resumeOffset 但走不了分块（相机不支持 / 大小未知），
      * 绝不用"从 0 全量"去填一个已定位到偏移的流（会写出错位的损坏文件），而是抛
@@ -1001,7 +1014,8 @@ class NikonCamera(private val context: Context) {
         output: OutputStream,
         onProgress: ((DownloadProgress) -> Unit)? = null,
         resumeOffset: Long = 0L,
-        totalSize: Long = 0L
+        totalSize: Long = 0L,
+        preferHighThroughputAtStart: () -> Boolean = { false },
     ): Result<DownloadStats> = ioGate.withDownloadActivity {
         withContext(Dispatchers.IO) {
             val scope = this
@@ -1149,8 +1163,16 @@ class NikonCamera(private val context: Context) {
                     }
                 }
                 val sizeKnown = effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN
-                // 普通照片也走既有分块协议；这是在 PTP 事务边界插入大图请求的前提。
-                val usePartial = shouldUsePartialObjectDownload(partialObjectSupported, effectiveSize)
+                val preferHighThroughput = preferHighThroughputAtStart()
+                // 浏览时 Wi-Fi 保持小分块让路；USB 及传输页可见时的 Wi-Fi 使用高吞吐策略。
+                // 此处已经冻结本文件快照，页面切换不会中途换道。
+                val usePartial = shouldUsePartialObjectDownload(
+                    partialObjectSupported = partialObjectSupported,
+                    effectiveSize = effectiveSize,
+                    resumeOffset = resumeOffset,
+                    isUsbConnection = usbPtp != null,
+                    preferHighThroughput = preferHighThroughput,
+                )
 
                 // 请求了续传却走不了分块：全量只能从 0 填，会写坏已定位的流。拒绝，让调用方重下。
                 if (resumeOffset > 0 && !usePartial) {
@@ -1165,6 +1187,7 @@ class NikonCamera(private val context: Context) {
                     val chunkSize = downloadChunkSize(
                         effectiveSize = effectiveSize,
                         isUsbConnection = usbPtp != null,
+                        preferHighThroughput = preferHighThroughput,
                     )
                     while (offset < effectiveSize) {
                         scope.ensureActive()

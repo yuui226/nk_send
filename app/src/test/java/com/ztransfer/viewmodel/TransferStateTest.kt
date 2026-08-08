@@ -24,7 +24,34 @@ class TransferStateTest {
     )
 
     @Test
-    fun frameGenerationRemainsPartOfPendingWork() {
+    fun photoEffectsUseABoundedMultiWorkerPool() {
+        assertEquals(2, PHOTO_FRAME_EXPORT_PARALLELISM)
+    }
+
+    @Test
+    fun connectedPhotoEffectsUseTheNewWatermarkDefaults() {
+        val state = TransferState()
+
+        assertEquals(PhotoFrameWatermarkFont.CALLIGRAPHY, state.photoFrameWatermarkFont)
+        assertEquals(80, state.photoFrameWatermarkSizePercent)
+        assertEquals(
+            80,
+            restoredPhotoFrameWatermarkSizePercent(
+                persisted = null,
+                content = PhotoFrameWatermarkContent.TEXT,
+            ),
+        )
+    }
+
+    @Test
+    fun queueSpeedSurvivesZeroSamplesBetweenFiles() {
+        assertEquals(12L * 1024L * 1024L, retainLastValidTransferSpeed(0L, 12L * 1024L * 1024L))
+        assertEquals(12L * 1024L * 1024L, retainLastValidTransferSpeed(12L * 1024L * 1024L, 0L))
+        assertEquals(9L * 1024L * 1024L, retainLastValidTransferSpeed(12L * 1024L * 1024L, 9L * 1024L * 1024L))
+    }
+
+    @Test
+    fun downloadAndGenerationRemainingCountsStayIndependent() {
         val state = TransferState(
             tasks = listOf(
                 TransferTask(file(1), status = TransferStatus.WAITING),
@@ -42,7 +69,8 @@ class TransferStateTest {
             ),
         )
 
-        assertEquals(3, state.remainingCount)
+        assertEquals(2, state.downloadRemainingCount)
+        assertEquals(1, state.generationRemainingCount)
         assertEquals(0.4f, state.currentFileProgress)
     }
 
@@ -59,7 +87,8 @@ class TransferStateTest {
             ),
         )
 
-        assertEquals(1, state.remainingCount)
+        assertEquals(0, state.downloadRemainingCount)
+        assertEquals(1, state.generationRemainingCount)
         assertEquals(1f, state.currentFileProgress)
     }
 
@@ -93,7 +122,8 @@ class TransferStateTest {
         val pro = effectivePhotoFrameWatermark(true, customized)
 
         assertEquals(freeEditionPhotoFrameWatermark(), free)
-        assertEquals(42, free.sizePercent)
+        assertEquals(80, free.sizePercent)
+        assertEquals(PhotoFrameWatermarkFont.CALLIGRAPHY, free.font)
         assertEquals(80, free.opacityPercent)
         assertEquals(PhotoFrameWatermarkEffect.AUTO, free.effect)
         assertEquals(customized, pro)
@@ -259,6 +289,21 @@ class TransferStateTest {
 
         assertEquals(1, tasks.size)
         assertEquals(null, tasks.single().framePreset)
+    }
+
+    @Test
+    fun queueTaskWithoutAnyPhotoEffectDoesNotRequestDerivativeGeneration() {
+        val task = createQueueTasks(
+            files = listOf(file(1)),
+            photoFrameEnabled = false,
+            photoFramePreset = PhotoFramePreset.MIST,
+            photoFrameWatermark = PhotoFrameWatermark(enabled = false),
+            photoFilter = null,
+        ).single()
+
+        assertEquals(null, task.framePreset)
+        assertEquals(null, task.photoFilterRequested)
+        assertEquals(false, task.isGeneratingFrame)
     }
 
     @Test
