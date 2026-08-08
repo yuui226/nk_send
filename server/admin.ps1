@@ -830,9 +830,18 @@ function Read-LocalApkMetadata($apkPath) {
         Write-Host "APK 不是 ZTransfer 正式签名，可能误选了 Debug 包。未发布。" -ForegroundColor Red
         return $null
     }
+    $md5 = [Security.Cryptography.MD5]::Create()
+    $stream = [IO.File]::OpenRead($apkPath)
+    try {
+        $md5Base64 = [Convert]::ToBase64String($md5.ComputeHash($stream))
+    } finally {
+        $stream.Dispose()
+        $md5.Dispose()
+    }
     return @{
         SizeBytes = [long]$file.Length
         Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $apkPath).Hash.ToLowerInvariant()
+        Md5Base64 = $md5Base64
         VersionCode = [int]$version.VersionCode
         VersionName = [string]$version.VersionName
         PackageName = [string]$version.PackageName
@@ -934,7 +943,42 @@ function Upload-VersionedApkToOss($apkPath, $meta, $target) {
         $false
 }
 
-function Test-PublicOssApk($url, $expectedMeta) {
+function Copy-VersionedApkToLatest($meta, $target) {
+    $expected = New-OssReleaseTarget $meta
+    if ([string]$target.OssUri -ne [string]$expected.OssUri -or
+        [string]$target.LatestOssUri -ne [string]$expected.LatestOssUri -or
+        [string]$target.OssUri -eq [string]$target.LatestOssUri) {
+        throw "固定下载对象复制目标不安全，已拒绝操作"
+    }
+    $ossutil = Get-OssUtilPath
+    if (-not $ossutil -or -not (Get-OssCredentials)) {
+        Write-Host "OSS 上传工具或凭证不可用；尚未更新固定下载地址。" -ForegroundColor Red
+        return $false
+    }
+
+    Write-Host "正在通过 OSS 同桶复制更新新用户固定下载地址..." -ForegroundColor DarkGray
+    $copyArgs = @(
+        "cp", $target.OssUri, $target.LatestOssUri,
+        "--region", $OssRegion,
+        "--endpoint", $OssEndpoint,
+        "--acl", "public-read",
+        "--content-type", "application/vnd.android.package-archive",
+        "--cache-control", "no-cache, no-store, must-revalidate",
+        "--content-disposition", "attachment; filename=`"ZTransfer.apk`"",
+        "--metadata", "sha256=$($meta.Sha256)",
+        "--metadata-directive", "REPLACE",
+        "--force",
+        "--no-progress"
+    )
+    if ((Invoke-OssUtilAuthenticated $ossutil $copyArgs) -ne 0) {
+        Write-Host "OSS 同桶复制失败；尚未发布版本信息。" -ForegroundColor Red
+        return $false
+    }
+    Write-Host "固定下载对象已由 OSS 服务端更新。" -ForegroundColor Green
+    return $true
+}
+
+function Test-PublicOssApkFull($url, $expectedMeta) {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ztransfer-oss-verify-{0}.apk" -f [guid]::NewGuid().ToString("N"))
     try {
         Write-Host "正在从公网完整下载一次并校验大小、SHA-256、包名和版本..." -ForegroundColor DarkGray
@@ -966,6 +1010,78 @@ function Test-PublicOssApk($url, $expectedMeta) {
     }
 }
 
+function Test-PublicOssApk($url, $expectedMeta) {
+    if (([string]$expectedMeta.Md5Base64) -notmatch '^[A-Za-z0-9+/]{22}==$') {
+        Write-Host "本地 APK 缺少 MD5 校验值；未发布。" -ForegroundColor Red
+        return $false
+    }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) `
+        ("ztransfer-oss-headers-{0}.txt" -f [guid]::NewGuid().ToString("N"))
+    try {
+        Write-Host "正在校验公网对象大小、MD5、SHA-256 元数据和响应头..." -ForegroundColor DarkGray
+        $previousErrorAction = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            & curl.exe -f -sS -L --head --max-time 60 `
+                -H "Cache-Control: no-cache" -o $tmp -- $url
+            $curlExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+        if ($curlExit -ne 0 -or -not (Test-Path -LiteralPath $tmp -PathType Leaf)) {
+            Write-Host "OSS 公网地址不可访问；未发布。" -ForegroundColor Red
+            return $false
+        }
+
+        $lines = @(Get-Content -LiteralPath $tmp)
+        $statusIndex = -1
+        $statusCode = 0
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^HTTP/\S+\s+(\d{3})(?:\s|$)') {
+                $statusIndex = $i
+                $statusCode = [int]$Matches[1]
+            }
+        }
+        if ($statusIndex -lt 0 -or $statusCode -ne 200) {
+            Write-Host ("OSS 公网 HEAD 状态异常: {0}；未发布。" -f $statusCode) -ForegroundColor Red
+            return $false
+        }
+
+        $headers = @{}
+        for ($i = $statusIndex + 1; $i -lt $lines.Count; $i++) {
+            $line = [string]$lines[$i]
+            if (-not $line.Trim()) { break }
+            $separator = $line.IndexOf(':')
+            if ($separator -le 0) { continue }
+            $name = $line.Substring(0, $separator).Trim().ToLowerInvariant()
+            $value = $line.Substring($separator + 1).Trim()
+            $headers[$name] = $value
+        }
+
+        [long]$actualLength = 0
+        $lengthValid = [long]::TryParse(
+            [string]$headers['content-length'],
+            [ref]$actualLength
+        )
+        $contentType = ([string]$headers['content-type']).Split(';')[0].Trim().ToLowerInvariant()
+        $actualMd5 = [string]$headers['content-md5']
+        $actualSha256 = ([string]$headers['x-oss-meta-sha256']).ToLowerInvariant()
+        if (-not $lengthValid -or $actualLength -ne [long]$expectedMeta.SizeBytes -or
+            $actualMd5 -cne [string]$expectedMeta.Md5Base64 -or
+            $actualSha256 -cne ([string]$expectedMeta.Sha256).ToLowerInvariant() -or
+            $contentType -ne 'application/vnd.android.package-archive') {
+            Write-Host "OSS 公网对象响应头与本地 APK 不一致；未发布。" -ForegroundColor Red
+            Write-Host ("  size={0}, md5={1}, sha256={2}, type={3}" -f `
+                $actualLength, $actualMd5, $actualSha256, $contentType) -ForegroundColor DarkGray
+            return $false
+        }
+        Write-Host "公网对象快速校验通过。" -ForegroundColor Green
+        return $true
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-UpdateValidate {
     $release = Get-UpdateInfo
     if (-not $release) { return }
@@ -980,9 +1096,9 @@ function Invoke-UpdateValidate {
         VersionCode = [int]$release.versionCode
         VersionName = [string]$release.versionName
     }
-    if (-not (Test-PublicOssApk $release.url $expected)) { return }
+    if (-not (Test-PublicOssApkFull $release.url $expected)) { return }
     $latestUrl = "$OssPublicBaseUrl/$OssLatestObjectKey"
-    if (Test-PublicOssApk $latestUrl $expected) {
+    if (Test-PublicOssApkFull $latestUrl $expected) {
         Write-Host "当前版本地址和新用户固定下载地址均有效。" -ForegroundColor Green
     }
 }
@@ -1053,9 +1169,7 @@ function Invoke-UpdatePublish {
     Write-Host ("OSS 地址: {0}" -f $target.PublicUrl)
     Write-Host ("固定下载: {0}" -f $target.LatestPublicUrl)
     Write-Host ("SHA-256: {0}" -f $meta.Sha256) -ForegroundColor DarkGray
-    Write-Host "警告：正式发布会覆盖固定下载地址，并切换服务端当前版本。" -ForegroundColor Yellow
-    $confirm = (Read-Host "确认正式发布？输入 PUBLISH").Trim()
-    if ($confirm -cne "PUBLISH") { Write-Host "已取消"; return }
+    Write-Host "开始正式发布：将更新固定下载地址和服务端当前版本。" -ForegroundColor Yellow
 
     if (-not (Upload-VersionedApkToOss $apkPath $meta $target)) { return }
     if (-not (Test-PublicOssApk $target.PublicUrl $meta)) { return }
@@ -1068,11 +1182,7 @@ function Invoke-UpdatePublish {
         Write-Host "上传期间服务端版本已变化；为避免覆盖错误的固定下载包，已停止发布。" -ForegroundColor Red
         return
     }
-    Write-Host "正在更新新用户固定下载地址..." -ForegroundColor DarkGray
-    if (-not (Upload-ApkToOss $apkPath $meta $target.LatestOssUri `
-        "no-cache, no-store, must-revalidate" `
-        "attachment; filename=`"ZTransfer.apk`"" `
-        $true)) { return }
+    if (-not (Copy-VersionedApkToLatest $meta $target)) { return }
     if (-not (Test-PublicOssApk $target.LatestPublicUrl $meta)) { return }
     $draft = @{
         versionCode = $versionCode

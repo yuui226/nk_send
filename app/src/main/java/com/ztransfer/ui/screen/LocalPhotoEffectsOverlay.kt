@@ -53,7 +53,6 @@ import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.freeEditionPhotoFrameWatermark
-import com.ztransfer.viewmodel.photoFrameWatermark
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -66,8 +65,8 @@ private data class LocalPhotoSelection(
 )
 
 /**
- * One-shot editor for a phone photo. Its drafts are deliberately local: opening, editing or
- * closing this panel never changes the transfer pipeline's persisted photo-effect settings.
+ * Editor for a phone photo. Its controls persist independently from the transfer pipeline, while
+ * the selected source and decoded preview live only for the current visit.
  */
 @Composable
 fun LocalPhotoEffectsPage(
@@ -82,18 +81,43 @@ fun LocalPhotoEffectsPage(
     val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
 
+    val settingsPreferences = remember(context) { LocalPhotoEffectsPreferences(context) }
+    val availableFilterIds = state.photoFilters.map { it.id }
+    val initialSettings = remember(settingsPreferences, availableFilterIds) {
+        settingsPreferences.restore(availableFilterIds)
+    }
+
     var selection by remember { mutableStateOf<LocalPhotoSelection?>(null) }
     var sourceLoading by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var watermarkImageImporting by remember { mutableStateOf(false) }
 
-    var decorationEnabled by remember { mutableStateOf(state.photoFrameEnabled) }
-    var borderEnabled by remember { mutableStateOf(state.photoFrameBorderEnabled) }
-    var preset by remember { mutableStateOf(state.photoFramePreset) }
-    var watermarkDraft by remember { mutableStateOf(state.photoFrameWatermark) }
-    var filterId by remember { mutableStateOf(state.selectedPhotoFilterId) }
-    var filterEnabled by remember { mutableStateOf(state.photoFilterEnabled) }
-    var filterIntensity by remember { mutableIntStateOf(state.photoFilterIntensityPercent) }
+    var decorationEnabled by remember { mutableStateOf(initialSettings.decorationEnabled) }
+    var borderEnabled by remember { mutableStateOf(initialSettings.borderEnabled) }
+    var preset by remember { mutableStateOf(initialSettings.preset) }
+    var watermarkDraft by remember { mutableStateOf(initialSettings.watermark) }
+    var filterId by remember { mutableStateOf(initialSettings.filterId) }
+    var filterEnabled by remember { mutableStateOf(initialSettings.filterEnabled) }
+    var filterIntensity by remember {
+        mutableIntStateOf(initialSettings.filterIntensityPercent)
+    }
+
+    val currentSettings = LocalPhotoEffectsSettings(
+        decorationEnabled = decorationEnabled,
+        borderEnabled = borderEnabled,
+        preset = preset,
+        watermark = watermarkDraft,
+        filterId = filterId,
+        filterEnabled = filterEnabled,
+        filterIntensityPercent = filterIntensity,
+    )
+    val latestSettings by rememberUpdatedState(currentSettings)
+    LaunchedEffect(currentSettings) {
+        settingsPreferences.save(currentSettings)
+    }
+    DisposableEffect(settingsPreferences) {
+        onDispose { settingsPreferences.save(latestSettings) }
+    }
 
     var hintText by remember { mutableStateOf("") }
     var hintVisible by remember { mutableStateOf(false) }
