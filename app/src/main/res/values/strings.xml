@@ -121,6 +121,7 @@
     <string name="skin_frosted_glass">Frosted Glass</string>
     <string name="skin_titanium">Titanium</string>
     <string name="skin_wood">Wood</string>
+    <string name="skin_camera_controls">Camera Buttons</string>
     <string name="cd_skin">UI Skin</string>
     <string name="haptic_feedback">Haptic feedback</string>
     <string name="keep_screen_on">Keep screen on</string>

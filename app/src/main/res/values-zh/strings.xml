@@ -121,6 +121,7 @@
     <string name="skin_frosted_glass">毛玻璃</string>
     <string name="skin_titanium">钛合金</string>
     <string name="skin_wood">木纹</string>
+    <string name="skin_camera_controls">相机按键</string>
     <string name="cd_skin">界面皮肤</string>
     <string name="haptic_feedback">触感反馈</string>
     <string name="keep_screen_on">屏幕常亮</string>

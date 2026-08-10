@@ -21,7 +21,8 @@ import com.ztransfer.R
 enum class SkinPreset(val displayNameResId: Int) {
     FROSTED_GLASS(R.string.skin_frosted_glass),
     TITANIUM(R.string.skin_titanium),
-    WOOD(R.string.skin_wood)
+    WOOD(R.string.skin_wood),
+    CAMERA_CONTROLS(R.string.skin_camera_controls),
 }
 
 // 深色主题配色
@@ -100,9 +101,9 @@ data class AppColors(
     val glassPanelBorder: Color,
     /** 面板顶部自上而下淡出的高光叠层。 */
     val glassSheen: Color,
-    // ---- 按钮专属材质 token：皮肤（钛合金/木纹）只覆写下面这 4 个字段 ----
+    // ---- 按钮专属材质 token：三种实体皮肤只覆写下面这 4 个字段 ----
     // GlassButton 读 button*，面板/弹窗/提示条读 glass*，因此换皮肤只换按钮，
-    // 面板在三款皮肤下逐字节一致；默认毛玻璃按钮也可单独调出更轻、更透的磨砂质感。
+    // 面板在四款皮肤下逐字节一致；默认毛玻璃按钮也可单独调出更轻、更透的磨砂质感。
     /** 玻璃按钮底色（非 panel 变体的基底填充）。 */
     val buttonSurface: Color,
     /** 实体按钮表面渐变；默认毛玻璃不消费此 token。 */
@@ -194,13 +195,14 @@ val LightAppColors = AppColors(
 
 /**
  * 皮肤分发函数：根据选中的 [SkinPreset] 与当前深/浅模式返回对应的 [AppColors] 实例。
- * FROSTED_GLASS 即基础色板本身，另两款皮肤都是从基础色板 `copy()` 出来、
+ * FROSTED_GLASS 即基础色板本身，三款实体皮肤都是从基础色板 `copy()` 出来、
  * 只改 4 个 button* token，其余字段（含全部 glass* token）与基础色板逐字节一致。
  */
 fun skinAppColors(skin: SkinPreset, dark: Boolean): AppColors = when (skin) {
     SkinPreset.FROSTED_GLASS -> if (dark) DarkAppColors else LightAppColors
     SkinPreset.TITANIUM -> if (dark) DarkTitaniumColors else LightTitaniumColors
     SkinPreset.WOOD -> if (dark) DarkWoodColors else LightWoodColors
+    SkinPreset.CAMERA_CONTROLS -> if (dark) DarkCameraControlColors else LightCameraControlColors
 }
 
 val LocalAppColors = staticCompositionLocalOf { DarkAppColors }
@@ -230,11 +232,11 @@ fun rememberAppBackgroundBrush(): Brush {
 // 皮肤系统：材质 token
 //
 // 皮肤只改 [AppColors] 里那 4 个 button* token，其余字段全部由 `copy()` 从基础色板继承。
-// glass* token（面板/弹窗/提示条在读）刻意不覆写——设置卡片、弹层、提示条在三款皮肤下
+// glass* token（面板/弹窗/提示条在读）刻意不覆写——设置卡片、弹层、提示条在四款皮肤下
 // 逐字节一致，换皮肤只换按钮的材质；background/surface/文字/强调色同理不受影响。
-// 钛合金/木纹按钮另有一层程序化纹理（见 SkinTexture.kt），由 GlassButton 独家叠加。
+// 三种实体按钮另有一层程序化纹理（见 SkinTexture.kt），由 GlassButton 独家叠加。
 //
-// 两款材质沿两个轴与默认毛玻璃拉开差异（数值对着 GlassButton 的叠层顺序看：
+// 实体材质沿两个轴与默认毛玻璃拉开差异（数值对着 GlassButton 的叠层顺序看：
 // 底色 → 纹理 → 纵向高光渐变）：
 //
 //   1) 底色不透明度（透出多少背景）：毛玻璃 < 木纹 < 钛合金
@@ -303,4 +305,28 @@ val LightWoodColors = LightAppColors.copy(
     buttonHighlightTop = WoodGoldLight.copy(alpha = 0.060f),
     buttonHighlightBottom = WoodGoldLight.copy(alpha = 0.015f),
     buttonSheen = WoodGoldLight.copy(alpha = 0.045f),
+)
+
+// ================================================================================================
+// 皮肤系统：相机按键 (CAMERA_CONTROLS) — 哑光黑键帽、细冷光边缘与短机械键程
+// ================================================================================================
+
+private val CameraControlBlack = Color(0xFF151719)
+private val CameraControlBlackLight = Color(0xFF1B1D20)
+private val CameraControlEdge = Color(0xFFB9C0C4)
+
+/** 深色界面略压黑键帽，由绘制层的冷灰轮廓将它从机身般的暗背景中分离。 */
+val DarkCameraControlColors = DarkAppColors.copy(
+    buttonSurface = CameraControlBlack.copy(alpha = 0.995f),
+    buttonHighlightTop = CameraControlEdge.copy(alpha = 0.040f),
+    buttonHighlightBottom = Color.Black.copy(alpha = 0.18f),
+    buttonSheen = CameraControlEdge.copy(alpha = 0.035f),
+)
+
+/** 浅色界面仍保持真实黑色键帽，只略抬中间调，避免成为没有表面细节的纯黑洞。 */
+val LightCameraControlColors = LightAppColors.copy(
+    buttonSurface = CameraControlBlackLight.copy(alpha = 0.995f),
+    buttonHighlightTop = CameraControlEdge.copy(alpha = 0.050f),
+    buttonHighlightBottom = Color.Black.copy(alpha = 0.20f),
+    buttonSheen = CameraControlEdge.copy(alpha = 0.040f),
 )

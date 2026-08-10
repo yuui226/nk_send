@@ -31,13 +31,14 @@ class ButtonTexturePalette internal constructor(
         SkinPreset.FROSTED_GLASS -> 0
         SkinPreset.TITANIUM -> TITANIUM_TEXTURE_VARIANTS
         SkinPreset.WOOD -> WOOD_TEXTURE_VARIANTS
+        SkinPreset.CAMERA_CONTROLS -> CAMERA_CONTROL_TEXTURE_VARIANTS
     }
     private val brushes = arrayOfNulls<Brush>(variantCount)
 
     fun brushFor(seed: Int): Brush? {
         // 毛玻璃不能再使用矩形位图 tile：即使像素本身接近无缝，GPU 采样、缩放和
         // 离屏合成仍可能把 tile 边界显成按钮上的方框。毛玻璃颗粒和体积光统一交给
-        // GlassButton 的矢量光场绘制；钛合金、木纹才使用位图纹理。
+        // GlassButton 的矢量光场绘制；三种实体材质才使用位图纹理。
         if (skin == SkinPreset.FROSTED_GLASS) return null
         val variant = Math.floorMod(mixSeed(seed), variantCount)
         return brushes[variant] ?: ShaderBrush(
@@ -50,11 +51,11 @@ class ButtonTexturePalette internal constructor(
     }
 }
 
-/** 钛合金和木纹在这里提供稳定纹理；纯净毛玻璃不使用位图噪声。 */
+/** 三种实体材质在这里提供稳定纹理；纯净毛玻璃不使用位图噪声。 */
 val LocalButtonTexturePalette = staticCompositionLocalOf<ButtonTexturePalette?> { null }
 
 /**
- * 钛合金使用 12 个、木纹使用 24 个确定性变体。纹理只在变体第一次被按钮选中时生成，
+ * 钛合金使用 12 个、木纹使用 24 个、相机按键使用 4 个确定性变体。纹理只在变体第一次被按钮选中时生成，
  * 之后进程级缓存；
  * 避免切换主题时一次性生成整套纹理造成卡顿。
  */
@@ -69,6 +70,7 @@ fun rememberButtonTexturePalette(
 private const val TILE = 256
 private const val TITANIUM_TEXTURE_VARIANTS = 12
 private const val WOOD_TEXTURE_VARIANTS = 24
+private const val CAMERA_CONTROL_TEXTURE_VARIANTS = 4
 private const val CACHE_VARIANT_STRIDE = WOOD_TEXTURE_VARIANTS
 private const val TAU = (2 * PI).toFloat()
 
@@ -90,6 +92,7 @@ private fun buttonTextureTile(
             SkinPreset.FROSTED_GLASS -> error("Pure frosted glass does not use a bitmap texture")
             SkinPreset.TITANIUM -> titaniumTilePixels(dark, seed)
             SkinPreset.WOOD -> woodTilePixels(dark, seed)
+            SkinPreset.CAMERA_CONTROLS -> cameraControlTilePixels(dark, seed)
         }
         Bitmap.createBitmap(pixels, TILE, TILE, Bitmap.Config.ARGB_8888).asImageBitmap()
     }
@@ -310,6 +313,36 @@ private fun titaniumTilePixels(dark: Boolean, seed: Int): IntArray {
                 0.20f * fine +
                 0.18f * micro +
                 0.06f * hairline
+            out[y * TILE + x] = packSigned(texture, maxAlpha, lightRgb, darkRgb)
+        }
+    }
+    return out
+}
+
+// =================================================================================================
+// 相机实体按键：低反射注塑键帽的等向细颗粒与极少量微凹点。
+// 纹理仅负责近看时不显得像纯色矢量块；键帽的弧面、窄边和键程由 GlassButton 绘制。
+// =================================================================================================
+
+private fun cameraControlTilePixels(dark: Boolean, seed: Int): IntArray {
+    val out = IntArray(TILE * TILE)
+    val maxAlpha = if (dark) 0.090f else 0.075f
+    val lightRgb = if (dark) 0xAEB5B9 else 0xC5CBCF
+    val darkRgb = 0x030405
+
+    for (y in 0 until TILE) {
+        val v = y.toFloat() / TILE
+        for (x in 0 until TILE) {
+            val u = x.toFloat() / TILE
+            val macro = periodicValueNoise(u, v, 5, 5, seed + 101)
+            val micro = cellHash(x, y, seed + 307) * 2f - 1f
+            val pitNoise = cellHash(x, y, seed + 401)
+            val pit = if (pitNoise > 0.985f) {
+                smoothStep(0.985f, 1f, pitNoise)
+            } else {
+                0f
+            }
+            val texture = 0.14f * macro + 0.48f * micro - 0.42f * pit
             out[y * TILE + x] = packSigned(texture, maxAlpha, lightRgb, darkRgb)
         }
     }

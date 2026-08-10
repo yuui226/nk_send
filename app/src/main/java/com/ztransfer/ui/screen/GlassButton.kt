@@ -444,6 +444,116 @@ private fun Modifier.woodSculptedFinish(
 }
 
 /**
+ * 相机实体按键的低反射键帽。
+ *
+ * 黑色注塑细颗粒由稳定纹理贴图提供；这里仅绘制真实键帽会出现的中央微弧、顶部窄冷光、
+ * 底部压暗和一圈极细倒角。所有 Brush 与轮廓都缓存在 draw cache，静止时没有逐帧计算。
+ */
+private fun Modifier.cameraControlCapFinish(
+    enabled: Boolean,
+    shape: Shape,
+    dark: Boolean,
+    activeColor: Color,
+    activeProgress: Float,
+    pressProgress: Float,
+): Modifier {
+    if (!enabled) return this
+    return drawWithCache {
+        val outlinePath = shape.createOutline(size, layoutDirection, this).toMaterialPath()
+        val width = size.width.coerceAtLeast(1f)
+        val height = size.height.coerceAtLeast(1f)
+        val longest = max(width, height)
+        val press = pressProgress.coerceIn(0f, 1f)
+        val active = activeProgress.coerceIn(0f, 1f)
+        val volume = 1f - 0.72f * press
+        val coolEdge = if (dark) Color(0xFFD2D7DA) else Color(0xFFBEC4C7)
+
+        val crown = Brush.radialGradient(
+            colorStops = arrayOf(
+                0.00f to coolEdge.copy(alpha = 0.075f * volume),
+                0.38f to coolEdge.copy(alpha = 0.040f * volume),
+                0.72f to Color.Transparent,
+                1.00f to Color.Black.copy(alpha = 0.11f * volume),
+            ),
+            center = Offset(width * 0.42f, height * 0.28f),
+            radius = longest * 0.82f,
+        )
+        val topRoll = Brush.verticalGradient(
+            colorStops = arrayOf(
+                0.00f to coolEdge.copy(alpha = 0.16f * volume),
+                0.10f to coolEdge.copy(alpha = 0.055f * volume),
+                0.34f to Color.Transparent,
+                0.70f to Color.Transparent,
+                1.00f to Color.Black.copy(alpha = 0.34f * volume),
+            ),
+        )
+        val activeWash = Brush.radialGradient(
+            colors = listOf(
+                activeColor.copy(alpha = 0.14f * active),
+                activeColor.copy(alpha = 0.045f * active),
+                Color.Transparent,
+            ),
+            center = Offset(width * 0.50f, height * 0.42f),
+            radius = longest * 0.78f,
+        )
+        val insetRim = Brush.verticalGradient(
+            colorStops = arrayOf(
+                0.00f to Color.Black.copy(alpha = 0.20f),
+                0.45f to Color.Black.copy(alpha = 0.10f),
+                1.00f to Color.Black.copy(alpha = 0.68f),
+            ),
+        )
+        val bevelRim = Brush.verticalGradient(
+            colorStops = arrayOf(
+                0.00f to coolEdge.copy(alpha = if (dark) 0.22f else 0.16f),
+                0.34f to coolEdge.copy(alpha = 0.050f),
+                0.68f to Color.Black.copy(alpha = 0.30f),
+                1.00f to Color.Black.copy(alpha = 0.82f),
+            ),
+        )
+
+        onDrawBehind {
+            drawPath(outlinePath, crown)
+            drawPath(outlinePath, topRoll)
+            if (active > 0.001f) drawPath(outlinePath, activeWash)
+            drawPath(outlinePath, insetRim, style = Stroke(width = 3.2.dp.toPx()))
+            drawPath(outlinePath, bevelRim, style = Stroke(width = 1.05.dp.toPx()))
+            if (press > 0.001f) {
+                drawPath(outlinePath, Color.Black.copy(alpha = 0.10f * press))
+            }
+        }
+    }
+}
+
+/** 相机键帽上的浅色丝印；统一着色确保黑色按钮在深浅主题下都保持足够对比度。 */
+private fun Modifier.cameraPrintedContent(
+    enabled: Boolean,
+    activeColor: Color,
+    activeProgress: Float,
+    printColor: Color?,
+): Modifier {
+    if (!enabled) return this
+    return drawWithCache {
+        val active = activeProgress.coerceIn(0f, 1f)
+        val ink = printColor ?: lerp(
+            Color(0xFFD5D8DA),
+            activeColor,
+            0.72f * active,
+        )
+        val bounds = Rect(0f, 0f, size.width, size.height)
+        val inkPaint = Paint().apply {
+            alpha = 0.96f
+            colorFilter = ColorFilter.tint(ink, BlendMode.SrcIn)
+        }
+        onDrawWithContent printedDraw@{
+            drawContext.canvas.saveLayer(bounds, inkPaint)
+            this@printedDraw.drawContent()
+            drawContext.canvas.restore()
+        }
+    }
+}
+
+/**
  * 钛合金专属的压凹钢印。
  *
  * 钢印的明暗全部限制在文字/图案轮廓内部：金属凹槽底面只比按钮略暗，左上形成
@@ -605,8 +715,8 @@ fun GlassSurface(
 
 /**
  * 统一的材质悬浮按钮。毛玻璃使用半透明雾化底、微颗粒与双层柔边；钛合金使用喷砂拉丝
- * 与圆润金属体积；木纹使用稳定随机纹理与硬质微弧木面。
- * 三种材质都不额外改变调用方提供的 shape。
+ * 与圆润金属体积；木纹使用稳定随机纹理与硬质微弧木面；相机按键使用低反射黑键帽、窄冷光倒角与短键程。
+ * 四种材质都不额外改变调用方提供的 shape。
  * 与 "Z传" 悬浮按钮同款视觉。全局悬浮控件（返回/标题/清空/重试等）复用，保证设计语言一致。
  *
  * 按压微缩放：按下快速下沉到 0.95、松开弹性回弹——全 App 玻璃按钮统一的"手感"，
@@ -624,8 +734,8 @@ fun GlassSurface(
  * [showSheen]：控制实体材质的顶部高光；毛玻璃没有方位高光，此参数只降低其边缘和颗粒
  * 定义度。紧凑按钮可关闭它，避免小面积圆角表面看起来像一圈白框。
  *
- * [titaniumStampColor]：仅在钛合金主题中为凹刻内容填色，同时保留钢印内壁的明暗切面。
- * 适合品牌标志等需要成为视觉焦点的内容；普通按钮保持默认的深灰金属钢印。
+ * [materialContentColor]：钛合金主题中为凹刻填色，相机按键主题中作为键帽丝印色。
+ * 适合品牌标志等需要成为视觉焦点的内容；未指定时使用各材质的默认印记。
  */
 @Composable
 fun GlassButton(
@@ -641,7 +751,7 @@ fun GlassButton(
     shadowElevation: Dp? = null,
     frostedOpacityBoost: Float = 0f,
     textureSeed: Int? = null,
-    titaniumStampColor: Color? = null,
+    materialContentColor: Color? = null,
     activeOutline: Boolean = false,
     content: @Composable RowScope.() -> Unit
 ) {
@@ -653,16 +763,26 @@ fun GlassButton(
     val texturePalette = LocalButtonTexturePalette.current
     val isTitaniumButton = texturePalette?.skin == SkinPreset.TITANIUM
     val isWoodButton = texturePalette?.skin == SkinPreset.WOOD
-    val isSolidMaterial = isTitaniumButton || isWoodButton
+    val isCameraControlButton = texturePalette?.skin == SkinPreset.CAMERA_CONTROLS
+    val isCameraControlCap = isCameraControlButton && !panel
+    val isSolidMaterial = isTitaniumButton || isWoodButton || isCameraControlButton
     // 按下用短 tween 快速跟手，松开用全局弹簧回弹（与顶栏胶囊等共用手感参数）。
     // 钛合金的键程略克制，实木与磨砂玻璃稍多一些缩放反馈。
     val pressScale by animateFloatAsState(
         targetValue = if (pressed && enabled) {
-            if (isTitaniumButton) 0.970f else 0.965f
+            when {
+                isCameraControlButton -> 0.982f
+                isTitaniumButton -> 0.970f
+                else -> 0.965f
+            }
         } else {
             1f
         },
-        animationSpec = if (pressed) tween(80) else Motion.bouncy(),
+        animationSpec = when {
+            pressed -> tween(80)
+            isCameraControlButton -> tween(140)
+            else -> Motion.bouncy()
+        },
         label = "glassPress"
     )
     val pressLight by animateFloatAsState(
@@ -697,13 +817,15 @@ fun GlassButton(
     // 只有实体材质使用可平铺位图画刷；毛玻璃的非平铺微颗粒由绘制层直接生成。
     val baseElevation = shadowElevation ?: when {
         panel -> 0.dp
+        isCameraControlButton -> (9f + 2f * activeProgress).dp
         isWoodButton -> (8f + 2f * activeProgress).dp
         isTitaniumButton -> (7f + 2f * activeProgress).dp
         else -> (4f + 3f * activeProgress).dp
     }
     // 钛合金与木头都是实体材质；按下时投影与键程同时收紧。
     val elevation = if (isSolidMaterial && !panel) {
-        (baseElevation.value * (1f - 0.66f * pressLight)).dp
+        val collapse = if (isCameraControlButton) 0.82f else 0.66f
+        (baseElevation.value * (1f - collapse * pressLight)).dp
     } else {
         baseElevation
     }
@@ -714,6 +836,8 @@ fun GlassButton(
     val skinTexture = remember(texturePalette, textureSeed, compositionTextureSeed) {
         texturePalette?.brushFor(textureSeed ?: compositionTextureSeed)
     }
+    // panel 是弹窗内容器里的低投影变体，不应该变成一枚高出面板的实体键帽。
+    val appliedSkinTexture = if (isCameraControlButton && panel) null else skinTexture
     val isFrostedGlass = texturePalette?.skin == SkinPreset.FROSTED_GLASS
     val baseColor = if (panel) colors.onBackground.copy(alpha = 0.05f) else colors.buttonSurface
     val containerColor =
@@ -732,7 +856,7 @@ fun GlassButton(
             scaleX = pressScale
             scaleY = pressScale
             translationY = if (isSolidMaterial && !panel) {
-                1.6.dp.toPx() * pressLight
+                (if (isCameraControlButton) 2.1.dp else 1.6.dp).toPx() * pressLight
             } else {
                 0f
             }
@@ -797,7 +921,7 @@ fun GlassButton(
                 modifier = Modifier
                     .buttonMaterialBase(
                         shape = shape,
-                        texture = skinTexture,
+                        texture = appliedSkinTexture,
                         highlightTop = highlightTop,
                         highlightBottom = highlightBottom
                     )
@@ -815,13 +939,27 @@ fun GlassButton(
                         panel = panel,
                         pressProgress = pressLight
                     )
+                    .cameraControlCapFinish(
+                        enabled = isCameraControlCap,
+                        shape = shape,
+                        dark = dark,
+                        activeColor = resolvedActiveColor,
+                        activeProgress = activeProgress,
+                        pressProgress = pressLight,
+                    )
                     .padding(contentPadding)
                     .titaniumStampedContent(
                         enabled = isTitaniumButton,
                         dark = dark,
                         pressProgress = pressLight,
-                        stampColor = titaniumStampColor
-                ),
+                        stampColor = materialContentColor,
+                    )
+                    .cameraPrintedContent(
+                        enabled = isCameraControlCap,
+                        activeColor = resolvedActiveColor,
+                        activeProgress = activeProgress,
+                        printColor = materialContentColor,
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
                 // Surface 会把固定尺寸按钮的 Row 撑满；显式居中，避免钛合金/木纹主题
                 // 沿用 Row 默认的 Start 排列，把单图标推到按钮左侧。

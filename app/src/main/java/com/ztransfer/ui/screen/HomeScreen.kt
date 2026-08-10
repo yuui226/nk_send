@@ -411,7 +411,7 @@ fun HomeScreen(
                 // 与文件列表页的双 Z 标按钮完全同规格（顶栏统一 36dp 高，见彼处注释）。
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 // 钛合金主题使用品牌黄填充钢印；其余主题仍保留 ZMark 原本的前景色。
-                titaniumStampColor = colors.accentYellow,
+                materialContentColor = colors.accentYellow,
                 modifier = Modifier
                     .height(36.dp)
                     .onGloballyPositioned { zAnchor = it.boundsInRoot() }
