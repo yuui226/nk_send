@@ -1042,7 +1042,7 @@ fun SettingsOverlay(
             )
             val selectedLanguage = languages.firstOrNull { it.first == state.appLanguage }
                 ?: languages.first()
-            val skinChoices = SkinPreset.entries.map { skin ->
+            val skinChoices = ButtonSkinDisplayOrder.map { skin ->
                 skin to stringResource(skin.displayNameResId)
             }
             val selectedSkin = skinChoices.first { it.first == state.skinPreset }

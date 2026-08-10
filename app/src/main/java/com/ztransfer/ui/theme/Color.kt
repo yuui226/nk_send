@@ -12,11 +12,9 @@ import com.ztransfer.R
 /**
  * 皮肤预设枚举，每种皮肤对应一组 [AppColors]（深色 + 浅色各一套）。
  *
- * 皮肤只换"玻璃按钮"的材质——即 [AppColors] 里那 4 个 button* token
- * （外加 [SkinTexture] 里按皮肤生成的按钮纹理）。面板/弹窗/提示条读的是
- * glass* token，皮肤从不覆写它们；页面背景、卡片底、缩略图占位、文字与
- * 强调/状态色也一律沿用基础色板（[DarkAppColors] / [LightAppColors]），
- * 所以换皮肤只有按钮换材质，设置页、弹窗、照片和列表与默认主题完全一致。
+ * [AppColors] 中只有 4 个 button* token 随皮肤覆写，按钮纹理由 [SkinTexture] 提供；
+ * 面板、弹窗、页面背景、文字和状态色仍沿用基础色板。少数需要与按钮形成家族感的
+ * 局部细节（连接卡片、缩略图发丝边等）直接读取当前 [SkinPreset] 派生，不污染通用 token。
  */
 enum class SkinPreset(val displayNameResId: Int) {
     FROSTED_GLASS(R.string.skin_frosted_glass),
@@ -24,6 +22,14 @@ enum class SkinPreset(val displayNameResId: Int) {
     WOOD(R.string.skin_wood),
     CAMERA_CONTROLS(R.string.skin_camera_controls),
 }
+
+/** 设置页的产品展示顺序独立于枚举 ordinal，避免 UI 调整影响任何潜在序列语义。 */
+val ButtonSkinDisplayOrder = listOf(
+    SkinPreset.FROSTED_GLASS,
+    SkinPreset.WOOD,
+    SkinPreset.CAMERA_CONTROLS,
+    SkinPreset.TITANIUM,
+)
 
 // 深色主题配色
 val DarkBackground = Color(0xFF121212)
@@ -102,8 +108,8 @@ data class AppColors(
     /** 面板顶部自上而下淡出的高光叠层。 */
     val glassSheen: Color,
     // ---- 按钮专属材质 token：三种实体皮肤只覆写下面这 4 个字段 ----
-    // GlassButton 读 button*，面板/弹窗/提示条读 glass*，因此换皮肤只换按钮，
-    // 面板在四款皮肤下逐字节一致；默认毛玻璃按钮也可单独调出更轻、更透的磨砂质感。
+    // GlassButton 读 button*，面板/弹窗/提示条读 glass*，所以面板在四款皮肤下
+    // 逐字节一致；默认毛玻璃按钮也可单独调出更轻、更透的磨砂质感。
     /** 玻璃按钮底色（非 panel 变体的基底填充）。 */
     val buttonSurface: Color,
     /** 实体按钮表面渐变；默认毛玻璃不消费此 token。 */
@@ -233,7 +239,8 @@ fun rememberAppBackgroundBrush(): Brush {
 //
 // 皮肤只改 [AppColors] 里那 4 个 button* token，其余字段全部由 `copy()` 从基础色板继承。
 // glass* token（面板/弹窗/提示条在读）刻意不覆写——设置卡片、弹层、提示条在四款皮肤下
-// 逐字节一致，换皮肤只换按钮的材质；background/surface/文字/强调色同理不受影响。
+// 逐字节一致；background/surface/文字/强调色同理不受影响。页面若需要少量材质呼应，
+// 直接从 SkinPreset 派生局部颜色，不扩张这套全局色板。
 // 三种实体按钮另有一层程序化纹理（见 SkinTexture.kt），由 GlassButton 独家叠加。
 //
 // 实体材质沿两个轴与默认毛玻璃拉开差异（数值对着 GlassButton 的叠层顺序看：

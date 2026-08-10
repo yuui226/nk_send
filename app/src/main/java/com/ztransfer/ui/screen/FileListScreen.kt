@@ -79,7 +79,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -195,6 +194,41 @@ internal fun queuePillDisplayRemaining(actualRemaining: Int, heldCount: Int): In
     return afterFlightHold.takeIf { it > 0 } ?: actual
 }
 
+private fun smoothStep(start: Float, end: Float, value: Float): Float {
+    val t = ((value - start) / (end - start)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
+/** 波浪只在进度中段完整出现，起点和终点自然压回竖直边缘。 */
+internal fun queuePillWaveEnvelope(progress: Float): Float {
+    val p = progress.coerceIn(0f, 1f)
+    val enter = smoothStep(0.05f, 0.14f, p)
+    val exit = 1f - smoothStep(0.90f, 0.98f, p)
+    return enter * exit
+}
+
+/** 每个任务获得稳定相位；不创建 Random，也不会在重组时改变波形。 */
+internal fun queuePillWaveSeed(taskId: Long?): Float {
+    var hash = (taskId ?: 0L).hashCode()
+    hash = (hash xor (hash ushr 16)) * 0x45D9F3B
+    hash = hash xor (hash ushr 16)
+    return (hash and 0xFFFF) / 65535f
+}
+
+/** 三个周期谐波叠加成连续、不规则但首尾无跳变的单位波形。 */
+internal fun queuePillWaveUnitOffset(
+    normalizedY: Float,
+    phaseTurns: Float,
+    seedTurns: Float,
+): Float {
+    val y = normalizedY.coerceIn(0f, 1f)
+    val time = phaseTurns * QUEUE_PILL_TWO_PI
+    val seed = seedTurns * QUEUE_PILL_TWO_PI
+    return 0.64f * sin(time + y * QUEUE_PILL_TWO_PI * 1.15f + seed) +
+        0.24f * sin(-2f * time + y * QUEUE_PILL_TWO_PI * 2.40f + seed * 0.73f) +
+        0.12f * sin(3f * time + y * QUEUE_PILL_TWO_PI * 3.35f + seed * 1.31f)
+}
+
 @Composable
 private fun AnimatedQueuePillCount(
     count: Int,
@@ -222,8 +256,103 @@ private fun AnimatedQueuePillCount(
     }
 }
 
+@Composable
+private fun QueuePillProgressFill(
+    progress: () -> Float,
+    waveEligible: Boolean,
+    waveSeed: Long?,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val fillPath = remember { Path() }
+    val seedTurns = remember(waveSeed) { queuePillWaveSeed(waveSeed) }
+    val latestProgress by rememberUpdatedState(progress)
+    // derivedStateOf 只在跨越可见阈值时触发重组；区间内的逐帧进度仍只重绘 Canvas。
+    val waveVisible by remember(waveEligible) {
+        derivedStateOf {
+            waveEligible && queuePillWaveEnvelope(latestProgress()) > 0.001f
+        }
+    }
+    // 等待、生成，以及起止端波幅已经归零时，连相位动画本身也不创建。
+    val waveMotion = if (waveVisible) {
+        rememberInfiniteTransition(label = "queuePillWave").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = QUEUE_PILL_WAVE_CYCLE_MS,
+                    easing = LinearEasing,
+                ),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "queuePillWavePhase",
+        )
+    } else {
+        null
+    }
+
+    Canvas(modifier = modifier) {
+        val p = progress().coerceIn(0f, 1f)
+        if (p <= 0f) return@Canvas
+
+        val fillWidth = size.width * p
+        val envelope = queuePillWaveEnvelope(p)
+        if (waveMotion == null || envelope <= 0.001f) {
+            // Surface 已按胶囊轮廓裁切左侧；这里只保留用户要求的竖直进度前沿。
+            drawRect(color = color, size = Size(fillWidth, size.height))
+            return@Canvas
+        }
+
+        // 动画状态只在绘制阶段读取，因此每帧只重绘本 Canvas，不重组胶囊内容和布局。
+        val phaseTurns = waveMotion.value
+        val phaseRadians = phaseTurns * QUEUE_PILL_TWO_PI
+        val breathing = 0.90f + 0.10f * sin(2f * phaseRadians + seedTurns * QUEUE_PILL_TWO_PI)
+        val amplitude = QUEUE_PILL_WAVE_AMPLITUDE.toPx() * envelope * breathing
+        val segmentHeight = size.height / QUEUE_PILL_WAVE_SEGMENTS
+
+        fillPath.reset()
+        val topX = (fillWidth + amplitude * queuePillWaveUnitOffset(0f, phaseTurns, seedTurns))
+            .coerceIn(0f, size.width)
+        fillPath.moveTo(0f, 0f)
+        fillPath.lineTo(topX, 0f)
+
+        // 以采样点作为二次曲线控制点、相邻点中点作为终点，保持轻微随机感但不出现折角。
+        var currentX = topX
+        var currentY = 0f
+        for (index in 1..QUEUE_PILL_WAVE_SEGMENTS) {
+            val nextY = segmentHeight * index
+            val nextX = (
+                fillWidth + amplitude * queuePillWaveUnitOffset(
+                    normalizedY = index.toFloat() / QUEUE_PILL_WAVE_SEGMENTS,
+                    phaseTurns = phaseTurns,
+                    seedTurns = seedTurns,
+                )
+                ).coerceIn(0f, size.width)
+            fillPath.quadraticTo(
+                currentX,
+                currentY,
+                (currentX + nextX) / 2f,
+                (currentY + nextY) / 2f,
+            )
+            currentX = nextX
+            currentY = nextY
+        }
+        fillPath.quadraticTo(currentX, currentY, currentX, currentY)
+        fillPath.lineTo(0f, size.height)
+        fillPath.close()
+        drawPath(path = fillPath, color = color)
+    }
+}
+
 /** 队列入口收起为普通按钮时使用固定材质种子，保证木纹/金属微纹在重组后保持一致。 */
 private const val QUEUE_ENTRY_BUTTON_TEXTURE_SEED = 0x2A71E001
+private const val QUEUE_PILL_WAVE_CYCLE_MS = 2_200
+private const val QUEUE_PILL_WAVE_SEGMENTS = 8
+private const val QUEUE_PILL_TWO_PI = 6.2831855f
+private const val REMOTE_BUSY_VISUAL_DELAY_MS = 180L
+private val QUEUE_PILL_WAVE_AMPLITUDE = 2.dp
+private val THUMBNAIL_THEME_BORDER_WIDTH = 0.75.dp
+private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 48.dp
 
 // 缩略图后台填充没有任何窗口/视口参数：未传输=从新到旧全量填充；传输中=完全停止。
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
@@ -661,6 +790,16 @@ fun FileListScreen(
     val transfersBusy = transferState.tasks.any {
         it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
     }
+    // 队列限制即时生效；视觉压暗稍后确认，过滤“本地文件已存在→瞬时完成”产生的单帧闪烁。
+    var transfersBusyVisual by remember { mutableStateOf(false) }
+    LaunchedEffect(transfersBusy) {
+        if (transfersBusy) {
+            delay(REMOTE_BUSY_VISUAL_DELAY_MS)
+            transfersBusyVisual = true
+        } else {
+            transfersBusyVisual = false
+        }
+    }
     // 触感反馈（开关在设置里，默认开）。
     val haptics = rememberHaptics(transferState.hapticsEnabled)
 
@@ -765,9 +904,7 @@ fun FileListScreen(
             // 同一条弧线进胶囊。预览中格子若仍在注册表则照常飞；滚出屏幕则只入队无动画。
             val fromCell = cellBoundsRegistry[file.handle]
             // 同源去重:同帧双击防重复残影。
-            if (file.handle !in queuedByHandle && fromCell != null &&
-                queueFlights.none { it.from == fromCell }
-            ) {
+            if (fromCell != null && queueFlights.none { it.from == fromCell }) {
                 queueFlights += QueueFlight(
                     id = nextFlightId++, from = fromCell,
                     packs = emptyList(), count = 1,
@@ -1105,7 +1242,7 @@ fun FileListScreen(
                 shape = CircleShape,
                 contentPadding = PaddingValues(14.dp),
                 showSheen = false,
-                active = remoteIntroExpanded && !transfersBusy,
+                active = remoteIntroExpanded && !transfersBusyVisual,
                 activeColor = colors.accentBlue,
                 // 深色由 0.38 提至约 0.60，浅色由 0.80 提至约 0.87；
                 // 仍能透出背景，但入口不会再像一层几乎看不见的薄膜。
@@ -1117,7 +1254,11 @@ fun FileListScreen(
                 RemoteMark(
                     modifier = Modifier
                         .size(24.dp),
-                    color = if (transfersBusy) colors.onSurfaceVariant.copy(alpha = 0.5f) else colors.accentBlue,
+                    color = if (transfersBusyVisual) {
+                        colors.onSurfaceVariant.copy(alpha = 0.5f)
+                    } else {
+                        colors.accentBlue
+                    },
                     // 收起时由屏内 48dp 热区承担唯一语义，避免无障碍树出现两个同名入口。
                     contentDescription = remoteEntryDescription.takeIf { remoteExpanded }
                 )
@@ -1137,7 +1278,7 @@ fun FileListScreen(
                     Text(
                         text = stringResource(R.string.remote_entry_intro),
                         modifier = Modifier.clearAndSetSemantics { },
-                        color = if (transfersBusy) {
+                        color = if (transfersBusyVisual) {
                             colors.onSurfaceVariant.copy(alpha = 0.62f)
                         } else {
                             colors.onBackground
@@ -1268,26 +1409,56 @@ fun FileListScreen(
             // 信号按钮右侧：类型筛选按钮。信号条展开/收起的宽度动画是逐帧真实布局，
             // 本按钮随 Row 重排平滑让位，位置天然跟随动画。已设筛选时图标高亮。
             Spacer(modifier = Modifier.width(8.dp))
+            val buttonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+            val buttonDark = colors.background.luminance() < 0.5f
+            val filterButtonColors = remember(
+                buttonSkin,
+                buttonDark,
+                colors.onBackground,
+                colors.accentYellow,
+            ) {
+                filterButtonPalette(
+                    skin = buttonSkin,
+                    dark = buttonDark,
+                    defaultInactiveIcon = colors.onBackground,
+                    defaultActive = colors.accentYellow,
+                )
+            }
             val filterMarkColor by animateColorAsState(
-                targetValue = if (filterActive) colors.accentYellow else colors.onBackground,
+                targetValue = if (filterActive) {
+                    filterButtonColors.activeIcon
+                } else {
+                    filterButtonColors.inactiveIcon
+                },
                 animationSpec = tween(180),
                 label = "filterMarkActive"
+            )
+            val filterMarkFill by animateFloatAsState(
+                targetValue = if (filterActive) 1f else 0f,
+                animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                label = "filterMarkFill",
             )
             GlassButton(
                 onClick = { showFilter = !showFilter },
                 shape = RoundedCornerShape(22.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 active = filterActive,
-                activeColor = colors.accentYellow,
+                activeColor = filterButtonColors.activeMaterial,
                 activeOutline = true,
+                // 钛合金按凹刻填色、相机键帽按丝印色处理；其它材质直接沿用图标颜色。
+                materialContentColor = filterMarkColor,
                 modifier = Modifier
                     .height(36.dp)
+                    // 实体主题的 Material Surface 会自动补足 48dp 触控宽度；提前给出同样的
+                    // 测量约束，避免不足部分居中留白，让四种主题的可见边缘都严格相隔 8dp。
+                    .widthIn(min = TOP_BAR_COMPACT_BUTTON_MIN_WIDTH)
                     .onGloballyPositioned { filterAnchor = it.boundsInRoot() }
             ) {
                 // 自绘筛选标志（与信号条同族的圆头杆件语言）；已设筛选时高亮。
                 FilterMark(
                     modifier = Modifier.size(19.dp),
                     color = filterMarkColor,
+                    fillProgress = filterMarkFill,
                     contentDescription = stringResource(R.string.cd_filter_type)
                 )
             }
@@ -1636,20 +1807,13 @@ fun QueuePill(
         Box(contentAlignment = Alignment.CenterEnd) {
             // 1) 单文件进度填充（填满当前动画宽度；收起为图标后不显示）。
             if (!allDone || finishProgressVisible) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .drawBehind {
-                            val fillWidth = size.width * animatedBar.value
-                            drawRoundRect(
-                                color = colors.accentBlue.copy(alpha = 0.35f),
-                                size = Size(fillWidth, size.height),
-                                cornerRadius = CornerRadius(
-                                    x = minOf(fillWidth, size.height) / 2f,
-                                    y = size.height / 2f,
-                                ),
-                            )
-                        }
+                QueuePillProgressFill(
+                    progress = { animatedBar.value },
+                    waveEligible = activeProgressTask?.status == TransferStatus.TRANSFERING ||
+                        finishProgressVisible,
+                    waveSeed = activeProgressTask?.taskId ?: retainedProgressTaskId,
+                    color = colors.accentBlue.copy(alpha = 0.35f),
+                    modifier = Modifier.matchParentSize(),
                 )
             }
             // 2) 毛玻璃高光 + 描边叠层（与 "Z传" 同款，略有区别）。
@@ -1768,6 +1932,84 @@ internal fun disconnectedConnectionType(
     connectionType: CameraConnectionType?
 ): CameraConnectionType = connectionType ?: CameraConnectionType.WIFI
 
+internal data class FilterButtonPalette(
+    val inactiveIcon: Color,
+    val activeIcon: Color,
+    val activeMaterial: Color,
+)
+
+/**
+ * 筛选按钮按实体材质选择刻印与激活指示色。强调色同时驱动轻染、轮廓和图标，
+ * 但强度仍由 GlassButton 的统一 active 动画控制，切换主题不会增加额外绘制层。
+ */
+internal fun filterButtonPalette(
+    skin: SkinPreset,
+    dark: Boolean,
+    defaultInactiveIcon: Color,
+    defaultActive: Color,
+): FilterButtonPalette = when (skin) {
+    SkinPreset.FROSTED_GLASS -> FilterButtonPalette(
+        inactiveIcon = defaultInactiveIcon,
+        activeIcon = defaultActive,
+        activeMaterial = defaultActive,
+    )
+
+    SkinPreset.TITANIUM -> {
+        FilterButtonPalette(
+            inactiveIcon = if (dark) Color(0xFFE4ECEF) else Color(0xFF344149),
+            activeIcon = if (dark) Color(0xFFF0FAFF) else Color(0xFF053A54),
+            activeMaterial = if (dark) Color(0xFF45A9D8) else Color(0xFF167DA7),
+        )
+    }
+
+    SkinPreset.WOOD -> {
+        FilterButtonPalette(
+            inactiveIcon = if (dark) Color(0xFFF1D6A7) else Color(0xFF472A18),
+            activeIcon = if (dark) Color(0xFFD8F6E8) else Color(0xFF062D22),
+            activeMaterial = if (dark) Color(0xFF43A37B) else Color(0xFF1A7658),
+        )
+    }
+
+    SkinPreset.CAMERA_CONTROLS -> FilterButtonPalette(
+        // 相机键帽在深浅界面里始终是黑色，统一使用冷灰丝印与琥珀状态灯。
+        inactiveIcon = Color(0xFFD5D8DA),
+        activeIcon = Color(0xFFFFE2A3),
+        activeMaterial = Color(0xFFFF9F1A),
+    )
+}
+
+/** 缩略图只借用材质色相，不复制按钮纹理、投影或高光。 */
+internal fun thumbnailThemeBorderColor(skin: SkinPreset, dark: Boolean): Color = when (skin) {
+    SkinPreset.FROSTED_GLASS -> if (dark) {
+        Color.White.copy(alpha = 0.12f)
+    } else {
+        Color.Black.copy(alpha = 0.09f)
+    }
+
+    SkinPreset.TITANIUM -> if (dark) {
+        Color(0xFFD7E2E7).copy(alpha = 0.20f)
+    } else {
+        Color(0xFF46545B).copy(alpha = 0.17f)
+    }
+
+    SkinPreset.WOOD -> if (dark) {
+        Color(0xFFE4B979).copy(alpha = 0.20f)
+    } else {
+        Color(0xFF623519).copy(alpha = 0.17f)
+    }
+
+    SkinPreset.CAMERA_CONTROLS -> if (dark) {
+        Color(0xFFCDD3D6).copy(alpha = 0.16f)
+    } else {
+        Color(0xFF23272A).copy(alpha = 0.18f)
+    }
+}
+
+internal fun stackedThumbnailThemeBorderColor(skin: SkinPreset, dark: Boolean): Color {
+    val base = thumbnailThemeBorderColor(skin, dark)
+    return base.copy(alpha = (base.alpha * 1.55f).coerceAtMost(0.36f))
+}
+
 internal data class SignalBarPalette(
     val lit: Color,
     val unlit: Color,
@@ -1836,13 +2078,15 @@ fun SignalPill(
     }
     val skin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
     val dark = colors.background.luminance() < 0.5f
-    val signalBars = signalBarPalette(
-        skin = skin,
-        dark = dark,
-        level = level,
-        defaultLit = color,
-        defaultUnlit = colors.onSurfaceVariant.copy(alpha = 0.28f),
-    )
+    val signalBars = remember(skin, dark, level, color, colors.onSurfaceVariant) {
+        signalBarPalette(
+            skin = skin,
+            dark = dark,
+            level = level,
+            defaultLit = color,
+            defaultUnlit = colors.onSurfaceVariant.copy(alpha = 0.28f),
+        )
+    }
 
     // 强调动画：trigger 递增时轻微放大、再弹性缩回（比左右抖动柔和）。
     val pulse = remember { Animatable(1f) }
@@ -1878,6 +2122,8 @@ fun SignalPill(
         // 顶栏按钮统一 36dp 高；信号条内容 15dp，在按钮内垂直居中。
         modifier = Modifier
             .height(36.dp)
+            // 收起状态至少与筛选按钮使用同一宽度基线；展开的 dBm 文本仍可自然增宽。
+            .widthIn(min = TOP_BAR_COMPACT_BUTTON_MIN_WIDTH)
             .graphicsLayer {
                 val s = pulse.value * (breath?.value ?: 1f)
                 scaleX = s
@@ -2119,6 +2365,12 @@ private fun ThumbnailGrid(
     exportReflowActive: Boolean = false,
     onExportExitFinished: (Int) -> Unit = {}
 ) {
+    val colors = AppTheme.colors
+    val thumbnailSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val thumbnailDark = colors.background.luminance() < 0.5f
+    val thumbnailBorderColor = remember(thumbnailSkin, thumbnailDark) {
+        thumbnailThemeBorderColor(thumbnailSkin, thumbnailDark)
+    }
 
     // 日期展开/收起动画（手风琴方案；不用条目位移动画——它对"被推出屏幕的条目"有框架级
     // 边缘悬停，对"从屏外移入"的条目又根本不生效，大日期组收起时什么动画都看不到）：
@@ -2373,7 +2625,8 @@ private fun ThumbnailGrid(
                                 ThumbnailCell(
                                     file = file,
                                     task = queuedByHandle[file.handle],
-                                    alreadyExported = file.handle in exportedHandles,
+                                    transferred = file.handle in exportedHandles,
+                                    themeBorderColor = thumbnailBorderColor,
                                     transfersBusy = transfersBusy,
                                     allowRemoteThumbnail = allowRemoteThumbnails,
                                     cameraViewModel = cameraViewModel,
@@ -2601,6 +2854,11 @@ internal fun BurstStackPhoto(
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
+    val skin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val dark = colors.background.luminance() < 0.5f
+    val borderColor = remember(skin, dark) {
+        stackedThumbnailThemeBorderColor(skin, dark)
+    }
     var thumbnail by remember(file.handle) {
         mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
     }
@@ -2615,7 +2873,7 @@ internal fun BurstStackPhoto(
         modifier = modifier
             .clip(shape)
             .background(colors.thumbPlaceholder)
-            .border(1.dp, Color.White.copy(alpha = 0.62f), shape)
+            .border(THUMBNAIL_THEME_BORDER_WIDTH, borderColor, shape)
     ) {
         thumbnail?.let { image ->
             Image(
@@ -2648,7 +2906,8 @@ internal fun BurstStackPhoto(
 private fun ThumbnailCell(
     file: NikonCamera.FileInfo,
     task: TransferTask?,
-    alreadyExported: Boolean,
+    transferred: Boolean,
+    themeBorderColor: Color,
     transfersBusy: Boolean,
     allowRemoteThumbnail: Boolean,
     cameraViewModel: CameraViewModel,
@@ -2706,6 +2965,12 @@ private fun ThumbnailCell(
     var cellBounds by remember { mutableStateOf<Rect?>(null) }
 
     val thumbnailShape = RoundedCornerShape(8.dp)
+    val thumbnailBorderWidth = if (inExpandedBurstCollection) 1.dp else THUMBNAIL_THEME_BORDER_WIDTH
+    val thumbnailBorderColor = if (inExpandedBurstCollection) {
+        colors.accentOrange.copy(alpha = 0.92f)
+    } else {
+        themeBorderColor
+    }
     Box(
         modifier = modifier
             .graphicsLayer {
@@ -2722,16 +2987,10 @@ private fun ThumbnailCell(
             }
             .clip(thumbnailShape)
             .background(colors.thumbPlaceholder)
-            .then(
-                if (inExpandedBurstCollection) {
-                    Modifier.border(
-                        width = 1.dp,
-                        color = colors.accentOrange.copy(alpha = 0.92f),
-                        shape = thumbnailShape
-                    )
-                } else {
-                    Modifier
-                }
+            .border(
+                width = thumbnailBorderWidth,
+                color = thumbnailBorderColor,
+                shape = thumbnailShape,
             )
             .onGloballyPositioned {
                 // 同一份 bounds 双用:长按预览的放大起点 + 打包动画的灵魂起点。
@@ -2840,12 +3099,14 @@ private fun ThumbnailCell(
             }
         }
 
-        // 已入队：遮罩 + 状态角标。入队/移出时淡入淡出（网格上唯一的硬切，抹掉它）；
+        // 只有尚在队列流程中的任务显示遮罩和状态角标；COMPLETED 已经是“目录中存在”，
+        // 与历史扫描结果统一交给下方玻璃绿勾，不再保留另一套半透明完成样式。
+        val overlayTask = task?.takeIf { showsQueueStatusOverlay(it.status) }
         // lastTask 保留最后一次的任务，退场动画期间角标仍有内容可渲染。
-        var lastTask by remember(file.handle) { mutableStateOf(task) }
-        LaunchedEffect(task) { if (task != null) lastTask = task }
+        var lastTask by remember(file.handle) { mutableStateOf(overlayTask) }
+        LaunchedEffect(overlayTask) { if (overlayTask != null) lastTask = overlayTask }
         AnimatedVisibility(
-            visible = task != null,
+            visible = overlayTask != null,
             enter = fadeIn(tween(150)),
             exit = fadeOut(tween(150)),
             modifier = Modifier.matchParentSize()
@@ -2855,7 +3116,7 @@ private fun ThumbnailCell(
                     .fillMaxSize()
                     .background(colors.background.copy(alpha = 0.35f))
             ) {
-                (task ?: lastTask)?.let { t ->
+                (overlayTask ?: lastTask)?.let { t ->
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
@@ -2866,16 +3127,29 @@ private fun ThumbnailCell(
                 }
             }
         }
-        if (alreadyExported && task == null) {
-            Box(modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp)) {
-                AlreadyExportedIndicator()
-            }
+        AnimatedVisibility(
+            visible = transferred && overlayTask == null,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(120)),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
+        ) {
+            TransferredIndicator()
         }
     }
 }
 
+/** 已完成任务与目录扫描结果统一使用已传输徽标，其余状态仍属于队列过程。 */
+internal fun showsQueueStatusOverlay(status: TransferStatus): Boolean =
+    when (status) {
+        TransferStatus.COMPLETED -> false
+        TransferStatus.WAITING,
+        TransferStatus.TRANSFERING,
+        TransferStatus.FAILED,
+        TransferStatus.CANCELLED -> true
+    }
+
 @Composable
-private fun AlreadyExportedIndicator() {
+private fun TransferredIndicator() {
     val colors = AppTheme.colors
     // 已传输是状态徽标而不是可点击按钮：复用全局玻璃材质，但不挂点击、投影或按压反馈。
     // heavy 实底保证叠在任何明暗照片上都清楚，绿色细边与对号共同表达“已完成”。

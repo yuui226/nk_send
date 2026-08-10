@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import com.ztransfer.ui.theme.AppTheme
@@ -33,10 +34,12 @@ private fun Modifier.markSemantics(contentDescription: String?): Modifier =
 fun FilterMark(
     modifier: Modifier = Modifier,
     color: Color = AppTheme.colors.onBackground,
+    fillProgress: Float = 0f,
     contentDescription: String? = null
 ) {
     Canvas(modifier = modifier.markSemantics(contentDescription).aspectRatio(1f)) {
         val s = size.minDimension
+        val fill = fillProgress.coerceIn(0f, 1f)
         val funnel = Path().apply {
             // 宽口→斜肩→收窄通道→短尾：封闭轮廓在小尺寸下仍能一眼认成漏斗。
             moveTo(0.16f * s, 0.20f * s)
@@ -47,15 +50,37 @@ fun FilterMark(
             lineTo(0.41f * s, 0.50f * s)
             close()
         }
-        drawPath(
-            path = funnel,
-            color = color,
-            style = Stroke(
-                width = 0.075f * s,
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round
+
+        // 空心描边淡出的同时，实心漏斗从 94% 轻微舒展并淡入；动画结束后只绘制
+        // 对应的单一路径，不保留持续动画或额外图层。
+        if (fill < 0.999f) {
+            drawPath(
+                path = funnel,
+                color = color.copy(alpha = color.alpha * (1f - fill)),
+                style = Stroke(
+                    width = 0.075f * s,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                ),
             )
-        )
+        }
+        if (fill > 0.001f) {
+            val fillScale = 0.94f + 0.06f * fill
+            withTransform(
+                transformBlock = {
+                    scale(
+                        scaleX = fillScale,
+                        scaleY = fillScale,
+                        pivot = center,
+                    )
+                },
+            ) {
+                drawPath(
+                    path = funnel,
+                    color = color.copy(alpha = color.alpha * fill),
+                )
+            }
+        }
     }
 }
 
