@@ -7,7 +7,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -416,26 +415,36 @@ fun TransferScreen(
                                 }
                             }
 
-                            if (task.status == TransferStatus.TRANSFERING) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                // 平滑追值：进度跳变时进度条缓缓滑到新值，而非硬切一格。
-                                val animatedProgress = animateFloatAsState(
-                                    targetValue = task.progress,
-                                    animationSpec = Motion.progress,
-                                    label = "taskProgress"
-                                )
-                                LinearProgressIndicator(
-                                    progress = animatedProgress.value,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(4.dp)
-                                        // 圆角进度条，与卡片圆角语言一致
-                                        .clip(RoundedCornerShape(2.dp)),
-                                    color = colors.accentBlue,
-                                    // 轨道用主题蓝的极淡版而非灰色：与蓝调传输卡同色系，
-                                    // "已走/未走"读作同一根条的深浅，而不是两种材质。
-                                    trackColor = colors.accentBlue.copy(alpha = 0.18f),
-                                )
+                            AnimatedVisibility(
+                                visible = task.status == TransferStatus.TRANSFERING,
+                                enter = fadeIn(tween(160)),
+                                exit = fadeOut(tween(220)),
+                            ) {
+                                Column {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    // 退出期间把目标补到 100%，再随状态自然淡出，避免最后一次
+                                    // 进度回调和完成状态同帧到达时进度条突然消失。
+                                    val animatedProgress = rememberSmoothTransferProgress(
+                                        targetProgress = if (task.status == TransferStatus.TRANSFERING) {
+                                            task.progress
+                                        } else {
+                                            1f
+                                        },
+                                        resetKey = taskId,
+                                    )
+                                    LinearProgressIndicator(
+                                        progress = animatedProgress.value,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(4.dp)
+                                            // 圆角进度条，与卡片圆角语言一致
+                                            .clip(RoundedCornerShape(2.dp)),
+                                        color = colors.accentBlue,
+                                        // 轨道用主题蓝的极淡版而非灰色：与蓝调传输卡同色系，
+                                        // "已走/未走"读作同一根条的深浅，而不是两种材质。
+                                        trackColor = colors.accentBlue.copy(alpha = 0.18f),
+                                    )
+                                }
                             }
 
                         }

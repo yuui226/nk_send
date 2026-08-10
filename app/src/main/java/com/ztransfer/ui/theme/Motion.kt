@@ -23,11 +23,12 @@ object Motion {
 
     /**
      * 进度条 / 进度环的数值插值：新进度到来时平滑「追」上而非硬跳，让进度流动起来。
-     * 临界阻尼不回弹（进度不应倒退）；StiffnessMediumLow 兼顾灵动与跟手，settle 约几百毫秒。
+     * 临界阻尼不回弹（进度不应倒退）；较柔和的刚度吸收协议层离散采样，同时仍能持续追值。
      */
     val progress: SpringSpec<Float> = spring(
         dampingRatio = Spring.DampingRatioNoBouncy,
-        stiffness = Spring.StiffnessMediumLow
+        stiffness = 180f,
+        visibilityThreshold = 0.0005f,
     )
 
     /** 覆盖层"从锚点变形展开/收回"（设置面板、长按预览共用，保证节奏一致）。 */

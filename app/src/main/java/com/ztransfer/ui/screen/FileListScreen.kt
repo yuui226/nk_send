@@ -79,6 +79,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -90,6 +91,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
@@ -1500,22 +1502,13 @@ fun QueuePill(
             else -> false
         }
     }
-    // 进度条 = 当前单文件进度（复用传输页语义）；全部传完时填满。
-    val barFraction = if (allDone) 1f else transferState.currentFileProgress
-    // 平滑追值：填充宽度随 Motion.progress 弹簧缓动而非硬跳（与传输页进度条/列表进度环同一手感）。
-    // 用 State 在 drawBehind 里读 .value：每帧只重绘填充，不触发胶囊重组。
-    val animatedBar = animateFloatAsState(
-        targetValue = barFraction,
-        animationSpec = Motion.progress,
-        label = "pillProgress"
-    )
-
     // "done → 图标" 的转场只由"传输中 → 全部完成"触发。prevAllDone 初值取当前 allDone：
     // 若进入本页时已是完成态（例如从队列页返回），不再闪 done，直接显示图标（无转场动画）。
     var showDoneLabel by remember { mutableStateOf(false) }
     var prevAllDone by remember { mutableStateOf(allDone) }
     // 本轮队列是否真的下载过（用于完成震动：纯"已存在跳过"的瞬时完成不震）。
     var sawTransfer by remember { mutableStateOf(false) }
+    var finishProgressVisible by remember { mutableStateOf(false) }
     LaunchedEffect(hasActive) {
         if (hasActive) sawTransfer = true
     }
@@ -1526,17 +1519,39 @@ fun QueuePill(
         if (allDone && !prevAllDone) {
             val celebrate = !hasCancelled && sawTransfer
             sawTransfer = false
+            finishProgressVisible = celebrate
             if (!hasCancelled) {
                 if (celebrate) haptics.success()
                 showDoneLabel = true
                 delay(1800)
                 showDoneLabel = false
             }
+            finishProgressVisible = false
         }
         prevAllDone = allDone
     }
     // 收起为图标：全部完成（且 done 标签已过），或数字尚未获准显示（防"已存在跳过"闪 1）。
     val collapsedToIcon = (allDone && !showDoneLabel) || (!allDone && !countingVisible)
+
+    // 进度条 = 当前单文件进度（复用传输页语义）。保留最近的进度归属，让最后一张
+    // 完成后仍能从当前位置顺滑补满，而不是因“当前任务”瞬间消失而重建动画。
+    val activeProgressTask = transferState.tasks.firstOrNull {
+        it.status == TransferStatus.TRANSFERING
+    } ?: transferState.tasks.firstOrNull { it.isGeneratingFrame }
+        ?: transferState.tasks.firstOrNull { it.status == TransferStatus.WAITING }
+    var retainedProgressTaskId by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(activeProgressTask?.taskId) {
+        activeProgressTask?.taskId?.let { retainedProgressTaskId = it }
+    }
+    val barFraction = when {
+        allDone && finishProgressVisible -> 1f
+        allDone -> 0f // 静止图标态不预热动画，避免下一轮等待阶段错误继承满格。
+        else -> transferState.currentFileProgress
+    }
+    val animatedBar = rememberSmoothTransferProgress(
+        targetProgress = barFraction,
+        resetKey = activeProgressTask?.taskId ?: retainedProgressTaskId,
+    )
 
     // 普通按钮与胶囊共用同一条宽度弹簧。切换材质实现时右缘仍固定，只向左平滑伸缩，
     // 不会因为图标态改用 GlassButton 而丢掉原先的胶囊变形手感。
@@ -1620,14 +1635,19 @@ fun QueuePill(
     ) {
         Box(contentAlignment = Alignment.CenterEnd) {
             // 1) 单文件进度填充（填满当前动画宽度；收起为图标后不显示）。
-            if (!allDone) {
+            if (!allDone || finishProgressVisible) {
                 Box(
                     modifier = Modifier
                         .matchParentSize()
                         .drawBehind {
-                            drawRect(
+                            val fillWidth = size.width * animatedBar.value
+                            drawRoundRect(
                                 color = colors.accentBlue.copy(alpha = 0.35f),
-                                size = Size(size.width * animatedBar.value, size.height)
+                                size = Size(fillWidth, size.height),
+                                cornerRadius = CornerRadius(
+                                    x = minOf(fillWidth, size.height) / 2f,
+                                    y = size.height / 2f,
+                                ),
                             )
                         }
                 )
@@ -1748,6 +1768,38 @@ internal fun disconnectedConnectionType(
     connectionType: CameraConnectionType?
 ): CameraConnectionType = connectionType ?: CameraConnectionType.WIFI
 
+internal data class SignalBarPalette(
+    val lit: Color,
+    val unlit: Color,
+)
+
+/** 木纹表面使用与胡桃/蜂蜜底色反向的指示灯色，档位靠明暗和格数共同表达。 */
+internal fun signalBarPalette(
+    skin: SkinPreset,
+    dark: Boolean,
+    level: Int,
+    defaultLit: Color,
+    defaultUnlit: Color,
+): SignalBarPalette {
+    if (skin != SkinPreset.WOOD) return SignalBarPalette(defaultLit, defaultUnlit)
+
+    val lit = if (dark) {
+        when {
+            level >= 4 -> Color(0xFFA8E7BC) // 胡桃木上的柔和薄荷绿
+            level >= 2 -> Color(0xFFFFD58A) // 暖金色，与木纹同族但亮度充分
+            else -> Color(0xFFFF9D91)       // 低信号保持克制的珊瑚红警示
+        }
+    } else {
+        when {
+            level >= 4 -> Color(0xFF164F32) // 蜂蜜木上的深森林绿
+            level >= 2 -> Color(0xFF4B2A12) // 深琥珀棕，不与橙色木纹融在一起
+            else -> Color(0xFF8A2025)       // 深酒红，弱信号仍清楚可辨
+        }
+    }
+    val unlitBase = if (dark) Color(0xFFFFE4B5) else Color(0xFF321D10)
+    return SignalBarPalette(lit = lit, unlit = unlitBase.copy(alpha = 0.34f))
+}
+
 /**
  * 连接状态毛玻璃按钮：Wi-Fi 显示信号格与 dBm，USB 显示经典三叉标；
  * Wi-Fi 断开时点击进入系统设置，USB 断开则等待重新插线。
@@ -1782,6 +1834,15 @@ fun SignalPill(
         level >= 2 -> colors.accentOrange
         else -> colors.statusError
     }
+    val skin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val dark = colors.background.luminance() < 0.5f
+    val signalBars = signalBarPalette(
+        skin = skin,
+        dark = dark,
+        level = level,
+        defaultLit = color,
+        defaultUnlit = colors.onSurfaceVariant.copy(alpha = 0.28f),
+    )
 
     // 强调动画：trigger 递增时轻微放大、再弹性缩回（比左右抖动柔和）。
     val pulse = remember { Animatable(1f) }
@@ -1863,7 +1924,7 @@ fun SignalPill(
                                     .width(4.dp)
                                     .height((6 + i * 3).dp)
                                     .clip(RoundedCornerShape(1.5.dp))
-                                    .background(if (lit) color else colors.onSurfaceVariant.copy(alpha = 0.28f))
+                                    .background(if (lit) signalBars.lit else signalBars.unlit)
                             )
                         }
                     }
@@ -1896,7 +1957,7 @@ fun SignalPill(
                     text = if (usbMode) stringResource(R.string.connection_usb) else "$r dBm",
                     style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                     fontWeight = FontWeight.Medium,
-                    color = color,
+                    color = if (usbMode) color else signalBars.lit,
                     maxLines = 1,
                     softWrap = false,
                     modifier = Modifier
@@ -3606,13 +3667,12 @@ private fun TransferStatusIndicator(task: TransferTask) {
                 if (st == TransferStatus.TRANSFERING) {
                     // 传输中在列表用确定型进度环（卡片那侧改用下载字形，见 statusGlyph 说明）。
                     // 平滑追值：进度环随进度缓缓扫过，而非一段段硬跳。
-                    val animatedProgress by animateFloatAsState(
-                        targetValue = task.progress,
-                        animationSpec = Motion.progress,
-                        label = "cellProgress"
+                    val animatedProgress = rememberSmoothTransferProgress(
+                        targetProgress = task.progress,
+                        resetKey = task.taskId,
                     )
                     CircularProgressIndicator(
-                        progress = animatedProgress,
+                        progress = animatedProgress.value,
                         modifier = Modifier.size(15.dp),
                         color = colors.accentBlue,
                         trackColor = Color.White.copy(alpha = 0.25f),
