@@ -101,6 +101,8 @@
     <string name="transfer_directory">传输目录</string>
     <string name="dir_set">已设置</string>
     <string name="dir_not_set">未设置</string>
+    <string name="dir_please_set">请设置传输目录</string>
+    <string name="transfer_directory_required_hint">请先设置传输目录</string>
     <string name="change_directory">更改目录</string>
     <string name="choose_directory">选择目录</string>
     <string name="columns">列数</string>

@@ -152,6 +152,11 @@ internal const val QQ_NUMBER = "953000922"
 
 private enum class SettingsPage { MAIN, EFFECTS }
 
+internal fun transferDirectoryNeedsAttention(
+    requested: Boolean,
+    isDirectorySet: Boolean,
+): Boolean = requested && !isDirectorySet
+
 /**
  * 轻量设置面板（全屏覆盖层，非系统 Dialog），从顶栏设置按钮变形弹出、关闭缩回按钮
  * （见 [AnchorPopup]）。内容按功能分为四块玻璃分区卡片：传输目录 / 照片列表 / 通用 / 界面，
@@ -164,6 +169,7 @@ fun SettingsOverlay(
     effectPreviewCameraManufacturer: String? = null,
     effectPreviewCameraModel: String? = null,
     effectPreviewExif: PhotoExif? = null,
+    requestTransferDirectoryAttention: Boolean = false,
     onEffectPreviewRequested: () -> Unit = {},
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
@@ -215,6 +221,32 @@ fun SettingsOverlay(
         } catch (e: Exception) {
             dirSetFallback
         }
+    }
+    val directoryAttentionActive = transferDirectoryNeedsAttention(
+        requested = requestTransferDirectoryAttention,
+        isDirectorySet = dirText != null,
+    )
+    val directoryAttentionProgress = remember { Animatable(0f) }
+    LaunchedEffect(directoryAttentionActive) {
+        if (!directoryAttentionActive) {
+            directoryAttentionProgress.snapTo(0f)
+            return@LaunchedEffect
+        }
+        directoryAttentionProgress.snapTo(0.25f)
+        repeat(2) {
+            directoryAttentionProgress.animateTo(
+                1f,
+                tween(180, easing = FastOutSlowInEasing),
+            )
+            directoryAttentionProgress.animateTo(
+                0.32f,
+                tween(280, easing = FastOutSlowInEasing),
+            )
+        }
+        directoryAttentionProgress.animateTo(
+            0.55f,
+            tween(220, easing = FastOutSlowInEasing),
+        )
     }
 
     // 右上角"解锁高级版"徽标打开的介绍对话框（免费/高级版对比 + 解锁按钮复制 QQ 号）。
@@ -712,7 +744,18 @@ fun SettingsOverlay(
 
             // ---------- 传输目录：标题、单行路径与更改按钮并排；未设置时保留橙色强调 ----------
             SettingsCard(
-                borderColor = if (dirText == null) colors.accentOrange.copy(alpha = 0.8f) else colors.glassPanelBorder
+                modifier = Modifier.graphicsLayer {
+                    val scale = 1f + directoryAttentionProgress.value * 0.008f
+                    scaleX = scale
+                    scaleY = scale
+                },
+                borderColor = if (dirText == null) {
+                    colors.accentOrange.copy(alpha = 0.8f)
+                } else {
+                    colors.glassPanelBorder
+                },
+                attentionColor = colors.accentOrange.takeIf { directoryAttentionActive },
+                attentionProgress = directoryAttentionProgress.value,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
@@ -725,8 +768,23 @@ fun SettingsOverlay(
                     Column(modifier = Modifier.weight(1f)) {
                         SectionLabel(stringResource(R.string.transfer_directory))
                         Text(
-                            text = dirText ?: stringResource(R.string.dir_not_set),
-                            style = MaterialTheme.typography.bodySmall,
+                            text = dirText ?: stringResource(
+                                if (directoryAttentionActive) {
+                                    R.string.dir_please_set
+                                } else {
+                                    R.string.dir_not_set
+                                }
+                            ),
+                            style = if (directoryAttentionActive) {
+                                MaterialTheme.typography.labelLarge
+                            } else {
+                                MaterialTheme.typography.bodySmall
+                            },
+                            fontWeight = if (directoryAttentionActive) {
+                                FontWeight.Bold
+                            } else {
+                                FontWeight.Normal
+                            },
                             color = if (dirText != null) colors.onSurfaceVariant else colors.accentOrange,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -2505,6 +2563,8 @@ private fun SettingsCard(
     modifier: Modifier = Modifier,
     borderColor: Color = AppTheme.colors.glassPanelBorder,
     pressAccentColor: Color? = null,
+    attentionColor: Color? = null,
+    attentionProgress: Float = 0f,
     enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
@@ -2527,6 +2587,21 @@ private fun SettingsCard(
         animationSpec = if (pressed) tween(90) else Motion.bouncy(),
         label = "settingsCardPressHighlight",
     )
+    val normalizedAttention = attentionProgress.coerceIn(0f, 1f)
+    val effectiveBorderColor = when {
+        pressAccentColor != null && pressProgress > 0f -> pressAccentColor.copy(
+            alpha = 0.52f + 0.30f * pressProgress,
+        )
+        attentionColor != null -> attentionColor.copy(
+            alpha = 0.72f + 0.26f * normalizedAttention,
+        )
+        else -> borderColor
+    }
+    val effectiveBorderWidth = when {
+        pressProgress > 0f -> 1f + 0.45f * pressProgress
+        attentionColor != null -> 1.25f + 0.75f * normalizedAttention
+        else -> 1f
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -2550,19 +2625,20 @@ private fun SettingsCard(
             // onBackground 极低透明度：深色主题下是白色微提亮、浅色下是黑色微压暗，两套都成立。
             .background(AppTheme.colors.onBackground.copy(alpha = 0.04f))
             .then(
+                attentionColor?.let { accent ->
+                    Modifier.background(
+                        accent.copy(alpha = 0.055f + 0.075f * normalizedAttention)
+                    )
+                } ?: Modifier
+            )
+            .then(
                 pressAccentColor?.let { accent ->
                     Modifier.background(accent.copy(alpha = 0.10f * pressProgress))
                 } ?: Modifier
             )
             .border(
-                width = (1f + 0.45f * pressProgress).dp,
-                color = pressAccentColor?.let { accent ->
-                    if (pressProgress > 0f) {
-                        accent.copy(alpha = 0.52f + 0.30f * pressProgress)
-                    } else {
-                        borderColor
-                    }
-                } ?: borderColor,
+                width = effectiveBorderWidth.dp,
+                color = effectiveBorderColor,
                 shape = shape,
             )
             .padding(12.dp),

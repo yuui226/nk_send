@@ -289,6 +289,7 @@ fun FileListScreen(
     val colors = AppTheme.colors
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
+    var transferDirectoryAttention by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
     // 高级版烟花彩蛋：设置面板里的"高级版"徽标点击时在本页放烟花（与连接页共用实现）。
@@ -386,10 +387,16 @@ fun FileListScreen(
     // 提示条文案在非组合的回调（BackHandler/onClick）里使用，先在组合期取出。
     val exitHint = stringResource(R.string.press_back_to_exit)
     val notConnectedHint = stringResource(R.string.camera_not_connected)
+    val transferDirectoryRequiredHint = stringResource(R.string.transfer_directory_required_hint)
     // 免费版监看时长用完的引导（指向设置里的"高级版"入口），轻提示不打断。
     val remoteEndedHint = stringResource(R.string.remote_trial_ended)
     // 带参数的文案组合期取不到,回调/协程里经 context.getString 现取;返回键退出也用它。
     val context = LocalContext.current
+    val requestTransferDirectory: () -> Unit = {
+        transferDirectoryAttention = true
+        showSettings = true
+        showHint(transferDirectoryRequiredHint)
+    }
 
     // 监看时长归零自动退回本页:落地后弹提示气泡（监看页已消失，提示只能显示在这里）。
     // 本页在去监看页时离开组合、返回时重新进入，LaunchedEffect(Unit) 恰好每次落地都跑。
@@ -713,7 +720,8 @@ fun FileListScreen(
             previewIndex = null
             previewItems = emptyList()
             previewSourceAtOpen = null
-            showSettings = true; return@onTapFile
+            requestTransferDirectory()
+            return@onTapFile
         }
         if (!state.isConnectedToCamera && !hasLocalOriginal(file)) {
             signalPulse++
@@ -746,7 +754,7 @@ fun FileListScreen(
                 previewIndex = null
                 previewItems = emptyList()
                 previewSourceAtOpen = null
-                showSettings = true
+                requestTransferDirectory()
                 return@onTransferBurstPreview
             }
             if (!state.isConnectedToCamera && remaining.any { !hasLocalOriginal(it) }) {
@@ -884,7 +892,8 @@ fun FileListScreen(
             // 单文件入队见外层 onTapFile（列表点击与预览页按钮共用）。
             val onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit = onTransferGroup@{ remaining, fromBounds ->
                 if (transferState.transferDirUri == null) {
-                    showSettings = true; return@onTransferGroup
+                    requestTransferDirectory()
+                    return@onTransferGroup
                 }
                 if (!state.isConnectedToCamera && remaining.any { !hasLocalOriginal(it) }) {
                     // 未连接：信号按钮放大强调 + 提示，而不是静默无响应。
@@ -1008,7 +1017,7 @@ fun FileListScreen(
         val openRemote: () -> Unit = {
             // 端侧录制与照片传输共用同一个 SAF 保存目录。与加入传输队列的
             // 拦截顺序一致：目录未设置时先引导设置，不进入监看后再让用户返工。
-            if (transferState.transferDirUri == null) showSettings = true
+            if (transferState.transferDirUri == null) requestTransferDirectory()
             else if (transfersBusy) showHint(remoteBlockedHint)
             // 免费版当日监看时长已用完:入口处直接提示,不进页再弹回。
             else if (LicenseManager.remoteTimeLeftMs() <= 0L) showHint(remoteEndedHint)
@@ -1155,7 +1164,10 @@ fun FileListScreen(
             // 左：双 Z 标悬浮按钮（原"Z传"文本，换成自绘的尼康 Z 系列标志更简洁），
             // 本身即为设置入口（点击打开设置弹窗）。毛玻璃观感复用 GlassButton。
             GlassButton(
-                onClick = { showSettings = true },
+                onClick = {
+                    transferDirectoryAttention = false
+                    showSettings = true
+                },
                 shape = RoundedCornerShape(22.dp),
                 // 顶栏按钮统一 36dp 高（与队列胶囊等一致）；标志 20dp + 上下 8dp 正好填满。
                 // 水平 padding 与旁边信号按钮同值，宽度刚好包住标志。
@@ -1295,9 +1307,13 @@ fun FileListScreen(
                 effectPreviewCameraManufacturer = state.cameraManufacturer,
                 effectPreviewCameraModel = state.cameraModel,
                 effectPreviewExif = state.effectPreviewExif,
+                requestTransferDirectoryAttention = transferDirectoryAttention,
                 onEffectPreviewRequested = cameraViewModel::requestEffectPreview,
                 anchorBounds = zAnchor,
-                onDismiss = { showSettings = false },
+                onDismiss = {
+                    showSettings = false
+                    transferDirectoryAttention = false
+                },
                 onPlayFireworks = { fireworks.launch() },
                 // 本页是连着相机时的主界面,购买入口多半从这里进——不接上这条,
                 // 购买时就不会断开相机、相机热点不关、付款没网。

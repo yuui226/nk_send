@@ -101,6 +101,8 @@
     <string name="transfer_directory">傳輸目錄</string>
     <string name="dir_set">已設定</string>
     <string name="dir_not_set">未設定</string>
+    <string name="dir_please_set">請設定傳輸目錄</string>
+    <string name="transfer_directory_required_hint">請先設定傳輸目錄</string>
     <string name="change_directory">變更目錄</string>
     <string name="choose_directory">選擇目錄</string>
     <string name="columns">欄數</string>
