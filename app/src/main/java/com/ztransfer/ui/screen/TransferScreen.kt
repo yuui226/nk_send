@@ -2,6 +2,7 @@ package com.ztransfer.ui.screen
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -51,6 +52,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -72,6 +76,12 @@ import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.isTransferredOriginal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private const val TRANSFER_CARD_WAVE_CYCLE_MS = 2_600
+private const val TRANSFER_CARD_WAVE_SEGMENTS = 12
+private const val TRANSFER_CARD_WAVE_SPATIAL_SCALE = 0.55f
+private const val TRANSFER_CARD_PROGRESS_ALPHA = 0.14f
+private val TRANSFER_CARD_WAVE_AMPLITUDE = 3.dp
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -202,6 +212,18 @@ fun TransferScreen(
                     DisposableEffect(taskId) {
                         onDispose { removingTaskIds.remove(taskId) }
                     }
+                    val cardContainerColor by animateColorAsState(
+                        targetValue = when (task.status) {
+                            // 传输进度已经成为卡片背景，底色保持中性，避免两层蓝色叠加过重。
+                            TransferStatus.TRANSFERING -> colors.surface
+                            TransferStatus.COMPLETED -> colors.statusConnected.copy(alpha = 0.1f)
+                            TransferStatus.FAILED -> colors.statusError.copy(alpha = 0.1f)
+                            TransferStatus.CANCELLED -> colors.surfaceVariant
+                            TransferStatus.WAITING -> colors.surface
+                        },
+                        animationSpec = tween(240, easing = FastOutSlowInEasing),
+                        label = "transferCardStateColor",
+                    )
                     Box(
                         modifier = Modifier
                             // 上方卡片增删/长矮时，本卡平滑让位而不是硬跳。
@@ -210,23 +232,67 @@ fun TransferScreen(
                             .padding(bottom = 8.dp)
                     ) {
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (task.status == TransferStatus.TRANSFERING) {
+                                    Modifier.semantics {
+                                        progressBarRangeInfo = ProgressBarRangeInfo(
+                                            current = normalizedTransferProgress(task.progress),
+                                            range = 0f..1f,
+                                        )
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            ),
                         // 14dp 与列表页卡片/监看页 tile 的中型控件圆角一致（原 12dp 家族外）。
                         shape = RoundedCornerShape(14.dp),
                         // 浅色下白卡浮在浅灰背景上需要发丝线定界；深色 token 为透明，视觉不变。
                         border = BorderStroke(1.dp, colors.cardHairline),
                         colors = CardDefaults.cardColors(
-                            containerColor = when (task.status) {
-                                TransferStatus.TRANSFERING -> colors.accentBlue.copy(alpha = 0.1f)
-                                TransferStatus.COMPLETED -> colors.statusConnected.copy(alpha = 0.1f)
-                                TransferStatus.FAILED -> colors.statusError.copy(alpha = 0.1f)
-                                TransferStatus.CANCELLED -> colors.surfaceVariant
-                                TransferStatus.WAITING -> colors.surface
-                            }
+                            containerColor = cardContainerColor,
                         )
                     ) {
-                        // 进度条/重试按钮随状态出现消失时，卡片高度平滑过渡，
-                        // 卡内图标与文字不再瞬移。顶部 sheen 高光与玻璃面板同族材质。
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = task.status == TransferStatus.TRANSFERING,
+                                enter = fadeIn(tween(180)),
+                                exit = if (task.status == TransferStatus.COMPLETED) {
+                                    // 先给平滑进度一点补满时间，再让蓝色液面退入绿色完成底。
+                                    fadeOut(tween(durationMillis = 220, delayMillis = 100))
+                                } else {
+                                    fadeOut(tween(180))
+                                },
+                                modifier = Modifier.matchParentSize(),
+                            ) {
+                                // 完成时顺滑补满再淡入绿色底；失败/取消只淡出当前进度，
+                                // 不把未完成任务错误表达成 100%。
+                                val animatedProgress = rememberSmoothTransferProgress(
+                                    targetProgress = transferCardProgressTarget(
+                                        status = task.status,
+                                        progress = task.progress,
+                                    ),
+                                    resetKey = taskId,
+                                )
+                                LiquidProgressFill(
+                                    progress = { animatedProgress.value },
+                                    waveEligible = transferCardWaveEligible(task.status),
+                                    seedKey = taskId,
+                                    color = colors.accentBlue.copy(
+                                        alpha = TRANSFER_CARD_PROGRESS_ALPHA,
+                                    ),
+                                    modifier = Modifier.fillMaxSize(),
+                                    amplitude = TRANSFER_CARD_WAVE_AMPLITUDE,
+                                    cycleMillis = TRANSFER_CARD_WAVE_CYCLE_MS,
+                                    segments = TRANSFER_CARD_WAVE_SEGMENTS,
+                                    spatialScale = TRANSFER_CARD_WAVE_SPATIAL_SCALE,
+                                    label = "transferCardWave",
+                                )
+                            }
+
+                        // 状态文字变化可能改变高度，继续柔和过渡；顶部 sheen 位于进度层之上，
+                        // 让液态填充仍属于卡片材质，而不是覆盖内容的色块。
                         Column(
                             modifier = Modifier
                                 .background(cardSheen)
@@ -415,38 +481,7 @@ fun TransferScreen(
                                 }
                             }
 
-                            AnimatedVisibility(
-                                visible = task.status == TransferStatus.TRANSFERING,
-                                enter = fadeIn(tween(160)),
-                                exit = fadeOut(tween(220)),
-                            ) {
-                                Column {
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    // 退出期间把目标补到 100%，再随状态自然淡出，避免最后一次
-                                    // 进度回调和完成状态同帧到达时进度条突然消失。
-                                    val animatedProgress = rememberSmoothTransferProgress(
-                                        targetProgress = if (task.status == TransferStatus.TRANSFERING) {
-                                            task.progress
-                                        } else {
-                                            1f
-                                        },
-                                        resetKey = taskId,
-                                    )
-                                    LinearProgressIndicator(
-                                        progress = animatedProgress.value,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(4.dp)
-                                            // 圆角进度条，与卡片圆角语言一致
-                                            .clip(RoundedCornerShape(2.dp)),
-                                        color = colors.accentBlue,
-                                        // 轨道用主题蓝的极淡版而非灰色：与蓝调传输卡同色系，
-                                        // "已走/未走"读作同一根条的深浅，而不是两种材质。
-                                        trackColor = colors.accentBlue.copy(alpha = 0.18f),
-                                    )
-                                }
-                            }
-
+                        }
                         }
                     }
                     }

@@ -81,7 +81,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -194,41 +193,6 @@ internal fun queuePillDisplayRemaining(actualRemaining: Int, heldCount: Int): In
     return afterFlightHold.takeIf { it > 0 } ?: actual
 }
 
-private fun smoothStep(start: Float, end: Float, value: Float): Float {
-    val t = ((value - start) / (end - start)).coerceIn(0f, 1f)
-    return t * t * (3f - 2f * t)
-}
-
-/** 波浪只在进度中段完整出现，起点和终点自然压回竖直边缘。 */
-internal fun queuePillWaveEnvelope(progress: Float): Float {
-    val p = progress.coerceIn(0f, 1f)
-    val enter = smoothStep(0.05f, 0.14f, p)
-    val exit = 1f - smoothStep(0.90f, 0.98f, p)
-    return enter * exit
-}
-
-/** 每个任务获得稳定相位；不创建 Random，也不会在重组时改变波形。 */
-internal fun queuePillWaveSeed(taskId: Long?): Float {
-    var hash = (taskId ?: 0L).hashCode()
-    hash = (hash xor (hash ushr 16)) * 0x45D9F3B
-    hash = hash xor (hash ushr 16)
-    return (hash and 0xFFFF) / 65535f
-}
-
-/** 三个周期谐波叠加成连续、不规则但首尾无跳变的单位波形。 */
-internal fun queuePillWaveUnitOffset(
-    normalizedY: Float,
-    phaseTurns: Float,
-    seedTurns: Float,
-): Float {
-    val y = normalizedY.coerceIn(0f, 1f)
-    val time = phaseTurns * QUEUE_PILL_TWO_PI
-    val seed = seedTurns * QUEUE_PILL_TWO_PI
-    return 0.64f * sin(time + y * QUEUE_PILL_TWO_PI * 1.15f + seed) +
-        0.24f * sin(-2f * time + y * QUEUE_PILL_TWO_PI * 2.40f + seed * 0.73f) +
-        0.12f * sin(3f * time + y * QUEUE_PILL_TWO_PI * 3.35f + seed * 1.31f)
-}
-
 @Composable
 private fun AnimatedQueuePillCount(
     count: Int,
@@ -256,101 +220,9 @@ private fun AnimatedQueuePillCount(
     }
 }
 
-@Composable
-private fun QueuePillProgressFill(
-    progress: () -> Float,
-    waveEligible: Boolean,
-    waveSeed: Long?,
-    color: Color,
-    modifier: Modifier = Modifier,
-) {
-    val fillPath = remember { Path() }
-    val seedTurns = remember(waveSeed) { queuePillWaveSeed(waveSeed) }
-    val latestProgress by rememberUpdatedState(progress)
-    // derivedStateOf 只在跨越可见阈值时触发重组；区间内的逐帧进度仍只重绘 Canvas。
-    val waveVisible by remember(waveEligible) {
-        derivedStateOf {
-            waveEligible && queuePillWaveEnvelope(latestProgress()) > 0.001f
-        }
-    }
-    // 等待、生成，以及起止端波幅已经归零时，连相位动画本身也不创建。
-    val waveMotion = if (waveVisible) {
-        rememberInfiniteTransition(label = "queuePillWave").animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(
-                    durationMillis = QUEUE_PILL_WAVE_CYCLE_MS,
-                    easing = LinearEasing,
-                ),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "queuePillWavePhase",
-        )
-    } else {
-        null
-    }
-
-    Canvas(modifier = modifier) {
-        val p = progress().coerceIn(0f, 1f)
-        if (p <= 0f) return@Canvas
-
-        val fillWidth = size.width * p
-        val envelope = queuePillWaveEnvelope(p)
-        if (waveMotion == null || envelope <= 0.001f) {
-            // Surface 已按胶囊轮廓裁切左侧；这里只保留用户要求的竖直进度前沿。
-            drawRect(color = color, size = Size(fillWidth, size.height))
-            return@Canvas
-        }
-
-        // 动画状态只在绘制阶段读取，因此每帧只重绘本 Canvas，不重组胶囊内容和布局。
-        val phaseTurns = waveMotion.value
-        val phaseRadians = phaseTurns * QUEUE_PILL_TWO_PI
-        val breathing = 0.90f + 0.10f * sin(2f * phaseRadians + seedTurns * QUEUE_PILL_TWO_PI)
-        val amplitude = QUEUE_PILL_WAVE_AMPLITUDE.toPx() * envelope * breathing
-        val segmentHeight = size.height / QUEUE_PILL_WAVE_SEGMENTS
-
-        fillPath.reset()
-        val topX = (fillWidth + amplitude * queuePillWaveUnitOffset(0f, phaseTurns, seedTurns))
-            .coerceIn(0f, size.width)
-        fillPath.moveTo(0f, 0f)
-        fillPath.lineTo(topX, 0f)
-
-        // 以采样点作为二次曲线控制点、相邻点中点作为终点，保持轻微随机感但不出现折角。
-        var currentX = topX
-        var currentY = 0f
-        for (index in 1..QUEUE_PILL_WAVE_SEGMENTS) {
-            val nextY = segmentHeight * index
-            val nextX = (
-                fillWidth + amplitude * queuePillWaveUnitOffset(
-                    normalizedY = index.toFloat() / QUEUE_PILL_WAVE_SEGMENTS,
-                    phaseTurns = phaseTurns,
-                    seedTurns = seedTurns,
-                )
-                ).coerceIn(0f, size.width)
-            fillPath.quadraticTo(
-                currentX,
-                currentY,
-                (currentX + nextX) / 2f,
-                (currentY + nextY) / 2f,
-            )
-            currentX = nextX
-            currentY = nextY
-        }
-        fillPath.quadraticTo(currentX, currentY, currentX, currentY)
-        fillPath.lineTo(0f, size.height)
-        fillPath.close()
-        drawPath(path = fillPath, color = color)
-    }
-}
-
 /** 队列入口收起为普通按钮时使用固定材质种子，保证木纹/金属微纹在重组后保持一致。 */
 private const val QUEUE_ENTRY_BUTTON_TEXTURE_SEED = 0x2A71E001
-private const val QUEUE_PILL_WAVE_CYCLE_MS = 2_200
-private const val QUEUE_PILL_WAVE_SEGMENTS = 8
-private const val QUEUE_PILL_TWO_PI = 6.2831855f
 private const val REMOTE_BUSY_VISUAL_DELAY_MS = 180L
-private val QUEUE_PILL_WAVE_AMPLITUDE = 2.dp
 private val THUMBNAIL_THEME_BORDER_WIDTH = 0.75.dp
 private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 48.dp
 
@@ -1807,11 +1679,11 @@ fun QueuePill(
         Box(contentAlignment = Alignment.CenterEnd) {
             // 1) 单文件进度填充（填满当前动画宽度；收起为图标后不显示）。
             if (!allDone || finishProgressVisible) {
-                QueuePillProgressFill(
+                LiquidProgressFill(
                     progress = { animatedBar.value },
                     waveEligible = activeProgressTask?.status == TransferStatus.TRANSFERING ||
                         finishProgressVisible,
-                    waveSeed = activeProgressTask?.taskId ?: retainedProgressTaskId,
+                    seedKey = activeProgressTask?.taskId ?: retainedProgressTaskId,
                     color = colors.accentBlue.copy(alpha = 0.35f),
                     modifier = Modifier.matchParentSize(),
                 )

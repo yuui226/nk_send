@@ -6,10 +6,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import com.ztransfer.ui.theme.Motion
+import com.ztransfer.viewmodel.TransferStatus
 import kotlin.math.max
 
 internal fun normalizedTransferProgress(progress: Float): Float =
     if (progress.isFinite()) progress.coerceIn(0f, 1f) else 0f
+
+/** 卡片离场时只有成功完成可以补满；失败和取消保留真实的最后进度。 */
+internal fun transferCardProgressTarget(status: TransferStatus, progress: Float): Float =
+    if (status == TransferStatus.COMPLETED) 1f else normalizedTransferProgress(progress)
+
+/** 完成补满期间继续保留波浪，失败/取消则直接淡出当前进度。 */
+internal fun transferCardWaveEligible(status: TransferStatus): Boolean =
+    status == TransferStatus.TRANSFERING || status == TransferStatus.COMPLETED
 
 /**
  * 传输进度统一追值器。
