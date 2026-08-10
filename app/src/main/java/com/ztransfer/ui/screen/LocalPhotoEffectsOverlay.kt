@@ -236,6 +236,9 @@ fun LocalPhotoEffectsPage(
                 .widthIn(max = 680.dp)
                 .fillMaxSize()
                 .align(Alignment.TopCenter)
+                .clearFocusOnBackgroundTap(enabled = true) {
+                    focusManager.clearFocus()
+                }
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 16.dp),
         ) {

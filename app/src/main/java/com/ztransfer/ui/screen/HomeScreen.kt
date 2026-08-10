@@ -46,6 +46,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -86,7 +87,6 @@ import kotlin.math.sin
 fun HomeScreen(
     viewModel: CameraViewModel,
     transferViewModel: TransferViewModel,
-    connectionAttentionEnabled: Boolean = true,
     onConnectionCelebrationFinished: () -> Unit,
     onOpenLocalPhotoEffects: () -> Unit,
 ) {
@@ -112,6 +112,12 @@ fun HomeScreen(
     var tipsPopupAnchor by remember { mutableStateOf<Rect?>(null) }
 
     val colors = AppTheme.colors
+    val buttonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val wifiSettingsTextColor = wifiSettingsButtonTextColor(
+        skin = buttonSkin,
+        dark = colors.background.luminance() < 0.5f,
+        defaultColor = colors.accentBlue,
+    )
     val connected = state.isConnectedToCamera
     val usbError = state.usbConnectionError
     // 会话真正就绪后再触发卡片内成功动画；动画完成时主动通知 MainScreen 跳转。
@@ -195,7 +201,7 @@ fun HomeScreen(
         WifiConnectionStatus.IDLE -> null
     }
     // 识别传输方式后立即停止提示动画；具体动画在卡片图层内运行，避免每帧重组整个页面。
-    val connectionAttentionActive = selectedConnection == null && connectionAttentionEnabled
+    val connectionAttentionActive = selectedConnection == null
     val soonDays = if (isPro) {
         val subExp = remember(showRenewInfo) { LicenseManager.subExpiresAtSec() }
         if (subExp > 0L) subDaysLeft(subExp) else -1
@@ -329,7 +335,7 @@ fun HomeScreen(
                                     stringResource(R.string.open_wifi_settings),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = colors.accentBlue,
+                                    color = wifiSettingsTextColor,
                                     maxLines = 1,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.fillMaxWidth()

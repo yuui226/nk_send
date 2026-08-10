@@ -52,6 +52,8 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -84,6 +86,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -1822,7 +1825,7 @@ internal fun PhotoFrameWatermarkEditor(
  * 只监听没有被输入框、按钮或滚动消费的轻点；因此点空白可收起键盘，点输入框本身不会
  * 被父层抢走焦点，拖动页面也不会误触发。
  */
-private fun Modifier.clearFocusOnBackgroundTap(
+internal fun Modifier.clearFocusOnBackgroundTap(
     enabled: Boolean,
     clearFocus: () -> Unit,
 ): Modifier = pointerInput(enabled) {
@@ -1843,6 +1846,7 @@ private fun WatermarkTextField(
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
+    val focusManager = LocalFocusManager.current
     val contentAlpha = if (enabled) 1f else 0.52f
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
@@ -1872,8 +1876,9 @@ private fun WatermarkTextField(
     }
     val textStyle = MaterialTheme.typography.bodyMedium.copy(
         color = colors.onBackground.copy(alpha = contentAlpha),
+        textAlign = TextAlign.Center,
     )
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(10.dp)
     Box(
         modifier = modifier.height(PHOTO_EFFECTS_CONTROL_HEIGHT),
         contentAlignment = Alignment.CenterStart,
@@ -1894,6 +1899,8 @@ private fun WatermarkTextField(
             enabled = enabled,
             singleLine = true,
             textStyle = textStyle,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
             interactionSource = interactionSource,
             decorationBox = { innerField -> innerField() },
             modifier = Modifier

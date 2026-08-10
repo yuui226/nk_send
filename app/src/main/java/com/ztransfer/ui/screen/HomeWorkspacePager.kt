@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 private const val CONNECTION_PAGE = 0
 private const val LOCAL_EFFECTS_PAGE = 1
 internal const val WORKSPACE_ENTRY_SNAP_THRESHOLD = 0.50f
-internal const val WORKSPACE_RETURN_SNAP_THRESHOLD = 0.18f
+internal const val WORKSPACE_RETURN_SNAP_THRESHOLD = 0.06f
 
 internal fun shouldPauseConnectionDiscovery(settledPage: Int, targetPage: Int): Boolean =
     settledPage == LOCAL_EFFECTS_PAGE || targetPage == LOCAL_EFFECTS_PAGE
@@ -54,7 +54,7 @@ fun HomeWorkspacePager(
     }
     val pagerFlingBehavior = PagerDefaults.flingBehavior(
         state = pagerState,
-        // 返回连接页时，默认近半页的落点距离对长屏过大，改为 18%。
+        // 返回连接页时，长屏上的拖动距离需要足够轻巧，约一成页面即可确认返回。
         // 反向进入工作台仍保留 50%，避免连接页的小幅纵向误触。
         // 两边的快速轻扫均继续由原生速度阈值判定，不叠加第二套手势。
         snapPositionalThreshold = snapThreshold,
@@ -111,9 +111,6 @@ fun HomeWorkspacePager(
             CONNECTION_PAGE -> HomeScreen(
                 viewModel = cameraViewModel,
                 transferViewModel = transferViewModel,
-                connectionAttentionEnabled =
-                    pagerState.settledPage == CONNECTION_PAGE &&
-                        pagerState.targetPage == CONNECTION_PAGE,
                 onConnectionCelebrationFinished = {
                     if (pagerState.settledPage == CONNECTION_PAGE &&
                         pagerState.targetPage == CONNECTION_PAGE

@@ -342,6 +342,8 @@ fun FileListScreen(
         if (!remoteIntroHandledForEntry && remoteIntroEligible) {
             // 避开页面自身的入场首帧，让入口像随后自然舒展开，而不是同时抢动画焦点。
             delay(160)
+            // 用户已经开始浏览照片时不再强行展开，避免引导态覆盖“离开顶部即收起”的规则。
+            if (!atTop) return@LaunchedEffect
             // 真正开始展开时再记次数；此前离页既不消耗次数，回来也仍有机会看到提示。
             remoteIntroHandledForEntry = true
             transferViewModel.recordRemoteEntryIntroPlayed()
@@ -352,6 +354,13 @@ fun FileListScreen(
     }
     LaunchedEffect(atTop) {
         if (atTop) remoteExpandedAwayFromTop = false
+    }
+    LaunchedEffect(atTop, gridState.isScrollInProgress) {
+        if (!atTop && gridState.isScrollInProgress) {
+            // 首次提示也必须服从真实滚动：一旦离开顶部，立即恢复贴边收起态。
+            remoteIntroExpanded = false
+            remoteExpandedAwayFromTop = false
+        }
     }
     // 回到顶部按钮的可见性：翻得够深 + 正向顶部方向滚动才出现；往深处翻/接近顶部
     // 立即隐藏；停止滚动一段时间后自动隐藏——静止画面上没有按钮，误触窗口极小。

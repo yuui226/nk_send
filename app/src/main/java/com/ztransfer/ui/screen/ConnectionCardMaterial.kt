@@ -21,12 +21,96 @@ import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
 import com.ztransfer.ui.theme.SkinPreset
 
-private data class ConnectionCardFramePalette(
+internal data class ConnectionCardFramePalette(
     val washTop: Color,
     val washBottom: Color,
     val edgeTop: Color,
     val edgeBottom: Color,
 )
+
+internal const val CONNECTION_CARD_RIM_STROKE_DP = 1.8f
+
+private fun Color.withScaledAlpha(scale: Float): Color = copy(alpha = alpha * scale)
+
+internal fun wifiSettingsButtonTextColor(
+    skin: SkinPreset,
+    dark: Boolean,
+    defaultColor: Color,
+): Color = if (skin == SkinPreset.WOOD) {
+    if (dark) Color(0xFFF1D6A7) else Color(0xFF472A18)
+} else {
+    defaultColor
+}
+
+internal fun connectionCardFramePalette(
+    skin: SkinPreset,
+    dark: Boolean,
+    glassBorderTop: Color,
+    glassBorderBottom: Color,
+): ConnectionCardFramePalette = when (skin) {
+    SkinPreset.FROSTED_GLASS -> ConnectionCardFramePalette(
+        washTop = Color.Transparent,
+        washBottom = Color.Transparent,
+        edgeTop = if (dark) {
+            glassBorderTop.copy(alpha = 0.48f)
+        } else {
+            Color.White.copy(alpha = 0.78f)
+        },
+        edgeBottom = if (dark) {
+            glassBorderBottom.copy(alpha = 0.18f)
+        } else {
+            Color.Black.copy(alpha = 0.17f)
+        },
+    )
+
+    SkinPreset.TITANIUM -> if (dark) {
+        ConnectionCardFramePalette(
+            washTop = Color.White.copy(alpha = 0.035f),
+            washBottom = Color.Black.copy(alpha = 0.040f),
+            edgeTop = Color(0xFFDDE5E9).copy(alpha = 0.36f),
+            edgeBottom = Color.Black.copy(alpha = 0.48f),
+        )
+    } else {
+        ConnectionCardFramePalette(
+            washTop = Color.White.copy(alpha = 0.080f),
+            washBottom = Color(0xFF65727A).copy(alpha = 0.028f),
+            edgeTop = Color(0xFFADB9BF).copy(alpha = 0.48f),
+            edgeBottom = Color(0xFF4D5960).copy(alpha = 0.30f),
+        )
+    }
+
+    SkinPreset.WOOD -> if (dark) {
+        ConnectionCardFramePalette(
+            washTop = Color(0xFFF0C37D).copy(alpha = 0.035f),
+            washBottom = Color(0xFF2A1308).copy(alpha = 0.055f),
+            edgeTop = Color(0xFFE8BE7B).copy(alpha = 0.38f),
+            edgeBottom = Color(0xFF160A04).copy(alpha = 0.56f),
+        )
+    } else {
+        ConnectionCardFramePalette(
+            washTop = Color(0xFFF4CC8F).copy(alpha = 0.040f),
+            washBottom = Color(0xFF7A431F).copy(alpha = 0.030f),
+            edgeTop = Color(0xFFC88F43).copy(alpha = 0.42f),
+            edgeBottom = Color(0xFF613318).copy(alpha = 0.30f),
+        )
+    }
+
+    SkinPreset.CAMERA_CONTROLS -> if (dark) {
+        ConnectionCardFramePalette(
+            washTop = Color(0xFFBFC6CA).copy(alpha = 0.025f),
+            washBottom = Color.Black.copy(alpha = 0.060f),
+            edgeTop = Color(0xFFD0D5D7).copy(alpha = 0.32f),
+            edgeBottom = Color.Black.copy(alpha = 0.62f),
+        )
+    } else {
+        ConnectionCardFramePalette(
+            washTop = Color(0xFF879095).copy(alpha = 0.015f),
+            washBottom = Color.Black.copy(alpha = 0.035f),
+            edgeTop = Color(0xFF626B70).copy(alpha = 0.36f),
+            edgeBottom = Color.Black.copy(alpha = 0.40f),
+        )
+    }
+}
 
 private fun Outline.toConnectionCardPath(): Path = when (this) {
     is Outline.Generic -> path
@@ -73,12 +157,19 @@ internal fun ConnectionCardSurface(
     val containerColor = remember(solidBaseColor, tint) {
         tint.compositeOver(solidBaseColor)
     }
+    val cardShadowElevation = when (skin) {
+        SkinPreset.FROSTED_GLASS -> 0.dp
+        SkinPreset.TITANIUM -> 4.5.dp
+        SkinPreset.WOOD -> 5.dp
+        SkinPreset.CAMERA_CONTROLS -> 5.5.dp
+    }
 
     Box(
         modifier = modifier
             .graphicsLayer {
                 this.shape = shape
                 clip = true
+                shadowElevation = cardShadowElevation.toPx()
             }
             .background(containerColor),
         content = content,
@@ -95,70 +186,12 @@ internal fun Modifier.connectionCardMaterialFrame(shape: RoundedCornerShape): Mo
     val skin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
     val dark = colors.background.luminance() < 0.5f
     val palette = remember(skin, dark, colors.glassBorderTop, colors.glassBorderBottom) {
-        when (skin) {
-            SkinPreset.FROSTED_GLASS -> ConnectionCardFramePalette(
-                washTop = Color.Transparent,
-                washBottom = Color.Transparent,
-                edgeTop = if (dark) {
-                    colors.glassBorderTop.copy(alpha = 0.36f)
-                } else {
-                    Color.White.copy(alpha = 0.72f)
-                },
-                edgeBottom = if (dark) {
-                    colors.glassBorderBottom.copy(alpha = 0.12f)
-                } else {
-                    Color.Black.copy(alpha = 0.12f)
-                },
-            )
-
-            SkinPreset.TITANIUM -> if (dark) {
-                ConnectionCardFramePalette(
-                    washTop = Color.White.copy(alpha = 0.026f),
-                    washBottom = Color.Black.copy(alpha = 0.032f),
-                    edgeTop = Color(0xFFDDE5E9).copy(alpha = 0.24f),
-                    edgeBottom = Color.Black.copy(alpha = 0.36f),
-                )
-            } else {
-                ConnectionCardFramePalette(
-                    washTop = Color.White.copy(alpha = 0.10f),
-                    washBottom = Color(0xFF65727A).copy(alpha = 0.022f),
-                    edgeTop = Color(0xFFBBC6CC).copy(alpha = 0.36f),
-                    edgeBottom = Color(0xFF56636B).copy(alpha = 0.22f),
-                )
-            }
-
-            SkinPreset.WOOD -> if (dark) {
-                ConnectionCardFramePalette(
-                    washTop = Color(0xFFF0C37D).copy(alpha = 0.026f),
-                    washBottom = Color(0xFF2A1308).copy(alpha = 0.050f),
-                    edgeTop = Color(0xFFE2B66F).copy(alpha = 0.24f),
-                    edgeBottom = Color(0xFF1B0D06).copy(alpha = 0.44f),
-                )
-            } else {
-                ConnectionCardFramePalette(
-                    washTop = Color(0xFFF4CC8F).copy(alpha = 0.030f),
-                    washBottom = Color(0xFF7A431F).copy(alpha = 0.026f),
-                    edgeTop = Color(0xFFD5A35E).copy(alpha = 0.30f),
-                    edgeBottom = Color(0xFF6C391B).copy(alpha = 0.22f),
-                )
-            }
-
-            SkinPreset.CAMERA_CONTROLS -> if (dark) {
-                ConnectionCardFramePalette(
-                    washTop = Color(0xFFBFC6CA).copy(alpha = 0.018f),
-                    washBottom = Color.Black.copy(alpha = 0.052f),
-                    edgeTop = Color(0xFFCBD1D4).copy(alpha = 0.18f),
-                    edgeBottom = Color.Black.copy(alpha = 0.52f),
-                )
-            } else {
-                ConnectionCardFramePalette(
-                    washTop = Color(0xFF879095).copy(alpha = 0.010f),
-                    washBottom = Color.Black.copy(alpha = 0.030f),
-                    edgeTop = Color(0xFF717A7F).copy(alpha = 0.22f),
-                    edgeBottom = Color.Black.copy(alpha = 0.30f),
-                )
-            }
-        }
+        connectionCardFramePalette(
+            skin = skin,
+            dark = dark,
+            glassBorderTop = colors.glassBorderTop,
+            glassBorderBottom = colors.glassBorderBottom,
+        )
     }
     // 绘制 Modifier 单独 remember，确保父卡片呼吸缩放持续刷新图层时，路径、
     // 渐变和线宽仍只在尺寸/主题变化时重建，而不是每个动画帧重建。
@@ -167,15 +200,20 @@ internal fun Modifier.connectionCardMaterialFrame(shape: RoundedCornerShape): Mo
             val outlinePath = shape.createOutline(size, layoutDirection, this)
                 .toConnectionCardPath()
             val wash = Brush.verticalGradient(
-                listOf(palette.washTop, palette.washBottom),
+                listOf(
+                    palette.washTop,
+                    palette.washTop.withScaledAlpha(0.18f),
+                    palette.washBottom.withScaledAlpha(0.10f),
+                    palette.washBottom,
+                ),
             )
             val edge = Brush.verticalGradient(
                 listOf(palette.edgeTop, palette.edgeBottom),
             )
             val hasWash = palette.washTop.alpha > 0.001f || palette.washBottom.alpha > 0.001f
-            // 父容器已按同一 shape 裁切，这里以 2.4dp 居中画在边界上，
-            // 外半圈被裁掉，最终只留下约 1.2dp 的清晰内描边。
-            val edgeWidth = 2.4.dp.toPx()
+            // 只留不到 1dp 的内侧轮廓；立体感由整面连续明暗和外部阴影形成，
+            // 避免宽描边在卡片内部产生可见的截止线。
+            val edgeWidth = CONNECTION_CARD_RIM_STROKE_DP.dp.toPx()
             onDrawBehind {
                 if (hasWash) drawPath(outlinePath, brush = wash)
                 drawPath(

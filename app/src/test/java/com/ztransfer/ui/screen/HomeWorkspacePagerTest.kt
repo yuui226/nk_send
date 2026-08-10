@@ -24,8 +24,8 @@ class HomeWorkspacePagerTest {
 
     @Test
     fun `only the return direction uses the more responsive snap threshold`() {
-        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD >= 0.15f)
-        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD <= 0.25f)
+        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD >= 0.04f)
+        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD <= 0.08f)
         assertTrue(WORKSPACE_ENTRY_SNAP_THRESHOLD >= 0.40f)
         assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD < WORKSPACE_ENTRY_SNAP_THRESHOLD)
     }
