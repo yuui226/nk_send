@@ -257,6 +257,7 @@ fun HomeScreen(
                         },
                         title = stringResource(R.string.connection_usb),
                         accent = colors.accentOrange,
+                        materialSeed = USB_CARD_BADGE_TEXTURE_SEED,
                         steps = listOf(
                             stringResource(R.string.usb_step_power),
                             stringResource(R.string.usb_step_cable)
@@ -285,6 +286,7 @@ fun HomeScreen(
                         },
                         title = stringResource(R.string.connection_wifi_hotspot),
                         accent = colors.accentBlue,
+                        materialSeed = WIFI_CARD_BADGE_TEXTURE_SEED,
                         steps = listOf(
                             stringResource(R.string.step_camera_wifi),
                             stringResource(R.string.step_phone_wifi)
@@ -536,6 +538,8 @@ fun HomeScreen(
 
 private const val CONNECTION_ATTENTION_MS = 2_400
 private const val WIFI_PROBING_FEEDBACK_DELAY_MS = 350L
+private const val USB_CARD_BADGE_TEXTURE_SEED = 0x554253
+private const val WIFI_CARD_BADGE_TEXTURE_SEED = 0x57494649
 
 /**
  * 物理链路只是候选证据。无线模式必须等真实相机会话建立后才能进入 hero 场景；
@@ -583,6 +587,7 @@ private fun ConnectionMethodCard(
     modeIcon: @Composable (Color, Modifier) -> Unit,
     title: String,
     accent: Color,
+    materialSeed: Int,
     steps: List<String>,
     selected: Boolean,
     success: Boolean,
@@ -683,6 +688,8 @@ private fun ConnectionMethodCard(
             }
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
+                ConnectionCardMaterialFrame(shape)
+
                 // 空白区负责卡片形变；前景按钮拥有独立手势，不与卡片反馈竞争。
                 Box(
                     modifier = Modifier
@@ -879,7 +886,8 @@ private fun ConnectionMethodCard(
                         probeProgress * 5.dp.toPx()
                 }
         ) {
-            GlassSurface(
+            val badgeAccent = if (success) colors.statusConnected else accent
+            SkinMaterialBadge(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
@@ -890,23 +898,17 @@ private fun ConnectionMethodCard(
                         alpha = if (selected) 1f else 1f - cardExitProgress
                     },
                 shape = RoundedCornerShape(13.dp),
-                panel = true,
-                tint = if (success) {
-                    colors.statusConnected.copy(alpha = 0.12f)
+                accentColor = badgeAccent,
+                contentColor = accent,
+                emphasis = if (success) {
+                    1f
                 } else {
-                    accent.copy(alpha = 0.07f)
+                    (if (attentionActive) 0.18f else 0.08f) + probeProgress * 0.48f
                 },
-                borderColor = if (success) {
-                    colors.statusConnected.copy(alpha = 0.78f)
-                } else {
-                    accent.copy(
-                        alpha = (if (attentionActive) 0.32f else 0.24f) +
-                            probeProgress * 0.30f
-                    )
-                }
-            ) {
+                textureSeed = materialSeed,
+            ) { badgeContentColor ->
                 modeIcon(
-                    accent,
+                    badgeContentColor,
                     Modifier
                         .size(22.dp)
                         .align(Alignment.Center)

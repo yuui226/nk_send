@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
@@ -711,6 +712,141 @@ fun GlassSurface(
             }
         )
     Box(modifier = decoration, content = content)
+}
+
+/**
+ * 非交互的皮肤材质底座，用于连接卡片等场景中的模式图标。
+ *
+ * 它与 [GlassButton] 共用颜色 token、稳定纹理和材质绘制，但没有点击语义、
+ * 交互状态或按压动画，避免把纯展示图标误表达为可点击按钮。
+ */
+@Composable
+internal fun SkinMaterialBadge(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(13.dp),
+    accentColor: Color,
+    contentColor: Color = accentColor,
+    emphasis: Float = 0f,
+    textureSeed: Int? = null,
+    content: @Composable BoxScope.(Color) -> Unit,
+) {
+    val colors = AppTheme.colors
+    val dark = colors.background.luminance() < 0.5f
+    val texturePalette = LocalButtonTexturePalette.current
+    val skin = texturePalette?.skin ?: SkinPreset.FROSTED_GLASS
+    val active = emphasis.coerceIn(0f, 1f)
+    val resolvedContentColor = materialBadgeContentColor(skin, dark, contentColor)
+
+    if (skin == SkinPreset.FROSTED_GLASS) {
+        GlassSurface(
+            modifier = modifier,
+            shape = shape,
+            panel = true,
+            tint = accentColor.copy(alpha = 0.055f + 0.065f * active),
+            borderColor = accentColor.copy(alpha = 0.22f + 0.56f * active),
+        ) {
+            content(resolvedContentColor)
+        }
+        return
+    }
+
+    val isTitanium = skin == SkinPreset.TITANIUM
+    val isWood = skin == SkinPreset.WOOD
+    val isCameraControl = skin == SkinPreset.CAMERA_CONTROLS
+    val compositionTextureSeed = currentCompositeKeyHash
+    val texture = remember(texturePalette, textureSeed, compositionTextureSeed) {
+        texturePalette?.brushFor(textureSeed ?: compositionTextureSeed)
+    }
+    val highlightTop = lerp(
+        colors.buttonHighlightTop,
+        accentColor.copy(alpha = 0.24f),
+        active * 0.62f,
+    )
+    val highlightBottom = lerp(
+        colors.buttonHighlightBottom,
+        accentColor.copy(alpha = 0.075f),
+        active * 0.52f,
+    )
+    val elevation = when {
+        isCameraControl -> 4.dp
+        isWood -> 3.dp
+        else -> 2.dp
+    }
+
+    Surface(
+        modifier = modifier,
+        shape = shape,
+        color = colors.buttonSurface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = accentColor.copy(alpha = 0.22f + 0.56f * active),
+        ),
+        shadowElevation = elevation,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .buttonMaterialBase(
+                    shape = shape,
+                    texture = texture,
+                    highlightTop = highlightTop,
+                    highlightBottom = highlightBottom,
+                )
+                .titaniumRoundedFinish(
+                    enabled = isTitanium,
+                    shape = shape,
+                    dark = dark,
+                    panel = false,
+                    pressProgress = 0f,
+                )
+                .woodSculptedFinish(
+                    enabled = isWood,
+                    shape = shape,
+                    dark = dark,
+                    panel = false,
+                    pressProgress = 0f,
+                )
+                .cameraControlCapFinish(
+                    enabled = isCameraControl,
+                    shape = shape,
+                    dark = dark,
+                    activeColor = accentColor,
+                    activeProgress = active * 0.64f,
+                    pressProgress = 0f,
+                )
+                .titaniumStampedContent(
+                    enabled = isTitanium,
+                    dark = dark,
+                    pressProgress = 0f,
+                    stampColor = resolvedContentColor,
+                )
+                .cameraPrintedContent(
+                    enabled = isCameraControl,
+                    activeColor = accentColor,
+                    activeProgress = active,
+                    printColor = resolvedContentColor,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            content(resolvedContentColor)
+        }
+    }
+}
+
+/**
+ * 保留 USB 橙和 Wi-Fi 蓝的语义色相，只针对中亮度实体材质校正明度。
+ * 浅色钛/木压暗印记，深色石墨钛提亮印记；其余材质本身对比充足，保持原色。
+ */
+internal fun materialBadgeContentColor(
+    skin: SkinPreset,
+    dark: Boolean,
+    color: Color,
+): Color = when {
+    !dark && (skin == SkinPreset.TITANIUM || skin == SkinPreset.WOOD) ->
+        lerp(color, Color.Black, 0.55f)
+
+    dark && skin == SkinPreset.TITANIUM -> lerp(color, Color.White, 0.48f)
+    else -> color
 }
 
 /**
