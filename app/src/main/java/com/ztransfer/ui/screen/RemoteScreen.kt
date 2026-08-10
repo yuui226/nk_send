@@ -5,11 +5,13 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.hardware.SensorManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.DocumentsContract
+import android.view.OrientationEventListener
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -95,6 +97,9 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
@@ -188,6 +193,49 @@ private const val USB_LIVE_VIEW_STABLE_FRAMES = 8
 private const val TAP_FOCUS_LOCKED_FEEDBACK_MS = 1800L
 private const val TAP_FOCUS_MARKER_VISIBLE_MS = 3_000L
 private const val TRACKING_CANCEL_EXIT_MS = 220L
+private const val REMOTE_ORIENTATION_STABLE_MS = 260L
+
+private data class RemoteRotationRequest(
+    val rotation: Int,
+    val persist: Boolean,
+)
+
+/**
+ * Keeps sensor callbacks out of Compose state. A manual rotation cancels only the pending
+ * transition for the current physical direction; automatic following resumes after the phone
+ * reaches a different stable direction.
+ */
+private class RemoteOrientationSession {
+    var candidateRotation: Int? = null
+    var manuallySuppressedRotation: Int? = null
+    var pendingJob: Job? = null
+
+    fun cancelPending() {
+        pendingJob?.cancel()
+        pendingJob = null
+    }
+
+    fun suppressCurrentDirection() {
+        manuallySuppressedRotation = candidateRotation
+        cancelPending()
+    }
+
+    fun pause() {
+        candidateRotation = null
+        cancelPending()
+    }
+}
+
+/**
+ * Maps only the centres of the three layouts supported by RemoteScreen. The gaps are deliberate
+ * hysteresis zones, and upside-down portrait is ignored because the monitor has no 180° layout.
+ */
+internal fun remoteRotationForDeviceOrientation(orientation: Int): Int? = when (orientation) {
+    in 0..30, in 330..359 -> 0
+    in 60..120 -> 2
+    in 240..300 -> 1
+    else -> null
+}
 
 internal fun shouldPollMovieModeDuringLiveViewRecovery(
     initialLoaded: Boolean,
@@ -293,11 +341,16 @@ fun RemoteScreen(
     val originalOrientation = remember(activity) {
         activity?.requestedOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     }
+    val lifecycleOwner = LocalLifecycleOwner.current
     val screenScope = rememberCoroutineScope()
-    val rotation = transferState.remoteRotation
+    var rotation by remember {
+        mutableIntStateOf(transferState.remoteRotation.coerceIn(0, 2))
+    }
     val isLandscape = rotation != 0
     var switchingRotation by remember { mutableStateOf(false) }
     val rotationTransition = remember { Animatable(1f) }
+    val rotationRequests = remember { Channel<RemoteRotationRequest>(Channel.CONFLATED) }
+    val orientationSession = remember { RemoteOrientationSession() }
     // Activity 始终保持竖屏。内部顺时针旋转后，系统顶部/底部 inset 分别映射为
     // 横屏内容的左/右安全边；背景不避让，继续铺到系统控制条后面。
     val rotationStatusInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -308,18 +361,70 @@ fun RemoteScreen(
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         onDispose { activity?.requestedOrientation = originalOrientation }
     }
-    fun cycleRotation() {
-        if (switchingRotation) return
-        screenScope.launch {
+
+    LaunchedEffect(rotationRequests) {
+        for (request in rotationRequests) {
+            if (request.rotation == rotation) continue
             switchingRotation = true
             try {
                 rotationTransition.animateTo(0f, tween(110))
-                transferViewModel.setRemoteRotation((rotation + 1) % 3)
+                rotation = request.rotation
+                if (request.persist) transferViewModel.setRemoteRotation(request.rotation)
                 rotationTransition.animateTo(1f, tween(190))
             } finally {
                 switchingRotation = false
             }
         }
+    }
+
+    DisposableEffect(context, lifecycleOwner, orientationSession, rotationRequests) {
+        val listener = object : OrientationEventListener(context, SensorManager.SENSOR_DELAY_NORMAL) {
+            override fun onOrientationChanged(orientation: Int) {
+                val candidate = remoteRotationForDeviceOrientation(orientation)
+                if (candidate == orientationSession.candidateRotation) return
+
+                orientationSession.candidateRotation = candidate
+                orientationSession.cancelPending()
+                if (candidate != null) {
+                    if (candidate == orientationSession.manuallySuppressedRotation) return
+                    orientationSession.manuallySuppressedRotation = null
+                    orientationSession.pendingJob = screenScope.launch {
+                        delay(REMOTE_ORIENTATION_STABLE_MS)
+                        if (orientationSession.candidateRotation == candidate) {
+                            rotationRequests.trySend(
+                                RemoteRotationRequest(rotation = candidate, persist = false)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        val canDetectOrientation = listener.canDetectOrientation()
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> if (canDetectOrientation) listener.enable()
+                Lifecycle.Event.ON_PAUSE -> {
+                    listener.disable()
+                    orientationSession.pause()
+                }
+                else -> Unit
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            listener.disable()
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            orientationSession.pause()
+        }
+    }
+
+    fun cycleRotation() {
+        if (switchingRotation) return
+        orientationSession.suppressCurrentDirection()
+        rotationRequests.trySend(
+            RemoteRotationRequest(rotation = (rotation + 1) % 3, persist = true)
+        )
     }
     // 免费版监看限时:每天累计 FREE_REMOTE_DAILY_MS(无单次概念),自然日重置。
     // 计时从"参数加载完 + 监看首帧已显示"（onReady）才开始——进页加载不占时长;
