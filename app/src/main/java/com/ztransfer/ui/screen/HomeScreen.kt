@@ -86,6 +86,7 @@ import kotlin.math.sin
 fun HomeScreen(
     viewModel: CameraViewModel,
     transferViewModel: TransferViewModel,
+    connectionAttentionEnabled: Boolean = true,
     onConnectionCelebrationFinished: () -> Unit,
     onOpenLocalPhotoEffects: () -> Unit,
 ) {
@@ -194,7 +195,7 @@ fun HomeScreen(
         WifiConnectionStatus.IDLE -> null
     }
     // 识别传输方式后立即停止提示动画；具体动画在卡片图层内运行，避免每帧重组整个页面。
-    val connectionAttentionActive = selectedConnection == null
+    val connectionAttentionActive = selectedConnection == null && connectionAttentionEnabled
     val soonDays = if (isPro) {
         val subExp = remember(showRenewInfo) { LicenseManager.subExpiresAtSec() }
         if (subExp > 0L) subDaysLeft(subExp) else -1
@@ -601,7 +602,8 @@ private fun ConnectionMethodCard(
     footer: (@Composable RowScope.() -> Unit)? = null
 ) {
     val colors = AppTheme.colors
-    val shape = RoundedCornerShape(24.dp)
+    val shape = remember { RoundedCornerShape(24.dp) }
+    val badgeShape = remember { RoundedCornerShape(13.dp) }
     val view = LocalView.current
     // 这是连接页最基本的状态提示，不再依赖 Compose 的动画帧时钟。若某些 Android 16
     // 设备上该时钟停滞，InfiniteTransition 会始终留在首帧。用单调系统时间
@@ -668,7 +670,7 @@ private fun ConnectionMethodCard(
                 translationX = pressDirection * deformation * 1.5.dp.toPx()
             }
     ) {
-        GlassSurface(
+        ConnectionCardSurface(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -687,9 +689,11 @@ private fun ConnectionMethodCard(
                 else -> Color.Transparent
             }
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                ConnectionCardMaterialFrame(shape)
-
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .connectionCardMaterialFrame(shape),
+            ) {
                 // 空白区负责卡片形变；前景按钮拥有独立手势，不与卡片反馈竞争。
                 Box(
                     modifier = Modifier
@@ -897,7 +901,7 @@ private fun ConnectionMethodCard(
                         scaleY = heroScale
                         alpha = if (selected) 1f else 1f - cardExitProgress
                     },
-                shape = RoundedCornerShape(13.dp),
+                shape = badgeShape,
                 accentColor = badgeAccent,
                 contentColor = accent,
                 emphasis = if (success) {

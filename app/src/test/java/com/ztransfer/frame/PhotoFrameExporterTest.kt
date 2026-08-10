@@ -618,7 +618,7 @@ class PhotoFrameExporterTest {
     fun watermarkOnlyIdentityNormalizesBorderPositionsAndIgnoresHiddenPreset() {
         val automatic = PhotoFrameWatermark(position = PhotoFrameWatermarkPosition.AUTO)
         val explicit = PhotoFrameWatermark(
-            position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
+            position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER,
         )
 
         assertEquals(

@@ -306,12 +306,22 @@ internal fun effectivePhotoFrameWatermark(
         position = if ((!borderEnabled || content == PhotoFrameWatermarkContent.IMAGE) &&
             !permitted.position.isPhotoPlacement()
         ) {
-            PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
+            PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER
         } else {
             permitted.position
         },
     )
 }
+
+/** Normalizes persisted watermark values without replacing a temporarily unavailable position. */
+internal fun normalizedPhotoFrameWatermarkPreference(
+    preference: PhotoFrameWatermark,
+    borderEnabled: Boolean,
+): PhotoFrameWatermark = effectivePhotoFrameWatermark(
+    isPro = true,
+    preference = preference,
+    borderEnabled = borderEnabled,
+).copy(position = preference.position)
 
 /** 只允许 JPG/JPEG/PNG 派生效果图；视频、RAW 和未知类型始终保持原样传输。 */
 internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Boolean =
@@ -730,13 +740,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     ) {
         val normalized = watermark
             ?.takeIf { LicenseManager.isPro.value }
-            ?.let {
-                effectivePhotoFrameWatermark(
-                    isPro = true,
-                    preference = it,
-                    borderEnabled = borderEnabled,
-                )
-            }
+            ?.let { normalizedPhotoFrameWatermarkPreference(it, borderEnabled) }
         val effectiveWatermark = normalized ?: effectivePhotoFrameWatermark(
             isPro = LicenseManager.isPro.value,
             preference = _state.value.photoFrameWatermark,

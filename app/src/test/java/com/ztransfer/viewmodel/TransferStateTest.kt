@@ -190,7 +190,7 @@ class TransferStateTest {
 
         assertEquals(PhotoFrameWatermarkContent.IMAGE, effective.content)
         assertEquals(imageHash, effective.imageHash)
-        assertEquals(PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT, effective.position)
+        assertEquals(PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER, effective.position)
     }
 
     @Test
@@ -215,8 +215,35 @@ class TransferStateTest {
         val pro = effectivePhotoFrameWatermark(true, preference, borderEnabled = false)
         val free = effectivePhotoFrameWatermark(false, preference, borderEnabled = false)
 
-        assertEquals(PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT, pro.position)
-        assertEquals(PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT, free.position)
+        assertEquals(PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER, pro.position)
+        assertEquals(PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER, free.position)
+    }
+
+    @Test
+    fun persistedPreferenceKeepsPositionHiddenByCurrentConstraints() {
+        val preference = PhotoFrameWatermark(
+            content = PhotoFrameWatermarkContent.IMAGE,
+            imageHash = "a".repeat(64),
+            position = PhotoFrameWatermarkPosition.LEFT,
+            opacityPercent = 140,
+        )
+
+        val normalized = normalizedPhotoFrameWatermarkPreference(
+            preference = preference,
+            borderEnabled = false,
+        )
+
+        assertEquals(PhotoFrameWatermarkContent.IMAGE, normalized.content)
+        assertEquals(PhotoFrameWatermarkPosition.LEFT, normalized.position)
+        assertEquals(100, normalized.opacityPercent)
+        assertEquals(
+            PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER,
+            effectivePhotoFrameWatermark(
+                isPro = true,
+                preference = normalized,
+                borderEnabled = false,
+            ).position,
+        )
     }
 
     @Test

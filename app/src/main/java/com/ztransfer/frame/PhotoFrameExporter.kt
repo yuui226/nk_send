@@ -3325,7 +3325,7 @@ private fun PhotoFrameWatermark.forBorderMode(
     borderEnabled: Boolean,
 ): PhotoFrameWatermark =
     if (!borderEnabled && !position.isPhotoPlacement()) {
-        copy(position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT)
+        copy(position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER)
     } else {
         this
     }

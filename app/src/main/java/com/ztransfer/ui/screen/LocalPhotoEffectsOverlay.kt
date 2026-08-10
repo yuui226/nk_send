@@ -47,8 +47,6 @@ import com.ztransfer.frame.PhotoFrameMediaStoreSource
 import com.ztransfer.frame.PhotoFrameMetadata
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkContent
-import com.ztransfer.frame.PhotoFrameWatermarkPosition
-import com.ztransfer.frame.isPhotoPlacement
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.viewmodel.TransferViewModel
@@ -191,8 +189,6 @@ fun LocalPhotoEffectsPage(
                     watermarkDraft = watermarkDraft.copy(
                         content = PhotoFrameWatermarkContent.IMAGE,
                         imageHash = imageHash,
-                        position = watermarkDraft.position.takeIf { it.isPhotoPlacement() }
-                            ?: PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
                     )
                     decorationEnabled = borderEnabled || watermarkDraft.enabled
                 },
@@ -207,7 +203,9 @@ fun LocalPhotoEffectsPage(
         ?.let { PhotoFilterSelection(it, filterIntensity) }
     val editorWatermark = when {
         !decorationEnabled -> PhotoFrameWatermark(enabled = false)
-        isPro -> watermarkDraft
+        isPro -> watermarkDraft.withEditorPlacementConstraints(
+            borderEnabled = decorationEnabled && borderEnabled,
+        )
         else -> freeEditionPhotoFrameWatermark()
     }
     val requestedRenderWatermark = if (
@@ -381,18 +379,19 @@ fun LocalPhotoEffectsPage(
                 onBorderEnabledChanged = { enabled ->
                     borderEnabled = enabled
                     decorationEnabled = enabled || (isPro && watermarkDraft.enabled)
-                    if (!enabled && !watermarkDraft.position.isPhotoPlacement()) {
-                        watermarkDraft = watermarkDraft.copy(
-                            position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
-                        )
-                    }
                 },
                 onPresetChanged = { preset = it },
                 onWatermarkChanged = { updated ->
                     if (isPro) {
-                        watermarkDraft = updated
+                        watermarkDraft = mergeWatermarkEditKeepingPreferredPosition(
+                            preferred = watermarkDraft,
+                            edited = updated,
+                        )
                         decorationEnabled = borderEnabled || updated.enabled
                     }
+                },
+                onWatermarkPositionChanged = { position ->
+                    if (isPro) watermarkDraft = watermarkDraft.copy(position = position)
                 },
                 onWatermarkTextCommitted = { text ->
                     if (isPro) watermarkDraft = watermarkDraft.copy(text = text)

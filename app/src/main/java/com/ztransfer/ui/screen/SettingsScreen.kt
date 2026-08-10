@@ -380,8 +380,6 @@ fun SettingsOverlay(
                     val updatedWatermark = watermarkDraft.copy(
                         content = PhotoFrameWatermarkContent.IMAGE,
                         imageHash = imageHash,
-                        position = watermarkDraft.position.takeIf { it.isPhotoPlacement() }
-                            ?: PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
                     )
                     watermarkDraft = updatedWatermark
                     // 图片选择完成即保存配置；即使用户随后直接杀掉应用，私有副本仍会被选中。
@@ -582,7 +580,9 @@ fun SettingsOverlay(
                     ?.let { PhotoFilterSelection(it, filterDraftIntensity) }
                 val editorWatermark = when {
                     !frameDraftDecorationEnabled -> PhotoFrameWatermark(enabled = false)
-                    isPro -> watermarkDraft
+                    isPro -> watermarkDraft.withEditorPlacementConstraints(
+                        borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
+                    )
                     // 免费版真实导出固定使用默认水印；预览必须走同一规则。
                     else -> freeEditionPhotoFrameWatermark()
                 }
@@ -684,18 +684,19 @@ fun SettingsOverlay(
                     onBorderEnabledChanged = { enabled ->
                         frameDraftBorderEnabled = enabled
                         frameDraftDecorationEnabled = enabled || (isPro && watermarkDraft.enabled)
-                        if (!enabled && !watermarkDraft.position.isPhotoPlacement()) {
-                            watermarkDraft = watermarkDraft.copy(
-                                position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
-                            )
-                        }
                     },
                     onPresetChanged = { frameDraftPreset = it },
                     onWatermarkChanged = { updated ->
                         if (isPro) {
-                            watermarkDraft = updated
+                            watermarkDraft = mergeWatermarkEditKeepingPreferredPosition(
+                                preferred = watermarkDraft,
+                                edited = updated,
+                            )
                             frameDraftDecorationEnabled = frameDraftBorderEnabled || updated.enabled
                         }
+                    },
+                    onWatermarkPositionChanged = { position ->
+                        if (isPro) watermarkDraft = watermarkDraft.copy(position = position)
                     },
                     onWatermarkTextCommitted = { text ->
                         if (isPro) {
@@ -1435,6 +1436,7 @@ internal fun PhotoFrameWatermarkEditor(
     onBorderEnabledChanged: (Boolean) -> Unit,
     onPresetChanged: (PhotoFramePreset) -> Unit,
     onWatermarkChanged: (PhotoFrameWatermark) -> Unit,
+    onWatermarkPositionChanged: (PhotoFrameWatermarkPosition) -> Unit,
     onWatermarkTextCommitted: (String) -> Unit,
     imageImporting: Boolean,
     onProRequired: () -> Unit,
@@ -1604,9 +1606,6 @@ internal fun PhotoFrameWatermarkEditor(
                                             onWatermarkChanged(
                                                 watermark.copy(
                                                     content = PhotoFrameWatermarkContent.IMAGE,
-                                                    position = watermark.position.takeIf {
-                                                        it.isPhotoPlacement()
-                                                    } ?: PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT,
                                                 )
                                             )
                                         }
@@ -1726,7 +1725,7 @@ internal fun PhotoFrameWatermarkEditor(
                                 optionLabel = { it.second },
                                 onValueCommitted = {
                                     focusManager.clearFocus()
-                                    onWatermarkChanged(watermark.copy(position = it.first))
+                                    onWatermarkPositionChanged(it.first)
                                 },
                                 onDetent = haptics::tick,
                                 label = stringResource(R.string.photo_frame_watermark_position),
@@ -1802,7 +1801,7 @@ internal fun PhotoFrameWatermarkEditor(
                                     },
                                     optionLabel = { it.second },
                                     onValueCommitted = {
-                                        onWatermarkChanged(watermark.copy(position = it.first))
+                                        onWatermarkPositionChanged(it.first)
                                     },
                                     onDetent = haptics::tick,
                                     label = stringResource(R.string.photo_frame_watermark_position),
