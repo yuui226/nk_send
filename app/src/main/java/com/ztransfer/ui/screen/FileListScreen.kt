@@ -1292,6 +1292,9 @@ fun FileListScreen(
             SettingsOverlay(
                 viewModel = transferViewModel,
                 effectPreviewSource = state.effectPreviewBitmap,
+                effectPreviewCameraManufacturer = state.cameraManufacturer,
+                effectPreviewCameraModel = state.cameraModel,
+                effectPreviewExif = state.effectPreviewExif,
                 onEffectPreviewRequested = cameraViewModel::requestEffectPreview,
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },

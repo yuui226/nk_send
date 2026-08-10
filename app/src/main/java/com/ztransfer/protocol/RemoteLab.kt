@@ -20,7 +20,6 @@ import kotlinx.coroutines.withContext
  */
 object Lab {
     // ---- 标准操作码 ----
-    const val GET_DEVICE_INFO = 0x1001
     const val GET_DEVICE_PROP_DESC = 0x1014
     const val GET_DEVICE_PROP_VALUE = 0x1015
     const val SET_DEVICE_PROP_VALUE = 0x1016
@@ -1431,11 +1430,7 @@ suspend fun NikonCamera.rcChangeApplicationMode(mode: Int): Int =
     labCommand(Lab.NK_CHANGE_APP_MODE, mode).first
 
 /** 相机型号（DeviceInfo.Model），遥控页标题用。 */
-suspend fun NikonCamera.rcModelName(): String? {
-    val (rc, d) = labCommand(Lab.GET_DEVICE_INFO)
-    if (rc != Lab.OK || d == null) return null
-    return runCatching { parseDeviceInfo(d).model }.getOrNull()
-}
+suspend fun NikonCamera.rcModelName(): String? = deviceModel
 
 // ============================ Live View ============================
 
@@ -1451,14 +1446,11 @@ internal fun liveViewWarmupRemainingMs(
     return (readyAtElapsedMs + USB_LIVE_VIEW_WARMUP_MS - nowElapsedMs).coerceAtLeast(0L)
 }
 
-/** 在 Live View 启动前解析一次取帧能力，避免部分机型在 LV 运行中拒绝 GetDeviceInfo。 */
+/** 复用连接阶段缓存的 DeviceInfo 取帧能力，监看启动时不再重复查询。 */
 private suspend fun NikonCamera.resolveLiveViewImageOperation() {
     if (liveViewImageOperation != null) return
-    val (rc, data) = labCommand(Lab.GET_DEVICE_INFO)
-    val supportsEnhanced = rc == Lab.OK && data != null &&
-        runCatching {
-            Lab.NK_GET_LIVE_VIEW_IMG_EX in parseDeviceInfo(data).operations
-        }.getOrDefault(false)
+    val supportsEnhanced = cachedDeviceInfo?.operations
+        ?.contains(Lab.NK_GET_LIVE_VIEW_IMG_EX) == true
     liveViewImageOperation = if (supportsEnhanced) {
         Lab.NK_GET_LIVE_VIEW_IMG_EX
     } else {
@@ -1929,14 +1921,8 @@ suspend fun NikonCamera.runLabProbe(
     )
 
     // ---- 1. DeviceInfo ----
-    val (dirc, did) = labCommand(Lab.GET_DEVICE_INFO)
-    var info: LabDeviceInfo? = null
-    if (dirc == Lab.OK && did != null) {
-        info = runCatching { parseDeviceInfo(did) }.getOrNull()
-        if (info == null) log("!! DeviceInfo parse failed, ${did.size} bytes")
-    } else {
-        log("!! GetDeviceInfo resp=${hex4(dirc)}")
-    }
+    val info = cachedDeviceInfo
+    if (info == null) log("!! DeviceInfo unavailable from connection cache")
     val ops = info?.operations ?: emptySet()
     info?.let {
         log("Model: ${it.manufacturer} ${it.model}  fw=${it.deviceVersion}")

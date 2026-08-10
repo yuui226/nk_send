@@ -111,6 +111,7 @@ import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
 import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
 import com.ztransfer.frame.limitPhotoFrameWatermarkText
 import com.ztransfer.frame.isPhotoPlacement
+import com.ztransfer.frame.normalizeCaptureDateTime
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterRenderer
@@ -121,6 +122,7 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
 import com.ztransfer.viewmodel.freeEditionPhotoFrameWatermark
 import com.ztransfer.viewmodel.photoFrameWatermark
@@ -159,6 +161,9 @@ private enum class SettingsPage { MAIN, EFFECTS }
 fun SettingsOverlay(
     viewModel: TransferViewModel,
     effectPreviewSource: Bitmap? = null,
+    effectPreviewCameraManufacturer: String? = null,
+    effectPreviewCameraModel: String? = null,
+    effectPreviewExif: PhotoExif? = null,
     onEffectPreviewRequested: () -> Unit = {},
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
@@ -175,6 +180,17 @@ fun SettingsOverlay(
     val activity = context.findActivity()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val effectPreviewMetadata = remember(
+        effectPreviewCameraManufacturer,
+        effectPreviewCameraModel,
+        effectPreviewExif,
+    ) {
+        cameraEffectPreviewMetadata(
+            manufacturer = effectPreviewCameraManufacturer,
+            model = effectPreviewCameraModel,
+            exif = effectPreviewExif,
+        )
+    }
     // 当前语言依赖 attachBaseContext，在 Activity 重建后才会全局生效。拨轮提交后走弹窗
     // 自己的 close 动画；此标记让动画完成回调知道随后需要重建，而不是当场硬切页面。
     var recreateAfterDismiss by remember { mutableStateOf(false) }
@@ -582,6 +598,7 @@ fun SettingsOverlay(
                         if (previewSource != null) {
                             PhotoEffectsRenderedPreview(
                                 source = previewSource.bitmap,
+                                metadata = effectPreviewMetadata,
                                 sourceRotationQuarterTurns = previewSource.quarterTurns,
                                 requestedRotationQuarterTurns = effectPreviewRotationQuarterTurns,
                                 // previewSource 已经完成物理旋转，直接看当前宽高；不能再按
@@ -2396,6 +2413,27 @@ private val PHOTO_EFFECTS_PREVIEW_METADATA = PhotoFrameMetadata(
     iso = "ISO100",
     focalLength = "50mm",
     dateTime = "2026-08-04 10:30:00",
+)
+
+internal fun cameraEffectPreviewMetadata(
+    manufacturer: String?,
+    model: String?,
+    exif: PhotoExif? = null,
+): PhotoFrameMetadata = PHOTO_EFFECTS_PREVIEW_METADATA.copy(
+    make = manufacturer?.trim()?.takeIf(String::isNotEmpty)
+        ?: PHOTO_EFFECTS_PREVIEW_METADATA.make,
+    model = model?.trim()?.takeIf(String::isNotEmpty)
+        ?: PHOTO_EFFECTS_PREVIEW_METADATA.model,
+    aperture = exif?.aperture?.trim()?.takeIf(String::isNotEmpty)
+        ?: PHOTO_EFFECTS_PREVIEW_METADATA.aperture,
+    shutter = exif?.shutterSpeed?.trim()?.takeIf(String::isNotEmpty)
+        ?: PHOTO_EFFECTS_PREVIEW_METADATA.shutter,
+    iso = exif?.iso?.trim()?.takeIf(String::isNotEmpty)
+        ?: PHOTO_EFFECTS_PREVIEW_METADATA.iso,
+    focalLength = exif?.focalLength?.trim()?.takeIf(String::isNotEmpty)
+        ?: PHOTO_EFFECTS_PREVIEW_METADATA.focalLength,
+    dateTime = normalizeCaptureDateTime(exif?.dateTime)
+        ?: PHOTO_EFFECTS_PREVIEW_METADATA.dateTime,
 )
 
 private fun createPhotoFramePreviewSource(): Bitmap {

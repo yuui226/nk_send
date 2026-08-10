@@ -1,0 +1,70 @@
+package com.ztransfer.ui.screen
+
+import com.ztransfer.viewmodel.PhotoExif
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class CameraEffectPreviewMetadataTest {
+    @Test
+    fun connectedCameraIdentityReplacesDemoIdentity() {
+        val metadata = cameraEffectPreviewMetadata(
+            manufacturer = "NIKON CORPORATION",
+            model = "NIKON Z 5",
+        )
+
+        assertEquals("NIKON CORPORATION", metadata.make)
+        assertEquals("NIKON Z 5", metadata.model)
+    }
+
+    @Test
+    fun missingCameraIdentityFallsBackToDemoIdentity() {
+        val metadata = cameraEffectPreviewMetadata(
+            manufacturer = " ",
+            model = null,
+        )
+
+        assertEquals("NIKON CORPORATION", metadata.make)
+        assertEquals("NIKON Z 8", metadata.model)
+    }
+
+    @Test
+    fun previewExifReplacesEveryDemoExposureField() {
+        val metadata = cameraEffectPreviewMetadata(
+            manufacturer = "NIKON CORPORATION",
+            model = "NIKON Z 6_3",
+            exif = PhotoExif(
+                aperture = "f/4.0",
+                shutterSpeed = "1/125",
+                iso = "ISO640",
+                focalLength = "85mm",
+                dateTime = "2026:08:10 14:25:36",
+            ),
+        )
+
+        assertEquals("f/4.0", metadata.aperture)
+        assertEquals("1/125", metadata.shutter)
+        assertEquals("ISO640", metadata.iso)
+        assertEquals("85mm", metadata.focalLength)
+        assertEquals("2026-08-10 14:25:36", metadata.dateTime)
+    }
+
+    @Test
+    fun missingExifFieldsFallBackIndividually() {
+        val metadata = cameraEffectPreviewMetadata(
+            manufacturer = null,
+            model = null,
+            exif = PhotoExif(
+                aperture = "f/5.6",
+                shutterSpeed = null,
+                iso = " ",
+                focalLength = null,
+            ),
+        )
+
+        assertEquals("f/5.6", metadata.aperture)
+        assertEquals("1/250", metadata.shutter)
+        assertEquals("ISO100", metadata.iso)
+        assertEquals("50mm", metadata.focalLength)
+        assertEquals("2026-08-04 10:30:00", metadata.dateTime)
+    }
+}

@@ -217,6 +217,9 @@ data class CameraState(
     val isConnectedToCamera: Boolean = false,
     val isConnecting: Boolean = false,
     val connectionType: CameraConnectionType? = null,
+    /** PTP DeviceInfo identity for the active session; null when the camera did not report it. */
+    val cameraManufacturer: String? = null,
+    val cameraModel: String? = null,
     val usbConnectionError: String? = null,
     val wifiConnectionStatus: WifiConnectionStatus = WifiConnectionStatus.IDLE,
     val files: List<NikonCamera.FileInfo> = emptyList(),
@@ -228,6 +231,8 @@ data class CameraState(
     /** Latest camera still, quietly prefetched at FHD for the frame/filter settings demos. */
     val effectPreviewBitmap: Bitmap? = null,
     val effectPreviewFileKey: String? = null,
+    /** EXIF belonging to [effectPreviewFileKey], published atomically with the FHD bitmap. */
+    val effectPreviewExif: PhotoExif? = null,
     // 当前候选 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；无候选链路时为 null。
     val wifiRssi: Int? = null
 )
@@ -239,7 +244,8 @@ data class PhotoExif(
     val aperture: String?,       // "f/2.8"
     val shutterSpeed: String?,   // "1/250"
     val iso: String?,            // "400"
-    val focalLength: String?     // "50mm"
+    val focalLength: String?,    // "50mm"
+    val dateTime: String? = null,
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -549,7 +555,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 _state.update {
                     it.copy(
                         isConnecting = true,
-                        usbConnectionError = null
+                        usbConnectionError = null,
+                        cameraManufacturer = null,
+                        cameraModel = null,
                     )
                 }
                 keepaliveJob?.cancel()
@@ -588,6 +596,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                     isConnectedToCamera = true,
                                     isConnecting = false,
                                     connectionType = CameraConnectionType.USB,
+                                    cameraManufacturer = cam.deviceManufacturer,
+                                    cameraModel = cam.deviceModel,
                                     usbConnectionError = null,
                                     wifiRssi = null
                                 )
@@ -845,6 +855,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         effectPreviewBitmap = thumbnail,
                         // 缩略图只是立即可见的真实占位；null 保证后续仍会升级为 FHD。
                         effectPreviewFileKey = null,
+                        effectPreviewExif = null,
                     )
                 }
             }
@@ -964,18 +975,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         // 后台预取遇忙立即让路；用户已经打开照片效果页时才做有限重试。
                         retryDeviceBusy = requestedKey == key,
                     )
-                    // A real camera response (including unsupported/null) is one completed
-                    // attempt. Cancellation by a foreground task is not latched, so idle time
-                    // can retry later.
+                    if (bitmap == null) {
+                        // A real unsupported/null response is one completed attempt.
+                        effectPreviewAttemptKey = key
+                        return@collectLatest
+                    }
+                    // Fetch EXIF only after the FHD succeeds. If a foreground task cancels this
+                    // step, do not latch the attempt: the same photo can retry when IO is idle.
+                    val exif = loadExif(latest)
                     effectPreviewAttemptKey = key
-                    bitmap ?: return@collectLatest
                     if (_state.value.isConnectedToCamera &&
                         effectPreviewKey(
                             latestEffectPreviewFile(_state.value.files) ?: return@collectLatest
                         ) == key
                     ) {
                         _state.update {
-                            it.copy(effectPreviewBitmap = bitmap, effectPreviewFileKey = key)
+                            it.copy(
+                                effectPreviewBitmap = bitmap,
+                                effectPreviewFileKey = key,
+                                effectPreviewExif = exif,
+                            )
                         }
                         log {
                             "EFFECT_PREVIEW ready handle=${latest.handle} " +
@@ -1252,6 +1271,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _state.update {
             it.copy(
                 isConnecting = true,
+                cameraManufacturer = null,
+                cameraModel = null,
                 wifiConnectionStatus = if (
                     it.wifiConnectionStatus == WifiConnectionStatus.RECONNECTING
                 ) {
@@ -1304,6 +1325,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 isConnectedToCamera = true,
                                 isConnecting = false,
                                 connectionType = CameraConnectionType.WIFI,
+                                cameraManufacturer = cam.deviceManufacturer,
+                                cameraModel = cam.deviceModel,
                                 wifiConnectionStatus = WifiConnectionStatus.IDLE
                             )
                         }
@@ -1503,6 +1526,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 storageIds = if (preserveExisting) it.storageIds else emptyList(),
                 effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
                 effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
+                effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
             )
         }
         // 监看和交互式大图都先于列表枚举：保留待加载标记，不向 ioMutex 排队。
@@ -2287,7 +2311,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             ?.let { "%.0fmm".format(it) }
 
         // 图像尺寸：SHORT/LONG 整数
-        return PhotoExif(aperture, shutter, iso, focal)
+        val dateTime = sequenceOf(
+            ExifInterface.TAG_DATETIME_ORIGINAL,
+            ExifInterface.TAG_DATETIME_DIGITIZED,
+            ExifInterface.TAG_DATETIME,
+        ).mapNotNull(exif::getAttribute)
+            .firstOrNull { it.isNotBlank() }
+
+        return PhotoExif(aperture, shutter, iso, focal, dateTime)
     }
 
     private fun diskFile(file: NikonCamera.FileInfo): File {

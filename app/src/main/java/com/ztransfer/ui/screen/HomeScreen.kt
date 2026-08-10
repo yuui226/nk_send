@@ -482,6 +482,9 @@ fun HomeScreen(
             SettingsOverlay(
                 viewModel = transferViewModel,
                 effectPreviewSource = state.effectPreviewBitmap,
+                effectPreviewCameraManufacturer = state.cameraManufacturer,
+                effectPreviewCameraModel = state.cameraModel,
+                effectPreviewExif = state.effectPreviewExif,
                 onEffectPreviewRequested = viewModel::requestEffectPreview,
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },

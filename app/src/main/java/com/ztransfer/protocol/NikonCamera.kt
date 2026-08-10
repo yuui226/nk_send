@@ -254,8 +254,22 @@ class NikonCamera(private val context: Context) {
     // USB 录像期间持有的尼康完整远控模式（0x90C2）。开录前设 1，停录回待机时
     // 成对清 0；放在连接对象上可跨横竖屏重建记账，断线换实例则自然清空。
     @Volatile internal var remoteControlModeSet = false
+    /** Identity reported by PTP DeviceInfo for the current camera session. */
+    @Volatile var deviceManufacturer: String? = null
+        private set
+    @Volatile var deviceModel: String? = null
+        private set
+    @Volatile internal var cachedDeviceInfo: LabDeviceInfo? = null
+        private set
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
+
+    private fun cacheDeviceInfo(data: ByteArray): LabDeviceInfo =
+        parseDeviceInfo(data).also { info ->
+            cachedDeviceInfo = info
+            deviceManufacturer = info.manufacturer.trim().takeIf(String::isNotEmpty)
+            deviceModel = info.model.trim().takeIf(String::isNotEmpty)
+        }
 
     companion object {
         const val TAG = "ZTransfer"
@@ -371,24 +385,28 @@ class NikonCamera(private val context: Context) {
             }
             sessionOpen = true
 
-            if (FileOrderProbe.enabled) {
-                try {
-                    sendCmd(PtpConstants.GET_DEVICE_INFO)
-                    val (deviceInfoResp, deviceInfoData) = recvRespWithPayload()
-                    if (deviceInfoResp == PtpConstants.RESPONSE_OK && deviceInfoData != null) {
-                        val info = parseDeviceInfo(deviceInfoData)
+            // Read the identity once while establishing the session so every camera-backed UI can
+            // use the real body model without inserting a later command into thumbnail/transfer IO.
+            try {
+                sendCmd(PtpConstants.GET_DEVICE_INFO)
+                val (deviceInfoResp, deviceInfoData) = recvRespWithPayload()
+                if (deviceInfoResp == PtpConstants.RESPONSE_OK && deviceInfoData != null) {
+                    val info = cacheDeviceInfo(deviceInfoData)
+                    if (FileOrderProbe.enabled) {
                         FileOrderProbe.recordCapabilities(
                             manufacturer = info.manufacturer,
                             model = info.model,
                             deviceVersion = info.deviceVersion,
                             operations = info.operations,
                         )
-                    } else {
-                        FileOrderProbe.recordCapabilityFailure(
-                            "response=0x${deviceInfoResp.toString(16)} data=${deviceInfoData?.size ?: 0}B"
-                        )
                     }
-                } catch (e: Exception) {
+                } else if (FileOrderProbe.enabled) {
+                    FileOrderProbe.recordCapabilityFailure(
+                        "response=0x${deviceInfoResp.toString(16)} data=${deviceInfoData?.size ?: 0}B"
+                    )
+                }
+            } catch (e: Exception) {
+                if (FileOrderProbe.enabled) {
                     FileOrderProbe.recordCapabilityFailure(
                         "${e.javaClass.simpleName}: ${e.message.orEmpty()}"
                     )
@@ -445,10 +463,10 @@ class NikonCamera(private val context: Context) {
                     )
                 )
             }
-            if (FileOrderProbe.enabled) {
-                if (deviceInfoData != null) {
-                    runCatching { parseDeviceInfo(deviceInfoData) }
-                        .onSuccess { info ->
+            if (deviceInfoData != null) {
+                runCatching { cacheDeviceInfo(deviceInfoData) }
+                    .onSuccess { info ->
+                        if (FileOrderProbe.enabled) {
                             FileOrderProbe.recordCapabilities(
                                 manufacturer = info.manufacturer,
                                 model = info.model,
@@ -456,14 +474,16 @@ class NikonCamera(private val context: Context) {
                                 operations = info.operations,
                             )
                         }
-                        .onFailure { error ->
+                    }
+                    .onFailure { error ->
+                        if (FileOrderProbe.enabled) {
                             FileOrderProbe.recordCapabilityFailure(
                                 "${error.javaClass.simpleName}: ${error.message.orEmpty()}"
                             )
                         }
-                } else {
-                    FileOrderProbe.recordCapabilityFailure("response OK but payload is empty")
-                }
+                    }
+            } else if (FileOrderProbe.enabled) {
+                FileOrderProbe.recordCapabilityFailure("response OK but payload is empty")
             }
 
             transport.readTimeoutMs = SO_TIMEOUT_MS
@@ -481,9 +501,9 @@ class NikonCamera(private val context: Context) {
     /**
      * Replaces the media-browsing PTP session with a fresh USB remote-control session.
      *
-     * Nikon's USB tethering path requires a newly opened session, drains GetEventEx once,
-     * then reads DeviceInfo before entering control mode. A stale OpenSession is explicitly
-     * closed and retried on a new UsbDeviceConnection.
+     * Nikon's USB tethering path requires a newly opened session and drains GetEventEx once
+     * before entering control mode. DeviceInfo remains cached from the physical connection so
+     * switching from browsing to remote control does not query it a second time.
      */
     internal suspend fun refreshUsbRemoteSession(): String =
         ioMutex.withLock {
@@ -538,19 +558,8 @@ class NikonCamera(private val context: Context) {
                         sendCmd(0x941C) // Nikon GetEventEx: drain stale events after OpenSession.
                         val drainResponse = recvRespWithPayload().first
 
-                        sendCmd(PtpConstants.GET_DEVICE_INFO)
-                        val (deviceInfoResponse, deviceInfoData) = recvRespWithPayload()
-                        if (deviceInfoResponse != PtpConstants.RESPONSE_OK) {
-                            throw IllegalStateException(
-                                "GetDeviceInfo response=0x%04X".format(deviceInfoResponse)
-                            )
-                        }
                         liveViewImageOperation =
-                            if (deviceInfoData != null &&
-                                runCatching {
-                                    0x9428 in parseDeviceInfo(deviceInfoData).operations
-                                }.getOrDefault(false)
-                            ) {
+                            if (cachedDeviceInfo?.operations?.contains(0x9428) == true) {
                                 0x9428
                             } else {
                                 0x9203
@@ -564,7 +573,7 @@ class NikonCamera(private val context: Context) {
                         return@withContext buildString {
                             append("session=0x%04X".format(openResponse))
                             append(" drain=0x%04X".format(drainResponse))
-                            append(" info=0x%04X".format(deviceInfoResponse))
+                            append(" info=cached")
                             append(" irq=").append(if (eventReaderStarted) "Y" else "N")
                             append(" settle=").append(reopenSettleMs).append("/")
                                 .append(SystemClock.elapsedRealtime() - settleStartedAt)
