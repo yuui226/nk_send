@@ -328,6 +328,32 @@ fun ProDialog(
                             selected = selectedProduct,
                             onSelect = { selectedProduct = it },
                         )
+                        Spacer(Modifier.height(10.dp))
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            color = colors.accentYellow.copy(alpha = 0.08f),
+                            border = BorderStroke(1.dp, colors.accentYellow.copy(alpha = 0.24f)),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = colors.accentYellow,
+                                    modifier = Modifier.size(17.dp),
+                                )
+                                Text(
+                                    text = stringResource(R.string.purchase_device_switch_hint),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.onBackground,
+                                )
+                            }
+                        }
                         // 年费摊到每天当脚注:一年十几块听着是笔钱,一天几分钱不是。
                         // 压在价格下方而非上方——放上面会和紧跟着的大号金额把同一个数字报两遍。
                         // 摊完不足 1 分就别报了(那会印出"合每天 ¥0.00")。

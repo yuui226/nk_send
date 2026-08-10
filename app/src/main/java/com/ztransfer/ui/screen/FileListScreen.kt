@@ -1205,6 +1205,7 @@ fun FileListScreen(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 active = filterActive,
                 activeColor = colors.accentYellow,
+                activeOutline = true,
                 modifier = Modifier
                     .height(36.dp)
                     .onGloballyPositioned { filterAnchor = it.boundsInRoot() }

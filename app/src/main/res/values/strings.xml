@@ -328,6 +328,7 @@
     <string name="plan_lifetime">Lifetime Pro</string>
     <string name="plan_unavailable">Unavailable</string>
     <string name="plan_lifetime_unavailable">Lifetime plan unavailable</string>
+    <string name="purchase_device_switch_hint">Pro supports switching devices · Keep your activation code safe</string>
     <string name="buy_annual_cta">Buy Annual Pro · %1$s · %2$d days</string>
     <string name="buy_lifetime_cta">Buy Lifetime Pro · %1$s · Lifetime</string>
     <string name="price_promo_tag">Limited-time offer</string>

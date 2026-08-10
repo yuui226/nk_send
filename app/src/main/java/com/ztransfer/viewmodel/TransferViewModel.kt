@@ -358,7 +358,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     private var transferJob: Job? = null
     @Volatile
-    private var transferScreenVisible: Boolean = false
+    private var preferHighThroughputTransfers: Boolean = false
     private val prefs = application.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
     private val contentResolver = application.contentResolver
     /**
@@ -450,11 +450,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     )
 
     /**
-     * 由导航宿主同步传输页是否位于用户当前视角。该值不持久化，也不修改正在传输的文件；
-     * 每张文件在调用协议层前只读取一次，因此离开页面后从下一张开始恢复无线小分块。
+     * 由导航宿主同步当前页面是否应优先保证无线传输吞吐。该值不持久化，也不修改正在
+     * 传输的文件；每张文件在调用协议层前只读取一次。导航在主线程写、协议在 IO 线程读，
+     * 因此用 volatile 保证下一张文件能立即看到最新页面策略。
      */
-    fun setTransferScreenVisible(visible: Boolean) {
-        transferScreenVisible = visible
+    fun setPreferHighThroughputTransfers(enabled: Boolean) {
+        preferHighThroughputTransfers = enabled
     }
 
     private sealed interface FrameExportOutcome {
@@ -1258,7 +1259,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     resumeOffset = resumeOffset,
                                     totalSize = task.file.size,
                                     // 协议层在首个数据命令前读取一次，随后整张文件固定该策略。
-                                    preferHighThroughputAtStart = { transferScreenVisible },
+                                    preferHighThroughputAtStart = { preferHighThroughputTransfers },
                                 )
                             }
                         }

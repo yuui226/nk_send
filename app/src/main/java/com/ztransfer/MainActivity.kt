@@ -98,19 +98,27 @@ sealed class Screen(val route: String) {
     object Remote : Screen("remote")   // 无线遥控页，位于文件页左侧
 }
 
+internal fun shouldPreferHighThroughputTransfers(route: String?): Boolean =
+    route == Screen.Files.route || route == Screen.Transfer.route
+
 @Composable
 fun MainScreen(transferViewModel: TransferViewModel) {
     val navController = rememberNavController()
     val cameraViewModel: CameraViewModel = viewModel()
 
-    // 传输页只影响“下一张开始的文件”所采用的无线下载策略。页面切换时同步更新，
-    // TransferViewModel 会在每个文件真正进入协议层前冻结一次快照，不会中途改当前文件。
+    // 照片列表（含其上的大图预览）和传输页都优先保证无线传输吞吐。两页之间切换时
+    // 布尔值保持 true，不会产生一次 false 的瞬态；每个文件进入协议层前再冻结策略，
+    // 因此已经开始的文件也不会中途换道。
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
-    val transferScreenVisible = currentBackStackEntry?.destination?.route == Screen.Transfer.route
-    DisposableEffect(transferScreenVisible) {
-        transferViewModel.setTransferScreenVisible(transferScreenVisible)
+    val preferHighThroughputTransfers = shouldPreferHighThroughputTransfers(
+        currentBackStackEntry?.destination?.route
+    )
+    DisposableEffect(preferHighThroughputTransfers) {
+        transferViewModel.setPreferHighThroughputTransfers(preferHighThroughputTransfers)
         onDispose {
-            if (transferScreenVisible) transferViewModel.setTransferScreenVisible(false)
+            if (preferHighThroughputTransfers) {
+                transferViewModel.setPreferHighThroughputTransfers(false)
+            }
         }
     }
 

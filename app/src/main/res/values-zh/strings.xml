@@ -328,6 +328,7 @@
     <string name="plan_lifetime">永久高级版</string>
     <string name="plan_unavailable">未开放</string>
     <string name="plan_lifetime_unavailable">永久版暂未开放</string>
+    <string name="purchase_device_switch_hint">高级版支持换机，妥善保存激活码即可</string>
     <string name="buy_annual_cta">购买年费高级版 · %1$s · %2$d 天</string>
     <string name="buy_lifetime_cta">购买永久高级版 · %1$s · 永久</string>
     <string name="price_promo_tag">限时特惠</string>

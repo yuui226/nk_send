@@ -2,6 +2,7 @@ package com.ztransfer.ui.screen
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -641,6 +642,7 @@ fun GlassButton(
     frostedOpacityBoost: Float = 0f,
     textureSeed: Int? = null,
     titaniumStampColor: Color? = null,
+    activeOutline: Boolean = false,
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = AppTheme.colors
@@ -682,6 +684,16 @@ fun GlassButton(
         else colors.buttonHighlightBottom
     val highlightTop = lerp(normalHighlightTop, resolvedActiveColor.copy(alpha = 0.30f), activeProgress)
     val highlightBottom = lerp(normalHighlightBottom, resolvedActiveColor.copy(alpha = 0.12f), activeProgress)
+    // Reuse the existing active transition so the outline and tint settle as one material state.
+    // No separate animator or persistent work is introduced.
+    val activeOutlineBorder = if (activeOutline && activeProgress > 0.001f) {
+        BorderStroke(
+            width = 1.25.dp,
+            color = resolvedActiveColor.copy(alpha = 0.58f * activeProgress),
+        )
+    } else {
+        null
+    }
     // 只有实体材质使用可平铺位图画刷；毛玻璃的非平铺微颗粒由绘制层直接生成。
     val baseElevation = shadowElevation ?: when {
         panel -> 0.dp
@@ -746,6 +758,11 @@ fun GlassButton(
                     activeProgress = activeProgress,
                     pressProgress = pressLight
                 )
+                .then(
+                    activeOutlineBorder?.let { outline ->
+                        Modifier.border(outline, shape)
+                    } ?: Modifier
+                )
                 .clickable(
                     enabled = enabled,
                     role = Role.Button,
@@ -771,7 +788,7 @@ fun GlassButton(
             enabled = enabled,
             shape = shape,
             color = containerColor,
-            border = null,
+            border = activeOutlineBorder,
             shadowElevation = elevation,
             interactionSource = interactionSource,
             modifier = transformedModifier
