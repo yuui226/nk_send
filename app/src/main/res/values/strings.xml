@@ -250,6 +250,7 @@
 
     <!-- Remote control page -->
     <string name="cd_remote_entry">Camera live view</string>
+    <string name="remote_entry_intro">Live\nRemote</string>
     <string name="cd_rotate_photo">Rotate photo</string>
     <string name="cd_dev_panel">Developer tools</string>
     <string name="remote_blocked_transfer">Transfer in progress — enter live view after it finishes</string>

@@ -250,6 +250,7 @@
 
     <!-- 遥控页 -->
     <string name="cd_remote_entry">相机监看</string>
+    <string name="remote_entry_intro">监看\n遥控</string>
     <string name="cd_rotate_photo">旋转照片</string>
     <string name="cd_dev_panel">开发者工具</string>
     <string name="remote_blocked_transfer">传输进行中，完成后再进入监看</string>

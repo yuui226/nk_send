@@ -20,6 +20,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
@@ -69,6 +70,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -98,6 +100,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -329,6 +332,24 @@ fun FileListScreen(
     }
     // 监看入口离开顶部后缩进左侧；用户点开后保持完整，继续滚动或回到顶部时重置手动状态。
     var remoteExpandedAwayFromTop by remember { mutableStateOf(false) }
+    // 同一照片列表导航实例只尝试一次；跨启动累计播放六次后永久停止自动展开。
+    val remoteIntroEligible = remember(transferViewModel) {
+        transferViewModel.shouldShowRemoteEntryIntro()
+    }
+    var remoteIntroHandledForEntry by rememberSaveable { mutableStateOf(false) }
+    var remoteIntroExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!remoteIntroHandledForEntry && remoteIntroEligible) {
+            // 避开页面自身的入场首帧，让入口像随后自然舒展开，而不是同时抢动画焦点。
+            delay(160)
+            // 真正开始展开时再记次数；此前离页既不消耗次数，回来也仍有机会看到提示。
+            remoteIntroHandledForEntry = true
+            transferViewModel.recordRemoteEntryIntroPlayed()
+            remoteIntroExpanded = true
+            delay(2200)
+            remoteIntroExpanded = false
+        }
+    }
     LaunchedEffect(atTop) {
         if (atTop) remoteExpandedAwayFromTop = false
     }
@@ -1004,7 +1025,7 @@ fun FileListScreen(
         // 图标压暗示意不可用，点击给出提示而非静默无响应。
         val remoteBlockedHint = stringResource(R.string.remote_blocked_transfer)
         val remoteEntryDescription = stringResource(R.string.cd_remote_entry)
-        val remoteExpanded = atTop || remoteExpandedAwayFromTop
+        val remoteExpanded = atTop || remoteExpandedAwayFromTop || remoteIntroExpanded
         val remoteReveal = animateFloatAsState(
             targetValue = if (remoteExpanded) 1f else 0f,
             animationSpec = spring(dampingRatio = 0.58f, stiffness = 360f),
@@ -1014,6 +1035,15 @@ fun FileListScreen(
         val density = LocalDensity.current
         val hiddenTravelPx = with(density) { 48.dp.toPx() }
         val playfulLiftPx = with(density) { 6.dp.toPx() }
+        val remoteButtonWidth by animateDpAsState(
+            targetValue = if (remoteIntroExpanded) 108.dp else 52.dp,
+            animationSpec = if (remoteIntroExpanded) {
+                Motion.bouncy()
+            } else {
+                tween(300, easing = FastOutSlowInEasing)
+            },
+            label = "remoteEntryWidth",
+        )
         val openRemote: () -> Unit = {
             // 端侧录制与照片传输共用同一个 SAF 保存目录。与加入传输队列的
             // 拦截顺序一致：目录未设置时先引导设置，不进入监看后再让用户返工。
@@ -1022,6 +1052,7 @@ fun FileListScreen(
             // 免费版当日监看时长已用完:入口处直接提示,不进页再弹回。
             else if (LicenseManager.remoteTimeLeftMs() <= 0L) showHint(remoteEndedHint)
             else {
+                remoteIntroExpanded = false
                 remoteExpandedAwayFromTop = false
                 onNavigateToRemote()
             }
@@ -1031,7 +1062,7 @@ fun FileListScreen(
                 .align(Alignment.BottomStart)
                 .navigationBarsPadding()
                 .padding(bottom = 40.dp)
-                .size(width = 80.dp, height = 56.dp),
+                .size(width = 140.dp, height = 56.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             GlassButton(
@@ -1045,7 +1076,8 @@ fun FileListScreen(
                 },
                 modifier = Modifier
                     .offset(x = 20.dp)
-                    .size(52.dp)
+                    .width(remoteButtonWidth)
+                    .height(52.dp)
                     .graphicsLayer {
                         // 弹簧允许轻微越界；路径中段上抬，收起时带一点俏皮歪头。
                         val progress = remoteReveal.value.coerceIn(-0.12f, 1.12f)
@@ -1062,6 +1094,8 @@ fun FileListScreen(
                 shape = CircleShape,
                 contentPadding = PaddingValues(14.dp),
                 showSheen = false,
+                active = remoteIntroExpanded && !transfersBusy,
+                activeColor = colors.accentBlue,
                 // 深色由 0.38 提至约 0.60，浅色由 0.80 提至约 0.87；
                 // 仍能透出背景，但入口不会再像一层几乎看不见的薄膜。
                 frostedOpacityBoost = 0.35f,
@@ -1076,6 +1110,35 @@ fun FileListScreen(
                     // 收起时由屏内 48dp 热区承担唯一语义，避免无障碍树出现两个同名入口。
                     contentDescription = remoteEntryDescription.takeIf { remoteExpanded }
                 )
+                AnimatedVisibility(
+                    visible = remoteIntroExpanded,
+                    enter = fadeIn(tween(180, delayMillis = 70)) +
+                        expandHorizontally(
+                            animationSpec = tween(250, easing = FastOutSlowInEasing),
+                            expandFrom = Alignment.Start,
+                        ),
+                    exit = fadeOut(tween(120)) +
+                        shrinkHorizontally(
+                            animationSpec = tween(240, easing = FastOutSlowInEasing),
+                            shrinkTowards = Alignment.Start,
+                        ),
+                ) {
+                    Text(
+                        text = stringResource(R.string.remote_entry_intro),
+                        modifier = Modifier.clearAndSetSemantics { },
+                        color = if (transfersBusy) {
+                            colors.onSurfaceVariant.copy(alpha = 0.62f)
+                        } else {
+                            colors.onBackground
+                        },
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 10.sp,
+                            lineHeight = 11.sp,
+                        ),
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
             if (!remoteExpanded) {
                 // 视觉上只露出半颗，但保留 48dp 的屏内点击热区，兼顾发现性与可访问性。

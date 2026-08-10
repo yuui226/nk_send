@@ -352,6 +352,11 @@ internal fun createQueueTasks(
     }
     .toList()
 
+internal const val REMOTE_ENTRY_INTRO_MAX_PLAYS = 6
+
+internal fun isRemoteEntryIntroEligible(playCount: Int): Boolean =
+    playCount.coerceAtLeast(0) < REMOTE_ENTRY_INTRO_MAX_PLAYS
+
 class TransferViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(TransferState())
     val state: StateFlow<TransferState> = _state.asStateFlow()
@@ -431,6 +436,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val COPY_SUFFIX_REGEX = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
         // 分块大小引用协议层常量，保证断点续传偏移与分块下载粒度的严格一致。
         val RESUME_CHUNK_SIZE: Long get() = NikonCamera.CHUNK_SIZE
+        const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_play_count"
     }
 
     /** 半成品文件信息：用于断点续传。[token] = 文件内容身份（大小+拍摄时间），
@@ -456,6 +462,20 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      */
     fun setPreferHighThroughputTransfers(enabled: Boolean) {
         preferHighThroughputTransfers = enabled
+    }
+
+    /** 监看入口自解释动画最多跨启动展示六次，之后不再打扰已经熟悉入口的用户。 */
+    internal fun shouldShowRemoteEntryIntro(): Boolean = isRemoteEntryIntroEligible(
+        prefs.getInt(KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT, 0),
+    )
+
+    /** 仅在动画真正开始时调用；apply 先同步更新内存值，再异步落盘，不阻塞主线程。 */
+    internal fun recordRemoteEntryIntroPlayed() {
+        val playCount = prefs.getInt(KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT, 0).coerceAtLeast(0)
+        if (!isRemoteEntryIntroEligible(playCount)) return
+        prefs.edit()
+            .putInt(KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT, playCount + 1)
+            .apply()
     }
 
     private sealed interface FrameExportOutcome {
