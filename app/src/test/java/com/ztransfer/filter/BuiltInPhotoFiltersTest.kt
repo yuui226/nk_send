@@ -2,93 +2,160 @@ package com.ztransfer.filter
 
 import java.security.MessageDigest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BuiltInPhotoFiltersTest {
     @Test
-    fun builtInSetContainsFiveDistinctConvertedPresets() {
+    fun builtInSetContainsFiftyDistinctCuratedNp3Presets() {
         val filters = BuiltInPhotoFilters.all
 
-        assertEquals(5, filters.size)
+        assertEquals(50, filters.size)
         assertEquals(
             listOf(
-                "Kodak Ektar Green",
-                "Kodak-Sun-Nature-02",
-                "MSLT-Portra400-V1",
-                "cineblue brandon",
-                "britfilm bw",
+                "Forest Verdure",
+                "Dusk Ember",
+                "Bleached Silver",
+                "Blue Hour",
+                "Blue Memory",
+                "British Mono",
+                "Love Glow",
+                "Calm Breeze",
+                "Cinema Blue",
+                "Cinematic Dusk",
+                "Clear Portrait",
+                "Cozy Autumn",
+                "Dawn Hues",
+                "Darkroom Film",
+                "Fern Shade",
+                "Classic Film",
+                "Golden Dusk",
+                "Soft Harmony",
+                "Urban Green",
+                "Matte Blue",
+                "Moss Mood",
+                "Green Shadows",
+                "Soft Portrait",
+                "Natural Link",
+                "Cyan Negative",
+                "Red Cyan",
+                "Teal Negative",
+                "Lemon Negative",
+                "Amber Negative",
+                "Lime Negative",
+                "Pastel Pink",
+                "Rose Vintage",
+                "Setouchi Blue",
+                "Sky Mist",
+                "Soft Film",
+                "Soft Glow",
+                "Cool Sun Kiss",
+                "Warm Sun Kiss",
+                "Sunset Film",
+                "Sunset Glow",
+                "Teal and Orange",
+                "Gentle Clarity",
+                "Turquoise Blue",
+                "Vintage Color",
+                "Vintage Vibe",
+                "Vital Film",
+                "Warm Street",
+                "Warm Lowlight",
+                "Warm Portrait",
+                "Honey Warm",
             ),
             filters.map { it.name },
         )
         assertEquals(filters.size, filters.map { it.id }.distinct().size)
+        assertEquals(
+            filters.size,
+            filters.mapNotNull { BuiltInPhotoFilters.catalogKey(it.id) }.distinct().size,
+        )
         filters.forEach { filter ->
             assertTrue(filter.id.matches(Regex("[0-9a-f]{64}")))
-            assertTrue(BuiltInPhotoFilters.nameResId(filter.id) != null)
+            assertNotNull(BuiltInPhotoFilters.nameResId(filter.id))
+            assertTrue(BuiltInPhotoFilters.catalogKey(filter.id)?.matches(Regex("[0-9a-f]{64}")) == true)
+            assertTrue(filter.parameters is Np3PhotoFilterParameters)
         }
     }
 
     @Test
-    fun sourceIdentityAndSupportedNp3ControlsRemainStable() {
-        val filters = BuiltInPhotoFilters.all
-        val ektar = BuiltInPhotoFilters.all[0]
-        val nature = BuiltInPhotoFilters.all[1]
-        val portra = BuiltInPhotoFilters.all[2]
-        val cineBlue = BuiltInPhotoFilters.all[3]
-        val silver = BuiltInPhotoFilters.all[4]
+    fun curatedSetContainsNoIdenticalEffects() {
+        val fingerprints = BuiltInPhotoFilters.all.map { filter ->
+            val parameters = filter.parameters as Np3PhotoFilterParameters
+            buildString {
+                append(
+                    listOf(
+                        parameters.contrast,
+                        parameters.highlights,
+                        parameters.shadows,
+                        parameters.whites,
+                        parameters.blacks,
+                        parameters.saturation,
+                    ).joinToString(","),
+                )
+                parameters.colorBands.forEach { band ->
+                    append("|")
+                    append(band.hue)
+                    append(",")
+                    append(band.chroma)
+                    append(",")
+                    append(band.brightness)
+                }
+                append("|")
+                append(parameters.toneCurve?.joinToString(",") ?: "none")
+            }
+        }
+
+        assertEquals(fingerprints.size, fingerprints.distinct().size)
+    }
+
+    @Test
+    fun representativeSourceIdentityAndNp3ControlsRemainStable() {
+        val britishMono = BuiltInPhotoFilters.all[5]
+        val cinemaBlue = BuiltInPhotoFilters.all[8]
+        val softPortrait = BuiltInPhotoFilters.all[22]
 
         assertEquals(
-            listOf(
-                "1b6ec047f8e8159fa0595f3ae55e504b9af14acddd0c46d8531571d015d3624c",
-                "ed73bfbc40c576b9c152140a3cd4bdb6c3cf90df6bf1d1aa5d362d0569dedc79",
-                "a247d4033b0c11acb864dcf03c7355d213e39e81c4030bedb71067e7ca5f14f7",
-                "079ca263bcef213f804aa4f49b3d3a4570828647c4d8563860f147d2128ee778",
-                "644e9710e38197be33257f0562f89dc3882642e36be6d2b295f82f813597a6d7",
-            ),
-            filters.map { it.id },
-        )
-
-        val ektarParameters = ektar.parameters as NcpPhotoFilterParameters
-        val natureParameters = nature.parameters as NcpPhotoFilterParameters
-        assertEquals(1, ektarParameters.saturationStep)
-        assertEquals(1, ektarParameters.hueStep)
-        assertEquals(0x0505, ektarParameters.toneCurve.first())
-        assertEquals(0x0383, natureParameters.toneCurve.first())
-        assertEquals(
-            "7d4eced324272d812907559cafa628e8b6320b21efd32cca69609a1d4acc8c5d",
-            toneCurveSha256(ektarParameters.toneCurve),
+            "644e9710e38197be33257f0562f89dc3882642e36be6d2b295f82f813597a6d7",
+            britishMono.id,
         )
         assertEquals(
-            "9f34a470afb614f76d4d1b9ea8a5c21f8e383756f49380efd5902be45d2ff1a2",
-            toneCurveSha256(natureParameters.toneCurve),
+            "079ca263bcef213f804aa4f49b3d3a4570828647c4d8563860f147d2128ee778",
+            cinemaBlue.id,
         )
-
-        val portraParameters = portra.parameters as Np3PhotoFilterParameters
-        assertEquals(11, portraParameters.colorBands[0].hue)
-        assertEquals(-16, portraParameters.colorBands[5].hue)
-        assertEquals(11, portraParameters.colorBands[5].brightness)
         assertEquals(
-            "3e2a4eb44786f539f4ef14d0db034d98b15e902c25f7917b35586bfd232c881b",
-            toneCurveSha256(requireNotNull(portraParameters.toneCurve)),
+            "a247d4033b0c11acb864dcf03c7355d213e39e81c4030bedb71067e7ca5f14f7",
+            softPortrait.id,
         )
 
-        val cineBlueParameters = cineBlue.parameters as Np3PhotoFilterParameters
-        assertEquals(-5, cineBlueParameters.saturation)
-        assertEquals(78, cineBlueParameters.colorBands[4].chroma)
-        assertEquals(100, cineBlueParameters.colorBands[5].chroma)
+        val monoParameters = britishMono.parameters as Np3PhotoFilterParameters
+        assertEquals(3, monoParameters.contrast)
+        assertEquals(-20, monoParameters.highlights)
+        assertEquals(31, monoParameters.shadows)
+        assertEquals(-34, monoParameters.whites)
+        assertEquals(-10, monoParameters.blacks)
+        assertEquals(-98, monoParameters.saturation)
+        assertEquals(null, monoParameters.toneCurve)
+
+        val cinemaParameters = cinemaBlue.parameters as Np3PhotoFilterParameters
+        assertEquals(-5, cinemaParameters.saturation)
+        assertEquals(78, cinemaParameters.colorBands[4].chroma)
+        assertEquals(100, cinemaParameters.colorBands[5].chroma)
         assertEquals(
             "4700e2c82549d7c475119be74539f2d0594484422fb37afe6f789219b2f5e5d3",
-            toneCurveSha256(requireNotNull(cineBlueParameters.toneCurve)),
+            toneCurveSha256(requireNotNull(cinemaParameters.toneCurve)),
         )
 
-        val silverParameters = silver.parameters as Np3PhotoFilterParameters
-        assertEquals(3, silverParameters.contrast)
-        assertEquals(-20, silverParameters.highlights)
-        assertEquals(31, silverParameters.shadows)
-        assertEquals(-34, silverParameters.whites)
-        assertEquals(-10, silverParameters.blacks)
-        assertEquals(-98, silverParameters.saturation)
-        assertEquals(null, silverParameters.toneCurve)
+        val portraitParameters = softPortrait.parameters as Np3PhotoFilterParameters
+        assertEquals(11, portraitParameters.colorBands[0].hue)
+        assertEquals(-16, portraitParameters.colorBands[5].hue)
+        assertEquals(11, portraitParameters.colorBands[5].brightness)
+        assertEquals(
+            "3e2a4eb44786f539f4ef14d0db034d98b15e902c25f7917b35586bfd232c881b",
+            toneCurveSha256(requireNotNull(portraitParameters.toneCurve)),
+        )
     }
 
     @Test

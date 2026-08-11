@@ -136,6 +136,8 @@ fun LocalPhotoEffectsPage(
     val saveFailedText = stringResource(R.string.local_photo_save_failed)
     val watermarkProOnlyText = stringResource(R.string.photo_frame_watermark_pro_only)
     val watermarkImageImportFailedText = stringResource(R.string.photo_frame_image_import_failed)
+    val watermarkFavoriteImageMissingText =
+        stringResource(R.string.photo_effect_favorite_image_missing)
     val savedFormat = stringResource(R.string.local_photo_saved)
 
     val photoPicker = rememberLauncherForActivityResult(
@@ -191,6 +193,9 @@ fun LocalPhotoEffectsPage(
                         imageHash = imageHash,
                     )
                     decorationEnabled = borderEnabled || watermarkDraft.enabled
+                    if (borderEnabled) {
+                        viewModel.updateFavoriteFrameEffect(preset, watermarkDraft)
+                    }
                 },
                 onFailure = { showHint(watermarkImageImportFailedText) },
             )
@@ -361,6 +366,7 @@ fun LocalPhotoEffectsPage(
             Spacer(Modifier.height(10.dp))
             PhotoFilterEditor(
                 filters = state.photoFilters,
+                favoriteFilters = state.favoritePhotoFilters,
                 selectedId = filterId,
                 enabled = filterEnabled,
                 intensityPercent = filterIntensity,
@@ -370,13 +376,18 @@ fun LocalPhotoEffectsPage(
                     filterEnabled = true
                 },
                 onIntensityChanged = { filterIntensity = it },
+                onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
+                onFavoriteIntensityUpdated =
+                    viewModel::updateFavoritePhotoFilterIntensity,
                 hapticsEnabled = state.hapticsEnabled,
             )
             Spacer(Modifier.height(10.dp))
             PhotoFrameWatermarkEditor(
+                favoriteEffects = state.favoriteFrameEffects,
                 borderEnabled = decorationEnabled && borderEnabled,
                 preset = preset,
                 watermark = editorWatermark,
+                watermarkContentSource = watermarkDraft,
                 isPro = isPro,
                 hapticsEnabled = state.hapticsEnabled,
                 onBorderEnabledChanged = { enabled ->
@@ -393,6 +404,12 @@ fun LocalPhotoEffectsPage(
                         decorationEnabled = borderEnabled || updated.enabled
                     }
                 },
+                onFavoriteWatermarkApplied = { favoriteWatermark ->
+                    if (isPro) {
+                        watermarkDraft = favoriteWatermark
+                        decorationEnabled = borderEnabled || favoriteWatermark.enabled
+                    }
+                },
                 onWatermarkPositionChanged = { position ->
                     if (isPro) watermarkDraft = watermarkDraft.copy(position = position)
                 },
@@ -400,6 +417,11 @@ fun LocalPhotoEffectsPage(
                     if (isPro) watermarkDraft = watermarkDraft.copy(text = text)
                 },
                 imageImporting = watermarkImageImporting,
+                onFavoriteToggled = viewModel::toggleFavoriteFrameEffect,
+                onFavoriteUpdated = viewModel::updateFavoriteFrameEffect,
+                onFavoriteImageMissing = {
+                    showHint(watermarkFavoriteImageMissingText)
+                },
                 onProRequired = { showHint(watermarkProOnlyText) },
                 onImageRequested = {
                     if (isPro && !watermarkImageImporting) {

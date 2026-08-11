@@ -49,6 +49,7 @@ import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
 import com.ztransfer.ui.theme.Motion
 import com.ztransfer.ui.theme.SkinPreset
+import com.ztransfer.ui.theme.rememberButtonTextureBrush
 import kotlin.math.ceil
 import kotlin.math.max
 
@@ -754,9 +755,10 @@ internal fun SkinMaterialBadge(
     val isWood = skin == SkinPreset.WOOD
     val isCameraControl = skin == SkinPreset.CAMERA_CONTROLS
     val compositionTextureSeed = currentCompositeKeyHash
-    val texture = remember(texturePalette, textureSeed, compositionTextureSeed) {
-        texturePalette?.brushFor(textureSeed ?: compositionTextureSeed)
-    }
+    val texture = rememberButtonTextureBrush(
+        palette = texturePalette,
+        seed = textureSeed ?: compositionTextureSeed,
+    )
     val highlightTop = lerp(
         colors.buttonHighlightTop,
         accentColor.copy(alpha = 0.24f),
@@ -969,9 +971,10 @@ fun GlassButton(
     // 可覆盖它。两者都只参与确定性哈希，所以 A/B 按钮各自选中不同变体后不会在重组、
     // 返回页面或进程重启时跳纹。
     val compositionTextureSeed = currentCompositeKeyHash
-    val skinTexture = remember(texturePalette, textureSeed, compositionTextureSeed) {
-        texturePalette?.brushFor(textureSeed ?: compositionTextureSeed)
-    }
+    val skinTexture = rememberButtonTextureBrush(
+        palette = texturePalette,
+        seed = textureSeed ?: compositionTextureSeed,
+    )
     // panel 是弹窗内容器里的低投影变体，不应该变成一枚高出面板的实体键帽。
     val appliedSkinTexture = if (isCameraControlButton && panel) null else skinTexture
     val isFrostedGlass = texturePalette?.skin == SkinPreset.FROSTED_GLASS

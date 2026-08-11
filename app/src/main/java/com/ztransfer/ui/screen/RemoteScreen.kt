@@ -194,6 +194,8 @@ private const val TAP_FOCUS_LOCKED_FEEDBACK_MS = 1800L
 private const val TAP_FOCUS_MARKER_VISIBLE_MS = 3_000L
 private const val TRACKING_CANCEL_EXIT_MS = 220L
 private const val REMOTE_ORIENTATION_STABLE_MS = 260L
+private const val REMOTE_ROTATION_FADE_OUT_MS = 80
+private const val REMOTE_ROTATION_FADE_IN_MS = 140
 
 private data class RemoteRotationRequest(
     val rotation: Int,
@@ -346,9 +348,8 @@ fun RemoteScreen(
     var rotation by remember {
         mutableIntStateOf(transferState.remoteRotation.coerceIn(0, 2))
     }
-    val isLandscape = rotation != 0
     var switchingRotation by remember { mutableStateOf(false) }
-    val rotationTransition = remember { Animatable(1f) }
+    val rotationFade = remember { Animatable(1f) }
     val rotationRequests = remember { Channel<RemoteRotationRequest>(Channel.CONFLATED) }
     val orientationSession = remember { RemoteOrientationSession() }
     // Activity 始终保持竖屏。内部顺时针旋转后，系统顶部/底部 inset 分别映射为
@@ -367,10 +368,18 @@ fun RemoteScreen(
             if (request.rotation == rotation) continue
             switchingRotation = true
             try {
-                rotationTransition.animateTo(0f, tween(110))
+                rotationFade.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(REMOTE_ROTATION_FADE_OUT_MS),
+                )
                 rotation = request.rotation
                 if (request.persist) transferViewModel.setRemoteRotation(request.rotation)
-                rotationTransition.animateTo(1f, tween(190))
+                // Let the new constraints/layout reach composition while the host is invisible.
+                withFrameNanos { }
+                rotationFade.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(REMOTE_ROTATION_FADE_IN_MS),
+                )
             } finally {
                 switchingRotation = false
             }
@@ -458,38 +467,28 @@ fun RemoteScreen(
                 2 -> 270f
                 else -> 0f
             }
-            val hostModifier = if (isLandscape) {
+            val hostModifier = if (rotation == 0) {
+                Modifier.fillMaxSize().graphicsLayer { alpha = rotationFade.value }
+            } else {
                 Modifier
                     .requiredSize(width = maxHeight, height = maxWidth)
                     .graphicsLayer {
                         this.rotationZ = rotationZ
-                        alpha = rotationTransition.value
-                        scaleX = 0.96f + 0.04f * rotationTransition.value
-                        scaleY = scaleX
+                        alpha = rotationFade.value
                     }
-            } else {
-                Modifier.fillMaxSize().graphicsLayer {
-                    alpha = rotationTransition.value
-                    scaleX = 0.96f + 0.04f * rotationTransition.value
-                    scaleY = scaleX
-                }
+            }
+            val contentInsets = when (rotation) {
+                1 -> rotationLeftInset to rotationRightInset
+                2 -> rotationRightInset to rotationLeftInset
+                else -> 0.dp to 0.dp
             }
             Box(hostModifier.background(backgroundBrush)) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(
-                            when (rotation) {
-                                1 -> Modifier.absolutePadding(
-                                    left = rotationLeftInset,
-                                    right = rotationRightInset
-                                )
-                                2 -> Modifier.absolutePadding(
-                                    left = rotationRightInset,   // 270°: 底部→左侧
-                                    right = rotationLeftInset    // 270°: 顶部→右侧
-                                )
-                                else -> Modifier
-                            }
+                        .absolutePadding(
+                            left = contentInsets.first,
+                            right = contentInsets.second,
                         )
                 ) {
                     RemoteContent(
@@ -2321,19 +2320,17 @@ private fun RemoteContent(
     // ---------- 布局 ----------
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
         AnimatedContent(
-            targetState = rotation != 0,  // landscape when rotated
+            targetState = rotation,
             transitionSpec = {
-                (fadeIn(tween(durationMillis = 190, delayMillis = 50)) +
-                    scaleIn(initialScale = 0.97f, animationSpec = tween(240)))
-                    .togetherWith(
-                        fadeOut(tween(130)) +
-                            scaleOut(targetScale = 1.02f, animationSpec = tween(160))
-                    )
+                // The host is fully transparent while this layout switches. Keep the child swap
+                // effectively immediate so rotation has one animation only: fade out, then in.
+                fadeIn(tween(1)).togetherWith(fadeOut(tween(1)))
             },
             contentAlignment = Alignment.Center,
             label = "remoteLayoutOrientation",
             modifier = Modifier.fillMaxSize()
-        ) { landscape ->
+        ) { renderedRotation ->
+        val landscape = renderedRotation != 0
         if (!landscape) {
         Column(
             modifier = Modifier

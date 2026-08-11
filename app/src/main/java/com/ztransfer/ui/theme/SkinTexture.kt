@@ -2,6 +2,8 @@ package com.ztransfer.ui.theme
 
 import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
@@ -10,6 +12,10 @@ import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -35,20 +41,48 @@ class ButtonTexturePalette internal constructor(
     }
     private val brushes = arrayOfNulls<Brush>(variantCount)
 
-    fun brushFor(seed: Int): Brush? {
+    internal fun cachedBrushFor(seed: Int): Brush? {
         // 毛玻璃不能再使用矩形位图 tile：即使像素本身接近无缝，GPU 采样、缩放和
         // 离屏合成仍可能把 tile 边界显成按钮上的方框。毛玻璃颗粒和体积光统一交给
         // GlassButton 的矢量光场绘制；三种实体材质才使用位图纹理。
         if (skin == SkinPreset.FROSTED_GLASS) return null
         val variant = Math.floorMod(mixSeed(seed), variantCount)
-        return brushes[variant] ?: ShaderBrush(
+        brushes[variant]?.let { return it }
+        val tile = cachedButtonTextureTile(skin, dark, variant) ?: return null
+        return createBrush(variant, tile)
+    }
+
+    internal suspend fun loadBrushFor(seed: Int): Brush? {
+        cachedBrushFor(seed)?.let { return it }
+        if (skin == SkinPreset.FROSTED_GLASS) return null
+        val variant = Math.floorMod(mixSeed(seed), variantCount)
+        val tile = withContext(Dispatchers.Default) {
+            buttonTextureTile(skin, dark, variant)
+        }
+        return createBrush(variant, tile)
+    }
+
+    private fun createBrush(variant: Int, tile: ImageBitmap): Brush =
+        brushes[variant] ?: ShaderBrush(
             ImageShader(
-                image = buttonTextureTile(skin, dark, variant),
+                image = tile,
                 tileModeX = TileMode.Repeated,
                 tileModeY = TileMode.Repeated
             )
         ).also { brushes[variant] = it }
+}
+
+/** Generate material pixels off the main thread and show the solid material until they are ready. */
+@Composable
+fun rememberButtonTextureBrush(
+    palette: ButtonTexturePalette?,
+    seed: Int,
+): Brush? {
+    val initial = remember(palette, seed) { palette?.cachedBrushFor(seed) }
+    val brush by produceState<Brush?>(initialValue = initial, palette, seed) {
+        value = palette?.loadBrushFor(seed)
     }
+    return brush
 }
 
 /** 三种实体材质在这里提供稳定纹理；纯净毛玻璃不使用位图噪声。 */
@@ -79,22 +113,45 @@ private const val TAU = (2 * PI).toFloat()
  * 不会在切换皮肤时一次性分配整套缓存。
  */
 private val tileCache = HashMap<Int, ImageBitmap>()
+private val tileCacheLock = Any()
+private val tileGenerationMutex = Mutex()
 
-private fun buttonTextureTile(
+private fun buttonTextureCacheKey(
+    skin: SkinPreset,
+    dark: Boolean,
+    variant: Int,
+): Int = (skin.ordinal * 2 + if (dark) 1 else 0) * CACHE_VARIANT_STRIDE + variant
+
+private fun cachedButtonTextureTile(
+    skin: SkinPreset,
+    dark: Boolean,
+    variant: Int,
+): ImageBitmap? = synchronized(tileCacheLock) {
+    tileCache[buttonTextureCacheKey(skin, dark, variant)]
+}
+
+private suspend fun buttonTextureTile(
     skin: SkinPreset,
     dark: Boolean,
     variant: Int
 ): ImageBitmap {
-    val key = (skin.ordinal * 2 + if (dark) 1 else 0) * CACHE_VARIANT_STRIDE + variant
-    return tileCache.getOrPut(key) {
-        val seed = mixSeed(0x5F3759DF xor (skin.ordinal * 0x45D9F3B) xor variant)
-        val pixels = when (skin) {
-            SkinPreset.FROSTED_GLASS -> error("Pure frosted glass does not use a bitmap texture")
-            SkinPreset.TITANIUM -> titaniumTilePixels(dark, seed)
-            SkinPreset.WOOD -> woodTilePixels(dark, seed)
-            SkinPreset.CAMERA_CONTROLS -> cameraControlTilePixels(dark, seed)
+    val key = buttonTextureCacheKey(skin, dark, variant)
+    cachedButtonTextureTile(skin, dark, variant)?.let { return it }
+    return tileGenerationMutex.withLock {
+        cachedButtonTextureTile(skin, dark, variant) ?: run {
+            val seed = mixSeed(0x5F3759DF xor (skin.ordinal * 0x45D9F3B) xor variant)
+            val pixels = when (skin) {
+                SkinPreset.FROSTED_GLASS -> error("Pure frosted glass does not use a bitmap texture")
+                SkinPreset.TITANIUM -> titaniumTilePixels(dark, seed)
+                SkinPreset.WOOD -> woodTilePixels(dark, seed)
+                SkinPreset.CAMERA_CONTROLS -> cameraControlTilePixels(dark, seed)
+            }
+            Bitmap.createBitmap(pixels, TILE, TILE, Bitmap.Config.ARGB_8888)
+                .asImageBitmap()
+                .also { tile ->
+                    synchronized(tileCacheLock) { tileCache[key] = tile }
+                }
         }
-        Bitmap.createBitmap(pixels, TILE, TILE, Bitmap.Config.ARGB_8888).asImageBitmap()
     }
 }
 

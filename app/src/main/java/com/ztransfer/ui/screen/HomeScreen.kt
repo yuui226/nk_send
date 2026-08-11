@@ -490,11 +490,7 @@ fun HomeScreen(
         if (showSettings) {
             SettingsOverlay(
                 viewModel = transferViewModel,
-                effectPreviewSource = state.effectPreviewBitmap,
-                effectPreviewCameraManufacturer = state.cameraManufacturer,
-                effectPreviewCameraModel = state.cameraModel,
-                effectPreviewExif = state.effectPreviewExif,
-                onEffectPreviewRequested = viewModel::requestEffectPreview,
+                showPhotoEffectsEntry = false,
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },
                 onPlayFireworks = { fireworks.launch() },

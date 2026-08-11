@@ -80,10 +80,12 @@ internal fun <T> ReleaseCommitWheel(
     onDetent: () -> Unit = {},
     enabled: Boolean = true,
     wheelHeight: Dp = 54.dp,
+    accentColor: Color? = null,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
     val colors = AppTheme.colors
+    val resolvedAccent = accentColor ?: colors.accentBlue
     val density = LocalDensity.current
     val rowPx = with(density) { SETTINGS_WHEEL_ROW_HEIGHT.toPx() }
     val selectedIndex = options.indexOf(selected).coerceAtLeast(0)
@@ -108,17 +110,9 @@ internal fun <T> ReleaseCommitWheel(
         label = "settingsWheelLabel",
     )
     val darkTheme = colors.background.luminance() < 0.5f
-    val badgeText = if (darkTheme) Color(0xFFC6E2E8) else Color(0xFF496872)
-    val badgeBackground = if (darkTheme) {
-        Color(0xFF8BB9C7).copy(alpha = 0.14f)
-    } else {
-        Color(0xFFE3F0F3).copy(alpha = 0.92f)
-    }
-    val badgeBorder = if (darkTheme) {
-        Color(0xFFB2D5DE).copy(alpha = 0.24f)
-    } else {
-        Color(0xFF88AAB5).copy(alpha = 0.34f)
-    }
+    val badgeText = if (darkTheme) resolvedAccent.copy(alpha = 0.94f) else resolvedAccent
+    val badgeBackground = resolvedAccent.copy(alpha = if (darkTheme) 0.13f else 0.10f)
+    val badgeBorder = resolvedAccent.copy(alpha = if (darkTheme) 0.25f else 0.30f)
     val enabledModifier = if (enabled) {
         modifier
     } else {
@@ -134,10 +128,11 @@ internal fun <T> ReleaseCommitWheel(
                     listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
                 )
             )
+            .background(resolvedAccent.copy(alpha = if (darkTheme) 0.045f else 0.035f))
             .border(
                 width = if (dragging) 1.5.dp else 1.dp,
                 brush = if (dragging) {
-                    Brush.verticalGradient(listOf(colors.accentBlue, colors.accentBlue))
+                    Brush.verticalGradient(listOf(resolvedAccent, resolvedAccent))
                 } else {
                     Brush.verticalGradient(
                         listOf(colors.glassBorderTop, colors.glassBorderBottom)

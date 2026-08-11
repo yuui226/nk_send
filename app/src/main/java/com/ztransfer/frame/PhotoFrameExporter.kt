@@ -54,6 +54,9 @@ internal const val PHOTO_FRAME_REGION_TARGET_PIXELS = 1024 * 1024
 private val PHOTO_FRAME_SESSION_PREFIX =
     "$PHOTO_FRAME_PART_PREFIX${UUID.randomUUID().toString().take(8)}_"
 private const val PLAQUE_BAND_TO_WIDTH = 0.12f
+private const val BRAND_FRAME_SIDE_TO_PHOTO_WIDTH = 0.032f
+private const val BRAND_INSET_BOTTOM_TO_PHOTO_WIDTH = 0.032f
+private const val BRAND_GALLERY_BOTTOM_TO_PHOTO_WIDTH = 0.16f
 
 /** 设置页可选的成片样式。名称是持久化键，不要随意改名。 */
 enum class PhotoFramePreset(internal val fileSuffix: String) {
@@ -63,6 +66,8 @@ enum class PhotoFramePreset(internal val fileSuffix: String) {
     FROSTED("glass"),
     PLAQUE("plaque"),
     IMMERSIVE("immersive"),
+    BRAND_INSET("brand_inset"),
+    BRAND_GALLERY("brand_gallery"),
 }
 
 /** 自定义水印选项。枚举名称会直接持久化，新增档位可以，已有名称不要修改。 */
@@ -415,6 +420,38 @@ internal data class PhotoWatermarkPlacement(
     val originX: Float,
     val baseline: Float,
 )
+
+internal data class BrandFrameBounds(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+) {
+    val width: Float get() = right - left
+    val height: Float get() = bottom - top
+
+    fun intersects(other: BrandFrameBounds): Boolean =
+        left < other.right && other.left < right && top < other.bottom && other.top < bottom
+}
+
+private sealed interface PhotoWatermarkRenderLayout {
+    val bounds: RectF
+
+    data class Text(
+        override val bounds: RectF,
+        val text: String,
+        val originX: Float,
+        val baseline: Float,
+        val paint: Paint,
+        val style: PhotoFrameWatermark,
+    ) : PhotoWatermarkRenderLayout
+
+    data class Image(
+        override val bounds: RectF,
+        val bitmap: Bitmap,
+        val alpha: Int,
+    ) : PhotoWatermarkRenderLayout
+}
 
 /**
  * 边框导出器：读取已传输原片，在原片外创建新画布并另存 JPG。
@@ -1071,6 +1108,9 @@ object PhotoFrameExporter {
                     calculatePlaqueFrameLayout(source.width, source.height, longEdge)
                 PhotoFramePreset.IMMERSIVE ->
                     calculateImmersiveFrameLayout(source.width, source.height, longEdge)
+                PhotoFramePreset.BRAND_INSET,
+                PhotoFramePreset.BRAND_GALLERY ->
+                    calculateBrandFrameLayout(source.width, source.height, preset, longEdge)
                 else -> calculatePhotoFrameLayout(source.width, source.height, longEdge)
             }
         } else {
@@ -1082,6 +1122,13 @@ object PhotoFrameExporter {
                         source.width,
                         source.height,
                         maxOf(source.width, source.height),
+                    )
+                PhotoFramePreset.BRAND_INSET,
+                PhotoFramePreset.BRAND_GALLERY ->
+                    calculateOriginalQualityBrandFrameLayout(
+                        source.width,
+                        source.height,
+                        preset,
                     )
                 else -> calculateOriginalQualityPhotoFrameLayout(source.width, source.height)
             }
@@ -1115,6 +1162,10 @@ object PhotoFrameExporter {
             }
             if (preset == PhotoFramePreset.IMMERSIVE) {
                 drawImmersiveFrame(context, canvas, source, layout, metadata, watermark)
+                return output
+            }
+            if (preset.isBrandFrame()) {
+                drawBrandFrame(context, canvas, source, layout, metadata, preset, watermark)
                 return output
             }
             drawBackdrop(canvas, backdropSource, preset)
@@ -1184,6 +1235,8 @@ object PhotoFrameExporter {
             PhotoFramePreset.MIST, PhotoFramePreset.FROSTED -> 1f
             PhotoFramePreset.PLAQUE -> 0f
             PhotoFramePreset.IMMERSIVE -> 0f
+            PhotoFramePreset.BRAND_INSET,
+            PhotoFramePreset.BRAND_GALLERY -> 0.78f
         }
         // ShadowLayer 在原尺寸高像素画布上直接做两次软件模糊代价很高。阴影本身没有
         // 高频细节，先在 1/4 尺寸透明代理图渲染，再双线性放大，视觉一致而参与
@@ -1361,10 +1414,14 @@ object PhotoFrameExporter {
                     PhotoFramePreset.MINIMAL -> Unit
                     PhotoFramePreset.PLAQUE -> Unit
                     PhotoFramePreset.IMMERSIVE -> Unit
+                    PhotoFramePreset.BRAND_INSET,
+                    PhotoFramePreset.BRAND_GALLERY -> Unit
                 }
             }
             PhotoFramePreset.PLAQUE -> canvas.drawColor(Color.WHITE)
             PhotoFramePreset.IMMERSIVE -> Unit
+            PhotoFramePreset.BRAND_INSET,
+            PhotoFramePreset.BRAND_GALLERY -> canvas.drawColor(Color.WHITE)
         }
     }
 
@@ -1724,6 +1781,8 @@ object PhotoFrameExporter {
                     PhotoFramePreset.FROSTED -> Color.rgb(24, 31, 38)
                     PhotoFramePreset.PLAQUE -> Color.rgb(24, 31, 38)
                     PhotoFramePreset.IMMERSIVE -> Color.rgb(250, 252, 253)
+                    PhotoFramePreset.BRAND_INSET,
+                    PhotoFramePreset.BRAND_GALLERY -> Color.rgb(250, 252, 253)
                 }
             }
             alpha = watermarkAlpha(watermark.opacityPercent)
@@ -1775,17 +1834,21 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
     ) {
-        if (!watermark.enabled || !watermark.position.isPhotoPlacement()) return
+        val layout = layoutPhotoWatermark(context, canvas, photoRect, preset, watermark) ?: return
+        drawPhotoWatermarkLayout(canvas, layout)
+    }
+
+    private fun layoutPhotoWatermark(
+        context: Context,
+        canvas: Canvas,
+        photoRect: RectF,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+    ): PhotoWatermarkRenderLayout? {
+        if (!watermark.enabled || !watermark.position.isPhotoPlacement()) return null
         val safeInset = min(photoRect.width(), photoRect.height()) * 0.04f
         if (watermark.content == PhotoFrameWatermarkContent.IMAGE) {
-            drawPhotoImageWatermark(
-                context = context,
-                canvas = canvas,
-                photoRect = photoRect,
-                safeInset = safeInset,
-                watermark = watermark,
-            )
-            return
+            return layoutPhotoImageWatermark(context, photoRect, safeInset, watermark)
         }
         val paint = createWatermarkPaint(
             context = context,
@@ -1812,16 +1875,33 @@ object PhotoFrameExporter {
             ),
             position = watermark.position,
         )
-        drawWatermarkText(canvas, text, placement.originX, placement.baseline, paint, watermark)
+        val effectPadding = when (resolvedWatermarkEffect(watermark)) {
+            PhotoFrameWatermarkEffect.NONE -> 0f
+            PhotoFrameWatermarkEffect.SHADOW -> paint.textSize * 0.18f
+            PhotoFrameWatermarkEffect.OUTLINE -> maxOf(1f, paint.textSize * 0.075f)
+            PhotoFrameWatermarkEffect.AUTO -> error("AUTO must be resolved before layout")
+        }
+        return PhotoWatermarkRenderLayout.Text(
+            bounds = RectF(
+                placement.originX + bounds.left - effectPadding,
+                placement.baseline + bounds.top - effectPadding,
+                placement.originX + bounds.right + effectPadding,
+                placement.baseline + bounds.bottom + effectPadding,
+            ),
+            text = text,
+            originX = placement.originX,
+            baseline = placement.baseline,
+            paint = paint,
+            style = watermark,
+        )
     }
 
-    private fun drawPhotoImageWatermark(
+    private fun layoutPhotoImageWatermark(
         context: Context,
-        canvas: Canvas,
         photoRect: RectF,
         safeInset: Float,
         watermark: PhotoFrameWatermark,
-    ) {
+    ): PhotoWatermarkRenderLayout.Image {
         val imageHash = requireNotNull(validPhotoFrameWatermarkImageHash(watermark.imageHash)) {
             "Image watermark has no valid private copy"
         }
@@ -1857,12 +1937,33 @@ object PhotoFrameExporter {
             placement.originX + targetWidth,
             placement.baseline,
         )
-        drawDownsampledWatermarkBitmap(
-            canvas = canvas,
-            source = bitmap,
-            destination = destination,
+        return PhotoWatermarkRenderLayout.Image(
+            bounds = destination,
+            bitmap = bitmap,
             alpha = watermarkAlpha(watermark.opacityPercent),
         )
+    }
+
+    private fun drawPhotoWatermarkLayout(
+        canvas: Canvas,
+        layout: PhotoWatermarkRenderLayout,
+    ) {
+        when (layout) {
+            is PhotoWatermarkRenderLayout.Text -> drawWatermarkText(
+                canvas = canvas,
+                text = layout.text,
+                x = layout.originX,
+                baseline = layout.baseline,
+                paint = layout.paint,
+                watermark = layout.style,
+            )
+            is PhotoWatermarkRenderLayout.Image -> drawDownsampledWatermarkBitmap(
+                canvas = canvas,
+                source = layout.bitmap,
+                destination = layout.bounds,
+                alpha = layout.alpha,
+            )
+        }
     }
 
     /**
@@ -2266,6 +2367,13 @@ object PhotoFrameExporter {
         val layout = when (preset) {
             PhotoFramePreset.PLAQUE ->
                 calculateOriginalQualityPlaqueLayout(orientedSize.width, orientedSize.height)
+            PhotoFramePreset.BRAND_INSET,
+            PhotoFramePreset.BRAND_GALLERY ->
+                calculateOriginalQualityBrandFrameLayout(
+                    orientedSize.width,
+                    orientedSize.height,
+                    preset,
+                )
             else -> calculateOriginalQualityPhotoFrameLayout(orientedSize.width, orientedSize.height)
         }
         val output = Bitmap.createBitmap(
@@ -2292,6 +2400,32 @@ object PhotoFrameExporter {
                 )
                 // The complete plaque band and both watermark modes are composited after filtering.
                 drawPlaqueDecoration(context, canvas, layout, metadata, watermark)
+                return@withRegionDecoder output
+            }
+            if (preset.isBrandFrame()) {
+                drawBrandFrameBase(canvas, layout)
+                val radius = brandFrameCornerRadius(layout)
+                val clip = Path().apply {
+                    addRoundRect(photoRect, radius, radius, Path.Direction.CW)
+                }
+                canvas.save()
+                canvas.clipPath(clip)
+                drawPhotoRegions(
+                    decoder = decoder,
+                    canvas = canvas,
+                    photoRect = photoRect,
+                    orientation = orientation,
+                    filter = filter,
+                )
+                canvas.restore()
+                drawBrandFrameDecoration(
+                    context = context,
+                    canvas = canvas,
+                    layout = layout,
+                    metadata = metadata,
+                    preset = preset,
+                    watermark = watermark,
+                )
                 return@withRegionDecoder output
             }
 
@@ -2530,6 +2664,312 @@ object PhotoFrameExporter {
             }
             rawTop = rawBottom
         }
+    }
+
+    private fun drawBrandFrame(
+        context: Context,
+        canvas: Canvas,
+        source: Bitmap,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+    ) {
+        drawBrandFrameBase(canvas, layout)
+        val photoRect = layout.photoRect()
+        val radius = brandFrameCornerRadius(layout)
+        val clip = Path().apply {
+            addRoundRect(photoRect, radius, radius, Path.Direction.CW)
+        }
+        canvas.save()
+        canvas.clipPath(clip)
+        canvas.drawBitmap(
+            source,
+            null,
+            photoRect,
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+        )
+        canvas.restore()
+        drawBrandFrameDecoration(context, canvas, layout, metadata, preset, watermark)
+    }
+
+    private fun drawBrandFrameBase(canvas: Canvas, layout: PhotoFrameLayout) {
+        canvas.drawColor(Color.rgb(253, 253, 252))
+        drawPhotoElevation(
+            canvas = canvas,
+            photoRect = layout.photoRect(),
+            radius = brandFrameCornerRadius(layout),
+            preset = PhotoFramePreset.MINIMAL,
+        )
+    }
+
+    /** Frame graphics are composited after the photo, so filters never alter typography. */
+    private fun drawBrandFrameDecoration(
+        context: Context,
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+    ) {
+        require(preset.isBrandFrame())
+        val photoRect = layout.photoRect()
+        val radius = brandFrameCornerRadius(layout)
+        val photoWatermark = watermark.forBrandPhoto(preset)
+        val photoWatermarkLayout = layoutPhotoWatermark(
+            context = context,
+            canvas = canvas,
+            photoRect = photoRect,
+            preset = preset,
+            watermark = photoWatermark,
+        )
+        val occupiedWatermarkBounds = photoWatermarkLayout?.bounds?.toBrandFrameBounds()
+        val brand = cameraBrandLabel(metadata.make, metadata.model)
+        val details = frameDetailLine(metadata)
+
+        canvas.save()
+        canvas.clipPath(Path().apply {
+            addRoundRect(photoRect, radius, radius, Path.Direction.CW)
+        })
+        when (preset) {
+            PhotoFramePreset.BRAND_INSET -> drawBrandInsetMetadata(
+                canvas = canvas,
+                photoRect = photoRect,
+                brand = brand,
+                details = details,
+                occupiedWatermarkBounds = occupiedWatermarkBounds,
+            )
+            PhotoFramePreset.BRAND_GALLERY -> drawBrandGalleryDetails(
+                canvas = canvas,
+                photoRect = photoRect,
+                details = details,
+                occupiedWatermarkBounds = occupiedWatermarkBounds,
+            )
+            else -> error("Not a brand frame")
+        }
+        photoWatermarkLayout?.let { drawPhotoWatermarkLayout(canvas, it) }
+        canvas.restore()
+
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = maxOf(1f, layout.canvasWidth * 0.001f)
+            color = Color.argb(46, 15, 20, 24)
+            canvas.drawRoundRect(photoRect, radius, radius, this)
+        }
+        if (preset == PhotoFramePreset.BRAND_GALLERY) {
+            drawBrandGalleryBand(context, canvas, layout, brand, watermark)
+        }
+    }
+
+    private fun drawBrandInsetMetadata(
+        canvas: Canvas,
+        photoRect: RectF,
+        brand: String,
+        details: String,
+        occupiedWatermarkBounds: BrandFrameBounds?,
+    ) {
+        val shortEdge = min(photoRect.width(), photoRect.height())
+        val brandPaint = brand.takeIf(String::isNotEmpty)?.let { text ->
+            fittedBrandPaint(
+                text = text,
+                preferredSize = photoRect.width() * 0.043f,
+                maxWidth = photoRect.width() * 0.72f,
+                color = Color.WHITE,
+            ).apply {
+                setShadowLayer(
+                    textSize * 0.13f,
+                    0f,
+                    textSize * 0.07f,
+                    Color.argb(190, 0, 0, 0),
+                )
+            }
+        }
+        val detailPaint = details.takeIf(String::isNotEmpty)?.let { text ->
+            fittedBrandDetailPaint(
+                text = text,
+                preferredSize = photoRect.width() * 0.021f,
+                maxWidth = photoRect.width() * 0.78f,
+            )
+        }
+        val rows = listOfNotNull(
+            brandPaint?.let { textVisualBounds(brand, it) },
+            detailPaint?.let { textVisualBounds(details, it) },
+        )
+        if (rows.isEmpty()) return
+        val preferredAreaBottom = photoRect.bottom - shortEdge * 0.030f
+        val blockHeight = rows.sumOf { (it.bottom - it.top).toDouble() }.toFloat() +
+            shortEdge * 0.020f * (rows.size - 1).coerceAtLeast(0)
+        val blockWidth = maxOf(
+            brandPaint?.measureText(brand) ?: 0f,
+            detailPaint?.measureText(details) ?: 0f,
+        ).coerceAtLeast(1f)
+        val area = placeBrandMetadataBlock(
+            photo = photoRect.toBrandFrameBounds(),
+            preferredBottom = preferredAreaBottom,
+            blockHeight = blockHeight,
+            blockWidth = blockWidth,
+            occupied = occupiedWatermarkBounds,
+            gap = shortEdge * 0.040f,
+        )
+        val baselines = centeredFrameTextBaselines(
+            areaTop = area.top,
+            areaBottom = area.bottom,
+            rows = rows,
+            preferredGap = shortEdge * 0.020f,
+        )
+        var row = 0
+        if (brandPaint != null) {
+            canvas.drawText(brand, photoRect.centerX(), baselines[row++], brandPaint)
+        }
+        if (detailPaint != null) {
+            canvas.drawText(details, photoRect.centerX(), baselines[row], detailPaint)
+        }
+    }
+
+    private fun drawBrandGalleryDetails(
+        canvas: Canvas,
+        photoRect: RectF,
+        details: String,
+        occupiedWatermarkBounds: BrandFrameBounds?,
+    ) {
+        if (details.isEmpty()) return
+        val shortEdge = min(photoRect.width(), photoRect.height())
+        val paint = fittedBrandDetailPaint(
+            text = details,
+            preferredSize = photoRect.width() * 0.021f,
+            maxWidth = photoRect.width() * 0.78f,
+        )
+        val bounds = textVisualBounds(details, paint)
+        val area = placeBrandMetadataBlock(
+            photo = photoRect.toBrandFrameBounds(),
+            preferredBottom = photoRect.bottom - shortEdge * 0.035f,
+            blockHeight = bounds.bottom - bounds.top,
+            blockWidth = paint.measureText(details).coerceAtLeast(1f),
+            occupied = occupiedWatermarkBounds,
+            gap = shortEdge * 0.040f,
+        )
+        val baseline = area.top - bounds.top
+        canvas.drawText(details, photoRect.centerX(), baseline, paint)
+    }
+
+    private fun drawBrandGalleryBand(
+        context: Context,
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        brand: String,
+        watermark: PhotoFrameWatermark,
+    ) {
+        val band = RectF(
+            0f,
+            layout.photoBottom,
+            layout.canvasWidth.toFloat(),
+            layout.canvasHeight.toFloat(),
+        )
+        val bandWatermark = watermark.takeIf {
+            it.enabled && it.content == PhotoFrameWatermarkContent.TEXT &&
+                !it.position.isPhotoPlacement() &&
+                it.position != PhotoFrameWatermarkPosition.AUTO
+        }
+        val brandPaint = brand.takeIf(String::isNotEmpty)?.let { text ->
+            fittedBrandPaint(
+                text = text,
+                preferredSize = layout.canvasWidth * 0.052f,
+                maxWidth = layout.canvasWidth * 0.72f,
+                color = Color.rgb(15, 17, 19),
+            )
+        }
+        var watermarkPaint = bandWatermark?.let { bandStyle ->
+            createWatermarkPaint(
+                context = context,
+                canvas = canvas,
+                preset = PhotoFramePreset.BRAND_GALLERY,
+                watermark = if (bandStyle.color == PhotoFrameWatermarkColor.ADAPTIVE) {
+                    bandStyle.copy(color = PhotoFrameWatermarkColor.BLACK)
+                } else {
+                    bandStyle
+                },
+                maxWidth = band.width() * 0.34f,
+            )
+        }
+        val preferredGap = band.height() * 0.12f
+        val availableTop = band.top + band.height() * 0.08f
+        val availableBottom = band.bottom - band.height() * 0.10f
+        val initialRows = listOfNotNull(
+            watermarkPaint?.let {
+                textVisualBounds(checkNotNull(bandWatermark).displayText, it)
+            },
+            brandPaint?.let { textVisualBounds(brand, it) },
+        )
+        if (initialRows.isEmpty()) return
+        val gapAllowance = if (initialRows.size > 1) preferredGap else 0f
+        val scale = frameTextScaleToFit(
+            areaHeight = (availableBottom - availableTop - gapAllowance).coerceAtLeast(0f),
+            rows = initialRows,
+        )
+        if (scale < 1f) {
+            brandPaint?.let { it.textSize *= scale }
+            watermarkPaint = watermarkPaint?.apply { textSize *= scale }
+        }
+        val rows = listOfNotNull(
+            watermarkPaint?.let {
+                textVisualBounds(checkNotNull(bandWatermark).displayText, it)
+            },
+            brandPaint?.let { textVisualBounds(brand, it) },
+        )
+        val baselines = centeredFrameTextBaselines(
+            areaTop = availableTop,
+            areaBottom = availableBottom,
+            rows = rows,
+            preferredGap = preferredGap,
+        )
+        var row = 0
+        if (watermarkPaint != null && bandWatermark != null) {
+            val (x, align) = watermarkHorizontalPlacement(
+                band,
+                PhotoFramePreset.BRAND_GALLERY,
+                bandWatermark.position,
+            )
+            watermarkPaint.textAlign = align
+            drawWatermarkText(
+                canvas,
+                bandWatermark.displayText,
+                x,
+                baselines[row++],
+                watermarkPaint,
+                bandWatermark,
+            )
+        }
+        if (brandPaint != null) {
+            canvas.drawText(brand, band.centerX(), baselines[row], brandPaint)
+        }
+    }
+
+    private fun fittedBrandPaint(
+        text: String,
+        preferredSize: Float,
+        maxWidth: Float,
+        color: Int,
+    ): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+        this.color = color
+        textSize = preferredSize
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create("sans-serif-black", Typeface.BOLD)
+        val measured = measureText(text)
+        if (measured > maxWidth && measured > 0f) textSize *= maxWidth / measured
+    }
+
+    private fun fittedBrandDetailPaint(
+        text: String,
+        preferredSize: Float,
+        maxWidth: Float,
+    ): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+        color = Color.rgb(249, 250, 251)
+        textSize = preferredSize
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD_ITALIC)
+        setShadowLayer(textSize * 0.12f, 0f, textSize * 0.06f, Color.argb(195, 0, 0, 0))
+        val measured = measureText(text)
+        if (measured > maxWidth && measured > 0f) textSize *= maxWidth / measured
     }
 
     /**
@@ -3302,6 +3742,170 @@ internal fun calculateImmersiveFrameLayout(
     )
 }
 
+internal fun calculateBrandFrameLayout(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    preset: PhotoFramePreset,
+    longEdge: Int = 3200,
+): PhotoFrameLayout {
+    require(sourceWidth > 0 && sourceHeight > 0)
+    require(longEdge > 0)
+    require(preset.isBrandFrame())
+    val bottomRatio = when (preset) {
+        PhotoFramePreset.BRAND_INSET -> BRAND_INSET_BOTTOM_TO_PHOTO_WIDTH
+        PhotoFramePreset.BRAND_GALLERY -> BRAND_GALLERY_BOTTOM_TO_PHOTO_WIDTH
+        else -> error("Not a brand frame")
+    }
+    val compositeWidth = sourceWidth * (1f + BRAND_FRAME_SIDE_TO_PHOTO_WIDTH * 2f)
+    val compositeHeight = sourceHeight + sourceWidth *
+        (BRAND_FRAME_SIDE_TO_PHOTO_WIDTH + bottomRatio)
+    val scale = min(longEdge / compositeWidth, longEdge / compositeHeight)
+    val photoWidth = (sourceWidth * scale).roundToInt().coerceAtLeast(1)
+    val photoHeight = (sourceHeight * scale).roundToInt().coerceAtLeast(1)
+    val side = (photoWidth * BRAND_FRAME_SIDE_TO_PHOTO_WIDTH).roundToInt().coerceAtLeast(1)
+    val top = side
+    val bottom = (photoWidth * bottomRatio).roundToInt().coerceAtLeast(1)
+    val canvasWidth = photoWidth + side * 2
+    val canvasHeight = photoHeight + top + bottom
+    return PhotoFrameLayout(
+        canvasWidth = canvasWidth,
+        canvasHeight = canvasHeight,
+        photoLeft = side.toFloat(),
+        photoTop = top.toFloat(),
+        photoRight = (side + photoWidth).toFloat(),
+        photoBottom = (top + photoHeight).toFloat(),
+        metadataTop = (top + photoHeight).toFloat(),
+    )
+}
+
+internal fun calculateOriginalQualityBrandFrameLayout(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    preset: PhotoFramePreset,
+): PhotoFrameLayout {
+    require(sourceWidth > 0 && sourceHeight > 0)
+    require(preset.isBrandFrame())
+    val bottomRatio = when (preset) {
+        PhotoFramePreset.BRAND_INSET -> BRAND_INSET_BOTTOM_TO_PHOTO_WIDTH
+        PhotoFramePreset.BRAND_GALLERY -> BRAND_GALLERY_BOTTOM_TO_PHOTO_WIDTH
+        else -> error("Not a brand frame")
+    }
+    val side = (sourceWidth * BRAND_FRAME_SIDE_TO_PHOTO_WIDTH)
+        .roundToInt()
+        .coerceAtLeast(1)
+    val bottom = (sourceWidth * bottomRatio).roundToInt().coerceAtLeast(1)
+    check(sourceWidth <= Int.MAX_VALUE - side * 2) { "Original photo is too large to frame" }
+    check(sourceHeight <= Int.MAX_VALUE - side - bottom) {
+        "Original photo is too large to frame"
+    }
+    return PhotoFrameLayout(
+        canvasWidth = sourceWidth + side * 2,
+        canvasHeight = sourceHeight + side + bottom,
+        photoLeft = side.toFloat(),
+        photoTop = side.toFloat(),
+        photoRight = (side + sourceWidth).toFloat(),
+        photoBottom = (side + sourceHeight).toFloat(),
+        metadataTop = (side + sourceHeight).toFloat(),
+    )
+}
+
+internal fun PhotoFramePreset.isBrandFrame(): Boolean =
+    this == PhotoFramePreset.BRAND_INSET || this == PhotoFramePreset.BRAND_GALLERY
+
+/**
+ * Places the brand/EXIF block at its intended lower-center position, moving it just above the
+ * real rendered watermark bounds only when the two rectangles intersect. Watermarks placed in a
+ * corner therefore do not cause unrelated metadata to jump, while large bottom/center watermarks
+ * always receive an explicit safety gap.
+ */
+internal fun placeBrandMetadataBlock(
+    photo: BrandFrameBounds,
+    preferredBottom: Float,
+    blockHeight: Float,
+    blockWidth: Float,
+    occupied: BrandFrameBounds?,
+    gap: Float,
+): BrandFrameBounds {
+    require(photo.width > 0f && photo.height > 0f)
+    require(blockHeight in 0f..photo.height)
+    require(blockWidth > 0f)
+    require(gap >= 0f)
+
+    val width = blockWidth.coerceAtMost(photo.width)
+    val left = photo.left + (photo.width - width) / 2f
+    fun blockEndingAt(bottom: Float): BrandFrameBounds {
+        val clampedBottom = bottom.coerceIn(photo.top + blockHeight, photo.bottom)
+        return BrandFrameBounds(left, clampedBottom - blockHeight, left + width, clampedBottom)
+    }
+
+    val preferred = blockEndingAt(preferredBottom)
+    if (occupied == null || !preferred.intersects(occupied)) return preferred
+
+    val above = blockEndingAt(occupied.top - gap)
+    if (above.top >= photo.top && !above.intersects(occupied)) return above
+
+    val belowTop = occupied.bottom + gap
+    if (belowTop + blockHeight <= photo.bottom) {
+        val below = BrandFrameBounds(left, belowTop, left + width, belowTop + blockHeight)
+        if (!below.intersects(occupied)) return below
+    }
+
+    // Current watermark size limits always leave a vertical lane. Keep this deterministic fallback
+    // for corrupted legacy values: prefer the edge with the larger free span.
+    val roomAbove = (occupied.top - gap - photo.top).coerceAtLeast(0f)
+    val roomBelow = (photo.bottom - occupied.bottom - gap).coerceAtLeast(0f)
+    return if (roomAbove >= roomBelow) {
+        blockEndingAt((occupied.top - gap).coerceAtLeast(photo.top + blockHeight))
+    } else {
+        val top = (occupied.bottom + gap).coerceAtMost(photo.bottom - blockHeight)
+        BrandFrameBounds(left, top, left + width, top + blockHeight)
+    }
+}
+
+private fun PhotoFrameLayout.photoRect(): RectF = RectF(
+    photoLeft,
+    photoTop,
+    photoRight,
+    photoBottom,
+)
+
+private fun RectF.toBrandFrameBounds(): BrandFrameBounds = BrandFrameBounds(
+    left = left,
+    top = top,
+    right = right,
+    bottom = bottom,
+)
+
+private fun PhotoFrameWatermark.forBrandPhoto(
+    preset: PhotoFramePreset,
+): PhotoFrameWatermark = when (preset) {
+    PhotoFramePreset.BRAND_INSET -> if (position.isPhotoPlacement()) {
+        this
+    } else {
+        copy(
+            position = when (position) {
+                PhotoFrameWatermarkPosition.LEFT -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT
+                PhotoFrameWatermarkPosition.CENTER -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER
+                PhotoFrameWatermarkPosition.AUTO,
+                PhotoFrameWatermarkPosition.RIGHT -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
+                else -> position
+            }
+        )
+    }
+    PhotoFramePreset.BRAND_GALLERY -> when {
+        position.isPhotoPlacement() -> this
+        position == PhotoFrameWatermarkPosition.AUTO ->
+            copy(position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT)
+        content == PhotoFrameWatermarkContent.IMAGE ->
+            copy(position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT)
+        else -> copy(enabled = false)
+    }
+    else -> error("Not a brand frame")
+}
+
+private fun brandFrameCornerRadius(layout: PhotoFrameLayout): Float =
+    (layout.photoRight - layout.photoLeft) * 0.014f
+
 /** 照片与毛玻璃参数卡共用的圆角，随底部信息区高度等比缩放。 */
 internal fun photoFrameCornerRadius(layout: PhotoFrameLayout): Float =
     (layout.canvasHeight - layout.metadataTop) * 0.26f
@@ -3480,9 +4084,64 @@ internal fun normalizeCameraMake(make: String?): String {
         value.contains("canon", ignoreCase = true) -> "Canon"
         value.contains("sony", ignoreCase = true) -> "SONY"
         value.contains("fujifilm", ignoreCase = true) -> "FUJIFILM"
+        value.contains("hasselblad", ignoreCase = true) -> "Hasselblad"
+        value.contains("leica", ignoreCase = true) -> "Leica"
+        value.contains("panasonic", ignoreCase = true) -> "Panasonic"
+        value.contains("olympus", ignoreCase = true) ||
+            value.contains("om digital", ignoreCase = true) -> "OM SYSTEM"
+        value.contains("pentax", ignoreCase = true) -> "PENTAX"
+        value.contains("ricoh", ignoreCase = true) -> "RICOH"
+        value.contains("apple", ignoreCase = true) -> "Apple"
+        value.contains("samsung", ignoreCase = true) -> "SAMSUNG"
+        value.contains("google", ignoreCase = true) -> "Google"
+        value.contains("xiaomi", ignoreCase = true) ||
+            value.contains("redmi", ignoreCase = true) -> "XIAOMI"
+        value.contains("huawei", ignoreCase = true) -> "HUAWEI"
+        value.contains("honor", ignoreCase = true) -> "HONOR"
+        value.contains("oneplus", ignoreCase = true) -> "ONEPLUS"
+        value.contains("oppo", ignoreCase = true) -> "OPPO"
+        value.contains("vivo", ignoreCase = true) -> "VIVO"
+        value.contains("realme", ignoreCase = true) -> "REALME"
+        value.contains("motorola", ignoreCase = true) -> "MOTOROLA"
         value.isNotEmpty() -> value
         else -> ""
     }
+}
+
+/** Uppercase typographic brand used by the two brand-frame presets; no trademark artwork. */
+internal fun cameraBrandLabel(make: String?, model: String?): String {
+    val normalizedMake = normalizeCameraMake(make).trim()
+    if (normalizedMake.isNotEmpty()) {
+        return normalizedMake.uppercase(Locale.ROOT).take(32)
+    }
+    val modelValue = model?.trim().orEmpty()
+    val inferred = when {
+        modelValue.contains("nikon", ignoreCase = true) -> "NIKON"
+        modelValue.contains("canon", ignoreCase = true) -> "CANON"
+        modelValue.contains("sony", ignoreCase = true) -> "SONY"
+        modelValue.contains("fujifilm", ignoreCase = true) -> "FUJIFILM"
+        modelValue.contains("hasselblad", ignoreCase = true) -> "HASSELBLAD"
+        modelValue.contains("leica", ignoreCase = true) -> "LEICA"
+        modelValue.contains("panasonic", ignoreCase = true) -> "PANASONIC"
+        modelValue.contains("olympus", ignoreCase = true) ||
+            modelValue.contains("om system", ignoreCase = true) -> "OM SYSTEM"
+        modelValue.contains("pentax", ignoreCase = true) -> "PENTAX"
+        modelValue.contains("ricoh", ignoreCase = true) -> "RICOH"
+        modelValue.contains("iphone", ignoreCase = true) -> "APPLE"
+        modelValue.contains("pixel", ignoreCase = true) -> "GOOGLE"
+        modelValue.contains("galaxy", ignoreCase = true) -> "SAMSUNG"
+        modelValue.startsWith("SM-", ignoreCase = true) -> "SAMSUNG"
+        modelValue.contains("xiaomi", ignoreCase = true) ||
+            modelValue.contains("redmi", ignoreCase = true) -> "XIAOMI"
+        modelValue.contains("huawei", ignoreCase = true) -> "HUAWEI"
+        modelValue.contains("honor", ignoreCase = true) -> "HONOR"
+        modelValue.contains("oneplus", ignoreCase = true) -> "ONEPLUS"
+        modelValue.contains("oppo", ignoreCase = true) -> "OPPO"
+        modelValue.contains("vivo", ignoreCase = true) -> "VIVO"
+        modelValue.contains("realme", ignoreCase = true) -> "REALME"
+        else -> null
+    }
+    return inferred.orEmpty()
 }
 
 /**
@@ -3571,6 +4230,7 @@ private val PHOTO_FRAME_OUTPUT_PATTERN = Regex(
 )
 
 private const val PHOTO_FRAME_WATERMARK_RENDER_VERSION = 2
+private const val BRAND_FRAME_RENDER_VERSION = 4
 
 internal fun isPhotoFrameOutputName(name: String): Boolean =
     PHOTO_FRAME_OUTPUT_PATTERN.containsMatchIn(name)
@@ -3613,6 +4273,7 @@ internal fun photoFrameWatermarkFingerprint(
         val renderedPosition = resolvedWatermarkPosition(preset, watermark.position)
         buildList {
             add("v=$PHOTO_FRAME_WATERMARK_RENDER_VERSION")
+            if (preset.isBrandFrame()) add("brand-v=$BRAND_FRAME_RENDER_VERSION")
             add("on")
             add(watermark.content.name)
             add(watermarkSizeFingerprintToken(watermark))
@@ -3630,6 +4291,8 @@ internal fun photoFrameWatermarkFingerprint(
                 }
             }
         }.joinToString("\u0000")
+    } else if (preset.isBrandFrame()) {
+        "brand-v=$BRAND_FRAME_RENDER_VERSION\u0000off"
     } else {
         "off"
     }
@@ -3675,6 +4338,8 @@ private fun resolvedWatermarkPosition(
             PhotoFramePreset.PLAQUE -> PhotoFrameWatermarkPosition.LEFT
             // AUTO is an inline signature in this preset, while CENTER is a separate row.
             PhotoFramePreset.IMMERSIVE -> PhotoFrameWatermarkPosition.AUTO
+            PhotoFramePreset.BRAND_INSET,
+            PhotoFramePreset.BRAND_GALLERY -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
             else -> PhotoFrameWatermarkPosition.CENTER
         }
     }

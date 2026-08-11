@@ -72,6 +72,87 @@ class PhotoFrameExporterTest {
         assertEquals(PhotoFramePreset.FROSTED, PhotoFramePreset.valueOf("FROSTED"))
         assertEquals(PhotoFramePreset.PLAQUE, PhotoFramePreset.valueOf("PLAQUE"))
         assertEquals(PhotoFramePreset.IMMERSIVE, PhotoFramePreset.valueOf("IMMERSIVE"))
+        assertEquals(PhotoFramePreset.BRAND_INSET, PhotoFramePreset.valueOf("BRAND_INSET"))
+        assertEquals(PhotoFramePreset.BRAND_GALLERY, PhotoFramePreset.valueOf("BRAND_GALLERY"))
+    }
+
+    @Test
+    fun brandFramesKeepTheWholePhotoAndUseTheirOwnWhiteSpaceRhythm() {
+        listOf(PhotoFramePreset.BRAND_INSET, PhotoFramePreset.BRAND_GALLERY).forEach { preset ->
+            val preview = calculateBrandFrameLayout(6000, 4000, preset)
+            val original = calculateOriginalQualityBrandFrameLayout(6000, 4000, preset)
+
+            assertTrue(maxOf(preview.canvasWidth, preview.canvasHeight) <= 3200)
+            assertEquals(
+                1.5f,
+                (preview.photoRight - preview.photoLeft) /
+                    (preview.photoBottom - preview.photoTop),
+                0.002f,
+            )
+            assertEquals(6000f, original.photoRight - original.photoLeft, 0.001f)
+            assertEquals(4000f, original.photoBottom - original.photoTop, 0.001f)
+            assertEquals(original.photoLeft, original.photoTop, 0.001f)
+            assertTrue(original.photoBottom < original.canvasHeight)
+        }
+
+        val inset = calculateOriginalQualityBrandFrameLayout(
+            6000,
+            4000,
+            PhotoFramePreset.BRAND_INSET,
+        )
+        val gallery = calculateOriginalQualityBrandFrameLayout(
+            6000,
+            4000,
+            PhotoFramePreset.BRAND_GALLERY,
+        )
+        assertEquals(inset.photoLeft, inset.canvasHeight - inset.photoBottom, 1f)
+        assertTrue(gallery.canvasHeight - gallery.photoBottom > gallery.photoLeft * 4f)
+    }
+
+    @Test
+    fun brandLabelNormalizesCameraAndPhoneManufacturers() {
+        assertEquals("NIKON", cameraBrandLabel("NIKON CORPORATION", "NIKON Z 8"))
+        assertEquals("APPLE", cameraBrandLabel("Apple Computer, Inc.", "iPhone 17 Pro"))
+        assertEquals("SAMSUNG", cameraBrandLabel(null, "SM-S9380"))
+        assertEquals("GOOGLE", cameraBrandLabel(null, "Pixel 10 Pro"))
+        assertEquals("HASSELBLAD", cameraBrandLabel("Hasselblad", "X2D 100C"))
+        assertEquals("", cameraBrandLabel(null, null))
+    }
+
+    @Test
+    fun brandMetadataUsesActualWatermarkBoundsToAvoidOverlap() {
+        val photo = BrandFrameBounds(0f, 0f, 1000f, 600f)
+        val centeredBottomWatermark = BrandFrameBounds(260f, 480f, 740f, 570f)
+        val metadata = placeBrandMetadataBlock(
+            photo = photo,
+            preferredBottom = 580f,
+            blockHeight = 64f,
+            blockWidth = 820f,
+            occupied = centeredBottomWatermark,
+            gap = 24f,
+        )
+
+        assertEquals(456f, metadata.bottom, 0.001f)
+        assertTrue(!metadata.intersects(centeredBottomWatermark))
+        assertTrue(metadata.top >= photo.top)
+        assertTrue(metadata.bottom <= photo.bottom)
+    }
+
+    @Test
+    fun cornerWatermarkDoesNotMoveCenteredBrandMetadataWhenBoundsDoNotIntersect() {
+        val photo = BrandFrameBounds(0f, 0f, 1000f, 600f)
+        val cornerWatermark = BrandFrameBounds(20f, 500f, 80f, 570f)
+        val metadata = placeBrandMetadataBlock(
+            photo = photo,
+            preferredBottom = 580f,
+            blockHeight = 64f,
+            blockWidth = 800f,
+            occupied = cornerWatermark,
+            gap = 24f,
+        )
+
+        assertEquals(580f, metadata.bottom, 0.001f)
+        assertTrue(!metadata.intersects(cornerWatermark))
     }
 
     @Test

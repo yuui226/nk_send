@@ -10,6 +10,14 @@ import androidx.lifecycle.viewModelScope
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
+import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
+import com.ztransfer.effects.FavoriteFrameWatermarkEffect
+import com.ztransfer.effects.FavoritePhotoFilter
+import com.ztransfer.effects.decodeFavoriteFrameEffects
+import com.ztransfer.effects.decodeFavoritePhotoFilters
+import com.ztransfer.effects.encodeFavoriteFrameEffects
+import com.ztransfer.effects.encodeFavoritePhotoFilters
 import com.ztransfer.frame.PhotoFrameDestination
 import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFramePreset
@@ -168,6 +176,8 @@ data class TransferState(
     val photoFrameWatermarkOpacityPercent: Int = DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
     val photoFrameWatermarkEffect: PhotoFrameWatermarkEffect = PhotoFrameWatermarkEffect.AUTO,
     val photoFilters: List<PhotoFilterPreset> = emptyList(),
+    val favoritePhotoFilters: List<FavoritePhotoFilter> = emptyList(),
+    val favoriteFrameEffects: List<FavoriteFrameWatermarkEffect> = emptyList(),
     val photoFilterEnabled: Boolean = false,
     val selectedPhotoFilterId: String? = null,
     val photoFilterIntensityPercent: Int = 100,
@@ -505,6 +515,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     init {
         val dir = prefs.getString("transfer_dir", null)
         val restoredPhotoFilters = BuiltInPhotoFilters.all
+        val validPhotoFilterCatalogKeys = restoredPhotoFilters
+            .mapNotNull { BuiltInPhotoFilters.catalogKey(it.id) }
+            .toSet()
+        val restoredFavoritePhotoFilters = decodeFavoritePhotoFilters(
+            prefs.getString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY, null),
+            validPhotoFilterCatalogKeys,
+        )
+        val restoredFavoriteFrameEffects = decodeFavoriteFrameEffects(
+            prefs.getString(FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY, null),
+        )
         val storedPhotoFilterId = prefs.getString("photo_filter_selected_id", null)
         val restoredPhotoFilterId = storedPhotoFilterId
             ?.takeIf { id -> restoredPhotoFilters.any { it.id == id } }
@@ -646,6 +666,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     )
                 }.getOrDefault(PhotoFrameWatermarkEffect.AUTO),
                 photoFilters = restoredPhotoFilters,
+                favoritePhotoFilters = restoredFavoritePhotoFilters,
+                favoriteFrameEffects = restoredFavoriteFrameEffects,
                 photoFilterEnabled = storedPhotoFilterId == restoredPhotoFilterId &&
                     prefs.getBoolean("photo_filter_enabled", false),
                 selectedPhotoFilterId = restoredPhotoFilterId,
@@ -809,6 +831,85 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val canEnable = enabled && _state.value.selectedPhotoFilterId != null
         prefs.edit().putBoolean("photo_filter_enabled", canEnable).apply()
         _state.update { it.copy(photoFilterEnabled = canEnable) }
+    }
+
+    fun toggleFavoritePhotoFilter(filterId: String, intensityPercent: Int) {
+        val catalogKey = BuiltInPhotoFilters.catalogKey(filterId) ?: return
+        val current = _state.value.favoritePhotoFilters
+        val updated = if (current.any { it.catalogKey == catalogKey }) {
+            current.filterNot { it.catalogKey == catalogKey }
+        } else {
+            current + FavoritePhotoFilter(
+                catalogKey = catalogKey,
+                intensityPercent = normalizePhotoFilterIntensity(intensityPercent),
+            )
+        }
+        persistFavoritePhotoFilters(updated)
+    }
+
+    fun updateFavoritePhotoFilterIntensity(filterId: String, intensityPercent: Int) {
+        val catalogKey = BuiltInPhotoFilters.catalogKey(filterId) ?: return
+        val current = _state.value.favoritePhotoFilters
+        if (current.none { it.catalogKey == catalogKey }) return
+        val updated = current.map { favorite ->
+            if (favorite.catalogKey == catalogKey) {
+                favorite.copy(
+                    intensityPercent = normalizePhotoFilterIntensity(intensityPercent),
+                )
+            } else {
+                favorite
+            }
+        }
+        persistFavoritePhotoFilters(updated)
+    }
+
+    fun toggleFavoriteFrameEffect(
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+    ) {
+        val current = _state.value.favoriteFrameEffects
+        val updated = if (current.any { it.framePreset == preset }) {
+            current.filterNot { it.framePreset == preset }
+        } else {
+            current + FavoriteFrameWatermarkEffect.capture(preset, watermark)
+        }
+        persistFavoriteFrameEffects(updated)
+    }
+
+    fun updateFavoriteFrameEffect(
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+    ) {
+        val current = _state.value.favoriteFrameEffects
+        if (current.none { it.framePreset == preset }) return
+        val updated = current.map { favorite ->
+            if (favorite.framePreset == preset) {
+                FavoriteFrameWatermarkEffect.capture(preset, watermark)
+            } else {
+                favorite
+            }
+        }
+        persistFavoriteFrameEffects(updated)
+    }
+
+    private fun persistFavoritePhotoFilters(favorites: List<FavoritePhotoFilter>) {
+        prefs.edit()
+            .putString(
+                FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
+                encodeFavoritePhotoFilters(favorites),
+            )
+            .apply()
+        _state.update { it.copy(favoritePhotoFilters = favorites) }
+    }
+
+    private fun persistFavoriteFrameEffects(favorites: List<FavoriteFrameWatermarkEffect>) {
+        prefs.edit()
+            .putString(
+                FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY,
+                encodeFavoriteFrameEffects(favorites),
+            )
+            .apply()
+        _state.update { it.copy(favoriteFrameEffects = favorites) }
     }
 
     fun setPhotoFilterConfiguration(
