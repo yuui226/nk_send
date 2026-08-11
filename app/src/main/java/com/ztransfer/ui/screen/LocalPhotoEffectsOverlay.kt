@@ -47,6 +47,7 @@ import com.ztransfer.frame.PhotoFrameMediaStoreSource
 import com.ztransfer.frame.PhotoFrameMetadata
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkContent
+import com.ztransfer.frame.LOCAL_PHOTO_FALLBACK_RELATIVE_PATH
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.viewmodel.TransferViewModel
@@ -342,7 +343,7 @@ fun LocalPhotoEffectsPage(
             } else {
                 PhotoEffectsRenderedPreview(
                     source = previewBitmap,
-                    hideSourceWhileRendering = true,
+                    resetOnSourceChange = true,
                     metadata = selection?.metadata ?: PhotoFrameMetadata(
                         make = null,
                         model = null,
@@ -456,7 +457,13 @@ fun LocalPhotoEffectsPage(
                         }
                         saving = false
                         result.fold(
-                            onSuccess = { showHint(savedFormat.format(it.displayName)) },
+                            onSuccess = { exportResult ->
+                                val savedDirectory = exportResult.relativePath
+                                    ?.trimEnd('/', '\\')
+                                    ?.takeIf(String::isNotBlank)
+                                    ?: LOCAL_PHOTO_FALLBACK_RELATIVE_PATH
+                                showHint(savedFormat.format(savedDirectory))
+                            },
                             onFailure = { showHint(saveFailedText) },
                         )
                     }

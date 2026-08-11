@@ -483,7 +483,7 @@
     <string name="local_photo_same_folder_hint">Saved beside the original, or to Pictures/ZTransfer when needed</string>
     <string name="local_photo_generate">Generate and save</string>
     <string name="local_photo_generating">Generating…</string>
-    <string name="local_photo_saved">Saved: %1$s</string>
+    <string name="local_photo_saved">Saved to: %1$s</string>
     <string name="local_photo_select_failed">Choose a writable photo stored on this phone</string>
     <string name="local_photo_save_failed">Couldn’t generate the photo. The original is unchanged.</string>
 </resources>

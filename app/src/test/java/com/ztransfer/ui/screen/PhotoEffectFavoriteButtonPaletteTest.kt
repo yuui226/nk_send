@@ -11,13 +11,6 @@ import org.junit.Test
 
 class PhotoEffectFavoriteButtonPaletteTest {
     @Test
-    fun favoriteWheelEntriesHaveASolidStarWithoutChangingNormalEntries() {
-        assertEquals("★ 清透", favoriteWheelLabel("清透", favorite = true))
-        assertEquals("清透", favoriteWheelLabel("清透", favorite = false))
-        assertEquals("无滤镜", favoriteWheelLabel("无滤镜", favorite = false))
-    }
-
-    @Test
     fun frostedGlassUsesTheCurrentThemeColors() {
         val inactive = Color(0xFF123456)
         val active = Color(0xFFABCDEF)

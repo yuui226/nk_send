@@ -199,7 +199,6 @@ private const val REMOTE_ROTATION_FADE_IN_MS = 140
 
 private data class RemoteRotationRequest(
     val rotation: Int,
-    val persist: Boolean,
 )
 
 /**
@@ -345,9 +344,8 @@ fun RemoteScreen(
     }
     val lifecycleOwner = LocalLifecycleOwner.current
     val screenScope = rememberCoroutineScope()
-    var rotation by remember {
-        mutableIntStateOf(transferState.remoteRotation.coerceIn(0, 2))
-    }
+    // 每次进入监看页都从竖向布局开始；横向只由本次会话中的手动旋转或陀螺仪触发。
+    var rotation by remember { mutableIntStateOf(0) }
     var switchingRotation by remember { mutableStateOf(false) }
     val rotationFade = remember { Animatable(1f) }
     val rotationRequests = remember { Channel<RemoteRotationRequest>(Channel.CONFLATED) }
@@ -373,7 +371,6 @@ fun RemoteScreen(
                     animationSpec = tween(REMOTE_ROTATION_FADE_OUT_MS),
                 )
                 rotation = request.rotation
-                if (request.persist) transferViewModel.setRemoteRotation(request.rotation)
                 // Let the new constraints/layout reach composition while the host is invisible.
                 withFrameNanos { }
                 rotationFade.animateTo(
@@ -401,7 +398,7 @@ fun RemoteScreen(
                         delay(REMOTE_ORIENTATION_STABLE_MS)
                         if (orientationSession.candidateRotation == candidate) {
                             rotationRequests.trySend(
-                                RemoteRotationRequest(rotation = candidate, persist = false)
+                                RemoteRotationRequest(rotation = candidate)
                             )
                         }
                     }
@@ -432,7 +429,7 @@ fun RemoteScreen(
         if (switchingRotation) return
         orientationSession.suppressCurrentDirection()
         rotationRequests.trySend(
-            RemoteRotationRequest(rotation = (rotation + 1) % 3, persist = true)
+            RemoteRotationRequest(rotation = (rotation + 1) % 3)
         )
     }
     // 免费版监看限时:每天累计 FREE_REMOTE_DAILY_MS(无单次概念),自然日重置。

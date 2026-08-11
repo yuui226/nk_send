@@ -59,7 +59,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -1382,6 +1383,7 @@ internal fun PhotoFilterEditor(
 ) {
     val colors = AppTheme.colors
     val filterAccent = colors.accentBlue
+    val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
     val haptics = rememberHaptics(hapticsEnabled)
     val selected = filters.firstOrNull { it.id == selectedId }
     val normalizedIntensity = normalizePhotoFilterIntensity(intensityPercent)
@@ -1410,13 +1412,14 @@ internal fun PhotoFilterEditor(
                     if (filterId == null) {
                         offLabel
                     } else {
-                        val catalogKey = BuiltInPhotoFilters.catalogKey(filterId)
-                        favoriteWheelLabel(
-                            label = filterLabelsById[filterId].orEmpty(),
-                            favorite = catalogKey != null && catalogKey in favoriteByCatalogKey,
-                        )
+                        filterLabelsById[filterId].orEmpty()
                     }
                 },
+                favoriteOption = { filterId ->
+                    filterId != null && BuiltInPhotoFilters.catalogKey(filterId)
+                        ?.let(favoriteByCatalogKey::containsKey) == true
+                },
+                favoriteIconColor = favoritePalette.activeIcon,
                 onValueCommitted = { filterId ->
                     if (filterId == null) {
                         onDisabled()
@@ -1433,7 +1436,7 @@ internal fun PhotoFilterEditor(
                 label = stringResource(R.string.photo_filter),
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = filterAccent,
-                modifier = Modifier.weight(1.45f),
+                modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
             )
             ReleaseCommitWheel(
                 options = intensityChoices,
@@ -1453,7 +1456,7 @@ internal fun PhotoFilterEditor(
                 enabled = enabled && selected != null,
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = filterAccent,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT),
             )
             FavoriteToggleButton(
                 favorite = selected?.let { preset ->
@@ -1515,22 +1518,7 @@ private fun FavoriteToggleButton(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    val colors = AppTheme.colors
-    val buttonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
-    val buttonDark = colors.background.luminance() < 0.5f
-    val palette = remember(
-        buttonSkin,
-        buttonDark,
-        colors.onSurfaceVariant,
-        colors.accentOrange,
-    ) {
-        photoEffectFavoriteButtonPalette(
-            skin = buttonSkin,
-            dark = buttonDark,
-            defaultInactiveIcon = colors.onSurfaceVariant,
-            defaultActive = colors.accentOrange,
-        )
-    }
+    val palette = rememberPhotoEffectFavoriteButtonPalette()
     val markColor by animateColorAsState(
         targetValue = if (favorite) palette.activeIcon else palette.inactiveIcon,
         animationSpec = tween(180),
@@ -1558,7 +1546,7 @@ private fun FavoriteToggleButton(
             label = "photoEffectFavorite",
         ) { selected ->
             Icon(
-                imageVector = if (selected) Icons.Default.Star else Icons.Outlined.StarBorder,
+                imageVector = if (selected) Icons.Rounded.Star else Icons.Rounded.StarBorder,
                 contentDescription = stringResource(
                     if (selected) R.string.photo_effect_favorite_remove
                     else R.string.photo_effect_favorite_add,
@@ -1567,6 +1555,26 @@ private fun FavoriteToggleButton(
                 modifier = Modifier.size(22.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun rememberPhotoEffectFavoriteButtonPalette(): PhotoEffectFavoriteButtonPalette {
+    val colors = AppTheme.colors
+    val buttonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val buttonDark = colors.background.luminance() < 0.5f
+    return remember(
+        buttonSkin,
+        buttonDark,
+        colors.onSurfaceVariant,
+        colors.accentOrange,
+    ) {
+        photoEffectFavoriteButtonPalette(
+            skin = buttonSkin,
+            dark = buttonDark,
+            defaultInactiveIcon = colors.onSurfaceVariant,
+            defaultActive = colors.accentOrange,
+        )
     }
 }
 
@@ -1638,6 +1646,7 @@ internal fun PhotoFrameWatermarkEditor(
     val colors = AppTheme.colors
     val frameAccent = colors.accentOrange
     val watermarkAccent = colors.accentPurple
+    val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
     val haptics = rememberHaptics(hapticsEnabled)
     val focusManager = LocalFocusManager.current
     val proLockInteractionSource = remember { MutableInteractionSource() }
@@ -1745,12 +1754,13 @@ internal fun PhotoFrameWatermarkEditor(
                     if (framePreset == null) {
                         frameOffLabel
                     } else {
-                        favoriteWheelLabel(
-                            label = checkNotNull(frameLabels[framePreset]),
-                            favorite = framePreset in favoriteByPreset,
-                        )
+                        checkNotNull(frameLabels[framePreset])
                     }
                 },
+                favoriteOption = { framePreset ->
+                    framePreset != null && framePreset in favoriteByPreset
+                },
+                favoriteIconColor = favoritePalette.activeIcon,
                 onValueCommitted = { selectedPreset ->
                     focusManager.clearFocus()
                     if (selectedPreset == null) {
@@ -1774,9 +1784,9 @@ internal fun PhotoFrameWatermarkEditor(
                 label = stringResource(R.string.photo_frame_style_short),
                 wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
                 accentColor = frameAccent,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
             )
-            Box(modifier = Modifier.weight(1f)) {
+            Box(modifier = Modifier.weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT)) {
                 ReleaseCommitWheel(
                     options = watermarkEnabledChoices,
                     selected = watermarkEnabledChoices.first {
@@ -2091,9 +2101,6 @@ internal fun PhotoFrameWatermarkEditor(
     }
 }
 
-internal fun favoriteWheelLabel(label: String, favorite: Boolean): String =
-    if (favorite) "★ $label" else label
-
 /**
  * 只监听没有被输入框、按钮或滚动消费的轻点；因此点空白可收起键盘，点输入框本身不会
  * 被父层抢走焦点，拖动页面也不会误触发。
@@ -2242,7 +2249,7 @@ private fun PhotoEffectsPreviewLoadingPlaceholder() {
 @Composable
 internal fun PhotoEffectsRenderedPreview(
     source: Bitmap,
-    hideSourceWhileRendering: Boolean = false,
+    resetOnSourceChange: Boolean = false,
     metadata: PhotoFrameMetadata = PHOTO_EFFECTS_PREVIEW_METADATA,
     sourceRotationQuarterTurns: Int,
     requestedRotationQuarterTurns: Int,
@@ -2256,9 +2263,9 @@ internal fun PhotoEffectsRenderedPreview(
 ) {
     val colors = AppTheme.colors
     val context = LocalContext.current
-    // Keep the connected-camera frame stable during FHD upgrades. The phone-photo workbench keys
-    // these states by source so a replacement cannot reveal the raw or previously selected photo.
-    val sourceRenderIdentity: Any = if (hideSourceWhileRendering) source else Unit
+    // 相机缩略图升级为 FHD 时保留旧效果帧；本地工作台换照片则按源重置，避免串图。
+    // 两种入口在首张效果帧完成前都不直接绘制原图。
+    val sourceRenderIdentity: Any = if (resetOnSourceChange) source else Unit
     val rendered = remember(sourceRenderIdentity) {
         mutableStateOf<RenderedPhotoEffectsPreview?>(null)
     }
@@ -2390,9 +2397,8 @@ internal fun PhotoEffectsRenderedPreview(
         animationSpec = Motion.overlayExpand,
         label = "photoFramePreviewAspectRatio",
     )
-    // 相机预览只在组件首次出现时渐显；手机工作台按新照片重置并从占位直接渐入成片。
-    // 旋转或同一照片的高清源升级不会重置，避免再次露出原片。
-    val firstFrameVisibility = remember(sourceRenderIdentity) { Animatable(0f) }
+    // 首张效果帧就绪前保持图片区为空；不绘制原图、遮罩或加载层。
+    // 本地工作台按新照片重置，相机的高清源升级不重置。
     val replacementVisibility = remember(sourceRenderIdentity) { Animatable(1f) }
     var visibleFrame by remember(sourceRenderIdentity) {
         mutableStateOf<RenderedPhotoEffectsPreview?>(null)
@@ -2436,13 +2442,6 @@ internal fun PhotoEffectsRenderedPreview(
             visibleFrame = next
             outgoingFrame = null
             frameTransition.snapTo(1f)
-            firstFrameVisibility.snapTo(0f)
-            // 原图继续稳稳托底；等效果纹理进入组合树一帧后再渐显，避免首张成片硬切。
-            withFrameNanos { }
-            firstFrameVisibility.animateTo(
-                1f,
-                tween(durationMillis = 220, easing = FastOutSlowInEasing),
-            )
         } else if (current.bitmap === next.bitmap) {
             // 无滤镜对比图稍后补齐时只更新数据，不触发第二次画面过渡。
             visibleFrame = next
@@ -2524,38 +2523,14 @@ internal fun PhotoEffectsRenderedPreview(
                     )
                 },
         ) {
-            if (preview == null && !previewFailed) {
-                // 相机设置预览继续用 FHD 托底；手机工作台等待成片后再一次显示，避免原图闪现。
-                if (hideSourceWhileRendering) {
-                    PhotoEffectsPreviewRenderPlaceholder()
-                } else {
-                    FittedRotatingBitmap(
-                        image = sourceImage,
-                        rotationDegrees = 0f,
-                        description = stringResource(R.string.photo_frame_preview),
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            } else if (preview != null) {
-                if (firstFrameVisibility.value < 1f) {
-                    if (hideSourceWhileRendering) {
-                        PhotoEffectsPreviewRenderPlaceholder()
-                    } else {
-                        FittedRotatingBitmap(
-                            image = sourceImage,
-                            rotationDegrees = 0f,
-                            description = null,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
+            if (preview != null) {
                 outgoingFrame?.let { frame ->
                     PhotoEffectsPreviewLayer(
                         frame = frame,
                         showUnfiltered = showUnfiltered,
                         // 旧帧保持不透明作为底层，新帧只负责渐入；总画面始终不透底，
                         // 避免普通双向淡化在中点产生一次明显的亮度闪烁。
-                        alpha = firstFrameVisibility.value * replacementVisibility.value,
+                        alpha = replacementVisibility.value,
                         description = null,
                     )
                 }
@@ -2563,12 +2538,12 @@ internal fun PhotoEffectsRenderedPreview(
                     PhotoEffectsPreviewLayer(
                         frame = frame,
                         showUnfiltered = showUnfiltered,
-                        alpha = firstFrameVisibility.value * replacementVisibility.value *
+                        alpha = replacementVisibility.value *
                             if (outgoingFrame == null) 1f else frameTransition.value,
                         description = stringResource(R.string.photo_frame_preview),
                     )
                 }
-            } else {
+            } else if (previewFailed) {
                 Image(
                     bitmap = sourceImage,
                     contentDescription = stringResource(R.string.photo_frame_preview),
@@ -2607,23 +2582,6 @@ internal fun PhotoEffectsRenderedPreview(
 }
 
 @Composable
-private fun PhotoEffectsPreviewRenderPlaceholder() {
-    val colors = AppTheme.colors
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.glassSurface.copy(alpha = 0.38f)),
-    ) {
-        CircularProgressIndicator(
-            color = colors.accentBlue.copy(alpha = 0.78f),
-            strokeWidth = 2.dp,
-            modifier = Modifier.size(22.dp),
-        )
-    }
-}
-
-@Composable
 private fun PhotoEffectsPreviewLayer(
     frame: RenderedPhotoEffectsPreview,
     showUnfiltered: Boolean,
@@ -2649,6 +2607,9 @@ private fun PhotoEffectsPreviewLayer(
 private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
 private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
 private val PHOTO_EFFECTS_CONTROL_HEIGHT = 48.dp
+// 顶部两行共用 4:3 栅格：名称类波轮更舒展，数值/开关波轮更紧凑，收藏方钮保持对齐。
+private const val PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT = 4f
+private const val PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT = 3f
 // 与相机 FHD 预览源保持一致，避免高密度屏幕或放大查看时出现二次缩放模糊。
 private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_920
 private const val PHOTO_EFFECTS_COMPARISON_DELAY_MS = 500L

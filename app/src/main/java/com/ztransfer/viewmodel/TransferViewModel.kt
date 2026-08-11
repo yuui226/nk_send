@@ -181,8 +181,6 @@ data class TransferState(
     val photoFilterEnabled: Boolean = false,
     val selectedPhotoFilterId: String? = null,
     val photoFilterIntensityPercent: Int = 100,
-    // 监看页是否使用应用内横屏全屏布局。跨进页、跨应用重启持久化。
-    val remoteRotation: Int = 0,  // 0=竖屏, 1=横90°, 2=横270°
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
     // 切换后由设置面板触发 Activity.recreate() 生效。
     val appLanguage: String = AppLocale.SYSTEM
@@ -674,7 +672,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 photoFilterIntensityPercent = normalizePhotoFilterIntensity(
                     prefs.getInt("photo_filter_intensity", 100),
                 ),
-                remoteRotation = prefs.getInt("remote_rotation", 0),
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
         }
@@ -957,12 +954,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
             onComplete(result)
         }
-    }
-
-    /** 保存监看页的应用内横屏状态；不改变 Android Activity 的系统方向。 */
-    fun setRemoteRotation(rotation: Int) {
-        prefs.edit().putInt("remote_rotation", rotation).apply()
-        _state.update { it.copy(remoteRotation = rotation) }
     }
 
     /** 应用内语言；写入后需 Activity.recreate() 才对界面生效（attachBaseContext 重读偏好）。 */

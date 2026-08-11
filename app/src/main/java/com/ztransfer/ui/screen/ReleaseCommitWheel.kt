@@ -7,11 +7,21 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,8 +49,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import com.ztransfer.ui.theme.AppTheme
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -81,6 +89,8 @@ internal fun <T> ReleaseCommitWheel(
     enabled: Boolean = true,
     wheelHeight: Dp = 54.dp,
     accentColor: Color? = null,
+    favoriteOption: (T) -> Boolean = { false },
+    favoriteIconColor: Color? = null,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
@@ -93,6 +103,7 @@ internal fun <T> ReleaseCommitWheel(
     val latestOptions by rememberUpdatedState(options)
     val latestCommit by rememberUpdatedState(onValueCommitted)
     val latestDetent by rememberUpdatedState(onDetent)
+    val latestFavoriteOption by rememberUpdatedState(favoriteOption)
 
     var dragging by remember { mutableStateOf(false) }
     var position by remember { mutableFloatStateOf(selectedIndex.toFloat()) }
@@ -143,6 +154,7 @@ internal fun <T> ReleaseCommitWheel(
             .semantics {
                 contentDescription = buildString {
                     if (!label.isNullOrBlank()) append("$label, ")
+                    if (latestFavoriteOption(options[selectedIndex])) append("★ ")
                     append(optionLabel(options[selectedIndex]))
                 }
             }
@@ -229,27 +241,59 @@ internal fun <T> ReleaseCommitWheel(
                 // 与监看参数拨轮一致：静止时只显示中心真值，只有实际拖动后才显示邻档。
                 if (!dragging && index != idleCenter) continue
                 val distance = abs(index - position)
-                Text(
-                    text = optionLabel(options[index]),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontSize = 14.sp,
-                    lineHeight = 16.sp,
-                    fontWeight = if (distance < 0.5f) FontWeight.SemiBold else FontWeight.Normal,
-                    color = colors.onBackground.copy(
-                        alpha = if (distance < 0.5f) 1f else 0.38f
-                    ),
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .offset {
-                            IntOffset(
-                                x = 0,
-                                y = (rowPx * (index - position)).roundToInt(),
-                            )
-                        },
-                )
+                val itemAlpha = if (distance < 0.5f) 1f else 0.38f
+                val itemModifier = Modifier
+                    .fillMaxWidth()
+                    .offset {
+                        IntOffset(
+                            x = 0,
+                            y = (rowPx * (index - position)).roundToInt(),
+                        )
+                    }
+                val textStyle = MaterialTheme.typography.labelMedium
+                val textWeight = if (distance < 0.5f) {
+                    FontWeight.SemiBold
+                } else {
+                    FontWeight.Normal
+                }
+                if (favoriteOption(options[index])) {
+                    Row(
+                        modifier = itemModifier,
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Star,
+                            contentDescription = null,
+                            tint = (favoriteIconColor ?: resolvedAccent).copy(alpha = itemAlpha),
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Spacer(Modifier.width(3.dp))
+                        Text(
+                            text = optionLabel(options[index]),
+                            style = textStyle,
+                            fontSize = 14.sp,
+                            lineHeight = 16.sp,
+                            fontWeight = textWeight,
+                            color = colors.onBackground.copy(alpha = itemAlpha),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                } else {
+                    Text(
+                        text = optionLabel(options[index]),
+                        style = textStyle,
+                        fontSize = 14.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = textWeight,
+                        color = colors.onBackground.copy(alpha = itemAlpha),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = itemModifier,
+                    )
+                }
             }
         }
     }

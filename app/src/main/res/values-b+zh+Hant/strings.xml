@@ -481,7 +481,7 @@
     <string name="local_photo_same_folder_hint">優先儲存到原目錄；無法寫入時自動儲存到 Pictures/ZTransfer</string>
     <string name="local_photo_generate">產生並儲存</string>
     <string name="local_photo_generating">正在產生…</string>
-    <string name="local_photo_saved">已儲存：%1$s</string>
+    <string name="local_photo_saved">已儲存至：%1$s</string>
     <string name="local_photo_select_failed">請選擇儲存在本機相簿中且可寫入的照片</string>
     <string name="local_photo_save_failed">產生失敗，原照片未受影響</string>
 </resources>

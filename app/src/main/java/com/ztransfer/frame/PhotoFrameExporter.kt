@@ -223,6 +223,7 @@ internal fun photoFrameWatermarkImageFile(context: Context, imageHash: String): 
 
 data class PhotoFrameExportResult(
     val displayName: String,
+    val relativePath: String? = null,
 )
 
 internal const val LOCAL_PHOTO_FALLBACK_RELATIVE_PATH = "Pictures/ZTransfer"
@@ -3389,7 +3390,10 @@ object PhotoFrameExporter {
             keepTarget = true
             val publishedName = displayNameOf(resolver, target) ?: name
             occupiedNames.add(publishedName)
-            return PhotoFrameExportResult(displayName = publishedName)
+            return PhotoFrameExportResult(
+                displayName = publishedName,
+                relativePath = relativePath,
+            )
         } finally {
             if (!keepTarget) runCatching { resolver.delete(target, null, null) }
         }

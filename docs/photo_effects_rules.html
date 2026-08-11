@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>滤镜·边框·水印｜当前实现规则</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18201d;
+      --muted: #66706b;
+      --paper: #f6f7f3;
+      --panel: rgba(255, 255, 255, .82);
+      --line: rgba(24, 32, 29, .11);
+      --filter: #5d7e70;
+      --filter-soft: #e5eee9;
+      --frame: #9a6547;
+      --frame-soft: #f3e7de;
+      --mark: #6f6a9d;
+      --mark-soft: #eceaf6;
+      --gold: #b98525;
+      --gold-soft: #f7ecd5;
+      --good: #3f765c;
+      --good-soft: #e5f1ea;
+      --warn: #9a6426;
+      --warn-soft: #f8ead6;
+      --shadow: 0 18px 50px rgba(28, 38, 33, .08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 0%, rgba(121, 151, 133, .15), transparent 28rem),
+        radial-gradient(circle at 94% 14%, rgba(197, 151, 114, .13), transparent 25rem),
+        var(--paper);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+    }
+
+    button { font: inherit; }
+
+    .shell {
+      width: min(1240px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 44px 0 72px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 42px;
+      border: 1px solid var(--line);
+      border-radius: 30px;
+      background: rgba(255, 255, 255, .76);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(20px);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 360px;
+      height: 360px;
+      right: -180px;
+      top: -220px;
+      border-radius: 50%;
+      background: conic-gradient(from 30deg, var(--filter-soft), var(--frame-soft), var(--mark-soft));
+      opacity: .8;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      position: relative;
+      z-index: 1;
+      margin: 0;
+      font-size: clamp(34px, 5vw, 62px);
+      line-height: 1.08;
+      letter-spacing: -.055em;
+    }
+
+    .lead {
+      position: relative;
+      z-index: 1;
+      max-width: 760px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .stats {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 30px;
+    }
+
+    .stat {
+      padding: 15px 16px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(250, 251, 248, .78);
+    }
+
+    .stat strong { display: block; font-size: 23px; line-height: 1.15; }
+    .stat span { color: var(--muted); font-size: 12px; }
+
+    .tabs {
+      position: sticky;
+      z-index: 20;
+      top: 12px;
+      display: flex;
+      gap: 6px;
+      width: fit-content;
+      max-width: 100%;
+      margin: 22px auto 28px;
+      padding: 6px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(248, 249, 246, .84);
+      box-shadow: 0 10px 28px rgba(28, 38, 33, .08);
+      backdrop-filter: blur(18px);
+    }
+
+    .tab {
+      min-width: max-content;
+      padding: 9px 18px;
+      border: 0;
+      border-radius: 999px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      transition: color .18s ease, background .18s ease, transform .18s ease;
+    }
+
+    .tab:hover { color: var(--ink); }
+    .tab:active { transform: scale(.97); }
+    .tab.active { color: #fff; background: var(--ink); }
+
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .section-head { margin: 38px 0 18px; }
+    .section-head h2 { margin: 0; font-size: 27px; letter-spacing: -.03em; }
+    .section-head p { margin: 5px 0 0; color: var(--muted); }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+    .filter-chip { color: var(--filter); background: var(--filter-soft); }
+    .frame-chip { color: var(--frame); background: var(--frame-soft); }
+    .mark-chip { color: var(--mark); background: var(--mark-soft); }
+    .shared-chip { color: var(--gold); background: var(--gold-soft); }
+
+    .flow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 210px minmax(0, 1fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .card {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: 0 10px 28px rgba(28, 38, 33, .045);
+    }
+
+    .card h3 { margin: 0 0 6px; font-size: 19px; letter-spacing: -.02em; }
+    .card p { margin: 0; color: var(--muted); font-size: 14px; }
+    .route-a { border-top: 4px solid var(--frame); }
+    .route-b { border-top: 4px solid var(--filter); }
+
+    .route-label {
+      display: inline-flex;
+      margin-bottom: 14px;
+      padding: 3px 8px;
+      border-radius: 7px;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: .06em;
+    }
+    .route-a .route-label { background: var(--frame); }
+    .route-b .route-label { background: var(--filter); }
+
+    .steps { display: grid; gap: 8px; margin-top: 18px; }
+    .step {
+      position: relative;
+      padding: 11px 12px 11px 38px;
+      border-radius: 13px;
+      background: rgba(245, 246, 242, .9);
+      color: #35403b;
+      font-size: 13px;
+    }
+    .step b {
+      position: absolute;
+      left: 11px;
+      top: 10px;
+      width: 19px;
+      height: 19px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--muted);
+      background: white;
+      font-size: 10px;
+      line-height: 18px;
+      text-align: center;
+    }
+
+    .shared {
+      display: grid;
+      place-content: center;
+      min-height: 100%;
+      padding: 20px 16px;
+      border: 1px dashed rgba(185, 133, 37, .5);
+      border-radius: 22px;
+      color: #765816;
+      background: var(--gold-soft);
+      text-align: center;
+    }
+    .star { font-size: 28px; line-height: 1; }
+    .shared strong { display: block; margin: 8px 0 2px; }
+    .shared small { color: #856d3d; }
+    .shared .arrow { margin: 12px 0; color: var(--gold); letter-spacing: 8px; }
+
+    .matrix {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: var(--panel);
+    }
+    .matrix-row {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr 1fr;
+      border-top: 1px solid var(--line);
+    }
+    .matrix-row:first-child { border-top: 0; }
+    .matrix-row > div { padding: 14px 16px; border-left: 1px solid var(--line); }
+    .matrix-row > div:first-child { border-left: 0; }
+    .matrix-head { color: var(--muted); background: rgba(238, 240, 235, .75); font-size: 12px; font-weight: 700; }
+    .yes { color: var(--good); font-weight: 700; }
+    .no { color: var(--muted); }
+
+    .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .logic-card { position: relative; overflow: hidden; min-height: 290px; }
+    .logic-card::before { content: ""; position: absolute; inset: 0 0 auto; height: 5px; background: var(--accent); }
+    .logic-card.filter { --accent: var(--filter); --soft: var(--filter-soft); }
+    .logic-card.frame { --accent: var(--frame); --soft: var(--frame-soft); }
+    .logic-card.mark { --accent: var(--mark); --soft: var(--mark-soft); }
+    .logic-card .number {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      margin-bottom: 16px;
+      border-radius: 12px;
+      color: var(--accent);
+      background: var(--soft);
+      font-weight: 800;
+    }
+    .rule-list { display: grid; gap: 9px; margin: 17px 0 0; padding: 0; list-style: none; }
+    .rule-list li { padding-left: 16px; color: #46504c; font-size: 13px; }
+    .rule-list li::before { content: "•"; float: left; margin-left: -15px; color: var(--accent); font-weight: 900; }
+
+    .callout {
+      display: flex;
+      gap: 13px;
+      align-items: flex-start;
+      margin-top: 14px;
+      padding: 16px 18px;
+      border: 1px solid rgba(63, 118, 92, .2);
+      border-radius: 16px;
+      background: var(--good-soft);
+    }
+    .callout b { white-space: nowrap; color: var(--good); }
+    .callout p { margin: 0; color: #456254; font-size: 13px; }
+
+    .favorite-layout { display: grid; grid-template-columns: .86fr 1.14fr; gap: 16px; }
+    .wheel {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: #202623;
+      color: #f7faf8;
+      box-shadow: var(--shadow);
+    }
+    .wheel-label { color: #aab5af; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+    .wheel-window {
+      position: relative;
+      margin-top: 12px;
+      padding: 5px 0;
+      overflow: hidden;
+      border-radius: 16px;
+      background: linear-gradient(#303835, #242b28 37%, #242b28 63%, #303835);
+    }
+    .wheel-window::after {
+      content: "";
+      position: absolute;
+      left: 8px; right: 8px; top: 50%;
+      height: 42px;
+      transform: translateY(-50%);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 11px;
+      background: rgba(255,255,255,.055);
+      pointer-events: none;
+    }
+    .wheel-item { height: 42px; color: #87928c; line-height: 42px; text-align: center; }
+    .wheel-item.selected { color: #fff; font-weight: 720; }
+    .wheel-item .filled { color: #f4bf4e; }
+
+    .favorite-rules { display: grid; gap: 12px; }
+    .fav-row { display: grid; grid-template-columns: 40px 1fr; gap: 13px; align-items: start; }
+    .fav-icon {
+      display: grid;
+      place-items: center;
+      width: 40px; height: 40px;
+      border-radius: 13px;
+      color: var(--gold);
+      background: var(--gold-soft);
+      font-size: 20px;
+    }
+    .fav-row h3 { margin: 0; font-size: 15px; }
+    .fav-row p { margin-top: 2px; font-size: 13px; }
+
+    .simulator { margin-top: 18px; }
+    .sim-controls { display: flex; flex-wrap: wrap; gap: 9px; margin: 14px 0; }
+    .choice {
+      padding: 8px 13px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--muted);
+      background: white;
+      cursor: pointer;
+    }
+    .choice.active { color: white; border-color: var(--ink); background: var(--ink); }
+    .sim-result {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 14px;
+      align-items: center;
+      padding: 18px;
+      border-radius: 16px;
+      background: #f0f2ed;
+    }
+    .sim-result strong { display: block; }
+    .sim-result span { color: var(--muted); font-size: 12px; }
+    .sim-result .exchange { color: var(--gold); font-size: 21px; }
+
+    .pipeline { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+    .pipe-step { position: relative; min-height: 150px; padding: 19px; }
+    .pipe-step:not(:last-child)::after {
+      content: "›";
+      position: absolute;
+      z-index: 2;
+      right: -18px;
+      top: 50%;
+      width: 25px; height: 25px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--muted);
+      background: var(--paper);
+      line-height: 22px;
+      text-align: center;
+    }
+    .pipe-step i { display: block; color: var(--muted); font-size: 11px; font-style: normal; }
+    .pipe-step b { display: block; margin: 7px 0; font-size: 15px; }
+    .pipe-step p { font-size: 12px; }
+
+    details {
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+    }
+    summary { padding: 14px 17px; cursor: pointer; font-weight: 700; }
+    details > div { padding: 0 17px 16px; color: var(--muted); font-size: 13px; }
+
+    .audit { display: grid; gap: 11px; }
+    .audit-item {
+      display: grid;
+      grid-template-columns: 98px 1fr;
+      gap: 15px;
+      align-items: start;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: var(--panel);
+    }
+    .status {
+      display: inline-flex;
+      justify-content: center;
+      padding: 5px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .status.ok { color: var(--good); background: var(--good-soft); }
+    .status.check { color: var(--warn); background: var(--warn-soft); }
+    .audit-item h3 { margin: 0; font-size: 15px; }
+    .audit-item p { margin: 3px 0 0; font-size: 13px; }
+
+    .source-note {
+      margin-top: 28px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    code { padding: 2px 5px; border-radius: 6px; background: rgba(24,32,29,.06); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+    @media (max-width: 900px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .flow, .favorite-layout { grid-template-columns: 1fr; }
+      .shared { min-height: 180px; }
+      .shared .arrow { transform: rotate(90deg); }
+      .trio { grid-template-columns: 1fr; }
+      .pipeline { grid-template-columns: 1fr 1fr; }
+      .pipe-step:not(:last-child)::after { display: none; }
+    }
+
+    @media (max-width: 580px) {
+      .shell { width: min(100% - 22px, 1240px); padding-top: 16px; }
+      .hero { padding: 28px 22px; border-radius: 23px; }
+      .stats { grid-template-columns: 1fr 1fr; }
+      .stat { padding: 12px; }
+      .flow, .pipeline { grid-template-columns: 1fr; }
+      .matrix-row { grid-template-columns: 1.3fr .85fr .85fr; font-size: 12px; }
+      .matrix-row > div { padding: 11px 9px; }
+      .sim-result { grid-template-columns: 1fr; }
+      .sim-result .exchange { transform: rotate(90deg); justify-self: center; }
+      .audit-item { grid-template-columns: 1fr; gap: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">Current implementation map · 2026-08-11</p>
+      <h1>滤镜·边框·水印</h1>
+      <p class="lead">这不是未来方案，而是按当前代码整理的行为地图。重点检查两个入口的状态边界、收藏恢复内容、渲染顺序，以及品牌边框的水印避让规则。</p>
+      <div class="stats">
+        <div class="stat"><strong>2</strong><span>实际入口</span></div>
+        <div class="stat"><strong>50</strong><span>内置 NP3 滤镜</span></div>
+        <div class="stat"><strong>8</strong><span>边框样式</span></div>
+        <div class="stat"><strong>1 套</strong><span>全局共享收藏</span></div>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="规则分类">
+      <button class="tab active" data-page="overview">总体结构</button>
+      <button class="tab" data-page="favorites">收藏逻辑</button>
+      <button class="tab" data-page="render">渲染与导出</button>
+      <button class="tab" data-page="audit">待确认规则</button>
+    </nav>
+
+    <section class="page active" id="overview">
+      <div class="section-head">
+        <h2>两个入口，一套收藏，两套当前配置</h2>
+        <p>两边能看见同样的收藏与排序，但不会互相切换当前正在使用的效果。</p>
+        <div class="legend">
+          <span class="chip filter-chip">滤镜</span>
+          <span class="chip frame-chip">边框</span>
+          <span class="chip mark-chip">水印</span>
+          <span class="chip shared-chip">共享收藏</span>
+        </div>
+      </div>
+
+      <div class="flow">
+        <article class="card route-a">
+          <span class="route-label">入口 A</span>
+          <h3>照片列表页 · 设置弹窗</h3>
+          <p>编辑相机传输照片的默认效果。首页设置弹窗已隐藏该入口。</p>
+          <div class="steps">
+            <div class="step"><b>1</b>选择滤镜、强度、边框和水印</div>
+            <div class="step"><b>2</b>离开编辑页或关闭弹窗时提交</div>
+            <div class="step"><b>3</b>之后加入队列的任务复制一份配置快照</div>
+            <div class="step"><b>4</b>原图传完后另存效果图</div>
+          </div>
+        </article>
+
+        <aside class="shared">
+          <div class="star">★</div>
+          <strong>全局收藏仓库</strong>
+          <small>滤镜收藏 + 边框水印收藏</small>
+          <div class="arrow">← →</div>
+          <small>共享星标、顺序和收藏参数<br>不共享当前选中项</small>
+        </aside>
+
+        <article class="card route-b">
+          <span class="route-label">入口 B</span>
+          <h3>首页 · 本地照片工作台</h3>
+          <p>先选手机中的真实照片，再预览并保存，不进入相机传输任务。</p>
+          <div class="steps">
+            <div class="step"><b>1</b>照片只在本次进入期间保留</div>
+            <div class="step"><b>2</b>滤镜、边框、水印当前配置独立持久化</div>
+            <div class="step"><b>3</b>下次进入恢复控制项，但不恢复上次照片</div>
+            <div class="step"><b>4</b>保存到原图旁；失败则转到 Pictures/ZTransfer</div>
+          </div>
+        </article>
+      </div>
+
+      <div class="section-head">
+        <h2>状态边界</h2>
+        <p>“共享”只指收藏数据，不等于两个入口的编辑器同步。</p>
+      </div>
+      <div class="matrix">
+        <div class="matrix-row matrix-head"><div>数据</div><div>两个入口共享？</div><div>会持久化？</div></div>
+        <div class="matrix-row"><div>收藏的滤镜 + 收藏强度</div><div class="yes">共享</div><div class="yes">是</div></div>
+        <div class="matrix-row"><div>收藏的边框 + 水印表现参数</div><div class="yes">共享</div><div class="yes">是</div></div>
+        <div class="matrix-row"><div>当前选择的滤镜 / 边框 / 水印</div><div class="no">各自独立</div><div class="yes">各自保存</div></div>
+        <div class="matrix-row"><div>水印当前文本 / 当前图片</div><div class="no">各入口可不同</div><div class="yes">属于当前配置</div></div>
+        <div class="matrix-row"><div>工作台当前选择的照片</div><div class="no">不共享</div><div class="no">不保存</div></div>
+        <div class="matrix-row"><div>已加入传输队列任务的效果配置</div><div class="no">任务自身快照</div><div class="yes">随任务保存</div></div>
+      </div>
+
+      <div class="section-head">
+        <h2>三个视觉区域的实际规则</h2>
+        <p>编辑器用轻微不同的区域底色区分三组波轮；标题不再额外显示“｜照片滤镜”等竖杠分区名。</p>
+      </div>
+      <div class="trio">
+        <article class="card logic-card filter">
+          <div class="number">50</div>
+          <h3>滤镜</h3>
+          <p>50 个挑选后的 NP3 参数预设，转换为 App 内的 sRGB 近似效果。</p>
+          <ul class="rule-list">
+            <li>“无滤镜”永远在波轮第一项</li>
+            <li>收藏项按收藏时间置顶，并在名称前显示实心星</li>
+            <li>选中使用稳定滤镜 ID，不使用会随排序变化的索引</li>
+            <li>强度为 2%～100%，每档 2%；关闭使用“无滤镜”</li>
+            <li>滤镜只作用于照片像素，不染色边框与文字</li>
+          </ul>
+        </article>
+
+        <article class="card logic-card frame">
+          <div class="number">8</div>
+          <h3>边框</h3>
+          <p>雾白、暗夜、简白、毛玻璃、铭牌、沉浸、品牌内嵌、品牌留白。</p>
+          <ul class="rule-list">
+            <li>“关闭”永远在波轮第一项</li>
+            <li>收藏项置顶，名称前显示实心星</li>
+            <li>边框关闭时，水印仍可单独开启</li>
+            <li>品牌为空且无法从型号识别时，不显示 CAMERA 占位</li>
+            <li>品牌信息与 EXIF 只在真实相交时避让水印</li>
+          </ul>
+        </article>
+
+        <article class="card logic-card mark">
+          <div class="number">11</div>
+          <h3>水印</h3>
+          <p>文字或图片；支持 5 种字体、11 个位置、6 种颜色与 4 种效果。</p>
+          <ul class="rule-list">
+            <li>文字最多 24 个 Unicode 字符，换行会变为空格</li>
+            <li>图片复制到 App 私有目录，配置只保存内容哈希</li>
+            <li>“随样式”按当前边框选择设计位置</li>
+            <li>照片内位置按短边 4% 留安全边距</li>
+            <li>智能效果：照片内使用阴影，边框区不加效果</li>
+          </ul>
+        </article>
+      </div>
+
+      <div class="callout">
+        <b>当前结论</b>
+        <p>在工作台应用一套收藏，只会改变工作台当前配置；照片列表页弹窗不会跟着切换。弹窗里只会立刻看到相同的星标和收藏置顶顺序——这与此前确认的预期一致。</p>
+      </div>
+    </section>
+
+    <section class="page" id="favorites">
+      <div class="section-head">
+        <h2>收藏不是完整快照</h2>
+        <p>滤镜收藏保存强度；边框收藏保存水印“怎么显示”，但不保存用户当时写了什么或选了哪张 Logo。</p>
+      </div>
+      <div class="favorite-layout">
+        <div class="wheel">
+          <div class="wheel-label">波轮排序示意</div>
+          <div class="wheel-window" aria-label="收藏后的波轮示意">
+            <div class="wheel-item">无滤镜</div>
+            <div class="wheel-item selected"><span class="filled">★</span> 电影蓝</div>
+            <div class="wheel-item"><span class="filled">★</span> 暖秋</div>
+            <div class="wheel-item">森屿青</div>
+            <div class="wheel-item">暮色余温</div>
+          </div>
+          <p style="margin-top:14px;color:#aab5af;font-size:12px">关闭项固定最上方 → 收藏区 → 其余原始列表。收藏顺序按首次收藏先后排列；取消后重新收藏会追加到收藏区末尾。</p>
+        </div>
+
+        <div class="card favorite-rules">
+          <div class="fav-row">
+            <div class="fav-icon">★</div>
+            <div><h3>滤镜收藏保存</h3><p>稳定目录键 + 当时强度。收藏后继续调整强度，会同步更新该收藏的强度。</p></div>
+          </div>
+          <div class="fav-row">
+            <div class="fav-icon">▣</div>
+            <div><h3>边框收藏保存</h3><p>边框样式、水印开关、文字/图片类型、字体、大小、位置、颜色、透明度、效果。</p></div>
+          </div>
+          <div class="fav-row">
+            <div class="fav-icon">Aa</div>
+            <div><h3>明确不保存</h3><p>不保存收藏当时的水印文本，也不保存收藏当时的图片哈希；应用时读取当前入口正在使用的文本或图片。</p></div>
+          </div>
+          <div class="fav-row">
+            <div class="fav-icon">!</div>
+            <div><h3>图片缺失保护</h3><p>收藏要求图片水印，但当前入口没有有效图片时，不应用收藏，并提示先选择当前水印图片。</p></div>
+          </div>
+          <div class="fav-row">
+            <div class="fav-icon">1</div>
+            <div><h3>唯一性</h3><p>每个滤镜只能有一条收藏；每种边框也只能有一条收藏，不能为同一边框保存多套水印风格。</p></div>
+          </div>
+        </div>
+      </div>
+
+      <article class="card simulator">
+        <h3>入口联动模拟</h3>
+        <p>点击下面的操作，观察另一入口究竟会不会变化。</p>
+        <div class="sim-controls">
+          <button class="choice active" data-action="apply">在工作台应用收藏</button>
+          <button class="choice" data-action="add">在工作台新增收藏</button>
+          <button class="choice" data-action="tune">调整已收藏滤镜强度</button>
+        </div>
+        <div class="sim-result">
+          <div><strong id="leftTitle">工作台：当前效果改变</strong><span id="leftDetail">应用收藏中的滤镜 / 边框 / 水印表现</span></div>
+          <div class="exchange">⇄</div>
+          <div><strong id="rightTitle">设置弹窗：当前效果不变</strong><span id="rightDetail">只共享收藏仓库，不同步当前选中项</span></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="page" id="render">
+      <div class="section-head">
+        <h2>从原图到效果图</h2>
+        <p>预览和实际保存遵循同样的核心顺序：照片滤镜先做，边框与水印后合成。</p>
+      </div>
+      <div class="pipeline">
+        <article class="card pipe-step"><i>01</i><b>读取原图</b><p>JPG / JPEG / PNG；解析尺寸与可用 EXIF。</p></article>
+        <article class="card pipe-step"><i>02</i><b>应用滤镜</b><p>只改变照片像素。NP3 参数是 sRGB 近似，并非 Nikon RAW 引擎复刻。</p></article>
+        <article class="card pipe-step"><i>03</i><b>计算边框</b><p>按样式扩展画布或全幅呈现，边框本身不经过滤镜。</p></article>
+        <article class="card pipe-step"><i>04</i><b>排版水印</b><p>先测量真实文字/图片范围，再与品牌及 EXIF 做碰撞判断。</p></article>
+        <article class="card pipe-step"><i>05</i><b>另存 JPEG</b><p>不覆盖原图；失败时保留原图与已有文件。</p></article>
+      </div>
+
+      <div class="section-head">
+        <h2>“随样式”的位置映射</h2>
+        <p>下面只描述水印位置选择为“边框·随样式 / AUTO”时的行为。</p>
+      </div>
+      <div class="matrix">
+        <div class="matrix-row matrix-head"><div>边框</div><div>自动位置</div><div>自动效果</div></div>
+        <div class="matrix-row"><div>铭牌</div><div>边框信息区左侧</div><div>无额外效果</div></div>
+        <div class="matrix-row"><div>沉浸</div><div>样式内联签名位</div><div>由样式排版</div></div>
+        <div class="matrix-row"><div>品牌内嵌</div><div class="yes">图内右下</div><div>阴影</div></div>
+        <div class="matrix-row"><div>品牌留白</div><div class="yes">图内右下</div><div>阴影</div></div>
+        <div class="matrix-row"><div>其余 4 种边框</div><div>边框信息区居中</div><div>无额外效果</div></div>
+        <div class="matrix-row"><div>边框关闭，仅水印</div><div>非图内位置强制图内底部居中</div><div>阴影</div></div>
+      </div>
+
+      <details open>
+        <summary>品牌内嵌 / 品牌留白的特殊处理</summary>
+        <div>没有参考图中的重遮罩层，只保留文字本身用于可读性的阴影。品牌名优先读取 EXIF Make，也可从常见相机/手机型号推断并转为大写；无法识别时整行不显示。图内底部的品牌、EXIF 与水印使用实测矩形碰撞，只有真的相交才会上移，不会因为同处底部就无条件顶开。</div>
+      </details>
+      <details>
+        <summary>图片水印的位置限制</summary>
+        <div>图片水印若选择了边框区位置，会被转换到图内底部居中，避免把任意比例的 Logo 塞入高度有限的信息带。品牌留白的“随样式”仍是图内右下。</div>
+      </details>
+      <details>
+        <summary>免费版与高级版</summary>
+        <div>自定义水印控制为高级版能力。免费版渲染时会用固定默认文字水印替代用户偏好：文本为 ZTransfer、大小 80%、透明度 80%、位置随样式。滤镜与边框的有效组合仍按装饰开关决定。</div>
+      </details>
+      <details>
+        <summary>两个入口的保存差异</summary>
+        <div>相机传输入口在任务加入队列时保存配置快照，已在队列里的任务不会被之后的新设置追改。本地工作台直接处理用户选中的照片，优先保存到源照片同目录，无法写入时保存到 Pictures/ZTransfer。</div>
+      </details>
+    </section>
+
+    <section class="page" id="audit">
+      <div class="section-head">
+        <h2>请按产品预期检查这些点</h2>
+        <p>绿色项与此前沟通一致；橙色项不是代码报错，而是当前实现中值得明确拍板的规则。</p>
+      </div>
+      <div class="audit">
+        <article class="audit-item"><span class="status ok">符合既定预期</span><div><h3>两个入口共用收藏，但不联动当前效果</h3><p>工作台应用收藏后，弹窗当前滤镜、边框、水印不会改变；星标与收藏顺序会共享。</p></div></article>
+        <article class="audit-item"><span class="status ok">符合既定预期</span><div><h3>边框和水印表现一起收藏</h3><p>恢复边框收藏时会恢复水印开关、类型、字体、大小、位置、颜色、透明度和效果，包括水印位置。</p></div></article>
+        <article class="audit-item"><span class="status ok">符合既定预期</span><div><h3>收藏不记录历史文本与历史图片</h3><p>应用时读取当前入口的文本或当前图片；不会复活收藏那一刻使用过的内容。</p></div></article>
+        <article class="audit-item"><span class="status ok">符合既定预期</span><div><h3>品牌自动水印位于图内右下</h3><p>品牌内嵌、品牌留白在“随样式”下都如此；无重遮罩；无品牌则不显示 CAMERA。</p></div></article>
+        <article class="audit-item"><span class="status check">需要确认</span><div><h3>同一种边框只能收藏一套水印表现</h3><p>收藏以边框样式为唯一键。例如“品牌留白”不能同时收藏一套金色文字和一套白色 Logo。</p></div></article>
+        <article class="audit-item"><span class="status check">需要确认</span><div><h3>水印文字清空后会显示 ZTransfer</h3><p>当前实现把空白文本归一为默认品牌文字，用户不能在水印开启状态下刻意保留空文本。</p></div></article>
+        <article class="audit-item"><span class="status check">需要确认</span><div><h3>品牌留白手动选左 / 中 / 右，会把文字放入白色留白区</h3><p>只有“随样式”固定在图内右下；图片水印不能进入留白区，会转为图内位置。</p></div></article>
+        <article class="audit-item"><span class="status check">需要确认</span><div><h3>滤镜强度没有 0% 和 1%</h3><p>波轮为 2%～100%，步进 2%；完全关闭通过第一项“无滤镜”完成。</p></div></article>
+        <article class="audit-item"><span class="status check">需要确认</span><div><h3>设置变化不追改已经入队的照片</h3><p>每个传输任务创建时就复制配置。之后切换收藏或改强度，只影响新加入队列的任务。</p></div></article>
+      </div>
+
+      <p class="source-note">依据当前工作区代码整理：<code>SettingsScreen.kt</code>、<code>LocalPhotoEffectsOverlay.kt</code>、<code>LocalPhotoEffectsPreferences.kt</code>、<code>PhotoEffectFavorites.kt</code>、<code>PhotoFrameExporter.kt</code>、<code>TransferViewModel.kt</code>。页面只陈述现状，不包含尚未实现的滤镜导入、分类、隐藏或删除功能。</p>
+    </section>
+  </main>
+
+  <script>
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    const tabs = [...document.querySelectorAll('.tab')];
+    const pages = [...document.querySelectorAll('.page')];
+    tabs.forEach(tab => tab.addEventListener('click', () => {
+      tabs.forEach(item => item.classList.toggle('active', item === tab));
+      pages.forEach(page => page.classList.toggle('active', page.id === tab.dataset.page));
+      window.scrollTo({ top: document.querySelector('.tabs').offsetTop - 12, behavior: 'smooth' });
+    }));
+
+    const scenarios = {
+      apply: {
+        leftTitle: '工作台：当前效果改变',
+        leftDetail: '应用收藏中的滤镜 / 边框 / 水印表现',
+        rightTitle: '设置弹窗：当前效果不变',
+        rightDetail: '只共享收藏仓库，不同步当前选中项'
+      },
+      add: {
+        leftTitle: '工作台：星标亮起并置顶',
+        leftDetail: '当前项追加到收藏区末尾',
+        rightTitle: '设置弹窗：出现同一颗星',
+        rightDetail: '收藏列表与排序更新，当前效果仍不变'
+      },
+      tune: {
+        leftTitle: '工作台：收藏强度更新',
+        leftDetail: '已收藏滤镜的强度跟随当前调整',
+        rightTitle: '设置弹窗：下次应用读取新强度',
+        rightDetail: '未主动应用前，弹窗当前强度不会跳变'
+      }
+    };
+
+    document.querySelectorAll('.choice').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('.choice').forEach(item => item.classList.toggle('active', item === button));
+      const result = scenarios[button.dataset.action];
+      Object.entries(result).forEach(([id, value]) => document.getElementById(id).textContent = value);
+    }));
+  </script>
+</body>
+</html>
