@@ -12,12 +12,15 @@ import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
 import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
+import com.ztransfer.effects.PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY
 import com.ztransfer.effects.FavoriteFrameWatermarkEffect
 import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.effects.decodeFavoriteFrameEffects
 import com.ztransfer.effects.decodeFavoritePhotoFilters
+import com.ztransfer.effects.decodePhotoFilterIntensities
 import com.ztransfer.effects.encodeFavoriteFrameEffects
 import com.ztransfer.effects.encodeFavoritePhotoFilters
+import com.ztransfer.effects.encodePhotoFilterIntensities
 import com.ztransfer.frame.PhotoFrameDestination
 import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFramePreset
@@ -45,6 +48,7 @@ import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
@@ -180,7 +184,8 @@ data class TransferState(
     val favoriteFrameEffects: List<FavoriteFrameWatermarkEffect> = emptyList(),
     val photoFilterEnabled: Boolean = false,
     val selectedPhotoFilterId: String? = null,
-    val photoFilterIntensityPercent: Int = 100,
+    val photoFilterIntensityPercent: Int = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
+    val transferPhotoFilterIntensities: Map<String, Int> = emptyMap(),
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
     // 切换后由设置面板触发 Activity.recreate() 生效。
     val appLanguage: String = AppLocale.SYSTEM
@@ -516,7 +521,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val validPhotoFilterCatalogKeys = restoredPhotoFilters
             .mapNotNull { BuiltInPhotoFilters.catalogKey(it.id) }
             .toSet()
-        val restoredFavoritePhotoFilters = decodeFavoritePhotoFilters(
+        val decodedFavoritePhotoFilters = decodeFavoritePhotoFilters(
             prefs.getString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY, null),
             validPhotoFilterCatalogKeys,
         )
@@ -527,6 +532,53 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val restoredPhotoFilterId = storedPhotoFilterId
             ?.takeIf { id -> restoredPhotoFilters.any { it.id == id } }
             ?: restoredPhotoFilters.firstOrNull()?.id
+        val restoredPhotoFilterIntensities = buildMap {
+            if (prefs.contains("photo_filter_intensity")) {
+                restoredPhotoFilterId
+                    ?.let(BuiltInPhotoFilters::catalogKey)
+                    ?.let { catalogKey ->
+                        put(
+                            catalogKey,
+                            normalizePhotoFilterIntensity(
+                                prefs.getInt(
+                                    "photo_filter_intensity",
+                                    DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
+                                ),
+                            ),
+                        )
+                    }
+            }
+            putAll(
+                decodePhotoFilterIntensities(
+                    prefs.getString(PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY, null),
+                    validPhotoFilterCatalogKeys,
+                )
+            )
+        }
+        val encodedPhotoFilterIntensities =
+            encodePhotoFilterIntensities(restoredPhotoFilterIntensities)
+        if (prefs.getString(PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY, null) !=
+            encodedPhotoFilterIntensities || prefs.contains("photo_filter_intensity")
+        ) {
+            prefs.edit()
+                .putString(
+                    PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY,
+                    encodedPhotoFilterIntensities,
+                )
+                .remove("photo_filter_intensity")
+                .apply()
+        }
+        val encodedFavoritePhotoFilters = encodeFavoritePhotoFilters(decodedFavoritePhotoFilters)
+        if (prefs.getString(FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY, null) !=
+            encodedFavoritePhotoFilters
+        ) {
+            prefs.edit()
+                .putString(
+                    FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
+                    encodedFavoritePhotoFilters,
+                )
+                .apply()
+        }
         val storedSkinName = prefs.getString("skin_preset", null)
         val restoredSkinPreset = if (storedSkinName == null) {
             SkinPreset.FROSTED_GLASS
@@ -664,14 +716,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     )
                 }.getOrDefault(PhotoFrameWatermarkEffect.AUTO),
                 photoFilters = restoredPhotoFilters,
-                favoritePhotoFilters = restoredFavoritePhotoFilters,
+                favoritePhotoFilters = decodedFavoritePhotoFilters,
                 favoriteFrameEffects = restoredFavoriteFrameEffects,
                 photoFilterEnabled = storedPhotoFilterId == restoredPhotoFilterId &&
                     prefs.getBoolean("photo_filter_enabled", false),
                 selectedPhotoFilterId = restoredPhotoFilterId,
-                photoFilterIntensityPercent = normalizePhotoFilterIntensity(
-                    prefs.getInt("photo_filter_intensity", 100),
-                ),
+                photoFilterIntensityPercent = restoredPhotoFilterId
+                    ?.let(BuiltInPhotoFilters::catalogKey)
+                    ?.let(restoredPhotoFilterIntensities::get)
+                    ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
+                transferPhotoFilterIntensities = restoredPhotoFilterIntensities,
                 appLanguage = prefs.getString(AppLocale.PREF_KEY, AppLocale.SYSTEM) ?: AppLocale.SYSTEM
             )
         }
@@ -830,34 +884,31 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(photoFilterEnabled = canEnable) }
     }
 
-    fun toggleFavoritePhotoFilter(filterId: String, intensityPercent: Int) {
+    fun toggleFavoritePhotoFilter(filterId: String) {
         val catalogKey = BuiltInPhotoFilters.catalogKey(filterId) ?: return
         val current = _state.value.favoritePhotoFilters
         val updated = if (current.any { it.catalogKey == catalogKey }) {
             current.filterNot { it.catalogKey == catalogKey }
         } else {
-            current + FavoritePhotoFilter(
-                catalogKey = catalogKey,
-                intensityPercent = normalizePhotoFilterIntensity(intensityPercent),
-            )
+            current + FavoritePhotoFilter(catalogKey)
         }
         persistFavoritePhotoFilters(updated)
     }
 
-    fun updateFavoritePhotoFilterIntensity(filterId: String, intensityPercent: Int) {
+    fun rememberTransferPhotoFilterIntensity(filterId: String, intensityPercent: Int) {
         val catalogKey = BuiltInPhotoFilters.catalogKey(filterId) ?: return
-        val current = _state.value.favoritePhotoFilters
-        if (current.none { it.catalogKey == catalogKey }) return
-        val updated = current.map { favorite ->
-            if (favorite.catalogKey == catalogKey) {
-                favorite.copy(
-                    intensityPercent = normalizePhotoFilterIntensity(intensityPercent),
-                )
-            } else {
-                favorite
-            }
+        val intensity = normalizePhotoFilterIntensity(intensityPercent)
+        val state = _state.value
+        val intensities = state.transferPhotoFilterIntensities + (catalogKey to intensity)
+        prefs.edit()
+            .putString(
+                PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY,
+                encodePhotoFilterIntensities(intensities),
+            )
+            .apply()
+        _state.update {
+            it.copy(transferPhotoFilterIntensities = intensities)
         }
-        persistFavoritePhotoFilters(updated)
     }
 
     fun toggleFavoriteFrameEffect(
@@ -917,10 +968,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val validId = selectedId?.takeIf { id -> _state.value.photoFilters.any { it.id == id } }
         val intensity = normalizePhotoFilterIntensity(intensityPercent)
         val active = enabled && validId != null
+        validId?.let { rememberTransferPhotoFilterIntensity(it, intensity) }
         prefs.edit().apply {
             if (validId == null) remove("photo_filter_selected_id")
             else putString("photo_filter_selected_id", validId)
-            putInt("photo_filter_intensity", intensity)
             putBoolean("photo_filter_enabled", active)
         }.apply()
         _state.update {

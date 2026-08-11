@@ -41,7 +41,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
+import com.ztransfer.effects.FavoriteFrameWatermarkEffect
+import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFrameMediaStoreSource
 import com.ztransfer.frame.PhotoFrameMetadata
@@ -100,6 +103,13 @@ fun LocalPhotoEffectsPage(
     var filterIntensity by remember {
         mutableIntStateOf(initialSettings.filterIntensityPercent)
     }
+    var filterIntensities by remember { mutableStateOf(initialSettings.filterIntensities) }
+    var favoritePhotoFilters by remember {
+        mutableStateOf(initialSettings.favoritePhotoFilters)
+    }
+    var favoriteFrameEffects by remember {
+        mutableStateOf(initialSettings.favoriteFrameEffects)
+    }
 
     val currentSettings = LocalPhotoEffectsSettings(
         decorationEnabled = decorationEnabled,
@@ -109,6 +119,9 @@ fun LocalPhotoEffectsPage(
         filterId = filterId,
         filterEnabled = filterEnabled,
         filterIntensityPercent = filterIntensity,
+        filterIntensities = filterIntensities,
+        favoritePhotoFilters = favoritePhotoFilters,
+        favoriteFrameEffects = favoriteFrameEffects,
     )
     val latestSettings by rememberUpdatedState(currentSettings)
     LaunchedEffect(currentSettings) {
@@ -367,7 +380,8 @@ fun LocalPhotoEffectsPage(
             Spacer(Modifier.height(10.dp))
             PhotoFilterEditor(
                 filters = state.photoFilters,
-                favoriteFilters = state.favoritePhotoFilters,
+                favoriteFilters = favoritePhotoFilters,
+                rememberedIntensities = filterIntensities,
                 selectedId = filterId,
                 enabled = filterEnabled,
                 intensityPercent = filterIntensity,
@@ -376,15 +390,28 @@ fun LocalPhotoEffectsPage(
                     filterId = it
                     filterEnabled = true
                 },
-                onIntensityChanged = { filterIntensity = it },
-                onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
-                onFavoriteIntensityUpdated =
-                    viewModel::updateFavoritePhotoFilterIntensity,
+                onIntensityChanged = { selectedFilterId, intensity ->
+                    filterIntensity = intensity
+                    val catalogKey = BuiltInPhotoFilters.catalogKey(selectedFilterId)
+                        ?: selectedFilterId
+                    filterIntensities = filterIntensities + (catalogKey to intensity)
+                },
+                onFavoriteToggled = { selectedFilterId ->
+                    BuiltInPhotoFilters.catalogKey(selectedFilterId)?.let { catalogKey ->
+                        favoritePhotoFilters = if (
+                            favoritePhotoFilters.any { it.catalogKey == catalogKey }
+                        ) {
+                            favoritePhotoFilters.filterNot { it.catalogKey == catalogKey }
+                        } else {
+                            favoritePhotoFilters + FavoritePhotoFilter(catalogKey)
+                        }
+                    }
+                },
                 hapticsEnabled = state.hapticsEnabled,
             )
             Spacer(Modifier.height(10.dp))
             PhotoFrameWatermarkEditor(
-                favoriteEffects = state.favoriteFrameEffects,
+                favoriteEffects = favoriteFrameEffects,
                 borderEnabled = decorationEnabled && borderEnabled,
                 preset = preset,
                 watermark = editorWatermark,
@@ -418,8 +445,30 @@ fun LocalPhotoEffectsPage(
                     if (isPro) watermarkDraft = watermarkDraft.copy(text = text)
                 },
                 imageImporting = watermarkImageImporting,
-                onFavoriteToggled = viewModel::toggleFavoriteFrameEffect,
-                onFavoriteUpdated = viewModel::updateFavoriteFrameEffect,
+                onFavoriteToggled = { favoritePreset, favoriteWatermark ->
+                    favoriteFrameEffects = if (
+                        favoriteFrameEffects.any { it.framePreset == favoritePreset }
+                    ) {
+                        favoriteFrameEffects.filterNot { it.framePreset == favoritePreset }
+                    } else {
+                        favoriteFrameEffects + FavoriteFrameWatermarkEffect.capture(
+                            favoritePreset,
+                            favoriteWatermark,
+                        )
+                    }
+                },
+                onFavoriteUpdated = { favoritePreset, favoriteWatermark ->
+                    favoriteFrameEffects = favoriteFrameEffects.map { favorite ->
+                        if (favorite.framePreset == favoritePreset) {
+                            FavoriteFrameWatermarkEffect.capture(
+                                favoritePreset,
+                                favoriteWatermark,
+                            )
+                        } else {
+                            favorite
+                        }
+                    }
+                },
                 onFavoriteImageMissing = {
                     showHint(watermarkFavoriteImageMissingText)
                 },

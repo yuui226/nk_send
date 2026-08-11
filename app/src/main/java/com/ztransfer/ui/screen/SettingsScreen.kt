@@ -127,6 +127,7 @@ import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.normalizePhotoFilterIntensity
+import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
@@ -680,6 +681,7 @@ fun SettingsOverlay(
                 PhotoFilterEditor(
                     filters = state.photoFilters,
                     favoriteFilters = state.favoritePhotoFilters,
+                    rememberedIntensities = state.transferPhotoFilterIntensities,
                     selectedId = filterDraftId,
                     enabled = filterDraftEnabled,
                     intensityPercent = filterDraftIntensity,
@@ -688,10 +690,11 @@ fun SettingsOverlay(
                         filterDraftId = it
                         filterDraftEnabled = true
                     },
-                    onIntensityChanged = { filterDraftIntensity = it },
+                    onIntensityChanged = { filterId, intensity ->
+                        filterDraftIntensity = intensity
+                        viewModel.rememberTransferPhotoFilterIntensity(filterId, intensity)
+                    },
                     onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
-                    onFavoriteIntensityUpdated =
-                        viewModel::updateFavoritePhotoFilterIntensity,
                     hapticsEnabled = state.hapticsEnabled,
                 )
                 Spacer(Modifier.height(10.dp))
@@ -1371,14 +1374,14 @@ private fun PhotoEffectSummaryItem(
 internal fun PhotoFilterEditor(
     filters: List<PhotoFilterPreset>,
     favoriteFilters: List<FavoritePhotoFilter>,
+    rememberedIntensities: Map<String, Int>,
     selectedId: String?,
     enabled: Boolean,
     intensityPercent: Int,
     onDisabled: () -> Unit,
     onSelected: (String) -> Unit,
-    onIntensityChanged: (Int) -> Unit,
-    onFavoriteToggled: (String, Int) -> Unit,
-    onFavoriteIntensityUpdated: (String, Int) -> Unit,
+    onIntensityChanged: (String, Int) -> Unit,
+    onFavoriteToggled: (String) -> Unit,
     hapticsEnabled: Boolean,
 ) {
     val colors = AppTheme.colors
@@ -1400,6 +1403,11 @@ internal fun PhotoFilterEditor(
     }
     val filterOptionIds: List<String?> = listOf(null) + orderedFilters.map { it.id }
     val selectedOptionId = selectedId?.takeIf { enabled && it in filterLabelsById }
+    fun rememberedIntensity(filterId: String): Int {
+        val catalogKey = BuiltInPhotoFilters.catalogKey(filterId)
+        return catalogKey?.let(rememberedIntensities::get)
+            ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+    }
     SettingsCard(
         borderColor = filterAccent.copy(alpha = 0.24f),
         tintColor = filterAccent,
@@ -1425,11 +1433,7 @@ internal fun PhotoFilterEditor(
                         onDisabled()
                     } else {
                         onSelected(filterId)
-                        BuiltInPhotoFilters.catalogKey(filterId)
-                            ?.let(favoriteByCatalogKey::get)
-                            ?.let { favorite ->
-                                onIntensityChanged(favorite.intensityPercent)
-                            }
+                        onIntensityChanged(filterId, rememberedIntensity(filterId))
                     }
                 },
                 onDetent = haptics::tick,
@@ -1443,12 +1447,8 @@ internal fun PhotoFilterEditor(
                 selected = normalizedIntensity,
                 optionLabel = { "$it%" },
                 onValueCommitted = { intensity ->
-                    onIntensityChanged(intensity)
                     selected?.takeIf { enabled }?.let { preset ->
-                        val catalogKey = BuiltInPhotoFilters.catalogKey(preset.id)
-                        if (catalogKey != null && catalogKey in favoriteByCatalogKey) {
-                            onFavoriteIntensityUpdated(preset.id, intensity)
-                        }
+                        onIntensityChanged(preset.id, intensity)
                     }
                 },
                 onDetent = haptics::tick,
@@ -1467,7 +1467,7 @@ internal fun PhotoFilterEditor(
                 onClick = {
                     selected?.let { preset ->
                         haptics.tick()
-                        onFavoriteToggled(preset.id, normalizedIntensity)
+                        onFavoriteToggled(preset.id)
                     }
                 },
             )

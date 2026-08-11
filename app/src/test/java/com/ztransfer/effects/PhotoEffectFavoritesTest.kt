@@ -13,7 +13,7 @@ import org.junit.Test
 
 class PhotoEffectFavoritesTest {
     @Test
-    fun filterCodecPreservesOrderNormalizesIntensityAndDropsInvalidEntries() {
+    fun filterCodecPreservesOrderMigratesLegacyValuesAndDropsInvalidEntries() {
         val decoded = decodeFavoritePhotoFilters(
             encoded = "cinema_blue,71;missing,80;cinema_blue,92;soft_portrait,101;broken",
             validCatalogKeys = setOf("cinema_blue", "soft_portrait"),
@@ -21,12 +21,29 @@ class PhotoEffectFavoritesTest {
 
         assertEquals(
             listOf(
-                FavoritePhotoFilter("cinema_blue", 72),
-                FavoritePhotoFilter("soft_portrait", 100),
+                FavoritePhotoFilter("cinema_blue"),
+                FavoritePhotoFilter("soft_portrait"),
             ),
             decoded,
         )
-        assertEquals("cinema_blue,72;soft_portrait,100", encodeFavoritePhotoFilters(decoded))
+        assertEquals("cinema_blue;soft_portrait", encodeFavoritePhotoFilters(decoded))
+    }
+
+    @Test
+    fun filterIntensityMemoryUsesStableKeysAndNormalizesValues() {
+        val restored = decodePhotoFilterIntensities(
+            encoded = "soft_portrait,79;missing,60;soft_portrait,22;cinema_blue,101;broken",
+            validCatalogKeys = setOf("soft_portrait", "cinema_blue"),
+        )
+
+        assertEquals(
+            mapOf("soft_portrait" to 80, "cinema_blue" to 100),
+            restored,
+        )
+        assertEquals(
+            "cinema_blue,100;soft_portrait,80",
+            encodePhotoFilterIntensities(restored),
+        )
     }
 
     @Test

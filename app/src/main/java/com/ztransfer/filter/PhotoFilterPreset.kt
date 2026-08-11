@@ -71,6 +71,8 @@ data class PhotoFilterSelection(
         get() = normalizePhotoFilterIntensity(intensityPercent)
 }
 
+const val DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT = 80
+
 /** Valid intensity detents are 2, 4, ... 100; disabling the filter is represented separately. */
 fun normalizePhotoFilterIntensity(value: Int): Int {
     val clamped = value.coerceIn(2, 100)

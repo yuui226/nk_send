@@ -22,7 +22,7 @@ class LocalPhotoEffectsPreferencesTest {
         assertEquals(80, defaults.watermark.sizePercent)
         assertEquals("forest", defaults.filterId)
         assertFalse(defaults.filterEnabled)
-        assertEquals(100, defaults.filterIntensityPercent)
+        assertEquals(80, defaults.filterIntensityPercent)
     }
 
     @Test
@@ -81,6 +81,29 @@ class LocalPhotoEffectsPreferencesTest {
             watermarkImageExists = { it == hash },
         )
 
-        assertEquals(settings, restored)
+        assertEquals(
+            settings.copy(filterIntensities = mapOf("forest" to 80)),
+            restored,
+        )
+    }
+
+    @Test
+    fun workbenchKeepsIndependentIntensityForEachFilter() {
+        val settings = defaultLocalPhotoEffectsSettings(defaultFilterId = "forest").copy(
+            filterIntensityPercent = 80,
+            filterIntensities = mapOf(
+                "forest" to 45,
+                "removed-filter" to 62,
+            ),
+        )
+
+        val restored = normalizeLocalPhotoEffectsSettings(
+            settings = settings,
+            availableFilterIds = setOf("forest"),
+            watermarkImageExists = { false },
+        )
+
+        assertEquals(46, restored.filterIntensityPercent)
+        assertEquals(mapOf("forest" to 46), restored.filterIntensities)
     }
 }

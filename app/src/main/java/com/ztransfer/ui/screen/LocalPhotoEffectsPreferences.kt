@@ -1,7 +1,19 @@
 package com.ztransfer.ui.screen
 
 import android.content.Context
+import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
+import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
+import com.ztransfer.effects.FavoriteFrameWatermarkEffect
+import com.ztransfer.effects.FavoritePhotoFilter
+import com.ztransfer.effects.decodeFavoriteFrameEffects
+import com.ztransfer.effects.decodeFavoritePhotoFilters
+import com.ztransfer.effects.decodePhotoFilterIntensities
+import com.ztransfer.effects.encodeFavoriteFrameEffects
+import com.ztransfer.effects.encodeFavoritePhotoFilters
+import com.ztransfer.effects.encodePhotoFilterIntensities
+import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.normalizePhotoFilterIntensity
+import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkColor
@@ -24,6 +36,9 @@ internal data class LocalPhotoEffectsSettings(
     val filterId: String?,
     val filterEnabled: Boolean,
     val filterIntensityPercent: Int,
+    val filterIntensities: Map<String, Int> = emptyMap(),
+    val favoritePhotoFilters: List<FavoritePhotoFilter> = emptyList(),
+    val favoriteFrameEffects: List<FavoriteFrameWatermarkEffect> = emptyList(),
 )
 
 internal fun defaultLocalPhotoEffectsSettings(defaultFilterId: String?) =
@@ -34,7 +49,10 @@ internal fun defaultLocalPhotoEffectsSettings(defaultFilterId: String?) =
         watermark = PhotoFrameWatermark(),
         filterId = defaultFilterId,
         filterEnabled = false,
-        filterIntensityPercent = 100,
+        filterIntensityPercent = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
+        filterIntensities = emptyMap(),
+        favoritePhotoFilters = emptyList(),
+        favoriteFrameEffects = emptyList(),
     )
 
 internal fun normalizeLocalPhotoEffectsSettings(
@@ -48,6 +66,23 @@ internal fun normalizeLocalPhotoEffectsSettings(
         it == PhotoFrameWatermarkContent.IMAGE && imageHash == null
     } ?: PhotoFrameWatermarkContent.TEXT
     val validFilterId = settings.filterId?.takeIf(availableFilterIds::contains)
+    val validCatalogKeys = availableFilterIds
+        .map { filterId -> BuiltInPhotoFilters.catalogKey(filterId) ?: filterId }
+        .toSet()
+    val filterIntensities = settings.filterIntensities
+        .mapNotNull { (key, intensity) ->
+            key.takeIf(validCatalogKeys::contains)
+                ?.let { it to normalizePhotoFilterIntensity(intensity) }
+        }
+        .toMap()
+        .toMutableMap()
+    val currentCatalogKey = validFilterId?.let { filterId ->
+        BuiltInPhotoFilters.catalogKey(filterId) ?: filterId
+    }
+    val currentIntensity = currentCatalogKey
+        ?.let(filterIntensities::get)
+        ?: normalizePhotoFilterIntensity(settings.filterIntensityPercent)
+    if (currentCatalogKey != null) filterIntensities.putIfAbsent(currentCatalogKey, currentIntensity)
     return settings.copy(
         watermark = settings.watermark.copy(
             content = watermarkContent,
@@ -60,7 +95,13 @@ internal fun normalizeLocalPhotoEffectsSettings(
         ),
         filterId = validFilterId,
         filterEnabled = settings.filterEnabled && validFilterId != null,
-        filterIntensityPercent = normalizePhotoFilterIntensity(settings.filterIntensityPercent),
+        filterIntensityPercent = currentIntensity,
+        filterIntensities = filterIntensities,
+        favoritePhotoFilters = settings.favoritePhotoFilters
+            .filter { it.catalogKey in validCatalogKeys }
+            .distinctBy { it.catalogKey },
+        favoriteFrameEffects = settings.favoriteFrameEffects
+            .distinctBy { it.framePreset },
     )
 }
 
@@ -72,10 +113,31 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
     fun restore(availableFilterIds: List<String>): LocalPhotoEffectsSettings {
         val fallback = defaultLocalPhotoEffectsSettings(availableFilterIds.firstOrNull())
         val availableFilterIdSet = availableFilterIds.toSet()
+        val validCatalogKeys = availableFilterIds
+            .map { filterId -> BuiltInPhotoFilters.catalogKey(filterId) ?: filterId }
+            .toSet()
         if (!preferences.contains(KEY_VERSION)) {
-            return normalize(fallback, availableFilterIdSet)
+            return normalize(
+                fallback.copy(
+                    favoritePhotoFilters = decodeFavoritePhotoFilters(
+                        legacyFavoriteValue(
+                            storedVersion = 0,
+                            key = FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
+                        ),
+                        validCatalogKeys,
+                    ),
+                    favoriteFrameEffects = decodeFavoriteFrameEffects(
+                        legacyFavoriteValue(
+                            storedVersion = 0,
+                            key = FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY,
+                        ),
+                    ),
+                ),
+                availableFilterIdSet,
+            )
         }
         val values = preferences.all
+        val storedVersion = values.int(KEY_VERSION, 0)
         val storedFilterId = values.string(KEY_FILTER_ID)
         val restored = LocalPhotoEffectsSettings(
             decorationEnabled = values.boolean(KEY_DECORATION_ENABLED, fallback.decorationEnabled),
@@ -102,6 +164,25 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
                 KEY_FILTER_INTENSITY,
                 fallback.filterIntensityPercent,
             ),
+            filterIntensities = decodePhotoFilterIntensities(
+                values.string(KEY_FILTER_INTENSITIES),
+                validCatalogKeys,
+            ),
+            favoritePhotoFilters = decodeFavoritePhotoFilters(
+                values.string(KEY_FAVORITE_PHOTO_FILTERS)
+                    ?: legacyFavoriteValue(
+                        storedVersion = storedVersion,
+                        key = FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY,
+                    ),
+                validCatalogKeys,
+            ),
+            favoriteFrameEffects = decodeFavoriteFrameEffects(
+                values.string(KEY_FAVORITE_FRAME_EFFECTS)
+                    ?: legacyFavoriteValue(
+                        storedVersion = storedVersion,
+                        key = FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY,
+                    ),
+            ),
         )
         return normalize(restored, availableFilterIdSet)
     }
@@ -126,7 +207,19 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
             if (settings.filterId == null) remove(KEY_FILTER_ID)
             else putString(KEY_FILTER_ID, settings.filterId)
             putBoolean(KEY_FILTER_ENABLED, settings.filterEnabled)
-            putInt(KEY_FILTER_INTENSITY, settings.filterIntensityPercent)
+            remove(KEY_FILTER_INTENSITY)
+            putString(
+                KEY_FILTER_INTENSITIES,
+                encodePhotoFilterIntensities(settings.filterIntensities),
+            )
+            putString(
+                KEY_FAVORITE_PHOTO_FILTERS,
+                encodeFavoritePhotoFilters(settings.favoritePhotoFilters),
+            )
+            putString(
+                KEY_FAVORITE_FRAME_EFFECTS,
+                encodeFavoriteFrameEffects(settings.favoriteFrameEffects),
+            )
         }.apply()
     }
 
@@ -139,9 +232,20 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         watermarkImageExists = { hash -> photoFrameWatermarkImageFile(appContext, hash).isFile },
     )
 
+    /**
+     * Before v3 both editors used the transfer preference file. Seed the phone editor once so an
+     * upgrade does not discard visible stars, then save() writes an independent local copy.
+     */
+    private fun legacyFavoriteValue(storedVersion: Int, key: String): String? {
+        if (storedVersion >= SETTINGS_VERSION) return null
+        return appContext.getSharedPreferences(LEGACY_SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE)
+            .getString(key, null)
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "local_photo_effects"
-        const val SETTINGS_VERSION = 1
+        const val LEGACY_SHARED_PREFERENCES_NAME = "ztransfer"
+        const val SETTINGS_VERSION = 3
         const val KEY_VERSION = "settings_version"
         const val KEY_DECORATION_ENABLED = "decoration_enabled"
         const val KEY_BORDER_ENABLED = "border_enabled"
@@ -159,6 +263,9 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         const val KEY_FILTER_ID = "filter_id"
         const val KEY_FILTER_ENABLED = "filter_enabled"
         const val KEY_FILTER_INTENSITY = "filter_intensity"
+        const val KEY_FILTER_INTENSITIES = "filter_intensities_v1"
+        const val KEY_FAVORITE_PHOTO_FILTERS = "favorite_photo_filters_v1"
+        const val KEY_FAVORITE_FRAME_EFFECTS = "favorite_frame_effects_v1"
     }
 }
 

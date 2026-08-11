@@ -469,7 +469,7 @@
         <div class="stat"><strong>2</strong><span>实际入口</span></div>
         <div class="stat"><strong>50</strong><span>内置 NP3 滤镜</span></div>
         <div class="stat"><strong>8</strong><span>边框样式</span></div>
-        <div class="stat"><strong>1 套</strong><span>全局共享收藏</span></div>
+        <div class="stat"><strong>2 套</strong><span>入口独立收藏</span></div>
       </div>
     </header>
 
@@ -482,13 +482,13 @@
 
     <section class="page active" id="overview">
       <div class="section-head">
-        <h2>两个入口，一套收藏，两套当前配置</h2>
-        <p>两边能看见同样的收藏与排序，但不会互相切换当前正在使用的效果。</p>
+        <h2>两个入口，两套收藏，两套当前配置</h2>
+        <p>相机 JPG 与手机照片是两条独立处理链，收藏、排序、滤镜强度及当前配置均互不影响。</p>
         <div class="legend">
           <span class="chip filter-chip">滤镜</span>
           <span class="chip frame-chip">边框</span>
           <span class="chip mark-chip">水印</span>
-          <span class="chip shared-chip">共享收藏</span>
+          <span class="chip shared-chip">入口独立</span>
         </div>
       </div>
 
@@ -507,10 +507,10 @@
 
         <aside class="shared">
           <div class="star">★</div>
-          <strong>全局收藏仓库</strong>
-          <small>滤镜收藏 + 边框水印收藏</small>
+          <strong>数据边界</strong>
+          <small>相机配置 ≠ 手机配置</small>
           <div class="arrow">← →</div>
-          <small>共享星标、顺序和收藏参数<br>不共享当前选中项</small>
+          <small>星标、顺序、强度和边框水印收藏<br>全部按入口分别保存</small>
         </aside>
 
         <article class="card route-b">
@@ -528,12 +528,13 @@
 
       <div class="section-head">
         <h2>状态边界</h2>
-        <p>“共享”只指收藏数据，不等于两个入口的编辑器同步。</p>
+        <p>两边只共享内置效果目录和编辑器样式，不共享任何用户收藏或强度记忆。</p>
       </div>
       <div class="matrix">
         <div class="matrix-row matrix-head"><div>数据</div><div>两个入口共享？</div><div>会持久化？</div></div>
-        <div class="matrix-row"><div>收藏的滤镜 + 收藏强度</div><div class="yes">共享</div><div class="yes">是</div></div>
-        <div class="matrix-row"><div>收藏的边框 + 水印表现参数</div><div class="yes">共享</div><div class="yes">是</div></div>
+        <div class="matrix-row"><div>滤镜收藏（仅星标和排序）</div><div class="no">各自一套</div><div class="yes">各自保存</div></div>
+        <div class="matrix-row"><div>每款滤镜上次使用的强度</div><div class="no">相机 JPG / 手机照片各一套</div><div class="yes">各自按稳定目录键保存</div></div>
+        <div class="matrix-row"><div>收藏的边框 + 水印表现参数</div><div class="no">各自一套</div><div class="yes">各自保存</div></div>
         <div class="matrix-row"><div>当前选择的滤镜 / 边框 / 水印</div><div class="no">各自独立</div><div class="yes">各自保存</div></div>
         <div class="matrix-row"><div>水印当前文本 / 当前图片</div><div class="no">各入口可不同</div><div class="yes">属于当前配置</div></div>
         <div class="matrix-row"><div>工作台当前选择的照片</div><div class="no">不共享</div><div class="no">不保存</div></div>
@@ -554,6 +555,7 @@
             <li>收藏项按收藏时间置顶，并在名称前显示实心星</li>
             <li>选中使用稳定滤镜 ID，不使用会随排序变化的索引</li>
             <li>强度为 2%～100%，每档 2%；关闭使用“无滤镜”</li>
+            <li>首次使用默认为 80%；每款滤镜在两个入口分别记住强度</li>
             <li>滤镜只作用于照片像素，不染色边框与文字</li>
           </ul>
         </article>
@@ -587,14 +589,14 @@
 
       <div class="callout">
         <b>当前结论</b>
-        <p>在工作台应用一套收藏，只会改变工作台当前配置；照片列表页弹窗不会跟着切换。弹窗里只会立刻看到相同的星标和收藏置顶顺序——这与此前确认的预期一致。</p>
+        <p>在工作台新增、取消或应用收藏，只影响手机照片工作台；照片列表页弹窗的星标、排序、强度和当前效果均保持不变，反向亦然。</p>
       </div>
     </section>
 
     <section class="page" id="favorites">
       <div class="section-head">
         <h2>收藏不是完整快照</h2>
-        <p>滤镜收藏保存强度；边框收藏保存水印“怎么显示”，但不保存用户当时写了什么或选了哪张 Logo。</p>
+        <p>滤镜收藏只保存稳定目录键，用于星标与置顶排序；强度由各入口自己的滤镜强度表负责。边框收藏保存水印“怎么显示”，但不保存用户当时写了什么或选了哪张 Logo。</p>
       </div>
       <div class="favorite-layout">
         <div class="wheel">
@@ -612,7 +614,7 @@
         <div class="card favorite-rules">
           <div class="fav-row">
             <div class="fav-icon">★</div>
-            <div><h3>滤镜收藏保存</h3><p>稳定目录键 + 当时强度。收藏后继续调整强度，会同步更新该收藏的强度。</p></div>
+            <div><h3>滤镜收藏保存</h3><p>只保存稳定目录键，用于星标和置顶顺序；不保存强度。相机 JPG 与手机照片各有自己的收藏列表和滤镜强度表。</p></div>
           </div>
           <div class="fav-row">
             <div class="fav-icon">▣</div>
@@ -634,17 +636,17 @@
       </div>
 
       <article class="card simulator">
-        <h3>入口联动模拟</h3>
-        <p>点击下面的操作，观察另一入口究竟会不会变化。</p>
+        <h3>入口隔离模拟</h3>
+        <p>下面所有工作台操作均只改变手机照片工作台，不会改变相机 JPG 设置弹窗。</p>
         <div class="sim-controls">
           <button class="choice active" data-action="apply">在工作台应用收藏</button>
           <button class="choice" data-action="add">在工作台新增收藏</button>
-          <button class="choice" data-action="tune">调整已收藏滤镜强度</button>
+          <button class="choice" data-action="tune">调整滤镜强度</button>
         </div>
         <div class="sim-result">
           <div><strong id="leftTitle">工作台：当前效果改变</strong><span id="leftDetail">应用收藏中的滤镜 / 边框 / 水印表现</span></div>
           <div class="exchange">⇄</div>
-          <div><strong id="rightTitle">设置弹窗：当前效果不变</strong><span id="rightDetail">只共享收藏仓库，不同步当前选中项</span></div>
+          <div><strong id="rightTitle">设置弹窗：完全不变</strong><span id="rightDetail">收藏、排序、强度和当前选中项均不联动</span></div>
         </div>
       </article>
     </section>
@@ -700,7 +702,7 @@
         <p>绿色项与此前沟通一致；橙色项不是代码报错，而是当前实现中值得明确拍板的规则。</p>
       </div>
       <div class="audit">
-        <article class="audit-item"><span class="status ok">符合既定预期</span><div><h3>两个入口共用收藏，但不联动当前效果</h3><p>工作台应用收藏后，弹窗当前滤镜、边框、水印不会改变；星标与收藏顺序会共享。</p></div></article>
+        <article class="audit-item"><span class="status ok">符合既定预期</span><div><h3>两个入口的收藏与强度完全独立</h3><p>相机 JPG 和手机照片各自保存滤镜收藏、边框水印收藏及每款滤镜强度；任一入口的操作不会改变另一入口。</p></div></article>
         <article class="audit-item"><span class="status ok">符合既定预期</span><div><h3>边框和水印表现一起收藏</h3><p>恢复边框收藏时会恢复水印开关、类型、字体、大小、位置、颜色、透明度和效果，包括水印位置。</p></div></article>
         <article class="audit-item"><span class="status ok">符合既定预期</span><div><h3>收藏不记录历史文本与历史图片</h3><p>应用时读取当前入口的文本或当前图片；不会复活收藏那一刻使用过的内容。</p></div></article>
         <article class="audit-item"><span class="status ok">符合既定预期</span><div><h3>品牌自动水印位于图内右下</h3><p>品牌内嵌、品牌留白在“随样式”下都如此；无重遮罩；无品牌则不显示 CAMERA。</p></div></article>
@@ -730,19 +732,19 @@
         leftTitle: '工作台：当前效果改变',
         leftDetail: '应用收藏中的滤镜 / 边框 / 水印表现',
         rightTitle: '设置弹窗：当前效果不变',
-        rightDetail: '只共享收藏仓库，不同步当前选中项'
+        rightDetail: '收藏、排序、强度和当前选中项均不联动'
       },
       add: {
         leftTitle: '工作台：星标亮起并置顶',
         leftDetail: '当前项追加到收藏区末尾',
-        rightTitle: '设置弹窗：出现同一颗星',
-        rightDetail: '收藏列表与排序更新，当前效果仍不变'
+        rightTitle: '设置弹窗：没有变化',
+        rightDetail: '另一入口拥有独立的收藏列表与排序'
       },
       tune: {
-        leftTitle: '工作台：收藏强度更新',
-        leftDetail: '已收藏滤镜的强度跟随当前调整',
-        rightTitle: '设置弹窗：下次应用读取新强度',
-        rightDetail: '未主动应用前，弹窗当前强度不会跳变'
+        leftTitle: '工作台：本地强度记忆更新',
+        leftDetail: '当前滤镜在手机入口记住新强度，与收藏无关',
+        rightTitle: '设置弹窗：强度不变',
+        rightDetail: '相机入口维护自己的滤镜强度表'
       }
     };
 
