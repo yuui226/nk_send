@@ -1308,49 +1308,40 @@ internal fun PhotoEffectsInfoBubble(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
         panelModifier = Modifier
-            .padding(start = 42.dp, end = 18.dp, top = panelTop)
-            .fillMaxWidth(),
+            .padding(start = 18.dp, end = 18.dp, top = panelTop)
+            .widthIn(min = 260.dp, max = 420.dp),
+        panelAlignment = Alignment.TopEnd,
         shape = RoundedCornerShape(16.dp),
         dim = false,
     ) { _ ->
-        Row(
-            verticalAlignment = Alignment.Top,
+        Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
-            Icon(
-                Icons.Default.Lightbulb,
-                contentDescription = null,
-                tint = colors.accentOrange,
-                modifier = Modifier.size(17.dp),
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
             )
-            Spacer(Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                )
-                if (!extraHint.isNullOrBlank()) {
-                    Spacer(Modifier.height(7.dp))
-                    Text(
-                        extraHint,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
-                    )
-                }
+            if (!extraHint.isNullOrBlank()) {
                 Spacer(Modifier.height(7.dp))
                 Text(
-                    gestureHint,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    stringResource(R.string.photo_effects_wheel_hint),
+                    extraHint,
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
                 )
             }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                gestureHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.photo_effects_wheel_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
         }
     }
 }

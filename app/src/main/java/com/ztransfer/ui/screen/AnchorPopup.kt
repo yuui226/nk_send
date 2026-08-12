@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
@@ -56,6 +57,7 @@ fun AnchorPopup(
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
     panelModifier: Modifier,
+    panelAlignment: Alignment = Alignment.TopStart,
     shape: Shape = RoundedCornerShape(20.dp),
     // 遮罩是否压暗背景：大面板（设置）保持压暗聚焦；小面板（筛选下拉）传 false——
     // 全屏变暗对几个胶囊的下拉太兴师动众，遮罩仍在（点外部收起、拦滚动穿透），只是透明。
@@ -101,7 +103,9 @@ fun AnchorPopup(
 
         // 面板：以按钮中心为原点轻微缩放淡入；毛玻璃底 + 细描边 + 自上而下高光叠层。
         Surface(
-            modifier = panelModifier
+            modifier = Modifier
+                .align(panelAlignment)
+                .then(panelModifier)
                 .onGloballyPositioned { coordinates ->
                     animationState.panelBounds = coordinates.boundsInRoot()
                     if (!animationState.expansionStarted && !animationState.closing) {
