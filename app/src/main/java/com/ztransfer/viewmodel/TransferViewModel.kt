@@ -60,10 +60,12 @@ import com.ztransfer.service.TransferService
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -74,6 +76,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.Locale
 
 enum class TransferStatus {
     WAITING, TRANSFERING, COMPLETED, FAILED, CANCELLED
@@ -84,6 +87,51 @@ private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION = 2
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY =
     "photo_frame_watermark_size_scale_version"
 internal const val PHOTO_FRAME_EXPORT_PARALLELISM = 2
+private val COPY_SUFFIX_REGEX = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
+
+internal fun exportedOriginalBaseName(name: String): String = name.replace(COPY_SUFFIX_REGEX, "")
+
+private fun directoryLookupKey(name: String): String =
+    exportedOriginalBaseName(name).lowercase(Locale.ROOT)
+
+internal data class IndexedExistingFile<T>(
+    val displayName: String,
+    val size: Long,
+    val value: T,
+)
+
+/** 纯内存双索引，可用非 Android 值类型做单元测试。 */
+internal class ExistingFileNameIndex<T> {
+    private val lock = Any()
+    private val byDisplayName = HashMap<String, IndexedExistingFile<T>>()
+    private val byBaseName = HashMap<String, MutableList<IndexedExistingFile<T>>>()
+
+    fun add(displayName: String, size: Long, value: T) = synchronized(lock) {
+        val entry = IndexedExistingFile(displayName, size, value)
+        byDisplayName.put(displayName, entry)?.let { previous ->
+            byBaseName[directoryLookupKey(previous.displayName)]?.removeAll {
+                it.displayName == previous.displayName
+            }
+        }
+        byBaseName.getOrPut(directoryLookupKey(displayName)) { ArrayList(1) }.add(entry)
+    }
+
+    fun containsDisplayName(displayName: String): Boolean = synchronized(lock) {
+        byDisplayName.containsKey(displayName)
+    }
+
+    fun find(fileName: String, fileSize: Long): IndexedExistingFile<T>? = synchronized(lock) {
+        fun sizeMatches(localSize: Long): Boolean =
+            localSize < 0L || fileSize == PtpConstants.SIZE_UNKNOWN || localSize == fileSize
+
+        byDisplayName[fileName]?.takeIf { sizeMatches(it.size) }
+            ?: byBaseName[directoryLookupKey(fileName)]?.firstOrNull { sizeMatches(it.size) }
+    }
+
+    fun entries(): List<IndexedExistingFile<T>> = synchronized(lock) {
+        byDisplayName.values.toList()
+    }
+}
 
 data class TransferTask(
     val file: NikonCamera.FileInfo,
@@ -110,6 +158,33 @@ data class TransferTask(
     // 原片已成功落盘后的派生步骤；失败不改变 COMPLETED，原片始终保留。
     val isGeneratingFrame: Boolean = false,
 )
+
+/**
+ * 当前导出目录中已落盘原片的 O(1) 查询索引。内容原地增量更新；[TransferState]
+ * 通过 [TransferState.existingExportRevision] 发布一次轻量版本变化，避免每完成一张
+ * 都复制整个 Map<文件名, Set<大小>>。
+ */
+class ExportedOriginalIndex internal constructor() {
+    private val sizesByBaseName = ConcurrentHashMap<String, MutableSet<Long>>()
+
+    internal fun add(fileName: String, size: Long): Boolean =
+        sizesByBaseName
+            .computeIfAbsent(directoryLookupKey(fileName)) { ConcurrentHashMap.newKeySet() }
+            .add(size)
+
+    internal fun addAll(entries: Sequence<Pair<String, Long>>): Boolean {
+        var changed = false
+        entries.forEach { (fileName, size) ->
+            if (add(fileName, size)) changed = true
+        }
+        return changed
+    }
+
+    internal fun contains(file: NikonCamera.FileInfo): Boolean {
+        val sizes = sizesByBaseName[directoryLookupKey(file.fileName)] ?: return false
+        return file.size == PtpConstants.SIZE_UNKNOWN || sizes.any { it < 0L || it == file.size }
+    }
+}
 
 /**
  * 唯一活动下载的高频状态。它与低频 [TransferState.tasks] 分离：协议层约每 200ms 更新时
@@ -188,7 +263,9 @@ data class TransferState(
     val isTransferring: Boolean = false,
     val transferDirUri: String? = null,
     /** 导出目录内完整文件：归一化文件名 -> 已有大小集合，用于相机列表直接标记已传照片。 */
-    val existingExportFiles: Map<String, Set<Long>> = emptyMap(),
+    val existingExportIndex: ExportedOriginalIndex = ExportedOriginalIndex(),
+    /** [existingExportIndex] 原地更新后的发布版本，只负责触发订阅者重新读取索引。 */
+    val existingExportRevision: Long = 0L,
     val thumbnailColumns: Int = 3,
     // 连拍合集显示（默认关闭，保持旧版照片网格原样）：开启后列表把每段已识别的连拍
     // 收成一个可展开的虚拟卡位；原始文件集合、筛选和传输语义均不改变。
@@ -382,12 +459,8 @@ internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Bool
 /** 相机文件是否已在当前保存目录中落盘；列表对号、筛选和任务模式必须共用该判定。 */
 internal fun isTransferredOriginal(
     file: NikonCamera.FileInfo,
-    existingExportFiles: Map<String, Set<Long>>,
-): Boolean {
-    val sizes = existingExportFiles[file.fileName] ?: return false
-    return sizes.any { it < 0L || it == file.size } ||
-        file.size == PtpConstants.SIZE_UNKNOWN
-}
+    existingExportIndex: ExportedOriginalIndex,
+): Boolean = existingExportIndex.contains(file)
 
 internal fun createQueueTasks(
     files: List<NikonCamera.FileInfo>,
@@ -428,6 +501,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     @Volatile
     private var lastValidTransferSpeed = 0L
     private val pendingTransferQueue = PendingTransferQueue()
+    private val directoryIndexLock = Any()
+    private val directoryIndexes = HashMap<String, ExistingDirectoryIndex>()
+    private val directoryIndexScans = HashMap<String, Deferred<ExistingDirectoryIndex>>()
 
     private var transferJob: Job? = null
     @Volatile
@@ -500,8 +576,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         const val TAG = "ZTransfer"
         // 未完成文件的临时名前缀（带前导点，在相册中隐藏）。真正文件名只在下载完整后才出现。
         const val PART_PREFIX = ".nkpart_"
-        // 重名副本后缀（"DSC_0001 (1).NEF" 中的 " (1)"），用于剥离/生成。
-        val COPY_SUFFIX_REGEX = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
         // 分块大小引用协议层常量，保证断点续传偏移与分块下载粒度的严格一致。
         val RESUME_CHUNK_SIZE: Long get() = NikonCamera.CHUNK_SIZE
         const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_play_count"
@@ -511,17 +585,46 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      *  防止同名不同文件（DSC 编号跨文件夹回卷）续传时张冠李戴、把两份数据拼接成损坏文件。 */
     private data class PartInfo(val uri: Uri, val size: Long, val token: String)
 
-    private data class ExistingDirectoryScan(
-        val sizes: MutableMap<String, Long>,
-        val uris: MutableMap<String, Uri>,
-        val parts: Map<String, PartInfo>,
-    )
-
     private data class LocalOriginal(
         val displayName: String,
         val size: Long,
         val uri: Uri,
     )
+
+    /** 精确显示名与归一化原文件名双索引；副本匹配不再逐项遍历整个目录。 */
+    private class ExistingDirectoryIndex {
+        private val lock = Any()
+        private val files = ExistingFileNameIndex<Uri>()
+        private val partsByOriginalName = HashMap<String, PartInfo>()
+
+        fun addFile(displayName: String, size: Long, uri: Uri) = files.add(displayName, size, uri)
+
+        fun containsDisplayName(displayName: String): Boolean = files.containsDisplayName(displayName)
+
+        fun findOriginal(file: NikonCamera.FileInfo): LocalOriginal? = files
+            .find(file.fileName, file.size)
+            ?.let { LocalOriginal(it.displayName, it.size, it.value) }
+
+        fun exportedOriginalEntries(): Sequence<Pair<String, Long>> = files.entries()
+                .asSequence()
+                .filterNot {
+                    isPhotoFrameOutputName(it.displayName) ||
+                        it.displayName.equals(PHOTO_FRAME_OUTPUT_DIRECTORY, ignoreCase = true)
+                }
+                .map { exportedOriginalBaseName(it.displayName) to it.size }
+
+        fun addPart(originalName: String, part: PartInfo) = synchronized(lock) {
+            partsByOriginalName[originalName] = part
+        }
+
+        fun partFor(originalName: String): PartInfo? = synchronized(lock) {
+            partsByOriginalName[originalName]
+        }
+
+        fun removePart(originalName: String) = synchronized(lock) {
+            partsByOriginalName.remove(originalName)
+        }
+    }
 
     /**
      * 由导航宿主同步当前页面是否应优先保证无线传输吞吐。该值不持久化，也不修改正在
@@ -776,8 +879,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
         // 开 App 时清扫上次崩溃/被杀留下的半成品（.nkpart_ 临时文件）。
         if (dir != null) {
+            val uri = Uri.parse(dir)
+            // 构造 ViewModel 时同步登记清扫任务，再交给 IO 执行；用户极快点击传输时
+            // 也只会等待这一份扫描，不会抢先建立一个“不清扫半成品”的竞争快照。
+            primeDirectoryIndexScan(uri, deleteParts = true)
             viewModelScope.launch(Dispatchers.IO) {
-                refreshExistingExportFiles(Uri.parse(dir), deleteParts = true)
+                refreshExistingExportFiles(uri, deleteParts = true)
             }
         }
     }
@@ -1096,46 +1203,117 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         )
         prefs.edit().putString("transfer_dir", uri.toString()).apply()
-        _state.update { it.copy(transferDirUri = uri.toString(), existingExportFiles = emptyMap()) }
-        viewModelScope.launch(Dispatchers.IO) { refreshExistingExportFiles(uri, deleteParts = false) }
+        invalidateDirectoryIndexes()
+        primeDirectoryIndexScan(uri, deleteParts = false)
+        _state.update {
+            it.copy(
+                transferDirUri = uri.toString(),
+                existingExportIndex = ExportedOriginalIndex(),
+                existingExportRevision = 0L,
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            refreshExistingExportFiles(uri, deleteParts = false)
+        }
     }
 
-    private fun refreshExistingExportFiles(uri: Uri, deleteParts: Boolean) {
-        try {
-            val existing = sweepAndListExisting(uri, deleteParts).sizes
-            val normalized = HashMap<String, MutableSet<Long>>()
-            existing.forEach { (name, size) ->
-                // 派生图只参与边框输出的文件名防冲突，不参与“相机原片已传”状态。
-                // 否则每传一张 JPG 都会让 Compose 持有的索引多一项，目录越大越浪费。
-                if (
-                    !isPhotoFrameOutputName(name) &&
-                    !name.equals(PHOTO_FRAME_OUTPUT_DIRECTORY, ignoreCase = true)
-                ) {
-                    normalized.getOrPut(baseName(name)) { HashSet() }.add(size)
+    private fun primeDirectoryIndexScan(uri: Uri, deleteParts: Boolean) {
+        val key = uri.toString()
+        synchronized(directoryIndexLock) {
+            if (directoryIndexes.containsKey(key) || directoryIndexScans.containsKey(key)) return
+            directoryIndexScans[key] = viewModelScope.async(Dispatchers.IO) {
+                sweepAndIndexExisting(uri, deleteParts)
+            }
+        }
+    }
+
+    private suspend fun getDirectoryIndex(
+        uri: Uri,
+        deleteParts: Boolean = false,
+    ): ExistingDirectoryIndex {
+        val key = uri.toString()
+        val scan = synchronized(directoryIndexLock) {
+            directoryIndexes[key]?.let { return it }
+            directoryIndexScans[key] ?: viewModelScope.async(Dispatchers.IO) {
+                sweepAndIndexExisting(uri, deleteParts)
+            }.also { directoryIndexScans[key] = it }
+        }
+        return try {
+            val scanned = scan.await()
+            synchronized(directoryIndexLock) {
+                if (directoryIndexScans[key] === scan) {
+                    directoryIndexScans.remove(key)
+                    directoryIndexes[key] = scanned
+                    scanned
+                } else {
+                    directoryIndexes[key] ?: scanned
                 }
             }
-            _state.update { state ->
-                if (state.transferDirUri == uri.toString()) {
-                    // 扫描期间可能已有新传输完成并写入索引；合并而不是覆盖，避免慢扫描
-                    // 用启动时的旧目录快照抹掉刚完成文件的绿勾。
-                    state.existingExportFiles.forEach { (name, sizes) ->
-                        normalized.getOrPut(name) { HashSet() }.addAll(sizes)
-                    }
-                    state.copy(existingExportFiles = normalized.mapValues { it.value.toSet() })
-                } else state
+        } catch (cancelled: CancellationException) {
+            synchronized(directoryIndexLock) {
+                if (directoryIndexScans[key] === scan) directoryIndexScans.remove(key)
             }
+            throw cancelled
+        } catch (error: Exception) {
+            synchronized(directoryIndexLock) {
+                if (directoryIndexScans[key] === scan) directoryIndexScans.remove(key)
+            }
+            throw error
+        }
+    }
+
+    private fun invalidateDirectoryIndexes() = synchronized(directoryIndexLock) {
+        directoryIndexes.clear()
+        directoryIndexScans.clear()
+    }
+
+    private fun invalidateDirectoryIndex(uri: Uri) = synchronized(directoryIndexLock) {
+        val key = uri.toString()
+        directoryIndexes.remove(key)
+        directoryIndexScans.remove(key)
+    }
+
+    private suspend fun refreshExistingExportFiles(
+        uri: Uri,
+        deleteParts: Boolean,
+    ) {
+        try {
+            val directoryIndex = getDirectoryIndex(uri, deleteParts)
+            val snapshot = _state.value
+            if (snapshot.transferDirUri != uri.toString()) return
+            if (snapshot.existingExportIndex.addAll(directoryIndex.exportedOriginalEntries())) {
+                _state.update { state ->
+                    if (
+                        state.transferDirUri == uri.toString() &&
+                        state.existingExportIndex === snapshot.existingExportIndex
+                    ) {
+                        state.copy(existingExportRevision = state.existingExportRevision + 1L)
+                    } else {
+                        state
+                    }
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             // 保留扫描期间由已完成传输写入的索引；新目录初始本来就是空映射。
         }
     }
 
     private fun recordExistingExport(uri: Uri, name: String, size: Long) {
-        val normalizedName = baseName(name)
+        val snapshot = _state.value
+        // 目录选择器在传输期间仍可能被打开；旧目录任务完成后绝不能污染新目录索引。
+        if (snapshot.transferDirUri != uri.toString()) return
+        if (!snapshot.existingExportIndex.add(name, size)) return
         _state.update { state ->
-            // 目录选择器在传输期间仍可能被打开；旧目录任务完成后绝不能污染新目录索引。
-            if (state.transferDirUri != uri.toString()) return@update state
-            val sizes = state.existingExportFiles[normalizedName].orEmpty() + size
-            state.copy(existingExportFiles = state.existingExportFiles + (normalizedName to sizes))
+            if (
+                state.transferDirUri == uri.toString() &&
+                state.existingExportIndex === snapshot.existingExportIndex
+            ) {
+                state.copy(existingExportRevision = state.existingExportRevision + 1L)
+            } else {
+                state
+            }
         }
     }
 
@@ -1187,6 +1365,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 }
                 if (!dirValid) {
                     pendingTransferQueue.clear()
+                    invalidateDirectoryIndex(uri)
                     prefs.edit().remove("transfer_dir").apply()
                     // 文案只取一次：str() 每次都要构建配置上下文，放 map 里会按任务数重复执行
                     //（update 遇 CAS 重试还会整体重跑）。
@@ -1204,13 +1383,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     return@launch   // finally 负责复位 isTransferring（前台服务尚未启动）
                 }
 
-                // 单次遍历：保留半成品(.nkpart_)供断点续传 + 建立"已存在(名称->大小)"去重表。
-                val directoryScan = withContext(Dispatchers.IO) {
-                    sweepAndListExisting(uri, deleteParts = false)
-                }
-                val existing = directoryScan.sizes
-                val existingUris = directoryScan.uris
-                val partFiles = directoryScan.parts
+                // 启动/选目录时已建立索引；这里复用同一单飞结果。正常连续队列不再重复
+                // query SAF，后续成功文件和断点文件会增量写回该索引。
+                val directoryIndex = getDirectoryIndex(uri, deleteParts = false)
                 var taskToRecheck: TransferTask? = null
                 while (true) {
                     // 待传队列与历史展示列表分离，取下一项为 O(1)，不会随着已完成历史增长
@@ -1222,11 +1397,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     val handle = task.file.handle
 
                     // 第一查：原片存在就直接引用，不再区分“下载任务/边框任务”。
-                    val localOriginal = findLocalOriginal(
-                        file = task.file,
-                        existingSizes = existing,
-                        existingUris = existingUris,
-                    )
+                    val localOriginal = directoryIndex.findOriginal(task.file)
                     if (localOriginal != null) {
                         log { "DL_SKIP existing: ${task.file.fileName}" }
                         recordExistingExport(uri, localOriginal.displayName, localOriginal.size)
@@ -1360,7 +1531,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 断点续传：检查是否存在上次传输留下的、【身份令牌匹配】的半成品文件。
                     var resumeOffset = 0L
                     var fileDocUri: Uri? = null
-                    val partFile = partFiles[task.file.fileName]?.takeIf { it.token == identityToken(task.file) }
+                    val partFile = directoryIndex.partFor(task.file.fileName)
+                        ?.takeIf { it.token == identityToken(task.file) }
                     if (partFile != null) {
                         val partSize = partFile.size
                         // task.file.size 对 >4GB 文件是 SIZE_UNKNOWN 哨兵，绝不能拿它当真实大小比较。
@@ -1376,15 +1548,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 // 改名失败：复用已有副本逻辑
                                 for (n in 1..99) {
                                     val candidate = suffixedName(finalName, n)
-                                    if (existing.containsKey(candidate)) continue
+                                    if (directoryIndex.containsDisplayName(candidate)) continue
                                     renamed = renameQuietly(partFile.uri, candidate)
                                     if (renamed != null) break
                                 }
                             }
                             if (renamed != null) {
                                 val savedName = displayNameOf(renamed) ?: finalName
-                                existing[savedName] = partSize
-                                existingUris[savedName] = renamed
+                                directoryIndex.addFile(savedName, partSize, renamed)
+                                directoryIndex.removePart(task.file.fileName)
                                 recordExistingExport(uri, savedName, partSize)
                                 if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
                                 // 回到循环顶部，统一走“原片存在 → 检查边框”的同一条路径。
@@ -1394,6 +1566,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             } else {
                                 // 改不了，删半成品让正常路径重下
                                 deleteQuietly(partFile.uri)
+                                directoryIndex.removePart(task.file.fileName)
                             }
                         } else if (partSize >= RESUME_CHUNK_SIZE && (!sizeKnown || partSize < task.file.size)) {
                             // 半成品够大（≥1 块）且未完整：从块边界续传。大小未知(>4GB)也允许——
@@ -1404,6 +1577,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         } else {
                             // 不足一个续传块（当前 4MB）或异常半成品，删掉重建。
                             deleteQuietly(partFile.uri)
+                            directoryIndex.removePart(task.file.fileName)
                         }
                     }
 
@@ -1442,6 +1616,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     partFileName(task.file)
                                 ) ?: throw Exception(str(R.string.error_create_file))
                                 fileDocUri = createdUri
+                                directoryIndex.addPart(
+                                    task.file.fileName,
+                                    PartInfo(
+                                        uri = createdUri,
+                                        size = 0L,
+                                        token = identityToken(task.file),
+                                    ),
+                                )
                             }
 
                             // 续传时用 ParcelFileDescriptor "rw" 模式实现 seekable 写入；
@@ -1508,7 +1690,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 if (renamedUri == null && !renameBroken) {
                                     for (n in 1..99) {
                                         val candidate = suffixedName(finalName, n)
-                                        if (existing.containsKey(candidate)) continue
+                                        if (directoryIndex.containsDisplayName(candidate)) continue
                                         renamedUri = renameQuietly(createdUri, candidate)
                                         if (renamedUri != null) {
                                             savedName = candidate
@@ -1519,10 +1701,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 var saveError: Throwable? = null
                                 if (renamedUri == null) {
                                     var copyName = finalName
-                                    if (existing.containsKey(copyName)) {
+                                    if (directoryIndex.containsDisplayName(copyName)) {
                                         for (n in 1..99) {
                                             val candidate = suffixedName(finalName, n)
-                                            if (!existing.containsKey(candidate)) {
+                                            if (!directoryIndex.containsDisplayName(candidate)) {
                                                 copyName = candidate
                                                 break
                                             }
@@ -1544,8 +1726,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     }
                                 }
                                 if (renamedUri != null) {
-                                    existing[savedName] = stats.bytes
-                                    existingUris[savedName] = renamedUri
+                                    directoryIndex.addFile(savedName, stats.bytes, renamedUri)
+                                    directoryIndex.removePart(task.file.fileName)
                                     recordExistingExport(uri, savedName, stats.bytes)
                                     val framePreset = task.framePreset
                                     val photoFilter = task.photoFilterRequested
@@ -1592,6 +1774,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     // 改名与复制均失败：删掉临时文件并标记失败——
                                     // 重试时从头下载（改名失败不是传输层问题，续传解决不了）。
                                     deleteQuietly(createdUri)
+                                    directoryIndex.removePart(task.file.fileName)
                                     val reason = when {
                                         saveError is java.io.FileNotFoundException ->
                                             str(R.string.error_dir_invalid)
@@ -1608,12 +1791,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     // 走不了续传（相机不支持分块 / >4GB 拿不到真实大小）：删掉半成品，
                                     // 本次标记失败，重试将从头全新下载——绝不用错位的全量数据续写。
                                     deleteQuietly(fileDocUri)
+                                    directoryIndex.removePart(task.file.fileName)
                                     updateTask(taskId) {
                                         it.copy(status = TransferStatus.FAILED, error = str(R.string.transfer_failed), speed = 0)
                                     }
                                 } else {
                                     // 普通传输失败：保留半成品，重试时从块边界续传。
                                     // 不删 .nkpart_：断点续传依赖它，交给 App 启动 init 的 sweep 统一清扫。
+                                    refreshPartIndexForRetry(
+                                        directoryIndex = directoryIndex,
+                                        file = task.file,
+                                        partUri = fileDocUri,
+                                    )
                                     updateTask(taskId) {
                                         it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                                     }
@@ -1632,6 +1821,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         if (BuildConfig.DEBUG) {
                             android.util.Log.e(TAG, "DL_FAIL: ${task.file.fileName} - ${e.javaClass.simpleName}: ${e.message}", e)
                         }
+                        refreshPartIndexForRetry(
+                            directoryIndex = directoryIndex,
+                            file = task.file,
+                            partUri = fileDocUri,
+                        )
                         updateTask(taskId) {
                             it.copy(status = TransferStatus.FAILED, error = friendlyError(e), speed = 0)
                         }
@@ -1641,6 +1835,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     throw cancelled
                 } catch (error: Exception) {
                     pendingTransferQueue.clear()
+                    invalidateDirectoryIndex(Uri.parse(dirUri))
                     // 目录 URI 解析、目录扫描等位于单任务 try/catch 之外。任何 provider
                     // 异常都只能让相关卡片失败，不能成为主线程未捕获异常导致 App 闪退。
                     if (BuildConfig.DEBUG) {
@@ -1693,19 +1888,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      * @param deleteParts true=清空半成品（App 启动/新队列）, false=保留半成品供续传（队列启动重试）
      * @return 完整文件大小、Uri 与半成品映射的一致快照
      */
-    private fun sweepAndListExisting(
+    private fun sweepAndIndexExisting(
         treeUri: Uri,
         deleteParts: Boolean = true
-    ): ExistingDirectoryScan {
-        val map = HashMap<String, Long>()
-        val uris = HashMap<String, Uri>()
-        val parts = HashMap<String, PartInfo>()
-        try {
-            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
-                treeUri,
-                DocumentsContract.getTreeDocumentId(treeUri)
-            )
-            contentResolver.query(
+    ): ExistingDirectoryIndex {
+        val index = ExistingDirectoryIndex()
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri)
+        )
+        val cursor = contentResolver.query(
                 childrenUri,
                 arrayOf(
                     DocumentsContract.Document.COLUMN_DISPLAY_NAME,
@@ -1713,20 +1905,22 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     DocumentsContract.Document.COLUMN_DOCUMENT_ID
                 ),
                 null, null, null
-            )?.use { c ->
+            ) ?: throw java.io.IOException("Directory provider returned no cursor")
+        cursor.use { c ->
                 val nameIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                 val sizeIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
                 val idIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                if (nameIdx >= 0) {
-                    while (c.moveToNext()) {
+                if (nameIdx < 0 || idIdx < 0) {
+                    throw java.io.IOException("Directory provider omitted required columns")
+                }
+                while (c.moveToNext()) {
                         val name = c.getString(nameIdx) ?: continue
                         if (name.startsWith(PHOTO_FRAME_PART_PREFIX)) {
                             // 边框派生临时文件不可续传：App 启动时清理；队列运行期间
                             // 只忽略不删除，避免新队列扫描误删仍在后台写入的旧队列任务。
                             if (
                                 deleteParts &&
-                                !isCurrentPhotoFrameTempName(name) &&
-                                idIdx >= 0
+                                !isCurrentPhotoFrameTempName(name)
                             ) {
                                 val docId = c.getString(idIdx) ?: continue
                                 runCatching {
@@ -1737,7 +1931,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                             }
                         } else if (name.startsWith(PART_PREFIX)) {
-                            if (deleteParts && idIdx >= 0) {
+                            if (deleteParts) {
                                 val docId = c.getString(idIdx) ?: continue
                                 try {
                                     DocumentsContract.deleteDocument(
@@ -1745,7 +1939,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
                                     )
                                 } catch (_: Exception) {}
-                            } else if (!deleteParts && idIdx >= 0) {
+                            } else {
                                 // 续传模式：保留半成品，解析出身份令牌与原文件名（按首个下划线切分）。
                                 val docId = c.getString(idIdx) ?: continue
                                 val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else 0L
@@ -1755,32 +1949,63 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     val token = afterPrefix.substring(0, sep)
                                     val origName = afterPrefix.substring(sep + 1)
                                     if (origName.isNotEmpty()) {
-                                        parts[origName] = PartInfo(
+                                        index.addPart(origName, PartInfo(
                                             uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
                                             size = size, token = token
-                                        )
+                                        ))
                                     }
                                 }
                                 // sep<=0：旧格式/异常半成品名，不记录（App 启动 init sweep 会清掉）。
                             }
                         } else {
                             val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else -1L
-                            map[name] = size
-                            if (idIdx >= 0) {
-                                val docId = c.getString(idIdx)
-                                if (docId != null) {
-                                    uris[name] = DocumentsContract.buildDocumentUriUsingTree(
+                            val docId = c.getString(idIdx)
+                            if (docId != null) {
+                                index.addFile(
+                                    displayName = name,
+                                    size = size,
+                                    uri = DocumentsContract.buildDocumentUriUsingTree(
                                         treeUri,
                                         docId,
-                                    )
-                                }
+                                    ),
+                                )
                             }
                         }
-                    }
                 }
             }
-        } catch (_: Exception) {}
-        return ExistingDirectoryScan(sizes = map, uris = uris, parts = parts)
+        return index
+    }
+
+    /** 失败后只查询这一份半成品的大小并更新缓存；不为一次重试重扫整个目录。 */
+    private suspend fun refreshPartIndexForRetry(
+        directoryIndex: ExistingDirectoryIndex,
+        file: NikonCamera.FileInfo,
+        partUri: Uri?,
+    ) {
+        if (partUri == null) return
+        val size = withContext(Dispatchers.IO) {
+            try {
+                contentResolver.query(
+                    partUri,
+                    arrayOf(DocumentsContract.Document.COLUMN_SIZE),
+                    null,
+                    null,
+                    null,
+                )?.use { cursor ->
+                    if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+        if (size == null) {
+            directoryIndex.removePart(file.fileName)
+            return
+        }
+        directoryIndex.addPart(
+            file.fileName,
+            PartInfo(partUri, size.coerceAtLeast(0L), identityToken(file)),
+        )
     }
 
     /**
@@ -1860,36 +2085,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
         } catch (_: Exception) {
             null
-        }
-    }
-
-    /** 剥掉重名副本后缀："DSC_0001 (2).NEF" -> "DSC_0001.NEF"，用于与相机文件名归一化匹配。 */
-    private fun baseName(name: String): String = name.replace(COPY_SUFFIX_REGEX, "")
-
-    /** 从本次目录快照中找到已传原片；优先精确文件名，其次接受同大小的重名副本。 */
-    private fun findLocalOriginal(
-        file: NikonCamera.FileInfo,
-        existingSizes: Map<String, Long>,
-        existingUris: Map<String, Uri>,
-    ): LocalOriginal? {
-        fun sizeMatches(localSize: Long): Boolean =
-            localSize < 0L ||
-                file.size == PtpConstants.SIZE_UNKNOWN ||
-                localSize == file.size
-
-        val exactSize = existingSizes[file.fileName]
-        val exactUri = existingUris[file.fileName]
-        if (exactSize != null && exactUri != null && sizeMatches(exactSize)) {
-            return LocalOriginal(file.fileName, exactSize, exactUri)
-        }
-
-        return existingSizes.entries.firstNotNullOfOrNull { (displayName, size) ->
-            val localUri = existingUris[displayName] ?: return@firstNotNullOfOrNull null
-            if (baseName(displayName).equals(file.fileName, ignoreCase = true) && sizeMatches(size)) {
-                LocalOriginal(displayName, size, localUri)
-            } else {
-                null
-            }
         }
     }
 
@@ -2191,6 +2386,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         super.onCleared()
         transferJob?.cancel()
         pendingTransferQueue.clear()
+        invalidateDirectoryIndexes()
         photoFrameDispatcher.close()
         // 兜底停止前台服务，防止 VM 销毁后通知残留。
         TransferService.stop(getApplication())

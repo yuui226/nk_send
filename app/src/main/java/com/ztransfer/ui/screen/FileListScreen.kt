@@ -562,10 +562,13 @@ fun FileListScreen(
     }
     // 已传对号与“未传输”筛选必须共用这一个判定，避免界面同时出现
     // “带对号却仍在未传输列表”的自相矛盾。
-    val exportedHandles: Set<Int> = remember(state.files, transferState.existingExportFiles) {
+    val exportedHandles: Set<Int> = remember(
+        state.files,
+        transferState.existingExportRevision,
+    ) {
         state.files.asSequence()
             .filter { file ->
-                isTransferredOriginal(file, transferState.existingExportFiles)
+                isTransferredOriginal(file, transferState.existingExportIndex)
             }
             .mapTo(HashSet()) { it.handle }
     }
@@ -758,7 +761,7 @@ fun FileListScreen(
         transferState.tasks.associateBy { it.file.handle }
     }
     val hasLocalOriginal: (NikonCamera.FileInfo) -> Boolean = { file ->
-        isTransferredOriginal(file, transferState.existingExportFiles)
+        isTransferredOriginal(file, transferState.existingExportIndex)
     }
     // 单文件入队：列表轻触 + 预览页传输按钮共用。gating 与整组传输一致。
     val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
