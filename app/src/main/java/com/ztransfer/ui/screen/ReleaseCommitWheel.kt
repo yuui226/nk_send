@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -296,5 +298,18 @@ internal fun <T> ReleaseCommitWheel(
                 }
             }
         }
+
+        // 纯视觉拖动提示：不安装任何手势或点击处理，事件仍完整交给外层波轮。
+        Text(
+            text = "↕",
+            color = colors.onBackground.copy(alpha = 0.30f),
+            fontSize = 10.sp,
+            lineHeight = 10.sp,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 8.dp, bottom = 5.dp)
+                .graphicsLayer { alpha = labelAlpha }
+                .clearAndSetSemantics { },
+        )
     }
 }

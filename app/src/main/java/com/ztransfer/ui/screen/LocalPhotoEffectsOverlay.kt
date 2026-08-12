@@ -22,8 +22,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +30,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -82,6 +83,7 @@ fun LocalPhotoEffectsPage(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
+    val pageTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
     val settingsPreferences = remember(context) { LocalPhotoEffectsPreferences(context) }
     val availableFilterIds = state.photoFilters.map { it.id }
@@ -93,6 +95,9 @@ fun LocalPhotoEffectsPage(
     var sourceLoading by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var watermarkImageImporting by remember { mutableStateOf(false) }
+    var showPhotoEffectsInfo by remember { mutableStateOf(false) }
+    var photoEffectsInfoViewed by remember { mutableStateOf(false) }
+    var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
 
     var decorationEnabled by remember { mutableStateOf(initialSettings.decorationEnabled) }
     var borderEnabled by remember { mutableStateOf(initialSettings.borderEnabled) }
@@ -285,6 +290,20 @@ fun LocalPhotoEffectsPage(
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(8.dp))
+                TipLightbulbButton(
+                    onClick = {
+                        photoEffectsInfoViewed = true
+                        showPhotoEffectsInfo = true
+                    },
+                    contentDescription = stringResource(R.string.photo_effects_info_title),
+                    attention = !photoEffectsInfoViewed,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .onGloballyPositioned {
+                            photoEffectsInfoAnchorBounds = it.boundsInRoot()
+                        },
+                )
+                Spacer(Modifier.width(8.dp))
                 GlassButton(
                     onClick = {
                         photoPicker.launch(
@@ -306,13 +325,6 @@ fun LocalPhotoEffectsPage(
                         CircularProgressIndicator(
                             color = colors.accentBlue,
                             strokeWidth = 2.dp,
-                            modifier = Modifier.size(19.dp),
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.PhotoLibrary,
-                            contentDescription = null,
-                            tint = colors.accentBlue,
                             modifier = Modifier.size(19.dp),
                         )
                     }
@@ -529,13 +541,6 @@ fun LocalPhotoEffectsPage(
                         strokeWidth = 2.dp,
                         modifier = Modifier.size(19.dp),
                     )
-                } else {
-                    Icon(
-                        Icons.Default.Save,
-                        contentDescription = null,
-                        tint = colors.accentBlue,
-                        modifier = Modifier.size(19.dp),
-                    )
                 }
                 Text(
                     text = stringResource(
@@ -578,6 +583,16 @@ fun LocalPhotoEffectsPage(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
                 )
             }
+        }
+        if (showPhotoEffectsInfo) {
+            PhotoEffectsInfoBubble(
+                anchorBounds = photoEffectsInfoAnchorBounds,
+                onDismiss = { showPhotoEffectsInfo = false },
+                description = stringResource(R.string.local_photo_effects_info_description),
+                gestureHint = stringResource(R.string.local_photo_effects_gesture_hint),
+                extraHint = stringResource(R.string.local_photo_effects_exif_hint),
+                parentTopInset = pageTopInset,
+            )
         }
     }
 }

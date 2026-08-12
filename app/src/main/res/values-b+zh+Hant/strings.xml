@@ -199,7 +199,8 @@
     <string name="photo_effects_open_editor">編輯照片效果</string>
     <string name="photo_effects_info_title">照片效果說明</string>
     <string name="photo_effects_info_description">傳輸原圖後，效果圖另存。</string>
-    <string name="photo_effects_gesture_hint">操作：點擊放大 · 雙擊旋轉 · 長按對比濾鏡前後</string>
+    <string name="photo_effects_gesture_hint">預覽：點擊放大 · 雙擊旋轉 · 長按對比濾鏡前後</string>
+    <string name="photo_effects_wheel_hint">撥輪：按住上下拖動可快速調整</string>
     <string name="photo_filter_off_option">無濾鏡</string>
     <string name="photo_filter_intensity_summary">強度 %1$d%%</string>
     <string name="photo_filter_intensity">濾鏡強度</string>
@@ -475,6 +476,9 @@
     <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">開啟下載頁</string>
     <string name="local_photo_effects_entry">濾鏡·邊框·浮水印</string>
+    <string name="local_photo_effects_info_description">選擇圖片後，可調整濾鏡、邊框和浮水印並另存。</string>
+    <string name="local_photo_effects_exif_hint">邊框：截圖等無 EXIF 的圖片不顯示拍攝參數</string>
+    <string name="local_photo_effects_gesture_hint">預覽：長按對比濾鏡前後</string>
     <string name="local_photo_choose_short">選擇圖片</string>
     <string name="local_photo_replace">更換圖片</string>
     <string name="local_photo_preview_prompt">選擇照片後在這裡預覽效果</string>

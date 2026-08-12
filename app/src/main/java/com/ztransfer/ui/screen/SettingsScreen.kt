@@ -438,6 +438,8 @@ fun SettingsOverlay(
                 PhotoEffectsInfoBubble(
                     anchorBounds = photoEffectsInfoAnchorBounds,
                     onDismiss = { showPhotoEffectsInfo = false },
+                    description = stringResource(R.string.photo_effects_info_description),
+                    gestureHint = stringResource(R.string.photo_effects_gesture_hint),
                 )
             }
             // 底部玻璃提示（与列表页提示条同款视觉）：文案由触发方传入。
@@ -1289,13 +1291,19 @@ private data class ExpandedEffectsPreview(
 )
 
 @Composable
-private fun PhotoEffectsInfoBubble(
+internal fun PhotoEffectsInfoBubble(
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
+    description: String,
+    gestureHint: String,
+    extraHint: String? = null,
+    parentTopInset: Dp = 0.dp,
 ) {
     val colors = AppTheme.colors
     val density = LocalDensity.current
-    val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 8.dp } ?: 64.dp
+    val panelTop = anchorBounds?.let {
+        with(density) { it.bottom.toDp() } - parentTopInset + 8.dp
+    } ?: 64.dp
     AnchorPopup(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
@@ -1318,13 +1326,27 @@ private fun PhotoEffectsInfoBubble(
             Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    stringResource(R.string.photo_effects_info_description),
+                    description,
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
                 )
+                if (!extraHint.isNullOrBlank()) {
+                    Spacer(Modifier.height(7.dp))
+                    Text(
+                        extraHint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
                 Spacer(Modifier.height(7.dp))
                 Text(
-                    stringResource(R.string.photo_effects_gesture_hint),
+                    gestureHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    stringResource(R.string.photo_effects_wheel_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
                 )

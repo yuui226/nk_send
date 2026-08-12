@@ -199,7 +199,8 @@
     <string name="photo_effects_open_editor">编辑照片效果</string>
     <string name="photo_effects_info_title">照片效果说明</string>
     <string name="photo_effects_info_description">传输原图后，效果图另存。</string>
-    <string name="photo_effects_gesture_hint">操作：点击放大 · 双击旋转 · 长按对比滤镜前后</string>
+    <string name="photo_effects_gesture_hint">预览：点击放大 · 双击旋转 · 长按对比滤镜前后</string>
+    <string name="photo_effects_wheel_hint">波轮：按住上下拖动可快速调节</string>
     <string name="photo_filter_off_option">无滤镜</string>
     <string name="photo_filter_intensity_summary">强度 %1$d%%</string>
     <string name="photo_filter_intensity">滤镜强度</string>
@@ -475,6 +476,9 @@
     <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">打开下载页</string>
     <string name="local_photo_effects_entry">滤镜·边框·水印</string>
+    <string name="local_photo_effects_info_description">选择图片后，可调整滤镜、边框和水印并另存。</string>
+    <string name="local_photo_effects_exif_hint">边框：截图等无 EXIF 的图片不显示拍摄参数</string>
+    <string name="local_photo_effects_gesture_hint">预览：长按对比滤镜前后</string>
     <string name="local_photo_choose_short">选择图片</string>
     <string name="local_photo_replace">更换图片</string>
     <string name="local_photo_preview_prompt">选择照片后在这里预览效果</string>
