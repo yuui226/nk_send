@@ -191,6 +191,17 @@ fun TransferScreen(
                 // 倒序显示：最新加入队列的排在最上方（asReversed 是视图，不复制列表）。
                 items(transferState.tasks.asReversed(), key = { it.taskId }) { task ->
                     val taskId = task.taskId
+                    // 只有唯一的活动任务卡订阅高频进度；其它卡片和整个页面不随 200ms
+                    // 回调重组。任务进入终态后改读低频列表中的最终快照。
+                    val activeProgress = if (task.status == TransferStatus.TRANSFERING) {
+                        val progress by transferViewModel.activeTransferProgress.collectAsState()
+                        progress?.takeIf { it.taskId == taskId }
+                    } else {
+                        null
+                    }
+                    val displayedProgress = activeProgress?.fraction ?: task.progress
+                    val displayedDownloaded = activeProgress?.downloaded ?: task.downloaded
+                    val displayedSpeed = activeProgress?.bytesPerSecond ?: task.speed
                     val removing = removingTaskIds.containsKey(taskId)
                     // 移除动画：真实高度收合 + 淡出（collapseHeight，与列表页分组收合同款），
                     // 收合完毕才从队列删除，下方卡片随布局逐帧上移，无跳变。
@@ -238,7 +249,7 @@ fun TransferScreen(
                                 if (task.status == TransferStatus.TRANSFERING) {
                                     Modifier.semantics {
                                         progressBarRangeInfo = ProgressBarRangeInfo(
-                                            current = normalizedTransferProgress(task.progress),
+                                            current = normalizedTransferProgress(displayedProgress),
                                             range = 0f..1f,
                                         )
                                     }
@@ -271,7 +282,7 @@ fun TransferScreen(
                                 val animatedProgress = rememberSmoothTransferProgress(
                                     targetProgress = transferCardProgressTarget(
                                         status = task.status,
-                                        progress = task.progress,
+                                        progress = displayedProgress,
                                     ),
                                     resetKey = taskId,
                                 )
@@ -355,11 +366,13 @@ fun TransferScreen(
                                         TransferStatus.TRANSFERING -> {
                                             // >4GB 对象的 file.size 只是 SIZE_UNKNOWN 哨兵，别显示假总量。
                                             val base = if (task.file.size == PtpConstants.SIZE_UNKNOWN) {
-                                                formatFileSize(task.downloaded)
+                                                formatFileSize(displayedDownloaded)
                                             } else {
-                                                "${formatFileSize(task.downloaded)} / ${formatFileSize(task.file.size)}"
+                                                "${formatFileSize(displayedDownloaded)} / ${formatFileSize(task.file.size)}"
                                             }
-                                            (if (task.speed > 0) "$base · ${formatSpeed(task.speed)}" else base) to colors.accentBlue
+                                            (if (displayedSpeed > 0) {
+                                                "$base · ${formatSpeed(displayedSpeed)}"
+                                            } else base) to colors.accentBlue
                                         }
                                         TransferStatus.COMPLETED -> {
                                             val completedText = when {
@@ -540,7 +553,12 @@ fun TransferScreen(
                     enter = fadeIn() + scaleIn(initialScale = 0.6f),
                     exit = fadeOut() + scaleOut(targetScale = 0.6f)
                 ) {
-                    QueuePill(transferState = transferState, haptics = haptics, onClick = {})
+                    QueuePill(
+                        transferState = transferState,
+                        activeProgressFlow = transferViewModel.activeTransferProgress,
+                        haptics = haptics,
+                        onClick = {},
+                    )
                 }
             }
         }

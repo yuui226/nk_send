@@ -51,45 +51,52 @@ class TransferStateTest {
     }
 
     @Test
-    fun downloadAndGenerationRemainingCountsStayIndependent() {
-        val state = TransferState(
-            tasks = listOf(
-                TransferTask(file(1), status = TransferStatus.WAITING),
-                TransferTask(
-                    file(2),
-                    status = TransferStatus.TRANSFERING,
-                    progress = 0.4f,
-                ),
-                TransferTask(
-                    file(3),
-                    status = TransferStatus.COMPLETED,
-                    progress = 1f,
-                    isGeneratingFrame = true,
-                ),
-            ),
+    fun activeProgressIsMergedOnlyIntoItsMatchingTaskSnapshot() {
+        val activeTask = TransferTask(file(1), status = TransferStatus.TRANSFERING)
+        val waitingTask = TransferTask(file(2), status = TransferStatus.WAITING)
+        val progress = ActiveTransferProgress(
+            taskId = activeTask.taskId,
+            fraction = 0.4f,
+            downloaded = 40L,
+            bytesPerSecond = 12L,
+            retainedBytesPerSecond = 15L,
         )
 
-        assertEquals(2, state.downloadRemainingCount)
-        assertEquals(1, state.generationRemainingCount)
-        assertEquals(0.4f, state.currentFileProgress)
+        val merged = activeTask.withActiveProgress(progress)
+
+        assertEquals(0.4f, merged.progress)
+        assertEquals(40L, merged.downloaded)
+        assertEquals(12L, merged.speed)
+        assertEquals(0f, activeTask.progress)
+        assertEquals(waitingTask, waitingTask.withActiveProgress(progress))
     }
 
     @Test
-    fun frameGenerationKeepsCompletedSourceAtFullProgress() {
-        val state = TransferState(
-            tasks = listOf(
-                TransferTask(
-                    file(1),
-                    status = TransferStatus.COMPLETED,
-                    progress = 1f,
-                    isGeneratingFrame = true,
-                ),
-            ),
-        )
+    fun pendingQueuePreservesOrderAndWithdrawsWithoutScanningHistory() {
+        val first = TransferTask(file(1))
+        val second = TransferTask(file(2))
+        val third = TransferTask(file(3))
+        val queue = PendingTransferQueue()
+        queue.addAll(listOf(first, second, third))
 
-        assertEquals(0, state.downloadRemainingCount)
-        assertEquals(1, state.generationRemainingCount)
-        assertEquals(1f, state.currentFileProgress)
+        queue.withdraw(listOf(second.taskId))
+
+        assertEquals(first, queue.takeFirst())
+        assertEquals(third, queue.takeFirst())
+        assertEquals(null, queue.takeFirst())
+    }
+
+    @Test
+    fun claimedPendingTaskCanStillBeWithdrawnDuringPreflight() {
+        val task = TransferTask(file(1))
+        val queue = PendingTransferQueue()
+        queue.addAll(listOf(task))
+
+        assertEquals(task, queue.takeFirst())
+        queue.withdraw(listOf(task.taskId))
+
+        assertEquals(true, queue.consumeWithdrawal(task.taskId))
+        assertEquals(false, queue.consumeWithdrawal(task.taskId))
     }
 
     @Test

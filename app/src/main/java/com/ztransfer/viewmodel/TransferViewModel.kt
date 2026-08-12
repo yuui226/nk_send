@@ -111,6 +111,65 @@ data class TransferTask(
     val isGeneratingFrame: Boolean = false,
 )
 
+/**
+ * 唯一活动下载的高频状态。它与低频 [TransferState.tasks] 分离：协议层约每 200ms 更新时
+ * 只替换这个常量大小对象，不再复制整个任务列表，也不会令订阅设置/筛选的页面失效。
+ */
+data class ActiveTransferProgress(
+    val taskId: Long,
+    val fraction: Float = 0f,
+    val downloaded: Long = 0L,
+    /** 当前协议采样速度；0 表示本次采样未得到有效速度。 */
+    val bytesPerSecond: Long = 0L,
+    /** 跨文件短间隙保留的最近有效速度，供顶部队列胶囊稳定显示。 */
+    val retainedBytesPerSecond: Long = 0L,
+)
+
+internal fun TransferTask.withActiveProgress(
+    active: ActiveTransferProgress?,
+): TransferTask = if (active?.taskId == taskId && status == TransferStatus.TRANSFERING) {
+    copy(
+        progress = active.fraction,
+        downloaded = active.downloaded,
+        speed = active.bytesPerSecond,
+    )
+} else {
+    this
+}
+
+/** 仅负责低频队列调度；任务历史继续留在 TransferState 供 UI 展示。 */
+internal class PendingTransferQueue {
+    private val lock = Any()
+    private val tasks = LinkedHashMap<Long, TransferTask>()
+    private val withdrawnClaimedTaskIds = HashSet<Long>()
+
+    fun addAll(newTasks: Collection<TransferTask>) = synchronized(lock) {
+        newTasks.forEach { tasks[it.taskId] = it }
+    }
+
+    fun takeFirst(): TransferTask? = synchronized(lock) {
+        val iterator = tasks.entries.iterator()
+        if (!iterator.hasNext()) return@synchronized null
+        iterator.next().also { iterator.remove() }.value
+    }
+
+    /** 队列内任务直接移除；已经被调度器取走但尚在预检查的任务留下撤回标记。 */
+    fun withdraw(taskIds: Collection<Long>) = synchronized(lock) {
+        taskIds.forEach { taskId ->
+            if (tasks.remove(taskId) == null) withdrawnClaimedTaskIds += taskId
+        }
+    }
+
+    fun consumeWithdrawal(taskId: Long): Boolean = synchronized(lock) {
+        withdrawnClaimedTaskIds.remove(taskId)
+    }
+
+    fun clear() = synchronized(lock) {
+        tasks.clear()
+        withdrawnClaimedTaskIds.clear()
+    }
+}
+
 private fun TransferTask.newAttempt(): TransferTask = copy(
     taskId = transferTaskIds.incrementAndGet(),
     status = TransferStatus.WAITING,
@@ -127,8 +186,6 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
     val isTransferring: Boolean = false,
-    /** Last valid speed in the active original-transfer batch; retained across file switches. */
-    val currentSpeed: Long = 0L,
     val transferDirUri: String? = null,
     /** 导出目录内完整文件：归一化文件名 -> 已有大小集合，用于相机列表直接标记已传照片。 */
     val existingExportFiles: Map<String, Set<Long>> = emptyMap(),
@@ -277,24 +334,6 @@ internal val TransferState.photoFilterSelection: PhotoFilterSelection?
         return PhotoFilterSelection(preset, photoFilterIntensityPercent)
     }
 
-/** 尚未完成下载的原片数量；不包含并行执行的照片效果任务。 */
-val TransferState.downloadRemainingCount: Int
-    get() = tasks.count {
-        it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
-    }
-
-/** 尚未生成完成的效果图数量，包含等待线程和正在生成的任务。 */
-val TransferState.generationRemainingCount: Int
-    get() = tasks.count { it.isGeneratingFrame }
-
-/**
- * 当前处理项的进度（0..1）。派生图没有廉价而准确的分段进度，原片已完整落盘后保持满格，
- * 直到派生完成；这样顶栏不会在最后一步从 100% 倒退到 0%。
- */
-val TransferState.currentFileProgress: Float
-    get() = tasks.firstOrNull { it.status == TransferStatus.TRANSFERING }?.progress
-        ?: if (tasks.any { it.isGeneratingFrame }) 1f else 0f
-
 /** 免费版固定使用默认水印；高级版完整采用用户设置。预览和真正导出必须共用该入口。 */
 internal fun effectivePhotoFrameWatermark(
     isPro: Boolean,
@@ -383,6 +422,12 @@ internal fun isRemoteEntryIntroEligible(playCount: Int): Boolean =
 class TransferViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(TransferState())
     val state: StateFlow<TransferState> = _state.asStateFlow()
+    private val _activeTransferProgress = MutableStateFlow<ActiveTransferProgress?>(null)
+    val activeTransferProgress: StateFlow<ActiveTransferProgress?> =
+        _activeTransferProgress.asStateFlow()
+    @Volatile
+    private var lastValidTransferSpeed = 0L
+    private val pendingTransferQueue = PendingTransferQueue()
 
     private var transferJob: Job? = null
     @Volatile
@@ -1107,6 +1152,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         )
         if (newTasks.isEmpty()) return
         _state.update { state -> state.copy(tasks = state.tasks + newTasks) }
+        pendingTransferQueue.addAll(newTasks)
         processQueue(dirUri, cameraProvider)
     }
 
@@ -1140,6 +1186,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
                 if (!dirValid) {
+                    pendingTransferQueue.clear()
                     prefs.edit().remove("transfer_dir").apply()
                     // 文案只取一次：str() 每次都要构建配置上下文，放 map 里会按任务数重复执行
                     //（update 遇 CAS 重试还会整体重跑）。
@@ -1164,10 +1211,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 val existing = directoryScan.sizes
                 val existingUris = directoryScan.uris
                 val partFiles = directoryScan.parts
+                var taskToRecheck: TransferTask? = null
                 while (true) {
-                    // taskId 标识队列任务；handle 只用于与相机通信。同一 handle 可以有多张
-                    // 不同装饰配置的任务卡，任何状态更新都不能再按 handle 批量命中。
-                    val task = _state.value.tasks.firstOrNull { it.status == TransferStatus.WAITING } ?: break
+                    // 待传队列与历史展示列表分离，取下一项为 O(1)，不会随着已完成历史增长
+                    // 反复从列表头扫描。同一 handle 的不同装饰任务仍由 taskId 独立标识。
+                    val task = taskToRecheck?.also { taskToRecheck = null }
+                        ?: pendingTransferQueue.takeFirst()
+                        ?: break
                     val taskId = task.taskId
                     val handle = task.file.handle
 
@@ -1218,6 +1268,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     filter = filter,
                                 )
                             }
+                            // 预检查挂起期间用户可能撤回这项；此时不得继续派生或传输。
+                            if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
                             if (frameExists) {
                                 log {
                                         "DERIVATIVE_SKIP existing: ${localOriginal.displayName} " +
@@ -1305,18 +1357,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         continue
                     }
 
-                    updateTask(taskId) { it.copy(status = TransferStatus.TRANSFERING) }
-                    log { "DL_BEGIN: ${task.file.fileName} handle=$handle size=${task.file.size}" }
-
-                    // 首个真正要下载的文件才拉起前台服务（全部命中"已存在"时不必启动，避免通知闪一下）。
-                    if (!serviceStarted) {
-                        TransferService.start(
-                            getApplication(),
-                            useWifi = camera.connectionType == CameraConnectionType.WIFI
-                        )
-                        serviceStarted = true
-                    }
-
                     // 断点续传：检查是否存在上次传输留下的、【身份令牌匹配】的半成品文件。
                     var resumeOffset = 0L
                     var fileDocUri: Uri? = null
@@ -1325,8 +1365,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         val partSize = partFile.size
                         // task.file.size 对 >4GB 文件是 SIZE_UNKNOWN 哨兵，绝不能拿它当真实大小比较。
                         val sizeKnown = task.file.size > 0 && task.file.size != PtpConstants.SIZE_UNKNOWN
-                        if (sizeKnown && partSize >= task.file.size) {
-                            // 半成品已达完整大小：上次下载完在改名前崩了，直接改名跳过下载。
+                        if (sizeKnown && partSize == task.file.size) {
+                            // 半成品与完整大小严格相等：上次下载完在改名前崩了，直接改名跳过下载。
                             // 仅在大小【已知】时走此捷径——SIZE_UNKNOWN 下 partSize>=哨兵会把
                             // 4.3GB 的截断视频误判为完整，造成静默数据丢失。
                             log { "DL_RESUME_COMPLETE: ${task.file.fileName} partSize=$partSize" }
@@ -1346,7 +1386,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 existing[savedName] = partSize
                                 existingUris[savedName] = renamed
                                 recordExistingExport(uri, savedName, partSize)
+                                if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
                                 // 回到循环顶部，统一走“原片存在 → 检查边框”的同一条路径。
+                                // 使用本地槽立即复查，不能放回队尾改变用户看到的 FIFO 顺序。
+                                taskToRecheck = task
                                 continue
                             } else {
                                 // 改不了，删半成品让正常路径重下
@@ -1362,6 +1405,28 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             // 不足一个续传块（当前 4MB）或异常半成品，删掉重建。
                             deleteQuietly(partFile.uri)
                         }
+                    }
+
+                    // 断点改名/清理会切到 IO 线程；任务在这期间仍显示 WAITING，用户可以撤回。
+                    // 所有这类预处理结束后统一消费撤回标记，绝不能把 CANCELLED 再改回传输中。
+                    if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
+
+                    // 完成所有“无需下载即可结束”的检查后，才进入传输态并发布高频进度，
+                    // 避免完整断点文件仅改名时出现假进度或前台通知闪动。
+                    updateTask(taskId) { it.copy(status = TransferStatus.TRANSFERING) }
+                    _activeTransferProgress.value = ActiveTransferProgress(
+                        taskId = taskId,
+                        retainedBytesPerSecond = lastValidTransferSpeed,
+                    )
+                    log { "DL_BEGIN: ${task.file.fileName} handle=$handle size=${task.file.size}" }
+
+                    // 首个真正要下载的文件才拉起前台服务（全部命中"已存在"时不必启动，避免通知闪一下）。
+                    if (!serviceStarted) {
+                        TransferService.start(
+                            getApplication(),
+                            useWifi = camera.connectionType == CameraConnectionType.WIFI
+                        )
+                        serviceStarted = true
                     }
 
                     try {
@@ -1403,23 +1468,24 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     handle, out,
                                     onProgress = { progress ->
                                         val speed = progress.bytesPerSecond
-                                        _state.update { state ->
-                                            state.copy(
-                                                currentSpeed = retainLastValidTransferSpeed(
-                                                    previous = state.currentSpeed,
-                                                    sample = speed,
-                                                ),
-                                                tasks = state.tasks.map { t ->
-                                                    if (t.taskId == taskId && t.status == TransferStatus.TRANSFERING) {
-                                                        t.copy(
-                                                            progress = if (progress.total > 0) {
-                                                                progress.downloaded.toFloat() / progress.total
-                                                            } else 0f,
-                                                            downloaded = progress.downloaded,
-                                                            speed = speed
-                                                        )
-                                                    } else t
-                                                }
+                                        val retainedSpeed = retainLastValidTransferSpeed(
+                                            previous = lastValidTransferSpeed,
+                                            sample = speed,
+                                        )
+                                        lastValidTransferSpeed = retainedSpeed
+                                        _activeTransferProgress.update { active ->
+                                            if (active?.taskId != taskId) return@update active
+                                            active.copy(
+                                                fraction = if (progress.total > 0) {
+                                                    (progress.downloaded.toDouble() / progress.total)
+                                                        .toFloat()
+                                                        .coerceIn(0f, 1f)
+                                                } else {
+                                                    0f
+                                                },
+                                                downloaded = progress.downloaded,
+                                                bytesPerSecond = speed,
+                                                retainedBytesPerSecond = retainedSpeed,
                                             )
                                         }
                                     },
@@ -1574,6 +1640,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
+                    pendingTransferQueue.clear()
                     // 目录 URI 解析、目录扫描等位于单任务 try/catch 之外。任何 provider
                     // 异常都只能让相关卡片失败，不能成为主线程未捕获异常导致 App 闪退。
                     if (BuildConfig.DEBUG) {
@@ -1584,13 +1651,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         )
                     }
                     val message = friendlyError(error)
+                    val activeProgress = _activeTransferProgress.value
                     _state.update { state ->
                         state.copy(tasks = state.tasks.map { task ->
                             if (
                                 task.status == TransferStatus.WAITING ||
                                 task.status == TransferStatus.TRANSFERING
                             ) {
-                                task.copy(
+                                task.withActiveProgress(activeProgress).copy(
                                     status = TransferStatus.FAILED,
                                     error = message,
                                     speed = 0,
@@ -1604,7 +1672,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 仅当本协程仍是当前传输 job 时才收尾，避免误停新队列的前台服务/误清传输
                     // 状态（旧队列收尾期间新队列可能已启动并接管 transferJob）。
                     if (transferJob === self) {
-                        _state.update { it.copy(isTransferring = false, currentSpeed = 0L) }
+                        pendingTransferQueue.clear()
+                        _activeTransferProgress.value = null
+                        lastValidTransferSpeed = 0L
+                        _state.update { it.copy(isTransferring = false) }
                         stopTransferServiceIfIdle()
                     }
                 }
@@ -1947,10 +2018,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    /** 按 taskId 就地更新单个任务；ID 不存在时保持列表不变。用 update 保证跨线程原子读改写。 */
+    /** 按 taskId 更新单个低频任务状态；活动下载的高频进度在独立 StateFlow 中。 */
     private fun updateTask(taskId: Long, transform: (TransferTask) -> TransferTask) {
+        val activeProgress = _activeTransferProgress.value?.takeIf { it.taskId == taskId }
         _state.update { state ->
-            state.copy(tasks = state.tasks.map { if (it.taskId == taskId) transform(it) else it })
+            val index = state.tasks.indexOfFirst { it.taskId == taskId }
+            if (index < 0) return@update state
+            val current = state.tasks[index]
+            val updated = transform(current.withActiveProgress(activeProgress))
+            if (updated == current) return@update state
+            val tasks = state.tasks.toMutableList()
+            tasks[index] = updated
+            state.copy(tasks = tasks)
         }
     }
 
@@ -1977,6 +2056,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      * "清空队列"的第一步：先撤下，UI 播完移除动画后再逐个 [removeTask]。
      */
     fun withdrawPending() {
+        val waitingTaskIds = _state.value.tasks.asSequence()
+            .filter { it.status == TransferStatus.WAITING }
+            .mapTo(HashSet()) { it.taskId }
+        pendingTransferQueue.withdraw(waitingTaskIds)
         _state.update { state ->
             state.copy(
                 tasks = state.tasks.map {
@@ -1990,6 +2073,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     /** 撤下单个等待中的任务（仅 WAITING→CANCELLED）：移除动画播放期间队列不得开始传它。 */
     fun withdrawTask(taskId: Long) {
+        if (_state.value.tasks.any {
+                it.taskId == taskId && it.status == TransferStatus.WAITING
+            }
+        ) {
+            pendingTransferQueue.withdraw(listOf(taskId))
+        }
         _state.update { state ->
             state.copy(
                 tasks = state.tasks.map {
@@ -2051,18 +2140,25 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
         }.mapTo(HashSet()) { it.taskId }
         if (retryIds.isEmpty()) return
+        val attemptsByOldTaskId = snapshot.tasks.asSequence()
+            .filter { it.taskId in retryIds }
+            .associate { it.taskId to it.newAttempt() }
         _state.update { state ->
             state.copy(tasks = state.tasks.map {
                 if (
                     it.taskId in retryIds &&
                     (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED)
                 ) {
-                    it.newAttempt()
+                    attemptsByOldTaskId.getValue(it.taskId)
                 } else {
                     it
                 }
             })
         }
+        val appliedTaskIds = _state.value.tasks.asSequence().mapTo(HashSet()) { it.taskId }
+        pendingTransferQueue.addAll(attemptsByOldTaskId.values.filter {
+            it.taskId in appliedTaskIds
+        })
         processQueue(dirUri, cameraProvider)
     }
 
@@ -2072,17 +2168,21 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val task = snapshot.tasks.firstOrNull { it.taskId == taskId } ?: return
         if (task.status != TransferStatus.FAILED && task.status != TransferStatus.CANCELLED) return
         val dirUri = snapshot.transferDirUri ?: return
+        val attempt = task.newAttempt()
         _state.update { state ->
             state.copy(tasks = state.tasks.map {
                 if (
                     it.taskId == taskId &&
                     (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED)
                 ) {
-                    it.newAttempt()
+                    attempt
                 } else {
                     it
                 }
             })
+        }
+        if (_state.value.tasks.any { it.taskId == attempt.taskId }) {
+            pendingTransferQueue.addAll(listOf(attempt))
         }
         processQueue(dirUri, cameraProvider)
     }
@@ -2090,6 +2190,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         transferJob?.cancel()
+        pendingTransferQueue.clear()
         photoFrameDispatcher.close()
         // 兜底停止前台服务，防止 VM 销毁后通知残留。
         TransferService.stop(getApplication())

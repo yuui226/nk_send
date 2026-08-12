@@ -117,16 +117,14 @@ import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.Haptics
 import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.PhotoFilterCriteria
 import com.ztransfer.viewmodel.PhotoDateRange
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
-import com.ztransfer.viewmodel.currentFileProgress
 import com.ztransfer.viewmodel.compactDateRangeLabel
-import com.ztransfer.viewmodel.downloadRemainingCount
-import com.ztransfer.viewmodel.generationRemainingCount
 import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.latestCaptureLocalDate
 import com.ztransfer.viewmodel.storageIdsBySlot
@@ -137,6 +135,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -1010,6 +1009,7 @@ fun FileListScreen(
                 groups = groups,
                 queuedByHandle = queuedByHandle,
                 exportedHandles = exportedHandles,
+                activeProgressFlow = transferViewModel.activeTransferProgress,
                 columns = transferState.thumbnailColumns,
                 isLoading = state.isLoadingFiles,
                 transfersBusy = transfersBusy,
@@ -1380,6 +1380,7 @@ fun FileListScreen(
                 ) {
                     QueuePill(
                         transferState = transferState,
+                        activeProgressFlow = transferViewModel.activeTransferProgress,
                         heldCount = heldFiles,
                         haptics = haptics,
                         onClick = onNavigateToTransfer
@@ -1525,9 +1526,60 @@ fun FileListScreen(
     }
 }
 
+internal data class QueuePillTaskSummary(
+    val downloadRemaining: Int,
+    val generationRemaining: Int,
+    val activeDownloadTaskId: Long?,
+    val activeProgressTaskId: Long?,
+    val hasActive: Boolean,
+    val hasCancelled: Boolean,
+)
+
+/** 单次遍历生成胶囊所需的低频队列摘要；高频进度重组期间直接复用。 */
+internal fun summarizeQueuePillTasks(tasks: List<TransferTask>): QueuePillTaskSummary {
+    var downloadRemaining = 0
+    var generationRemaining = 0
+    var activeDownloadTaskId: Long? = null
+    var firstGeneratingTaskId: Long? = null
+    var firstWaitingTaskId: Long? = null
+    var hasCancelled = false
+
+    tasks.forEach { task ->
+        when (task.status) {
+            TransferStatus.WAITING -> {
+                downloadRemaining++
+                if (firstWaitingTaskId == null) firstWaitingTaskId = task.taskId
+            }
+            TransferStatus.TRANSFERING -> {
+                downloadRemaining++
+                if (activeDownloadTaskId == null) activeDownloadTaskId = task.taskId
+            }
+            TransferStatus.CANCELLED -> hasCancelled = true
+            TransferStatus.COMPLETED,
+            TransferStatus.FAILED -> Unit
+        }
+        if (task.isGeneratingFrame) {
+            generationRemaining++
+            if (firstGeneratingTaskId == null) firstGeneratingTaskId = task.taskId
+        }
+    }
+
+    return QueuePillTaskSummary(
+        downloadRemaining = downloadRemaining,
+        generationRemaining = generationRemaining,
+        activeDownloadTaskId = activeDownloadTaskId,
+        activeProgressTaskId = activeDownloadTaskId
+            ?: firstGeneratingTaskId
+            ?: firstWaitingTaskId,
+        hasActive = activeDownloadTaskId != null || generationRemaining > 0,
+        hasCancelled = hasCancelled,
+    )
+}
+
 @Composable
 fun QueuePill(
     transferState: com.ztransfer.viewmodel.TransferState,
+    activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     haptics: Haptics,
     onClick: () -> Unit,
     // 显示层押扣:飞行中的"整组包裹"承载的文件数,落袋前不计入读数
@@ -1535,8 +1587,12 @@ fun QueuePill(
     heldCount: Int = 0
 ) {
     val colors = AppTheme.colors
-    val downloadRemaining = transferState.downloadRemainingCount
-    val generationRemaining = transferState.generationRemainingCount
+    val liveProgress by activeProgressFlow.collectAsState()
+    val taskSummary = remember(transferState.tasks) {
+        summarizeQueuePillTasks(transferState.tasks)
+    }
+    val downloadRemaining = taskSummary.downloadRemaining
+    val generationRemaining = taskSummary.generationRemaining
     val remaining = if (downloadRemaining > 0) {
         queuePillDisplayRemaining(downloadRemaining, heldCount)
     } else {
@@ -1547,11 +1603,12 @@ fun QueuePill(
     val allDone = downloadRemaining == 0 && generationRemaining == 0
     val transferring = transferState.isTransferring
     val showingGeneration = downloadRemaining == 0 && generationRemaining > 0
-    // Keep the last valid batch speed across the short preparation gap between two files.
-    val activeSpeed = transferState.currentSpeed
-    val hasActive = transferState.tasks.any {
-        it.status == TransferStatus.TRANSFERING || it.isGeneratingFrame
+    val activeProgress = liveProgress?.takeIf {
+        it.taskId == taskSummary.activeDownloadTaskId
     }
+    // Keep the last valid batch speed across the short preparation gap between two files.
+    val activeSpeed = liveProgress?.retainedBytesPerSecond ?: 0L
+    val hasActive = taskSummary.hasActive
     // 数字延迟显现：刚入队的任务可能马上被"已存在"跳过（remaining 1→0 一闪而过），
     // 那种情况只播 done→图标转场、不闪数字。真正开始下载(TRANSFERING)立即显示数字；
     // 纯等待超过宽限期（说明确实在排队，如目录扫描慢）也显示。
@@ -1575,7 +1632,7 @@ fun QueuePill(
     }
     // 取消导致的"归零"不是完成：不闪 done、不震成功震（否则取消后出现庆祝反馈，误导）。
     // sawTransfer 在每次归零时都复位，取消那轮的记录不能污染下一轮的完成判定。
-    val hasCancelled = transferState.tasks.any { it.status == TransferStatus.CANCELLED }
+    val hasCancelled = taskSummary.hasCancelled
     LaunchedEffect(allDone) {
         if (allDone && !prevAllDone) {
             val celebrate = !hasCancelled && sawTransfer
@@ -1596,22 +1653,20 @@ fun QueuePill(
 
     // 进度条 = 当前单文件进度（复用传输页语义）。保留最近的进度归属，让最后一张
     // 完成后仍能从当前位置顺滑补满，而不是因“当前任务”瞬间消失而重建动画。
-    val activeProgressTask = transferState.tasks.firstOrNull {
-        it.status == TransferStatus.TRANSFERING
-    } ?: transferState.tasks.firstOrNull { it.isGeneratingFrame }
-        ?: transferState.tasks.firstOrNull { it.status == TransferStatus.WAITING }
     var retainedProgressTaskId by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(activeProgressTask?.taskId) {
-        activeProgressTask?.taskId?.let { retainedProgressTaskId = it }
+    LaunchedEffect(taskSummary.activeProgressTaskId) {
+        taskSummary.activeProgressTaskId?.let { retainedProgressTaskId = it }
     }
     val barFraction = when {
         allDone && finishProgressVisible -> 1f
         allDone -> 0f // 静止图标态不预热动画，避免下一轮等待阶段错误继承满格。
-        else -> transferState.currentFileProgress
+        activeProgress != null -> activeProgress.fraction
+        generationRemaining > 0 -> 1f
+        else -> 0f
     }
     val animatedBar = rememberSmoothTransferProgress(
         targetProgress = barFraction,
-        resetKey = activeProgressTask?.taskId ?: retainedProgressTaskId,
+        resetKey = taskSummary.activeProgressTaskId ?: retainedProgressTaskId,
     )
 
     // 普通按钮与胶囊共用同一条宽度弹簧。切换材质实现时右缘仍固定，只向左平滑伸缩，
@@ -1699,9 +1754,9 @@ fun QueuePill(
             if (!allDone || finishProgressVisible) {
                 LiquidProgressFill(
                     progress = { animatedBar.value },
-                    waveEligible = activeProgressTask?.status == TransferStatus.TRANSFERING ||
+                    waveEligible = taskSummary.activeDownloadTaskId != null ||
                         finishProgressVisible,
-                    seedKey = activeProgressTask?.taskId ?: retainedProgressTaskId,
+                    seedKey = taskSummary.activeProgressTaskId ?: retainedProgressTaskId,
                     color = colors.accentBlue.copy(alpha = 0.35f),
                     modifier = Modifier.matchParentSize(),
                 )
@@ -2227,6 +2282,7 @@ private fun ThumbnailGrid(
     groups: List<FileGroup>,
     queuedByHandle: Map<Int, TransferTask>,
     exportedHandles: Set<Int>,
+    activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     columns: Int,
     isLoading: Boolean,
     transfersBusy: Boolean,
@@ -2516,6 +2572,7 @@ private fun ThumbnailGrid(
                                     file = file,
                                     task = queuedByHandle[file.handle],
                                     transferred = file.handle in exportedHandles,
+                                    activeProgressFlow = activeProgressFlow,
                                     themeBorderColor = thumbnailBorderColor,
                                     transfersBusy = transfersBusy,
                                     allowRemoteThumbnail = allowRemoteThumbnails,
@@ -2797,6 +2854,7 @@ private fun ThumbnailCell(
     file: NikonCamera.FileInfo,
     task: TransferTask?,
     transferred: Boolean,
+    activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     themeBorderColor: Color,
     transfersBusy: Boolean,
     allowRemoteThumbnail: Boolean,
@@ -3012,7 +3070,10 @@ private fun ThumbnailCell(
                             .align(Alignment.BottomEnd)
                             .padding(4.dp)
                     ) {
-                        TransferStatusIndicator(task = t)
+                        TransferStatusIndicator(
+                            task = t,
+                            activeProgressFlow = activeProgressFlow,
+                        )
                     }
                 }
             }
@@ -3821,7 +3882,10 @@ internal fun BurstCollectionBadge(
  * 与"分类类"的彩色角贴(左上类型/右上连拍)分层。
  */
 @Composable
-private fun TransferStatusIndicator(task: TransferTask) {
+private fun TransferStatusIndicator(
+    task: TransferTask,
+    activeProgressFlow: StateFlow<ActiveTransferProgress?>,
+) {
     val colors = AppTheme.colors
     Box(
         modifier = Modifier
@@ -3833,10 +3897,16 @@ private fun TransferStatusIndicator(task: TransferTask) {
         Crossfade(targetState = task.status, animationSpec = tween(200), label = "cellStatus") { st ->
             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                 if (st == TransferStatus.TRANSFERING) {
+                    // 只有唯一的活动格子订阅高频进度；其余可见缩略图不会因此重组。
+                    val liveProgress by activeProgressFlow.collectAsState()
+                    val progress = liveProgress
+                        ?.takeIf { it.taskId == task.taskId }
+                        ?.fraction
+                        ?: task.progress
                     // 传输中在列表用确定型进度环（卡片那侧改用下载字形，见 statusGlyph 说明）。
                     // 平滑追值：进度环随进度缓缓扫过，而非一段段硬跳。
                     val animatedProgress = rememberSmoothTransferProgress(
-                        targetProgress = task.progress,
+                        targetProgress = progress,
                         resetKey = task.taskId,
                     )
                     CircularProgressIndicator(

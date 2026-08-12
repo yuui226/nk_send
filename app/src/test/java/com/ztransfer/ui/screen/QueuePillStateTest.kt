@@ -1,9 +1,27 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.viewmodel.TransferStatus
+import com.ztransfer.viewmodel.TransferTask
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class QueuePillStateTest {
+    private fun task(
+        handle: Int,
+        status: TransferStatus,
+        isGeneratingFrame: Boolean = false,
+    ) = TransferTask(
+        file = NikonCamera.FileInfo(
+            handle = handle,
+            size = 100L,
+            fileName = "DSC_$handle.JPG",
+            captureDate = null,
+        ),
+        status = status,
+        isGeneratingFrame = isGeneratingFrame,
+    )
+
     @Test
     fun transferDisplayTakesPriorityOverConcurrentEffectGeneration() {
         assertEquals(
@@ -38,5 +56,44 @@ class QueuePillStateTest {
     @Test
     fun genuinelyEmptyQueueStillDisplaysZero() {
         assertEquals(0, queuePillDisplayRemaining(actualRemaining = 0, heldCount = 20))
+    }
+
+    @Test
+    fun taskSummaryPreservesQueuePillPriorityInOnePass() {
+        val waiting = task(handle = 1, status = TransferStatus.WAITING)
+        val generating = task(
+            handle = 2,
+            status = TransferStatus.COMPLETED,
+            isGeneratingFrame = true,
+        )
+        val active = task(handle = 3, status = TransferStatus.TRANSFERING)
+        val cancelled = task(handle = 4, status = TransferStatus.CANCELLED)
+
+        val summary = summarizeQueuePillTasks(
+            listOf(waiting, generating, active, cancelled),
+        )
+
+        assertEquals(2, summary.downloadRemaining)
+        assertEquals(1, summary.generationRemaining)
+        assertEquals(active.taskId, summary.activeDownloadTaskId)
+        assertEquals(active.taskId, summary.activeProgressTaskId)
+        assertEquals(true, summary.hasActive)
+        assertEquals(true, summary.hasCancelled)
+    }
+
+    @Test
+    fun completedTaskGeneratingAnEffectKeepsTheProgressOwnerAtFull() {
+        val generating = task(
+            handle = 1,
+            status = TransferStatus.COMPLETED,
+            isGeneratingFrame = true,
+        )
+
+        val summary = summarizeQueuePillTasks(listOf(generating))
+
+        assertEquals(0, summary.downloadRemaining)
+        assertEquals(1, summary.generationRemaining)
+        assertEquals(generating.taskId, summary.activeProgressTaskId)
+        assertEquals(true, summary.hasActive)
     }
 }
