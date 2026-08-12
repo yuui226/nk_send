@@ -58,8 +58,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -109,6 +109,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
@@ -119,6 +120,7 @@ import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.ExportedOriginalIndex
 import com.ztransfer.viewmodel.PhotoFilterCriteria
 import com.ztransfer.viewmodel.PhotoDateRange
 import com.ztransfer.viewmodel.TransferStatus
@@ -169,6 +171,28 @@ internal sealed interface ThumbnailGridItem {
     ) : ThumbnailGridItem {
         override val key: Any = "burst_collection_$id"
     }
+}
+
+internal val ThumbnailGridItem.reuseContentType: String
+    get() = when (this) {
+        is ThumbnailGridItem.Photo -> "photo"
+        is ThumbnailGridItem.BurstCollection -> "burst_collection"
+    }
+
+internal fun buildLatestTaskIndexByHandle(tasks: List<TransferTask>): Map<Int, Int> = buildMap {
+    tasks.forEachIndexed { index, task -> put(task.file.handle, index) }
+}
+
+internal fun exportedHandlesForUntransferredFilter(
+    files: List<NikonCamera.FileInfo>,
+    index: ExportedOriginalIndex,
+    enabled: Boolean,
+): Set<Int> = if (enabled) {
+    files.asSequence()
+        .filter { file -> isTransferredOriginal(file, index) }
+        .mapTo(HashSet()) { it.handle }
+} else {
+    emptySet()
 }
 
 /** 展开后的队列胶囊内容；入口图标由主题按钮独立绘制。 */
@@ -292,8 +316,8 @@ fun FileListScreen(
     onNavigateToTransfer: () -> Unit,
     onNavigateToRemote: () -> Unit
 ) {
-    val state by cameraViewModel.state.collectAsState()
-    val transferState by transferViewModel.state.collectAsState()
+    val state by cameraViewModel.state.collectAsStateWithLifecycle()
+    val transferState by transferViewModel.state.collectAsStateWithLifecycle()
     val colors = AppTheme.colors
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
@@ -312,7 +336,7 @@ fun FileListScreen(
     var queueArea by remember { mutableStateOf<Rect?>(null) }
     // 每个格子在根坐标系的精确 bounds(格子本就为长按预览挂了 onGloballyPositioned,
     // 顺手写进注册表,零额外监听)。普通 HashMap 而非快照状态:只在点击瞬间读取,
-    // 滚动期间的高频写入不触发任何重组。滚出屏幕的旧条目用可见 key 过滤,不会误用。
+    // 滚动期间的高频写入不触发任何重组；格子离开组合时主动删除，容量只随组合项数量增长。
     val cellBoundsRegistry = remember { HashMap<Int, Rect>() }
     var pillCatchNonce by remember { mutableStateOf(0) }
     val pillCatchScale = remember { Animatable(1f) }
@@ -562,54 +586,63 @@ fun FileListScreen(
     }
     // 已传对号与“未传输”筛选必须共用这一个判定，避免界面同时出现
     // “带对号却仍在未传输列表”的自相矛盾。
-    val exportedHandles: Set<Int> = remember(
+    val exportedHandlesForFilter: Set<Int> = remember(
         state.files,
         transferState.existingExportRevision,
+        filterUntransferred,
     ) {
-        state.files.asSequence()
-            .filter { file ->
-                isTransferredOriginal(file, transferState.existingExportIndex)
-            }
-            .mapTo(HashSet()) { it.handle }
+        exportedHandlesForUntransferredFilter(
+            files = state.files,
+            index = transferState.existingExportIndex,
+            enabled = filterUntransferred,
+        )
     }
     // “未传输”筛选下，本次队列刚完成的照片先留在网格中播放单格退场，再真正加入过滤集合。
     // 导出目录扫描发现的历史文件不需要动画，仍然同步过滤，避免列表初次加载时闪现旧照片。
-    val animatedExportCandidates = remember(transferState.tasks) {
-        transferState.tasks.asSequence()
-            .filter {
-                it.status == TransferStatus.WAITING ||
-                    it.status == TransferStatus.TRANSFERING ||
-                    it.status == TransferStatus.COMPLETED
-            }
-            .mapTo(HashSet()) { it.file.handle }
+    val animatedExportCandidates = remember(transferState.tasks, filterUntransferred) {
+        if (filterUntransferred) {
+            transferState.tasks.asSequence()
+                .filter {
+                    it.status == TransferStatus.WAITING ||
+                        it.status == TransferStatus.TRANSFERING ||
+                        it.status == TransferStatus.COMPLETED
+                }
+                .mapTo(HashSet()) { it.file.handle }
+        } else {
+            emptySet()
+        }
     }
-    var finishedExportExitHandles by remember {
-        mutableStateOf(exportedHandles.intersect(animatedExportCandidates))
+    var finishedExportExitHandles by remember(filterUntransferred) {
+        mutableStateOf(exportedHandlesForFilter.intersect(animatedExportCandidates))
     }
     val exitingExportHandles = remember { mutableStateMapOf<Int, Unit>() }
     var exportReflowActive by remember { mutableStateOf(false) }
     var exportReflowTick by remember { mutableStateOf(0) }
     val filteredExportHandles = remember(
-        exportedHandles,
+        exportedHandlesForFilter,
         animatedExportCandidates,
         finishedExportExitHandles
     ) {
-        (exportedHandles - animatedExportCandidates) + finishedExportExitHandles
+        if (filterUntransferred) {
+            (exportedHandlesForFilter - animatedExportCandidates) + finishedExportExitHandles
+        } else {
+            emptySet()
+        }
     }
 
-    LaunchedEffect(exportedHandles, animatedExportCandidates, filterUntransferred) {
-        finishedExportExitHandles = finishedExportExitHandles.intersect(exportedHandles)
+    LaunchedEffect(exportedHandlesForFilter, animatedExportCandidates, filterUntransferred) {
+        finishedExportExitHandles = finishedExportExitHandles.intersect(exportedHandlesForFilter)
         exitingExportHandles.keys
-            .filterNot { it in exportedHandles }
+            .filterNot { it in exportedHandlesForFilter }
             .forEach(exitingExportHandles::remove)
 
         if (!filterUntransferred) {
-            // 筛选未开启时没有退场语义；先同步基线，防止下次开启时重播历史完成项。
+            // 筛选未开启时没有退场语义，也不保留任何已传 handle 集合。
             exitingExportHandles.clear()
-            finishedExportExitHandles = exportedHandles.intersect(animatedExportCandidates)
+            finishedExportExitHandles = emptySet()
             exportReflowActive = false
         } else {
-            val newlyExported = exportedHandles
+            val newlyExported = exportedHandlesForFilter
                 .intersect(animatedExportCandidates)
                 .minus(finishedExportExitHandles)
                 .minus(exitingExportHandles.keys)
@@ -756,9 +789,12 @@ fun FileListScreen(
             }
         }
 
-    // 队列 handle → 最新任务，仅用于列表角标；是否允许再次入队不再由队列状态决定。
-    val queuedByHandle = remember(transferState.tasks) {
-        transferState.tasks.associateBy { it.file.handle }
+    // 任务状态变化只替换原列表元素，handle -> 下标结构不变；仅在增删/重试时重建一次。
+    val queuedIndexByHandle = remember(
+        transferViewModel,
+        transferState.taskStructureRevision,
+    ) {
+        buildLatestTaskIndexByHandle(transferState.tasks)
     }
     val hasLocalOriginal: (NikonCamera.FileInfo) -> Boolean = { file ->
         isTransferredOriginal(file, transferState.existingExportIndex)
@@ -1010,8 +1046,10 @@ fun FileListScreen(
 
             ThumbnailGrid(
                 groups = groups,
-                queuedByHandle = queuedByHandle,
-                exportedHandles = exportedHandles,
+                tasks = transferState.tasks,
+                queuedIndexByHandle = queuedIndexByHandle,
+                existingExportIndex = transferState.existingExportIndex,
+                existingExportRevision = transferState.existingExportRevision,
                 activeProgressFlow = transferViewModel.activeTransferProgress,
                 columns = transferState.thumbnailColumns,
                 isLoading = state.isLoadingFiles,
@@ -1590,7 +1628,7 @@ fun QueuePill(
     heldCount: Int = 0
 ) {
     val colors = AppTheme.colors
-    val liveProgress by activeProgressFlow.collectAsState()
+    val liveProgress by activeProgressFlow.collectAsStateWithLifecycle()
     val taskSummary = remember(transferState.tasks) {
         summarizeQueuePillTasks(transferState.tasks)
     }
@@ -2283,8 +2321,10 @@ internal fun buildThumbnailGridItems(
 @Composable
 private fun ThumbnailGrid(
     groups: List<FileGroup>,
-    queuedByHandle: Map<Int, TransferTask>,
-    exportedHandles: Set<Int>,
+    tasks: List<TransferTask>,
+    queuedIndexByHandle: Map<Int, Int>,
+    existingExportIndex: ExportedOriginalIndex,
+    existingExportRevision: Long,
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     columns: Int,
     isLoading: Boolean,
@@ -2512,7 +2552,7 @@ private fun ThumbnailGrid(
                 itemsIndexed(
                     displayedItems,
                     key = { _, item -> item.key },
-                    contentType = { _, _ -> "thumbnail_grid_cell" }
+                    contentType = { _, item -> item.reuseContentType }
                 ) { index, item ->
                     // 照片与合集必须由完全相同的外层节点拥有尺寸和 placement 动画。
                     // 只有本次操作合集的成员允许淡入/淡出。其他已展开合集即使被重排，
@@ -2571,10 +2611,19 @@ private fun ThumbnailGrid(
                             }
                             is ThumbnailGridItem.Photo -> {
                                 val file = item.file
+                                val transferred = remember(
+                                    file,
+                                    existingExportIndex,
+                                    existingExportRevision,
+                                ) {
+                                    isTransferredOriginal(file, existingExportIndex)
+                                }
                                 ThumbnailCell(
                                     file = file,
-                                    task = queuedByHandle[file.handle],
-                                    transferred = file.handle in exportedHandles,
+                                    task = queuedIndexByHandle[file.handle]
+                                        ?.let(tasks::getOrNull)
+                                        ?.takeIf { it.file.handle == file.handle },
+                                    transferred = transferred,
                                     activeProgressFlow = activeProgressFlow,
                                     themeBorderColor = thumbnailBorderColor,
                                     transfersBusy = transfersBusy,
@@ -2914,6 +2963,11 @@ private fun ThumbnailCell(
     }
     // 记录本格子在根坐标系中的位置，供长按预览"从格子位置放大"用。
     var cellBounds by remember { mutableStateOf<Rect?>(null) }
+    DisposableEffect(file.handle, cellBoundsRegistry) {
+        onDispose {
+            cellBoundsRegistry.remove(file.handle)
+        }
+    }
 
     val thumbnailShape = RoundedCornerShape(8.dp)
     val thumbnailBorderWidth = if (inExpandedBurstCollection) 1.dp else THUMBNAIL_THEME_BORDER_WIDTH
@@ -3901,7 +3955,7 @@ private fun TransferStatusIndicator(
             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                 if (st == TransferStatus.TRANSFERING) {
                     // 只有唯一的活动格子订阅高频进度；其余可见缩略图不会因此重组。
-                    val liveProgress by activeProgressFlow.collectAsState()
+                    val liveProgress by activeProgressFlow.collectAsStateWithLifecycle()
                     val progress = liveProgress
                         ?.takeIf { it.taskId == task.taskId }
                         ?.fraction

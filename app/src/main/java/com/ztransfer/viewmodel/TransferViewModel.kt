@@ -260,6 +260,8 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
 
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
+    /** 仅在任务增删或替换时递增；纯状态变化不会让照片页重建 handle -> 列表下标索引。 */
+    val taskStructureRevision: Long = 0L,
     val isTransferring: Boolean = false,
     val transferDirUri: String? = null,
     /** 导出目录内完整文件：归一化文件名 -> 已有大小集合，用于相机列表直接标记已传照片。 */
@@ -1329,7 +1331,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             photoFilter = snapshot.photoFilterSelection,
         )
         if (newTasks.isEmpty()) return
-        _state.update { state -> state.copy(tasks = state.tasks + newTasks) }
+        _state.update { state ->
+            state.copy(
+                tasks = state.tasks + newTasks,
+                taskStructureRevision = state.taskStructureRevision + 1L,
+            )
+        }
         pendingTransferQueue.addAll(newTasks)
         processQueue(dirUri, cameraProvider)
     }
@@ -2293,13 +2300,19 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      */
     fun removeCleared() {
         _state.update { state ->
-            state.copy(
-                tasks = state.tasks.filter {
-                    it.status == TransferStatus.TRANSFERING ||
-                        it.status == TransferStatus.WAITING ||
-                        it.isGeneratingFrame
-                }
-            )
+            val kept = state.tasks.filter {
+                it.status == TransferStatus.TRANSFERING ||
+                    it.status == TransferStatus.WAITING ||
+                    it.isGeneratingFrame
+            }
+            if (kept.size == state.tasks.size) {
+                state
+            } else {
+                state.copy(
+                    tasks = kept,
+                    taskStructureRevision = state.taskStructureRevision + 1L,
+                )
+            }
         }
     }
 
@@ -2319,7 +2332,14 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         !it.isGeneratingFrame
             }
             removed = kept.size != state.tasks.size
-            state.copy(tasks = kept)
+            if (removed) {
+                state.copy(
+                    tasks = kept,
+                    taskStructureRevision = state.taskStructureRevision + 1L,
+                )
+            } else {
+                state
+            }
         }
         return removed
     }
@@ -2339,7 +2359,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             .filter { it.taskId in retryIds }
             .associate { it.taskId to it.newAttempt() }
         _state.update { state ->
-            state.copy(tasks = state.tasks.map {
+            val updatedTasks = state.tasks.map {
                 if (
                     it.taskId in retryIds &&
                     (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED)
@@ -2348,7 +2368,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 } else {
                     it
                 }
-            })
+            }
+            if (updatedTasks.indices.any { updatedTasks[it].taskId != state.tasks[it].taskId }) {
+                state.copy(
+                    tasks = updatedTasks,
+                    taskStructureRevision = state.taskStructureRevision + 1L,
+                )
+            } else {
+                state
+            }
         }
         val appliedTaskIds = _state.value.tasks.asSequence().mapTo(HashSet()) { it.taskId }
         pendingTransferQueue.addAll(attemptsByOldTaskId.values.filter {
@@ -2365,7 +2393,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val dirUri = snapshot.transferDirUri ?: return
         val attempt = task.newAttempt()
         _state.update { state ->
-            state.copy(tasks = state.tasks.map {
+            val updatedTasks = state.tasks.map {
                 if (
                     it.taskId == taskId &&
                     (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED)
@@ -2374,7 +2402,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 } else {
                     it
                 }
-            })
+            }
+            if (updatedTasks.indices.any { updatedTasks[it].taskId != state.tasks[it].taskId }) {
+                state.copy(
+                    tasks = updatedTasks,
+                    taskStructureRevision = state.taskStructureRevision + 1L,
+                )
+            } else {
+                state
+            }
         }
         if (_state.value.tasks.any { it.taskId == attempt.taskId }) {
             pendingTransferQueue.addAll(listOf(attempt))
