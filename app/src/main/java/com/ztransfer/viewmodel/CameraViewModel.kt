@@ -50,9 +50,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -84,6 +86,13 @@ internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStat
 }
 
 private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
+
+internal suspend fun <T> collectThumbnailSnapshotsSequentially(
+    snapshots: Flow<List<T>>,
+    consume: suspend (List<T>) -> Unit,
+) {
+    snapshots.distinctUntilChanged().collect(consume)
+}
 
 /** Selects the newest still image deterministically; video covers must never become effect demos. */
 internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCamera.FileInfo? =
@@ -807,7 +816,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // Separate from interactive FHD preview: while this one-shot request runs, the thumbnail
     // sweep yields the PTP channel, but opening/closing the full-screen preview cannot clobber it.
     private val effectPreviewActiveFlow = MutableStateFlow(false)
-    private val effectPreviewRequestedKeyFlow = MutableStateFlow<String?>(null)
+    private val effectPreviewDemandedFlow = MutableStateFlow(false)
     private var effectPreviewAttemptKey: String? = null
     private var effectPreviewLoadingKey: String? = null
 
@@ -846,6 +855,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 预取跳过后台静置等待。它仍然服从传输和监看的高优先级，不会抢占这些前台任务。
      */
     fun requestEffectPreview() {
+        // 设置弹窗可能早于首批文件出现；先记住需求，文件出现后自动继续。
+        effectPreviewDemandedFlow.value = true
         val latest = latestEffectPreviewFile(_state.value.files) ?: return
         val key = effectPreviewKey(latest)
         if (_state.value.effectPreviewFileKey != key) {
@@ -859,11 +870,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
             }
-        }
-        if (_state.value.effectPreviewFileKey != key &&
-            effectPreviewAttemptKey != key && effectPreviewLoadingKey != key
-        ) {
-            effectPreviewRequestedKeyFlow.value = key
         }
     }
 
@@ -880,53 +886,60 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     /**
      * 后台缩略图填充：与连接同生共死，【不依赖任何页面】——用户停在队列页/设置里
-     * 照常推进。只有两种状态：未传输=按拍摄时间从新到旧全量填充（prefetchThumbnail
-     * 只落盘）直到每张都有缓存；传输中=完全停止，通道全部让给传输。
-     * 文件列表渐进加载/传输状态翻转都会重启扫描——已落盘的经内存索引微秒级跳过，
-     * 重启代价可忽略，进度单调推进。
+     * 照常推进。文件扫描期间，每批文件自己的缩略图由扫描流水线负责；完整列表完成后，
+     * 本任务再按拍摄时间从新到旧补漏和重试。这样不会有两套后台任务争抢相机通道。
+     * 传输、监看、交互式 FHD 和效果预览仍会立即取消填充并独占通道。
      */
     private fun startThumbnailFill() {
         viewModelScope.launch {
-            combine(
-                state.map { it.files }.distinctUntilChanged(),
+            val foregroundBlocked = combine(
                 transfersBusyFlow,
                 remoteActiveFlow,
                 fhdActiveFlow,
                 effectPreviewActiveFlow,
-            ) { files, busy, remote, fhd, effectPreview ->
-                Quint(files, busy, remote, fhd, effectPreview)
-            }.combine(thumbnailPriorityRangeFlow) { inputs, range -> inputs to range }
-                .collectLatest { (inputs, range) ->
-                val (files, busy, remote, fhd, effectPreview) = inputs
-                if (busy || remote || fhd || effectPreview || files.isEmpty()) return@collectLatest
-                // 日期筛选范围优先；范围缓存完后继续全局新→旧，无需额外完成状态。
-                val ordered = prioritizedThumbnailFiles(files, range)
-                log { "THUMB_SWEEP start n=${ordered.size}" }
-                var loaded = 0
-                for (file in ordered) {
-                    if (!state.value.isConnectedToCamera) {
-                        log { "THUMB_SWEEP abort: disconnected, loaded=$loaded" }
-                        return@collectLatest
+            ) { busy, remote, fhd, effectPreview -> busy || remote || fhd || effectPreview }
+            combine(
+                foregroundBlocked,
+                thumbnailPriorityRangeFlow,
+                state.map { it.isConnectedToCamera to it.hasCompletedFileScan }
+                    .distinctUntilChanged(),
+            ) { blocked, range, connectionAndScan ->
+                Triple(blocked, range, connectionAndScan)
+            }.collectLatest { (blocked, range, connectionAndScan) ->
+                val (connected, scanComplete) = connectionAndScan
+                if (blocked || !connected || !scanComplete) return@collectLatest
+                // 普通 collect 保证补漏过程中新增照片不会取消当前 GetThumb；处理完
+                // 当前快照后，StateFlow 会直接给出最新列表。
+                collectThumbnailSnapshotsSequentially(state.map { it.files }) snapshot@{ files ->
+                    if (files.isEmpty()) return@snapshot
+                    val ordered = prioritizedThumbnailFiles(files, range)
+                    log { "THUMB_SWEEP start n=${ordered.size}" }
+                    var loaded = 0
+                    for (file in ordered) {
+                        if (!state.value.isConnectedToCamera) {
+                            log { "THUMB_SWEEP abort: disconnected, loaded=$loaded" }
+                            return@snapshot
+                        }
+                        try {
+                            if (prefetchThumbnail(file)) loaded++
+                        } catch (e: kotlinx.coroutines.CancellationException) {
+                            // 前台任务、断连、日期优先级变化或作用域结束可取消外层任务。
+                            throw e
+                        } catch (e: Exception) {
+                            // 单张异常绝不中断整轮，否则本协程退出后不会继续填充。
+                            log { "THUMB_SWEEP item failed handle=${file.handle}: $e" }
+                        }
                     }
-                    try {
-                        if (prefetchThumbnail(file)) loaded++
-                    } catch (e: kotlinx.coroutines.CancellationException) {
-                        throw e   // 列表更新/传输开始的正常取消，须向上传播
-                    } catch (e: Exception) {
-                        // 单张异常绝不中断整轮（逃逸异常会悄悄杀死本协程，之后再也不填充）。
-                        log { "THUMB_SWEEP item failed handle=${file.handle}: $e" }
-                    }
+                    log { "THUMB_SWEEP done loaded=$loaded/${ordered.size}" }
                 }
-                log { "THUMB_SWEEP done loaded=$loaded/${ordered.size}" }
             }
         }
     }
 
     /**
-     * Once the initial file list has been quiet briefly, fetch exactly one FHD image for the
-     * frame/filter settings demos. This is deliberately best-effort: it never blocks file loading,
-     * transfers, remote control, or interactive FHD preview, and failures remain invisible.
-     * A newly captured latest still replaces the previous demo automatically.
+     * 首次打开设置弹窗后，按需获取最新照片的一张 FHD 和 EXIF，供边框/滤镜页直接展示。
+     * 连接和文件扫描阶段不会自行启动；如果设置打开得早于首批文件，则需求会保留到
+     * latestStillFlow 首次有值。传输、遥控和交互式 FHD 活跃时继续等待，不争抢通道。
      */
     private fun startEffectPreviewPrefetch() {
         viewModelScope.launch {
@@ -942,19 +955,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 transfersBusyFlow,
                 remoteActiveFlow,
                 fhdActiveFlow,
-                effectPreviewRequestedKeyFlow,
-            ) { latest, busy, remote, fhd, requestedKey ->
-                Quint(latest, busy, remote, fhd, requestedKey)
-            }.collectLatest { (latest, busy, remote, fhd, requestedKey) ->
+                effectPreviewDemandedFlow,
+            ) { latest, busy, remote, fhd, demanded ->
+                Quint(latest, busy, remote, fhd, demanded)
+            }.collectLatest { (latest, busy, remote, fhd, demanded) ->
                 latest ?: return@collectLatest
-                if (busy || remote || fhd) return@collectLatest
+                if (!demanded || busy || remote || fhd) return@collectLatest
                 val key = effectPreviewKey(latest)
                 if (_state.value.effectPreviewFileKey == key || effectPreviewAttemptKey == key) {
+                    effectPreviewDemandedFlow.value = false
                     return@collectLatest
                 }
 
-                // 后台预取稍让第一屏缩略图；用户已经点进效果页时取消这段人为等待。
-                if (requestedKey != key) delay(EFFECT_PREVIEW_SETTLE_MS)
                 if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
                     !_state.value.isConnectedToCamera ||
                     effectPreviewKey(
@@ -972,12 +984,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         Bitmap.Config.ARGB_8888,
                         honorExifOrientation = true,
                         maxLongEdge = EFFECT_PREVIEW_SOURCE_EDGE,
-                        // 后台预取遇忙立即让路；用户已经打开照片效果页时才做有限重试。
-                        retryDeviceBusy = requestedKey == key,
+                        retryDeviceBusy = true,
                     )
                     if (bitmap == null) {
                         // A real unsupported/null response is one completed attempt.
                         effectPreviewAttemptKey = key
+                        effectPreviewDemandedFlow.value = false
                         return@collectLatest
                     }
                     // Fetch EXIF only after the FHD succeeds. If a foreground task cancels this
@@ -1001,11 +1013,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 "${bitmap.width}x${bitmap.height}"
                         }
                     }
+                    // 先原子发布 FHD + EXIF，再结束需求；否则 collectLatest 可能先取消本块。
+                    effectPreviewDemandedFlow.value = false
                 } finally {
                     effectPreviewLoadingKey = null
-                    if (effectPreviewRequestedKeyFlow.value == key) {
-                        effectPreviewRequestedKeyFlow.value = null
-                    }
                     effectPreviewActiveFlow.value = false
                 }
             }
@@ -1515,7 +1526,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
             noThumbHandles.clear()      // handle 跨会话可能复用，负缓存一并作废
             effectPreviewAttemptKey = null
-            effectPreviewRequestedKeyFlow.value = null
+            effectPreviewDemandedFlow.value = false
             effectPreviewLoadingKey = null
         }
         _state.update {
@@ -1705,12 +1716,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     // onBatch 回调运行在 IO 线程，用 update 原子读改写避免与主线程写入竞争。
                     if (fileLoadGeneration == generation && camera === cam) {
                         _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
+                        prefetchPublishedFileBatch(
+                            // 双卡备份模式下，原始 batch 可能包含不会单独显示的重复副本；
+                            // 只为本批真正加入列表的逻辑照片获取一次缩略图。
+                            batch = additions,
+                            expectedCamera = cam,
+                            expectedGeneration = generation,
+                        )
                     }
                 }
                 if (nonEmptyRemainingOrders.size == 1) {
                     cam.streamFileInfo(
                         handles = nonEmptyRemainingOrders.single().newestFirstHandles,
-                        batchSize = 20,
+                        batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
                         onBatch = publishBatch,
                     )
                 } else {
@@ -1718,7 +1736,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         newestFirstHandlesByStorage = nonEmptyRemainingOrders.map {
                             it.newestFirstHandles
                         },
-                        batchSize = 20,
+                        batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
                         onBatch = publishBatch,
                     )
                 }
@@ -1885,6 +1903,39 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             throw e
         } finally {
             if (inflightPrefetches[handle] === completion) inflightPrefetches.remove(handle)
+        }
+    }
+
+    /**
+     * 冷缓存文件扫描流水线：一批 ObjectInfo 发布后，在释放相机锁的窗口内依次缓存同批
+     * 缩略图，完成后才读取下一批。切回 Main 保证缩略图共享表仍只在单线程访问；实际
+     * PTP 和磁盘 IO 会由各自实现切到 IO 调度器，不会阻塞界面线程。
+     */
+    private suspend fun prefetchPublishedFileBatch(
+        batch: List<NikonCamera.FileInfo>,
+        expectedCamera: NikonCamera,
+        expectedGeneration: Long,
+    ) = withContext(Dispatchers.Main.immediate) {
+        for (file in batch) {
+            if (camera !== expectedCamera || fileLoadGeneration != expectedGeneration ||
+                !state.value.isConnectedToCamera
+            ) {
+                return@withContext
+            }
+            // 用户前台任务优先；本批未完成项会在完整扫描后的补漏阶段重试。
+            if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
+                effectPreviewActiveFlow.value
+            ) {
+                return@withContext
+            }
+            try {
+                prefetchThumbnail(file)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // 单张瞬时失败不阻塞后续文件信息；完整扫描结束后还会统一补漏。
+                log { "THUMB_PIPELINE item failed handle=${file.handle}: $e" }
+            }
         }
     }
 
@@ -2412,7 +2463,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val RETRY_INTERVAL_MS = 1_000L
         const val WIFI_BACKGROUND_RETRY_INTERVAL_MS = 3_000L
         const val WATCH_INTERVAL_MS = 1_000L
-        const val EFFECT_PREVIEW_SETTLE_MS = 600L
+        internal const val FILE_THUMBNAIL_PIPELINE_BATCH_SIZE = 12
         const val EFFECT_PREVIEW_SOURCE_EDGE = 1_920
         const val MAX_FHD_PREVIEW_EDGE = 1_920
         // 黑边判定：近黑像素的通道上限（JPEG 压缩后黑条并非纯黑，留噪声余量）；

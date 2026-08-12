@@ -191,6 +191,8 @@ fun SettingsOverlay(
     onHoldCameraWifi: (Boolean) -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
+    // 弹窗一出现就开始准备效果演示图；ViewModel 会按照片身份去重，重复打开不重复读取。
+    LaunchedEffect(Unit) { onEffectPreviewRequested() }
     val colors = AppTheme.colors
     val isPro by LicenseManager.isPro.collectAsState()
     val haptics = rememberHaptics(state.hapticsEnabled)
