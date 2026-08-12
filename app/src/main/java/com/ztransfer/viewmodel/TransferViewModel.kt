@@ -88,6 +88,7 @@ private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY =
     "photo_frame_watermark_size_scale_version"
 internal const val PHOTO_FRAME_EXPORT_PARALLELISM = 2
 private val COPY_SUFFIX_REGEX = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
+private val IDENTITY_TOKEN_UNSAFE_CHARS = Regex("[^A-Za-z0-9.]")
 
 internal fun exportedOriginalBaseName(name: String): String = name.replace(COPY_SUFFIX_REGEX, "")
 
@@ -659,7 +660,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     /** 文件内容身份令牌：大小+拍摄时间，仅留字母数字与点（内嵌半成品名，不含下划线分隔符）。 */
     private fun identityToken(file: NikonCamera.FileInfo): String =
-        "${file.size}.${file.captureDate ?: "0"}".replace(Regex("[^A-Za-z0-9.]"), "")
+        "${file.size}.${file.captureDate ?: "0"}".replace(IDENTITY_TOKEN_UNSAFE_CHARS, "")
 
     /** 半成品文件名 = 前缀 + 身份令牌 + "_" + 原文件名（原名可含下划线，解析按【首个】下划线切分）。 */
     private fun partFileName(file: NikonCamera.FileInfo): String =

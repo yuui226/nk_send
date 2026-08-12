@@ -2165,20 +2165,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } ?: return null
         if (thumbnailCacheSessionGeneration != expectedCacheGeneration) return null
         return try {
-            val bytes = withContext(Dispatchers.IO) {
-                if (disk.isFile) try { disk.readBytes() } catch (_: Exception) { null } else null
+            val encodedSize = withContext(Dispatchers.IO) {
+                if (disk.isFile) runCatching { disk.length() }.getOrDefault(0L) else 0L
             }
-            if (bytes == null || bytes.isEmpty()) {
+            if (encodedSize <= 0L) {
                 withContext(Dispatchers.IO) { diskCache.remove(cacheFileName, disk) }
                 return null
             }
-            decodeThumbnail(
-                file,
-                bytes,
-                diskCache,
-                cacheFileName,
-                disk,
-                fromDisk = true,
+            decodeThumbnailFile(
+                file = file,
+                encodedSize = encodedSize,
+                diskCache = diskCache,
+                cacheFileName = cacheFileName,
+                disk = disk,
                 expectedCacheGeneration = expectedCacheGeneration,
             )
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -2259,11 +2258,54 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // 解码后立即精确裁掉烘焙在缩略图里的黑边（3:2/16:9 塞 4:3 的上下黑条），
             // 裁好的位图进缓存——列表格子/队列小图/预览全都拿到无黑边的图，
             // UI 层不再需要"放大遮边"的近似 hack。
-            BitmapFactory.decodeByteArray(data, 0, data.size)
-                ?.let { cropLetterbox(it) }
-                ?.let { if (file.extension in VIDEO_EXTENSIONS) cropVideoBars(it) else it }
-                ?.asImageBitmap()
+            postProcessThumbnail(file, BitmapFactory.decodeByteArray(data, 0, data.size))
         }
+        return publishDecodedThumbnail(
+            file = file,
+            image = image,
+            encodedSize = data.size.toLong(),
+            diskCache = diskCache,
+            cacheFileName = cacheFileName,
+            disk = disk,
+            fromDisk = fromDisk,
+            expectedCacheGeneration = expectedCacheGeneration,
+        )
+    }
+
+    private suspend fun decodeThumbnailFile(
+        file: NikonCamera.FileInfo,
+        encodedSize: Long,
+        diskCache: ThumbnailDiskCache.CameraCache,
+        cacheFileName: String,
+        disk: File,
+        expectedCacheGeneration: Long,
+    ): ImageBitmap? {
+        val image = withContext(Dispatchers.Default) {
+            // 直接从缓存文件解码，避免 readBytes() 先额外分配一份完整 JPEG ByteArray。
+            postProcessThumbnail(file, BitmapFactory.decodeFile(disk.absolutePath))
+        }
+        return publishDecodedThumbnail(
+            file = file,
+            image = image,
+            encodedSize = encodedSize,
+            diskCache = diskCache,
+            cacheFileName = cacheFileName,
+            disk = disk,
+            fromDisk = true,
+            expectedCacheGeneration = expectedCacheGeneration,
+        )
+    }
+
+    private suspend fun publishDecodedThumbnail(
+        file: NikonCamera.FileInfo,
+        image: ImageBitmap?,
+        encodedSize: Long,
+        diskCache: ThumbnailDiskCache.CameraCache?,
+        cacheFileName: String,
+        disk: File?,
+        fromDisk: Boolean,
+        expectedCacheGeneration: Long,
+    ): ImageBitmap? {
         if (image == null) {
             // 解码失败：删掉磁盘上的坏文件。磁盘来源不负缓存（下次直接找相机重取）；
             // 相机新鲜字节都解不了才视为确认无图。
@@ -2274,7 +2316,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 noThumbHandles.add(file.handle)
             }
             log {
-                "THUMB decode failed handle=${file.handle} bytes=${data.size} fromDisk=$fromDisk"
+                "THUMB decode failed handle=${file.handle} bytes=$encodedSize fromDisk=$fromDisk"
             }
             return null
         }
@@ -2282,6 +2324,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         thumbnailCache.put(file.handle, image)
         return image
     }
+
+    private fun postProcessThumbnail(
+        file: NikonCamera.FileInfo,
+        decoded: Bitmap?,
+    ): ImageBitmap? = decoded
+        ?.let { cropLetterbox(it) }
+        ?.let { if (file.extension in VIDEO_EXTENSIONS) cropVideoBars(it) else it }
+        ?.asImageBitmap()
 
     /**
      * 长按预览专用：加载 FHD (1920×1080) 预览图。直接从相机拉 FHD JPEG 并解码。

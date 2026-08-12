@@ -776,11 +776,9 @@ class NikonCamera(private val context: Context) {
         val storageIds: Set<Int> = emptySet(),
     ) {
         /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
-        val extension: String
-            get() {
-                val i = fileName.lastIndexOf('.')
-                return if (i < 0) "" else fileName.substring(i).lowercase()
-            }
+        val extension: String = fileName.lastIndexOf('.').let { dot ->
+            if (dot < 0) "" else fileName.substring(dot).lowercase()
+        }
     }
 
     /**
