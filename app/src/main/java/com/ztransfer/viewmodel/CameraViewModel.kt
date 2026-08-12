@@ -1653,6 +1653,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 val allFiles = existingFiles.toMutableList()
+                var publishedFiles = BatchPublishedList.from(existingFiles)
                 // 备份模式下同一张照片在两张卡各有一份（handle 不同）：按 名称+大小+拍摄时间
                 // 去重，列表只显示一份；溢出/RAW+JPG 分卡等模式互不相同，不受影响。
                 val indexByIdentity = HashMap<String, Int>(
@@ -1671,20 +1672,36 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (FileOrderProbe.enabled && dynamicDualCardSchedule) {
                         FileOrderProbe.appendScheduledHandles(batch.map { it.handle })
                     }
+                    val publishedSizeBeforeBatch = publishedFiles.size
+                    val additions = ArrayList<NikonCamera.FileInfo>(batch.size)
+                    val replacements = HashMap<Int, NikonCamera.FileInfo>()
                     batch.forEach { file ->
                         val identity = file.logicalIdentity()
                         val existingIndex = indexByIdentity[identity]
                         if (existingIndex == null) {
                             indexByIdentity[identity] = allFiles.size
                             allFiles += file
+                            additions += file
                         } else {
-                            allFiles[existingIndex] = mergeStorageMembership(
-                                allFiles[existingIndex],
+                            val existing = allFiles[existingIndex]
+                            val merged = mergeStorageMembership(
+                                existing,
                                 file,
                             )
+                            if (merged !== existing) {
+                                allFiles[existingIndex] = merged
+                                if (existingIndex < publishedSizeBeforeBatch) {
+                                    replacements[existingIndex] = merged
+                                } else {
+                                    // 双卡的同一照片可能同时出现在当前批次：它尚未发布，
+                                    // 直接更新本批新增项，不能把它当作旧快照下标。
+                                    additions[existingIndex - publishedSizeBeforeBatch] = merged
+                                }
+                            }
                         }
                     }
-                    val snapshot = allFiles.toList()
+                    publishedFiles = publishedFiles.withBatch(replacements, additions)
+                    val snapshot: List<NikonCamera.FileInfo> = publishedFiles
                     // onBatch 回调运行在 IO 线程，用 update 原子读改写避免与主线程写入竞争。
                     if (fileLoadGeneration == generation && camera === cam) {
                         _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
