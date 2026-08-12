@@ -132,7 +132,8 @@
 
     <!-- Photo preview -->
     <string name="no_preview">No preview</string>
-    <string name="video_no_preview">Video · preview not supported</string>
+    <string name="video_no_preview">Video playback isn’t supported yet</string>
+    <string name="video_size_over_4gb">Over 4 GB</string>
     <string name="photo_frame_watermark">Frame &amp; watermark</string>
     <string name="photo_frame_off">Off</string>
     <string name="photo_frame_on">On</string>

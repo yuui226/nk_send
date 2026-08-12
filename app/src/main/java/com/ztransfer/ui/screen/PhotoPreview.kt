@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.BurstMode
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -84,7 +83,9 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
+import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.PhotoExif
@@ -95,6 +96,38 @@ private val VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 private const val PREVIEW_DEFERRED_LOAD_DELAY_MS = 340L
 private const val FHD_REVEAL_DURATION_MS = 300L
 private const val FHD_REVEAL_FRAME_MS = 16L
+private const val FOUR_GIB_BYTES = 4L * 1024L * 1024L * 1024L
+
+/** PTP DateTime（YYYYMMDDThhmmss…）转为预览页使用的稳定本地格式。 */
+internal fun formatPreviewCaptureDate(raw: String?): String? {
+    if (raw == null || raw.length < 8 || !raw.take(8).all(Char::isDigit)) return null
+    val year = raw.substring(0, 4).toInt()
+    val month = raw.substring(4, 6).toInt()
+    val day = raw.substring(6, 8).toInt()
+    runCatching { java.time.LocalDate.of(year, month, day) }.getOrNull() ?: return null
+    val date = "%04d-%02d-%02d".format(year, month, day)
+    if (raw.length < 15 || raw[8] != 'T' || !raw.substring(9, 15).all(Char::isDigit)) {
+        return date
+    }
+    val hour = raw.substring(9, 11).toInt()
+    val minute = raw.substring(11, 13).toInt()
+    val second = raw.substring(13, 15).toInt()
+    runCatching { java.time.LocalTime.of(hour, minute, second) }.getOrNull() ?: return date
+    return "$date %02d:%02d:%02d".format(hour, minute, second)
+}
+
+internal fun videoPreviewMetadata(
+    fileSize: Long,
+    captureDate: String?,
+    overFourGbLabel: String,
+): String = listOfNotNull(
+    when {
+        fileSize == PtpConstants.SIZE_UNKNOWN || fileSize > FOUR_GIB_BYTES -> overFourGbLabel
+        fileSize > 0L -> formatFileSize(fileSize)
+        else -> null
+    },
+    formatPreviewCaptureDate(captureDate),
+).joinToString("  ·  ")
 
 /** 预览分页模型与列表展示模型同构：合集是独立页面，不伪装成其中某张照片。 */
 internal sealed interface PhotoPreviewItem {
@@ -1021,7 +1054,8 @@ private fun PreviewPage(
         val anyLoading = isLoadingFhd || (!noThumb && thumbnail == null)
         when {
             isVideo -> {
-                // 视频无高清封面：缩略图压暗当背景 + 居中毛玻璃占位，明确"这是视频、暂不支持预览"，
+                // 视频无高清封面：缩略图压暗当背景 + 居中毛玻璃信息卡，明确暂不支持播放，
+                // 同时复用 ObjectInfo 已有的大小与拍摄时间，不为占位页增加相机请求。
                 // 而非把糊掉的小缩略图硬撑满屏当"预览"。
                 if (thumb != null) {
                     Image(
@@ -1032,34 +1066,35 @@ private fun PreviewPage(
                     )
                 }
                 Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.45f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
-                    ) {
-                        Icon(
-                            Icons.Default.Movie,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.9f),
-                            modifier = Modifier
-                                .padding(18.dp)
-                                .size(34.dp)
-                        )
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = Color.Black.copy(alpha = 0.45f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
+                val metadata = videoPreviewMetadata(
+                    fileSize = file.size,
+                    captureDate = file.captureDate,
+                    overFourGbLabel = stringResource(R.string.video_size_over_4gb),
+                )
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color.Black.copy(alpha = 0.45f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
                     ) {
                         Text(
                             stringResource(R.string.video_no_preview),
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Medium,
                             color = Color.White,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
+                        if (metadata.isNotEmpty()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = metadata,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(alpha = 0.76f),
+                                textAlign = TextAlign.Center,
+                            )
+                        }
                     }
                 }
             }

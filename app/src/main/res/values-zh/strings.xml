@@ -132,7 +132,8 @@
 
     <!-- 照片预览 -->
     <string name="no_preview">无预览</string>
-    <string name="video_no_preview">视频 · 暂不支持预览</string>
+    <string name="video_no_preview">视频暂不支持播放</string>
+    <string name="video_size_over_4gb">超过 4 GB</string>
     <string name="photo_frame_watermark">边框与水印</string>
     <string name="photo_frame_off">关闭</string>
     <string name="photo_frame_on">开启</string>
