@@ -433,6 +433,7 @@ fun SettingsOverlay(
             .padding(start = 12.dp, end = 12.dp, top = panelTop)
             .navigationBarsPadding()   // 小屏时面板底部不顶进导航栏
             .fillMaxWidth(),
+        animateScale = false,
         overlayContent = {
             if (showPhotoEffectsInfo) {
                 PhotoEffectsInfoBubble(

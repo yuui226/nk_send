@@ -230,7 +230,10 @@ private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 48.dp
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
 
 // 主筛选与日期编辑共用固定宽度，切页时不横向重排面板。
-private val FILTER_PANEL_WIDTH = 316.dp
+// 筛选内容包含五列类型按钮和三列日期波轮：手机上尽量利用横向空间，宽屏则封顶，
+// 避免固定窄面板挤压标签，也避免平板上横向铺得过散。
+private val FILTER_PANEL_MAX_WIDTH = 360.dp
+private val FILTER_PANEL_SCREEN_MARGIN = 12.dp
 private val DATE_FILTER_WHEEL_HEIGHT = 48.dp
 
 // 有彩色角标底（白字）的类型：其余走灰底灰字。提到顶层，避免每个格子每次重组都新建集合。
@@ -323,6 +326,8 @@ fun FileListScreen(
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
     var showFilter by remember { mutableStateOf(false) }
     var filterAnchor by remember { mutableStateOf<Rect?>(null) }
+    // 弹出时冻结点击瞬间的有效坐标；顶栏随后因信号胶囊等重排也不再拖着面板跳动。
+    var openedFilterAnchor by remember { mutableStateOf<Rect?>(null) }
     // 网格滚动状态提升到页面层供回顶按钮使用，但不能跨“列表被连接流程清空”保留。
     // 用空/非空作为状态槽身份：新连接的第一批照片会自然拿到全新的 0 位置状态；
     // 普通重组、继续分批加载以及离开子页面再返回都仍复用当前状态。
@@ -1311,7 +1316,17 @@ fun FileListScreen(
                 label = "filterMarkFill",
             )
             GlassButton(
-                onClick = { showFilter = !showFilter },
+                onClick = {
+                    if (showFilter) {
+                        showFilter = false
+                        openedFilterAnchor = null
+                    } else {
+                        filterAnchor?.let { measuredAnchor ->
+                            openedFilterAnchor = measuredAnchor
+                            showFilter = true
+                        }
+                    }
+                },
                 shape = RoundedCornerShape(22.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 active = filterActive,
@@ -1389,9 +1404,9 @@ fun FileListScreen(
         }
 
         // ---------- 类型/标记筛选浮层：从筛选按钮变形弹出、关闭缩回按钮（见 FilterOverlay）----------
-        if (showFilter) {
+        openedFilterAnchor?.takeIf { showFilter }?.let { frozenAnchor ->
             FilterOverlay(
-                anchorBounds = filterAnchor,
+                anchorBounds = frozenAnchor,
                 availableExts = availableExts,
                 current = filterCriteria,
                 storageSlots = visibleStorageSlots,
@@ -1413,7 +1428,10 @@ fun FileListScreen(
                         )
                     )
                 },
-                onDismiss = { showFilter = false }
+                onDismiss = {
+                    showFilter = false
+                    openedFilterAnchor = null
+                }
             )
         }
 
@@ -3178,7 +3196,7 @@ internal fun allowGridRemoteThumbnails(previewOpen: Boolean): Boolean = !preview
  */
 @Composable
 private fun FilterOverlay(
-    anchorBounds: Rect?,
+    anchorBounds: Rect,
     availableExts: List<String>,
     current: PhotoFilterCriteria,
     storageSlots: List<Int>,
@@ -3191,13 +3209,16 @@ private fun FilterOverlay(
     val density = LocalDensity.current
     var editingDate by remember { mutableStateOf(false) }
     val screenWidth = LocalConfiguration.current.screenWidthDp.dp
-    val panelWidth = minOf(FILTER_PANEL_WIDTH, screenWidth - 24.dp)
+    val panelWidth = minOf(
+        FILTER_PANEL_MAX_WIDTH,
+        screenWidth - FILTER_PANEL_SCREEN_MARGIN * 2,
+    )
     // 顶边贴按钮下缘 + 8dp；左缘对齐按钮，但不许超出屏幕右缘（信号条展开把按钮推得很靠右/
     // 窄屏时，面板整体向左钳制到贴边 12dp）。
-    val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 8.dp } ?: 76.dp
-    val panelStart = (anchorBounds?.let { with(density) { it.left.toDp() } } ?: 12.dp)
-        .coerceAtMost(screenWidth - panelWidth - 12.dp)
-        .coerceAtLeast(12.dp)
+    val panelTop = with(density) { anchorBounds.bottom.toDp() } + 8.dp
+    val panelStart = with(density) { anchorBounds.left.toDp() }
+        .coerceAtMost(screenWidth - panelWidth - FILTER_PANEL_SCREEN_MARGIN)
+        .coerceAtLeast(FILTER_PANEL_SCREEN_MARGIN)
 
     var working by remember { mutableStateOf(current) }
 
@@ -3225,6 +3246,7 @@ private fun FilterOverlay(
         panelModifier = Modifier
             .padding(start = panelStart, top = panelTop)
             .width(panelWidth),
+        animateScale = false,
         shape = RoundedCornerShape(16.dp),
         dim = false,
     ) { _ ->

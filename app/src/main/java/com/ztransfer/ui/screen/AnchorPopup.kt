@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -49,7 +50,8 @@ private class PopupAnimationState(
  * 遮罩随进度淡入，点击遮罩 / 返回键触发收回。
  *
  * 位置与尺寸由调用方经 [panelModifier] 决定（相对根 Box 左上角，用 padding 贴到按钮下方、
- * fillMaxWidth 或 width 定宽）。[content] 收到 close 回调，供面板内的关闭按钮使用；
+ * fillMaxWidth 或 width 定宽），[panelAlignment] 可改变父 Box 内的对齐基准。大型面板可关闭
+ * [animateScale]，只保留淡入淡出，避免整块内容在入场期间持续重采样。[content] 收到 close 回调；
  * [overlayContent] 渲染在遮罩与面板之上（如底部玻璃提示），可用 align 自行定位。
  */
 @Composable
@@ -58,6 +60,7 @@ fun AnchorPopup(
     onDismiss: () -> Unit,
     panelModifier: Modifier,
     panelAlignment: Alignment = Alignment.TopStart,
+    animateScale: Boolean = true,
     shape: Shape = RoundedCornerShape(20.dp),
     // 遮罩是否压暗背景：大面板（设置）保持压暗聚焦；小面板（筛选下拉）传 false——
     // 全屏变暗对几个胶囊的下拉太兴师动众，遮罩仍在（点外部收起、拦滚动穿透），只是透明。
@@ -111,13 +114,21 @@ fun AnchorPopup(
                     if (!animationState.expansionStarted && !animationState.closing) {
                         animationState.expansionStarted = true
                         animationScope.launch {
-                            progress.animateTo(1f, Motion.overlayExpand)
+                            // 首次组合可能同时构建设置页等大型内容树。先让布局与绘制完整落一帧，
+                            // 再启动纯图层动画，避免首个动画帧和测量/纹理上传抢主线程与 GPU。
+                            withFrameNanos { }
+                            if (!animationState.closing) {
+                                progress.animateTo(1f, Motion.overlayExpand)
+                            }
                         }
                     }
                 }
                 .graphicsLayer {
                     val b = animationState.panelBounds
-                    if (b != null && b.width > 0f && b.height > 0f && anchorBounds != null) {
+                    if (
+                        animateScale && b != null && b.width > 0f && b.height > 0f &&
+                        anchorBounds != null
+                    ) {
                         // 按钮中心相对于面板自身的比例位置（可超出 0..1，即原点落在面板外）。
                         transformOrigin = TransformOrigin(
                             (anchorBounds.center.x - b.left) / b.width,
@@ -135,7 +146,7 @@ fun AnchorPopup(
                     } else {
                         CompositingStrategy.ModulateAlpha
                     }
-                    val s = 0.96f + 0.04f * p
+                    val s = if (animateScale) 0.96f + 0.04f * p else 1f
                     scaleX = s
                     scaleY = s
                     alpha = p
