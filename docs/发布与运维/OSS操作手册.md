@@ -216,6 +216,6 @@ https://apk.ztransfer.top/releases/*.apk
 ## 相关文档
 
 - `server/OSS发布设置.md`：Bucket、RAM 和凭证一次性配置；
-- `docs/App更新系统.md`：App、服务端和 OSS 的完整更新流程；
+- `docs/发布与运维/App更新系统.md`：App、服务端和 OSS 的完整更新流程；
 - `server/cert-renew/README.md`：`apk.ztransfer.top` HTTPS 证书自动续期；
-- `docs/官网下载OSS跳转方案.md`：官网与新用户固定下载设计。
+- `docs/发布与运维/官网下载OSS跳转方案.md`：官网与新用户固定下载设计。

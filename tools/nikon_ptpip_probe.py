@@ -68,7 +68,7 @@ nikon_ptpip_probe.py —— 尼康「连接到电脑」PTP/IP 握手实验探针
   追一条流:右键任一 15740 包 → Follow → TCP Stream。
 
 三个新开关:--hold <秒>(保持会话观测掐断)、--keepalive none|ping|getdeviceinfo(试心跳)、
-           --guid <32位hex>(做 GUID A/B)。判定出口见 docs/连接到手机热点调研.md 第六节。
+           --guid <32位hex>(做 GUID A/B)。判定出口见 docs/技术调研/连接到手机热点调研.md 第六节。
 
 作者备注:PTP/IP 帧格式与操作码事实来源于 ISO 15740 与 libgphoto2 camlibs/ptp2/ptpip.c,
 仅参考协议事实,代码为独立实现。

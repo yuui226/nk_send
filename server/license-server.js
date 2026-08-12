@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ZTransfer 激活服务器 —— 零依赖单文件(Node >= 22.13,需要 node:sqlite)。
 // 用法: node license-server.js [config.json 路径]
-// 接口与表结构见 docs/激活与付费设计.md。
+// 接口与表结构见 docs/商业化与授权/激活与付费设计.md。
 'use strict';
 
 const fs = require('node:fs');

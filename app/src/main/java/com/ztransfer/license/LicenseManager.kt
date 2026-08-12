@@ -39,7 +39,7 @@ import javax.net.ssl.X509TrustManager
  * 授权管理:免费/付费状态、每日免费额度、激活与静默续签。
  *
  * 通行证 = base64url(payload JSON) + "." + base64url(ECDSA P-256 签名),由服务器签发,
- * 本地用内置公钥验签 + 核对设备指纹,日常使用完全离线。协议见 docs/激活与付费设计.md。
+ * 本地用内置公钥验签 + 核对设备指纹,日常使用完全离线。协议见 docs/商业化与授权/激活与付费设计.md。
  *
  * 传输热路径零接触:额度判定只发生在用户点击入队的瞬间(一次 SharedPreferences 读写)。
  */

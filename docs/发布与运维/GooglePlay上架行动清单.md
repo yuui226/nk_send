@@ -63,7 +63,7 @@
 | 生成 release AAB | ⬜ `./gradlew :app:bundleRelease`(产物在 `app/build/outputs/bundle/release/`) |
 | Play App Signing | ⬜ 首次上传 AAB 时按向导把签名托管给 Google(新应用强制),本地 keystore 变为「上传密钥」,务必备份 `keystore.properties` 与 jks 文件 |
 | versionCode/versionName | ⬜ 每次上传 AAB 必须递增 versionCode |
-| 真机回归 | ⬜ 切系统语言为英文过一遍全流程(见 docs/真机测试清单.md);重点看英文文案是否截断/换行异常 |
+| 真机回归 | ⬜ 切系统语言为英文过一遍全流程(见 `docs/测试与验证/真机测试清单.md`);重点看英文文案是否截断/换行异常 |
 
 **产品侧待定项**:
 - 设置面板的「QQ 群」按钮对海外用户无意义,建议做成按语言区分(英文界面显示邮箱或 Discord/Reddit 链接,或干脆隐藏)。

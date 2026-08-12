@@ -739,7 +739,7 @@ fun rcAngleLevelRoll(param: RcParam): Float? {
  * 机身不支持 0xD067（GetDevicePropDesc 直接失败）或值不是可解释的标量时返回 null。
  *
  * 支持性只认这一次实际响应，不查 0x90CA/0x9439 的广告清单：Nikon 厂商属性经常
- * 不出现在 DeviceInfo 与厂商码列表里却照样可读（见 docs/无线遥控相机调研.md），
+ * 不出现在 DeviceInfo 与厂商码列表里却照样可读（见 docs/技术调研/无线遥控相机调研.md），
  * 直接问属性描述才是权威答案。
  */
 suspend fun NikonCamera.rcGetAngleLevel(): RcParam? =
