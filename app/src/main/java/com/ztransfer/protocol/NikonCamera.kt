@@ -25,6 +25,17 @@ import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
+private fun normalizedCameraIdentifier(value: String?): String? {
+    val normalized = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    when (normalized.lowercase()) {
+        "unknown", "none", "null", "n/a" -> return null
+    }
+    // 全 0（可夹分隔符）是部分设备在没有真实序列号时使用的占位值。
+    return normalized.takeIf { text ->
+        text.any { character -> character.isLetter() || (character.isDigit() && character != '0') }
+    }
+}
+
 /** 写入本地文件失败（非相机连接错误），用于区分"掉线"与"磁盘/存储"问题。 */
 class OutputWriteException(message: String, cause: Throwable) : Exception(message, cause)
 
@@ -58,6 +69,56 @@ internal fun selectNewestFileHeadIndex(
         if (candidateIsNewer) selected = index
     }
     return selected.takeIf { it >= 0 }
+}
+
+internal data class ParsedObjectCacheIdentity(
+    val fileName: String,
+    val captureDate: String?,
+    val complete: Boolean,
+)
+
+private fun hasUtf16NullTerminator(data: ByteArray, offset: Int, codeUnits: Int): Boolean {
+    if (codeUnits <= 0 || codeUnits > (data.size - offset) / 2) return false
+    val terminatorOffset = offset + codeUnits * 2 - 2
+    return data[terminatorOffset] == 0.toByte() && data[terminatorOffset + 1] == 0.toByte()
+}
+
+/** 只解析参与磁盘缓存身份的 ObjectInfo 字段；载荷不完整时保留 UI 兜底值但禁止缓存清理。 */
+internal fun parseObjectCacheIdentity(
+    handle: Int,
+    extension: String,
+    data: ByteArray,
+): ParsedObjectCacheIdentity {
+    val fallbackName = "DSC_%04d%s".format(handle and 0xFFFF, extension)
+    if (data.size < 53) return ParsedObjectCacheIdentity(fallbackName, null, false)
+
+    val nameLen = data[52].toInt() and 0xFF
+    val nameFieldComplete = hasUtf16NullTerminator(data, 53, nameLen)
+    val decodedFileName = if (nameFieldComplete) {
+        String(data, 53, nameLen * 2, Charsets.UTF_16LE).trimEnd('\u0000')
+    } else null
+    val fileName = decodedFileName?.takeIf(String::isNotEmpty) ?: fallbackName
+    if (!nameFieldComplete || decodedFileName.isNullOrEmpty()) {
+        return ParsedObjectCacheIdentity(fileName, null, false)
+    }
+
+    val dateOffset = 53 + nameLen * 2
+    if (data.size <= dateOffset) return ParsedObjectCacheIdentity(fileName, null, false)
+    val dateLen = data[dateOffset].toInt() and 0xFF
+    if (dateLen == 0) return ParsedObjectCacheIdentity(fileName, null, true)
+    if (dateLen > (data.size - dateOffset - 1) / 2) {
+        return ParsedObjectCacheIdentity(fileName, null, false)
+    }
+    if (!hasUtf16NullTerminator(data, dateOffset + 1, dateLen)) {
+        return ParsedObjectCacheIdentity(fileName, null, false)
+    }
+    val date = String(
+        data,
+        dateOffset + 1,
+        dateLen * 2,
+        Charsets.UTF_16LE,
+    ).trimEnd('\u0000').takeIf { it.length >= 8 }
+    return ParsedObjectCacheIdentity(fileName, date, date != null)
 }
 
 /**
@@ -261,6 +322,23 @@ class NikonCamera(private val context: Context) {
         private set
     @Volatile internal var cachedDeviceInfo: LabDeviceInfo? = null
         private set
+    @Volatile private var responderGuid: String? = null
+    @Volatile private var usbDeviceSerial: String? = null
+    /**
+     * 跨连接稳定的机身身份，用于隔离缩略图磁盘缓存。有效的 PTP DeviceInfo 序列号
+     * 可统一同一机身的 Wi-Fi/USB 缓存；缺失或为占位值时再用当前链路的物理标识兜底。
+     */
+    val thumbnailCacheIdentity: String
+        get() {
+            val manufacturer = deviceManufacturer.orEmpty().trim()
+            val model = deviceModel.orEmpty().trim()
+            val transportId = if (usbPtp != null) usbDeviceSerial else responderGuid
+            val physicalId = normalizedCameraIdentifier(cachedDeviceInfo?.serial)
+                ?: normalizedCameraIdentifier(transportId)
+                // 极少数机身不报告任何序列身份；仍维持按型号隔离，不退回全局混存。
+                ?: "unknown-device"
+            return "$manufacturer\u0000$model\u0000$physicalId"
+        }
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
 
@@ -356,6 +434,10 @@ class NikonCamera(private val context: Context) {
 
             val payload = ack.payload ?: return@withContext Result.failure(Exception(context.getString(R.string.error_handshake_empty)))
             val sessionId = payload.getIntLE(0)
+            if (payload.size >= 20) {
+                responderGuid = payload.copyOfRange(4, 20)
+                    .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+            }
 
             evtSocket = newSocket().apply {
                 soTimeout = SO_TIMEOUT_MS
@@ -428,6 +510,10 @@ class NikonCamera(private val context: Context) {
         device: UsbDevice
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            usbDeviceSerial = runCatching { device.serialNumber }
+                .getOrNull()
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
             if (FileOrderProbe.enabled) FileOrderProbe.beginConnection("USB")
             log { "USB_CONNECT open device=${device.deviceName}" }
             tid = -1
@@ -646,18 +732,34 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    suspend fun getObjectHandles(storageId: Int = -1): List<Int> = ioMutex.withLock {
+    internal data class ObjectHandlesResult(
+        val handles: List<Int>,
+        val successful: Boolean,
+    )
+
+    internal suspend fun getObjectHandlesWithStatus(
+        storageId: Int = -1,
+    ): ObjectHandlesResult = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             try {
                 sendCmd(PtpConstants.GET_OBJECT_HANDLES, storageId, -1, 0)
                 val (respCode, data) = recvRespWithPayload()
                 if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
-                    return@withContext emptyList()
+                    return@withContext ObjectHandlesResult(emptyList(), false)
                 }
                 val count = data.getIntLE(0)
-                (0 until count).map { data.getIntLE(4 + it * 4) }
+                // 先用除法校验，避免损坏载荷里的 count 在 count * 4 时整型溢出。
+                if (count < 0 || count > (data.size - 4) / 4) {
+                    return@withContext ObjectHandlesResult(emptyList(), false)
+                }
+                ObjectHandlesResult(
+                    handles = (0 until count).map { data.getIntLE(4 + it * 4) },
+                    successful = true,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
-                emptyList()
+                ObjectHandlesResult(emptyList(), false)
             }
         }
     }
@@ -807,10 +909,11 @@ class NikonCamera(private val context: Context) {
         handles: List<Int>,
         batchSize: Int = 20,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit
-    ) = withContext(Dispatchers.IO) {
+    ): Boolean = withContext(Dispatchers.IO) {
         val loadContext = coroutineContext
         val total = handles.size
         var loaded = 0
+        var allObjectInfoSucceeded = true
         handles.chunked(batchSize).forEach { batch ->
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
             // 每批单独持锁，批间释放 ioMutex：缩略图模式下缩略图请求可在批间插入，
@@ -823,7 +926,9 @@ class NikonCamera(private val context: Context) {
             val files = ioMutex.withLock {
                 batch.mapNotNull { handle ->
                     loadContext.ensureActive()
-                    getObjectInfoInternal(handle)
+                    val result = getObjectInfoInternal(handle)
+                    if (!result.successful) allObjectInfoSucceeded = false
+                    result.file
                 }
             }
             if (FileOrderProbe.enabled) {
@@ -838,6 +943,7 @@ class NikonCamera(private val context: Context) {
                 onBatch(files, loaded, total)
             }
         }
+        allObjectInfoSucceeded
     }
 
     /**
@@ -850,16 +956,17 @@ class NikonCamera(private val context: Context) {
         newestFirstHandlesByStorage: List<List<Int>>,
         batchSize: Int = 20,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
-    ) = withContext(Dispatchers.IO) {
+    ): Boolean = withContext(Dispatchers.IO) {
         require(batchSize > 0) { "batchSize must be positive" }
         val groups = newestFirstHandlesByStorage.filter { it.isNotEmpty() }
-        if (groups.isEmpty()) return@withContext
+        if (groups.isEmpty()) return@withContext true
 
         val loadContext = coroutineContext
         val total = groups.sumOf { it.size }
         val cursors = IntArray(groups.size)
         val heads = MutableList<FileInfo?>(groups.size) { null }
         var completed = 0
+        var allObjectInfoSucceeded = true
 
         while (completed < total) {
             val requestedHandles = ArrayList<Int>(batchSize)
@@ -880,7 +987,9 @@ class NikonCamera(private val context: Context) {
                                 val handle = handles[cursors[groupIndex]++]
                                 objectInfoRequests++
                                 requestedHandles += handle
-                                val file = getObjectInfoInternal(handle)
+                                val result = getObjectInfoInternal(handle)
+                                val file = result.file
+                                if (!result.successful) allObjectInfoSucceeded = false
                                 if (file == null) {
                                     completed++
                                 } else {
@@ -920,13 +1029,20 @@ class NikonCamera(private val context: Context) {
                 error("Merged ObjectInfo scan made no progress")
             }
         }
+        allObjectInfoSucceeded
     }
 
-    internal fun getObjectInfoInternal(handle: Int): FileInfo? {
+    internal data class ObjectInfoResult(
+        val file: FileInfo?,
+        /** false 只表示 PTP/载荷失败；成功返回的文件夹等非媒体对象仍为 true。 */
+        val successful: Boolean,
+    )
+
+    internal fun getObjectInfoInternal(handle: Int): ObjectInfoResult {
         sendCmd(PtpConstants.GET_OBJECT_INFO, handle)
         val (respCode, data) = recvRespWithPayload()
         if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 53) {
-            return null
+            return ObjectInfoResult(null, false)
         }
 
         val storageId = data.getIntLE(0)
@@ -934,30 +1050,12 @@ class NikonCamera(private val context: Context) {
         // 关联对象（0x3001 = 文件夹）不是文件，一律不收录：常见机型的全量枚举可能不含它，
         // 但换卡/目录滚动时相机新建文件夹会带 ObjectAdded 事件，实时新增路径必须拦住，
         // 否则列表会冒出一个 0 字节的"100NIKON"条目。
-        if (format == 0x3001) return null
+        if (format == 0x3001) return ObjectInfoResult(null, true)
         // PTP ObjectInfo 的大小字段是 32 位无符号；>4GB 的对象（长视频）相机报 0xFFFFFFFF（未知）。
         val size = data.getIntLE(8).toLong() and 0xFFFFFFFFL
         val ext = PtpConstants.getExt(format)
 
-        val nameLen = data[52].toInt() and 0xFF
-        val fileName = if (nameLen > 0 && data.size >= 53 + nameLen * 2) {
-            String(data, 53, nameLen * 2, Charsets.UTF_16LE).trimEnd('\u0000')
-        } else {
-            "DSC_%04d%s".format(handle and 0xFFFF, ext)
-        }
-
-        val dateOffset = 53 + nameLen * 2
-        val captureDate = if (data.size > dateOffset) {
-            try {
-                val dateLen = data[dateOffset].toInt() and 0xFF
-                if (dateLen > 0 && data.size >= dateOffset + 1 + dateLen * 2) {
-                    val dateStr = String(data, dateOffset + 1, dateLen * 2, Charsets.UTF_16LE).trimEnd('\u0000')
-                    // 保留完整的 PTP DateTime（YYYYMMDDThhmmss…），前 8 位为日期。
-                    // UI 按前 8 位分组、按完整串在组内排时间序——只存日期的话组内排序就是无效操作。
-                    dateStr.takeIf { it.length >= 8 }
-                } else null
-            } catch (_: Exception) { null }
-        } else null
+        val cacheIdentity = parseObjectCacheIdentity(handle, ext, data)
 
         // ProtectionStatus(偏移 6,u16) 与文件同载荷,解析零额外流量。
         //（ObjectInfo 里还有两组刻意不用的字段:SequenceNumber(48)——机型可能恒填 0、
@@ -966,13 +1064,16 @@ class NikonCamera(private val context: Context) {
         // EXIF Orientation 里且依赖机内"自动旋转图像"设置,判不出构图。）
         val isProtected = data.getUShortLE(6) != 0
 
-        return FileInfo(
-            handle = handle,
-            size = size,
-            fileName = fileName,
-            captureDate = captureDate,
-            isProtected = isProtected,
-            storageIds = if (storageId == 0 || storageId == -1) emptySet() else setOf(storageId),
+        return ObjectInfoResult(
+            file = FileInfo(
+                handle = handle,
+                size = size,
+                fileName = cacheIdentity.fileName,
+                captureDate = cacheIdentity.captureDate,
+                isProtected = isProtected,
+                storageIds = if (storageId == 0 || storageId == -1) emptySet() else setOf(storageId),
+            ),
+            successful = cacheIdentity.complete,
         )
     }
 

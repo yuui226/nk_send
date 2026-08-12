@@ -190,6 +190,7 @@ internal data class FileScanHandleSnapshot(
     val sessionToken: Any,
     val storageIds: List<Int>,
     val handleOrders: List<StorageHandleOrder>,
+    val handleQueriesSucceeded: Boolean = true,
 ) {
     // 备份模式下第二张卡的副本会合并进第一条，状态列表不再保留它自己的 handle；单靠
     // existingHandles 无法知道它已读过。快照额外记住真正发布过的 handle，FHD 恢复时
@@ -309,26 +310,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // EXIF 参数缓存。null value = 已尝试但失败（负缓存）。
     private val exifCache = HashMap<String, PhotoExif?>()
 
-    /** EXIF 缓存键：与 [diskFile] 同一稳定身份，跨会话/重连命中同一张照片。 */
+    /** EXIF 缓存键：与缩略图磁盘缓存同一稳定身份，跨会话/重连命中同一张照片。 */
     private fun exifKey(file: NikonCamera.FileInfo): String =
         "${file.fileName}_${file.size}_${file.captureDate ?: "0"}"
 
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    // 缩略图磁盘缓存目录：后台填充落盘于此，内存 LRU 只服务可见区。
-    private val thumbDiskDir = File(application.cacheDir, "thumbs").apply { mkdirs() }
-    // 磁盘缓存文件名索引：首次使用时一次性列目录建立，写入/删除同步维护——后台填充
-    // 逐张探测"是否已落盘"在内存完成，不再每张跨线程 stat（几千张跳过从数百 ms 降到微秒级）。
-    // 仅主线程访问（prefetch/fetch 的续体都在主调度器）。
-    private var diskIndex: HashSet<String>? = null
+    // 缩略图按机身稳定身份分目录保存，无容量上限；当前相机完整扫描成功后才同步清理。
+    private val thumbnailDiskCache = ThumbnailDiskCache(File(application.cacheDir, "thumbs"))
+    private var activeThumbnailDiskCache: ThumbnailDiskCache.CameraCache? = null
+    // 每次成功切入一个相机会话递增，阻止旧会话迟到的磁盘解码结果污染 handle 级内存缓存。
+    private var thumbnailCacheSessionGeneration = 0L
+    // 本轮发生真实写入失败（含磁盘满）后停止后台落盘；换相机/重连时重新尝试。
+    private var thumbnailDiskWritesBlocked = false
 
-    private suspend fun diskIndexSet(): HashSet<String> {
-        diskIndex?.let { return it }
-        val names = withContext(Dispatchers.IO) {
-            thumbDiskDir.list()?.toHashSet() ?: HashSet()
+    private suspend fun activateThumbnailDiskCache(cam: NikonCamera) {
+        if (camera !== cam) return
+        // handle 只在单次相机会话内唯一。先切断旧会话缓存和共乘请求，再进行磁盘 IO，
+        // 避免打开目录的短暂窗口里把新相机 handle 写入旧相机目录。
+        inflightThumbs.values.forEach { it.deferred.cancel() }
+        inflightThumbs.clear()
+        inflightPrefetches.values.forEach { it.cancel() }
+        inflightPrefetches.clear()
+        thumbnailCacheSessionGeneration++
+        activeThumbnailDiskCache = null
+        val opened = withContext(Dispatchers.IO) {
+            thumbnailDiskCache.openCamera(cam.thumbnailCacheIdentity)
         }
-        // 挂起期间可能已有并发首调建好索引（且其后可能已有写入），保留已建的。
-        return diskIndex ?: names.also { diskIndex = it }
+        if (camera === cam) {
+            activeThumbnailDiskCache = opened
+            thumbnailDiskWritesBlocked = false
+        }
     }
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     @Suppress("DEPRECATION")
@@ -599,6 +611,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         } else {
                             usbConnectFailures = 0
                             camera = cam
+                            activateThumbnailDiskCache(cam)
                             activeUsbDeviceId = device.deviceId
                             _state.update {
                                 it.copy(
@@ -878,8 +891,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         scanAttachedUsbCamera()
         if (_state.value.connectionType != CameraConnectionType.USB) registerNetworkCallback()
         startConnectionWatcher()
-        // 磁盘缓存超容淘汰（后台一次，不阻塞启动）。
-        viewModelScope.launch(Dispatchers.IO) { pruneThumbDisk() }
+        // 启动时只清理超过 90 天未连接的相机目录和遗留临时文件，不设容量上限。
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = thumbnailDiskCache.cleanupExpiredCameraCaches()
+            log {
+                "THUMB_CACHE startup-clean expiredCameras=${result.expiredCameraDirectories} " +
+                    "temp=${result.staleTemporaryFiles} legacy=${result.expiredLegacyFiles}"
+            }
+        }
         startThumbnailFill()
         startEffectPreviewPrefetch()
     }
@@ -916,6 +935,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     log { "THUMB_SWEEP start n=${ordered.size}" }
                     var loaded = 0
                     for (file in ordered) {
+                        if (thumbnailDiskWritesBlocked) {
+                            log { "THUMB_SWEEP stop: disk writes unavailable, loaded=$loaded" }
+                            return@snapshot
+                        }
                         if (!state.value.isConnectedToCamera) {
                             log { "THUMB_SWEEP abort: disconnected, loaded=$loaded" }
                             return@snapshot
@@ -1330,6 +1353,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         cam.close()
                     } else {
                         camera = cam
+                        activateThumbnailDiskCache(cam)
                         acquireSessionWifiLock()   // 会话保活：连着就不让 Wi-Fi 打盹
                         _state.update {
                             it.copy(
@@ -1516,6 +1540,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         resumeSnapshot: FileScanHandleSnapshot? = null,
     ) {
         val cam = camera ?: return
+        val diskCacheForScan = activeThumbnailDiskCache
         val generation = ++fileLoadGeneration
         fileLoadJob?.cancel()
         fileLoadPending = true
@@ -1593,21 +1618,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         return@launch
                     }
 
-                    val rawHandlesByStorage = storageIds.map { storageId ->
+                    val handleResultsByStorage = storageIds.map { storageId ->
                         val startedAtMs = if (FileOrderProbe.enabled) {
                             SystemClock.elapsedRealtime()
                         } else {
                             0L
                         }
-                        val rawHandles = cam.getObjectHandles(storageId)
+                        val result = cam.getObjectHandlesWithStatus(storageId)
                         if (FileOrderProbe.enabled) {
                             FileOrderProbe.recordRawHandles(
                                 storageId = storageId,
-                                handles = rawHandles,
+                                handles = result.handles,
                                 elapsedMs = SystemClock.elapsedRealtime() - startedAtMs,
                             )
                         }
-                        storageId to rawHandles
+                        storageId to result
+                    }
+                    val handleQueriesSucceeded = handleResultsByStorage.all { it.second.successful }
+                    val rawHandlesByStorage = handleResultsByStorage.map { (storageId, result) ->
+                        storageId to result.handles
                     }
                     val handleOrders = newestFirstHandleOrders(rawHandlesByStorage)
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
@@ -1615,6 +1644,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         fileScanHandleSnapshot = null
                         fileLoadPending = false
                         _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                        if (handleQueriesSucceeded && diskCacheForScan != null) {
+                            reconcileThumbnailCache(diskCacheForScan, emptyList())
+                        } else {
+                            log { "THUMB_CACHE reconcile skipped: handle query failed" }
+                        }
                         if (FileOrderProbe.enabled) FileOrderProbe.finishScan("complete: no handles")
                         return@launch
                     }
@@ -1625,6 +1659,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         sessionToken = cam,
                         storageIds = storageIds,
                         handleOrders = handleOrders,
+                        handleQueriesSucceeded = handleQueriesSucceeded,
                     )
                     fileScanHandleSnapshot = activeSnapshot
                     if (FileOrderProbe.enabled) {
@@ -1657,6 +1692,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (fileScanHandleSnapshot === activeSnapshot) fileScanHandleSnapshot = null
                     fileLoadPending = false
                     _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                    if (activeSnapshot.handleQueriesSucceeded && diskCacheForScan != null) {
+                        reconcileThumbnailCache(diskCacheForScan, existingFiles)
+                    }
                     if (FileOrderProbe.enabled) {
                         FileOrderProbe.finishScan("complete: nothing remaining")
                     }
@@ -1725,7 +1763,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                 }
-                if (nonEmptyRemainingOrders.size == 1) {
+                val allObjectInfoSucceeded = if (nonEmptyRemainingOrders.size == 1) {
                     cam.streamFileInfo(
                         handles = nonEmptyRemainingOrders.single().newestFirstHandles,
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
@@ -1746,6 +1784,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 fileLoadPending = false
                 log { "FILE_SCAN done files=${allFiles.size}" }
                 _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                if (activeSnapshot.handleQueriesSucceeded && allObjectInfoSucceeded &&
+                    diskCacheForScan != null
+                ) {
+                    reconcileThumbnailCache(diskCacheForScan, allFiles)
+                } else if (!activeSnapshot.handleQueriesSucceeded || !allObjectInfoSucceeded) {
+                    // 任一 ObjectInfo 没有明确返回时都不能据此判定照片已从卡中删除。
+                    log { "THUMB_CACHE reconcile skipped: incomplete handle/ObjectInfo responses" }
+                }
                 if (FileOrderProbe.enabled) {
                     FileOrderProbe.finishScan("complete: files=${allFiles.size}")
                 }
@@ -1882,9 +1928,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     suspend fun prefetchThumbnail(file: NikonCamera.FileInfo): Boolean {
         val handle = file.handle
         if (handle in noThumbHandles) return true
-        if (thumbnailCache.get(handle) != null) return true
-        val disk = diskFile(file)
-        if (disk.name in diskIndexSet()) return true
+        val expectedCamera = camera ?: return false
+        val expectedCacheGeneration = thumbnailCacheSessionGeneration
+        val diskCache = activeThumbnailDiskCache ?: return false
+        val cacheFileName = thumbnailDiskCacheFileName(file)
+        val cached = withContext(Dispatchers.IO) {
+            diskCache.findCachedFile(cacheFileName, legacyThumbnailDiskCacheFileName(file))
+        }
+        if (cached != null) return true
+        if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
         // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
         // 用户来回翻动导致的"格子请求发出又取消"绝不会让这张图两头落空。
@@ -1895,7 +1947,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val completion = CompletableDeferred<Boolean>()
         inflightPrefetches[handle] = completion
         return try {
-            val result = fetchThumbnailToDisk(handle, disk)
+            val result = fetchThumbnailToDisk(
+                expectedCamera,
+                expectedCacheGeneration,
+                handle,
+                diskCache,
+                cacheFileName,
+            )
             completion.complete(result)
             result
         } catch (e: Throwable) {
@@ -1929,7 +1987,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 return@withContext
             }
             try {
-                prefetchThumbnail(file)
+                val cached = prefetchThumbnail(file)
+                if (!cached && thumbnailDiskWritesBlocked) return@withContext
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1940,24 +1999,36 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun fetchThumbnailToDisk(
+        expectedCamera: NikonCamera,
+        expectedCacheGeneration: Long,
         handle: Int,
-        disk: File,
+        diskCache: ThumbnailDiskCache.CameraCache,
+        cacheFileName: String,
     ): Boolean {
-        val cam = camera ?: return false
         val bytes = remoteThumbGate.withPermit {
+            if (camera !== expectedCamera) return@withPermit null
             if (FileOrderProbe.enabled) {
-                getRemoteThumbnailProbed(cam, handle, "background")
+                getRemoteThumbnailProbed(expectedCamera, handle, "background")
             } else {
-                cam.getThumbnail(handle)
+                expectedCamera.getThumbnail(handle)
             }
         }   // 瞬时失败会抛出，由扫描循环按单张失败处理
+        if (camera !== expectedCamera ||
+            thumbnailCacheSessionGeneration != expectedCacheGeneration
+        ) return false
         if (bytes == null || bytes.isEmpty()) {
             noThumbHandles.add(handle)
             return true
         }
-        withContext(Dispatchers.IO) { writeAtomic(disk, bytes) }
-        diskIndex?.add(disk.name)
-        return true
+        val written = withContext(Dispatchers.IO) { diskCache.write(cacheFileName, bytes) }
+        if (!written && camera === expectedCamera &&
+            thumbnailCacheSessionGeneration == expectedCacheGeneration &&
+            activeThumbnailDiskCache === diskCache
+        ) {
+            thumbnailDiskWritesBlocked = true
+            log { "THUMB_CACHE write failed; stop background fill for this connection" }
+        }
+        return written
     }
 
     /** 仅包裹现有 GetThumb 事务记录实际进相机通道的顺序；Debug 不增加任何相机请求。 */
@@ -2086,19 +2157,35 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun loadThumbnailFromDisk(file: NikonCamera.FileInfo): ImageBitmap? {
-        val disk = diskFile(file)
+        val diskCache = activeThumbnailDiskCache ?: return null
+        val expectedCacheGeneration = thumbnailCacheSessionGeneration
+        val cacheFileName = thumbnailDiskCacheFileName(file)
+        val disk = withContext(Dispatchers.IO) {
+            diskCache.findCachedFile(cacheFileName, legacyThumbnailDiskCacheFileName(file))
+        } ?: return null
+        if (thumbnailCacheSessionGeneration != expectedCacheGeneration) return null
         return try {
             val bytes = withContext(Dispatchers.IO) {
                 if (disk.isFile) try { disk.readBytes() } catch (_: Exception) { null } else null
             }
-            if (bytes == null || bytes.isEmpty()) return null
-            decodeThumbnail(file, bytes, disk, fromDisk = true)
+            if (bytes == null || bytes.isEmpty()) {
+                withContext(Dispatchers.IO) { diskCache.remove(cacheFileName, disk) }
+                return null
+            }
+            decodeThumbnail(
+                file,
+                bytes,
+                diskCache,
+                cacheFileName,
+                disk,
+                fromDisk = true,
+                expectedCacheGeneration = expectedCacheGeneration,
+            )
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             // 本地坏缓存不能让格子的加载协程失败；删掉后，允许远程的调用会正常重取。
-            withContext(Dispatchers.IO) { disk.delete() }
-            diskIndex?.remove(disk.name)
+            withContext(Dispatchers.IO) { diskCache.remove(cacheFileName, disk) }
             log { "THUMB disk decode failed handle=${file.handle}: ${e.javaClass.simpleName}" }
             null
         }
@@ -2110,23 +2197,46 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // 创建共享远程请求前已经查过一次磁盘；排队期间后台可能刚好写入，再查一次
             // 可避免一条重复的 GetThumb。
             loadThumbnailFromDisk(file)?.let { return it }
-            val disk = diskFile(file)
+            val expectedCamera = camera ?: return null
+            val expectedCacheGeneration = thumbnailCacheSessionGeneration
+            val diskCache = activeThumbnailDiskCache
+            val cacheFileName = thumbnailDiskCacheFileName(file)
             val bytes = remoteThumbGate.withPermit {
-                val cam = camera ?: return@withPermit null
+                if (camera !== expectedCamera) return@withPermit null
                 if (FileOrderProbe.enabled) {
-                    getRemoteThumbnailProbed(cam, handle, "visible")
+                    getRemoteThumbnailProbed(expectedCamera, handle, "visible")
                 } else {
-                    cam.getThumbnail(handle)
+                    expectedCamera.getThumbnail(handle)
                 }
             }
+            if (camera !== expectedCamera ||
+                thumbnailCacheSessionGeneration != expectedCacheGeneration
+            ) return null
             if (bytes == null || bytes.isEmpty()) {
                 noThumbHandles.add(handle)   // 相机明确表示无缩略图：负缓存，不再重试
                 log { "THUMB no-thumb handle=$handle (resp non-OK / empty)" }
                 return null
             }
-            withContext(Dispatchers.IO) { writeAtomic(disk, bytes) }
-            diskIndex?.add(disk.name)
-            decodeThumbnail(file, bytes, disk, fromDisk = false)
+            val writableCache = if (!thumbnailDiskWritesBlocked) diskCache else null
+            val written = writableCache != null && withContext(Dispatchers.IO) {
+                writableCache.write(cacheFileName, bytes)
+            }
+            if (writableCache != null && !written && camera === expectedCamera &&
+                thumbnailCacheSessionGeneration == expectedCacheGeneration &&
+                activeThumbnailDiskCache === writableCache
+            ) {
+                thumbnailDiskWritesBlocked = true
+                log { "THUMB_CACHE visible write failed; background fill stopped" }
+            }
+            decodeThumbnail(
+                file = file,
+                data = bytes,
+                diskCache = diskCache,
+                cacheFileName = cacheFileName,
+                disk = diskCache?.targetFile(cacheFileName),
+                fromDisk = false,
+                expectedCacheGeneration = expectedCacheGeneration,
+            )
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -2139,8 +2249,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun decodeThumbnail(
         file: NikonCamera.FileInfo,
         data: ByteArray,
-        disk: File,
+        diskCache: ThumbnailDiskCache.CameraCache?,
+        cacheFileName: String,
+        disk: File?,
         fromDisk: Boolean,
+        expectedCacheGeneration: Long,
     ): ImageBitmap? {
         val image = withContext(Dispatchers.Default) {
             // 解码后立即精确裁掉烘焙在缩略图里的黑边（3:2/16:9 塞 4:3 的上下黑条），
@@ -2154,14 +2267,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (image == null) {
             // 解码失败：删掉磁盘上的坏文件。磁盘来源不负缓存（下次直接找相机重取）；
             // 相机新鲜字节都解不了才视为确认无图。
-            withContext(Dispatchers.IO) { disk.delete() }
-            diskIndex?.remove(disk.name)
-            if (!fromDisk) noThumbHandles.add(file.handle)
+            if (diskCache != null) {
+                withContext(Dispatchers.IO) { diskCache.remove(cacheFileName, disk) }
+            }
+            if (!fromDisk && thumbnailCacheSessionGeneration == expectedCacheGeneration) {
+                noThumbHandles.add(file.handle)
+            }
             log {
                 "THUMB decode failed handle=${file.handle} bytes=${data.size} fromDisk=$fromDisk"
             }
             return null
         }
+        if (thumbnailCacheSessionGeneration != expectedCacheGeneration) return null
         thumbnailCache.put(file.handle, image)
         return image
     }
@@ -2389,38 +2506,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return PhotoExif(aperture, shutter, iso, focal, dateTime)
     }
 
-    private fun diskFile(file: NikonCamera.FileInfo): File {
-        val key = "${file.fileName}_${file.size}_${file.captureDate ?: "0"}"
-            .replace(Regex("[^A-Za-z0-9._-]"), "_")
-        return File(thumbDiskDir, "$key.jpg")
-    }
+    private fun thumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =
+        thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
 
-    /** 先写临时文件再改名，避免进程被杀留下半截 JPEG 被当成有效缓存。仅 IO 线程调用。 */
-    private fun writeAtomic(target: File, bytes: ByteArray) {
-        try {
-            // 系统设置"清除缓存"会把 thumbs 目录整个删掉且【不杀进程】：每次写入前
-            // 重建目录，否则此后所有落盘静默失败、后台填充整个失效（实测踩过）。
-            target.parentFile?.mkdirs()
-            val tmp = File(target.parentFile, target.name + ".tmp")
-            tmp.writeBytes(bytes)
-            if (!tmp.renameTo(target)) tmp.delete()
-        } catch (e: Exception) {
-            log { "THUMB disk write failed ${target.name}: ${e.javaClass.simpleName}: ${e.message}" }
-        }
-    }
+    private fun legacyThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =
+        legacyThumbnailCacheFileName(file.fileName, file.size, file.captureDate)
 
-    /** 磁盘缓存超容时按最旧访问淘汰到 3/4 容量。启动时后台执行一次，平时零开销。 */
-    private fun pruneThumbDisk() {
-        try {
-            val files = thumbDiskDir.listFiles() ?: return
-            var total = files.sumOf { it.length() }
-            if (total <= THUMB_DISK_MAX_BYTES) return
-            for (f in files.sortedBy { it.lastModified() }) {
-                total -= f.length()
-                f.delete()
-                if (total <= THUMB_DISK_MAX_BYTES * 3 / 4) break
+    private suspend fun reconcileThumbnailCache(
+        diskCache: ThumbnailDiskCache.CameraCache,
+        files: List<NikonCamera.FileInfo>,
+    ) {
+        withContext(Dispatchers.IO) {
+            val validCacheNames = files.mapTo(HashSet(files.size)) {
+                thumbnailDiskCacheFileName(it)
             }
-        } catch (_: Exception) {}
+            val removed = diskCache.reconcile(validCacheNames)
+            log { "THUMB_CACHE reconcile removed=$removed active=${validCacheNames.size}" }
+        }
     }
 
     /** 仅 debug 构建输出缩略图链路日志（与协议层同 TAG，logcat 过滤 ZTransfer 即可）。 */
@@ -2476,8 +2578,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 视频扩展名：封面黑边兜底裁切按 16:9 画面处理。
         // 注意与 PhotoPreview.kt 顶部的 VIDEO_EXTENSIONS（预览占位分支）保持同步。
         val VIDEO_EXTENSIONS = EFFECT_PREVIEW_VIDEO_EXTENSIONS
-        // 缩略图磁盘缓存容量上限（原始 JPEG 每张几 KB，64MB 足够上万张）。
-        const val THUMB_DISK_MAX_BYTES = 64L * 1024 * 1024
         // EXIF 解析支持的图片扩展名——视频/音频等格式不会有 EXIF 头。
         val EXIF_SUPPORTED_EXTENSIONS = setOf(".jpg", ".jpeg", ".nef", ".tif", ".tiff", ".nrw")
         // RAW 格式需要更大的 header（2MB）以确保 MakerNote 等嵌套 IFD 被完整覆盖。
