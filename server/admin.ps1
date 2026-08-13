@@ -216,7 +216,6 @@ function Get-Ledger {
 function Show-Ledger($resp) {
     $codes = @($resp.codes)
     $paidUnbound = @($resp.paid_unbound)
-    $refunds = @($resp.refund_required)
     if ($paidUnbound.Count -gt 0) {
         Write-Host ""
         Write-Host ("!!! 有 {0} 笔已付款订单从未完成设备绑定，请立即核对 !!!" -f $paidUnbound.Count) -ForegroundColor Red
@@ -232,22 +231,6 @@ function Show-Ledger($resp) {
                 (Format-PriceFen $r.amount_fen)
             ) -ForegroundColor Yellow
         }
-    }
-    if ($refunds.Count -gt 0) {
-        Write-Host ""
-        Write-Host ("!!! 有 {0} 笔已收款订单需要人工核对并退款 !!!" -f $refunds.Count) -ForegroundColor Red
-        foreach ($r in $refunds) {
-            Write-Host (
-                "  订单 {0}  {1}  {2}  商品 {3}  金额 {4}  支付流水 {5}" -f
-                $r.out_trade_no,
-                (Format-Time $r.paid_at),
-                $r.refund_reason,
-                $r.product,
-                (Format-PriceFen $r.amount_fen),
-                $(if ($r.charge_id) { $r.charge_id } else { "-" })
-            ) -ForegroundColor Yellow
-        }
-        Write-Host "请在支付平台完成退款并保留核对记录；不要吊销用户现有的永久会员。" -ForegroundColor Red
     }
     if ($codes.Count -eq 0) { Write-Host "(还没有生成过激活码)" -ForegroundColor DarkGray; return }
     Write-Host ""
@@ -340,8 +323,8 @@ function Invoke-Unrevoke {
     if ($confirm -ne "y") { Write-Host "已取消"; return }
     $resp = Call "POST" "/admin/unrevoke" @{ code = $code }
     if ($resp -and $resp.ok) {
-        # App 收到 CODE_REVOKED 时已经把本地的码删了,不会自己回来;必须让用户主动走"恢复授权"。
-        Write-Host ("已解除吊销,清空了 {0} 条激活记录。请让用户在 App 里点『恢复授权』找回。" -f $resp.cleared_activations) -ForegroundColor Green
+        # App 收到 CODE_REVOKED 时已经把本地的码删了，不会自己回来；必须重新输入激活码。
+        Write-Host ("已解除吊销,清空了 {0} 条激活记录。请让用户在 App 里重新输入激活码。" -f $resp.cleared_activations) -ForegroundColor Green
     }
     else { Show-Error $resp }
 }

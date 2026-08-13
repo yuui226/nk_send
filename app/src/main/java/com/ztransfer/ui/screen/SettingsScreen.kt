@@ -330,7 +330,6 @@ fun SettingsOverlay(
     }
     val mainSettingsScroll = rememberScrollState()
     val photoEffectsEditorScroll = rememberScrollState()
-    val subExpired by LicenseManager.subExpired.collectAsState()
     LaunchedEffect(settingsPage) {
         showPhotoEffectsInfo = false
         if (settingsPage == SettingsPage.EFFECTS) {
@@ -369,7 +368,6 @@ fun SettingsOverlay(
     var footerHintText by remember { mutableStateOf("") }
     var footerHintVisible by remember { mutableStateOf(false) }
     var footerHintNonce by remember { mutableIntStateOf(0) }
-    val restoredHint = stringResource(R.string.purchase_restored)
     fun showFooterHint(text: String) {
         footerHintText = text
         footerHintVisible = true
@@ -572,9 +570,7 @@ fun SettingsOverlay(
                     } else {
                         ProBadgeButton(
                             label = stringResource(R.string.unlock_pro),
-                            onClick = {
-                                if (subExpired) showRenewInfo = true else showPro = true
-                            }
+                            onClick = { showPro = true }
                         )
                     }
                     Spacer(Modifier.width(8.dp))
@@ -788,7 +784,6 @@ fun SettingsOverlay(
                 ProDialog(
                     onDismiss = { showPro = false },
                     onCelebrate = onPlayFireworks,
-                    onRestored = { showFooterHint(restoredHint) },
                     onHoldCameraWifi = onHoldCameraWifi,
                     renew = false
                 )

@@ -74,7 +74,7 @@ import com.ztransfer.license.hasUsableLockedPrice
 import com.ztransfer.license.nextOrderRetryDelay
 import com.ztransfer.license.orderFailureAction
 import com.ztransfer.license.paymentQrSource
-import com.ztransfer.license.shouldCreateSelectedOrder
+import com.ztransfer.license.shouldReplaceRecoveredOrder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -146,7 +146,6 @@ private fun saveToGallery(context: Context, bitmap: Bitmap, name: String): Boole
 fun PurchaseDialog(
     onDismiss: () -> Unit,
     onCelebrate: () -> Unit = {},
-    onRestored: () -> Unit = {},
     onHoldCameraWifi: (Boolean) -> Unit = {},
     product: LicenseManager.ProductId,
     // 年费续费时请求现有码延期；选择永久版时服务端仍按独立商品另发永久码。
@@ -180,8 +179,7 @@ fun PurchaseDialog(
     var error by remember { mutableStateOf<Int?>(null) }
     var productMismatch by remember { mutableStateOf(false) }
     var expired by remember { mutableStateOf(false) }    // 超 5 分钟未支付 → 提示重新发起
-    var refreshKey by remember { mutableStateOf(0) }     // 递增触发重新建单
-    var restored by remember { mutableStateOf(false) }   // 本机已拥有 → 免费恢复(而非新购买)
+    var refreshKey by remember { mutableStateOf(0) }     // 递增重试当前流程；优先查已有订单
     var paidRenew by remember { mutableStateOf(false) }  // 服务器判定的续费单 → 成功页说"续费成功"
     var paidProduct by remember { mutableStateOf(product) }
     var copied by remember { mutableStateOf(false) }
@@ -189,7 +187,8 @@ fun PurchaseDialog(
     // (App 常连着相机热点拉不到新价),而这个数是服务器建单时现读的,扫出来的码就是它。
     var orderPriceFen by remember { mutableStateOf(0) }
 
-    // 建单/续单:首次(refreshKey==0)先试本地旧单,拿不到再新建;刷新(>0)一律新建。
+    // 建单/续单:首次先恢复本地旧单。只要旧单仍有可支付入口就绝不覆盖；商品不同则提示
+    // 用户先处理旧单。旧入口失效后才创建新单，避免付款后丢失唯一的本地查单凭证。
     LaunchedEffect(refreshKey, product) {
         expired = false; saved = false; saveFailed = false; qr = null
         if (code == null) {
@@ -201,7 +200,6 @@ fun PurchaseDialog(
             orderPriceFen = 0
             paidProduct = product
             paidRenew = false
-            restored = false
             paidOrder = null
         }
         // 付款全流程都要外网。刚松开相机 Wi-Fi 后系统切到蜂窝需要一两秒,
@@ -216,43 +214,22 @@ fun PurchaseDialog(
             error = R.string.err_purchase_no_network
             return@LaunchedEffect
         }
-        // 普通购买先按设备指纹静默恢复。重装后本机已有有效授权时，直接进入“已恢复”
-        // 成功页，既不创建订单，也不让服务端返码后的自动激活中间态闪到用户眼前。
-        // 续费不能走这里：订阅用户本来就有授权，恢复成功不能阻止他主动续费。
-        if (refreshKey == 0 && !renew) {
-            when (LicenseManager.restorePurchase()) {
-                LicenseManager.RestoreResult.Success -> {
-                    onRestored()
-                    return@LaunchedEffect
-                }
-                LicenseManager.RestoreResult.NotFound -> Unit
-                // 网络刚从相机热点切到蜂窝时可能短暂失败；继续原下单流程，
-                // createOrder 的 already_pro 防重复购买仍是第二道兜底。
-                LicenseManager.RestoreResult.Unreachable -> Unit
-            }
-        }
-        val r: LicenseManager.OrderResult? = if (refreshKey == 0) {
-            val resumed = LicenseManager.pendingOrder()
-            val recovered = if (resumed != null) {
-                LicenseManager.orderStatus(resumed.order, wantUrl = true)
-            } else {
-                null
-            }
-            if (recovered == null ||
-                (recovered is LicenseManager.OrderResult.Failed && recovered.err == "NOT_FOUND") ||
-                (recovered is LicenseManager.OrderResult.Pending &&
-                    shouldCreateSelectedOrder(
-                        selectedProduct = product,
-                        recoveredProduct = recovered.product,
-                        hasPaymentSource = recovered.payUrl != null || recovered.payQr != null,
-                    ))
-            ) {
-                LicenseManager.createOrder(product, renew)
-            } else {
-                recovered
-            }
+        val resumed = LicenseManager.pendingOrder()
+        val recovered = if (resumed != null) {
+            LicenseManager.orderStatus(resumed.order, wantUrl = true)
         } else {
+            null
+        }
+        val r: LicenseManager.OrderResult? = if (recovered == null ||
+            (recovered is LicenseManager.OrderResult.Failed && recovered.err == "NOT_FOUND") ||
+            (recovered is LicenseManager.OrderResult.Pending &&
+                shouldReplaceRecoveredOrder(
+                    hasPaymentSource = recovered.payUrl != null || recovered.payQr != null,
+                ))
+        ) {
             LicenseManager.createOrder(product, renew)
+        } else {
+            recovered
         }
         if (r is LicenseManager.OrderResult.Pending && r.product != product) {
             productMismatch = true
@@ -272,7 +249,6 @@ fun PurchaseDialog(
                 paidProduct = r.product
                 orderPriceFen = r.priceFen
             }
-            // order 为空 = 服务器认出本机已拥有、免费恢复(见 createOrder 的 already_pro)
             is LicenseManager.OrderResult.Paid -> {
                 order = r.order
                 code = r.code
@@ -280,7 +256,6 @@ fun PurchaseDialog(
                 paidRenew = r.renew
                 paidProduct = r.product
                 orderPriceFen = r.priceFen
-                if (r.order.isEmpty()) restored = true
             }
             LicenseManager.OrderResult.Unreachable -> error = R.string.err_purchase_unreachable
             is LicenseManager.OrderResult.Failed -> {
@@ -376,10 +351,6 @@ fun PurchaseDialog(
         while (!activated) {
             when (LicenseManager.completePaidOrder(paid, BuildConfig.VERSION_NAME)) {
                 LicenseManager.ActivationResult.Success -> {
-                    if (restored) {
-                        onRestored()
-                        return@LaunchedEffect
-                    }
                     activated = true
                 }
                 LicenseManager.ActivationResult.Unreachable -> {
@@ -660,6 +631,7 @@ fun PurchaseDialog(
                                     panel = true,
                                     contentPadding = PaddingValues(horizontal = 26.dp, vertical = 12.dp),
                                     onClick = {
+                                        LicenseManager.clearPendingOrder(order)
                                         order = null
                                         payUrl = null
                                         payQr = null

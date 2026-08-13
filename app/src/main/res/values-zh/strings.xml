@@ -419,7 +419,6 @@
     <string name="renew_action">续费</string>
     <string name="renew_or_upgrade">续费或升级</string>
     <string name="sub_expired">高级版已到期</string>
-    <string name="sub_expired_renew">高级版已到期，续费继续使用</string>
     <plurals name="sub_days_left">
         <item quantity="other">剩 %1$d 天到期</item>
     </plurals>
@@ -432,10 +431,6 @@
     <string name="purchase_activated">高级版已解锁</string>
     <string name="purchase_activation_code_label">你的激活码</string>
     <string name="purchase_activation_code_keep">请妥善保存激活码，遗失将无法换机。</string>
-    <string name="purchase_restored">🎉 已恢复权益</string>
-    <string name="restore_action">恢复授权</string>
-    <string name="restore_restoring">恢复中…</string>
-    <string name="restore_none">未找到本机的授权（尚未购买，或已在新设备上使用）</string>
     <string name="settings_view_code">我要换机</string>
     <string name="settings_code_hint">在新设备输入此激活码即可换机，本机会恢复成免费版。请勿滥用，滥用会导致激活码失效。</string>
     <string name="copy_code">复制</string>

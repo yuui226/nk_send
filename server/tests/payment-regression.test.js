@@ -64,6 +64,10 @@ function feeText(fen) {
     return `${Math.floor(fen / 100)}.${String(fen % 100).padStart(2, '0')}`;
 }
 
+function requestId(n) {
+    return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+}
+
 function createResponse(order, overrides = {}) {
     return signed({
         errcode: 0,
@@ -184,13 +188,20 @@ test.after(() => {
 });
 
 test('payment regression suite', async (suite) => {
-    await suite.test('旧订单迁移为 annual/365，并增加退款状态字段', () => {
+    await suite.test('旧订单迁移为 annual/365，增加请求号并移除废弃退款字段', () => {
         const row = db.prepare(`
-            SELECT product, grant_days, refund_reason
+            SELECT product, grant_days, request_id
             FROM orders WHERE out_trade_no = 'ZTLEGACY1'`).get();
         assert.equal(row.product, 'annual');
         assert.equal(row.grant_days, 365);
-        assert.equal(row.refund_reason, null);
+        assert.equal(row.request_id, null);
+        const columns = db.prepare('PRAGMA table_info(orders)').all().map((item) => item.name);
+        assert.equal(columns.includes('refund_reason'), false);
+        const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all()
+            .map((item) => item.name);
+        assert.equal(indexes.includes('idx_orders_creating_fp'), false);
+        assert.equal(indexes.includes('idx_orders_fp'), false);
+        assert.equal(indexes.includes('idx_orders_request_id'), true);
         assert.equal(db.prepare('PRAGMA busy_timeout').get().timeout, 5000);
     });
 
@@ -228,7 +239,78 @@ test('payment regression suite', async (suite) => {
         assert.deepEqual({ ...row }, { product: 'annual', grant_days: 365, status: 'pending' });
     });
 
-    await suite.test('creating 占位阻止同设备并发请求触达第二次上游建单', async () => {
+    await suite.test('旧版全零共享指纹仍可正常付款发新码，绝不返回历史码', async () => {
+        const fp = '793843504c099edbb6c7d97dad20313f';
+        const oldCode = 'ACDEFG';
+        db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)')
+            .run(oldCode, 'old-zero-id-owner', new Date().toISOString(), null);
+        db.prepare('INSERT INTO bindings (code, device_fp, activated_at) VALUES (?, ?, ?)')
+            .run(oldCode, fp, new Date().toISOString());
+        const statuses = new Map();
+        installUpstream(statuses);
+
+        const created = await api.apiOrderCreate({ fp, product: 'annual' });
+        assert.equal(created.ok, true);
+        assert.ok(created.order);
+        assert.equal(created.code, undefined);
+        assert.equal(created.token, undefined);
+        statuses.set(created.order, 'OD');
+        const paid = await api.confirmPaid(created.order, { force: true });
+        assert.equal(paid.status, 'paid');
+        assert.notEqual(paid.code, oldCode);
+    });
+
+    await suite.test('年费续原码必须明确提交激活码，缺码则新购而不按设备指纹推断', async () => {
+        const fp = '12121212121212121212121212121212';
+        const code = 'ABCDGH';
+        db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)')
+            .run(code, 'explicit-renew', new Date().toISOString(),
+                new Date(Date.now() + 86_400_000).toISOString());
+        db.prepare('INSERT INTO bindings (code, device_fp, activated_at) VALUES (?, ?, ?)')
+            .run(code, fp, new Date().toISOString());
+        const statuses = new Map();
+        installUpstream(statuses);
+
+        const missing = await api.apiOrderCreate({
+            fp, product: 'annual', renew: true, request_id: requestId(7),
+        });
+        assert.equal(missing.ok, true);
+        assert.equal(missing.renew, false);
+        assert.equal(db.prepare('SELECT renew_code FROM orders WHERE out_trade_no = ?')
+            .get(missing.order).renew_code, null);
+        statuses.set(missing.order, 'OD');
+        const newlyPaid = await api.confirmPaid(missing.order, { force: true });
+        assert.equal(newlyPaid.status, 'paid');
+        assert.notEqual(newlyPaid.code, code);
+        const explicit = await api.apiOrderCreate({
+            fp, product: 'annual', renew: true, renew_code: code, request_id: requestId(5),
+        });
+        assert.equal(explicit.ok, true);
+        assert.equal(explicit.renew, true);
+        assert.equal(db.prepare('SELECT renew_code FROM orders WHERE out_trade_no = ?')
+            .get(explicit.order).renew_code, code);
+        db.prepare('UPDATE codes SET expires_at = ? WHERE code = ?')
+            .run(new Date(Date.now() - 1000).toISOString(), code);
+        statuses.set(explicit.order, 'OD');
+        const paidAfterExpiry = await api.confirmPaid(explicit.order, { force: true });
+        assert.notEqual(paidAfterExpiry.code, code);
+        assert.equal(paidAfterExpiry.renew_code, null);
+
+        const expiredCode = 'BCDEGH';
+        db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)')
+            .run(expiredCode, 'expired-renew', new Date().toISOString(),
+                new Date(Date.now() - 86_400_000).toISOString());
+        const expired = await api.apiOrderCreate({
+            fp, product: 'annual', renew: true, renew_code: expiredCode, request_id: requestId(8),
+        });
+        assert.equal(expired.ok, true);
+        assert.equal(expired.renew, false);
+        statuses.set(expired.order, 'OD');
+        const expiredPaid = await api.confirmPaid(expired.order, { force: true });
+        assert.notEqual(expiredPaid.code, expiredCode);
+    });
+
+    await suite.test('同一随机请求号并发只触达一次上游建单', async () => {
         const fp = '22222222222222222222222222222222';
         let release;
         let startedResolve;
@@ -240,30 +322,35 @@ test('payment regression suite', async (suite) => {
             startedResolve();
             return new Promise((resolve) => { release = () => resolve(createResponse(params.trade_order_id)); });
         });
-        const firstPromise = api.apiOrderCreate({ fp, product: 'annual' });
+        const rid = requestId(1);
+        const firstPromise = api.apiOrderCreate({ fp, product: 'annual', request_id: rid });
         await started;
-        const second = await api.apiOrderCreate({ fp, product: 'lifetime' });
-        assert.equal(second.err, 'PENDING_OTHER_PRODUCT');
+        const second = await api.apiOrderCreate({ fp, product: 'annual', request_id: rid });
+        assert.equal(second.err, 'ORDER_CREATING');
         assert.equal(createCalls, 1);
         release();
         assert.equal((await firstPromise).ok, true);
     });
 
-    await suite.test('同商品临期订单等待，不同商品立即创建独立订单', async () => {
+    await suite.test('订单复用只认随机请求号，相同设备指纹的另一请求完全独立', async () => {
         const upstream = installUpstream();
         const fp = '33333333333333333333333333333333';
-        const createdAt = new Date(Date.now() - 4.5 * 60_000).toISOString();
+        const createdAt = new Date(Date.now() - 5.5 * 60_000).toISOString();
         db.prepare(`INSERT INTO orders
-            (out_trade_no, device_fp, amount_fen, product, grant_days, status, created_at)
-            VALUES ('ZTWINDOW1', ?, 2690, 'annual', 365, 'pending', ?)`)
-            .run(fp, createdAt);
-        const same = await api.apiOrderCreate({ fp, product: 'annual' });
+            (out_trade_no, device_fp, amount_fen, product, grant_days, status, request_id, created_at)
+            VALUES ('ZTWINDOW1', ?, 2690, 'annual', 365, 'pending', ?, ?)`)
+            .run(fp, requestId(2), createdAt);
+        const same = await api.apiOrderCreate({
+            fp, product: 'annual', request_id: requestId(2),
+        });
         assert.equal(same.err, 'PENDING_ORDER_ACTIVE');
         assert.ok(same.retry_after_ms > 0);
         assert.equal(same.pay_url, undefined);
-        const other = await api.apiOrderCreate({ fp, product: 'lifetime' });
+        const other = await api.apiOrderCreate({
+            fp, product: 'annual', request_id: requestId(3),
+        });
         assert.equal(other.ok, true);
-        assert.equal(other.product, 'lifetime');
+        assert.equal(other.product, 'annual');
         assert.equal(upstream.createCalls, 1);
     });
 
@@ -271,7 +358,8 @@ test('payment regression suite', async (suite) => {
         const fp = '44444444444444444444444444444444';
         const statuses = new Map();
         const upstream = installUpstream(statuses);
-        const created = await api.apiOrderCreate({ fp, product: 'annual' });
+        const rid = requestId(6);
+        const created = await api.apiOrderCreate({ fp, product: 'annual', request_id: rid });
         statuses.set(created.order, 'WP');
         assert.equal((await api.apiOrderStatus({ fp, order: created.order })).status, 'pending');
         const beforeNotifyQueries = upstream.queryCalls;
@@ -297,6 +385,12 @@ test('payment regression suite', async (suite) => {
         assert.equal(binding.device_fp, fp);
         assert.equal(db.prepare('SELECT COUNT(*) AS n FROM activations WHERE code = ?')
             .get(paid.code).n, 1);
+        const retriedCreate = await api.apiOrderCreate({
+            fp, product: 'annual', request_id: rid,
+        });
+        assert.equal(retriedCreate.status, 'paid');
+        assert.equal(retriedCreate.code, paid.code);
+        assert.ok(retriedCreate.token);
         const status = await api.apiOrderStatus({
             fp,
             order: created.order,
@@ -461,7 +555,9 @@ test('payment regression suite', async (suite) => {
             .run(code, originalFp, new Date().toISOString());
         const statuses = new Map();
         installUpstream(statuses);
-        const renewal = await api.apiOrderCreate({ fp: originalFp, product: 'annual', renew: true });
+        const renewal = await api.apiOrderCreate({
+            fp: originalFp, product: 'annual', renew: true, renew_code: code,
+        });
         db.prepare('UPDATE bindings SET device_fp = ? WHERE code = ?').run(switchedFp, code);
         statuses.set(renewal.order, 'OD');
         const fulfilled = await api.confirmPaid(renewal.order, { force: true });
@@ -493,7 +589,7 @@ test('payment regression suite', async (suite) => {
             .get(lifetimePaid.code).expires_at, null);
     });
 
-    await suite.test('恢复授权始终优先永久码，不受两张二维码付款顺序影响', async () => {
+    await suite.test('同一设备已有多张码时新购买仍不返回任何旧码', async () => {
         const fp = '37373737373737373737373737373737';
         const statuses = new Map();
         installUpstream(statuses);
@@ -506,18 +602,18 @@ test('payment regression suite', async (suite) => {
         const lifetimePaid = await api.confirmPaid(lifetime.order, { force: true });
         const annualPaid = await api.confirmPaid(annual.order, { force: true });
 
-        // 明确模拟年费绑定发生得更晚；恢复仍不得用年费覆盖永久权益。
-        db.prepare('UPDATE bindings SET activated_at = ? WHERE code = ?')
-            .run('2025-01-01T00:00:00.000Z', lifetimePaid.code);
-        db.prepare('UPDATE bindings SET activated_at = ? WHERE code = ?')
-            .run('2026-01-01T00:00:00.000Z', annualPaid.code);
-
-        const restored = api.apiRestore({ fp });
-        assert.equal(restored.ok, true);
-        assert.equal(restored.code, lifetimePaid.code);
+        const next = await api.apiOrderCreate({
+            fp, product: 'annual', request_id: requestId(4),
+        });
+        assert.equal(next.ok, true);
+        assert.ok(next.order);
+        assert.equal(next.code, undefined);
+        assert.equal(next.token, undefined);
+        assert.notEqual(next.order, annual.order);
+        assert.notEqual(next.order, lifetime.order);
     });
 
-    await suite.test('旧年费单在权益变永久后付款，持久标记退款', async () => {
+    await suite.test('旧年费单在原码变永久后付款，仍按新购交付一张新年费码', async () => {
         const fp = '88888888888888888888888888888888';
         const code = 'ABCDEF';
         db.prepare('INSERT INTO codes (code, note, created_at, expires_at) VALUES (?, ?, ?, ?)')
@@ -528,23 +624,20 @@ test('payment regression suite', async (suite) => {
 
         const statuses = new Map();
         installUpstream(statuses);
-        const annual = await api.apiOrderCreate({ fp, product: 'annual', renew: true });
+        const annual = await api.apiOrderCreate({
+            fp, product: 'annual', renew: true, renew_code: code,
+        });
         assert.equal(annual.ok, true);
-        // 模拟另一条已完成的永久升级在这张旧年费二维码付款前生效。
+        // 原续费目标已不可续，到账后仍遵守“一笔付款交付一份权益”，按新购发码。
         db.prepare('UPDATE codes SET expires_at = NULL WHERE code = ?').run(code);
         statuses.set(annual.order, 'OD');
         const fulfilled = await api.confirmPaid(annual.order, { force: true });
-        assert.equal(fulfilled.status, 'refund_required');
-        assert.equal(fulfilled.code, code);
-        assert.equal(fulfilled.refund_reason, 'annual_payment_after_permanent_upgrade');
+        assert.equal(fulfilled.status, 'paid');
+        assert.notEqual(fulfilled.code, code);
+        assert.equal(fulfilled.renew_code, null);
         const appStatus = await api.apiOrderStatus({ fp, order: annual.order });
-        assert.equal(appStatus.status, 'paid'); // 旧 APK 仍能结束付款流程
-        assert.equal(appStatus.refund_required, true);
-        const ledger = api.adminListCodes();
-        const refund = ledger.refund_required.find((item) => item.out_trade_no === annual.order);
-        assert.equal(refund.product, 'annual');
-        assert.equal(refund.amount_fen, annual.price_fen);
-        assert.equal(refund.refund_reason, 'annual_payment_after_permanent_upgrade');
+        assert.equal(appStatus.status, 'paid');
+        assert.equal(appStatus.code, fulfilled.code);
     });
 
     await suite.test('管理台暴露任何历史已付款未绑定异常', () => {

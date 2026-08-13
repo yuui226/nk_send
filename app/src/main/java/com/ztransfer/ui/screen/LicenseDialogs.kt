@@ -96,11 +96,11 @@ internal fun subDaysLeft(sec: Long): Int =
  * 面板固定金徽章头部,主体在【购买页】与【激活页】之间**整块互斥切换**(而非向下展开):
  * Compose 的 Dialog 是独立窗口,内容做高度动画会让 WindowManager 逐帧重排窗口——又卡又晃,
  * 且把周围按钮一起顶动。换页只有一次性尺寸变化,干脆利落。
- *   购买页:对比表 → 定价 → 全宽金色"立即购买" → 一排玻璃小按钮[输入激活码 | 恢复授权 | 客服]
+ *   购买页:对比表 → 定价 → 全宽金色"立即购买" → 一排玻璃小按钮[输入激活码 | 客服]
  *   激活页:头部左上换成毛玻璃返回箭头 + 设备码 → 输入框 + 激活 → 状态行
  *
- * [showEnterCode] 控制整排次级入口(输入激活码 / 恢复授权 / 客服):仅连接页开——彼时尚未连
- * 相机热点,多半还有外网;设置面板关:连着相机 Wi-Fi 无外网,在线激活/恢复必失败,
+ * [showEnterCode] 控制整排次级入口(输入激活码 / 客服):仅连接页开——彼时尚未连
+ * 相机热点,多半还有外网;设置面板关:连着相机 Wi-Fi 无外网,在线激活必失败,
  * 而找客服在设置页脚本来就有"反馈"入口,不必重复。
  * 购买同理需要外网,但入口不藏:下单失败的报错文案会引导先断开相机 Wi-Fi。
  */
@@ -109,7 +109,6 @@ fun ProDialog(
     onDismiss: () -> Unit,
     showEnterCode: Boolean = false,
     onCelebrate: () -> Unit = {},
-    onRestored: () -> Unit = {},
     // 购买期间需临时松开对相机 Wi-Fi 的占用(相机热点没外网,付款联不上);由承载页接到 CameraViewModel。
     onHoldCameraWifi: (Boolean) -> Unit = {},
     // 订阅用户买年费时续原码；改选永久版时另发永久码，原年费码保持有效。
@@ -132,7 +131,6 @@ fun ProDialog(
             onDismiss = { showPurchase = false },
             // 购买+激活成功:关掉购买弹窗与本弹窗,再放烟花(烟花在页面顶层,须先关弹窗才可见)。
             onCelebrate = { showPurchase = false; onDismiss(); onCelebrate() },
-            onRestored = { showPurchase = false; onDismiss(); onRestored() },
             onHoldCameraWifi = onHoldCameraWifi,
             product = selectedProduct,
             renew = renew
@@ -145,10 +143,7 @@ fun ProDialog(
     var error by remember { mutableStateOf<Int?>(null) }        // 文案资源 id
     var errorArg by remember { mutableStateOf("") }              // err_generic 的错误码参数
     var success by remember { mutableStateOf(false) }
-    // 恢复已购授权(重装后本地无码时按指纹找回)
-    var restoring by remember { mutableStateOf(false) }
-    var restoreMsg by remember { mutableStateOf<Int?>(null) }
-    // 激活成功 / 恢复成功:短暂显示成功后关闭本弹窗并放烟花庆祝。
+    // 激活成功:短暂显示成功后关闭本弹窗并放烟花庆祝。
     if (success) {
         LaunchedEffect(Unit) { delay(1200); onDismiss(); onCelebrate() }
     }
@@ -369,8 +364,8 @@ fun ProDialog(
                             enabled = selectedPrice.available && selectedPrice.priceFen > 0,
                         )
 
-                        // ---- 次级：一排玻璃小按钮,三个平分整行,整排仅连接页给(showEnterCode):
-                        // 输入激活码/恢复授权要外网;客服在设置面板也不给——那里页脚有"反馈"入口兜底。----
+                        // ---- 次级：输入激活码 / 客服。授权只凭用户持有的激活码恢复，
+                        // 不再按设备指纹猜测历史权益。整排仅连接页给(showEnterCode)。----
                         if (showEnterCode) {
                             Spacer(Modifier.height(12.dp))
                             val subShape = RoundedCornerShape(12.dp)
@@ -389,38 +384,9 @@ fun ProDialog(
                                     SubActionLabel(stringResource(R.string.enter_code))
                                 }
                                 GlassButton(
-                                    enabled = !restoring && !success,
-                                    onClick = {
-                                        restoring = true; restoreMsg = null; copied = false
-                                        scope.launch {
-                                            when (LicenseManager.restorePurchase()) {
-                                                LicenseManager.RestoreResult.Success -> {
-                                                    onDismiss()
-                                                    onRestored()
-                                                }
-                                                LicenseManager.RestoreResult.NotFound ->
-                                                    restoreMsg = R.string.restore_none
-                                                LicenseManager.RestoreResult.Unreachable ->
-                                                    restoreMsg = R.string.err_server_unreachable
-                                            }
-                                            restoring = false
-                                        }
-                                    },
-                                    shape = subShape,
-                                    panel = true,
-                                    contentPadding = subPadding,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    SubActionLabel(
-                                        stringResource(
-                                            if (restoring) R.string.restore_restoring else R.string.restore_action
-                                        )
-                                    )
-                                }
-                                GlassButton(
                                     onClick = {
                                         clipboard.setText(AnnotatedString(QQ_NUMBER))
-                                        copied = true; restoreMsg = null
+                                        copied = true
                                     },
                                     shape = subShape,
                                     panel = true,
@@ -430,10 +396,9 @@ fun ProDialog(
                                     SubActionLabel(stringResource(R.string.contact_support))
                                 }
                             }
-                            // 按钮反馈共用一行位置:复制客服 QQ(绿)与恢复结果(橙),后点的顶掉先点的。
+                            // 客服 QQ 复制反馈。
                             val feedback: Pair<String, Color>? = when {
                                 copied -> stringResource(R.string.qq_group_copied, QQ_NUMBER) to colors.statusConnected
-                                restoreMsg != null -> stringResource(restoreMsg!!) to colors.accentOrange
                                 else -> null
                             }
                             if (feedback != null) {

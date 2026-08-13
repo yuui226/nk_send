@@ -10,6 +10,7 @@ import android.util.Base64
 import com.ztransfer.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.net.URLEncoder
 import java.net.URL
 import java.security.KeyFactory
@@ -29,6 +31,7 @@ import java.security.spec.X509EncodedKeySpec
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
@@ -74,14 +77,9 @@ object LicenseManager {
     private val _isPro = MutableStateFlow(false)
     val isPro: StateFlow<Boolean> get() = _isPro
 
-    // 曾是高级版、通行证已过期且续签时联不上网 → 提示用户"连网续期"(连上重开即自动恢复)。
+    // 当前设备的通行证已过期且续签时联不上网 → 提示用户“连网续期”(连上重开自动续签)。
     private val _renewalNeeded = MutableStateFlow(false)
     val renewalNeeded: StateFlow<Boolean> get() = _renewalNeeded
-
-    // 订阅到期:降级时本地的码一并清掉,单看"没有码"分不清【从没买过】和【买过但到期】。
-    // 故另存一位,让首页能说"已到期,续费继续使用";拿到新通行证(saveToken)即清除。
-    private val _subExpired = MutableStateFlow(false)
-    val subExpired: StateFlow<Boolean> get() = _subExpired
 
     // 今日剩余免费传输数,随 recordTransferDone 即时更新;PRO 恒 Int.MAX_VALUE。
     // UI 订阅它做"临近上限"预警——提示与计数同源,在完成 +1 之后弹出而非入队时。
@@ -90,6 +88,7 @@ object LicenseManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val purchaseRecoveryMutex = Mutex()
+    private var subscriptionExpiryJob: Job? = null
 
     /** 在 MainActivity.onCreate 调用一次:恢复本地状态,并静默续签 + 刷新定价。 */
     fun init(context: Context) {
@@ -97,8 +96,17 @@ object LicenseManager {
         val app = context.applicationContext
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         fingerprint = computeFingerprint(app)
-        _isPro.value = verifyToken(prefs.getString("token", null)) != null
-        _subExpired.value = prefs.getBoolean("sub_expired", false)
+        val token = prefs.getString("token", null)
+        val signed = verifySig(token)
+        val subExpiresAt = signed?.optLong("sub", 0L)
+            ?: prefs.getLong("sub_expires_at", 0L)
+        if (subExpiresAt > 0L && seenTimeSec() >= subExpiresAt) {
+            expireSubscription()
+        } else {
+            _isPro.value = verifyToken(token) != null
+            prefs.edit().remove("sub_expired").apply() // 清理旧版本遗留标记
+            scheduleSubscriptionExpiry(subExpiresAt)
+        }
         _quotaLeft.value = quotaRemaining()
         loadCachedPricing()
         registerPurchaseNetworkRecovery(app)
@@ -137,10 +145,29 @@ object LicenseManager {
     private fun computeFingerprint(context: Context): String {
         val androidId = Settings.Secure.getString(
             context.contentResolver, Settings.Secure.ANDROID_ID
-        ) ?: "unknown"
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest("$androidId:${context.packageName}".toByteArray())
-        return digest.take(16).joinToString("") { "%02x".format(it) }
+        )
+        val installId = if (normalizedAndroidId(androidId) == null) {
+            loadOrCreateInstallId(context)
+        } else {
+            ""
+        }
+        return computeDeviceFingerprint(
+            androidId = androidId,
+            packageName = context.packageName,
+            installId = installId,
+        )
+    }
+
+    /** Stored outside backup/transfer domains so a phone clone cannot copy the device identity. */
+    private fun loadOrCreateInstallId(context: Context): String {
+        val file = File(context.noBackupFilesDir, "license-install-id-v2")
+        runCatching { file.readText().trim() }
+            .getOrNull()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { return it }
+        val generated = UUID.randomUUID().toString()
+        runCatching { file.writeText(generated) }
+        return generated
     }
 
     /** 人读设备码 ZT-XXXX-XXXX(指纹前 8 个 hex),激活页展示 + 客服换绑沟通用。 */
@@ -195,41 +222,64 @@ object LicenseManager {
      * 用 verifySig 而非 verifyToken——到期当天通行证自身也过期了,仍要能把日期说给用户听。
      */
     fun subExpiresAtSec(): Long =
-        verifySig(prefs.getString("token", null))?.optLong("sub", 0L) ?: 0L
+        verifySig(prefs.getString("token", null))?.optLong("sub", 0L)
+            ?: prefs.getLong("sub_expires_at", 0L)
 
     private fun saveToken(token: String, code: String) {
-        val iat = verifySig(token)?.optLong("iat", 0L) ?: 0L
+        val payload = verifySig(token)
+        val iat = payload?.optLong("iat", 0L) ?: 0L
+        val sub = payload?.optLong("sub", 0L) ?: 0L
         prefs.edit()
             .putString("token", token)
             .putString("code", code)
             .putLong("last_renew", System.currentTimeMillis())
             .putLong("seen_time", maxOf(prefs.getLong("seen_time", 0L), iat))  // 单调递增,防回拨
-            .remove("sub_expired")
+            .putLong("sub_expires_at", sub)
             .apply()
         _isPro.value = true
         _renewalNeeded.value = false
-        _subExpired.value = false
         _quotaLeft.value = quotaRemaining()
+        scheduleSubscriptionExpiry(sub)
     }
 
-    /** 清除本地授权(测试按钮/被吊销)。不动服务器绑定,重新输入激活码即可恢复。 */
-    fun revertToFree() {
-        prefs.edit().remove("token").remove("code").remove("last_renew")
-            .remove("pending_order")   // 上一轮购买的残留单号,降级后已无意义
-            .remove("pending_order_product")
+    private fun clearLocalEntitlement() {
+        subscriptionExpiryJob?.cancel()
+        subscriptionExpiryJob = null
+        prefs.edit()
+            .remove("token")
+            .remove("code")
+            .remove("last_renew")
             .remove("sub_expired")
+            .remove("sub_expires_at")
             .apply()
         _isPro.value = false
         _renewalNeeded.value = false
-        _subExpired.value = false
         _quotaLeft.value = quotaRemaining()
     }
 
-    /** 订阅到期降级:清本地授权,但留一位标记,好让首页提示续费而不是当他没买过。 */
-    private fun markSubExpired() {
-        revertToFree()
-        prefs.edit().putBoolean("sub_expired", true).apply()
-        _subExpired.value = true
+    /** 清除本地授权(测试按钮/被吊销)。待付款订单是独立凭证，不得一并删除。 */
+    fun revertToFree() = clearLocalEntitlement()
+
+    /** 年费到期后激活码同时失效，直接清空本地授权。 */
+    private fun expireSubscription() = clearLocalEntitlement()
+
+    /** App 持续运行跨过到期点时也立即清码，不等待重启或下一次联网续签。 */
+    private fun scheduleSubscriptionExpiry(subExpiresAtSec: Long) {
+        subscriptionExpiryJob?.cancel()
+        subscriptionExpiryJob = null
+        if (subExpiresAtSec <= 0L) return
+        subscriptionExpiryJob = scope.launch {
+            while (prefs.getLong("sub_expires_at", 0L) == subExpiresAtSec) {
+                val remainingMs = subExpiresAtSec * 1000L - System.currentTimeMillis()
+                if (remainingMs > 0L) delay(remainingMs)
+                if (prefs.getLong("sub_expires_at", 0L) != subExpiresAtSec) return@launch
+                if (seenTimeSec() >= subExpiresAtSec) {
+                    expireSubscription()
+                    return@launch
+                }
+                // 等待期间系统时钟被调回，按新的剩余时间继续等待。
+            }
+        }
     }
 
     // ---------------------------------------------------------------- 免费额度
@@ -305,19 +355,25 @@ object LicenseManager {
                 saveToken(token, code)
                 ActivationResult.Success
             } else {
-                ActivationResult.Rejected(resp.optString("err", "BAD_RESPONSE"))
+                val err = resp.optString("err", "BAD_RESPONSE")
+                if (err == "CODE_EXPIRED" &&
+                    prefs.getString("code", null)?.equals(code, ignoreCase = true) == true
+                ) {
+                    expireSubscription()
+                }
+                ActivationResult.Rejected(err)
             }
         }
 
     /**
-     * 静默续签:通行证已过期、或距上次成功 ≥ 1 天时,有网就换新证。
-     * 过期后即便本地已降级(_isPro=false)也照样尝试——只要还留着码,能续上就自动恢复 PRO。
-     * 只有服务器明确吊销/解绑(被顶替)才降级并清除;网络失败保持现状(离线不惩罚)。
+     * 静默续签:当前设备持有匹配的已签名通行证,且通行证已过期或距上次成功 ≥ 1 天时,
+     * 有网就向服务器换新证。仅有激活码不触发静默恢复;激活码必须由用户主动输入或用于明确续费。
+     * 只有服务器明确吊销/解绑(被顶替)才清除本地授权;网络失败保持现状(离线不惩罚)。
      */
     private suspend fun renewIfDue() {
         val code = prefs.getString("code", null) ?: return
-        val obj = verifySig(prefs.getString("token", null))
-        val exp = obj?.optLong("exp", 0L) ?: 0L
+        val obj = verifySig(prefs.getString("token", null)) ?: return
+        val exp = obj.optLong("exp", 0L)
         val expired = exp in 1..seenTimeSec()
         val softDue = System.currentTimeMillis() - prefs.getLong("last_renew", 0L) >= SOFT_RENEW_INTERVAL_MS
         if (!expired && !softDue) return
@@ -340,36 +396,12 @@ object LicenseManager {
             saveToken(token, code)                        // 内部置 _isPro=true、清 renewalNeeded、滚动 7 天有效期
         } else when (resp.optString("err")) {
             "CODE_REVOKED", "NOT_BOUND" -> revertToFree()  // 被吊销/顶替:降级并清 flag
-            "CODE_EXPIRED" -> markSubExpired()             // 订阅到期:降级,并记住他是"过期"而非"没买过"
+            "CODE_EXPIRED" -> expireSubscription()         // 年费码到期即失效，清码后按新用户购买
             else -> Unit   // 未知错误按网络异常处理,不降级
         }
     }
 
-    // ---------------------------------------------------------------- 恢复 / 查看码
-
-    sealed class RestoreResult {
-        object Success : RestoreResult()
-        /** 服务器上没有本机的有效授权(从未购买、或已被新设备顶替)。 */
-        object NotFound : RestoreResult()
-        object Unreachable : RestoreResult()
-    }
-
-    /**
-     * 按设备指纹恢复授权(重装后本地没码时,用户在解锁弹窗主动点"恢复")。
-     * 仅当本机仍是该码当前绑定设备才成功;被顶替过的旧设备会得到 NotFound。
-     */
-    suspend fun restorePurchase(): RestoreResult = withContext(Dispatchers.IO) {
-        val resp = post("/v1/restore", JSONObject().put("fp", fingerprint))
-            ?: return@withContext RestoreResult.Unreachable
-        val token = resp.optString("token")
-        val code = resp.optString("code")
-        if (resp.optBoolean("ok") && code.isNotEmpty() && verifyToken(token) != null) {
-            saveToken(token, code)
-            RestoreResult.Success
-        } else {
-            RestoreResult.NotFound
-        }
-    }
+    // ---------------------------------------------------------------- 查看码
 
     /** 当前高级版用户的激活码(供设置页"查看我的激活码"与自助换机);非 PRO 返回 null。 */
     fun purchasedCode(): String? = if (_isPro.value) prefs.getString("code", null) else null
@@ -572,7 +604,7 @@ object LicenseManager {
         return PendingOrder(order, product)
     }
 
-    /** 购买闭环走完(激活成功)后清除续单记录。 */
+    /** 只在付款落证成功或支付码明确过期时清除待付款订单。 */
     fun clearPendingOrder(order: String? = null) {
         val current = prefs.getString("pending_order", null)
         if (!order.isNullOrEmpty() && current != order) return
@@ -630,32 +662,41 @@ object LicenseManager {
 
     /**
      * [renew] 为真且购买年费 = 给现有年费码续期(按 max(now, 原到期日) + 1 年计)。
+     * 若本地异常缺少原码，则不提交续费标记，按普通新购付款并领取新码。
      * 永久版始终是独立商品并另发永久码，不会改写或删除原年费码。
      */
     suspend fun createOrder(
         product: ProductId,
         renew: Boolean = false,
     ): OrderResult = withContext(Dispatchers.IO) {
+        val renewCode = if (renew && product == ProductId.ANNUAL) {
+            prefs.getString("code", null)?.trim()?.uppercase()
+                ?.takeIf { it.length == 6 }
+        } else null
         val resp = post("/v1/order/create", JSONObject().apply {
             put("fp", fingerprint)
             put("product", product.wireValue)
-            if (renew) put("renew", true)
+            put("request_id", UUID.randomUUID().toString())
+            if (renewCode != null) {
+                put("renew", true)
+                put("renew_code", renewCode)
+            }
         }) ?: return@withContext OrderResult.Unreachable
         val responseProduct = ProductId.fromWire(resp.optString("product"))
             ?: return@withContext OrderResult.Failed("BAD_PRODUCT")
-        // 防重复购买:服务器认出本机已是某码的绑定设备 → 直接返码免费恢复,不再收钱。
-        if (resp.optBoolean("already_pro")) {
-            val owned = resp.optString("code")
-            return@withContext if (owned.isNotEmpty()) {
+        if (resp.optString("status") == "paid") {
+            val paidCode = resp.optString("code")
+            val paidOrder = resp.optString("order")
+            return@withContext if (paidCode.isNotEmpty() && paidOrder.isNotEmpty()) {
                 OrderResult.Paid(
-                    "",
-                    owned,
+                    paidOrder,
+                    paidCode,
                     responseProduct,
                     resp.optBoolean("renew"),
                     resp.optInt("price_fen", 0),
+                    resp.optString("token").takeIf { it.isNotEmpty() },
                 )
-            }
-            else OrderResult.Failed(resp.optString("err", "BAD_RESPONSE"))
+            } else OrderResult.Failed("BAD_RESPONSE")
         }
         val order = resp.optString("order")
         if (!resp.optBoolean("ok") || order.isEmpty())

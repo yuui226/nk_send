@@ -95,13 +95,11 @@ fun HomeScreen(
     val context = LocalContext.current
     // 右上角"解锁高级版"入口的显隐 + 成功爆发的金色粒子彩蛋都依赖它。
     val isPro by LicenseManager.isPro.collectAsState()
-    // 曾购买、通行证过期且续签联不上网 → 顶部提示连网续期(连上重开自动恢复)。
+    // 当前设备的通行证过期且续签联不上网 → 顶部提示连网续期(连上重开自动续签)。
     val renewalNeeded by LicenseManager.renewalNeeded.collectAsState()
-    // 订阅到期(要花钱才能继续用)——与 renewalNeeded 是两回事,别混:那个连上网就自己好了。
-    val subExpired by LicenseManager.subExpired.collectAsState()
     var showPro by remember { mutableStateOf(false) }
     // 徽标左侧"续费"按钮打开的续费弹窗(剩余天数 + 续费价,再进付款);
-    // 常驻与临期/到期入口共用同一个确认弹窗，避免绕过套餐与锁价确认。
+    // 常驻与临期入口共用同一个确认弹窗，避免绕过套餐与锁价确认。
     var showRenewInfo by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
@@ -208,25 +206,10 @@ fun HomeScreen(
     } else -1
     val banner: Pair<String, Boolean>? = when {   // (文案, 点了能不能续费)
         renewalNeeded -> stringResource(R.string.renewal_needed) to false
-        subExpired -> stringResource(R.string.sub_expired_renew) to true
         soonDays in 0..SUB_ALERT_DAYS ->
             pluralStringResource(R.plurals.sub_expiring_soon, soonDays, soonDays) to true
         else -> null
     }
-    val restoredHint = stringResource(R.string.purchase_restored)
-    var restoredHintVisible by remember { mutableStateOf(false) }
-    var restoredHintNonce by remember { mutableStateOf(0) }
-    fun showRestoredHint() {
-        restoredHintVisible = true
-        restoredHintNonce++
-    }
-    LaunchedEffect(restoredHintNonce) {
-        if (restoredHintVisible) {
-            delay(1800)
-            restoredHintVisible = false
-        }
-    }
-
     Box(modifier = Modifier.fillMaxSize()) {
         // ---------- 连接内容区：顶部功能按钮仍由下面原有顶栏独立覆盖，本区只负责双卡 ----------
         BoxWithConstraints(
@@ -435,9 +418,7 @@ fun HomeScreen(
             if (!isPro) {
                 ProBadgeButton(
                     label = stringResource(R.string.unlock_pro),
-                    onClick = {
-                        if (subExpired) showRenewInfo = true else showPro = true
-                    }
+                    onClick = { showPro = true }
                 )
             } else {
                 // 订阅用户(有到期日;永久码没有):徽标左侧一颗与顶栏同规格的"续费"玻璃按钮。
@@ -471,9 +452,8 @@ fun HomeScreen(
                 onDismiss = { showPro = false },
                 showEnterCode = true,
                 onCelebrate = { fireworks.launch() },
-                onRestored = { showRestoredHint() },
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
-                // 到期的老用户从徽标再买 = 续原来那个码,不发新码。
+                // 普通解锁入口只负责新购；只有尚未到期的订阅才显示续费入口并续原码。
                 renew = false
             )
         }
@@ -504,31 +484,6 @@ fun HomeScreen(
                 anchorBounds = frozenAnchor,
                 onDismiss = { tipsPopupAnchor = null },
             )
-        }
-
-        // 自动恢复与主动“恢复授权”共用页面底部的通用玻璃提示。
-        AnimatedVisibility(
-            visible = restoredHintVisible,
-            enter = fadeIn() + slideInVertically { it / 2 },
-            exit = fadeOut() + slideOutVertically { it / 2 },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 28.dp)
-        ) {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = colors.glassSurfaceHeavy,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, colors.glassPanelBorder)
-            ) {
-                Text(
-                    restoredHint,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.onBackground
-                )
-            }
         }
 
         // ---------- 高级版烟花彩蛋：放在最上层（含设置面板之上），不拦截触摸，播完自行移除 ----------

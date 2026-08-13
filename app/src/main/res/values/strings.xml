@@ -419,7 +419,6 @@
     <string name="renew_action">Renew</string>
     <string name="renew_or_upgrade">Renew or upgrade</string>
     <string name="sub_expired">Pro has expired</string>
-    <string name="sub_expired_renew">Pro has expired — renew to continue</string>
     <plurals name="sub_days_left">
         <item quantity="one">%1$d day left</item>
         <item quantity="other">%1$d days left</item>
@@ -434,10 +433,6 @@
     <string name="purchase_activated">Pro unlocked</string>
     <string name="purchase_activation_code_label">Your activation code</string>
     <string name="purchase_activation_code_keep">Keep your activation code safe. If lost, you won\'t be able to switch devices.</string>
-    <string name="purchase_restored">🎉 Entitlement restored</string>
-    <string name="restore_action">Restore</string>
-    <string name="restore_restoring">Restoring…</string>
-    <string name="restore_none">No license found for this device (not purchased, or now in use on another device).</string>
     <string name="settings_view_code">Switch device</string>
     <string name="settings_code_hint">Enter this code on the new device to switch — this one reverts to Free. Don\'t misuse it: misuse disables the code.</string>
     <string name="copy_code">Copy</string>

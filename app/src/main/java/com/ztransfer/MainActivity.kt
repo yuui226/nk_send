@@ -56,7 +56,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Debug 源集启动内置回环相机；Release 源集实现为空，不包含任何模拟入口。
         CameraEndpointOverride.applyLaunchIntent(intent)
-        // 恢复授权状态（本地验签，毫秒级）并在后台触发静默续签（≥7 天且有网时）。
+        // 加载本地通行证（本地验签，毫秒级），并在有网时执行每日软续签；通行证最长有效 7 天。
         com.ztransfer.license.LicenseManager.init(applicationContext)
         // 每 6 小时至多检查一次；软更新每日最多提示一次，硬更新始终阻止继续使用。
         AppUpdateManager.init(applicationContext)
