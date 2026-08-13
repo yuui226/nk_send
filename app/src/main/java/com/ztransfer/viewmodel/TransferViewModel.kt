@@ -328,6 +328,15 @@ data class TransferState(
     val appLanguage: String = AppLocale.SYSTEM
 )
 
+/**
+ * Publishes a task list whose identity, order, or size changed and invalidates UI indexes derived
+ * from that structure. Status/progress-only element replacements must continue to use [copy].
+ */
+internal fun TransferState.withTaskStructure(tasks: List<TransferTask>): TransferState = copy(
+    tasks = tasks,
+    taskStructureRevision = taskStructureRevision + 1L,
+)
+
 internal fun retainLastValidTransferSpeed(previous: Long, sample: Long): Long =
     if (sample > 0L) sample else previous.coerceAtLeast(0L)
 
@@ -1333,10 +1342,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         )
         if (newTasks.isEmpty()) return
         _state.update { state ->
-            state.copy(
-                tasks = state.tasks + newTasks,
-                taskStructureRevision = state.taskStructureRevision + 1L,
-            )
+            state.withTaskStructure(state.tasks + newTasks)
         }
         pendingTransferQueue.addAll(newTasks)
         processQueue(dirUri, cameraProvider)
@@ -2309,10 +2315,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             if (kept.size == state.tasks.size) {
                 state
             } else {
-                state.copy(
-                    tasks = kept,
-                    taskStructureRevision = state.taskStructureRevision + 1L,
-                )
+                state.withTaskStructure(kept)
             }
         }
     }
@@ -2334,10 +2337,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
             removed = kept.size != state.tasks.size
             if (removed) {
-                state.copy(
-                    tasks = kept,
-                    taskStructureRevision = state.taskStructureRevision + 1L,
-                )
+                state.withTaskStructure(kept)
             } else {
                 state
             }
@@ -2371,10 +2371,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 }
             }
             if (updatedTasks.indices.any { updatedTasks[it].taskId != state.tasks[it].taskId }) {
-                state.copy(
-                    tasks = updatedTasks,
-                    taskStructureRevision = state.taskStructureRevision + 1L,
-                )
+                state.withTaskStructure(updatedTasks)
             } else {
                 state
             }
@@ -2405,10 +2402,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 }
             }
             if (updatedTasks.indices.any { updatedTasks[it].taskId != state.tasks[it].taskId }) {
-                state.copy(
-                    tasks = updatedTasks,
-                    taskStructureRevision = state.taskStructureRevision + 1L,
-                )
+                state.withTaskStructure(updatedTasks)
             } else {
                 state
             }

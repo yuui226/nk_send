@@ -48,9 +48,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -86,13 +87,6 @@ internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStat
 }
 
 private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
-
-internal suspend fun <T> collectThumbnailSnapshotsSequentially(
-    snapshots: Flow<List<T>>,
-    consume: suspend (List<T>) -> Unit,
-) {
-    snapshots.distinctUntilChanged().collect(consume)
-}
 
 /** Selects the newest still image deterministically; video covers must never become effect demos. */
 internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCamera.FileInfo? =
@@ -323,6 +317,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var thumbnailCacheSessionGeneration = 0L
     // 本轮发生真实写入失败（含磁盘满）后停止后台落盘；换相机/重连时重新尝试。
     private var thumbnailDiskWritesBlocked = false
+    private val thumbnailFillQueue = ThumbnailFillQueue()
+    private val thumbnailFillWake = Channel<Unit>(Channel.CONFLATED)
 
     private suspend fun activateThumbnailDiskCache(cam: NikonCamera) {
         if (camera !== cam) return
@@ -333,6 +329,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         inflightPrefetches.values.forEach { it.cancel() }
         inflightPrefetches.clear()
         thumbnailCacheSessionGeneration++
+        thumbnailFillQueue.reset()
         activeThumbnailDiskCache = null
         val opened = withContext(Dispatchers.IO) {
             thumbnailDiskCache.openCamera(cam.thumbnailCacheIdentity)
@@ -910,6 +907,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 传输、监看、交互式 FHD 和效果预览仍会立即取消填充并独占通道。
      */
     private fun startThumbnailFill() {
+        // 日期范围变化只重排尚未处理的队列。当前 GetThumb 完成后再采用新顺序。
+        viewModelScope.launch {
+            thumbnailPriorityRangeFlow.collect { range ->
+                thumbnailFillQueue.updatePriorityRange(range)
+                thumbnailFillQueue.retryFailed()
+                thumbnailFillWake.trySend(Unit)
+            }
+        }
         viewModelScope.launch {
             val foregroundBlocked = combine(
                 transfersBusyFlow,
@@ -919,41 +924,53 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             ) { busy, remote, fhd, effectPreview -> busy || remote || fhd || effectPreview }
             combine(
                 foregroundBlocked,
-                thumbnailPriorityRangeFlow,
                 state.map { it.isConnectedToCamera to it.hasCompletedFileScan }
                     .distinctUntilChanged(),
-            ) { blocked, range, connectionAndScan ->
-                Triple(blocked, range, connectionAndScan)
-            }.collectLatest { (blocked, range, connectionAndScan) ->
+            ) { blocked, connectionAndScan -> blocked to connectionAndScan }
+                .collectLatest { (blocked, connectionAndScan) ->
                 val (connected, scanComplete) = connectionAndScan
                 if (blocked || !connected || !scanComplete) return@collectLatest
-                // 普通 collect 保证补漏过程中新增照片不会取消当前 GetThumb；处理完
-                // 当前快照后，StateFlow 会直接给出最新列表。
-                collectThumbnailSnapshotsSequentially(state.map { it.files }) snapshot@{ files ->
-                    if (files.isEmpty()) return@snapshot
-                    val ordered = prioritizedThumbnailFiles(files, range)
-                    log { "THUMB_SWEEP start n=${ordered.size}" }
-                    var loaded = 0
-                    for (file in ordered) {
-                        if (thumbnailDiskWritesBlocked) {
-                            log { "THUMB_SWEEP stop: disk writes unavailable, loaded=$loaded" }
-                            return@snapshot
-                        }
-                        if (!state.value.isConnectedToCamera) {
-                            log { "THUMB_SWEEP abort: disconnected, loaded=$loaded" }
-                            return@snapshot
-                        }
-                        try {
-                            if (prefetchThumbnail(file)) loaded++
-                        } catch (e: kotlinx.coroutines.CancellationException) {
-                            // 前台任务、断连、日期优先级变化或作用域结束可取消外层任务。
-                            throw e
-                        } catch (e: Exception) {
-                            // 单张异常绝不中断整轮，否则本协程退出后不会继续填充。
-                            log { "THUMB_SWEEP item failed handle=${file.handle}: $e" }
-                        }
+                val expectedCacheGeneration = thumbnailCacheSessionGeneration
+                val expectedQueueRevision = thumbnailFillQueue.revision
+                thumbnailFillQueue.seed(state.value.files, thumbnailPriorityRangeFlow.value)
+                thumbnailFillQueue.retryFailed()
+                log { "THUMB_FILL resume pending=${thumbnailFillQueue.pendingCount}" }
+                var loaded = 0
+                while (currentCoroutineContext().isActive) {
+                    val file = thumbnailFillQueue.poll()
+                    if (file == null) {
+                        thumbnailFillWake.receive()
+                        thumbnailFillQueue.retryFailed()
+                        continue
                     }
-                    log { "THUMB_SWEEP done loaded=$loaded/${ordered.size}" }
+                    if (thumbnailDiskWritesBlocked) {
+                        thumbnailFillQueue.returnToFront(file, expectedQueueRevision)
+                        log { "THUMB_FILL stop: disk writes unavailable, loaded=$loaded" }
+                        return@collectLatest
+                    }
+                    if (!state.value.isConnectedToCamera ||
+                        thumbnailCacheSessionGeneration != expectedCacheGeneration
+                    ) {
+                        return@collectLatest
+                    }
+                    try {
+                        if (prefetchThumbnail(file)) {
+                            thumbnailFillQueue.markSettled(file.handle)
+                            loaded++
+                        } else {
+                            thumbnailFillQueue.markFailed(file)
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        // 前台任务只暂停队列；同一相机会话恢复后从当前照片继续。
+                        if (thumbnailCacheSessionGeneration == expectedCacheGeneration) {
+                            thumbnailFillQueue.returnToFront(file, expectedQueueRevision)
+                        }
+                        throw e
+                    } catch (e: Exception) {
+                        // 单张瞬时失败等待下一次真实唤醒再试，绝不在空闲循环中原地重试。
+                        thumbnailFillQueue.markFailed(file)
+                        log { "THUMB_FILL item failed handle=${file.handle}: $e" }
+                    }
                 }
             }
         }
@@ -1517,7 +1534,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 got
             }.getOrNull() ?: return@launch
-            _state.update { s ->
+            val previousState = _state.getAndUpdate { s ->
                 val duplicateIndex = s.files.indexOfFirst {
                     it.handle == handle ||
                         it.logicalIdentity() == info.logicalIdentity()
@@ -1532,6 +1549,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
             }
+            val added = previousState.files.none {
+                it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
+            }
+            if (added && _state.value.hasCompletedFileScan) {
+                thumbnailFillQueue.enqueueNew(info)
+                thumbnailFillWake.trySend(Unit)
+            }
         }
     }
 
@@ -1543,6 +1567,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val diskCacheForScan = activeThumbnailDiskCache
         val generation = ++fileLoadGeneration
         fileLoadJob?.cancel()
+        thumbnailFillQueue.beginScan()
         fileLoadPending = true
         // 没有显式传入同会话恢复快照，就代表本轮要重新读取 handles；旧快照不能在
         // 新一轮枚举尚未完成时被后续暂停误复用。
@@ -1939,9 +1964,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
         // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
-        // 用户来回翻动导致的"格子请求发出又取消"绝不会让这张图两头落空。
+        // 用户来回翻动导致的“格子请求发出又取消”绝不会让这张图两头落空。
         if (inflightThumbs[handle]?.deferred?.isCancelled == false) {
-            return loadThumbnail(file) != null
+            return loadThumbnail(file) != null || handle in noThumbHandles
         }
         inflightPrefetches[handle]?.let { return it.await() }
         val completion = CompletableDeferred<Boolean>()
@@ -1988,6 +2013,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             try {
                 val cached = prefetchThumbnail(file)
+                if (cached) thumbnailFillQueue.markSettled(file.handle)
                 if (!cached && thumbnailDiskWritesBlocked) return@withContext
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

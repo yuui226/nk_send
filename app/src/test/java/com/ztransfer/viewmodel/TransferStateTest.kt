@@ -44,6 +44,36 @@ class TransferStateTest {
     }
 
     @Test
+    fun taskStructureUpdatesIncrementOnlyTheStructureRevision() {
+        val original = TransferTask(file(1))
+        val added = TransferTask(file(2))
+        val state = TransferState(
+            tasks = listOf(original),
+            taskStructureRevision = 7L,
+            isTransferring = true,
+        )
+
+        val updated = state.withTaskStructure(state.tasks + added)
+
+        assertEquals(listOf(original, added), updated.tasks)
+        assertEquals(8L, updated.taskStructureRevision)
+        assertEquals(true, updated.isTransferring)
+    }
+
+    @Test
+    fun statusOnlyTaskReplacementDoesNotChangeTheStructureRevision() {
+        val task = TransferTask(file(1))
+        val state = TransferState(tasks = listOf(task), taskStructureRevision = 7L)
+
+        val updated = state.copy(
+            tasks = listOf(task.copy(status = TransferStatus.TRANSFERING))
+        )
+
+        assertEquals(7L, updated.taskStructureRevision)
+        assertEquals(TransferStatus.TRANSFERING, updated.tasks.single().status)
+    }
+
+    @Test
     fun queueSpeedSurvivesZeroSamplesBetweenFiles() {
         assertEquals(12L * 1024L * 1024L, retainLastValidTransferSpeed(0L, 12L * 1024L * 1024L))
         assertEquals(12L * 1024L * 1024L, retainLastValidTransferSpeed(12L * 1024L * 1024L, 0L))
