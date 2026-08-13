@@ -4235,6 +4235,7 @@ private val PHOTO_FRAME_OUTPUT_PATTERN = Regex(
 
 private const val PHOTO_FRAME_WATERMARK_RENDER_VERSION = 2
 private const val BRAND_FRAME_RENDER_VERSION = 4
+private const val PHOTO_FILTER_RENDER_VERSION = 2
 
 internal fun isPhotoFrameOutputName(name: String): Boolean =
     PHOTO_FRAME_OUTPUT_PATTERN.containsMatchIn(name)
@@ -4256,7 +4257,7 @@ internal fun photoFrameOutputName(
         ""
     }
     val filterSuffix = filter?.let {
-        "_f${it.preset.id.take(8)}i${it.normalizedIntensityPercent}"
+        "_f${photoFilterRenderFingerprint(it)}i${it.normalizedIntensityPercent}"
     }.orEmpty()
     val styleSuffix = when {
         borderEnabled -> "frame_${preset.fileSuffix}"
@@ -4267,6 +4268,13 @@ internal fun photoFrameOutputName(
     return "${File(sourceName).nameWithoutExtension}_${styleSuffix}" +
         "$watermarkSuffix$filterSuffix.jpg"
 }
+
+/** Changes whenever filter pixels change, so an older derived image cannot mask a new render. */
+internal fun photoFilterRenderFingerprint(filter: PhotoFilterSelection): String =
+    MessageDigest.getInstance("SHA-256")
+        .digest("v=$PHOTO_FILTER_RENDER_VERSION\u0000${filter.preset.id}".toByteArray(Charsets.UTF_8))
+        .take(4)
+        .joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
 
 /** 摘要只用于稳定区分成片配置，绝不把用户水印原文写入文件名。 */
 internal fun photoFrameWatermarkFingerprint(

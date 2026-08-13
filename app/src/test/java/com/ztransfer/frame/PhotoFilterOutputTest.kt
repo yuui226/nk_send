@@ -19,7 +19,7 @@ class PhotoFilterOutputTest {
             filter = selection,
         )
 
-        assertEquals("DSC_0001_filter_f01234567i72.jpg", name)
+        assertEquals("DSC_0001_filter_fc6a94ab7i72.jpg", name)
         assertTrue(isPhotoFrameOutputName(name))
         assertTrue(
             isPhotoFrameOutputFor(

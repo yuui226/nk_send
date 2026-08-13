@@ -23,6 +23,14 @@ object PhotoFilterRenderer {
     // while the source tone curves and Flexible Color mixer values remain exact.
     private const val APPROXIMATE_MAX_HUE_SHIFT_DEGREES = 30f
     private const val MAX_BAND_LIGHTNESS_SHIFT = 0.20f
+    /**
+     * Hue is not reliable close to the neutral axis: tiny sensor/JPEG channel differences can
+     * assign neighboring gray pixels to unrelated color bands. Fade chromatic adjustments in
+     * over a deliberately small sRGB-chroma range so neutral noise is not turned into blotches,
+     * while established colors retain the preset's original result.
+     */
+    internal const val NEUTRAL_PROTECTION_CHROMA_START = 4f / 255f
+    internal const val NEUTRAL_PROTECTION_CHROMA_END = 16f / 255f
     // 最多使用四个工作线程，并始终为界面/系统保留至少一个处理器。
     private val filterParallelism =
         (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 4)
@@ -220,15 +228,19 @@ object PhotoFilterRenderer {
                 },
             )
         }
+        val colorAdjustmentWeight = neutralProtectionWeight(delta)
         var hue = originalHue
 
         when (val parameters = preset.parameters) {
             is NcpPhotoFilterParameters -> {
                 hue = normalizeHue(
                     originalHue + parameters.hueStep / NCP_MAX_MANUAL_STEP *
-                        APPROXIMATE_MAX_HUE_SHIFT_DEGREES,
+                        APPROXIMATE_MAX_HUE_SHIFT_DEGREES * colorAdjustmentWeight,
                 )
-                saturation *= 1f + parameters.saturationStep / NCP_MAX_MANUAL_STEP
+                saturation *= protectedSaturationScale(
+                    parameters.saturationStep / NCP_MAX_MANUAL_STEP,
+                    colorAdjustmentWeight,
+                )
                 lightness = mapPhotoFilterToneCurve(lightness, parameters.normalizedToneCurve)
             }
 
@@ -255,10 +267,14 @@ object PhotoFilterRenderer {
                     100f * APPROXIMATE_MAX_HUE_SHIFT_DEGREES
                 val chroma = left.chroma * inverseProgress + right.chroma * progress
                 val brightness = left.brightness * inverseProgress + right.brightness * progress
-                hue = normalizeHue(originalHue + hueShift)
-                saturation *= 1f + chroma / 100f
-                saturation *= 1f + parameters.saturation / 100f
-                lightness += brightness / 100f * MAX_BAND_LIGHTNESS_SHIFT
+                hue = normalizeHue(originalHue + hueShift * colorAdjustmentWeight)
+                saturation *= 1f + chroma / 100f * colorAdjustmentWeight
+                saturation *= protectedSaturationScale(
+                    parameters.saturation / 100f,
+                    colorAdjustmentWeight,
+                )
+                lightness += brightness / 100f * MAX_BAND_LIGHTNESS_SHIFT *
+                    colorAdjustmentWeight
                 lightness = parameters.normalizedToneCurve?.let { curve ->
                     mapPhotoFilterToneCurve(lightness, curve)
                 } ?: applyNp3TonalControls(lightness, parameters)
@@ -297,6 +313,16 @@ object PhotoFilterRenderer {
         val x = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
         return x * x * (3f - 2f * x)
     }
+
+    internal fun neutralProtectionWeight(rgbChroma: Float): Float = smoothStep(
+        NEUTRAL_PROTECTION_CHROMA_START,
+        NEUTRAL_PROTECTION_CHROMA_END,
+        rgbChroma,
+    )
+
+    /** Positive saturation can reveal neutral chroma noise; desaturation cannot amplify it. */
+    private fun protectedSaturationScale(adjustment: Float, colorAdjustmentWeight: Float): Float =
+        1f + if (adjustment > 0f) adjustment * colorAdjustmentWeight else adjustment
 
     private fun mixChannel(original: Int, filtered: Int, strength: Float): Int =
         (original + (filtered - original) * strength).roundToInt().coerceIn(0, 255)
