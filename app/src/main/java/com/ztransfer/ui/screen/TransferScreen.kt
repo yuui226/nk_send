@@ -6,14 +6,17 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
@@ -21,6 +24,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -50,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
@@ -58,7 +63,6 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.frame.PhotoFramePreset
@@ -73,6 +77,7 @@ import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
+import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.isTransferredOriginal
 import kotlinx.coroutines.delay
@@ -83,6 +88,10 @@ private const val TRANSFER_CARD_WAVE_SEGMENTS = 12
 private const val TRANSFER_CARD_WAVE_SPATIAL_SCALE = 0.55f
 private const val TRANSFER_CARD_PROGRESS_ALPHA = 0.14f
 private val TRANSFER_CARD_WAVE_AMPLITUDE = 3.dp
+
+private enum class TransferCardPillTone { SIZE, SPEED, EFFECT, TRANSFER_DURATION, GENERATION_DURATION }
+
+private enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -201,7 +210,6 @@ fun TransferScreen(
                         null
                     }
                     val displayedProgress = activeProgress?.fraction ?: task.progress
-                    val displayedDownloaded = activeProgress?.downloaded ?: task.downloaded
                     val displayedSpeed = activeProgress?.bytesPerSecond ?: task.speed
                     var generationClockMs by remember(taskId) {
                         mutableLongStateOf(android.os.SystemClock.elapsedRealtime())
@@ -247,16 +255,22 @@ fun TransferScreen(
                         onDispose { removingTaskIds.remove(taskId) }
                     }
                     val cardContainerColor by animateColorAsState(
-                        targetValue = when (task.status) {
-                            // 传输进度已经成为卡片背景，底色保持中性，避免两层蓝色叠加过重。
-                            TransferStatus.TRANSFERING -> colors.surface
-                            TransferStatus.COMPLETED -> colors.statusConnected.copy(alpha = 0.1f)
-                            TransferStatus.FAILED -> colors.statusError.copy(alpha = 0.1f)
-                            TransferStatus.CANCELLED -> colors.surfaceVariant
-                            TransferStatus.WAITING -> colors.surface
-                        },
+                        targetValue = lerp(
+                            colors.surface,
+                            transferCardStateColor(task, colors),
+                            0.055f,
+                        ),
                         animationSpec = tween(240, easing = FastOutSlowInEasing),
                         label = "transferCardStateColor",
+                    )
+                    val cardBorderColor by animateColorAsState(
+                        targetValue = lerp(
+                            colors.cardHairline,
+                            transferCardStateColor(task, colors),
+                            0.15f,
+                        ),
+                        animationSpec = tween(240, easing = FastOutSlowInEasing),
+                        label = "transferCardStateBorderColor",
                     )
                     Box(
                         modifier = Modifier
@@ -283,7 +297,7 @@ fun TransferScreen(
                         // 14dp 与列表页卡片/监看页 tile 的中型控件圆角一致（原 12dp 家族外）。
                         shape = RoundedCornerShape(14.dp),
                         // 浅色下白卡浮在浅灰背景上需要发丝线定界；深色 token 为透明，视觉不变。
-                        border = BorderStroke(1.dp, colors.cardHairline),
+                        border = BorderStroke(1.dp, cardBorderColor),
                         colors = CardDefaults.cardColors(
                             containerColor = cardContainerColor,
                         )
@@ -325,7 +339,7 @@ fun TransferScreen(
                                 )
                             }
 
-                        // 状态文字变化可能改变高度，继续柔和过渡；顶部 sheen 位于进度层之上，
+                        // 信息胶囊出现可能改变高度，继续柔和过渡；顶部 sheen 位于进度层之上，
                         // 让液态填充仍属于卡片材质，而不是覆盖内容的色块。
                         Column(
                             modifier = Modifier
@@ -337,178 +351,45 @@ fun TransferScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // 前导状态标志：独立成卡片最左的"状态列"，与右侧操作按钮分居
-                                // 两端——状态归状态、操作归操作。换状态交叉淡化不硬切；
-                                // 传输→完成的瞬间弹一下（事件驱动、只在真在传时触发——
-                                // 已完成卡片滚回屏幕不会重播），与全局"确认"手感一致。
-                                val iconPop = remember(taskId) { Animatable(1f) }
-                                var prevStatus by remember(taskId) { mutableStateOf(task.status) }
-                                LaunchedEffect(task.status) {
-                                    val was = prevStatus
-                                    prevStatus = task.status
-                                    if (task.status == TransferStatus.COMPLETED && was == TransferStatus.TRANSFERING) {
-                                        iconPop.snapTo(0.5f)
-                                        iconPop.animateTo(1f, Motion.bouncy())
-                                    }
-                                }
-                                Box(
-                                    Modifier.graphicsLayer {
-                                        scaleX = iconPop.value
-                                        scaleY = iconPop.value
-                                    }
-                                ) {
-                                    Crossfade(targetState = task.status, animationSpec = tween(220), label = "taskIcon") { st ->
-                                        TaskStatusIcon(st, size = 20.dp)
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-
                                 // 缩略图：屏幕内的卡片始终允许取图（传输中请求排到
                                 // 文件间隙执行），isTransferring 仅作传输结束后的补载重试键。
-                                QueueThumbnail(
-                                    file = task.file,
-                                    retryNudge = transferState.isTransferring,
-                                    cameraViewModel = cameraViewModel
-                                )
+                                Box(modifier = Modifier.size(56.dp)) {
+                                    QueueThumbnail(
+                                        file = task.file,
+                                        retryNudge = transferState.isTransferring,
+                                        cameraViewModel = cameraViewModel,
+                                        modifier = Modifier.align(Alignment.Center),
+                                    )
+                                    TaskStatusBadge(
+                                        task = task,
+                                        taskId = taskId,
+                                        modifier = Modifier.align(Alignment.BottomEnd),
+                                    )
+                                }
 
                                 Spacer(modifier = Modifier.width(12.dp))
 
-                                // 中部两行：文件名 + 状态副信息，撑满前导高度，充分利用竖向空间。
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = task.file.fileName,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        color = if (task.status == TransferStatus.CANCELLED) colors.onSurfaceVariant else colors.onBackground,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                Box(modifier = Modifier.weight(1f)) {
+                                    TransferTaskCardContent(
+                                        task = task,
+                                        displayedSpeed = displayedSpeed,
+                                        displayedFrameGenerationElapsedMs = displayedFrameGenerationElapsedMs,
+                                        modifier = Modifier.fillMaxWidth(),
                                     )
-                                    Spacer(modifier = Modifier.height(3.dp))
-                                    val (subText, subColor) = when (task.status) {
-                                        TransferStatus.WAITING -> stringResource(R.string.status_waiting) to colors.onSurfaceVariant
-                                        TransferStatus.TRANSFERING -> {
-                                            // >4GB 对象的 file.size 只是 SIZE_UNKNOWN 哨兵，别显示假总量。
-                                            val base = if (task.file.size == PtpConstants.SIZE_UNKNOWN) {
-                                                formatFileSize(displayedDownloaded)
-                                            } else {
-                                                "${formatFileSize(displayedDownloaded)} / ${formatFileSize(task.file.size)}"
-                                            }
-                                            (if (displayedSpeed > 0) {
-                                                "$base · ${formatSpeed(displayedSpeed)}"
-                                            } else base) to colors.accentBlue
-                                        }
-                                        TransferStatus.COMPLETED -> {
-                                            val completedText = when {
-                                                task.isGeneratingFrame ->
-                                                    stringResource(R.string.queue_pill_generating)
-                                                task.skipped -> stringResource(R.string.status_skipped)
-                                                // 大小 · 速度 · 耗时：一眼看出快慢与用时。大小取真实落盘字节数
-                                                //（>4GB 对象的 file.size 只是哨兵值）；耗时完成后填入。
-                                                else -> buildString {
-                                                    append(formatFileSize(task.downloaded))
-                                                    if (task.downloadMBps > 0f) append(" · %.1f MB/s".format(task.downloadMBps))
-                                                    task.elapsedMs?.let { append(" · ${formatDuration(it)}") }
-                                                }
-                                            }
-                                            completedText to if (task.isGeneratingFrame) {
-                                                colors.accentBlue
-                                            } else {
-                                                colors.statusConnected
-                                            }
-                                        }
-                                        TransferStatus.FAILED -> (task.error ?: stringResource(R.string.transfer_failed)) to colors.statusError
-                                        TransferStatus.CANCELLED -> stringResource(R.string.status_cancelled) to colors.onSurfaceVariant
-                                    }
-                                    Text(
-                                        text = subText,
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = subColor,
-                                        // 失败原因带具体诊断信息（如"保存失败：复制不完整…"），
-                                        // 放宽到两行让用户截图即含完整线索；其余状态保持单行紧凑。
-                                        maxLines = if (task.status == TransferStatus.FAILED) 2 else 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    if (
-                                        task.status == TransferStatus.COMPLETED &&
-                                        displayedFrameGenerationElapsedMs != null
-                                    ) {
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = stringResource(
-                                                R.string.status_generation_duration,
-                                                formatDuration(displayedFrameGenerationElapsedMs),
-                                            ),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (task.isGeneratingFrame) {
-                                                colors.accentBlue
-                                            } else {
-                                                colors.statusConnected
-                                            },
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                    task.framePreset?.let { preset ->
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = if (task.frameBorderRequested) {
-                                                stringResource(
-                                                    R.string.photo_frame_task_label,
-                                                    photoFramePresetLabel(preset),
-                                                )
-                                            } else {
-                                                stringResource(R.string.photo_frame_watermark_only)
-                                            },
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = colors.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                    task.photoFilterRequested?.let { filter ->
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = stringResource(
-                                                R.string.photo_filter_task_label,
-                                                photoFilterDisplayName(filter.preset),
-                                                filter.normalizedIntensityPercent,
-                                            ),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = colors.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
-
-                                // 尾部操作列：重试(仅失败时,断开置灰) + 移除,同规格图标圆钮
-                                // 并排——同为"对这张卡的操作",与最左的状态列互不混淆。
-                                AnimatedVisibility(
-                                    visible = task.status == TransferStatus.FAILED,
-                                    enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
-                                    exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start)
-                                ) {
-                                    Row {
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        val connected = cameraState.isConnectedToCamera
-                                        GlassButton(
-                                            onClick = { transferViewModel.retrySingleTask(taskId, cameraViewModel::getCamera) },
-                                            enabled = connected || isTransferredOriginal(
-                                                task.file,
-                                                transferState.existingExportIndex,
-                                            ),
-                                            shape = CircleShape,
-                                            contentPadding = PaddingValues(6.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Refresh,
-                                                contentDescription = stringResource(R.string.retry),
-                                                // 禁用态视觉由 GlassButton 统一压淡，不再手动切灰。
-                                                tint = colors.accentBlue,
-                                                modifier = Modifier.size(16.dp)
+                                    TransferRetryButton(
+                                        visible = task.status == TransferStatus.FAILED,
+                                        enabled = cameraState.isConnectedToCamera || isTransferredOriginal(
+                                            task.file,
+                                            transferState.existingExportIndex,
+                                        ),
+                                        onClick = {
+                                            transferViewModel.retrySingleTask(
+                                                taskId,
+                                                cameraViewModel::getCamera,
                                             )
-                                        }
-                                    }
+                                        },
+                                        modifier = Modifier.align(Alignment.TopEnd),
+                                    )
                                 }
 
                                 // 最尾：毛玻璃移除按钮——把本卡从队列移除。正在传输的
@@ -729,6 +610,325 @@ fun TransferScreen(
     }
 }
 
+private fun transferCardVisualState(task: TransferTask): TransferCardVisualState = when {
+    task.isGeneratingFrame -> TransferCardVisualState.GENERATING
+    task.status == TransferStatus.WAITING -> TransferCardVisualState.WAITING
+    task.status == TransferStatus.TRANSFERING -> TransferCardVisualState.TRANSFERRING
+    task.status == TransferStatus.COMPLETED -> TransferCardVisualState.COMPLETED
+    task.status == TransferStatus.FAILED -> TransferCardVisualState.FAILED
+    else -> TransferCardVisualState.CANCELLED
+}
+
+@Composable
+private fun TransferRetryButton(
+    visible: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + scaleIn(
+            initialScale = 0.75f,
+            transformOrigin = TransformOrigin(1f, 0f),
+        ),
+        exit = fadeOut() + scaleOut(
+            targetScale = 0.75f,
+            transformOrigin = TransformOrigin(1f, 0f),
+        ),
+        modifier = modifier,
+    ) {
+        GlassButton(
+            onClick = onClick,
+            enabled = enabled,
+            shape = CircleShape,
+            contentPadding = PaddingValues(6.dp),
+        ) {
+            Icon(
+                Icons.Default.Refresh,
+                contentDescription = stringResource(R.string.retry),
+                tint = AppTheme.colors.accentBlue,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+private fun transferCardStateColor(task: TransferTask, colors: AppColors): Color = when (
+    transferCardVisualState(task)
+) {
+    TransferCardVisualState.WAITING -> colors.accentYellow
+    TransferCardVisualState.TRANSFERRING -> colors.accentBlue
+    TransferCardVisualState.GENERATING -> colors.accentPurple
+    TransferCardVisualState.COMPLETED -> colors.statusConnected
+    TransferCardVisualState.FAILED -> colors.statusError
+    TransferCardVisualState.CANCELLED -> colors.onSurfaceVariant
+}
+
+@Composable
+private fun TaskStatusBadge(
+    task: TransferTask,
+    taskId: Long,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val visualState = transferCardVisualState(task)
+    val badgeColor = transferCardStateColor(task, colors)
+    val iconPop = remember(taskId) { Animatable(1f) }
+    var previousState by remember(taskId) { mutableStateOf(visualState) }
+    LaunchedEffect(visualState) {
+        val was = previousState
+        previousState = visualState
+        if (was != visualState) {
+            iconPop.snapTo(0.62f)
+            iconPop.animateTo(1f, Motion.bouncy())
+        }
+    }
+    Surface(
+        modifier = modifier.graphicsLayer {
+            scaleX = iconPop.value
+            scaleY = iconPop.value
+        },
+        shape = CircleShape,
+        color = badgeColor,
+        border = BorderStroke(2.dp, colors.surface),
+    ) {
+        Box(
+            modifier = Modifier.size(22.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Crossfade(
+                targetState = visualState,
+                animationSpec = tween(180),
+                label = "taskStatusBadge",
+            ) { state ->
+                Icon(
+                    imageVector = when (state) {
+                        TransferCardVisualState.WAITING -> Icons.Default.Schedule
+                        TransferCardVisualState.TRANSFERRING -> Icons.Default.Downloading
+                        TransferCardVisualState.GENERATING -> Icons.Default.AutoAwesome
+                        TransferCardVisualState.COMPLETED -> Icons.Default.Check
+                        TransferCardVisualState.FAILED -> Icons.Default.PriorityHigh
+                        TransferCardVisualState.CANCELLED -> Icons.Default.Close
+                    },
+                    contentDescription = null,
+                    tint = colors.onAccent,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+        }
+    }
+}
+@Composable
+private fun TransferTaskCardContent(
+    task: TransferTask,
+    displayedSpeed: Long,
+    displayedFrameGenerationElapsedMs: Long?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val isFailed = task.status == TransferStatus.FAILED
+    val transferred = task.status == TransferStatus.COMPLETED
+    val speedText = when {
+        task.status == TransferStatus.TRANSFERING && displayedSpeed > 0L -> formatSpeed(displayedSpeed)
+        transferred && task.downloadMBps > 0f -> "%.1f MB/s".format(task.downloadMBps)
+        else -> null
+    }
+    val transferDuration = task.elapsedMs?.let(::formatDuration)
+    val generationDuration = displayedFrameGenerationElapsedMs?.let(::formatDuration)
+    val effectText = transferTaskEffectText(task)
+    val animateTransferPills = task.status == TransferStatus.TRANSFERING
+    val animateGenerationPills = task.isGeneratingFrame
+
+    Column(modifier = modifier) {
+        Text(
+            text = task.file.fileName,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = if (task.status == TransferStatus.CANCELLED) {
+                colors.onSurfaceVariant
+            } else {
+                colors.onBackground
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = if (isFailed) Modifier.padding(end = 42.dp) else Modifier,
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            TransferInfoPill(
+                text = transferTaskFileSizeText(task),
+                tone = TransferCardPillTone.SIZE,
+                respond = animateTransferPills && speedText != null,
+            )
+            TransferPillVisibility(
+                visible = speedText != null,
+                delayMillis = 60,
+            ) {
+                speedText?.let {
+                    TransferInfoPill(
+                        text = it,
+                        tone = TransferCardPillTone.SPEED,
+                        respond = transferDuration != null,
+                    )
+                }
+            }
+            TransferPillVisibility(
+                visible = transferDuration != null,
+                delayMillis = 150,
+            ) {
+                transferDuration?.let {
+                    TransferInfoPill(text = it, tone = TransferCardPillTone.TRANSFER_DURATION)
+                }
+            }
+        }
+
+        if (isFailed) {
+            Spacer(modifier = Modifier.height(7.dp))
+            Text(
+                text = task.error ?: stringResource(R.string.transfer_failed),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.statusError,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else if (effectText != null) {
+            Spacer(modifier = Modifier.height(7.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                TransferInfoPill(
+                    text = effectText,
+                    tone = TransferCardPillTone.EFFECT,
+                    respond = animateGenerationPills && generationDuration != null,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                TransferPillVisibility(
+                    visible = generationDuration != null,
+                    delayMillis = 80,
+                ) {
+                    generationDuration?.let {
+                        TransferInfoPill(text = it, tone = TransferCardPillTone.GENERATION_DURATION)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TransferPillVisibility(
+    visible: Boolean,
+    delayMillis: Int,
+    content: @Composable () -> Unit,
+) {
+    // 初次组合时直接采用真实状态；只有当前卡片留在组合内发生 false → true，才播放
+    // “从左侧胶囊分裂”动画。LazyColumn 滚出再滚回不会重播，速度数值更新也不会触发。
+    val visibilityState = remember {
+        MutableTransitionState(visible).apply { targetState = visible }
+    }
+    LaunchedEffect(visible) {
+        visibilityState.targetState = visible
+    }
+    AnimatedVisibility(
+        visibleState = visibilityState,
+        enter = transferCardPillEnter(delayMillis),
+        exit = fadeOut(tween(100)) + shrinkHorizontally(shrinkTowards = Alignment.Start),
+    ) { content() }
+}
+
+private fun transferCardPillEnter(delayMillis: Int) =
+    fadeIn(tween(200, delayMillis = delayMillis)) +
+        expandHorizontally(
+            expandFrom = Alignment.Start,
+            animationSpec = Motion.bouncy(),
+        ) +
+        slideInHorizontally(
+            initialOffsetX = { -minOf(it, 8) },
+            animationSpec = spring(
+                dampingRatio = 0.62f,
+                stiffness = 360f,
+            ),
+        ) +
+        scaleIn(
+            initialScale = 0.78f,
+            transformOrigin = TransformOrigin(0f, 0.5f),
+            animationSpec = tween(200, delayMillis = delayMillis),
+        )
+
+@Composable
+private fun TransferInfoPill(
+    text: String,
+    tone: TransferCardPillTone,
+    modifier: Modifier = Modifier,
+    respond: Boolean = false,
+) {
+    val colors = AppTheme.colors
+    val accent = when (tone) {
+        TransferCardPillTone.SIZE -> colors.onSurfaceVariant
+        TransferCardPillTone.SPEED -> colors.statusConnected
+        TransferCardPillTone.EFFECT -> colors.accentPurple
+        TransferCardPillTone.TRANSFER_DURATION -> colors.accentBlue
+        TransferCardPillTone.GENERATION_DURATION -> colors.accentYellow
+    }
+    val sourceScale = remember { Animatable(1f) }
+    var previouslyResponding by remember { mutableStateOf(respond) }
+    LaunchedEffect(respond) {
+        val shouldRespond = respond && !previouslyResponding
+        previouslyResponding = respond
+        if (shouldRespond) {
+            sourceScale.snapTo(1f)
+            sourceScale.animateTo(0.94f, tween(105, easing = FastOutSlowInEasing))
+            sourceScale.animateTo(1f, Motion.bouncy())
+        }
+    }
+    Box(
+        modifier = modifier
+            // 左侧为分裂锚点；仅改变 X 缩放，左边界始终固定，回弹发生在右缘。
+            .graphicsLayer {
+                transformOrigin = TransformOrigin(0f, 0.5f)
+                scaleX = sourceScale.value
+            }
+            .clip(RoundedCornerShape(999.dp))
+            .background(accent.copy(alpha = 0.10f))
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = accent,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun transferTaskEffectText(task: TransferTask): String? {
+    val frameName = task.framePreset
+        ?.takeIf { task.frameBorderRequested }
+        ?.let { photoFramePresetLabel(it) }
+    val watermarkName = task.framePreset
+        ?.takeIf { task.frameWatermarkRequested.enabled }
+        ?.let { stringResource(R.string.photo_frame_watermark_short) }
+    val filterName = task.photoFilterRequested?.let { photoFilterDisplayName(it.preset) }
+    val filterIntensity = task.photoFilterRequested?.let { "${it.normalizedIntensityPercent}%" }
+    val parts = listOfNotNull(frameName, watermarkName, filterName, filterIntensity)
+    return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+}
+
+private fun transferTaskFileSizeText(task: TransferTask): String = when {
+    task.file.size != PtpConstants.SIZE_UNKNOWN -> formatFileSize(task.file.size)
+    task.downloaded > 0L -> formatFileSize(task.downloaded)
+    else -> "—"
+}
+
 @Composable
 private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringResource(
     when (preset) {
@@ -862,7 +1062,8 @@ private fun ConfirmCard(
 private fun QueueThumbnail(
     file: NikonCamera.FileInfo,
     retryNudge: Boolean,
-    cameraViewModel: CameraViewModel
+    cameraViewModel: CameraViewModel,
+    modifier: Modifier = Modifier,
 ) {
     var thumbnail by remember(file.handle) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(file.handle, retryNudge) {
@@ -871,7 +1072,7 @@ private fun QueueThumbnail(
         }
     }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(52.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(AppTheme.colors.thumbPlaceholder),
@@ -895,20 +1096,5 @@ private fun QueueThumbnail(
             )
         }
     }
-}
-
-/**
- * 队列任务状态图标（等待/传输/完成/失败/取消）。字形与语义色取自共用的 [statusGlyph]
- * （单一数据源，与列表页角标统一）；卡片在纯色卡面上，裸符号铺底、无圆片容器。
- */
-@Composable
-private fun TaskStatusIcon(status: TransferStatus, size: Dp = 20.dp) {
-    val (icon, tint) = statusGlyph(status)
-    Icon(
-        imageVector = icon,
-        contentDescription = null,
-        tint = tint,
-        modifier = Modifier.size(size)
-    )
 }
 
