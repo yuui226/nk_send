@@ -144,6 +144,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
@@ -603,6 +604,21 @@ fun SettingsOverlay(
                     .firstOrNull { it.id == filterDraftId }
                     ?.takeIf { filterDraftEnabled }
                     ?.let { PhotoFilterSelection(it, filterDraftIntensity) }
+                val previewFilterPrefetch = remember(
+                    state.photoFilters,
+                    state.favoritePhotoFilters,
+                    state.transferPhotoFilterIntensities,
+                    filterDraftId,
+                    filterDraftEnabled,
+                ) {
+                    nextPhotoFilterSelections(
+                        filters = state.photoFilters,
+                        favoriteCatalogKeys = state.favoritePhotoFilters.map { it.catalogKey },
+                        rememberedIntensities = state.transferPhotoFilterIntensities,
+                        selectedId = filterDraftId,
+                        enabled = filterDraftEnabled,
+                    )
+                }
                 val editorWatermark = when {
                     !frameDraftDecorationEnabled -> PhotoFrameWatermark(enabled = false)
                     isPro -> watermarkDraft.withEditorPlacementConstraints(
@@ -668,6 +684,7 @@ fun SettingsOverlay(
                                 preset = frameDraftPreset,
                                 watermark = renderWatermark,
                                 filter = previewFilter,
+                                prefetchFilters = previewFilterPrefetch,
                                 onOpen = { bitmap, anchorRect ->
                                     focusManager.clearFocus()
                                     keyboardController?.hide()
@@ -1491,6 +1508,36 @@ internal fun PhotoFilterEditor(
     }
 }
 
+internal fun nextPhotoFilterSelections(
+    filters: List<PhotoFilterPreset>,
+    favoriteCatalogKeys: List<String>,
+    rememberedIntensities: Map<String, Int>,
+    selectedId: String?,
+    enabled: Boolean,
+    count: Int = PHOTO_EFFECTS_FORWARD_PREFETCH_COUNT,
+): List<PhotoFilterSelection> {
+    if (!enabled || selectedId == null || count <= 0) return emptyList()
+    val ordered = orderWithFavorites(
+        items = filters,
+        favoriteKeys = favoriteCatalogKeys,
+        keyOf = { filter -> BuiltInPhotoFilters.catalogKey(filter.id) ?: filter.id },
+    )
+    val selectedIndex = ordered.indexOfFirst { it.id == selectedId }
+    if (selectedIndex < 0 || selectedIndex == ordered.lastIndex) return emptyList()
+    return ordered.asSequence()
+        .drop(selectedIndex + 1)
+        .take(count)
+        .map { preset ->
+            val catalogKey = BuiltInPhotoFilters.catalogKey(preset.id) ?: preset.id
+            PhotoFilterSelection(
+                preset = preset,
+                intensityPercent = rememberedIntensities[catalogKey]
+                    ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
+            )
+        }
+        .toList()
+}
+
 internal data class PhotoEffectFavoriteButtonPalette(
     val inactiveIcon: Color,
     val activeIcon: Color,
@@ -2275,6 +2322,7 @@ internal fun PhotoEffectsRenderedPreview(
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
     filter: PhotoFilterSelection? = null,
+    prefetchFilters: List<PhotoFilterSelection> = emptyList(),
     onOpen: ((Bitmap, Rect) -> Unit)?,
 ) {
     val colors = AppTheme.colors
@@ -2294,18 +2342,27 @@ internal fun PhotoEffectsRenderedPreview(
         )
     }
     val currentFilterKey = PhotoEffectsPreviewCacheKey.from(filter)
-    val previewCache = remember(
+    val previewCaches = remember(
         source,
         metadata,
         sourceRotationQuarterTurns,
         borderEnabled,
         preset,
         watermark,
-        currentFilterKey,
-    ) { PhotoEffectsPreviewCache() }
-    DisposableEffect(previewCache) {
-        onDispose { previewCache.close() }
+    ) {
+        BoundedAccessCache<PhotoEffectsPreviewCacheKey, PhotoEffectsPreviewCache>(
+            maxEntries = PHOTO_EFFECTS_RECENT_PREVIEW_CACHE_SIZE,
+            createValue = { _: PhotoEffectsPreviewCacheKey -> PhotoEffectsPreviewCache() },
+            closeValue = PhotoEffectsPreviewCache::close,
+        )
     }
+    DisposableEffect(previewCaches) {
+        onDispose { previewCaches.close() }
+    }
+    val currentPreviewCache = remember(previewCaches, currentFilterKey) {
+        previewCaches.getOrCreate(currentFilterKey)
+    }
+    val previewDemand = remember(previewCaches) { PhotoEffectsPreviewDemand() }
     // 对比图不含滤镜，切换滤镜时仍然有效；与主成片分开缓存，避免重复合成相同底图。
     val comparisonCache = if (filter == null) {
         null
@@ -2331,35 +2388,77 @@ internal fun PhotoEffectsRenderedPreview(
     }
     suspend fun filteredSource(selection: PhotoFilterSelection?): Bitmap {
         if (selection == null) return source
-        return checkNotNull(filteredSourceCache).getOrRender { isCancelled ->
+        return checkNotNull(filteredSourceCache).getOrRender(
+            serializeWithOtherPreviews = false,
+        ) { isCancelled ->
             PhotoFilterRenderer.render(source, selection, isCancelled)
         }
     }
-    suspend fun renderPreview(selection: PhotoFilterSelection?): Bitmap {
-        val input = filteredSource(selection)
+    suspend fun renderPreview(
+        selection: PhotoFilterSelection?,
+        useCurrentFilteredSource: Boolean,
+    ): Bitmap {
+        val selectionKey = PhotoEffectsPreviewCacheKey.from(selection)
         val outputCache = if (selection == null && filter != null) {
             checkNotNull(comparisonCache)
         } else {
-            previewCache
+            previewCaches.getOrCreate(selectionKey)
         }
-        return outputCache.getOrRender { _ ->
-            PhotoFrameExporter.renderPreview(
-                context = context,
-                source = input,
-                metadata = metadata,
-                preset = preset,
-                watermark = watermark,
-                borderEnabled = borderEnabled,
-                longEdge = PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
-                filter = null,
-            )
+        return outputCache.getOrRender(
+            isObsolete = {
+                selection != null && !previewDemand.isRequested(selectionKey)
+            },
+        ) { isCancelled ->
+            // Keep filtering inside the completed-frame cache. A recent full-preview hit must not
+            // rebuild an intermediate filtered bitmap before discovering that output already exists.
+            val input = if (useCurrentFilteredSource) {
+                filteredSource(selection)
+            } else {
+                selection?.let {
+                    PhotoFilterRenderer.render(source, it, isCancelled)
+                } ?: source
+            }
+            var output: Bitmap? = null
+            try {
+                output = PhotoFrameExporter.renderPreview(
+                    context = context,
+                    source = input,
+                    metadata = metadata,
+                    preset = preset,
+                    watermark = watermark,
+                    borderEnabled = borderEnabled,
+                    longEdge = PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
+                    filter = null,
+                )
+                checkNotNull(output)
+            } finally {
+                // Prefetch intermediates are never displayed or retained. The selected filter's
+                // intermediate keeps its existing cache so border/watermark edits do not refilter.
+                // With no frame/watermark the exporter may return input itself; ownership then
+                // transfers to the completed-preview cache and it must remain alive.
+                if (
+                    shouldRecyclePrefetchInput(
+                        useCurrentFilteredSource = useCurrentFilteredSource,
+                        inputIsSource = input === source,
+                        outputIsInput = output === input,
+                    )
+                ) {
+                    input.recycle()
+                }
+            }
         }
     }
 
-    LaunchedEffect(previewCache, filter) {
+    LaunchedEffect(currentPreviewCache, filter, prefetchFilters) {
+        previewDemand.replaceRequested(
+            buildSet {
+                add(currentFilterKey)
+                prefetchFilters.forEach { add(PhotoEffectsPreviewCacheKey.from(it)) }
+            },
+        )
         try {
             previewFailed = false
-            val output = renderPreview(filter)
+            val output = renderPreview(filter, useCurrentFilteredSource = true)
             ensureActive()
             rendered.value = RenderedPhotoEffectsPreview(
                 bitmap = output,
@@ -2367,13 +2466,32 @@ internal fun PhotoEffectsRenderedPreview(
                 frameLayout = requestedFrameLayout,
             )
 
+            // Current output always wins. Only after it is visible do we fill the next two wheel
+            // positions in order; a jump elsewhere makes obsolete pixel loops stop promptly.
+            // This child runs alongside the comparison delay so prefetch does not add its own
+            // duration in front of the existing long-press comparison work.
+            val prefetchJob = launch {
+                try {
+                    prefetchFilters.forEach { nextFilter ->
+                        ensureActive()
+                        renderPreview(nextFilter, useCurrentFilteredSource = false)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (outOfMemory: OutOfMemoryError) {
+                    recordPhotoFramePreviewFailure(context, outOfMemory)
+                } catch (error: Exception) {
+                    recordPhotoFramePreviewFailure(context, error)
+                }
+            }
+
             // 对比图只跳过滤镜，继续使用完全相同的边框、水印、尺寸和元数据。
             // 无滤镜基线同样进入缓存，所有滤镜共用，不再为每次长按重复渲染。
             if (filter != null) {
                 try {
                     // 主预览优先显示；继续调参时该延时会被取消，旧对比图不会抢占下一次渲染。
                     delay(PHOTO_EFFECTS_COMPARISON_DELAY_MS)
-                    val comparison = renderPreview(null)
+                    val comparison = renderPreview(null, useCurrentFilteredSource = false)
                     ensureActive()
                     rendered.value = RenderedPhotoEffectsPreview(
                         bitmap = output,
@@ -2389,6 +2507,7 @@ internal fun PhotoEffectsRenderedPreview(
                     recordPhotoFramePreviewFailure(context, error)
                 }
             }
+            prefetchJob.join()
             // 不主动 recycle 上一张已交给 Compose 的位图。部分设备的渲染线程可能仍在
             // 使用上一帧纹理；解除状态引用后交给运行时回收更安全。
         } catch (cancelled: CancellationException) {
@@ -2628,6 +2747,8 @@ private const val PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT = 4f
 private const val PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT = 3f
 // 与相机 FHD 预览源保持一致，避免高密度屏幕或放大查看时出现二次缩放模糊。
 private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_920
+private const val PHOTO_EFFECTS_RECENT_PREVIEW_CACHE_SIZE = 3
+private const val PHOTO_EFFECTS_FORWARD_PREFETCH_COUNT = 2
 private const val PHOTO_EFFECTS_COMPARISON_DELAY_MS = 500L
 private const val PHOTO_EFFECTS_TEXT_PREVIEW_DELAY_MS = 140L
 private const val PHOTO_EFFECTS_FALLBACK_GRACE_MS = 2_200L
@@ -2668,12 +2789,30 @@ private data class PhotoEffectsPreviewCacheKey(
     }
 }
 
+/** The selected filter and its two forward neighbors are the only valid filter pixel work. */
+private class PhotoEffectsPreviewDemand {
+    @Volatile
+    private var requested: Set<PhotoEffectsPreviewCacheKey> = emptySet()
+
+    fun replaceRequested(keys: Set<PhotoEffectsPreviewCacheKey>) {
+        requested = keys
+    }
+
+    fun isRequested(key: PhotoEffectsPreviewCacheKey): Boolean = key in requested
+}
+
+internal fun shouldRecyclePrefetchInput(
+    useCurrentFilteredSource: Boolean,
+    inputIsSource: Boolean,
+    outputIsInput: Boolean,
+): Boolean = !useCurrentFilteredSource && !inputIsSource && !outputIsInput
+
 /**
  * 单个明确渲染目标的一帧缓存。
  *
- * 同一目标的请求共享一个 [Deferred]；依赖变化时由 remember 销毁整个实例，不维护多键
- * LRU，也不缓存不会显示的投机成片。不同实例通过全局渲染锁串行，取消的等待任务不会
- * 继续抢 CPU。位图只解除引用而不主动 recycle，避免 Compose 仍在使用旧帧纹理。
+ * 同一目标的请求共享一个 [Deferred]；不同实例通过全局渲染锁串行，取消的等待任务不会
+ * 继续抢 CPU。最近完成的三个完整预览由外层有界缓存持有；位图只解除引用而不主动
+ * recycle，避免 Compose 仍在使用旧帧纹理。
  */
 private class PhotoEffectsPreviewCache {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -2682,29 +2821,51 @@ private class PhotoEffectsPreviewCache {
     private var running: Deferred<Bitmap>? = null
 
     suspend fun getOrRender(
-        render: (isCancelled: () -> Boolean) -> Bitmap,
+        isObsolete: () -> Boolean = { false },
+        serializeWithOtherPreviews: Boolean = true,
+        render: suspend (isCancelled: () -> Boolean) -> Bitmap,
     ): Bitmap {
-        val task = mutex.withLock {
-            completed?.let { return it }
-            running ?: scope.async {
-                photoEffectsPreviewRenderMutex.withLock {
-                    ensureActive()
-                    render { !isActive }
-                }
-            }.also { running = it }
-        }
-        val bitmap = try {
-            task.await()
-        } catch (error: Throwable) {
-            mutex.withLock {
-                if (running === task) running = null
+        while (true) {
+            val task = mutex.withLock {
+                completed?.let { return it }
+                running?.takeUnless { it.isCancelled } ?: scope.async {
+                    val renderNow: suspend () -> Bitmap = {
+                        ensureActive()
+                        render { !isActive || isObsolete() }
+                    }
+                    if (serializeWithOtherPreviews) {
+                        photoEffectsPreviewRenderMutex.withLock { renderNow() }
+                    } else {
+                        renderNow()
+                    }
+                }.also { running = it }
             }
-            throw error
-        }
-        return mutex.withLock {
-            completed ?: bitmap.also {
-                if (running === task) running = null
-                completed = it
+            val bitmap = try {
+                task.await()
+            } catch (error: Throwable) {
+                // Awaiter cancellation does not cancel the cache-owned shared task. Keep it
+                // published so a prefetched filter promoted to current can join the same work.
+                if (task.isCancelled) {
+                    mutex.withLock {
+                        if (running === task) running = null
+                    }
+                    // A task can become obsolete, cancel, and then be requested as the new current
+                    // filter. Retry transparently instead of exposing that harmless race as failure.
+                    if (
+                        error is CancellationException &&
+                        currentCoroutineContext().isActive &&
+                        !isObsolete()
+                    ) {
+                        continue
+                    }
+                }
+                throw error
+            }
+            return mutex.withLock {
+                completed ?: bitmap.also {
+                    if (running === task) running = null
+                    completed = it
+                }
             }
         }
     }

@@ -341,6 +341,21 @@ fun LocalPhotoEffectsPage(
 
             Spacer(Modifier.height(14.dp))
             val previewBitmap = selection?.preview
+            val previewFilterPrefetch = remember(
+                state.photoFilters,
+                favoritePhotoFilters,
+                filterIntensities,
+                filterId,
+                filterEnabled,
+            ) {
+                nextPhotoFilterSelections(
+                    filters = state.photoFilters,
+                    favoriteCatalogKeys = favoritePhotoFilters.map { it.catalogKey },
+                    rememberedIntensities = filterIntensities,
+                    selectedId = filterId,
+                    enabled = filterEnabled,
+                )
+            }
             if (previewBitmap == null) {
                 Box(
                     contentAlignment = Alignment.Center,
@@ -385,6 +400,7 @@ fun LocalPhotoEffectsPage(
                     preset = preset,
                     watermark = renderWatermark,
                     filter = selectedFilter,
+                    prefetchFilters = previewFilterPrefetch,
                     onOpen = null,
                 )
             }
