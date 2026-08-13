@@ -80,6 +80,7 @@
     <!-- 傳輸佇列 -->
     <string name="status_waiting">等待</string>
     <string name="queue_pill_generating">產生中</string>
+    <string name="status_generation_duration">產生 %1$s</string>
     <string name="status_skipped">跳過</string>
     <string name="status_cancelled">已取消</string>
     <string name="transfer_failed">傳輸失敗</string>

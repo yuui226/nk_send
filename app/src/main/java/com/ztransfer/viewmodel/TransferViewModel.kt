@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.effects.FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY
 import com.ztransfer.effects.FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY
 import com.ztransfer.effects.PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY
@@ -47,6 +48,7 @@ import com.ztransfer.frame.photoFrameWatermarkImageFile
 import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.filter.normalizePhotoFilterIntensity
@@ -70,6 +72,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -158,7 +161,29 @@ data class TransferTask(
     val elapsedMs: Long? = null,
     // 原片已成功落盘后的派生步骤；失败不改变 COMPLETED，原片始终保留。
     val isGeneratingFrame: Boolean = false,
+    /** 用户看到“生成中”的单调时钟起点；仅在生成期间保留。 */
+    val frameGenerationStartedAtElapsedMs: Long? = null,
+    /** 单次派生从显示“生成中”到结束的用户可感知耗时。 */
+    val frameGenerationElapsedMs: Long? = null,
 )
+
+internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask = copy(
+    isGeneratingFrame = true,
+    frameGenerationStartedAtElapsedMs = nowElapsedMs,
+    frameGenerationElapsedMs = null,
+)
+
+internal fun TransferTask.finishFrameGeneration(nowElapsedMs: Long): TransferTask {
+    if (!isGeneratingFrame) return this
+    val elapsed = frameGenerationStartedAtElapsedMs?.let { startedAt ->
+        (nowElapsedMs - startedAt).coerceAtLeast(0L)
+    }
+    return copy(
+        isGeneratingFrame = false,
+        frameGenerationStartedAtElapsedMs = null,
+        frameGenerationElapsedMs = elapsed,
+    )
+}
 
 /**
  * 当前导出目录中已落盘原片的 O(1) 查询索引。内容原地增量更新；[TransferState]
@@ -257,6 +282,8 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
     downloadMBps = 0f,
     elapsedMs = null,
     isGeneratingFrame = false,
+    frameGenerationStartedAtElapsedMs = null,
+    frameGenerationElapsedMs = null,
 )
 
 data class TransferState(
@@ -518,6 +545,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private val directoryIndexScans = HashMap<String, Deferred<ExistingDirectoryIndex>>()
 
     private var transferJob: Job? = null
+    private var photoFilterPrewarmJob: Job? = null
+    private var photoFilterPrewarmSelection: PhotoFilterSelection? = null
     @Volatile
     private var preferHighThroughputTransfers: Boolean = false
     private val prefs = application.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
@@ -1345,7 +1374,30 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             state.withTaskStructure(state.tasks + newTasks)
         }
         pendingTransferQueue.addAll(newTasks)
+        prewarmPhotoFilterFor(newTasks)
         processQueue(dirUri, cameraProvider)
+    }
+
+    private fun prewarmPhotoFilterFor(tasks: Collection<TransferTask>) {
+        tasks.firstNotNullOfOrNull { it.photoFilterRequested }?.let(::prewarmPhotoFilter)
+    }
+
+    /**
+     * 用户确认传输时便开始建立精确 RGB 映射表，让这项一次性计算与首张照片下载并行。
+     * 第一张进入生成流程时只需等待尚未完成的尾段，之后同滤镜、同强度全部直接复用。
+     */
+    private fun prewarmPhotoFilter(selection: PhotoFilterSelection) {
+        if (
+            photoFilterPrewarmSelection == selection &&
+            photoFilterPrewarmJob?.isActive == true
+        ) {
+            return
+        }
+        photoFilterPrewarmJob?.cancel()
+        photoFilterPrewarmSelection = selection
+        photoFilterPrewarmJob = viewModelScope.launch(Dispatchers.IO) {
+            PhotoFilterRenderer.prepareOriginalFilter(selection) { !isActive }
+        }
     }
 
     private fun processQueue(dirUri: String, cameraProvider: () -> NikonCamera?) {
@@ -1478,8 +1530,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     progress = 1f,
                                     downloaded = localOriginal.size,
                                     speed = 0,
-                                    isGeneratingFrame = true,
-                                )
+                                ).startFrameGeneration(android.os.SystemClock.elapsedRealtime())
                             }
                             if (!serviceStarted) {
                                 TransferService.start(getApplication(), useWifi = false)
@@ -1763,8 +1814,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             downloaded = stats.bytes, speed = 0,
                                             downloadMBps = endToEndMBps,
                                             elapsedMs = elapsed,
-                                            isGeneratingFrame = shouldGenerateFrame,
-                                        )
+                                        ).let { completed ->
+                                            if (shouldGenerateFrame) {
+                                                completed.startFrameGeneration(
+                                                    android.os.SystemClock.elapsedRealtime(),
+                                                )
+                                            } else {
+                                                completed
+                                            }
+                                        }
                                     }
                                     if (shouldGenerateFrame) {
                                         // 派生严格发生在正式原片落盘之后。导出器只读取原片并创建
@@ -2125,11 +2183,51 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         skipIfExisting: Boolean = false,
         failTaskOnError: Boolean = false,
     ) {
+        val probeStartedAtMs = if (PhotoGenerationProbe.enabled) {
+            android.os.SystemClock.elapsedRealtime()
+        } else {
+            0L
+        }
+        val probeSession = if (PhotoGenerationProbe.enabled) {
+            PhotoGenerationProbe.begin(
+                sourceName = sourceName,
+                configuration = buildString {
+                    append("preset=${preset.name} border=$borderEnabled")
+                    append(" filter=${filterRequested?.preset?.name ?: "none"}")
+                    filterRequested?.let { append(" intensity=${it.normalizedIntensityPercent}") }
+                },
+            )
+        } else {
+            PhotoGenerationProbe.NO_SESSION
+        }
+        var probeOutcome = "cancelled"
+        var frameExportSaved = false
         activePhotoFrameExports.incrementAndGet()
         val job = viewModelScope.launch(photoFrameDispatcher) {
+            if (PhotoGenerationProbe.enabled) {
+                PhotoGenerationProbe.stage(
+                    sessionId = probeSession,
+                    name = "worker_wait",
+                    durationMs = android.os.SystemClock.elapsedRealtime() - probeStartedAtMs,
+                )
+            }
             val destinationKey = treeUri.toString()
             val outcome = try {
+                val destinationWasCached = photoFrameDestinations.containsKey(destinationKey)
+                val destinationStartedAtMs = if (PhotoGenerationProbe.enabled) {
+                    android.os.SystemClock.elapsedRealtime()
+                } else {
+                    0L
+                }
                 val destination = getOrPreparePhotoFrameDestination(treeUri)
+                if (PhotoGenerationProbe.enabled) {
+                    PhotoGenerationProbe.stage(
+                        sessionId = probeSession,
+                        name = "destination_prepare",
+                        durationMs = android.os.SystemClock.elapsedRealtime() - destinationStartedAtMs,
+                        detail = "cached=$destinationWasCached",
+                    )
+                }
                 // 在真正轮到渲染时重新判定授权：排队期间若高级版到期，免费版默认
                 // 水印立即恢复；查重与导出必须使用同一份生效配置。
                 val effectiveBorder = decorationRequested && borderEnabled
@@ -2164,6 +2262,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         watermark = effectiveWatermark,
                         borderEnabled = effectiveBorder,
                         filter = filterRequested,
+                        probeSessionId = probeSession,
                     ).fold(
                         onSuccess = { FrameExportOutcome.Saved(it.displayName) },
                         onFailure = { FrameExportOutcome.Failed(it) },
@@ -2174,6 +2273,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             } catch (error: Exception) {
                 FrameExportOutcome.Failed(error)
             }
+            probeOutcome = when (outcome) {
+                is FrameExportOutcome.Saved -> "saved"
+                FrameExportOutcome.AlreadyExists -> "already_exists"
+                is FrameExportOutcome.Failed ->
+                    "failed:${outcome.error.javaClass.simpleName}"
+            }
+            frameExportSaved = outcome is FrameExportOutcome.Saved
             when (outcome) {
                 is FrameExportOutcome.Saved -> {
                     log { "DERIVATIVE_SAVE: $sourceName -> ${outcome.displayName}" }
@@ -2211,9 +2317,30 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
         }
         // invokeOnCompletion 即使任务排队期间就被取消也必定执行，计数和 UI 不会泄漏。
-        job.invokeOnCompletion {
+        job.invokeOnCompletion { cause ->
+            if (cause != null) {
+                probeOutcome = if (cause is CancellationException) {
+                    "cancelled:${cause.javaClass.simpleName}"
+                } else {
+                    "aborted:${cause.javaClass.simpleName}"
+                }
+            }
+            if (PhotoGenerationProbe.enabled) {
+                PhotoGenerationProbe.finish(
+                    sessionId = probeSession,
+                    outcome = probeOutcome,
+                    totalMs = android.os.SystemClock.elapsedRealtime() - probeStartedAtMs,
+                )
+            }
             updateTask(taskId) { task ->
-                if (task.isGeneratingFrame) task.copy(isGeneratingFrame = false) else task
+                val finished = task.finishFrameGeneration(
+                    android.os.SystemClock.elapsedRealtime(),
+                )
+                if (frameExportSaved) {
+                    finished
+                } else {
+                    finished.copy(frameGenerationElapsedMs = null)
+                }
             }
             if (activePhotoFrameExports.decrementAndGet() == 0) {
                 stopTransferServiceIfIdle()
@@ -2377,9 +2504,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             }
         }
         val appliedTaskIds = _state.value.tasks.asSequence().mapTo(HashSet()) { it.taskId }
-        pendingTransferQueue.addAll(attemptsByOldTaskId.values.filter {
+        val appliedAttempts = attemptsByOldTaskId.values.filter {
             it.taskId in appliedTaskIds
-        })
+        }
+        pendingTransferQueue.addAll(appliedAttempts)
+        prewarmPhotoFilterFor(appliedAttempts)
         processQueue(dirUri, cameraProvider)
     }
 
@@ -2409,6 +2538,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
         if (_state.value.tasks.any { it.taskId == attempt.taskId }) {
             pendingTransferQueue.addAll(listOf(attempt))
+            prewarmPhotoFilterFor(listOf(attempt))
         }
         processQueue(dirUri, cameraProvider)
     }
@@ -2416,6 +2546,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         transferJob?.cancel()
+        photoFilterPrewarmJob?.cancel()
         pendingTransferQueue.clear()
         invalidateDirectoryIndexes()
         photoFrameDispatcher.close()

@@ -23,7 +23,8 @@ class PhotoFrameExporterTest {
         val full24MpBytes = 6000L * 4000L * 4L
         val regionAndFilterBytes =
             6000L * photoFrameRegionRows(6000) * 4L * 2L
-        assertTrue(regionAndFilterBytes < full24MpBytes / 10L)
+        assertTrue(regionAndFilterBytes <= 32L * 1024L * 1024L)
+        assertTrue(regionAndFilterBytes < full24MpBytes / 2L)
     }
 
     @Test
@@ -289,6 +290,41 @@ class PhotoFrameExporterTest {
             OrientedPhotoSize(4000, 6000),
             orientedPhotoSize(6000, 4000, ExifInterface.ORIENTATION_ROTATE_90),
         )
+    }
+
+    @Test
+    fun directCanvasTileMappingMatchesEveryExifOrientation() {
+        val expected = mapOf(
+            ExifInterface.ORIENTATION_NORMAL to
+                floatArrayOf(10f, 20f, 110f, 20f, 10f, 220f),
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL to
+                floatArrayOf(110f, 20f, 10f, 20f, 110f, 220f),
+            ExifInterface.ORIENTATION_ROTATE_180 to
+                floatArrayOf(110f, 220f, 10f, 220f, 110f, 20f),
+            ExifInterface.ORIENTATION_FLIP_VERTICAL to
+                floatArrayOf(10f, 220f, 110f, 220f, 10f, 20f),
+            ExifInterface.ORIENTATION_TRANSPOSE to
+                floatArrayOf(10f, 20f, 10f, 220f, 110f, 20f),
+            ExifInterface.ORIENTATION_ROTATE_90 to
+                floatArrayOf(110f, 20f, 110f, 220f, 10f, 20f),
+            ExifInterface.ORIENTATION_TRANSVERSE to
+                floatArrayOf(110f, 220f, 110f, 20f, 10f, 220f),
+            ExifInterface.ORIENTATION_ROTATE_270 to
+                floatArrayOf(10f, 220f, 10f, 20f, 110f, 220f),
+        )
+
+        expected.forEach { (orientation, points) ->
+            val actual = FloatArray(6)
+            fillOrientedTileDestinationTriangle(
+                left = 10f,
+                top = 20f,
+                right = 110f,
+                bottom = 220f,
+                orientation = orientation,
+                output = actual,
+            )
+            assertTrue("orientation=$orientation", points.contentEquals(actual))
+        }
     }
 
     @Test

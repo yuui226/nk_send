@@ -16,6 +16,28 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class TransferStateTest {
+    @Test
+    fun frameGenerationTimingUsesUserVisibleMonotonicInterval() {
+        val started = TransferTask(file(1)).startFrameGeneration(nowElapsedMs = 1_000L)
+
+        assertEquals(true, started.isGeneratingFrame)
+        assertEquals(1_000L, started.frameGenerationStartedAtElapsedMs)
+        assertEquals(null, started.frameGenerationElapsedMs)
+
+        val finished = started.finishFrameGeneration(nowElapsedMs = 26_250L)
+
+        assertEquals(false, finished.isGeneratingFrame)
+        assertEquals(null, finished.frameGenerationStartedAtElapsedMs)
+        assertEquals(25_250L, finished.frameGenerationElapsedMs)
+    }
+
+    @Test
+    fun finishingInactiveFrameGenerationDoesNotOverwriteItsRecordedDuration() {
+        val task = TransferTask(file(1), frameGenerationElapsedMs = 2_500L)
+
+        assertEquals(task, task.finishFrameGeneration(nowElapsedMs = 10_000L))
+    }
+
     private fun file(handle: Int) = NikonCamera.FileInfo(
         handle = handle,
         size = 100L,

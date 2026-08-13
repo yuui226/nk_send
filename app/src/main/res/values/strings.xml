@@ -80,6 +80,7 @@
     <!-- Transfer queue -->
     <string name="status_waiting">Waiting</string>
     <string name="queue_pill_generating">Generating</string>
+    <string name="status_generation_duration">Generation %1$s</string>
     <string name="status_skipped">Skipped</string>
     <string name="status_cancelled">Cancelled</string>
     <string name="transfer_failed">Transfer failed</string>

@@ -13,6 +13,7 @@ import android.graphics.Color
 import android.graphics.ColorSpace
 import android.graphics.ImageDecoder
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
@@ -22,6 +23,7 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
@@ -29,6 +31,7 @@ import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import androidx.core.content.res.ResourcesCompat
 import com.ztransfer.R
+import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.util.applyExifOrientation
@@ -45,18 +48,35 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
 
 /** 未完成的边框派生文件；仅在完整写入后改成正式名称，App 下次启动会清理遗留项。 */
 internal const val PHOTO_FRAME_PART_PREFIX = ".nkframe_"
 internal const val PHOTO_FRAME_OUTPUT_DIRECTORY = "ZTFrames"
 internal const val PHOTO_FRAME_JPEG_QUALITY = 100
-internal const val PHOTO_FRAME_REGION_TARGET_PIXELS = 1024 * 1024
+// 较大分块显著减少 JPEG region decoder 从文件头重复扫描；单块 RGBA + 滤镜缓冲约 32MiB。
+internal const val PHOTO_FRAME_REGION_TARGET_PIXELS = 4 * 1024 * 1024
 private val PHOTO_FRAME_SESSION_PREFIX =
     "$PHOTO_FRAME_PART_PREFIX${UUID.randomUUID().toString().take(8)}_"
 private const val PLAQUE_BAND_TO_WIDTH = 0.12f
 private const val BRAND_FRAME_SIDE_TO_PHOTO_WIDTH = 0.032f
 private const val BRAND_INSET_BOTTOM_TO_PHOTO_WIDTH = 0.032f
 private const val BRAND_GALLERY_BOTTOM_TO_PHOTO_WIDTH = 0.16f
+
+@Suppress("NOTHING_TO_INLINE")
+private inline fun generationProbeClock(): Long =
+    if (PhotoGenerationProbe.enabled) SystemClock.elapsedRealtime() else 0L
+
+private inline fun recordGenerationStage(
+    sessionId: Long,
+    name: String,
+    durationMs: Long,
+    detail: () -> String = { "" },
+) {
+    if (PhotoGenerationProbe.enabled && sessionId != PhotoGenerationProbe.NO_SESSION) {
+        PhotoGenerationProbe.stage(sessionId, name, durationMs, detail())
+    }
+}
 
 /** 设置页可选的成片样式。名称是持久化键，不要随意改名。 */
 enum class PhotoFramePreset(internal val fileSuffix: String) {
@@ -352,6 +372,63 @@ internal fun orientedRegionRect(
     return Rect(mapped.left, mapped.top, mapped.right, mapped.bottom)
 }
 
+/**
+ * Fills three destination points for mapping an unrotated tile directly through Canvas.
+ * Point order matches source (top-left, top-right, bottom-left).
+ */
+internal fun fillOrientedTileDestinationTriangle(
+    left: Float,
+    top: Float,
+    right: Float,
+    bottom: Float,
+    orientation: Int,
+    output: FloatArray,
+) {
+    require(output.size >= 6)
+    when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> {
+            output[0] = right; output[1] = top
+            output[2] = left; output[3] = top
+            output[4] = right; output[5] = bottom
+        }
+        ExifInterface.ORIENTATION_ROTATE_180 -> {
+            output[0] = right; output[1] = bottom
+            output[2] = left; output[3] = bottom
+            output[4] = right; output[5] = top
+        }
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> {
+            output[0] = left; output[1] = bottom
+            output[2] = right; output[3] = bottom
+            output[4] = left; output[5] = top
+        }
+        ExifInterface.ORIENTATION_TRANSPOSE -> {
+            output[0] = left; output[1] = top
+            output[2] = left; output[3] = bottom
+            output[4] = right; output[5] = top
+        }
+        ExifInterface.ORIENTATION_ROTATE_90 -> {
+            output[0] = right; output[1] = top
+            output[2] = right; output[3] = bottom
+            output[4] = left; output[5] = top
+        }
+        ExifInterface.ORIENTATION_TRANSVERSE -> {
+            output[0] = right; output[1] = bottom
+            output[2] = right; output[3] = top
+            output[4] = left; output[5] = bottom
+        }
+        ExifInterface.ORIENTATION_ROTATE_270 -> {
+            output[0] = left; output[1] = bottom
+            output[2] = left; output[3] = top
+            output[4] = right; output[5] = bottom
+        }
+        else -> {
+            output[0] = left; output[1] = top
+            output[2] = right; output[3] = top
+            output[4] = left; output[5] = bottom
+        }
+    }
+}
+
 internal fun orientedPhotoRegion(
     rawLeft: Int,
     rawTop: Int,
@@ -505,6 +582,7 @@ object PhotoFrameExporter {
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean = true,
         filter: PhotoFilterSelection? = null,
+        probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
     ): Result<PhotoFrameExportResult> {
         return try {
             currentCoroutineContext().ensureActive()
@@ -514,6 +592,7 @@ object PhotoFrameExporter {
                 "Only JPG/JPEG/PNG supports borders or watermarks"
             }
             val renderedWatermark = watermark.forBorderMode(borderEnabled)
+            val renderStartedAtMs = generationProbeClock()
             val rendered = renderSource(
                 context = context,
                 resolver = resolver,
@@ -522,9 +601,16 @@ object PhotoFrameExporter {
                 watermark = renderedWatermark,
                 borderEnabled = borderEnabled,
                 filter = filter,
+                probeSessionId = probeSessionId,
             )
+            recordGenerationStage(
+                probeSessionId,
+                "render_total",
+                generationProbeClock() - renderStartedAtMs,
+            ) { "output=${rendered.width}x${rendered.height}" }
             val saved = try {
                 currentCoroutineContext().ensureActive()
+                val saveStartedAtMs = generationProbeClock()
                 saveRendered(
                     resolver = resolver,
                     destination = destination,
@@ -535,7 +621,14 @@ object PhotoFrameExporter {
                     borderEnabled = borderEnabled,
                     filter = filter,
                     bitmap = rendered,
-                )
+                    probeSessionId = probeSessionId,
+                ).also {
+                    recordGenerationStage(
+                        probeSessionId,
+                        "save_total",
+                        generationProbeClock() - saveStartedAtMs,
+                    )
+                }
             } finally {
                 rendered.recycle()
             }
@@ -751,8 +844,15 @@ object PhotoFrameExporter {
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean,
         filter: PhotoFilterSelection?,
+        probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
     ): Bitmap {
+        val metadataStartedAtMs = generationProbeClock()
         val metadata = if (borderEnabled) readMetadata(resolver, sourceUri) else EMPTY_METADATA
+        recordGenerationStage(
+            probeSessionId,
+            "metadata_read",
+            generationProbeClock() - metadataStartedAtMs,
+        ) { "enabled=$borderEnabled" }
         if (borderEnabled && preset != PhotoFramePreset.IMMERSIVE) {
             return renderOriginalFrameByRegions(
                 context = context,
@@ -762,14 +862,28 @@ object PhotoFrameExporter {
                 preset = preset,
                 watermark = watermark,
                 filter = filter,
+                probeSessionId = probeSessionId,
             )
         }
+        val decodeStartedAtMs = generationProbeClock()
         val decoded = decodeOriginal(resolver, sourceUri)
             ?: error("Cannot decode source photo")
+        recordGenerationStage(
+            probeSessionId,
+            "full_decode",
+            generationProbeClock() - decodeStartedAtMs,
+        ) { "source=${decoded.width}x${decoded.height}" }
         return try {
             if (filter != null) {
+                val filterStartedAtMs = generationProbeClock()
                 PhotoFilterRenderer.renderInPlace(decoded, filter)
+                recordGenerationStage(
+                    probeSessionId,
+                    "filter_pixels",
+                    generationProbeClock() - filterStartedAtMs,
+                ) { "pixels=${decoded.width.toLong() * decoded.height}" }
             }
+            val composeStartedAtMs = generationProbeClock()
             val rendered = renderFrame(
                 context,
                 decoded,
@@ -777,6 +891,11 @@ object PhotoFrameExporter {
                 preset,
                 watermark,
                 borderEnabled,
+            )
+            recordGenerationStage(
+                probeSessionId,
+                "frame_compose",
+                generationProbeClock() - composeStartedAtMs,
             )
             if (rendered !== decoded) decoded.recycle()
             rendered
@@ -1330,11 +1449,17 @@ object PhotoFrameExporter {
                 }
                 val tiny = Bitmap.createBitmap(blurWidth, blurHeight, Bitmap.Config.ARGB_8888)
                 try {
-                    Canvas(tiny).drawCenterCrop(
+                    val tinyCanvas = Canvas(tiny)
+                    tinyCanvas.drawCenterCrop(
                         source,
                         RectF(0f, 0f, blurWidth.toFloat(), blurHeight.toFloat()),
                     )
                     blurBitmapInPlace(tiny, radius = 8, passes = 2)
+                    // CINEMA overlays have no high-frequency detail. Compositing them on the
+                    // 192px proxy before its single upscale avoids two extra 31MP canvas passes.
+                    if (preset == PhotoFramePreset.CINEMA) {
+                        drawCinemaBackdropTreatment(tinyCanvas)
+                    }
                     canvas.drawBitmap(
                         tiny,
                         null,
@@ -1369,27 +1494,7 @@ object PhotoFrameExporter {
                             )
                         }
                     }
-                    PhotoFramePreset.CINEMA -> {
-                        canvas.drawColor(Color.argb(150, 3, 9, 15))
-                        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                            shader = LinearGradient(
-                                0f,
-                                canvas.height * 0.62f,
-                                0f,
-                                canvas.height.toFloat(),
-                                Color.argb(0, 0, 0, 0),
-                                Color.argb(110, 0, 0, 0),
-                                Shader.TileMode.CLAMP,
-                            )
-                            canvas.drawRect(
-                                0f,
-                                canvas.height * 0.60f,
-                                canvas.width.toFloat(),
-                                canvas.height.toFloat(),
-                                this,
-                            )
-                        }
-                    }
+                    PhotoFramePreset.CINEMA -> Unit
                     PhotoFramePreset.FROSTED -> {
                         // 保留照片主色的同时覆盖一层冷白雾面，让整块外框像透过磨砂玻璃；
                         // 参数区还会叠一层独立玻璃胶囊，形成清晰的材质层级。
@@ -1967,6 +2072,28 @@ object PhotoFrameExporter {
         }
     }
 
+    private fun drawCinemaBackdropTreatment(canvas: Canvas) {
+        canvas.drawColor(Color.argb(150, 3, 9, 15))
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                0f,
+                canvas.height * 0.62f,
+                0f,
+                canvas.height.toFloat(),
+                Color.argb(0, 0, 0, 0),
+                Color.argb(110, 0, 0, 0),
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawRect(
+                0f,
+                canvas.height * 0.60f,
+                canvas.width.toFloat(),
+                canvas.height.toFloat(),
+                this,
+            )
+        }
+    }
+
     /**
      * Logo 通常带有细线和透明边缘。一次把大图缩到几十像素会跨过过多源像素，导致细线
      * 呈断续状；逐级减半相当于建立临时 mip 层，再完成最后一次缩放。源文件和缓存位图
@@ -2362,7 +2489,14 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         filter: PhotoFilterSelection?,
-    ): Bitmap = withRegionDecoder(context, resolver, sourceUri) { decoder ->
+        probeSessionId: Long,
+    ): Bitmap = withRegionDecoder(
+        context = context,
+        resolver = resolver,
+        uri = sourceUri,
+        probeSessionId = probeSessionId,
+    ) { decoder ->
+        val setupStartedAtMs = generationProbeClock()
         val orientation = readSourceOrientation(resolver, sourceUri)
         val orientedSize = orientedPhotoSize(decoder.width, decoder.height, orientation)
         val layout = when (preset) {
@@ -2382,6 +2516,13 @@ object PhotoFrameExporter {
             layout.canvasHeight,
             Bitmap.Config.ARGB_8888,
         )
+        recordGenerationStage(
+            probeSessionId,
+            "frame_setup",
+            generationProbeClock() - setupStartedAtMs,
+        ) {
+            "output=${layout.canvasWidth}x${layout.canvasHeight} orientation=$orientation"
+        }
         try {
             val canvas = Canvas(output)
             val photoRect = RectF(
@@ -2398,9 +2539,16 @@ object PhotoFrameExporter {
                     photoRect = photoRect,
                     orientation = orientation,
                     filter = filter,
+                    probeSessionId = probeSessionId,
                 )
                 // The complete plaque band and both watermark modes are composited after filtering.
+                val decorationStartedAtMs = generationProbeClock()
                 drawPlaqueDecoration(context, canvas, layout, metadata, watermark)
+                recordGenerationStage(
+                    probeSessionId,
+                    "frame_decoration",
+                    generationProbeClock() - decorationStartedAtMs,
+                ) { "preset=${preset.name}" }
                 return@withRegionDecoder output
             }
             if (preset.isBrandFrame()) {
@@ -2417,8 +2565,10 @@ object PhotoFrameExporter {
                     photoRect = photoRect,
                     orientation = orientation,
                     filter = filter,
+                    probeSessionId = probeSessionId,
                 )
                 canvas.restore()
+                val decorationStartedAtMs = generationProbeClock()
                 drawBrandFrameDecoration(
                     context = context,
                     canvas = canvas,
@@ -2427,18 +2577,41 @@ object PhotoFrameExporter {
                     preset = preset,
                     watermark = watermark,
                 )
+                recordGenerationStage(
+                    probeSessionId,
+                    "frame_decoration",
+                    generationProbeClock() - decorationStartedAtMs,
+                ) { "preset=${preset.name}" }
                 return@withRegionDecoder output
             }
 
             // Backdrop color/blur must describe the original photo, not the filtered photo layer.
+            val previewStartedAtMs = generationProbeClock()
             val unfilteredPreview = decodeRegionPreview(decoder, orientation)
+            recordGenerationStage(
+                probeSessionId,
+                "backdrop_preview_decode",
+                generationProbeClock() - previewStartedAtMs,
+            ) { "preview=${unfilteredPreview.width}x${unfilteredPreview.height}" }
             try {
+                val backdropStartedAtMs = generationProbeClock()
                 drawBackdrop(canvas, unfilteredPreview, preset)
+                recordGenerationStage(
+                    probeSessionId,
+                    "backdrop_draw",
+                    generationProbeClock() - backdropStartedAtMs,
+                ) { "preset=${preset.name}" }
             } finally {
                 unfilteredPreview.recycle()
             }
             val radius = photoFrameCornerRadius(layout)
+            val elevationStartedAtMs = generationProbeClock()
             drawPhotoElevation(canvas, photoRect, radius, preset)
+            recordGenerationStage(
+                probeSessionId,
+                "photo_elevation",
+                generationProbeClock() - elevationStartedAtMs,
+            )
             val clip = Path().apply {
                 addRoundRect(photoRect, radius, radius, Path.Direction.CW)
             }
@@ -2450,7 +2623,9 @@ object PhotoFrameExporter {
                 photoRect = photoRect,
                 orientation = orientation,
                 filter = filter,
+                probeSessionId = probeSessionId,
             )
+            val decorationStartedAtMs = generationProbeClock()
             // Watermark is intentionally after the filtered photo tiles and is never filtered.
             drawPhotoWatermark(context, canvas, photoRect, preset, watermark)
             canvas.restore()
@@ -2472,6 +2647,11 @@ object PhotoFrameExporter {
                 preset,
                 watermark.withoutPhotoPlacement(),
             )
+            recordGenerationStage(
+                probeSessionId,
+                "frame_decoration",
+                generationProbeClock() - decorationStartedAtMs,
+            ) { "preset=${preset.name}" }
             output
         } catch (error: Throwable) {
             output.recycle()
@@ -2494,8 +2674,10 @@ object PhotoFrameExporter {
         context: Context,
         resolver: ContentResolver,
         uri: Uri,
+        probeSessionId: Long,
         block: suspend (BitmapRegionDecoder) -> T,
     ): T {
+        val openStartedAtMs = generationProbeClock()
         var descriptorFailure: Exception? = null
         val descriptor = try {
             resolver.openFileDescriptor(uri, "r")
@@ -2512,6 +2694,11 @@ object PhotoFrameExporter {
                     null
                 }
                 if (decoder != null) {
+                    recordGenerationStage(
+                        probeSessionId,
+                        "region_decoder_open",
+                        generationProbeClock() - openStartedAtMs,
+                    ) { "mode=file_descriptor source=${decoder.width}x${decoder.height}" }
                     try {
                         return block(decoder)
                     } finally {
@@ -2538,6 +2725,11 @@ object PhotoFrameExporter {
                 null
             }
             if (decoder != null) {
+                recordGenerationStage(
+                    probeSessionId,
+                    "region_decoder_open",
+                    generationProbeClock() - openStartedAtMs,
+                ) { "mode=buffered_stream source=${decoder.width}x${decoder.height}" }
                 try {
                     return block(decoder)
                 } finally {
@@ -2550,6 +2742,7 @@ object PhotoFrameExporter {
         // decode that seekable file. This is slower but keeps the same bounded-memory behaviour.
         val temporary = File.createTempFile("frame_source_", ".img", context.cacheDir)
         try {
+            val materializeStartedAtMs = generationProbeClock()
             try {
                 resolver.openInputStream(uri)?.use { source ->
                     temporary.outputStream().buffered().use { target ->
@@ -2561,6 +2754,11 @@ object PhotoFrameExporter {
                 streamFailure?.let(error::addSuppressed)
                 throw RegionDecodeUnavailableException(error)
             }
+            recordGenerationStage(
+                probeSessionId,
+                "source_materialize",
+                generationProbeClock() - materializeStartedAtMs,
+            ) { "bytes=${temporary.length()}" }
             val decoder = try {
                 BitmapRegionDecoder.newInstance(temporary.absolutePath, false)
             } catch (error: Exception) {
@@ -2568,6 +2766,11 @@ object PhotoFrameExporter {
                 streamFailure?.let(error::addSuppressed)
                 throw RegionDecodeUnavailableException(error)
             }
+            recordGenerationStage(
+                probeSessionId,
+                "region_decoder_open",
+                generationProbeClock() - openStartedAtMs,
+            ) { "mode=private_cache source=${decoder.width}x${decoder.height}" }
             try {
                 return block(decoder)
             } finally {
@@ -2605,17 +2808,46 @@ object PhotoFrameExporter {
         photoRect: RectF,
         orientation: Int,
         filter: PhotoFilterSelection?,
+        probeSessionId: Long,
     ) {
         val rowsPerRegion = photoFrameRegionRows(decoder.width)
         val paint = Paint(Paint.DITHER_FLAG)
         val filterScratch = filter?.let {
             IntArray(maxOf(PHOTO_FRAME_REGION_TARGET_PIXELS, decoder.width))
         }
+        val renderContext = currentCoroutineContext()
+        val isRenderCancelled = { !renderContext.isActive }
+        val filterPreparationStartedAtMs = generationProbeClock()
+        val preparedFilter = filter?.let {
+            PhotoFilterRenderer.prepareOriginalFilter(it, isRenderCancelled)
+        }
+        preparedFilter?.let { prepared ->
+            recordGenerationStage(
+                probeSessionId,
+                "filter_lookup_prepare",
+                generationProbeClock() - filterPreparationStartedAtMs,
+            ) { "mode=${prepared.mode.name}" }
+        }
+        val sourceTriangle = FloatArray(6)
+        val destinationTriangle = FloatArray(6)
+        val orientationMatrix = Matrix()
+        val destinationRect = RectF()
+        var regionCount = 0
+        var decodeElapsedMs = 0L
+        var filterElapsedMs = 0L
+        var drawElapsedMs = 0L
+        val decodeSamplesMs = if (PhotoGenerationProbe.enabled) arrayListOf<Long>() else null
+        val filterSamplesMs = if (PhotoGenerationProbe.enabled && filter != null) {
+            arrayListOf<Long>()
+        } else {
+            null
+        }
         var rawTop = 0
         while (rawTop < decoder.height) {
             currentCoroutineContext().ensureActive()
             val rawBottom = minOf(decoder.height, rawTop + rowsPerRegion)
             val rawRegion = Rect(0, rawTop, decoder.width, rawBottom)
+            val decodeStartedAtMs = generationProbeClock()
             var tile = decoder.decodeRegion(
                 rawRegion,
                 BitmapFactory.Options().apply {
@@ -2624,8 +2856,13 @@ object PhotoFrameExporter {
                     inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
                 },
             ) ?: error("Cannot decode source photo region")
+            val regionDecodeMs = generationProbeClock() - decodeStartedAtMs
+            decodeElapsedMs += regionDecodeMs
+            decodeSamplesMs?.add(regionDecodeMs)
+            regionCount++
             try {
-                if (filter != null) {
+                if (preparedFilter != null) {
+                    val filterStartedAtMs = generationProbeClock()
                     if (!tile.isMutable) {
                         val mutable = tile.copy(Bitmap.Config.ARGB_8888, true)
                             ?: error("Cannot create mutable photo region")
@@ -2635,35 +2872,86 @@ object PhotoFrameExporter {
                     // Only this source-photo region is filtered. No frame pixel exists yet here.
                     PhotoFilterRenderer.renderInPlace(
                         source = tile,
-                        selection = filter,
+                        prepared = preparedFilter,
+                        isCancelled = isRenderCancelled,
                         scratchPixels = filterScratch,
                     )
+                    val regionFilterMs = generationProbeClock() - filterStartedAtMs
+                    filterElapsedMs += regionFilterMs
+                    filterSamplesMs?.add(regionFilterMs)
                 }
-                tile = applyExifOrientation(tile, orientation)
+                val drawStartedAtMs = generationProbeClock()
                 val mapped = orientedRegionRect(
                     rawRegion = rawRegion,
                     rawWidth = decoder.width,
                     rawHeight = decoder.height,
                     orientation = orientation,
                 )
-                check(tile.width == mapped.width() && tile.height == mapped.height()) {
+                val orientedTileSize = orientedPhotoSize(tile.width, tile.height, orientation)
+                check(
+                    orientedTileSize.width == mapped.width() &&
+                        orientedTileSize.height == mapped.height(),
+                ) {
                     "Oriented photo region size mismatch"
                 }
-                canvas.drawBitmap(
-                    tile,
-                    null,
-                    RectF(
-                        photoRect.left + mapped.left,
-                        photoRect.top + mapped.top,
-                        photoRect.left + mapped.right,
-                        photoRect.top + mapped.bottom,
-                    ),
-                    paint,
+                destinationRect.set(
+                    photoRect.left + mapped.left,
+                    photoRect.top + mapped.top,
+                    photoRect.left + mapped.right,
+                    photoRect.top + mapped.bottom,
                 )
+                if (orientation == ExifInterface.ORIENTATION_NORMAL || orientation == 0) {
+                    canvas.drawBitmap(tile, null, destinationRect, paint)
+                } else {
+                    sourceTriangle[0] = 0f
+                    sourceTriangle[1] = 0f
+                    sourceTriangle[2] = tile.width.toFloat()
+                    sourceTriangle[3] = 0f
+                    sourceTriangle[4] = 0f
+                    sourceTriangle[5] = tile.height.toFloat()
+                    fillOrientedTileDestinationTriangle(
+                        left = destinationRect.left,
+                        top = destinationRect.top,
+                        right = destinationRect.right,
+                        bottom = destinationRect.bottom,
+                        orientation = orientation,
+                        output = destinationTriangle,
+                    )
+                    check(
+                        orientationMatrix.setPolyToPoly(
+                            sourceTriangle,
+                            0,
+                            destinationTriangle,
+                            0,
+                            3,
+                        ),
+                    ) { "Cannot map oriented photo region" }
+                    canvas.drawBitmap(tile, orientationMatrix, paint)
+                }
+                drawElapsedMs += generationProbeClock() - drawStartedAtMs
             } finally {
                 if (!tile.isRecycled) tile.recycle()
             }
             rawTop = rawBottom
+        }
+        val pixelCount = decoder.width.toLong() * decoder.height
+        recordGenerationStage(probeSessionId, "region_decode", decodeElapsedMs) {
+            buildString {
+                append("regions=$regionCount rows=$rowsPerRegion")
+                append(" source=${decoder.width}x${decoder.height}")
+                decodeSamplesMs?.let { append(" eachMs=${it.joinToString(",")}") }
+            }
+        }
+        if (preparedFilter != null) {
+            recordGenerationStage(probeSessionId, "filter_pixels", filterElapsedMs) {
+                buildString {
+                    append("pixels=$pixelCount regions=$regionCount")
+                    filterSamplesMs?.let { append(" eachMs=${it.joinToString(",")}") }
+                }
+            }
+        }
+        recordGenerationStage(probeSessionId, "region_orient_draw", drawElapsedMs) {
+            "regions=$regionCount orientation=$orientation mode=canvas_matrix"
         }
     }
 
@@ -3409,6 +3697,7 @@ object PhotoFrameExporter {
         borderEnabled: Boolean,
         filter: PhotoFilterSelection?,
         bitmap: Bitmap,
+        probeSessionId: Long,
     ): PhotoFrameExportResult {
         val parentUri = destination.directoryUri
         val preferred = photoFrameOutputName(
@@ -3421,6 +3710,7 @@ object PhotoFrameExporter {
         // Reserve before touching the provider so concurrent exporters never select the same name.
         val name = reservePhotoFrameName(preferred, destination.occupiedNames)
         val tempName = photoFrameTempName(System.nanoTime())
+        val createStartedAtMs = generationProbeClock()
         val temp = try {
             DocumentsContract.createDocument(
                 resolver,
@@ -3432,15 +3722,27 @@ object PhotoFrameExporter {
             destination.occupiedNames.remove(name)
             throw error
         }
+        recordGenerationStage(
+            probeSessionId,
+            "output_create",
+            generationProbeClock() - createStartedAtMs,
+        )
         var tempStillExists = true
         var keepReservedName = false
         try {
+            val jpegStartedAtMs = generationProbeClock()
             val written = resolver.openOutputStream(temp, "w")?.let { raw ->
                 BufferedOutputStream(raw, COPY_BUFFER_BYTES).use { output ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_FRAME_JPEG_QUALITY, output)
                 }
             } == true
             if (!written) error("Cannot write derived photo")
+            recordGenerationStage(
+                probeSessionId,
+                "jpeg_encode_write",
+                generationProbeClock() - jpegStartedAtMs,
+            ) { "${bitmap.width}x${bitmap.height} q=$PHOTO_FRAME_JPEG_QUALITY" }
+            val exifStartedAtMs = generationProbeClock()
             copyRenderedExif(
                 resolver = resolver,
                 sourceUri = sourceUri,
@@ -3448,17 +3750,28 @@ object PhotoFrameExporter {
                 width = bitmap.width,
                 height = bitmap.height,
             )
+            recordGenerationStage(
+                probeSessionId,
+                "exif_rewrite",
+                generationProbeClock() - exifStartedAtMs,
+            )
             // 压缩是不可中断的阻塞调用；若界面已销毁，在正式改名前响应取消，仅清理隐藏临时文件。
             currentCoroutineContext().ensureActive()
 
             // 正常 DocumentsProvider 走原子改名：系统杀进程时最多遗留隐藏临时文件，
             // 不会让图库出现半张损坏 JPG。改名损坏的定制系统再走完整文件复制回退。
+            val finalizeStartedAtMs = generationProbeClock()
             val renamed = try {
                 DocumentsContract.renameDocument(resolver, temp, name)
             } catch (_: Exception) {
                 null
             }
             if (renamed != null) {
+                recordGenerationStage(
+                    probeSessionId,
+                    "output_finalize",
+                    generationProbeClock() - finalizeStartedAtMs,
+                ) { "mode=rename" }
                 tempStillExists = false
                 val result = PhotoFrameExportResult(
                     displayName = displayNameOf(resolver, renamed) ?: name,
@@ -3474,6 +3787,11 @@ object PhotoFrameExporter {
                 sourceUri = temp,
                 requestedName = name,
             )
+            recordGenerationStage(
+                probeSessionId,
+                "output_finalize",
+                generationProbeClock() - finalizeStartedAtMs,
+            ) { "mode=full_copy" }
             val result = PhotoFrameExportResult(
                 displayName = displayNameOf(resolver, copied) ?: name,
             )

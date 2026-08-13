@@ -36,6 +36,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -202,6 +203,28 @@ fun TransferScreen(
                     val displayedProgress = activeProgress?.fraction ?: task.progress
                     val displayedDownloaded = activeProgress?.downloaded ?: task.downloaded
                     val displayedSpeed = activeProgress?.bytesPerSecond ?: task.speed
+                    var generationClockMs by remember(taskId) {
+                        mutableLongStateOf(android.os.SystemClock.elapsedRealtime())
+                    }
+                    LaunchedEffect(
+                        task.isGeneratingFrame,
+                        task.frameGenerationStartedAtElapsedMs,
+                    ) {
+                        while (
+                            task.isGeneratingFrame &&
+                            task.frameGenerationStartedAtElapsedMs != null
+                        ) {
+                            generationClockMs = android.os.SystemClock.elapsedRealtime()
+                            delay(200L)
+                        }
+                    }
+                    val displayedFrameGenerationElapsedMs = if (task.isGeneratingFrame) {
+                        task.frameGenerationStartedAtElapsedMs?.let { startedAt ->
+                            (generationClockMs - startedAt).coerceAtLeast(0L)
+                        }
+                    } else {
+                        task.frameGenerationElapsedMs
+                    }
                     val removing = removingTaskIds.containsKey(taskId)
                     // 移除动画：真实高度收合 + 淡出（collapseHeight，与列表页分组收合同款），
                     // 收合完毕才从队列删除，下方卡片随布局逐帧上移，无跳变。
@@ -376,6 +399,8 @@ fun TransferScreen(
                                         }
                                         TransferStatus.COMPLETED -> {
                                             val completedText = when {
+                                                task.isGeneratingFrame ->
+                                                    stringResource(R.string.queue_pill_generating)
                                                 task.skipped -> stringResource(R.string.status_skipped)
                                                 // 大小 · 速度 · 耗时：一眼看出快慢与用时。大小取真实落盘字节数
                                                 //（>4GB 对象的 file.size 只是哨兵值）；耗时完成后填入。
@@ -385,7 +410,11 @@ fun TransferScreen(
                                                     task.elapsedMs?.let { append(" · ${formatDuration(it)}") }
                                                 }
                                             }
-                                            completedText to colors.statusConnected
+                                            completedText to if (task.isGeneratingFrame) {
+                                                colors.accentBlue
+                                            } else {
+                                                colors.statusConnected
+                                            }
                                         }
                                         TransferStatus.FAILED -> (task.error ?: stringResource(R.string.transfer_failed)) to colors.statusError
                                         TransferStatus.CANCELLED -> stringResource(R.string.status_cancelled) to colors.onSurfaceVariant
@@ -399,6 +428,26 @@ fun TransferScreen(
                                         maxLines = if (task.status == TransferStatus.FAILED) 2 else 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                    if (
+                                        task.status == TransferStatus.COMPLETED &&
+                                        displayedFrameGenerationElapsedMs != null
+                                    ) {
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = stringResource(
+                                                R.string.status_generation_duration,
+                                                formatDuration(displayedFrameGenerationElapsedMs),
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (task.isGeneratingFrame) {
+                                                colors.accentBlue
+                                            } else {
+                                                colors.statusConnected
+                                            },
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                     task.framePreset?.let { preset ->
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(

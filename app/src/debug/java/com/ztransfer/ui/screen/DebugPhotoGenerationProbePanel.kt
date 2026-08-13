@@ -12,8 +12,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -27,12 +27,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.Rule
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,20 +48,19 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.collectAsState
-import com.ztransfer.diagnostics.FileOrderProbe
+import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.ui.theme.AppTheme
 
-/** Debug 照片页的文件顺序探测窗口；Release 有同名空实现。 */
+/** Debug 照片页的生成耗时窗口；Release 有同名空实现。 */
 @Composable
-internal fun DebugFileOrderProbePanel(modifier: Modifier = Modifier) {
+internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val version by FileOrderProbe.version.collectAsState()
+    val version by PhotoGenerationProbe.version.collectAsState()
     var open by remember { mutableStateOf(false) }
     val lines = remember(version, open) {
-        if (open) FileOrderProbe.displayLines() else emptyList()
+        if (open) PhotoGenerationProbe.displayLines() else emptyList()
     }
 
     Box(modifier = modifier) {
@@ -77,14 +77,14 @@ internal fun DebugFileOrderProbePanel(modifier: Modifier = Modifier) {
                 panel = true,
             ) {
                 Icon(
-                    Icons.Default.Rule,
+                    Icons.Default.Timer,
                     contentDescription = null,
                     tint = colors.accentOrange,
                     modifier = Modifier.size(14.dp),
                 )
                 Spacer(Modifier.width(5.dp))
                 Text(
-                    "顺序探测",
+                    "生成耗时",
                     color = colors.onBackground,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -122,38 +122,38 @@ internal fun DebugFileOrderProbePanel(modifier: Modifier = Modifier) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "文件 / 缩略图顺序探测",
+                                "照片生成分段耗时",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.onBackground,
                             )
                             Text(
-                                "连接后等待整卡扫描结束，再复制完整报告",
+                                "生成完成后复制报告，用于定位 25 秒异常",
                                 fontSize = 11.sp,
                                 color = colors.onSurfaceVariant,
                             )
                         }
                         GlassButton(
                             onClick = {
-                                clipboard.setText(AnnotatedString(FileOrderProbe.compactReport()))
-                                Toast.makeText(context, "精简探测报告已复制", Toast.LENGTH_SHORT).show()
+                                clipboard.setText(AnnotatedString(PhotoGenerationProbe.report()))
+                                Toast.makeText(context, "生成耗时报告已复制", Toast.LENGTH_SHORT).show()
                             },
                             contentPadding = PaddingValues(8.dp),
                         ) {
                             Icon(
                                 Icons.Default.ContentCopy,
-                                contentDescription = "复制精简报告",
+                                contentDescription = "复制生成耗时报告",
                                 tint = colors.accentBlue,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
                         GlassButton(
-                            onClick = { FileOrderProbe.clear() },
+                            onClick = { PhotoGenerationProbe.clear() },
                             contentPadding = PaddingValues(8.dp),
                         ) {
                             Icon(
                                 Icons.Default.DeleteSweep,
-                                contentDescription = "清空探测",
+                                contentDescription = "清空生成耗时",
                                 tint = colors.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp),
                             )
@@ -182,8 +182,8 @@ internal fun DebugFileOrderProbePanel(modifier: Modifier = Modifier) {
                             Text(
                                 text = line,
                                 color = when {
-                                    line.startsWith("!!") -> colors.accentOrange
-                                    "YES" in line -> colors.statusConnected
+                                    "failed" in line || "error" in line -> colors.accentOrange
+                                    "saved" in line -> colors.statusConnected
                                     else -> Color.White.copy(alpha = 0.82f)
                                 },
                                 fontFamily = FontFamily.Monospace,
