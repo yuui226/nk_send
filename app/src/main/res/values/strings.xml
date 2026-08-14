@@ -432,7 +432,7 @@
     <string name="purchase_waiting">Complete the payment above — activation is automatic once confirmed.</string>
     <string name="purchase_activated">Pro unlocked</string>
     <string name="purchase_activation_code_label">Your activation code</string>
-    <string name="purchase_activation_code_keep">Keep your activation code safe. If lost, you won\'t be able to switch devices.</string>
+    <string name="purchase_activation_code_keep">Keep this activation code safe. You\'ll need it when switching devices or reinstalling.</string>
     <string name="settings_view_code">Switch device</string>
     <string name="settings_code_hint">Enter this code on the new device to switch — this one reverts to Free. Don\'t misuse it: misuse disables the code.</string>
     <string name="copy_code">Copy</string>

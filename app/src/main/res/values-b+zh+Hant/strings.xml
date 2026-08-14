@@ -430,7 +430,7 @@
     <string name="purchase_waiting">在上方頁面完成付款，到帳後自動啟用。</string>
     <string name="purchase_activated">高級版已解鎖</string>
     <string name="purchase_activation_code_label">你的啟用碼</string>
-    <string name="purchase_activation_code_keep">請妥善保存啟用碼，遺失將無法換機。</string>
+    <string name="purchase_activation_code_keep">換機或重新安裝時需要此啟用碼，請妥善保存。</string>
     <string name="settings_view_code">我要換機</string>
     <string name="settings_code_hint">在新裝置輸入此啟用碼即可換機，本機會恢復成免費版。請勿濫用，濫用會導致啟用碼失效。</string>
     <string name="copy_code">複製</string>

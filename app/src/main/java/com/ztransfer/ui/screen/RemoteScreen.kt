@@ -2629,7 +2629,11 @@ private fun RemoteContent(
                     (maxHeight - fullscreenVerticalBreathingRoom * 2).coerceAtLeast(0.dp)
                 val (fullscreenImageWidth, fullscreenImageHeight) =
                     fitWithin(maxWidth, fullscreenAvailableHeight)
-                val targetImageX = if (immersiveFullscreen) 0.dp else normalImageX
+                val targetImageX = if (immersiveFullscreen) {
+                    (maxWidth - fullscreenImageWidth) / 2
+                } else {
+                    normalImageX
+                }
                 val targetImageY = if (immersiveFullscreen) {
                     fullscreenVerticalBreathingRoom +
                         (fullscreenAvailableHeight - fullscreenImageHeight) / 2

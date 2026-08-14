@@ -430,7 +430,7 @@
     <string name="purchase_waiting">在上方页面完成支付，到账后自动激活。</string>
     <string name="purchase_activated">高级版已解锁</string>
     <string name="purchase_activation_code_label">你的激活码</string>
-    <string name="purchase_activation_code_keep">请妥善保存激活码，遗失将无法换机。</string>
+    <string name="purchase_activation_code_keep">换机或重装时需要此激活码，请妥善保存。</string>
     <string name="settings_view_code">我要换机</string>
     <string name="settings_code_hint">在新设备输入此激活码即可换机，本机会恢复成免费版。请勿滥用，滥用会导致激活码失效。</string>
     <string name="copy_code">复制</string>

@@ -546,7 +546,7 @@ fun PurchaseDialog(
                                         Spacer(Modifier.height(10.dp))
                                         Text(
                                             stringResource(R.string.purchase_activation_code_keep),
-                                            style = MaterialTheme.typography.bodySmall,
+                                            style = MaterialTheme.typography.bodyMedium,
                                             color = colors.onSurfaceVariant,
                                             textAlign = TextAlign.Center,
                                             modifier = Modifier.fillMaxWidth()
