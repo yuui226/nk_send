@@ -178,6 +178,7 @@ internal fun transferDirectoryNeedsAttention(
 fun SettingsOverlay(
     viewModel: TransferViewModel,
     showPhotoEffectsEntry: Boolean = true,
+    showProBadge: Boolean = true,
     effectPreviewSource: Bitmap? = null,
     effectPreviewCameraManufacturer: String? = null,
     effectPreviewCameraModel: String? = null,
@@ -264,9 +265,8 @@ fun SettingsOverlay(
         )
     }
 
-    // 右上角"解锁高级版"徽标打开的介绍对话框（免费/高级版对比 + 解锁按钮复制 QQ 号）。
+    // 显示右上角"解锁高级版"徽标时，由它打开介绍对话框（免费/高级版对比 + 解锁按钮复制 QQ 号）。
     var showPro by remember { mutableStateOf(false) }
-    var showRenewInfo by remember { mutableStateOf(false) }
     // 页脚"我要换机"打开的对话框（取激活码 + 换机后果告知）。
     var showSwitchDevice by remember { mutableStateOf(false) }
     var settingsPage by remember { mutableStateOf(SettingsPage.MAIN) }
@@ -560,20 +560,22 @@ fun SettingsOverlay(
                 )
                 Spacer(Modifier.weight(1f))
                 if (page == SettingsPage.MAIN) {
-                    // 未解锁：金徽标"解锁高级版"，点击开介绍弹窗。
-                    // 已解锁：金徽标改显"高级版"，点击不弹窗，放烟花彩蛋。
-                    if (isPro) {
-                        ProBadgeButton(
-                            label = stringResource(R.string.pro_label),
-                            onClick = onPlayFireworks
-                        )
-                    } else {
-                        ProBadgeButton(
-                            label = stringResource(R.string.unlock_pro),
-                            onClick = { showPro = true }
-                        )
+                    if (showProBadge) {
+                        // 未解锁：金徽标"解锁高级版"，点击开介绍弹窗。
+                        // 已解锁：金徽标改显"高级版"，点击不弹窗，放烟花彩蛋。
+                        if (isPro) {
+                            ProBadgeButton(
+                                label = stringResource(R.string.pro_label),
+                                onClick = onPlayFireworks
+                            )
+                        } else {
+                            ProBadgeButton(
+                                label = stringResource(R.string.unlock_pro),
+                                onClick = { showPro = true }
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
                     }
-                    Spacer(Modifier.width(8.dp))
                     IconButton(onClick = close, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_close), tint = colors.onSurfaceVariant)
                     }
@@ -788,16 +790,6 @@ fun SettingsOverlay(
                     renew = false
                 )
             }
-            if (showRenewInfo) {
-                RenewDialog(
-                    onDismiss = { showRenewInfo = false },
-                    onCelebrate = onPlayFireworks,
-                    onHoldCameraWifi = onHoldCameraWifi,
-                )
-            }
-
-            // 过期用户在此也进入统一的 RenewDialog，避免绕过套餐与价格确认。
-
             Spacer(Modifier.height(14.dp))
 
             // ---------- 传输目录：标题、单行路径与更改按钮并排；未设置时保留橙色强调 ----------

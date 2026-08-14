@@ -388,7 +388,6 @@ fun HomeScreen(
         // 右上角：免费版显示"解锁高级版"金徽标。本页尚未连相机热点、多半还有外网，
         // 因此是全 app 唯一放"输入激活码"入口的弹窗（其余页面连着相机 Wi-Fi 无外网）----------
         // 已解锁：金徽标改显"高级版"，点击不弹窗，每点一次放一发独立烟花（可连点并发）。
-        // 设置面板里的同款徽标也共用这一实例（见 SettingsOverlay 的 onPlayFireworks）。
         val fireworks = rememberFireworksState()
         Row(
             modifier = Modifier
@@ -471,10 +470,10 @@ fun HomeScreen(
             SettingsOverlay(
                 viewModel = transferViewModel,
                 showPhotoEffectsEntry = false,
+                // 连接页顶栏已经有购买入口，设置弹窗不再重复展示高级版徽标。
+                showProBadge = false,
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },
-                onPlayFireworks = { fireworks.launch() },
-                onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
             )
         }
 

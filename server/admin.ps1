@@ -134,6 +134,29 @@ function Format-Time($iso) {
     try { return ([datetime]$iso).ToLocalTime().ToString("yyyy-MM-dd HH:mm") } catch { return $iso }
 }
 
+# PowerShell 的 Format-Table 按字符数计算列宽，中文在控制台里通常占两格，表头会因此歪斜。
+# 这里按终端显示宽度补空格，专供中英文混排的管理工具表格使用。
+function Get-ConsoleTextWidth($text) {
+    $width = 0
+    foreach ($char in ([string]$text).ToCharArray()) {
+        $code = [int]$char
+        $wide = ($code -ge 0x2E80 -and $code -le 0x9FFF) -or
+            ($code -ge 0xAC00 -and $code -le 0xD7AF) -or
+            ($code -ge 0xF900 -and $code -le 0xFAFF) -or
+            ($code -ge 0xFF01 -and $code -le 0xFF60) -or
+            ($code -ge 0xFFE0 -and $code -le 0xFFE6)
+        $width += $(if ($wide) { 2 } else { 1 })
+    }
+    return $width
+}
+
+function Pad-ConsoleText($text, $width, $alignRight = $false) {
+    $value = [string]$text
+    $padding = [Math]::Max(0, [int]$width - (Get-ConsoleTextWidth $value))
+    if ($alignRight) { return (" " * $padding) + $value }
+    return $value + (" " * $padding)
+}
+
 function Convert-YuanToFen($text, $allowEmpty) {
     $value = if ($null -eq $text) { "" } else { [string]$text }
     if ([string]::IsNullOrWhiteSpace($value)) {
@@ -256,10 +279,11 @@ function Show-Ledger($resp) {
 }
 
 function Invoke-NewCodes {
-    $countIn = Read-Host "生成几个?(直接回车 = 1)"
+    $countIn = Read-Host "生成几个激活码?(直接回车 = 1)"
     $count = 1
     if ($countIn -match '^\d+$') { $count = [int]$countIn }
     $note = Read-Host "备注(比如 '7月QQ群批次',可留空)"
+    # 每个激活码固定只允许 1 台在用设备；服务端以新机顶替旧机，不再询问或上传设备数。
     # 手动发码默认永久(自测/补偿/送人);要发年费码就填 365。
     $daysIn = Read-Host "有效期天数(回车 = 永久;年费填 365)"
     $days = 0
@@ -567,7 +591,7 @@ function Invoke-UpdateStatus {
     Show-UpdateInfo (Get-UpdateInfo)
 }
 
-function Invoke-UpdateStats {
+function Invoke-UpdateStats([switch]$ShowAll) {
     $resp = Call "GET" "/admin/update/stats" $null
     if (-not $resp) { return }
     if (-not $resp.ok) { Show-Error $resp; return }
@@ -576,28 +600,96 @@ function Invoke-UpdateStats {
         Write-Host "暂无更新统计" -ForegroundColor DarkGray
         return
     }
-    $table = foreach ($row in $rows) {
-        $source = if ($row.sourceVersionName) {
-            "{0} ({1})" -f $row.sourceVersionName, $row.sourceVersionCode
+
+    $allTargetCodes = @(
+        $rows | ForEach-Object { [int]$_.targetVersionCode } | Sort-Object -Descending -Unique
+    )
+    $targetCodes = if ($ShowAll) {
+        @($allTargetCodes)
+    } else {
+        @($allTargetCodes | Select-Object -First 3)
+    }
+
+    Write-Host ""
+    $scope = if ($ShowAll) { "全部 {0} 个目标版本" -f $targetCodes.Count } else { "最近 {0} 个目标版本" -f $targetCodes.Count }
+    Write-Host ("================ 更新统计 · {0} ================" -f $scope) -ForegroundColor Cyan
+
+    foreach ($targetCode in $targetCodes) {
+        $groupRows = @($rows | Where-Object { [int]$_.targetVersionCode -eq $targetCode })
+        if ($groupRows.Count -eq 0) { continue }
+        $first = $groupRows[0]
+        $target = if ($first.targetVersionName) {
+            "{0} ({1})" -f $first.targetVersionName, $first.targetVersionCode
         } else {
-            "versionCode {0}" -f $row.sourceVersionCode
+            "versionCode {0}" -f $first.targetVersionCode
         }
-        $target = if ($row.targetVersionName) {
-            "{0} ({1})" -f $row.targetVersionName, $row.targetVersionCode
-        } else {
-            "versionCode {0}" -f $row.targetVersionCode
+        $displayRows = @(
+            foreach ($row in $groupRows) {
+                [PSCustomObject]@{
+                    Source = $(if ($row.sourceVersionName) {
+                        "{0} ({1})" -f $row.sourceVersionName, $row.sourceVersionCode
+                    } else {
+                        "versionCode {0}" -f $row.sourceVersionCode
+                    })
+                    Checks = [string][long]$row.checkCount
+                    Installs = [string][long]$row.installTriggerCount
+                    LastCheck = Format-Time $row.lastCheckAt
+                    LastInstall = Format-Time $row.lastInstallAt
+                }
+            }
+        )
+
+        $sourceWidth = Get-ConsoleTextWidth "用户版本"
+        $checkWidth = Get-ConsoleTextWidth "检查次数"
+        $installWidth = Get-ConsoleTextWidth "安装触发"
+        $lastCheckWidth = Get-ConsoleTextWidth "最近检查"
+        $lastInstallWidth = Get-ConsoleTextWidth "最近安装"
+        foreach ($item in $displayRows) {
+            $sourceWidth = [Math]::Max($sourceWidth, (Get-ConsoleTextWidth $item.Source))
+            $checkWidth = [Math]::Max($checkWidth, (Get-ConsoleTextWidth $item.Checks))
+            $installWidth = [Math]::Max($installWidth, (Get-ConsoleTextWidth $item.Installs))
+            $lastCheckWidth = [Math]::Max($lastCheckWidth, (Get-ConsoleTextWidth $item.LastCheck))
+            $lastInstallWidth = [Math]::Max($lastInstallWidth, (Get-ConsoleTextWidth $item.LastInstall))
         }
-        [PSCustomObject]@{
-            "用户版本" = $source
-            "目标版本" = $target
-            "检查次数" = [long]$row.checkCount
-            "安装触发" = [long]$row.installTriggerCount
-            "最近检查" = Format-Time $row.lastCheckAt
-            "最近安装" = Format-Time $row.lastInstallAt
+
+        Write-Host ""
+        Write-Host ("目标版本: {0}    来源版本数: {1}" -f $target, $groupRows.Count) -ForegroundColor Yellow
+        $header = @(
+            (Pad-ConsoleText "用户版本" $sourceWidth),
+            (Pad-ConsoleText "检查次数" $checkWidth $true),
+            (Pad-ConsoleText "安装触发" $installWidth $true),
+            (Pad-ConsoleText "最近检查" $lastCheckWidth),
+            (Pad-ConsoleText "最近安装" $lastInstallWidth)
+        ) -join "  "
+        Write-Host $header -ForegroundColor DarkGray
+        Write-Host ("-" * (Get-ConsoleTextWidth $header)) -ForegroundColor DarkGray
+        foreach ($item in $displayRows) {
+            Write-Host (@(
+                (Pad-ConsoleText $item.Source $sourceWidth),
+                (Pad-ConsoleText $item.Checks $checkWidth $true),
+                (Pad-ConsoleText $item.Installs $installWidth $true),
+                (Pad-ConsoleText $item.LastCheck $lastCheckWidth),
+                (Pad-ConsoleText $item.LastInstall $lastInstallWidth)
+            ) -join "  ")
         }
+        $totalChecks = ($groupRows | Measure-Object -Property checkCount -Sum).Sum
+        $totalInstalls = ($groupRows | Measure-Object -Property installTriggerCount -Sum).Sum
+        Write-Host ("-" * (Get-ConsoleTextWidth $header)) -ForegroundColor DarkGray
+        Write-Host (@(
+            (Pad-ConsoleText "合计" $sourceWidth),
+            (Pad-ConsoleText ([string][long]$totalChecks) $checkWidth $true),
+            (Pad-ConsoleText ([string][long]$totalInstalls) $installWidth $true),
+            (Pad-ConsoleText "" $lastCheckWidth),
+            (Pad-ConsoleText "" $lastInstallWidth)
+        ) -join "  ") -ForegroundColor Green
+    }
+
+    $hiddenCount = $allTargetCodes.Count - $targetCodes.Count
+    if (-not $ShowAll -and $hiddenCount -gt 0) {
+        Write-Host ""
+        Write-Host ("已隐藏更早的 {0} 个目标版本；在菜单中选择 [8] 查看全部更新统计可展开。" -f $hiddenCount) -ForegroundColor DarkGray
     }
     Write-Host ""
-    $table | Format-Table -AutoSize
 }
 
 function Find-AndroidTool($fileNames, $relativePatterns) {
@@ -1218,7 +1310,8 @@ function Invoke-UpdateMenu {
         Write-Host "  [4] 正式发布新版本（会切换服务端）" -ForegroundColor Yellow
         Write-Host "  [5] 验证当前 OSS 下载"
         Write-Host "  [6] 修改软/硬更新策略"
-        Write-Host "  [7] 查看更新统计"
+        Write-Host "  [7] 查看更新统计（最近 3 个版本）"
+        Write-Host "  [8] 查看全部更新统计"
         Write-Host "  [0] 返回"
         $choice = Read-Host "选择"
         switch ($choice.Trim()) {
@@ -1229,8 +1322,9 @@ function Invoke-UpdateMenu {
             "5" { Invoke-UpdateValidate }
             "6" { Invoke-UpdatePolicy }
             "7" { Invoke-UpdateStats }
+            "8" { Invoke-UpdateStats -ShowAll }
             "0" { return }
-            default { Write-Host "输入 0-7" -ForegroundColor Yellow }
+            default { Write-Host "输入 0-8" -ForegroundColor Yellow }
         }
     }
 }

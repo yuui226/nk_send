@@ -82,3 +82,23 @@ test('菜单默认安全入口与正式发布入口不会混淆', () => {
     assert.match(publish, /Copy-VersionedApkToLatest/);
     assert.match(publish, /"POST"\s+"\/admin\/update\/publish"/);
 });
+
+test('人工发码固定单设备且不再询问设备数', () => {
+    const issue = functionSource('Invoke-NewCodes');
+
+    assert.match(issue, /生成几个激活码/);
+    assert.doesNotMatch(issue, /max.?devices|可用设备|设备上限/i);
+    assert.doesNotMatch(issue, /Read-Host[^\n]*设备/);
+    assert.doesNotMatch(issue, /@\{[^}]*device/i);
+});
+
+test('更新统计默认只展示最近三个目标版本并使用中文等宽表格', () => {
+    const stats = functionSource('Invoke-UpdateStats');
+    const menu = functionSource('Invoke-UpdateMenu');
+
+    assert.match(stats, /Select-Object -First 3/);
+    assert.match(stats, /Pad-ConsoleText/);
+    assert.doesNotMatch(stats, /Format-Table/);
+    assert.match(menu, /"7"\s*\{\s*Invoke-UpdateStats\s*\}/);
+    assert.match(menu, /"8"\s*\{\s*Invoke-UpdateStats -ShowAll\s*\}/);
+});
