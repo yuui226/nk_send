@@ -914,12 +914,10 @@ private fun transferTaskEffectText(task: TransferTask): String? {
     val frameName = task.framePreset
         ?.takeIf { task.frameBorderRequested }
         ?.let { photoFramePresetLabel(it) }
-    val watermarkName = task.framePreset
-        ?.takeIf { task.frameWatermarkRequested.enabled }
-        ?.let { stringResource(R.string.photo_frame_watermark_short) }
-    val filterName = task.photoFilterRequested?.let { photoFilterDisplayName(it.preset) }
-    val filterIntensity = task.photoFilterRequested?.let { "${it.normalizedIntensityPercent}%" }
-    val parts = listOfNotNull(frameName, watermarkName, filterName, filterIntensity)
+    val filterName = task.photoFilterRequested?.let {
+        "${photoFilterDisplayName(it.preset)} ${it.normalizedIntensityPercent}%"
+    }
+    val parts = listOfNotNull(frameName, filterName)
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
 }
 

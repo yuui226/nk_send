@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Z传 · 传输卡片列表布局</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page-top: #101722;
+      --page-bottom: #070b11;
+      --surface: rgba(26, 33, 44, .94);
+      --surface-soft: rgba(255, 255, 255, .035);
+      --surface-pressed: rgba(255, 255, 255, .075);
+      --line: rgba(255, 255, 255, .10);
+      --line-strong: rgba(255, 255, 255, .16);
+      --text: #f2f6fb;
+      --muted: #9ba6b6;
+      --faint: #717d8e;
+      --blue: #64b4ff;
+      --blue-soft: rgba(82, 165, 248, .15);
+      --green: #77dcb0;
+      --red: #ff878d;
+      --amber: #f0c76c;
+      --purple: #b9a3ff;
+      --shadow: 0 12px 30px rgba(0, 0, 0, .25);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-width: 320px; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      background:
+        radial-gradient(circle at 78% 0%, rgba(68, 139, 222, .13), transparent 25rem),
+        linear-gradient(180deg, var(--page-top), var(--page-bottom));
+    }
+
+    button { font: inherit; }
+
+    .transfer-list-demo {
+      width: min(100%, 454px);
+      margin: 0 auto;
+      padding: 22px 14px 34px;
+    }
+
+    .transfer-list-demo__stack {
+      display: grid;
+      gap: 9px;
+    }
+
+    .transfer-list-demo__card {
+      --progress: 0%;
+      --state-rgb: 255, 255, 255;
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 58px;
+      min-height: 96px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      isolation: isolate;
+    }
+
+    .transfer-list-demo__card::before {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      inset: 0 auto 0 0;
+      width: var(--progress);
+      background:
+        linear-gradient(105deg, rgba(76, 161, 247, .11), rgba(76, 161, 247, .045));
+      transition: width .25s ease;
+    }
+
+    .transfer-list-demo__card--waiting { --state-rgb: 240, 199, 108; }
+    .transfer-list-demo__card--transferring { --state-rgb: 100, 180, 255; }
+    .transfer-list-demo__card--generating { --state-rgb: 185, 163, 255; }
+    .transfer-list-demo__card--done { --state-rgb: 119, 220, 176; }
+    .transfer-list-demo__card--failed { --state-rgb: 255, 135, 141; }
+
+    .transfer-list-demo__card--waiting,
+    .transfer-list-demo__card--transferring,
+    .transfer-list-demo__card--generating,
+    .transfer-list-demo__card--done,
+    .transfer-list-demo__card--failed {
+      border-color: rgba(var(--state-rgb), .15);
+      background:
+        linear-gradient(110deg, rgba(var(--state-rgb), .055), transparent 68%),
+        var(--surface);
+    }
+
+    .transfer-list-demo__main {
+      position: relative;
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 64px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 11px 12px;
+    }
+
+    .transfer-list-demo__thumb {
+      position: relative;
+      width: 64px;
+      height: 64px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, .10);
+      border-radius: 11px;
+      background-color: #252d38;
+      box-shadow: inset 0 1px rgba(255, 255, 255, .07);
+    }
+
+    .transfer-list-demo__thumb--room {
+      background:
+        linear-gradient(90deg, transparent 70%, rgba(54, 106, 157, .72) 71% 100%),
+        linear-gradient(180deg, rgba(226, 213, 194, .72) 0 62%, rgba(105, 76, 58, .72) 63% 100%);
+    }
+
+    .transfer-list-demo__thumb--fan {
+      background:
+        radial-gradient(circle at 38% 32%, #d7d9d9 0 17%, transparent 18%),
+        repeating-conic-gradient(from 0deg at 38% 32%, #bfc5c8 0deg 3deg, #5f6870 4deg 7deg),
+        linear-gradient(135deg, #c7c9ca, #6c6d71 70%, #5c4a3f);
+    }
+
+    .transfer-list-demo__thumb--street {
+      background:
+        linear-gradient(110deg, transparent 0 43%, rgba(248, 196, 85, .85) 44% 49%, transparent 50%),
+        linear-gradient(180deg, #526f8c 0 48%, #283845 49% 63%, #171d23 64% 100%);
+    }
+
+    .transfer-list-demo__thumb--portrait {
+      background:
+        radial-gradient(circle at 52% 34%, #d8af93 0 14%, transparent 15%),
+        radial-gradient(ellipse at 52% 73%, #37425d 0 28%, transparent 29%),
+        linear-gradient(145deg, #9a7d77, #3d4253 56%, #202632);
+    }
+
+    .transfer-list-demo__thumb--mountain {
+      background:
+        linear-gradient(145deg, transparent 44%, #62788a 45% 60%, transparent 61%),
+        linear-gradient(35deg, transparent 43%, #313d49 44% 65%, transparent 66%),
+        linear-gradient(180deg, #829fc0 0 55%, #29333d 56% 100%);
+    }
+
+    .transfer-list-demo__state-mark {
+      position: absolute;
+      right: 4px;
+      bottom: 4px;
+      display: grid;
+      place-items: center;
+      width: 20px;
+      height: 20px;
+      border: 2px solid #1b222d;
+      border-radius: 50%;
+      color: #101721;
+      background: var(--green);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .34);
+    }
+
+    .transfer-list-demo__state-mark--blue { background: var(--blue); }
+    .transfer-list-demo__state-mark--amber { background: var(--amber); }
+    .transfer-list-demo__state-mark--purple { background: var(--purple); }
+    .transfer-list-demo__state-mark--red { background: var(--red); }
+
+    .transfer-list-demo__state-mark svg {
+      width: 12px;
+      height: 12px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .transfer-list-demo__copy { min-width: 0; }
+
+    .transfer-list-demo__headline {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .transfer-list-demo__headline--with-action { padding-right: 58px; }
+
+    .transfer-list-demo__filename {
+      min-width: 0;
+      flex: 0 1 auto;
+      margin: 0;
+      overflow: hidden;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.25;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .transfer-list-demo__metadata {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      margin-top: 6px;
+    }
+
+    .transfer-list-demo__pill {
+      flex: none;
+      max-width: 138px;
+      padding: 3px 7px;
+      overflow: hidden;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      font-size: 10px;
+      line-height: 1.2;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .transfer-list-demo__pill--size {
+      border-color: rgba(255, 255, 255, .10);
+      color: #aeb8c5;
+      background: rgba(255, 255, 255, .05);
+    }
+
+    .transfer-list-demo__pill--transfer {
+      border-color: rgba(100, 180, 255, .22);
+      color: #9ed0ff;
+      background: rgba(82, 165, 248, .10);
+    }
+
+    .transfer-list-demo__pill--effect {
+      border-color: rgba(167, 139, 250, .22);
+      color: #c9bcff;
+      background: rgba(139, 108, 231, .11);
+    }
+
+    .transfer-list-demo__pill--generation {
+      border-color: rgba(241, 185, 94, .22);
+      color: #f5d293;
+      background: rgba(220, 157, 52, .10);
+    }
+
+    .transfer-list-demo__pill--speed {
+      border-color: rgba(92, 211, 184, .22);
+      color: #9ee3d2;
+      background: rgba(63, 181, 153, .10);
+    }
+
+    .transfer-list-demo__pill--speed-enter {
+      transform-origin: left center;
+      animation: transfer-list-demo-speed-split 320ms cubic-bezier(.2, .9, .25, 1.25) 60ms both;
+    }
+
+    .transfer-list-demo__pill--size-response,
+    .transfer-list-demo__pill--effect-response {
+      transform-origin: left center;
+      animation: transfer-list-demo-source-response 320ms cubic-bezier(.2, .9, .25, 1.2) 40ms both;
+    }
+
+    .transfer-list-demo__pill--duration-enter {
+      transform-origin: left center;
+      animation: transfer-list-demo-duration-follow 300ms cubic-bezier(.2, .9, .25, 1.2) 150ms both;
+    }
+
+    .transfer-list-demo__pill--generation-enter {
+      transform-origin: left center;
+      animation: transfer-list-demo-duration-follow 320ms cubic-bezier(.2, .9, .25, 1.2) 80ms both;
+    }
+
+    @keyframes transfer-list-demo-source-response {
+      0%, 100% { transform: scale(1); }
+      34% { transform: scaleX(.94) scaleY(1.03); }
+      68% { transform: scaleX(1.04) scaleY(.98); }
+    }
+
+    @keyframes transfer-list-demo-speed-split {
+      0% {
+        max-width: 0;
+        margin-left: -5px;
+        padding-inline: 0;
+        opacity: 0;
+        transform: translateX(-8px) scale(.72);
+      }
+      62% {
+        max-width: 92px;
+        margin-left: 0;
+        padding-inline: 7px;
+        opacity: 1;
+        transform: translateX(2px) scale(1.06);
+      }
+      100% {
+        max-width: 92px;
+        margin-left: 0;
+        padding-inline: 7px;
+        opacity: 1;
+        transform: translateX(0) scale(1);
+      }
+    }
+
+    @keyframes transfer-list-demo-duration-follow {
+      0% {
+        max-width: 0;
+        margin-left: -5px;
+        padding-inline: 0;
+        opacity: 0;
+        transform: translateX(-7px) scale(.78);
+      }
+      66% {
+        max-width: 72px;
+        margin-left: 0;
+        padding-inline: 7px;
+        opacity: 1;
+        transform: translateX(1px) scale(1.045);
+      }
+      100% {
+        max-width: 72px;
+        margin-left: 0;
+        padding-inline: 7px;
+        opacity: 1;
+        transform: translateX(0) scale(1);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .transfer-list-demo__pill--speed-enter,
+      .transfer-list-demo__pill--size-response,
+      .transfer-list-demo__pill--effect-response,
+      .transfer-list-demo__pill--duration-enter,
+      .transfer-list-demo__pill--generation-enter { animation: none; }
+    }
+
+    .transfer-list-demo__primary {
+      margin: 5px 0 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .transfer-list-demo__primary--red {
+      color: #ffadb2;
+      white-space: normal;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .transfer-list-demo__details {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      margin-top: 7px;
+      overflow: hidden;
+    }
+
+    .transfer-list-demo__retry {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid rgba(100, 180, 255, .22);
+      border-radius: 999px;
+      color: #a9d5ff;
+      background: rgba(82, 165, 248, .09);
+      font-size: 11px;
+      line-height: 1.2;
+      cursor: pointer;
+    }
+
+    .transfer-list-demo__retry:hover { background: rgba(82, 165, 248, .16); }
+
+    .transfer-list-demo__retry svg {
+      width: 12px;
+      height: 12px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .transfer-list-demo__remove {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      min-height: 100%;
+      padding: 0;
+      border: 0;
+      border-left: 1px solid var(--line);
+      color: var(--muted);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, .018));
+      cursor: pointer;
+      transition: color .16s ease, background .16s ease;
+    }
+
+    .transfer-list-demo__remove:hover {
+      color: #ffb2b6;
+      background: rgba(238, 91, 99, .105);
+    }
+
+    .transfer-list-demo__remove:active { background: rgba(238, 91, 99, .16); }
+
+    .transfer-list-demo__remove:disabled {
+      color: rgba(155, 166, 182, .22);
+      background: rgba(255, 255, 255, .012);
+      cursor: default;
+    }
+
+    .transfer-list-demo__remove svg {
+      width: 22px;
+      height: 22px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.7;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .transfer-list-demo__remove-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    @media (max-width: 370px) {
+      .transfer-list-demo { padding-inline: 9px; }
+      .transfer-list-demo__card { grid-template-columns: minmax(0, 1fr) 52px; }
+      .transfer-list-demo__main { grid-template-columns: 56px minmax(0, 1fr); gap: 9px; padding: 10px; }
+      .transfer-list-demo__thumb { width: 56px; height: 56px; }
+      .transfer-list-demo__pill { max-width: 108px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="transfer-list-demo" aria-label="传输列表卡片布局示意">
+    <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+      <symbol id="transfer-card-broom" viewBox="0 0 24 24">
+        <path d="M14.4 3.1 9.9 11.5"></path>
+        <path d="m8.7 10.8 5.3 2.8"></path>
+        <path d="M7.8 11.3 3.5 18.9c2.4 1.6 5.2 2.2 8.4 1.7l3.3-6.3z"></path>
+        <path d="M5.5 16.5c1.9 1.3 4.1 1.8 6.7 1.5"></path>
+      </symbol>
+      <symbol id="transfer-card-check" viewBox="0 0 16 16"><path d="m3.2 8.3 3 3 6.6-7"></path></symbol>
+      <symbol id="transfer-card-arrow" viewBox="0 0 16 16"><path d="M8 13V3m0 0L4.8 6.2M8 3l3.2 3.2"></path></symbol>
+      <symbol id="transfer-card-wand" viewBox="0 0 16 16"><path d="m3 13 8.5-8.5M9.8 2.8l3.4 3.4M3 3v2M2 4h2m8 6v3m-1.5-1.5h3"></path></symbol>
+      <symbol id="transfer-card-alert" viewBox="0 0 16 16"><path d="M8 3v5.2M8 11.5v.2"></path></symbol>
+      <symbol id="transfer-card-clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5"></circle><path d="M8 5v3.2l2 1.2"></path></symbol>
+      <symbol id="transfer-card-retry" viewBox="0 0 16 16"><path d="M13 7A5.2 5.2 0 1 0 11.5 12M13 7V3.5M13 7H9.5"></path></symbol>
+    </svg>
+
+    <section class="transfer-list-demo__stack" aria-label="传输任务">
+      <article class="transfer-list-demo__card transfer-list-demo__card--transferring" style="--progress: 46%">
+        <div class="transfer-list-demo__main">
+          <div class="transfer-list-demo__thumb transfer-list-demo__thumb--room">
+            <span class="transfer-list-demo__state-mark transfer-list-demo__state-mark--blue" role="img" aria-label="状态：传输中">
+              <svg aria-hidden="true"><use href="#transfer-card-arrow"></use></svg>
+            </span>
+          </div>
+          <div class="transfer-list-demo__copy">
+            <div class="transfer-list-demo__headline">
+              <h2 class="transfer-list-demo__filename">Z30_8650.JPG</h2>
+            </div>
+            <div class="transfer-list-demo__metadata">
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--size transfer-list-demo__pill--size-response">31.2 MB</span>
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--speed transfer-list-demo__pill--speed-enter">18.7 MB/s</span>
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--transfer transfer-list-demo__pill--duration-enter">0.8s</span>
+            </div>
+            <div class="transfer-list-demo__details">
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--effect">暗调 · Blue Hour · 80%</span>
+            </div>
+          </div>
+        </div>
+        <button class="transfer-list-demo__remove" type="button" disabled aria-label="传输中不可移除">
+          <svg aria-hidden="true"><use href="#transfer-card-broom"></use></svg>
+        </button>
+      </article>
+
+      <article class="transfer-list-demo__card transfer-list-demo__card--generating">
+        <div class="transfer-list-demo__main">
+          <div class="transfer-list-demo__thumb transfer-list-demo__thumb--fan">
+            <span class="transfer-list-demo__state-mark transfer-list-demo__state-mark--purple" role="img" aria-label="状态：生成中">
+              <svg aria-hidden="true"><use href="#transfer-card-wand"></use></svg>
+            </span>
+          </div>
+          <div class="transfer-list-demo__copy">
+            <div class="transfer-list-demo__headline">
+              <h2 class="transfer-list-demo__filename">Z30_8651.JPG</h2>
+            </div>
+            <div class="transfer-list-demo__metadata">
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--size">31.2 MB</span>
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--speed">18.1 MB/s</span>
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--transfer">1.8s</span>
+            </div>
+            <div class="transfer-list-demo__details">
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--effect transfer-list-demo__pill--effect-response">暗调 · Blue Hour · 80%</span>
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--generation transfer-list-demo__pill--generation-enter">2.4s</span>
+            </div>
+          </div>
+        </div>
+        <button class="transfer-list-demo__remove" type="button" disabled aria-label="生成中不可移除">
+          <svg aria-hidden="true"><use href="#transfer-card-broom"></use></svg>
+        </button>
+      </article>
+
+      <article class="transfer-list-demo__card transfer-list-demo__card--done">
+        <div class="transfer-list-demo__main">
+          <div class="transfer-list-demo__thumb transfer-list-demo__thumb--street">
+            <span class="transfer-list-demo__state-mark" role="img" aria-label="状态：已完成">
+              <svg aria-hidden="true"><use href="#transfer-card-check"></use></svg>
+            </span>
+          </div>
+          <div class="transfer-list-demo__copy">
+            <div class="transfer-list-demo__headline">
+              <h2 class="transfer-list-demo__filename">Z30_8649.JPG</h2>
+            </div>
+            <div class="transfer-list-demo__metadata">
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--size">31.2 MB</span>
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--speed">17.6 MB/s</span>
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--transfer">1.8s</span>
+            </div>
+            <div class="transfer-list-demo__details">
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--effect">暗调 · Blue Hour · 80%</span>
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--generation">3.1s</span>
+            </div>
+          </div>
+        </div>
+        <button class="transfer-list-demo__remove" type="button" aria-label="从队列移除 Z30_8649.JPG">
+          <svg aria-hidden="true"><use href="#transfer-card-broom"></use></svg>
+        </button>
+      </article>
+
+      <article class="transfer-list-demo__card transfer-list-demo__card--failed">
+        <div class="transfer-list-demo__main">
+          <div class="transfer-list-demo__thumb transfer-list-demo__thumb--portrait">
+            <span class="transfer-list-demo__state-mark transfer-list-demo__state-mark--red" role="img" aria-label="状态：传输失败">
+              <svg aria-hidden="true"><use href="#transfer-card-alert"></use></svg>
+            </span>
+          </div>
+          <div class="transfer-list-demo__copy">
+            <div class="transfer-list-demo__headline transfer-list-demo__headline--with-action">
+              <h2 class="transfer-list-demo__filename">Z30_8648.JPG</h2>
+            </div>
+            <div class="transfer-list-demo__metadata">
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--size">31.2 MB</span>
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--transfer">0.6s</span>
+            </div>
+            <p class="transfer-list-demo__primary transfer-list-demo__primary--red">相机连接中断，请重新连接后重试</p>
+          </div>
+          <button class="transfer-list-demo__retry" type="button">
+            <svg aria-hidden="true"><use href="#transfer-card-retry"></use></svg>
+            重试
+          </button>
+        </div>
+        <button class="transfer-list-demo__remove" type="button" aria-label="从队列移除 Z30_8648.JPG">
+          <svg aria-hidden="true"><use href="#transfer-card-broom"></use></svg>
+        </button>
+      </article>
+
+      <article class="transfer-list-demo__card transfer-list-demo__card--waiting">
+        <div class="transfer-list-demo__main">
+          <div class="transfer-list-demo__thumb transfer-list-demo__thumb--mountain">
+            <span class="transfer-list-demo__state-mark transfer-list-demo__state-mark--amber" role="img" aria-label="状态：等待传输">
+              <svg aria-hidden="true"><use href="#transfer-card-clock"></use></svg>
+            </span>
+          </div>
+          <div class="transfer-list-demo__copy">
+            <div class="transfer-list-demo__headline">
+              <h2 class="transfer-list-demo__filename">Z30_8647.JPG</h2>
+            </div>
+            <div class="transfer-list-demo__metadata">
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--size">31.2 MB</span>
+            </div>
+            <div class="transfer-list-demo__details">
+              <span class="transfer-list-demo__pill transfer-list-demo__pill--effect">暗调 · Blue Hour · 80%</span>
+            </div>
+          </div>
+        </div>
+        <button class="transfer-list-demo__remove" type="button" aria-label="从队列移除 Z30_8647.JPG">
+          <svg aria-hidden="true"><use href="#transfer-card-broom"></use></svg>
+        </button>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
