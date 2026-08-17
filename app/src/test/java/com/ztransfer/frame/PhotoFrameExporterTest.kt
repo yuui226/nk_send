@@ -75,6 +75,53 @@ class PhotoFrameExporterTest {
         assertEquals(PhotoFramePreset.IMMERSIVE, PhotoFramePreset.valueOf("IMMERSIVE"))
         assertEquals(PhotoFramePreset.BRAND_INSET, PhotoFramePreset.valueOf("BRAND_INSET"))
         assertEquals(PhotoFramePreset.BRAND_GALLERY, PhotoFramePreset.valueOf("BRAND_GALLERY"))
+        assertEquals(
+            PhotoFramePreset.CLASSIC_SIGNATURE,
+            PhotoFramePreset.valueOf("CLASSIC_SIGNATURE"),
+        )
+        assertEquals(PhotoFramePreset.GALLERY_MAT, PhotoFramePreset.valueOf("GALLERY_MAT"))
+        assertEquals(PhotoFramePreset.FILM_GALLERY, PhotoFramePreset.valueOf("FILM_GALLERY"))
+        assertEquals(PhotoFramePreset.FILM_EDGE, PhotoFramePreset.valueOf("FILM_EDGE"))
+    }
+
+    @Test
+    fun editorialFramesKeepTheWholePhotoInPreviewAndOriginalQuality() {
+        listOf(
+            PhotoFramePreset.CLASSIC_SIGNATURE,
+            PhotoFramePreset.GALLERY_MAT,
+            PhotoFramePreset.FILM_GALLERY,
+            PhotoFramePreset.FILM_EDGE,
+        ).forEach { preset ->
+            val preview = calculateEditorialFrameLayout(6000, 4000, preset)
+            val original = calculateOriginalQualityEditorialFrameLayout(6000, 4000, preset)
+
+            assertTrue(maxOf(preview.canvasWidth, preview.canvasHeight) <= 3200)
+            assertEquals(
+                1.5f,
+                (preview.photoRight - preview.photoLeft) /
+                    (preview.photoBottom - preview.photoTop),
+                0.002f,
+            )
+            assertEquals(6000f, original.photoRight - original.photoLeft, 0.001f)
+            assertEquals(4000f, original.photoBottom - original.photoTop, 0.001f)
+            assertTrue(original.photoLeft >= 0f)
+            assertTrue(original.photoTop >= 0f)
+            assertTrue(original.photoRight <= original.canvasWidth)
+            assertTrue(original.photoBottom <= original.canvasHeight)
+        }
+
+        val mat = calculateOriginalQualityEditorialFrameLayout(
+            6000,
+            4000,
+            PhotoFramePreset.GALLERY_MAT,
+        )
+        assertEquals(mat.canvasWidth, mat.canvasHeight)
+        val film = calculateOriginalQualityEditorialFrameLayout(
+            6000,
+            4000,
+            PhotoFramePreset.FILM_GALLERY,
+        )
+        assertTrue(film.canvasHeight - film.photoBottom > film.photoTop)
     }
 
     @Test

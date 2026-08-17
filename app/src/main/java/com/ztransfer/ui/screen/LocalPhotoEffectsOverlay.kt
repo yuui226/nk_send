@@ -463,6 +463,7 @@ fun LocalPhotoEffectsPage(
                     metadataSettings,
                     preset,
                 ),
+                previewMetadata = selection?.metadata,
                 watermark = editorWatermark,
                 watermarkContentSource = watermarkDraft,
                 isPro = isPro,

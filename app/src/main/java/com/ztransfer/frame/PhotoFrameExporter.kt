@@ -63,6 +63,16 @@ private const val PLAQUE_BAND_TO_WIDTH = 0.12f
 private const val BRAND_FRAME_SIDE_TO_PHOTO_WIDTH = 0.032f
 private const val BRAND_INSET_BOTTOM_TO_PHOTO_WIDTH = 0.032f
 private const val BRAND_GALLERY_BOTTOM_TO_PHOTO_WIDTH = 0.16f
+private const val CLASSIC_SIGNATURE_SIDE_TO_PHOTO_WIDTH = 0.03f
+private const val CLASSIC_SIGNATURE_TOP_TO_PHOTO_WIDTH = 0.095f
+private const val CLASSIC_SIGNATURE_BOTTOM_TO_PHOTO_WIDTH = 0.15f
+private const val FILM_GALLERY_SIDE_TO_PHOTO_WIDTH = 0.085f
+private const val FILM_GALLERY_TOP_TO_PHOTO_WIDTH = 0.16f
+private const val FILM_GALLERY_BAR_TO_PHOTO_WIDTH = 0.09f
+private const val FILM_GALLERY_BOTTOM_TO_PHOTO_WIDTH = 0.34f
+private const val FILM_EDGE_SIDE_TO_PHOTO_WIDTH = 0.07f
+private const val FILM_EDGE_TOP_TO_PHOTO_WIDTH = 0.035f
+private const val FILM_EDGE_BOTTOM_TO_PHOTO_WIDTH = 0.085f
 
 @Suppress("NOTHING_TO_INLINE")
 private inline fun generationProbeClock(): Long =
@@ -89,6 +99,10 @@ enum class PhotoFramePreset(internal val fileSuffix: String) {
     IMMERSIVE("immersive"),
     BRAND_INSET("brand_inset"),
     BRAND_GALLERY("brand_gallery"),
+    CLASSIC_SIGNATURE("classic_signature"),
+    GALLERY_MAT("gallery_mat"),
+    FILM_GALLERY("film_gallery"),
+    FILM_EDGE("film_edge"),
 }
 
 /** 自定义水印选项。枚举名称会直接持久化，新增档位可以，已有名称不要修改。 */
@@ -1260,6 +1274,11 @@ object PhotoFrameExporter {
                 PhotoFramePreset.BRAND_INSET,
                 PhotoFramePreset.BRAND_GALLERY ->
                     calculateBrandFrameLayout(source.width, source.height, preset, longEdge)
+                PhotoFramePreset.CLASSIC_SIGNATURE,
+                PhotoFramePreset.GALLERY_MAT,
+                PhotoFramePreset.FILM_GALLERY,
+                PhotoFramePreset.FILM_EDGE ->
+                    calculateEditorialFrameLayout(source.width, source.height, preset, longEdge)
                 else -> calculatePhotoFrameLayout(source.width, source.height, longEdge)
             }
         } else {
@@ -1275,6 +1294,15 @@ object PhotoFrameExporter {
                 PhotoFramePreset.BRAND_INSET,
                 PhotoFramePreset.BRAND_GALLERY ->
                     calculateOriginalQualityBrandFrameLayout(
+                        source.width,
+                        source.height,
+                        preset,
+                    )
+                PhotoFramePreset.CLASSIC_SIGNATURE,
+                PhotoFramePreset.GALLERY_MAT,
+                PhotoFramePreset.FILM_GALLERY,
+                PhotoFramePreset.FILM_EDGE ->
+                    calculateOriginalQualityEditorialFrameLayout(
                         source.width,
                         source.height,
                         preset,
@@ -1315,6 +1343,19 @@ object PhotoFrameExporter {
             }
             if (preset.isBrandFrame()) {
                 drawBrandFrame(context, canvas, source, layout, metadata, preset, watermark)
+                return output
+            }
+            if (preset.isEditorialFrame()) {
+                drawEditorialFrame(
+                    context,
+                    canvas,
+                    source,
+                    backdropSource,
+                    layout,
+                    metadata,
+                    preset,
+                    watermark,
+                )
                 return output
             }
             drawBackdrop(canvas, backdropSource, preset)
@@ -1386,6 +1427,10 @@ object PhotoFrameExporter {
             PhotoFramePreset.IMMERSIVE -> 0f
             PhotoFramePreset.BRAND_INSET,
             PhotoFramePreset.BRAND_GALLERY -> 0.78f
+            PhotoFramePreset.CLASSIC_SIGNATURE,
+            PhotoFramePreset.GALLERY_MAT,
+            PhotoFramePreset.FILM_GALLERY,
+            PhotoFramePreset.FILM_EDGE -> 0f
         }
         // ShadowLayer 在原尺寸高像素画布上直接做两次软件模糊代价很高。阴影本身没有
         // 高频细节，先在 1/4 尺寸透明代理图渲染，再双线性放大，视觉一致而参与
@@ -1461,7 +1506,8 @@ object PhotoFrameExporter {
             }
             PhotoFramePreset.MIST,
             PhotoFramePreset.CINEMA,
-            PhotoFramePreset.FROSTED -> {
+            PhotoFramePreset.FROSTED,
+            PhotoFramePreset.FILM_GALLERY -> {
                 // 先缩图，再做两轮可控盒式模糊，最后双线性放大。相比单纯把 72px 图硬拉大，
                 // 渐变更连续、没有色块，同时不依赖仅 API 31 可用的 RenderEffect。
                 val blurLongEdge = 192
@@ -1486,7 +1532,10 @@ object PhotoFrameExporter {
                     blurBitmapInPlace(tiny, radius = 8, passes = 2)
                     // CINEMA overlays have no high-frequency detail. Compositing them on the
                     // 192px proxy before its single upscale avoids two extra 31MP canvas passes.
-                    if (preset == PhotoFramePreset.CINEMA) {
+                    if (
+                        preset == PhotoFramePreset.CINEMA ||
+                        preset == PhotoFramePreset.FILM_GALLERY
+                    ) {
                         drawCinemaBackdropTreatment(tinyCanvas)
                     }
                     canvas.drawBitmap(
@@ -1524,6 +1573,27 @@ object PhotoFrameExporter {
                         }
                     }
                     PhotoFramePreset.CINEMA -> Unit
+                    PhotoFramePreset.FILM_GALLERY -> {
+                        canvas.drawColor(Color.argb(66, 18, 12, 10))
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            shader = LinearGradient(
+                                0f,
+                                canvas.height * 0.50f,
+                                0f,
+                                canvas.height.toFloat(),
+                                Color.argb(0, 0, 0, 0),
+                                Color.argb(92, 15, 10, 8),
+                                Shader.TileMode.CLAMP,
+                            )
+                            canvas.drawRect(
+                                0f,
+                                canvas.height * 0.48f,
+                                canvas.width.toFloat(),
+                                canvas.height.toFloat(),
+                                this,
+                            )
+                        }
+                    }
                     PhotoFramePreset.FROSTED -> {
                         // 保留照片主色的同时覆盖一层冷白雾面，让整块外框像透过磨砂玻璃；
                         // 参数区还会叠一层独立玻璃胶囊，形成清晰的材质层级。
@@ -1551,12 +1621,18 @@ object PhotoFrameExporter {
                     PhotoFramePreset.IMMERSIVE -> Unit
                     PhotoFramePreset.BRAND_INSET,
                     PhotoFramePreset.BRAND_GALLERY -> Unit
+                    PhotoFramePreset.CLASSIC_SIGNATURE,
+                    PhotoFramePreset.GALLERY_MAT,
+                    PhotoFramePreset.FILM_EDGE -> Unit
                 }
             }
             PhotoFramePreset.PLAQUE -> canvas.drawColor(Color.WHITE)
             PhotoFramePreset.IMMERSIVE -> Unit
             PhotoFramePreset.BRAND_INSET,
             PhotoFramePreset.BRAND_GALLERY -> canvas.drawColor(Color.WHITE)
+            PhotoFramePreset.CLASSIC_SIGNATURE,
+            PhotoFramePreset.GALLERY_MAT -> canvas.drawColor(Color.WHITE)
+            PhotoFramePreset.FILM_EDGE -> canvas.drawColor(Color.rgb(8, 8, 9))
         }
     }
 
@@ -1947,6 +2023,10 @@ object PhotoFrameExporter {
                     PhotoFramePreset.IMMERSIVE -> Color.rgb(250, 252, 253)
                     PhotoFramePreset.BRAND_INSET,
                     PhotoFramePreset.BRAND_GALLERY -> Color.rgb(250, 252, 253)
+                    PhotoFramePreset.CLASSIC_SIGNATURE,
+                    PhotoFramePreset.GALLERY_MAT -> Color.rgb(24, 27, 30)
+                    PhotoFramePreset.FILM_GALLERY,
+                    PhotoFramePreset.FILM_EDGE -> Color.rgb(250, 249, 246)
                 }
             }
             alpha = watermarkAlpha(watermark.opacityPercent)
@@ -2604,6 +2684,15 @@ object PhotoFrameExporter {
                     orientedSize.height,
                     preset,
                 )
+            PhotoFramePreset.CLASSIC_SIGNATURE,
+            PhotoFramePreset.GALLERY_MAT,
+            PhotoFramePreset.FILM_GALLERY,
+            PhotoFramePreset.FILM_EDGE ->
+                calculateOriginalQualityEditorialFrameLayout(
+                    orientedSize.width,
+                    orientedSize.height,
+                    preset,
+                )
             else -> calculateOriginalQualityPhotoFrameLayout(orientedSize.width, orientedSize.height)
         }
         val output = Bitmap.createBitmap(
@@ -2665,6 +2754,41 @@ object PhotoFrameExporter {
                 canvas.restore()
                 val decorationStartedAtMs = generationProbeClock()
                 drawBrandFrameDecoration(
+                    context = context,
+                    canvas = canvas,
+                    layout = layout,
+                    metadata = metadata,
+                    preset = preset,
+                    watermark = watermark,
+                )
+                recordGenerationStage(
+                    probeSessionId,
+                    "frame_decoration",
+                    generationProbeClock() - decorationStartedAtMs,
+                ) { "preset=${preset.name}" }
+                return@withRegionDecoder output
+            }
+            if (preset.isEditorialFrame()) {
+                val preview = if (preset == PhotoFramePreset.FILM_GALLERY) {
+                    decodeRegionPreview(decoder, orientation)
+                } else {
+                    null
+                }
+                try {
+                    drawEditorialFrameBase(canvas, preview, layout, preset)
+                } finally {
+                    preview?.recycle()
+                }
+                drawPhotoRegions(
+                    decoder = decoder,
+                    canvas = canvas,
+                    photoRect = photoRect,
+                    orientation = orientation,
+                    filter = filter,
+                    probeSessionId = probeSessionId,
+                )
+                val decorationStartedAtMs = generationProbeClock()
+                drawEditorialFrameDecoration(
                     context = context,
                     canvas = canvas,
                     layout = layout,
@@ -3048,6 +3172,461 @@ object PhotoFrameExporter {
         recordGenerationStage(probeSessionId, "region_orient_draw", drawElapsedMs) {
             "regions=$regionCount orientation=$orientation mode=canvas_matrix"
         }
+    }
+
+    private fun drawEditorialFrame(
+        context: Context,
+        canvas: Canvas,
+        source: Bitmap,
+        backdropSource: Bitmap,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+    ) {
+        drawEditorialFrameBase(canvas, backdropSource, layout, preset)
+        canvas.drawBitmap(
+            source,
+            null,
+            layout.photoRect(),
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+        )
+        drawEditorialFrameDecoration(context, canvas, layout, metadata, preset, watermark)
+    }
+
+    /** The four reference-inspired frames share exact photo geometry in preview and export. */
+    private fun drawEditorialFrameBase(
+        canvas: Canvas,
+        backdropSource: Bitmap?,
+        layout: PhotoFrameLayout,
+        preset: PhotoFramePreset,
+    ) {
+        require(preset.isEditorialFrame())
+        val photo = layout.photoRect()
+        when (preset) {
+            PhotoFramePreset.CLASSIC_SIGNATURE -> canvas.drawColor(Color.rgb(253, 253, 252))
+            PhotoFramePreset.GALLERY_MAT -> {
+                canvas.drawColor(Color.rgb(254, 254, 253))
+                val frameWidth = min(photo.width(), photo.height()) * 0.045f
+                val outer = RectF(photo).apply { inset(-frameWidth, -frameWidth) }
+                drawPhotoElevation(canvas, outer, 0f, PhotoFramePreset.MINIMAL)
+                canvas.drawRect(outer, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.rgb(7, 7, 8)
+                })
+            }
+            PhotoFramePreset.FILM_GALLERY -> {
+                drawBackdrop(
+                    canvas,
+                    requireNotNull(backdropSource) { "Film gallery needs a backdrop source" },
+                    preset,
+                )
+                canvas.drawRect(filmGalleryOuterRect(layout), Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.rgb(13, 14, 16)
+                })
+            }
+            PhotoFramePreset.FILM_EDGE -> canvas.drawColor(Color.rgb(7, 7, 8))
+            else -> error("Not an editorial frame")
+        }
+    }
+
+    private fun drawEditorialFrameDecoration(
+        context: Context,
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        preset: PhotoFramePreset,
+        watermark: PhotoFrameWatermark,
+    ) {
+        require(preset.isEditorialFrame())
+        val photo = layout.photoRect()
+        drawPhotoWatermark(context, canvas, photo, preset, watermark.forEditorialPhoto(preset))
+        when (preset) {
+            PhotoFramePreset.CLASSIC_SIGNATURE ->
+                drawClassicSignatureDecoration(context, canvas, layout, metadata, watermark)
+            PhotoFramePreset.GALLERY_MAT ->
+                drawGalleryMatDecoration(context, canvas, layout, metadata, watermark)
+            PhotoFramePreset.FILM_GALLERY -> {
+                drawFilmStripDecoration(canvas, layout, metadata)
+                drawFilmGalleryInformation(context, canvas, layout, metadata, watermark)
+            }
+            PhotoFramePreset.FILM_EDGE -> drawFilmEdgeDecoration(canvas, layout, metadata)
+            else -> error("Not an editorial frame")
+        }
+    }
+
+    private fun drawClassicSignatureDecoration(
+        context: Context,
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        watermark: PhotoFrameWatermark,
+    ) {
+        val header = listOf(
+            cameraBrandLabel(metadata.make, metadata.model),
+            normalizeCameraModel(metadata.make, metadata.model),
+        ).filter(String::isNotBlank).joinToString(" ")
+        if (header.isNotEmpty()) {
+            val paint = fittedEditorialPaint(
+                header,
+                layout.canvasWidth * 0.034f,
+                layout.canvasWidth * 0.54f,
+                Color.rgb(10, 11, 12),
+                Typeface.create("sans-serif-black", Typeface.BOLD_ITALIC),
+            )
+            val bounds = textVisualBounds(header, paint)
+            val baseline = centeredFrameTextBaselines(
+                0f,
+                layout.photoTop,
+                listOf(bounds),
+                0f,
+            ).single()
+            canvas.drawText(header, layout.canvasWidth / 2f, baseline, paint)
+        }
+        val rows = buildList {
+            metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
+            classicSignatureDetailLine(metadata).takeIf(String::isNotBlank)?.let(::add)
+            metadata.dateTime?.takeIf(String::isNotBlank)?.let(::add)
+        }
+        val band = RectF(
+            0f,
+            layout.photoBottom,
+            layout.canvasWidth.toFloat(),
+            layout.canvasHeight.toFloat(),
+        )
+        drawEditorialInformationRows(
+            context,
+            canvas,
+            band,
+            PhotoFramePreset.CLASSIC_SIGNATURE,
+            rows,
+            watermark.bandWatermarkFor(PhotoFramePreset.CLASSIC_SIGNATURE),
+            darkText = true,
+        )
+        canvas.drawRect(layout.photoRect(), Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = maxOf(1f, layout.canvasWidth * 0.0008f)
+            color = Color.argb(35, 0, 0, 0)
+        })
+    }
+
+    private fun drawGalleryMatDecoration(
+        context: Context,
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        watermark: PhotoFrameWatermark,
+    ) {
+        val photo = layout.photoRect()
+        val frameWidth = min(photo.width(), photo.height()) * 0.045f
+        val band = RectF(
+            layout.canvasWidth * 0.08f,
+            photo.bottom + frameWidth + layout.canvasHeight * 0.012f,
+            layout.canvasWidth * 0.92f,
+            layout.canvasHeight * 0.985f,
+        )
+        drawEditorialInformationRows(
+            context,
+            canvas,
+            band,
+            PhotoFramePreset.GALLERY_MAT,
+            editorialMetadataRows(metadata),
+            watermark.bandWatermarkFor(PhotoFramePreset.GALLERY_MAT),
+            darkText = true,
+        )
+    }
+
+    private fun drawFilmStripDecoration(
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+    ) {
+        val photo = layout.photoRect()
+        val outer = filmGalleryOuterRect(layout)
+        val unit = photo.width()
+        val holeWidth = unit * 0.025f
+        val holeHeight = unit * 0.040f
+        val gap = unit * 0.025f
+        val count = ((outer.width() - gap) / (holeWidth + gap)).toInt().coerceAtLeast(3)
+        val occupied = count * holeWidth + (count - 1) * gap
+        val startX = outer.centerX() - occupied / 2f
+        val holePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(55, 55, 61) }
+        repeat(count) { index ->
+            val left = startX + index * (holeWidth + gap)
+            canvas.drawRoundRect(
+                RectF(
+                    left,
+                    photo.top - holeHeight - unit * 0.008f,
+                    left + holeWidth,
+                    photo.top - unit * 0.008f,
+                ),
+                holeWidth * 0.34f,
+                holeWidth * 0.34f,
+                holePaint,
+            )
+            canvas.drawRoundRect(
+                RectF(
+                    left,
+                    photo.bottom + unit * 0.008f,
+                    left + holeWidth,
+                    photo.bottom + holeHeight + unit * 0.008f,
+                ),
+                holeWidth * 0.34f,
+                holeWidth * 0.34f,
+                holePaint,
+            )
+        }
+        val filmTextColor = Color.rgb(184, 132, 99)
+        val labelPaint = fittedEditorialPaint(
+            text = "2",
+            preferredSize = unit * 0.021f,
+            maxWidth = unit * 0.04f,
+            color = filmTextColor,
+            typeface = Typeface.create("sans-serif", Typeface.BOLD),
+        ).apply { textAlign = Paint.Align.LEFT }
+        canvas.drawText("2", outer.left + unit * 0.018f, outer.top + unit * 0.028f, labelPaint)
+        val cameraIdentity = listOf(
+            cameraBrandLabel(metadata.make, metadata.model),
+            normalizeCameraModel(metadata.make, metadata.model),
+        ).filter(String::isNotBlank).joinToString(" ")
+        if (cameraIdentity.isNotEmpty()) {
+            val identityPaint = fittedEditorialPaint(
+                text = cameraIdentity,
+                preferredSize = unit * 0.021f,
+                maxWidth = unit * 0.58f,
+                color = filmTextColor,
+                typeface = Typeface.create("sans-serif", Typeface.BOLD),
+            ).apply { textAlign = Paint.Align.LEFT }
+            canvas.drawText(
+                cameraIdentity,
+                outer.left + unit * 0.15f,
+                outer.top + unit * 0.028f,
+                identityPaint,
+            )
+        }
+        metadata.dateTime?.takeIf(String::isNotBlank)?.let { dateTime ->
+            val dateTimePaint = fittedEditorialPaint(
+                text = dateTime,
+                preferredSize = unit * 0.021f,
+                maxWidth = unit * 0.72f,
+                color = filmTextColor,
+                typeface = Typeface.create("sans-serif", Typeface.BOLD),
+            )
+            canvas.drawText(
+                dateTime,
+                outer.centerX() + unit * 0.085f,
+                outer.bottom - unit * 0.014f,
+                dateTimePaint,
+            )
+        }
+        val triangleX = outer.right - unit * 0.14f
+        val triangleY = outer.top + unit * 0.020f
+        canvas.drawPath(Path().apply {
+            moveTo(triangleX, triangleY - unit * 0.010f)
+            lineTo(triangleX + unit * 0.022f, triangleY)
+            lineTo(triangleX, triangleY + unit * 0.010f)
+            close()
+        }, labelPaint)
+    }
+
+    private fun drawFilmGalleryInformation(
+        context: Context,
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+        watermark: PhotoFrameWatermark,
+    ) {
+        val outer = filmGalleryOuterRect(layout)
+        val rows = buildList {
+            metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
+            frameDetailLine(metadata).takeIf(String::isNotBlank)?.let(::add)
+        }
+        val band = RectF(
+            layout.canvasWidth * 0.08f,
+            outer.bottom + layout.canvasWidth * 0.035f,
+            layout.canvasWidth * 0.92f,
+            layout.canvasHeight - layout.canvasWidth * 0.035f,
+        )
+        drawEditorialInformationRows(
+            context,
+            canvas,
+            band,
+            PhotoFramePreset.FILM_GALLERY,
+            rows,
+            watermark.bandWatermarkFor(PhotoFramePreset.FILM_GALLERY),
+            darkText = false,
+        )
+    }
+
+    private fun drawFilmEdgeDecoration(
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+    ) {
+        val photo = layout.photoRect()
+        val sidePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+            color = Color.rgb(221, 166, 119)
+            textSize = photo.width() * 0.028f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val leftX = layout.photoLeft * 0.48f
+        canvas.save()
+        canvas.rotate(-90f, leftX, photo.centerY())
+        canvas.drawText("PORTRA 400", leftX, photo.centerY(), sidePaint)
+        canvas.restore()
+        val rightX = photo.right + (layout.canvasWidth - photo.right) * 0.52f
+        val rightY = photo.top + photo.height() * 0.22f
+        canvas.save()
+        canvas.rotate(90f, rightX, rightY)
+        canvas.drawText("▶  20", rightX, rightY, sidePaint)
+        canvas.restore()
+
+        val rows = editorialMetadataRows(metadata)
+        if (rows.isNotEmpty()) {
+            val text = rows.joinToString("   ")
+            val band = RectF(photo.left, photo.bottom, photo.right, layout.canvasHeight.toFloat())
+            val paint = fittedEditorialPaint(
+                text,
+                photo.width() * 0.016f,
+                band.width() * 0.90f,
+                Color.rgb(224, 170, 124),
+                Typeface.create("sans-serif-condensed", Typeface.NORMAL),
+            )
+            val baseline = centeredFrameTextBaselines(
+                band.top,
+                band.bottom,
+                listOf(textVisualBounds(text, paint)),
+                0f,
+            ).single()
+            canvas.drawText(text, band.centerX(), baseline, paint)
+        }
+    }
+
+    private fun drawEditorialInformationRows(
+        context: Context,
+        canvas: Canvas,
+        area: RectF,
+        preset: PhotoFramePreset,
+        metadataRows: List<String>,
+        watermark: PhotoFrameWatermark?,
+        darkText: Boolean,
+        emphasizeFirst: Boolean = false,
+    ) {
+        if (area.height() <= 0f) return
+        val color = if (darkText) Color.rgb(27, 28, 30) else Color.rgb(249, 248, 245)
+        val muted = if (darkText) Color.rgb(74, 76, 79) else Color.rgb(230, 226, 220)
+        val paints = metadataRows.mapIndexed { index, text ->
+            fittedEditorialPaint(
+                text,
+                area.width() * if (emphasizeFirst && index == 0) 0.052f else 0.024f,
+                area.width() * 0.90f,
+                if (index == 0) color else muted,
+                if (emphasizeFirst && index == 0) {
+                    Typeface.create("serif", Typeface.BOLD_ITALIC)
+                } else {
+                    Typeface.create("sans-serif", Typeface.NORMAL)
+                },
+            )
+        }.toMutableList()
+        var watermarkPaint = watermark?.let {
+            createWatermarkPaint(
+                context,
+                canvas,
+                preset,
+                if (it.color == PhotoFrameWatermarkColor.ADAPTIVE) {
+                    it.copy(
+                        color = if (darkText) {
+                            PhotoFrameWatermarkColor.BLACK
+                        } else {
+                            PhotoFrameWatermarkColor.WHITE
+                        },
+                    )
+                } else {
+                    it
+                },
+                area.width() * 0.48f,
+            )
+        }
+        fun bounds(): List<FrameTextVisualBounds> = buildList {
+            metadataRows.forEachIndexed { index, text ->
+                add(textVisualBounds(text, paints[index]))
+            }
+            if (watermark != null && watermarkPaint != null) {
+                add(textVisualBounds(watermark.displayText, checkNotNull(watermarkPaint)))
+            }
+        }
+        val initial = bounds()
+        if (initial.isEmpty()) return
+        val gap = area.height() * 0.055f
+        val scale = frameTextScaleToFit(
+            (area.height() - gap * (initial.size - 1).coerceAtLeast(0)).coerceAtLeast(0f),
+            initial,
+        )
+        if (scale < 1f) {
+            paints.forEach { it.textSize *= scale }
+            watermarkPaint = watermarkPaint?.apply { textSize *= scale }
+        }
+        val rows = bounds()
+        val baselines = centeredFrameTextBaselines(area.top, area.bottom, rows, gap)
+        metadataRows.forEachIndexed { index, text ->
+            canvas.drawText(text, area.centerX(), baselines[index], paints[index])
+        }
+        if (watermark != null && watermarkPaint != null) {
+            val paint = checkNotNull(watermarkPaint)
+            val (x, align) = watermarkHorizontalPlacement(area, preset, watermark.position)
+            paint.textAlign = align
+            drawWatermarkText(canvas, watermark.displayText, x, baselines.last(), paint, watermark)
+        }
+    }
+
+    private fun fittedEditorialPaint(
+        text: String,
+        preferredSize: Float,
+        maxWidth: Float,
+        color: Int,
+        typeface: Typeface,
+    ): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+        this.color = color
+        textSize = preferredSize
+        textAlign = Paint.Align.CENTER
+        this.typeface = typeface
+        val measured = measureText(text)
+        if (measured > maxWidth && measured > 0f) textSize *= maxWidth / measured
+    }
+
+    private fun editorialMetadataRows(metadata: PhotoFrameMetadata): List<String> = buildList {
+        val identity = listOf(
+            cameraBrandLabel(metadata.make, metadata.model),
+            normalizeCameraModel(metadata.make, metadata.model),
+        ).filter(String::isNotBlank).joinToString(" ")
+        identity.takeIf(String::isNotBlank)?.let(::add)
+        metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
+        frameDetailLine(metadata).takeIf(String::isNotBlank)?.let(::add)
+        metadata.dateTime?.takeIf(String::isNotBlank)?.let(::add)
+    }
+
+    private fun classicSignatureDetailLine(metadata: PhotoFrameMetadata): String =
+        listOfNotNull(
+            metadata.focalLength?.let { value ->
+                if (value.startsWith("FL", ignoreCase = true)) value else "FL $value"
+            },
+            metadata.aperture?.let { "Aperture $it" },
+            metadata.shutter?.let { "Shutter ${it.removeSuffix("s")}" },
+            metadata.iso?.let { value ->
+                if (value.startsWith("ISO", ignoreCase = true)) value else "ISO $value"
+            },
+        ).joinToString("   ")
+
+    private fun filmGalleryOuterRect(layout: PhotoFrameLayout): RectF {
+        val photo = layout.photoRect()
+        val horizontal = photo.width() * 0.018f
+        val bar = photo.width() * FILM_GALLERY_BAR_TO_PHOTO_WIDTH
+        return RectF(
+            photo.left - horizontal,
+            photo.top - bar,
+            photo.right + horizontal,
+            photo.bottom + bar,
+        )
     }
 
     private fun drawBrandFrame(
@@ -4291,8 +4870,120 @@ internal fun calculateOriginalQualityBrandFrameLayout(
     )
 }
 
+internal fun calculateEditorialFrameLayout(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    preset: PhotoFramePreset,
+    longEdge: Int = 3200,
+): PhotoFrameLayout {
+    require(longEdge > 0)
+    val original = calculateOriginalQualityEditorialFrameLayout(sourceWidth, sourceHeight, preset)
+    val scale = longEdge.toFloat() / maxOf(original.canvasWidth, original.canvasHeight)
+    fun scaled(value: Float): Float = value * scale
+    val canvasWidth = (original.canvasWidth * scale).roundToInt().coerceAtLeast(1)
+    val canvasHeight = (original.canvasHeight * scale).roundToInt().coerceAtLeast(1)
+    return PhotoFrameLayout(
+        canvasWidth = canvasWidth,
+        canvasHeight = canvasHeight,
+        photoLeft = scaled(original.photoLeft),
+        photoTop = scaled(original.photoTop),
+        photoRight = scaled(original.photoRight),
+        photoBottom = scaled(original.photoBottom),
+        metadataTop = scaled(original.metadataTop),
+    )
+}
+
+/** Every editorial preset keeps the source rectangle at exactly 1:1 in original-quality export. */
+internal fun calculateOriginalQualityEditorialFrameLayout(
+    sourceWidth: Int,
+    sourceHeight: Int,
+    preset: PhotoFramePreset,
+): PhotoFrameLayout {
+    require(sourceWidth > 0 && sourceHeight > 0)
+    require(preset.isEditorialFrame())
+    fun px(ratio: Float): Int = (sourceWidth * ratio).roundToInt().coerceAtLeast(1)
+    return when (preset) {
+        PhotoFramePreset.CLASSIC_SIGNATURE -> {
+            val side = px(CLASSIC_SIGNATURE_SIDE_TO_PHOTO_WIDTH)
+            val top = px(CLASSIC_SIGNATURE_TOP_TO_PHOTO_WIDTH)
+            val bottom = px(CLASSIC_SIGNATURE_BOTTOM_TO_PHOTO_WIDTH)
+            PhotoFrameLayout(
+                canvasWidth = sourceWidth + side * 2,
+                canvasHeight = sourceHeight + top + bottom,
+                photoLeft = side.toFloat(),
+                photoTop = top.toFloat(),
+                photoRight = (side + sourceWidth).toFloat(),
+                photoBottom = (top + sourceHeight).toFloat(),
+                metadataTop = (top + sourceHeight).toFloat(),
+            )
+        }
+        PhotoFramePreset.GALLERY_MAT -> {
+            val aspect = sourceWidth.toFloat() / sourceHeight
+            val (widthFraction, heightFraction) = when {
+                aspect > 1.08f -> 0.80f to 0.56f
+                aspect < 0.92f -> 0.56f to 0.80f
+                else -> 0.68f to 0.68f
+            }
+            val side = maxOf(
+                sourceWidth / widthFraction,
+                sourceHeight / heightFraction,
+            ).roundToInt().coerceAtLeast(maxOf(sourceWidth, sourceHeight))
+            val left = (side - sourceWidth) / 2f
+            val top = (side - sourceHeight) * 0.45f
+            PhotoFrameLayout(
+                canvasWidth = side,
+                canvasHeight = side,
+                photoLeft = left,
+                photoTop = top,
+                photoRight = left + sourceWidth,
+                photoBottom = top + sourceHeight,
+                metadataTop = top + sourceHeight,
+            )
+        }
+        PhotoFramePreset.FILM_GALLERY -> {
+            val side = px(FILM_GALLERY_SIDE_TO_PHOTO_WIDTH)
+            val top = px(FILM_GALLERY_TOP_TO_PHOTO_WIDTH)
+            val bar = px(FILM_GALLERY_BAR_TO_PHOTO_WIDTH)
+            val bottom = px(FILM_GALLERY_BOTTOM_TO_PHOTO_WIDTH)
+            val photoTop = top + bar
+            PhotoFrameLayout(
+                canvasWidth = sourceWidth + side * 2,
+                canvasHeight = sourceHeight + top + bar * 2 + bottom,
+                photoLeft = side.toFloat(),
+                photoTop = photoTop.toFloat(),
+                photoRight = (side + sourceWidth).toFloat(),
+                photoBottom = (photoTop + sourceHeight).toFloat(),
+                metadataTop = (photoTop + sourceHeight + bar).toFloat(),
+            )
+        }
+        PhotoFramePreset.FILM_EDGE -> {
+            val side = px(FILM_EDGE_SIDE_TO_PHOTO_WIDTH)
+            val top = px(FILM_EDGE_TOP_TO_PHOTO_WIDTH)
+            val bottom = px(FILM_EDGE_BOTTOM_TO_PHOTO_WIDTH)
+            PhotoFrameLayout(
+                canvasWidth = sourceWidth + side * 2,
+                canvasHeight = sourceHeight + top + bottom,
+                photoLeft = side.toFloat(),
+                photoTop = top.toFloat(),
+                photoRight = (side + sourceWidth).toFloat(),
+                photoBottom = (top + sourceHeight).toFloat(),
+                metadataTop = (top + sourceHeight).toFloat(),
+            )
+        }
+        else -> error("Not an editorial frame")
+    }
+}
+
 internal fun PhotoFramePreset.isBrandFrame(): Boolean =
     this == PhotoFramePreset.BRAND_INSET || this == PhotoFramePreset.BRAND_GALLERY
+
+internal fun PhotoFramePreset.isEditorialFrame(): Boolean = when (this) {
+    PhotoFramePreset.CLASSIC_SIGNATURE,
+    PhotoFramePreset.GALLERY_MAT,
+    PhotoFramePreset.FILM_GALLERY,
+    PhotoFramePreset.FILM_EDGE -> true
+    else -> false
+}
 
 /**
  * Places the brand/EXIF block at its intended lower-center position, moving it just above the
@@ -4383,6 +5074,55 @@ private fun PhotoFrameWatermark.forBrandPhoto(
         else -> copy(enabled = false)
     }
     else -> error("Not a brand frame")
+}
+
+private fun PhotoFrameWatermark.forEditorialPhoto(
+    preset: PhotoFramePreset,
+): PhotoFrameWatermark {
+    require(preset.isEditorialFrame())
+    if (position.isPhotoPlacement()) return this
+    val mappedPosition = when (position) {
+        PhotoFrameWatermarkPosition.LEFT -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT
+        PhotoFrameWatermarkPosition.CENTER -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER
+        PhotoFrameWatermarkPosition.RIGHT -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
+        PhotoFrameWatermarkPosition.AUTO -> when (preset) {
+            PhotoFramePreset.GALLERY_MAT,
+            PhotoFramePreset.FILM_GALLERY -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER
+            else -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
+        }
+        else -> position
+    }
+    val shouldUsePhoto = when (preset) {
+        PhotoFramePreset.CLASSIC_SIGNATURE ->
+            position == PhotoFrameWatermarkPosition.AUTO ||
+                content == PhotoFrameWatermarkContent.IMAGE
+        PhotoFramePreset.GALLERY_MAT,
+        PhotoFramePreset.FILM_GALLERY -> content == PhotoFrameWatermarkContent.IMAGE
+        PhotoFramePreset.FILM_EDGE -> true
+        else -> false
+    }
+    return if (shouldUsePhoto) copy(position = mappedPosition) else copy(enabled = false)
+}
+
+private fun PhotoFrameWatermark.bandWatermarkFor(
+    preset: PhotoFramePreset,
+): PhotoFrameWatermark? {
+    if (!enabled || content != PhotoFrameWatermarkContent.TEXT || position.isPhotoPlacement()) {
+        return null
+    }
+    val supported = when (preset) {
+        PhotoFramePreset.CLASSIC_SIGNATURE -> position != PhotoFrameWatermarkPosition.AUTO
+        PhotoFramePreset.GALLERY_MAT,
+        PhotoFramePreset.FILM_GALLERY -> true
+        PhotoFramePreset.FILM_EDGE -> false
+        else -> false
+    }
+    if (!supported) return null
+    return if (position == PhotoFrameWatermarkPosition.AUTO) {
+        copy(position = PhotoFrameWatermarkPosition.CENTER)
+    } else {
+        this
+    }
 }
 
 private fun brandFrameCornerRadius(layout: PhotoFrameLayout): Float =
@@ -4713,6 +5453,10 @@ private val PHOTO_FRAME_OUTPUT_PATTERN = Regex(
 
 private const val PHOTO_FRAME_WATERMARK_RENDER_VERSION = 2
 private const val BRAND_FRAME_RENDER_VERSION = 4
+private const val EDITORIAL_FRAME_RENDER_VERSION = 2
+// Film-gallery typography evolves independently. Transfer-side deduplication uses this token,
+// while the editor preview always redraws and therefore cannot reveal a stale-output hit.
+private const val FILM_GALLERY_RENDER_VERSION = 1
 private const val PHOTO_FILTER_RENDER_VERSION = 2
 
 internal fun isPhotoFrameOutputName(name: String): Boolean =
@@ -4774,6 +5518,10 @@ internal fun photoFrameWatermarkFingerprint(
         buildList {
             add("v=$PHOTO_FRAME_WATERMARK_RENDER_VERSION")
             if (preset.isBrandFrame()) add("brand-v=$BRAND_FRAME_RENDER_VERSION")
+            if (preset.isEditorialFrame()) add("editorial-v=$EDITORIAL_FRAME_RENDER_VERSION")
+            if (preset == PhotoFramePreset.FILM_GALLERY) {
+                add("film-gallery-v=$FILM_GALLERY_RENDER_VERSION")
+            }
             add("on")
             add(watermark.content.name)
             add(watermarkSizeFingerprintToken(watermark))
@@ -4793,6 +5541,14 @@ internal fun photoFrameWatermarkFingerprint(
         }.joinToString("\u0000")
     } else if (preset.isBrandFrame()) {
         "brand-v=$BRAND_FRAME_RENDER_VERSION\u0000off"
+    } else if (preset.isEditorialFrame()) {
+        buildList {
+            add("editorial-v=$EDITORIAL_FRAME_RENDER_VERSION")
+            if (preset == PhotoFramePreset.FILM_GALLERY) {
+                add("film-gallery-v=$FILM_GALLERY_RENDER_VERSION")
+            }
+            add("off")
+        }.joinToString("\u0000")
     } else {
         "off"
     }
@@ -4845,6 +5601,10 @@ private fun resolvedWatermarkPosition(
             PhotoFramePreset.IMMERSIVE -> PhotoFrameWatermarkPosition.AUTO
             PhotoFramePreset.BRAND_INSET,
             PhotoFramePreset.BRAND_GALLERY -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
+            PhotoFramePreset.CLASSIC_SIGNATURE,
+            PhotoFramePreset.FILM_EDGE -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
+            PhotoFramePreset.GALLERY_MAT,
+            PhotoFramePreset.FILM_GALLERY -> PhotoFrameWatermarkPosition.CENTER
             else -> PhotoFrameWatermarkPosition.CENTER
         }
     }

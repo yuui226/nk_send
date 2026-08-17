@@ -99,6 +99,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
@@ -129,6 +130,8 @@ import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.photoFrameDatePatternExample
 import com.ztransfer.frame.photoFrameTimePatternExample
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
+import com.ztransfer.frame.cameraBrandLabel
+import com.ztransfer.frame.normalizeCameraModel
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterRenderer
@@ -737,6 +740,7 @@ fun SettingsOverlay(
                         state.photoFrameMetadataSettings,
                         frameDraftPreset,
                     ),
+                    previewMetadata = effectPreviewMetadata,
                     // 高级版编辑器必须保留正在输入的原始草稿（包括暂时为空）；若在这里
                     // 经过 effectivePhotoFrameWatermark，空值会在每次重组时立刻变回默认值，
                     // 用户就无法真正清空后重新输入。预览渲染自身仍会使用 displayText。
@@ -985,6 +989,14 @@ fun SettingsOverlay(
                     stringResource(R.string.photo_frame_brand_inset),
                 PhotoFramePreset.BRAND_GALLERY to
                     stringResource(R.string.photo_frame_brand_gallery),
+                PhotoFramePreset.CLASSIC_SIGNATURE to
+                    stringResource(R.string.photo_frame_classic_signature),
+                PhotoFramePreset.GALLERY_MAT to
+                    stringResource(R.string.photo_frame_gallery_mat),
+                PhotoFramePreset.FILM_GALLERY to
+                    stringResource(R.string.photo_frame_film_gallery),
+                PhotoFramePreset.FILM_EDGE to
+                    stringResource(R.string.photo_frame_film_edge),
             )
             val selectedFrameChoice = frameChoices.first { it.first == state.photoFramePreset }
             val visibleWatermark = if (state.photoFrameEnabled) {
@@ -1689,12 +1701,50 @@ private fun FittedRotatingBitmap(
 private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
     BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
+internal data class PhotoFrameMetadataAvailability(
+    val focalLength: Boolean,
+    val exposure: Boolean,
+    val lensModel: Boolean,
+    val brand: Boolean,
+    val model: Boolean,
+    val date: Boolean,
+    val time: Boolean,
+) {
+    val hasAny: Boolean
+        get() = focalLength || exposure || lensModel || brand || model || date || time
+}
+
+/** Mirrors what the renderer can actually obtain from the current preview photo. */
+internal fun photoFrameMetadataAvailability(
+    metadata: PhotoFrameMetadata?,
+): PhotoFrameMetadataAvailability {
+    val value = metadata ?: EMPTY_PHOTO_EFFECTS_PREVIEW_METADATA
+    val dateTime = normalizeCaptureDateTime(value.dateTime)
+    val hasDate = dateTime?.take(10)?.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) == true
+    val hasTime = dateTime
+        ?.drop(10)
+        ?.trim()
+        ?.matches(Regex("\\d{2}:\\d{2}(?::\\d{2})?")) == true
+    return PhotoFrameMetadataAvailability(
+        focalLength = !value.focalLength.isNullOrBlank(),
+        exposure = sequenceOf(value.aperture, value.shutter, value.iso).any {
+            !it.isNullOrBlank()
+        },
+        lensModel = !value.lensModel.isNullOrBlank(),
+        brand = cameraBrandLabel(value.make, value.model).isNotBlank(),
+        model = normalizeCameraModel(value.make, value.model).isNotBlank(),
+        date = hasDate,
+        time = hasTime,
+    )
+}
+
 @Composable
 internal fun PhotoFrameWatermarkEditor(
     favoriteEffects: List<FavoriteFrameWatermarkEffect>,
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
     metadataSettings: PhotoFrameMetadataSettings,
+    previewMetadata: PhotoFrameMetadata?,
     watermark: PhotoFrameWatermark,
     watermarkContentSource: PhotoFrameWatermark = watermark,
     isPro: Boolean,
@@ -1721,6 +1771,9 @@ internal fun PhotoFrameWatermarkEditor(
     val focusManager = LocalFocusManager.current
     val proLockInteractionSource = remember { MutableInteractionSource() }
     var metadataSettingsExpanded by remember { mutableStateOf(false) }
+    val metadataAvailability = remember(previewMetadata) {
+        photoFrameMetadataAvailability(previewMetadata)
+    }
     val frameChoicesInCatalogOrder = listOf(
         PhotoFramePreset.MIST to stringResource(R.string.photo_frame_mist),
         PhotoFramePreset.CINEMA to stringResource(R.string.photo_frame_cinema),
@@ -1730,6 +1783,11 @@ internal fun PhotoFrameWatermarkEditor(
         PhotoFramePreset.IMMERSIVE to stringResource(R.string.photo_frame_immersive),
         PhotoFramePreset.BRAND_INSET to stringResource(R.string.photo_frame_brand_inset),
         PhotoFramePreset.BRAND_GALLERY to stringResource(R.string.photo_frame_brand_gallery),
+        PhotoFramePreset.CLASSIC_SIGNATURE to
+            stringResource(R.string.photo_frame_classic_signature),
+        PhotoFramePreset.GALLERY_MAT to stringResource(R.string.photo_frame_gallery_mat),
+        PhotoFramePreset.FILM_GALLERY to stringResource(R.string.photo_frame_film_gallery),
+        PhotoFramePreset.FILM_EDGE to stringResource(R.string.photo_frame_film_edge),
     )
     val frameLabels = frameChoicesInCatalogOrder.toMap()
     val favoriteByPreset = favoriteEffects.associateBy { it.framePreset }
@@ -1799,6 +1857,9 @@ internal fun PhotoFrameWatermarkEditor(
     LaunchedEffect(borderEnabled) {
         if (!borderEnabled) metadataSettingsExpanded = false
     }
+    LaunchedEffect(metadataAvailability.hasAny) {
+        if (!metadataAvailability.hasAny) metadataSettingsExpanded = false
+    }
     BackHandler(enabled = metadataSettingsExpanded) {
         metadataSettingsExpanded = false
     }
@@ -1864,26 +1925,31 @@ internal fun PhotoFrameWatermarkEditor(
                 accentColor = frameAccent,
                 modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
             )
-            GlassButton(
-                onClick = {
-                    haptics.tick()
-                    metadataSettingsExpanded = !metadataSettingsExpanded
-                },
-                enabled = borderEnabled,
-                active = borderEnabled && metadataSettingsExpanded,
-                activeColor = frameAccent.copy(alpha = 0.10f),
-                activeOutline = true,
-                shape = RoundedCornerShape(13.dp),
-                modifier = Modifier
-                    .weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT)
-                    .height(PHOTO_EFFECTS_CONTROL_HEIGHT),
-            ) {
-                Text(
-                    stringResource(R.string.photo_frame_metadata_button),
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            if (metadataAvailability.hasAny) {
+                GlassButton(
+                    onClick = {
+                        haptics.tick()
+                        metadataSettingsExpanded = !metadataSettingsExpanded
+                    },
+                    enabled = borderEnabled,
+                    active = borderEnabled && metadataSettingsExpanded,
+                    activeColor = frameAccent.copy(alpha = 0.10f),
+                    activeOutline = true,
+                    shape = RoundedCornerShape(13.dp),
+                    modifier = Modifier
+                        .weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT)
+                        .height(PHOTO_EFFECTS_CONTROL_HEIGHT),
+                ) {
+                    Text(
+                        stringResource(R.string.photo_frame_metadata_button),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontSize = 14.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             FavoriteToggleButton(
                 favorite = borderEnabled && preset in favoriteByPreset,
@@ -1896,12 +1962,13 @@ internal fun PhotoFrameWatermarkEditor(
         }
 
         AnimatedVisibility(
-            visible = borderEnabled && metadataSettingsExpanded,
+            visible = borderEnabled && metadataAvailability.hasAny && metadataSettingsExpanded,
             enter = fadeIn() + expandVertically(),
             exit = fadeOut() + shrinkVertically(),
         ) {
             PhotoFrameMetadataInlineSettings(
                 settings = metadataSettings,
+                availability = metadataAvailability,
                 onSettingsChanged = onMetadataSettingsChanged,
                 onDetent = haptics::tick,
                 modifier = Modifier.padding(top = 8.dp),
@@ -2223,6 +2290,7 @@ internal fun PhotoFrameWatermarkEditor(
 @OptIn(ExperimentalFoundationApi::class)
 private fun PhotoFrameMetadataInlineSettings(
     settings: PhotoFrameMetadataSettings,
+    availability: PhotoFrameMetadataAvailability,
     onSettingsChanged: (PhotoFrameMetadataSettings) -> Unit,
     onDetent: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2247,22 +2315,22 @@ private fun PhotoFrameMetadataInlineSettings(
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        val choices = listOf(
+        val choices = listOfNotNull(
             Triple(R.string.photo_frame_metadata_focal_length, settings.showFocalLength) {
                 settings.copy(showFocalLength = !settings.showFocalLength)
-            },
+            }.takeIf { availability.focalLength },
             Triple(R.string.photo_frame_metadata_exposure, settings.showExposure) {
                 settings.copy(showExposure = !settings.showExposure)
-            },
+            }.takeIf { availability.exposure },
             Triple(R.string.photo_frame_metadata_lens_model, settings.showLensModel) {
                 settings.copy(showLensModel = !settings.showLensModel)
-            },
+            }.takeIf { availability.lensModel },
             Triple(R.string.photo_frame_metadata_brand, settings.showBrand) {
                 settings.copy(showBrand = !settings.showBrand)
-            },
+            }.takeIf { availability.brand },
             Triple(R.string.photo_frame_metadata_model, settings.showModel) {
                 settings.copy(showModel = !settings.showModel)
-            },
+            }.takeIf { availability.model },
         )
         choices.chunked(3).forEach { rowChoices ->
             Row(
@@ -2283,37 +2351,43 @@ private fun PhotoFrameMetadataInlineSettings(
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            MetadataFormatWheel(
-                title = stringResource(R.string.photo_frame_metadata_date_format),
-                enabled = settings.showDate,
-                patterns = datePatterns,
-                selectedPattern = settings.datePattern,
-                example = ::photoFrameDatePatternExample,
-                onDisabled = { onSettingsChanged(settings.copy(showDate = false)) },
-                onPatternSelected = {
-                    onSettingsChanged(settings.copy(showDate = true, datePattern = it))
-                },
-                onDetent = onDetent,
-                modifier = Modifier.weight(1f),
-            )
-            MetadataFormatWheel(
-                title = stringResource(R.string.photo_frame_metadata_time_format),
-                enabled = settings.showTime,
-                patterns = timePatterns,
-                selectedPattern = settings.timePattern,
-                example = ::photoFrameTimePatternExample,
-                onDisabled = { onSettingsChanged(settings.copy(showTime = false)) },
-                onPatternSelected = {
-                    onSettingsChanged(settings.copy(showTime = true, timePattern = it))
-                },
-                onDetent = onDetent,
-                modifier = Modifier.weight(1f),
-            )
+        if (availability.date || availability.time) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                if (availability.date) {
+                    MetadataFormatWheel(
+                        title = stringResource(R.string.photo_frame_metadata_date_format),
+                        enabled = settings.showDate,
+                        patterns = datePatterns,
+                        selectedPattern = settings.datePattern,
+                        example = ::photoFrameDatePatternExample,
+                        onDisabled = { onSettingsChanged(settings.copy(showDate = false)) },
+                        onPatternSelected = {
+                            onSettingsChanged(settings.copy(showDate = true, datePattern = it))
+                        },
+                        onDetent = onDetent,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (availability.time) {
+                    MetadataFormatWheel(
+                        title = stringResource(R.string.photo_frame_metadata_time_format),
+                        enabled = settings.showTime,
+                        patterns = timePatterns,
+                        selectedPattern = settings.timePattern,
+                        example = ::photoFrameTimePatternExample,
+                        onDisabled = { onSettingsChanged(settings.copy(showTime = false)) },
+                        onPatternSelected = {
+                            onSettingsChanged(settings.copy(showTime = true, timePattern = it))
+                        },
+                        onDetent = onDetent,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
         }
 
     }
@@ -2504,7 +2578,7 @@ private fun PhotoEffectsPreviewLoadingPlaceholder() {
 internal fun PhotoEffectsRenderedPreview(
     source: Bitmap,
     resetOnSourceChange: Boolean = false,
-    metadata: PhotoFrameMetadata = PHOTO_EFFECTS_PREVIEW_METADATA,
+    metadata: PhotoFrameMetadata = EMPTY_PHOTO_EFFECTS_PREVIEW_METADATA,
     sourceRotationQuarterTurns: Int,
     requestedRotationQuarterTurns: Int,
     requestedPortrait: Boolean,
@@ -3075,43 +3149,30 @@ private data class RotatedPreviewSource(
     val quarterTurns: Int,
 )
 
-private val PHOTO_EFFECTS_PREVIEW_METADATA = PhotoFrameMetadata(
-    make = "NIKON CORPORATION",
-    model = "NIKON Z 8",
-    aperture = "2.8",
-    shutter = "1/250",
-    iso = "ISO100",
-    focalLength = "50mm",
-    lensModel = "NIKKOR Z 24-70mm f/2.8 S",
-    dateTime = "2026-08-04 10:30:00",
+private val EMPTY_PHOTO_EFFECTS_PREVIEW_METADATA = PhotoFrameMetadata(
+    make = null,
+    model = null,
+    aperture = null,
+    shutter = null,
+    iso = null,
+    focalLength = null,
+    lensModel = null,
+    dateTime = null,
 )
 
 internal fun cameraEffectPreviewMetadata(
     manufacturer: String?,
     model: String?,
     exif: PhotoExif? = null,
-): PhotoFrameMetadata = PHOTO_EFFECTS_PREVIEW_METADATA.copy(
-    make = manufacturer?.trim()?.takeIf(String::isNotEmpty)
-        ?: PHOTO_EFFECTS_PREVIEW_METADATA.make,
-    model = model?.trim()?.takeIf(String::isNotEmpty)
-        ?: PHOTO_EFFECTS_PREVIEW_METADATA.model,
-    aperture = exif?.aperture?.trim()?.takeIf(String::isNotEmpty)
-        ?: PHOTO_EFFECTS_PREVIEW_METADATA.aperture,
-    shutter = exif?.shutterSpeed?.trim()?.takeIf(String::isNotEmpty)
-        ?: PHOTO_EFFECTS_PREVIEW_METADATA.shutter,
-    iso = exif?.iso?.trim()?.takeIf(String::isNotEmpty)
-        ?: PHOTO_EFFECTS_PREVIEW_METADATA.iso,
-    focalLength = exif?.focalLength?.trim()?.takeIf(String::isNotEmpty)
-        ?: PHOTO_EFFECTS_PREVIEW_METADATA.focalLength,
-    // A connected photo with no LensModel must stay empty so the preview matches export. Only the
-    // disconnected/demo state uses sample lens data.
-    lensModel = if (exif == null) {
-        PHOTO_EFFECTS_PREVIEW_METADATA.lensModel
-    } else {
-        exif.lensModel?.trim()?.takeIf(String::isNotEmpty)
-    },
-    dateTime = normalizeCaptureDateTime(exif?.dateTime)
-        ?: PHOTO_EFFECTS_PREVIEW_METADATA.dateTime,
+): PhotoFrameMetadata = PhotoFrameMetadata(
+    make = manufacturer?.trim()?.takeIf(String::isNotEmpty),
+    model = model?.trim()?.takeIf(String::isNotEmpty),
+    aperture = exif?.aperture?.trim()?.takeIf(String::isNotEmpty),
+    shutter = exif?.shutterSpeed?.trim()?.takeIf(String::isNotEmpty),
+    iso = exif?.iso?.trim()?.takeIf(String::isNotEmpty),
+    focalLength = exif?.focalLength?.trim()?.takeIf(String::isNotEmpty),
+    lensModel = exif?.lensModel?.trim()?.takeIf(String::isNotEmpty),
+    dateTime = normalizeCaptureDateTime(exif?.dateTime),
 )
 
 private fun createPhotoFramePreviewSource(): Bitmap {

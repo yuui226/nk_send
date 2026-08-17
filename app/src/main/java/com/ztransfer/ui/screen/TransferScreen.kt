@@ -938,6 +938,10 @@ private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringReso
         PhotoFramePreset.IMMERSIVE -> R.string.photo_frame_immersive
         PhotoFramePreset.BRAND_INSET -> R.string.photo_frame_brand_inset
         PhotoFramePreset.BRAND_GALLERY -> R.string.photo_frame_brand_gallery
+        PhotoFramePreset.CLASSIC_SIGNATURE -> R.string.photo_frame_classic_signature
+        PhotoFramePreset.GALLERY_MAT -> R.string.photo_frame_gallery_mat
+        PhotoFramePreset.FILM_GALLERY -> R.string.photo_frame_film_gallery
+        PhotoFramePreset.FILM_EDGE -> R.string.photo_frame_film_edge
     }
 )
 

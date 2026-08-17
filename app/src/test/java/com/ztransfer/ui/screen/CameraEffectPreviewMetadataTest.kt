@@ -2,6 +2,8 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.viewmodel.PhotoExif
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraEffectPreviewMetadataTest {
@@ -17,18 +19,18 @@ class CameraEffectPreviewMetadataTest {
     }
 
     @Test
-    fun missingCameraIdentityFallsBackToDemoIdentity() {
+    fun missingCameraIdentityStaysEmpty() {
         val metadata = cameraEffectPreviewMetadata(
             manufacturer = " ",
             model = null,
         )
 
-        assertEquals("NIKON CORPORATION", metadata.make)
-        assertEquals("NIKON Z 8", metadata.model)
+        assertEquals(null, metadata.make)
+        assertEquals(null, metadata.model)
     }
 
     @Test
-    fun previewExifReplacesEveryDemoExposureField() {
+    fun previewExifUsesEveryRealExposureField() {
         val metadata = cameraEffectPreviewMetadata(
             manufacturer = "NIKON CORPORATION",
             model = "NIKON Z 6_3",
@@ -51,7 +53,7 @@ class CameraEffectPreviewMetadataTest {
     }
 
     @Test
-    fun missingExifFieldsFallBackIndividually() {
+    fun missingExifFieldsStayEmptyIndividually() {
         val metadata = cameraEffectPreviewMetadata(
             manufacturer = null,
             model = null,
@@ -64,10 +66,47 @@ class CameraEffectPreviewMetadataTest {
         )
 
         assertEquals("f/5.6", metadata.aperture)
-        assertEquals("1/250", metadata.shutter)
-        assertEquals("ISO100", metadata.iso)
-        assertEquals("50mm", metadata.focalLength)
+        assertEquals(null, metadata.shutter)
+        assertEquals(null, metadata.iso)
+        assertEquals(null, metadata.focalLength)
         assertEquals(null, metadata.lensModel)
-        assertEquals("2026-08-04 10:30:00", metadata.dateTime)
+        assertEquals(null, metadata.dateTime)
+    }
+
+    @Test
+    fun availabilityContainsOnlyFieldsPresentOnThePreviewPhoto() {
+        val availability = photoFrameMetadataAvailability(
+            cameraEffectPreviewMetadata(
+                manufacturer = "NIKON CORPORATION",
+                model = "NIKON Z 30",
+                exif = PhotoExif(
+                    aperture = "f/4.0",
+                    shutterSpeed = null,
+                    iso = "ISO200",
+                    focalLength = null,
+                    dateTime = "2026:08:17 09:08:07",
+                ),
+            )
+        )
+
+        assertTrue(availability.brand)
+        assertTrue(availability.model)
+        assertTrue(availability.exposure)
+        assertTrue(availability.date)
+        assertTrue(availability.time)
+        assertFalse(availability.focalLength)
+        assertFalse(availability.lensModel)
+        assertTrue(availability.hasAny)
+    }
+
+    @Test
+    fun emptyPreviewHidesTheWholeFrameInformationEntry() {
+        val availability = photoFrameMetadataAvailability(null)
+
+        assertFalse(availability.hasAny)
+        assertFalse(availability.brand)
+        assertFalse(availability.model)
+        assertFalse(availability.date)
+        assertFalse(availability.time)
     }
 }

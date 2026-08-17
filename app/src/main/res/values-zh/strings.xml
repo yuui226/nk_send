@@ -146,6 +146,10 @@
     <string name="photo_frame_immersive">沉浸</string>
     <string name="photo_frame_brand_inset">品牌内嵌</string>
     <string name="photo_frame_brand_gallery">品牌留白</string>
+    <string name="photo_frame_classic_signature">经典签名</string>
+    <string name="photo_frame_gallery_mat">艺术装裱</string>
+    <string name="photo_frame_film_gallery">胶片画廊</string>
+    <string name="photo_frame_film_edge">胶片边框</string>
     <string name="photo_frame_metadata_button">边框信息</string>
     <string name="photo_frame_metadata_focal_length">焦距</string>
     <string name="photo_frame_metadata_exposure">曝光参数</string>

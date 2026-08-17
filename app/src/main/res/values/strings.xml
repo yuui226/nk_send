@@ -146,6 +146,10 @@
     <string name="photo_frame_immersive">Immersive</string>
     <string name="photo_frame_brand_inset">Brand Inset</string>
     <string name="photo_frame_brand_gallery">Brand Gallery</string>
+    <string name="photo_frame_classic_signature">Classic Signature</string>
+    <string name="photo_frame_gallery_mat">Gallery Mat</string>
+    <string name="photo_frame_film_gallery">Film Gallery</string>
+    <string name="photo_frame_film_edge">Film Edge</string>
     <string name="photo_frame_metadata_button">Frame info</string>
     <string name="photo_frame_metadata_focal_length">Focal</string>
     <string name="photo_frame_metadata_exposure">Exposure</string>

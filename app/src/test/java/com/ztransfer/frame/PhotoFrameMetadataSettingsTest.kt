@@ -41,6 +41,31 @@ class PhotoFrameMetadataSettingsTest {
             assertFalse(settings.showTime)
             assertFalse(settings.showLensModel)
         }
+
+        val classic = defaultPhotoFrameMetadataSettings(PhotoFramePreset.CLASSIC_SIGNATURE)
+        assertTrue(classic.showBrand)
+        assertFalse(classic.showModel)
+        assertTrue(classic.showFocalLength)
+        assertTrue(classic.showExposure)
+
+        val filmGallery = defaultPhotoFrameMetadataSettings(PhotoFramePreset.FILM_GALLERY)
+        assertTrue(filmGallery.showBrand)
+        assertTrue(filmGallery.showModel)
+        assertTrue(filmGallery.showDate)
+        assertTrue(filmGallery.showTime)
+        assertFalse(filmGallery.showFocalLength)
+        assertFalse(filmGallery.showExposure)
+
+        listOf(PhotoFramePreset.GALLERY_MAT, PhotoFramePreset.FILM_EDGE).forEach { preset ->
+            val settings = defaultPhotoFrameMetadataSettings(preset)
+            assertFalse(settings.showDate)
+            assertFalse(settings.showTime)
+            assertFalse(settings.showFocalLength)
+            assertFalse(settings.showExposure)
+            assertFalse(settings.showBrand)
+            assertFalse(settings.showModel)
+            assertFalse(settings.showLensModel)
+        }
     }
 
     @Test

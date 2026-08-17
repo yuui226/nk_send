@@ -26,17 +26,46 @@ data class PhotoFrameMetadataSettings(
 
 internal fun defaultPhotoFrameMetadataSettings(
     preset: PhotoFramePreset,
-): PhotoFrameMetadataSettings = PhotoFrameMetadataSettings(
-    showDate = preset == PhotoFramePreset.PLAQUE,
-    showTime = preset == PhotoFramePreset.PLAQUE,
-    showFocalLength = true,
-    showExposure = true,
-    showBrand = true,
-    showModel = !preset.isBrandFrame(),
-    // No existing preset rendered the lens name. Keep every current default pixel-identical and
-    // let the user opt in per frame.
-    showLensModel = false,
-)
+): PhotoFrameMetadataSettings = when (preset) {
+    PhotoFramePreset.CLASSIC_SIGNATURE -> PhotoFrameMetadataSettings(
+        showDate = false,
+        showTime = false,
+        showFocalLength = true,
+        showExposure = true,
+        showBrand = true,
+        showModel = false,
+        showLensModel = false,
+    )
+    PhotoFramePreset.GALLERY_MAT,
+    PhotoFramePreset.FILM_EDGE -> PhotoFrameMetadataSettings(
+        showDate = false,
+        showTime = false,
+        showFocalLength = false,
+        showExposure = false,
+        showBrand = false,
+        showModel = false,
+        showLensModel = false,
+    )
+    PhotoFramePreset.FILM_GALLERY -> PhotoFrameMetadataSettings(
+        showDate = true,
+        showTime = true,
+        showFocalLength = false,
+        showExposure = false,
+        showBrand = true,
+        showModel = true,
+        showLensModel = false,
+    )
+    else -> PhotoFrameMetadataSettings(
+        showDate = preset == PhotoFramePreset.PLAQUE,
+        showTime = preset == PhotoFramePreset.PLAQUE,
+        showFocalLength = true,
+        showExposure = true,
+        showBrand = true,
+        showModel = !preset.isBrandFrame(),
+        // Existing defaults stay pixel-identical; lens is opt-in on every legacy frame.
+        showLensModel = false,
+    )
+}
 
 internal fun resolvedPhotoFrameMetadataSettings(
     settings: Map<PhotoFramePreset, PhotoFrameMetadataSettings>,
