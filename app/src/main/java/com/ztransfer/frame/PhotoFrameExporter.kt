@@ -581,6 +581,7 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean = true,
+        metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
         filter: PhotoFilterSelection? = null,
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
     ): Result<PhotoFrameExportResult> {
@@ -600,6 +601,7 @@ object PhotoFrameExporter {
                 preset = preset,
                 watermark = renderedWatermark,
                 borderEnabled = borderEnabled,
+                metadataSettings = metadataSettings,
                 filter = filter,
                 probeSessionId = probeSessionId,
             )
@@ -619,6 +621,7 @@ object PhotoFrameExporter {
                     preset = preset,
                     watermark = renderedWatermark,
                     borderEnabled = borderEnabled,
+                    metadataSettings = metadataSettings,
                     filter = filter,
                     bitmap = rendered,
                     probeSessionId = probeSessionId,
@@ -654,6 +657,7 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean = true,
+        metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
         filter: PhotoFilterSelection? = null,
     ): Result<PhotoFrameExportResult> {
         return try {
@@ -666,6 +670,7 @@ object PhotoFrameExporter {
                 preset = preset,
                 watermark = renderedWatermark,
                 borderEnabled = borderEnabled,
+                metadataSettings = metadataSettings,
                 filter = filter,
             )
             val saved = try {
@@ -676,6 +681,7 @@ object PhotoFrameExporter {
                     preset = preset,
                     watermark = renderedWatermark,
                     borderEnabled = borderEnabled,
+                    metadataSettings = metadataSettings,
                     filter = filter,
                     bitmap = rendered,
                 )
@@ -843,11 +849,16 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean,
+        metadataSettings: PhotoFrameMetadataSettings,
         filter: PhotoFilterSelection?,
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
     ): Bitmap {
         val metadataStartedAtMs = generationProbeClock()
-        val metadata = if (borderEnabled) readMetadata(resolver, sourceUri) else EMPTY_METADATA
+        val metadata = if (borderEnabled) {
+            readMetadata(resolver, sourceUri).withPresentation(metadataSettings)
+        } else {
+            EMPTY_METADATA
+        }
         recordGenerationStage(
             probeSessionId,
             "metadata_read",
@@ -1182,6 +1193,7 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean = true,
+        metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
         longEdge: Int,
         filter: PhotoFilterSelection? = null,
     ): Bitmap {
@@ -1190,7 +1202,7 @@ object PhotoFrameExporter {
             renderFrame(
                 context = context,
                 source = input,
-                metadata = metadata,
+                metadata = metadata.withPresentation(metadataSettings),
                 preset = preset,
                 watermark = watermark.forBorderMode(borderEnabled),
                 borderEnabled = borderEnabled,
@@ -1628,7 +1640,9 @@ object PhotoFrameExporter {
             if (lightText) Color.rgb(220, 227, 233) else Color.rgb(70, 79, 88)
         val brand = normalizeCameraMake(metadata.make)
         val model = normalizeCameraModel(metadata.make, metadata.model)
-        val details = frameDetailLine(metadata)
+        val details = listOf(frameDetailLine(metadata), metadata.dateTime.orEmpty())
+            .filter(String::isNotBlank)
+            .joinToString("   ")
         val hasTitle = brand.isNotEmpty() || model.isNotEmpty()
         val hasDetails = details.isNotBlank()
         val centerX = layout.canvasWidth / 2f
@@ -2253,7 +2267,9 @@ object PhotoFrameExporter {
         val cameraName = listOf(brand, model)
             .filter(String::isNotBlank)
             .joinToString(" ")
-        val details = immersiveFrameDetailLine(metadata)
+        val details = listOf(immersiveFrameDetailLine(metadata), metadata.dateTime.orEmpty())
+            .filter(String::isNotBlank)
+            .joinToString("  ")
         val inlineWatermark = metadataWatermark.takeIf {
             it.enabled && it.content == PhotoFrameWatermarkContent.TEXT &&
                 it.position == PhotoFrameWatermarkPosition.AUTO
@@ -3014,7 +3030,11 @@ object PhotoFrameExporter {
         )
         val occupiedWatermarkBounds = photoWatermarkLayout?.bounds?.toBrandFrameBounds()
         val brand = cameraBrandLabel(metadata.make, metadata.model)
-        val details = frameDetailLine(metadata)
+        val model = normalizeCameraModel(metadata.make, metadata.model)
+        val identity = listOf(brand, model).filter(String::isNotBlank).joinToString(" ")
+        val details = listOf(frameDetailLine(metadata), metadata.dateTime.orEmpty())
+            .filter(String::isNotBlank)
+            .joinToString("   ")
 
         canvas.save()
         canvas.clipPath(Path().apply {
@@ -3024,7 +3044,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.BRAND_INSET -> drawBrandInsetMetadata(
                 canvas = canvas,
                 photoRect = photoRect,
-                brand = brand,
+                brand = identity,
                 details = details,
                 occupiedWatermarkBounds = occupiedWatermarkBounds,
             )
@@ -3046,7 +3066,7 @@ object PhotoFrameExporter {
             canvas.drawRoundRect(photoRect, radius, radius, this)
         }
         if (preset == PhotoFramePreset.BRAND_GALLERY) {
-            drawBrandGalleryBand(context, canvas, layout, brand, watermark)
+            drawBrandGalleryBand(context, canvas, layout, identity, watermark)
         }
     }
 
@@ -3548,6 +3568,7 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean,
+        metadataSettings: PhotoFrameMetadataSettings,
         filter: PhotoFilterSelection?,
         bitmap: Bitmap,
     ): PhotoFrameExportResult {
@@ -3556,6 +3577,7 @@ object PhotoFrameExporter {
             preset,
             watermark,
             borderEnabled = borderEnabled,
+            metadataSettings = metadataSettings,
             filter = filter,
         )
         val name = uniqueName(preferred, source.occupiedNames)
@@ -3695,6 +3717,7 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean,
+        metadataSettings: PhotoFrameMetadataSettings,
         filter: PhotoFilterSelection?,
         bitmap: Bitmap,
         probeSessionId: Long,
@@ -3705,6 +3728,7 @@ object PhotoFrameExporter {
             preset,
             watermark,
             borderEnabled = borderEnabled,
+            metadataSettings = metadataSettings,
             filter = filter,
         )
         // Reserve before touching the provider so concurrent exporters never select the same name.
@@ -4564,13 +4588,19 @@ internal fun photoFrameOutputName(
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
     borderEnabled: Boolean = true,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     filter: PhotoFilterSelection? = null,
 ): String {
     // v2 调整了默认字体与透明度语义，所有成片都带配置摘要，避免误命中升级前旧图。
     val renderedWatermark = watermark.forBorderMode(borderEnabled)
+    val renderedMetadataSettings = if (borderEnabled) {
+        metadataSettings
+    } else {
+        defaultPhotoFrameMetadataSettings(preset)
+    }
     val decorationEnabled = borderEnabled || renderedWatermark.enabled
     val watermarkSuffix = if (decorationEnabled) {
-        "_w${photoFrameWatermarkFingerprint(renderedWatermark, preset)}"
+        "_w${photoFrameWatermarkFingerprint(renderedWatermark, preset, renderedMetadataSettings)}"
     } else {
         ""
     }
@@ -4598,8 +4628,10 @@ internal fun photoFilterRenderFingerprint(filter: PhotoFilterSelection): String 
 internal fun photoFrameWatermarkFingerprint(
     watermark: PhotoFrameWatermark,
     preset: PhotoFramePreset,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
 ): String {
-    val identity = if (watermark.enabled) {
+    val metadataToken = photoFrameMetadataSettingsFingerprintToken(preset, metadataSettings)
+    val baseIdentity = if (watermark.enabled) {
         val renderedPosition = resolvedWatermarkPosition(preset, watermark.position)
         buildList {
             add("v=$PHOTO_FRAME_WATERMARK_RENDER_VERSION")
@@ -4625,6 +4657,11 @@ internal fun photoFrameWatermarkFingerprint(
         "brand-v=$BRAND_FRAME_RENDER_VERSION\u0000off"
     } else {
         "off"
+    }
+    val identity = if (metadataToken == null) {
+        baseIdentity
+    } else {
+        "$baseIdentity\u0000metadata=$metadataToken"
     }
     return MessageDigest.getInstance("SHA-256")
         .digest(identity.toByteArray(Charsets.UTF_8))
@@ -4688,9 +4725,17 @@ internal fun PhotoFrameDestination.hasFrameFor(
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
     borderEnabled: Boolean = true,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     filter: PhotoFilterSelection? = null,
 ): Boolean {
-    val pattern = photoFrameOutputPattern(sourceName, preset, watermark, borderEnabled, filter)
+    val pattern = photoFrameOutputPattern(
+        sourceName,
+        preset,
+        watermark,
+        borderEnabled,
+        metadataSettings,
+        filter,
+    )
     return occupiedNames.any(pattern::matches)
 }
 
@@ -4700,12 +4745,14 @@ internal fun isPhotoFrameOutputFor(
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
     borderEnabled: Boolean = true,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     filter: PhotoFilterSelection? = null,
 ): Boolean = photoFrameOutputPattern(
     sourceName,
     preset,
     watermark,
     borderEnabled,
+    metadataSettings,
     filter,
 ).matches(name)
 
@@ -4714,9 +4761,17 @@ private fun photoFrameOutputPattern(
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark,
     borderEnabled: Boolean,
+    metadataSettings: PhotoFrameMetadataSettings,
     filter: PhotoFilterSelection?,
 ): Regex {
-    val preferred = photoFrameOutputName(sourceName, preset, watermark, borderEnabled, filter)
+    val preferred = photoFrameOutputName(
+        sourceName,
+        preset,
+        watermark,
+        borderEnabled,
+        metadataSettings,
+        filter,
+    )
     val dot = preferred.lastIndexOf('.')
     val stem = if (dot >= 0) preferred.substring(0, dot) else preferred
     val extension = if (dot >= 0) preferred.substring(dot) else ""

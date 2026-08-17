@@ -146,6 +146,16 @@
     <string name="photo_frame_immersive">Immersive</string>
     <string name="photo_frame_brand_inset">Brand Inset</string>
     <string name="photo_frame_brand_gallery">Brand Gallery</string>
+    <string name="photo_frame_metadata_button">Frame text</string>
+    <string name="photo_frame_metadata_focal_length">Focal</string>
+    <string name="photo_frame_metadata_exposure">Exposure</string>
+    <string name="photo_frame_metadata_brand">Brand</string>
+    <string name="photo_frame_metadata_model">Model</string>
+    <string name="photo_frame_metadata_date_format">Date format</string>
+    <string name="photo_frame_metadata_time_format">Time format</string>
+    <string name="photo_frame_metadata_custom_format">Custom</string>
+    <string name="photo_frame_metadata_format_invalid">Invalid format</string>
+    <string name="photo_frame_metadata_restore_default">Restore default</string>
     <string name="photo_frame_task_label">Frame: %1$s</string>
     <string name="photo_frame_watermark_summary">Watermark: %1$s</string>
     <string name="photo_frame_watermark_pro_only">Available in Pro only</string>

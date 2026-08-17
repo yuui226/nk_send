@@ -3759,7 +3759,7 @@ private fun Int.twoDigits(): String = toString().padStart(2, '0')
  * 与设置面板的选择胶囊同族语言。
  */
 @Composable
-private fun FilterChip(
+internal fun FilterChip(
     label: String? = null,
     selected: Boolean,
     onClick: () -> Unit,

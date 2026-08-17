@@ -146,6 +146,16 @@
     <string name="photo_frame_immersive">沉浸</string>
     <string name="photo_frame_brand_inset">品牌內嵌</string>
     <string name="photo_frame_brand_gallery">品牌留白</string>
+    <string name="photo_frame_metadata_button">邊框文字</string>
+    <string name="photo_frame_metadata_focal_length">焦距</string>
+    <string name="photo_frame_metadata_exposure">曝光參數</string>
+    <string name="photo_frame_metadata_brand">品牌</string>
+    <string name="photo_frame_metadata_model">型號</string>
+    <string name="photo_frame_metadata_date_format">日期格式</string>
+    <string name="photo_frame_metadata_time_format">時間格式</string>
+    <string name="photo_frame_metadata_custom_format">自訂</string>
+    <string name="photo_frame_metadata_format_invalid">格式無效</string>
+    <string name="photo_frame_metadata_restore_default">恢復預設</string>
     <string name="photo_frame_task_label">邊框：%1$s</string>
     <string name="photo_frame_watermark_summary">浮水印：%1$s</string>
     <string name="photo_frame_watermark_pro_only">僅高級版可用</string>

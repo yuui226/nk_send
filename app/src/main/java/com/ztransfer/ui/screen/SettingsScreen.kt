@@ -107,6 +107,7 @@ import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.effects.orderWithFavorites
 import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.frame.PhotoFrameMetadata
+import com.ztransfer.frame.PhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkColor
@@ -119,9 +120,15 @@ import com.ztransfer.frame.MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
 import com.ztransfer.frame.MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
 import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
 import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
+import com.ztransfer.frame.PHOTO_FRAME_TIME_PATTERNS
 import com.ztransfer.frame.limitPhotoFrameWatermarkText
 import com.ztransfer.frame.isPhotoPlacement
 import com.ztransfer.frame.normalizeCaptureDateTime
+import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
+import com.ztransfer.frame.isValidPhotoFrameDatePattern
+import com.ztransfer.frame.photoFrameDatePatternExample
+import com.ztransfer.frame.photoFrameTimePatternExample
+import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterRenderer
@@ -680,6 +687,10 @@ fun SettingsOverlay(
                                 borderEnabled =
                                     frameDraftDecorationEnabled && frameDraftBorderEnabled,
                                 preset = frameDraftPreset,
+                                metadataSettings = resolvedPhotoFrameMetadataSettings(
+                                    state.photoFrameMetadataSettings,
+                                    frameDraftPreset,
+                                ),
                                 watermark = renderWatermark,
                                 filter = previewFilter,
                                 prefetchFilters = previewFilterPrefetch,
@@ -722,6 +733,10 @@ fun SettingsOverlay(
                     favoriteEffects = state.favoriteFrameEffects,
                     borderEnabled = frameDraftDecorationEnabled && frameDraftBorderEnabled,
                     preset = frameDraftPreset,
+                    metadataSettings = resolvedPhotoFrameMetadataSettings(
+                        state.photoFrameMetadataSettings,
+                        frameDraftPreset,
+                    ),
                     // 高级版编辑器必须保留正在输入的原始草稿（包括暂时为空）；若在这里
                     // 经过 effectivePhotoFrameWatermark，空值会在每次重组时立刻变回默认值，
                     // 用户就无法真正清空后重新输入。预览渲染自身仍会使用 displayText。
@@ -734,6 +749,12 @@ fun SettingsOverlay(
                         frameDraftDecorationEnabled = enabled || (isPro && watermarkDraft.enabled)
                     },
                     onPresetChanged = { frameDraftPreset = it },
+                    onMetadataSettingsChanged = { updated ->
+                        viewModel.setPhotoFrameMetadataSettings(frameDraftPreset, updated)
+                    },
+                    onMetadataSettingsReset = {
+                        viewModel.setPhotoFrameMetadataSettings(frameDraftPreset, null)
+                    },
                     onWatermarkChanged = { updated ->
                         if (isPro) {
                             watermarkDraft = mergeWatermarkEditKeepingPreferredPosition(
@@ -1676,12 +1697,15 @@ internal fun PhotoFrameWatermarkEditor(
     favoriteEffects: List<FavoriteFrameWatermarkEffect>,
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
+    metadataSettings: PhotoFrameMetadataSettings,
     watermark: PhotoFrameWatermark,
     watermarkContentSource: PhotoFrameWatermark = watermark,
     isPro: Boolean,
     hapticsEnabled: Boolean,
     onBorderEnabledChanged: (Boolean) -> Unit,
     onPresetChanged: (PhotoFramePreset) -> Unit,
+    onMetadataSettingsChanged: (PhotoFrameMetadataSettings) -> Unit,
+    onMetadataSettingsReset: () -> Unit,
     onWatermarkChanged: (PhotoFrameWatermark) -> Unit,
     onFavoriteWatermarkApplied: (PhotoFrameWatermark) -> Unit,
     onWatermarkPositionChanged: (PhotoFrameWatermarkPosition) -> Unit,
@@ -1700,6 +1724,7 @@ internal fun PhotoFrameWatermarkEditor(
     val haptics = rememberHaptics(hapticsEnabled)
     val focusManager = LocalFocusManager.current
     val proLockInteractionSource = remember { MutableInteractionSource() }
+    var metadataSettingsExpanded by remember { mutableStateOf(false) }
     val frameChoicesInCatalogOrder = listOf(
         PhotoFramePreset.MIST to stringResource(R.string.photo_frame_mist),
         PhotoFramePreset.CINEMA to stringResource(R.string.photo_frame_cinema),
@@ -1775,6 +1800,13 @@ internal fun PhotoFrameWatermarkEditor(
         true to stringResource(R.string.photo_frame_on),
     )
 
+    LaunchedEffect(borderEnabled) {
+        if (!borderEnabled) metadataSettingsExpanded = false
+    }
+    BackHandler(enabled = metadataSettingsExpanded) {
+        metadataSettingsExpanded = false
+    }
+
     fun commitWatermarkChange(updated: PhotoFrameWatermark) {
         onWatermarkChanged(updated)
         if (borderEnabled && preset in favoriteByPreset) {
@@ -1836,12 +1868,69 @@ internal fun PhotoFrameWatermarkEditor(
                 accentColor = frameAccent,
                 modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
             )
-            Box(modifier = Modifier.weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT)) {
+            GlassButton(
+                onClick = {
+                    haptics.tick()
+                    metadataSettingsExpanded = !metadataSettingsExpanded
+                },
+                enabled = borderEnabled,
+                active = borderEnabled && metadataSettingsExpanded,
+                activeColor = frameAccent.copy(alpha = 0.10f),
+                activeOutline = true,
+                shape = RoundedCornerShape(13.dp),
+                modifier = Modifier
+                    .weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT)
+                    .height(PHOTO_EFFECTS_CONTROL_HEIGHT),
+            ) {
+                Text(
+                    stringResource(R.string.photo_frame_metadata_button),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            FavoriteToggleButton(
+                favorite = borderEnabled && preset in favoriteByPreset,
+                enabled = borderEnabled,
+                onClick = {
+                    haptics.tick()
+                    onFavoriteToggled(preset, watermark)
+                },
+            )
+        }
+
+        AnimatedVisibility(
+            visible = borderEnabled && metadataSettingsExpanded,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            PhotoFrameMetadataInlineSettings(
+                preset = preset,
+                settings = metadataSettings,
+                onSettingsChanged = onMetadataSettingsChanged,
+                onRestoreDefault = onMetadataSettingsReset,
+                onDetent = haptics::tick,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(watermarkAccent.copy(alpha = 0.055f))
+                .border(
+                    1.dp,
+                    watermarkAccent.copy(alpha = 0.18f),
+                    RoundedCornerShape(12.dp),
+                )
+                .padding(8.dp),
+        ) {
+            Box(modifier = Modifier.fillMaxWidth()) {
                 ReleaseCommitWheel(
                     options = watermarkEnabledChoices,
-                    selected = watermarkEnabledChoices.first {
-                        it.first == watermark.enabled
-                    },
+                    selected = watermarkEnabledChoices.first { it.first == watermark.enabled },
                     optionLabel = { it.second },
                     onValueCommitted = {
                         focusManager.clearFocus()
@@ -1867,38 +1956,22 @@ internal fun PhotoFrameWatermarkEditor(
                     )
                 }
             }
-            FavoriteToggleButton(
-                favorite = borderEnabled && preset in favoriteByPreset,
-                enabled = borderEnabled,
-                onClick = {
-                    haptics.tick()
-                    onFavoriteToggled(preset, watermark)
-                },
-            )
-        }
 
-        AnimatedVisibility(
-            visible = watermark.enabled,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-        ) {
-            Column(
-                modifier = Modifier.clickable(
-                    enabled = !isPro,
-                    interactionSource = proLockInteractionSource,
-                    indication = null,
-                    onClick = onProRequired,
-                )
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(watermarkAccent.copy(alpha = 0.055f))
-                    .border(
-                        1.dp,
-                        watermarkAccent.copy(alpha = 0.18f),
-                        RoundedCornerShape(12.dp),
-                    )
-                    .padding(8.dp),
+            AnimatedVisibility(
+                visible = watermark.enabled,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
             ) {
+                Column(
+                    modifier = Modifier
+                        .clickable(
+                            enabled = !isPro,
+                            interactionSource = proLockInteractionSource,
+                            indication = null,
+                            onClick = onProRequired,
+                        )
+                        .padding(top = 10.dp),
+                ) {
                 BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                     val contentWheelWidth = (maxWidth - 8.dp) / 3f
                     val editorWidth = maxWidth - contentWheelWidth - 8.dp
@@ -2146,10 +2219,232 @@ internal fun PhotoFrameWatermarkEditor(
                         }
                     }
                 }
+                }
             }
         }
     }
 }
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+private fun PhotoFrameMetadataInlineSettings(
+    preset: PhotoFramePreset,
+    settings: PhotoFrameMetadataSettings,
+    onSettingsChanged: (PhotoFrameMetadataSettings) -> Unit,
+    onRestoreDefault: () -> Unit,
+    onDetent: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val datePatterns = listOf(
+        "yyyy-MM-dd",
+        "yyyy/MM/dd",
+        "yyyy.MM.dd",
+        "dd-MM-yyyy",
+        "MM-dd-yyyy",
+    )
+    val timePatterns = PHOTO_FRAME_TIME_PATTERNS
+    var customDateVisible by remember(preset, settings.datePattern) {
+        mutableStateOf(settings.datePattern !in datePatterns)
+    }
+    var customDate by remember(preset, settings.datePattern) {
+        mutableStateOf(settings.datePattern)
+    }
+    val defaults = remember(preset) { defaultPhotoFrameMetadataSettings(preset) }
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(180)
+        bringIntoViewRequester.bringIntoView()
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .bringIntoViewRequester(bringIntoViewRequester)
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.glassSurface.copy(alpha = 0.58f))
+            .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(12.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val choices = listOf(
+            Triple(R.string.photo_frame_metadata_focal_length, settings.showFocalLength) {
+                settings.copy(showFocalLength = !settings.showFocalLength)
+            },
+            Triple(R.string.photo_frame_metadata_exposure, settings.showExposure) {
+                settings.copy(showExposure = !settings.showExposure)
+            },
+            Triple(R.string.photo_frame_metadata_brand, settings.showBrand) {
+                settings.copy(showBrand = !settings.showBrand)
+            },
+            Triple(R.string.photo_frame_metadata_model, settings.showModel) {
+                settings.copy(showModel = !settings.showModel)
+            },
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            choices.forEach { (label, selected, update) ->
+                FilterChip(
+                    label = stringResource(label),
+                    selected = selected,
+                    onClick = {
+                        onDetent()
+                        onSettingsChanged(update())
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            MetadataFormatWheel(
+                title = stringResource(R.string.photo_frame_metadata_date_format),
+                enabled = settings.showDate,
+                patterns = datePatterns,
+                selectedPattern = settings.datePattern,
+                example = ::photoFrameDatePatternExample,
+                allowCustom = true,
+                customVisible = customDateVisible,
+                onDisabled = {
+                    customDateVisible = false
+                    onSettingsChanged(settings.copy(showDate = false))
+                },
+                onPatternSelected = {
+                    customDateVisible = false
+                    customDate = it
+                    onSettingsChanged(settings.copy(showDate = true, datePattern = it))
+                },
+                onCustomRequested = {
+                    customDateVisible = true
+                    onSettingsChanged(settings.copy(showDate = true))
+                },
+                onDetent = onDetent,
+                modifier = Modifier.weight(1f),
+            )
+            MetadataFormatWheel(
+                title = stringResource(R.string.photo_frame_metadata_time_format),
+                enabled = settings.showTime,
+                patterns = timePatterns,
+                selectedPattern = settings.timePattern,
+                example = ::photoFrameTimePatternExample,
+                allowCustom = false,
+                customVisible = false,
+                onDisabled = { onSettingsChanged(settings.copy(showTime = false)) },
+                onPatternSelected = {
+                    onSettingsChanged(settings.copy(showTime = true, timePattern = it))
+                },
+                onCustomRequested = {},
+                onDetent = onDetent,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        AnimatedVisibility(customDateVisible && settings.showDate) {
+            OutlinedTextField(
+                value = customDate,
+                onValueChange = {
+                    customDate = it
+                    if (isValidPhotoFrameDatePattern(it)) {
+                        onSettingsChanged(settings.copy(showDate = true, datePattern = it))
+                    }
+                },
+                singleLine = true,
+                isError = !isValidPhotoFrameDatePattern(customDate),
+                supportingText = {
+                    if (!isValidPhotoFrameDatePattern(customDate)) {
+                        Text(stringResource(R.string.photo_frame_metadata_format_invalid))
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = colors.accentOrange,
+                    cursorColor = colors.accentOrange,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        if (settings != defaults) {
+            TextButton(
+                onClick = {
+                    customDateVisible = defaults.datePattern !in datePatterns
+                    customDate = defaults.datePattern
+                    onRestoreDefault()
+                },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text(stringResource(R.string.photo_frame_metadata_restore_default))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetadataFormatWheel(
+    title: String,
+    enabled: Boolean,
+    patterns: List<String>,
+    selectedPattern: String,
+    example: (String) -> String,
+    allowCustom: Boolean,
+    customVisible: Boolean,
+    onDisabled: () -> Unit,
+    onPatternSelected: (String) -> Unit,
+    onCustomRequested: () -> Unit,
+    onDetent: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val accent = colors.accentOrange
+    val offLabel = stringResource(R.string.photo_frame_off)
+    val customLabel = stringResource(R.string.photo_frame_metadata_custom_format)
+    val options = buildList {
+        add(MetadataFormatOption())
+        patterns.forEach { add(MetadataFormatOption(pattern = it)) }
+        if (allowCustom) add(MetadataFormatOption(custom = true))
+    }
+    val selected = when {
+        !enabled -> options.first()
+        allowCustom && (customVisible || selectedPattern !in patterns) -> options.last()
+        else -> options.firstOrNull { it.pattern == selectedPattern } ?: options[1]
+    }
+
+    ReleaseCommitWheel(
+        options = options,
+        selected = selected,
+        optionLabel = { option ->
+            when {
+                option.custom -> customLabel
+                option.pattern != null -> example(option.pattern)
+                else -> offLabel
+            }
+        },
+        onValueCommitted = { option ->
+            when {
+                option.custom -> onCustomRequested()
+                option.pattern != null -> onPatternSelected(option.pattern)
+                else -> onDisabled()
+            }
+        },
+        onDetent = onDetent,
+        label = title,
+        wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+        accentColor = accent,
+        modifier = modifier,
+    )
+}
+
+private data class MetadataFormatOption(
+    val pattern: String? = null,
+    val custom: Boolean = false,
+)
 
 /**
  * 只监听没有被输入框、按钮或滚动消费的轻点；因此点空白可收起键盘，点输入框本身不会
@@ -2307,6 +2602,7 @@ internal fun PhotoEffectsRenderedPreview(
     onRotate: (() -> Unit)?,
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     watermark: PhotoFrameWatermark,
     filter: PhotoFilterSelection? = null,
     prefetchFilters: List<PhotoFilterSelection> = emptyList(),
@@ -2335,6 +2631,7 @@ internal fun PhotoEffectsRenderedPreview(
         sourceRotationQuarterTurns,
         borderEnabled,
         preset,
+        metadataSettings,
         watermark,
     ) {
         BoundedAccessCache<PhotoEffectsPreviewCacheKey, PhotoEffectsPreviewCache>(
@@ -2359,6 +2656,7 @@ internal fun PhotoEffectsRenderedPreview(
         sourceRotationQuarterTurns,
         borderEnabled,
         preset,
+        metadataSettings,
         watermark,
     ) { PhotoEffectsPreviewCache() }
     DisposableEffect(comparisonCache) {
@@ -2414,6 +2712,7 @@ internal fun PhotoEffectsRenderedPreview(
                     preset = preset,
                     watermark = watermark,
                     borderEnabled = borderEnabled,
+                    metadataSettings = metadataSettings,
                     longEdge = PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
                     filter = null,
                 )

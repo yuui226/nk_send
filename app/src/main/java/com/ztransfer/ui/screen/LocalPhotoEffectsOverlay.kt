@@ -52,6 +52,9 @@ import com.ztransfer.frame.PhotoFrameMetadata
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkContent
 import com.ztransfer.frame.LOCAL_PHOTO_FALLBACK_RELATIVE_PATH
+import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
+import com.ztransfer.frame.normalizePhotoFrameMetadataSettings
+import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.viewmodel.TransferViewModel
@@ -102,6 +105,7 @@ fun LocalPhotoEffectsPage(
     var decorationEnabled by remember { mutableStateOf(initialSettings.decorationEnabled) }
     var borderEnabled by remember { mutableStateOf(initialSettings.borderEnabled) }
     var preset by remember { mutableStateOf(initialSettings.preset) }
+    var metadataSettings by remember { mutableStateOf(initialSettings.metadataSettings) }
     var watermarkDraft by remember { mutableStateOf(initialSettings.watermark) }
     var filterId by remember { mutableStateOf(initialSettings.filterId) }
     var filterEnabled by remember { mutableStateOf(initialSettings.filterEnabled) }
@@ -120,6 +124,7 @@ fun LocalPhotoEffectsPage(
         decorationEnabled = decorationEnabled,
         borderEnabled = borderEnabled,
         preset = preset,
+        metadataSettings = metadataSettings,
         watermark = watermarkDraft,
         filterId = filterId,
         filterEnabled = filterEnabled,
@@ -398,6 +403,10 @@ fun LocalPhotoEffectsPage(
                     onRotate = null,
                     borderEnabled = decorationEnabled && borderEnabled,
                     preset = preset,
+                    metadataSettings = resolvedPhotoFrameMetadataSettings(
+                        metadataSettings,
+                        preset,
+                    ),
                     watermark = renderWatermark,
                     filter = selectedFilter,
                     prefetchFilters = previewFilterPrefetch,
@@ -442,6 +451,10 @@ fun LocalPhotoEffectsPage(
                 favoriteEffects = favoriteFrameEffects,
                 borderEnabled = decorationEnabled && borderEnabled,
                 preset = preset,
+                metadataSettings = resolvedPhotoFrameMetadataSettings(
+                    metadataSettings,
+                    preset,
+                ),
                 watermark = editorWatermark,
                 watermarkContentSource = watermarkDraft,
                 isPro = isPro,
@@ -451,6 +464,19 @@ fun LocalPhotoEffectsPage(
                     decorationEnabled = enabled || (isPro && watermarkDraft.enabled)
                 },
                 onPresetChanged = { preset = it },
+                onMetadataSettingsChanged = { updated ->
+                    val normalized = normalizePhotoFrameMetadataSettings(updated)
+                    metadataSettings = if (
+                        normalized == defaultPhotoFrameMetadataSettings(preset)
+                    ) {
+                        metadataSettings - preset
+                    } else {
+                        metadataSettings + (preset to normalized)
+                    }
+                },
+                onMetadataSettingsReset = {
+                    metadataSettings = metadataSettings - preset
+                },
                 onWatermarkChanged = { updated ->
                     if (isPro) {
                         watermarkDraft = mergeWatermarkEditKeepingPreferredPosition(
@@ -529,6 +555,10 @@ fun LocalPhotoEffectsPage(
                                 preset = preset,
                                 watermark = renderWatermark,
                                 borderEnabled = decorationEnabled && borderEnabled,
+                                metadataSettings = resolvedPhotoFrameMetadataSettings(
+                                    metadataSettings,
+                                    preset,
+                                ),
                                 filter = selectedFilter,
                             )
                         }

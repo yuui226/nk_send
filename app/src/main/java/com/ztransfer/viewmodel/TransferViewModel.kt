@@ -24,6 +24,7 @@ import com.ztransfer.effects.encodeFavoritePhotoFilters
 import com.ztransfer.effects.encodePhotoFilterIntensities
 import com.ztransfer.frame.PhotoFrameDestination
 import com.ztransfer.frame.PhotoFrameExporter
+import com.ztransfer.frame.PhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkColor
@@ -46,6 +47,11 @@ import com.ztransfer.frame.normalizePhotoFrameWatermarkSizePercent
 import com.ztransfer.frame.importPhotoFrameWatermarkImage as storePhotoFrameWatermarkImage
 import com.ztransfer.frame.photoFrameWatermarkImageFile
 import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
+import com.ztransfer.frame.decodePhotoFrameMetadataSettings
+import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
+import com.ztransfer.frame.encodePhotoFrameMetadataSettings
+import com.ztransfer.frame.normalizePhotoFrameMetadataSettings
+import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterRenderer
@@ -89,6 +95,7 @@ private val transferTaskIds = AtomicLong(0L)
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION = 2
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY =
     "photo_frame_watermark_size_scale_version"
+private const val PHOTO_FRAME_METADATA_SETTINGS_KEY = "photo_frame_metadata_settings_v1"
 internal const val PHOTO_FRAME_EXPORT_PARALLELISM = 2
 private val COPY_SUFFIX_REGEX = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
 private val IDENTITY_TOKEN_UNSAFE_CHARS = Regex("[^A-Za-z0-9.]")
@@ -145,6 +152,8 @@ data class TransferTask(
     val framePreset: PhotoFramePreset? = null,
     /** false 表示保留原照片画布，仅叠加画面内水印。 */
     val frameBorderRequested: Boolean = true,
+    /** 入队时锁定当前边框的信息显隐与日期时间格式。 */
+    val frameMetadataSettings: PhotoFrameMetadataSettings? = null,
     /** 与预设同时快照，避免排队期间修改设置改变已入队任务的输出。 */
     val frameWatermarkRequested: PhotoFrameWatermark = PhotoFrameWatermark(),
     /** 入队时锁定的滤镜；与边框互相独立，null 表示原片不做颜色处理。 */
@@ -332,6 +341,7 @@ data class TransferState(
     val photoFrameBorderEnabled: Boolean = true,
     // 启用边框时采用的默认样式。派生图只另存新文件，永不覆盖原片。
     val photoFramePreset: PhotoFramePreset = PhotoFramePreset.MIST,
+    val photoFrameMetadataSettings: Map<PhotoFramePreset, PhotoFrameMetadataSettings> = emptyMap(),
     // 自定义水印。免费版渲染时强制使用默认值；高级版可关闭和调整，并记住选择。
     val photoFrameWatermarkEnabled: Boolean = true,
     val photoFrameWatermarkContent: PhotoFrameWatermarkContent = PhotoFrameWatermarkContent.TEXT,
@@ -507,6 +517,8 @@ internal fun createQueueTasks(
     photoFrameBorderEnabled: Boolean = true,
     photoFramePreset: PhotoFramePreset,
     photoFrameWatermark: PhotoFrameWatermark,
+    photoFrameMetadataSettings: PhotoFrameMetadataSettings =
+        defaultPhotoFrameMetadataSettings(photoFramePreset),
     photoFilter: PhotoFilterSelection? = null,
 ): List<TransferTask> = files.asSequence()
     // 同一次批量点击按相机文件去重；不同点击始终创建独立任务。
@@ -518,6 +530,7 @@ internal fun createQueueTasks(
                 shouldGeneratePhotoFrame(photoFrameEnabled, file.extension)
             },
             frameBorderRequested = photoFrameBorderEnabled,
+            frameMetadataSettings = photoFrameMetadataSettings,
             frameWatermarkRequested = photoFrameWatermark,
             photoFilterRequested = photoFilter.takeIf {
                 isSupportedPhotoFrameSourceExtension(file.extension)
@@ -864,6 +877,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             ?: PhotoFramePreset.MIST.name
                     )
                 }.getOrDefault(PhotoFramePreset.MIST),
+                photoFrameMetadataSettings = decodePhotoFrameMetadataSettings(
+                    prefs.getString(PHOTO_FRAME_METADATA_SETTINGS_KEY, null),
+                ),
                 photoFrameWatermarkEnabled =
                     prefs.getBoolean("photo_frame_branding_enabled", true),
                 photoFrameWatermarkContent = restoredWatermarkContent,
@@ -1258,6 +1274,30 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** Stores only non-default per-frame overrides; both effects editors keep separate stores. */
+    fun setPhotoFrameMetadataSettings(
+        preset: PhotoFramePreset,
+        settings: PhotoFrameMetadataSettings?,
+    ) {
+        val normalized = settings?.let(::normalizePhotoFrameMetadataSettings)
+        val current = _state.value.photoFrameMetadataSettings
+        val updated = if (
+            normalized == null || normalized == defaultPhotoFrameMetadataSettings(preset)
+        ) {
+            current - preset
+        } else {
+            current + (preset to normalized)
+        }
+        if (updated == current) return
+        prefs.edit()
+            .putString(
+                PHOTO_FRAME_METADATA_SETTINGS_KEY,
+                encodePhotoFrameMetadataSettings(updated),
+            )
+            .apply()
+        _state.update { it.copy(photoFrameMetadataSettings = updated) }
+    }
+
     private fun primeDirectoryIndexScan(uri: Uri, deleteParts: Boolean) {
         val key = uri.toString()
         synchronized(directoryIndexLock) {
@@ -1367,6 +1407,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             photoFrameBorderEnabled = snapshot.photoFrameBorderEnabled,
             photoFramePreset = snapshot.photoFramePreset,
             photoFrameWatermark = snapshot.photoFrameWatermark,
+            photoFrameMetadataSettings = resolvedPhotoFrameMetadataSettings(
+                snapshot.photoFrameMetadataSettings,
+                snapshot.photoFramePreset,
+            ),
             photoFilter = snapshot.photoFilterSelection,
         )
         if (newTasks.isEmpty()) return
@@ -1486,6 +1530,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             val decorationRequested = preset != null
                             val effectivePreset = preset ?: PhotoFramePreset.MIST
                             val effectiveBorder = decorationRequested && task.frameBorderRequested
+                            val effectiveMetadataSettings = task.frameMetadataSettings
+                                ?: defaultPhotoFrameMetadataSettings(effectivePreset)
                             val effectiveWatermark = if (decorationRequested) {
                                 effectivePhotoFrameWatermark(
                                     isPro = LicenseManager.isPro.value,
@@ -1502,6 +1548,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     effectivePreset,
                                     effectiveWatermark,
                                     borderEnabled = effectiveBorder,
+                                    metadataSettings = effectiveMetadataSettings,
                                     filter = filter,
                                 )
                             }
@@ -1543,6 +1590,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 sourceName = localOriginal.displayName,
                                 preset = effectivePreset,
                                 borderEnabled = effectiveBorder,
+                                metadataSettings = effectiveMetadataSettings,
                                 watermarkRequested = task.frameWatermarkRequested,
                                 decorationRequested = decorationRequested,
                                 filterRequested = filter,
@@ -1836,6 +1884,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             preset = framePreset ?: PhotoFramePreset.MIST,
                                             borderEnabled = framePreset != null &&
                                                 task.frameBorderRequested,
+                                            metadataSettings = task.frameMetadataSettings
+                                                ?: defaultPhotoFrameMetadataSettings(
+                                                    framePreset ?: PhotoFramePreset.MIST,
+                                                ),
                                             watermarkRequested = task.frameWatermarkRequested,
                                             decorationRequested = framePreset != null,
                                             filterRequested = photoFilter,
@@ -2177,6 +2229,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         sourceName: String,
         preset: PhotoFramePreset,
         borderEnabled: Boolean,
+        metadataSettings: PhotoFrameMetadataSettings,
         watermarkRequested: PhotoFrameWatermark,
         decorationRequested: Boolean = true,
         filterRequested: PhotoFilterSelection? = null,
@@ -2247,6 +2300,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         preset,
                         effectiveWatermark,
                         borderEnabled = effectiveBorder,
+                        metadataSettings = metadataSettings,
                         filter = filterRequested,
                     )
                 ) {
@@ -2261,6 +2315,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         preset = preset,
                         watermark = effectiveWatermark,
                         borderEnabled = effectiveBorder,
+                        metadataSettings = metadataSettings,
                         filter = filterRequested,
                         probeSessionId = probeSession,
                     ).fold(

@@ -15,6 +15,7 @@ import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.frame.PhotoFramePreset
+import com.ztransfer.frame.PhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkColor
 import com.ztransfer.frame.PhotoFrameWatermarkContent
@@ -26,12 +27,17 @@ import com.ztransfer.frame.normalizePhotoFrameWatermarkOpacityPercent
 import com.ztransfer.frame.normalizePhotoFrameWatermarkSizePercent
 import com.ztransfer.frame.photoFrameWatermarkImageFile
 import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
+import com.ztransfer.frame.decodePhotoFrameMetadataSettings
+import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
+import com.ztransfer.frame.encodePhotoFrameMetadataSettings
+import com.ztransfer.frame.normalizePhotoFrameMetadataSettings
 
 /** Persisted editor controls only. The selected source photo intentionally is not part of this model. */
 internal data class LocalPhotoEffectsSettings(
     val decorationEnabled: Boolean,
     val borderEnabled: Boolean,
     val preset: PhotoFramePreset,
+    val metadataSettings: Map<PhotoFramePreset, PhotoFrameMetadataSettings> = emptyMap(),
     val watermark: PhotoFrameWatermark,
     val filterId: String?,
     val filterEnabled: Boolean,
@@ -46,6 +52,7 @@ internal fun defaultLocalPhotoEffectsSettings(defaultFilterId: String?) =
         decorationEnabled = false,
         borderEnabled = true,
         preset = PhotoFramePreset.MIST,
+        metadataSettings = emptyMap(),
         watermark = PhotoFrameWatermark(),
         filterId = defaultFilterId,
         filterEnabled = false,
@@ -102,6 +109,13 @@ internal fun normalizeLocalPhotoEffectsSettings(
             .distinctBy { it.catalogKey },
         favoriteFrameEffects = settings.favoriteFrameEffects
             .distinctBy { it.framePreset },
+        metadataSettings = settings.metadataSettings
+            .mapNotNull { (preset, value) ->
+                normalizePhotoFrameMetadataSettings(value)
+                    .takeUnless { it == defaultPhotoFrameMetadataSettings(preset) }
+                    ?.let { preset to it }
+            }
+            .toMap(),
     )
 }
 
@@ -143,6 +157,9 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
             decorationEnabled = values.boolean(KEY_DECORATION_ENABLED, fallback.decorationEnabled),
             borderEnabled = values.boolean(KEY_BORDER_ENABLED, fallback.borderEnabled),
             preset = values.enum(KEY_PRESET, fallback.preset),
+            metadataSettings = decodePhotoFrameMetadataSettings(
+                values.string(KEY_METADATA_SETTINGS),
+            ),
             watermark = PhotoFrameWatermark(
                 enabled = values.boolean(KEY_WATERMARK_ENABLED, fallback.watermark.enabled),
                 content = values.enum(KEY_WATERMARK_CONTENT, fallback.watermark.content),
@@ -193,6 +210,10 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
             putBoolean(KEY_DECORATION_ENABLED, settings.decorationEnabled)
             putBoolean(KEY_BORDER_ENABLED, settings.borderEnabled)
             putString(KEY_PRESET, settings.preset.name)
+            putString(
+                KEY_METADATA_SETTINGS,
+                encodePhotoFrameMetadataSettings(settings.metadataSettings),
+            )
             putBoolean(KEY_WATERMARK_ENABLED, settings.watermark.enabled)
             putString(KEY_WATERMARK_CONTENT, settings.watermark.content.name)
             putString(KEY_WATERMARK_TEXT, settings.watermark.text)
@@ -250,6 +271,7 @@ internal class LocalPhotoEffectsPreferences(context: Context) {
         const val KEY_DECORATION_ENABLED = "decoration_enabled"
         const val KEY_BORDER_ENABLED = "border_enabled"
         const val KEY_PRESET = "frame_preset"
+        const val KEY_METADATA_SETTINGS = "frame_metadata_settings_v1"
         const val KEY_WATERMARK_ENABLED = "watermark_enabled"
         const val KEY_WATERMARK_CONTENT = "watermark_content"
         const val KEY_WATERMARK_TEXT = "watermark_text"

@@ -1,6 +1,7 @@
 package com.ztransfer.viewmodel
 
 import com.ztransfer.frame.PhotoFramePreset
+import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkColor
 import com.ztransfer.frame.PhotoFrameWatermarkContent
@@ -322,23 +323,34 @@ class TransferStateTest {
     @Test
     fun queueTaskSnapshotsFrameSettingsAtClickTime() {
         val jpeg = file(1)
+        val mistMetadata = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
+            showModel = false,
+        )
+        val cinemaMetadata = defaultPhotoFrameMetadataSettings(PhotoFramePreset.CINEMA).copy(
+            showDate = true,
+            datePattern = "dd.MM.yyyy",
+        )
         val mist = createQueueTasks(
             files = listOf(jpeg),
             photoFrameEnabled = true,
             photoFramePreset = PhotoFramePreset.MIST,
             photoFrameWatermark = PhotoFrameWatermark(enabled = true),
+            photoFrameMetadataSettings = mistMetadata,
         ).single()
         val cinema = createQueueTasks(
             files = listOf(jpeg),
             photoFrameEnabled = true,
             photoFramePreset = PhotoFramePreset.CINEMA,
             photoFrameWatermark = PhotoFrameWatermark(enabled = false),
+            photoFrameMetadataSettings = cinemaMetadata,
         ).single()
 
         assertEquals(PhotoFramePreset.MIST, mist.framePreset)
         assertEquals(PhotoFramePreset.CINEMA, cinema.framePreset)
         assertEquals(true, mist.frameWatermarkRequested.enabled)
         assertEquals(false, cinema.frameWatermarkRequested.enabled)
+        assertEquals(mistMetadata, mist.frameMetadataSettings)
+        assertEquals(cinemaMetadata, cinema.frameMetadataSettings)
         assertNotEquals(mist.taskId, cinema.taskId)
     }
 
