@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="debug_photo_location_title">自定义照片位置</string>
+    <string name="debug_photo_location_latitude">纬度 -90～90</string>
+    <string name="debug_photo_location_longitude">经度 -180～180</string>
+    <string name="debug_photo_location_lookup">查询地点坐标</string>
+</resources>

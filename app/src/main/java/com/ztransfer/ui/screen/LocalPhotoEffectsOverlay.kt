@@ -47,6 +47,7 @@ import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.frame.PhotoFrameExporter
+import com.ztransfer.frame.PhotoFrameLocationOverride
 import com.ztransfer.frame.PhotoFrameMediaStoreSource
 import com.ztransfer.frame.PhotoFrameMetadata
 import com.ztransfer.frame.PhotoFrameWatermark
@@ -119,6 +120,10 @@ fun LocalPhotoEffectsPage(
     var favoriteFrameEffects by remember {
         mutableStateOf(initialSettings.favoriteFrameEffects)
     }
+    var debugLocationOverride by remember {
+        mutableStateOf<PhotoFrameLocationOverride?>(null)
+    }
+    var debugLocationEnabled by remember { mutableStateOf(false) }
 
     val currentSettings = LocalPhotoEffectsSettings(
         decorationEnabled = decorationEnabled,
@@ -253,6 +258,8 @@ fun LocalPhotoEffectsPage(
         renderWatermark = requestedRenderWatermark
     }
     val hasEffect = decorationEnabled || selectedFilter != null
+    val hasOutputChange = hasEffect || debugLocationOverride != null
+    val locationInputInvalid = debugLocationEnabled && debugLocationOverride == null
 
     Box(
         modifier = Modifier
@@ -534,6 +541,13 @@ fun LocalPhotoEffectsPage(
                 },
             )
 
+            DebugPhotoLocationSettingsCard(
+                onStateChanged = { enabled, config ->
+                    debugLocationEnabled = enabled
+                    debugLocationOverride = config
+                },
+            )
+
             Spacer(Modifier.height(12.dp))
             GlassButton(
                 onClick = {
@@ -543,6 +557,7 @@ fun LocalPhotoEffectsPage(
                     }
                     focusManager.clearFocus()
                     keyboardController?.hide()
+                    val locationForExport = debugLocationOverride
                     saving = true
                     scope.launch {
                         val result = withContext(Dispatchers.IO) {
@@ -558,6 +573,7 @@ fun LocalPhotoEffectsPage(
                                     preset,
                                 ),
                                 filter = selectedFilter,
+                                locationOverride = locationForExport,
                             )
                         }
                         saving = false
@@ -573,8 +589,9 @@ fun LocalPhotoEffectsPage(
                         )
                     }
                 },
-                enabled = selection != null && hasEffect && !saving && !sourceLoading,
-                active = selection != null && hasEffect,
+                enabled = selection != null && hasOutputChange && !locationInputInvalid &&
+                    !saving && !sourceLoading,
+                active = selection != null && hasOutputChange && !locationInputInvalid,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp),
