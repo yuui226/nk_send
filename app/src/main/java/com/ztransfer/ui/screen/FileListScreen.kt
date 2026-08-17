@@ -257,7 +257,7 @@ private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 48.dp
 // 避免固定窄面板挤压标签，也避免平板上横向铺得过散。
 private val FILTER_PANEL_MAX_WIDTH = 360.dp
 private val FILTER_PANEL_SCREEN_MARGIN = 12.dp
-private val DATE_FILTER_WHEEL_HEIGHT = 48.dp
+private val DATE_FILTER_WHEEL_HEIGHT = 50.dp
 
 // 有彩色角标底（白字）的类型：其余走灰底灰字。提到顶层，避免每个格子每次重组都新建集合。
 private val TYPE_BADGE_COLORED_EXTS = setOf(".jpg", ".nef", ".mov", ".mp4")

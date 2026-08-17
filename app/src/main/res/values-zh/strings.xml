@@ -99,19 +99,21 @@
     <!-- 设置 -->
     <string name="settings">设置</string>
     <string name="cd_close">关闭</string>
+    <string name="setting_off">关闭</string>
+    <string name="setting_on">开启</string>
     <string name="transfer_directory">传输目录</string>
     <string name="dir_set">已设置</string>
     <string name="dir_not_set">未设置</string>
     <string name="dir_please_set">请设置传输目录</string>
     <string name="transfer_directory_required_hint">请先设置传输目录</string>
-    <string name="auto_transfer_new_media">自动传输</string>
-    <string name="auto_transfer_new_media_summary">连接期间新增的照片和视频自动传输</string>
+    <string name="auto_transfer_new_media">实时传输</string>
+    <string name="auto_transfer_new_media_summary">连接期间新增的照片和视频会自动传输；监看遥控期间暂停，退出监看遥控界面后开始传输</string>
     <string name="organize_transfers_by_date">按天保存</string>
     <string name="change_directory">更改目录</string>
     <string name="choose_directory">选择目录</string>
-    <string name="columns">列数</string>
+    <string name="columns">照片列数</string>
     <string name="collapse_burst_photos">连拍成组</string>
-    <string name="photo_interaction">照片操作</string>
+    <string name="photo_interaction">照片列表操作</string>
     <string name="tap_transfer_hold_preview">点击：传输\n长按：预览</string>
     <string name="tap_preview_hold_transfer">点击：预览\n长按：传输</string>
     <string name="appearance">外观</string>

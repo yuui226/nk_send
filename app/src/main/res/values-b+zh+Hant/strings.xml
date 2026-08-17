@@ -99,19 +99,21 @@
     <!-- 設定 -->
     <string name="settings">設定</string>
     <string name="cd_close">關閉</string>
+    <string name="setting_off">關閉</string>
+    <string name="setting_on">開啟</string>
     <string name="transfer_directory">傳輸目錄</string>
     <string name="dir_set">已設定</string>
     <string name="dir_not_set">未設定</string>
     <string name="dir_please_set">請設定傳輸目錄</string>
     <string name="transfer_directory_required_hint">請先設定傳輸目錄</string>
-    <string name="auto_transfer_new_media">自動傳輸</string>
-    <string name="auto_transfer_new_media_summary">連線期間新增的照片和影片自動傳輸</string>
+    <string name="auto_transfer_new_media">即時傳輸</string>
+    <string name="auto_transfer_new_media_summary">連線期間新增的照片和影片會自動傳輸；監看遙控期間暫停，退出監看遙控介面後開始傳輸</string>
     <string name="organize_transfers_by_date">按天儲存</string>
     <string name="change_directory">變更目錄</string>
     <string name="choose_directory">選擇目錄</string>
-    <string name="columns">欄數</string>
+    <string name="columns">照片欄數</string>
     <string name="collapse_burst_photos">連拍成組</string>
-    <string name="photo_interaction">照片操作</string>
+    <string name="photo_interaction">照片列表操作</string>
     <string name="tap_transfer_hold_preview">點擊：傳輸\n長按：預覽</string>
     <string name="tap_preview_hold_transfer">點擊：預覽\n長按：傳輸</string>
     <string name="appearance">外觀</string>

@@ -99,19 +99,21 @@
     <!-- Settings -->
     <string name="settings">Settings</string>
     <string name="cd_close">Close</string>
+    <string name="setting_off">Disabled</string>
+    <string name="setting_on">Enabled</string>
     <string name="transfer_directory">Transfer folder</string>
     <string name="dir_set">Folder selected</string>
     <string name="dir_not_set">Not set</string>
     <string name="dir_please_set">Set a transfer folder</string>
     <string name="transfer_directory_required_hint">Please set a transfer folder first</string>
-    <string name="auto_transfer_new_media">Auto transfer</string>
-    <string name="auto_transfer_new_media_summary">Automatically transfer photos and videos added while connected</string>
+    <string name="auto_transfer_new_media">Real-time transfer</string>
+    <string name="auto_transfer_new_media_summary">Automatically transfers photos and videos added while connected. Transfer pauses during remote live view and starts after you exit it.</string>
     <string name="organize_transfers_by_date">Save by day</string>
     <string name="change_directory">Change folder</string>
     <string name="choose_directory">Choose folder</string>
-    <string name="columns">Columns</string>
+    <string name="columns">Photo columns</string>
     <string name="collapse_burst_photos">Group bursts</string>
-    <string name="photo_interaction">Photo interaction</string>
+    <string name="photo_interaction">Photo list actions</string>
     <string name="tap_transfer_hold_preview">Tap: transfer\nHold: preview</string>
     <string name="tap_preview_hold_transfer">Tap: preview\nHold: transfer</string>
     <string name="appearance">Appearance</string>

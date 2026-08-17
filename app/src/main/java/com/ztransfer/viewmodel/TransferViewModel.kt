@@ -326,8 +326,8 @@ data class TransferState(
     val keepScreenOn: Boolean = true,
     // 连接期间确认新增的照片和视频自动入队；默认关闭以保持旧版行为。
     val autoTransferNewMedia: Boolean = false,
-    // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中。
-    val organizeTransfersByDate: Boolean = false,
+    // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中；默认开启。
+    val organizeTransfersByDate: Boolean = true,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     // UI 皮肤预设（毛玻璃/经典等），全局配色与纹理风格。
@@ -891,7 +891,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 hapticsEnabled = prefs.getBoolean("haptics_enabled", true),
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
                 autoTransferNewMedia = prefs.getBoolean("auto_transfer_new_media", false),
-                organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", false),
+                organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", true),
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
                     ?: ThemeMode.SYSTEM,

@@ -89,8 +89,11 @@ internal fun <T> ReleaseCommitWheel(
     label: String? = null,
     onDetent: () -> Unit = {},
     enabled: Boolean = true,
-    wheelHeight: Dp = 54.dp,
+    wheelHeight: Dp = 50.dp,
+    optionRowHeight: Dp = SETTINGS_WHEEL_ROW_HEIGHT,
+    optionMaxLines: Int = 1,
     accentColor: Color? = null,
+    emphasized: Boolean = false,
     favoriteOption: (T) -> Boolean = { false },
     favoriteIconColor: Color? = null,
 ) {
@@ -99,7 +102,7 @@ internal fun <T> ReleaseCommitWheel(
     val colors = AppTheme.colors
     val resolvedAccent = accentColor ?: colors.accentBlue
     val density = LocalDensity.current
-    val rowPx = with(density) { SETTINGS_WHEEL_ROW_HEIGHT.toPx() }
+    val rowPx = with(density) { optionRowHeight.toPx() }
     val selectedIndex = options.indexOf(selected).coerceAtLeast(0)
     val latestSelectedIndex by rememberUpdatedState(selectedIndex)
     val latestOptions by rememberUpdatedState(options)
@@ -122,6 +125,11 @@ internal fun <T> ReleaseCommitWheel(
         animationSpec = tween(if (dragging) 90 else 180),
         label = "settingsWheelLabel",
     )
+    val emphasisProgress by animateFloatAsState(
+        targetValue = if (emphasized) 1f else 0f,
+        animationSpec = tween(220),
+        label = "settingsWheelEmphasis",
+    )
     val darkTheme = colors.background.luminance() < 0.5f
     val badgeText = if (darkTheme) resolvedAccent.copy(alpha = 0.94f) else resolvedAccent
     val badgeBackground = resolvedAccent.copy(alpha = if (darkTheme) 0.13f else 0.10f)
@@ -141,11 +149,25 @@ internal fun <T> ReleaseCommitWheel(
                     listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
                 )
             )
-            .background(resolvedAccent.copy(alpha = if (darkTheme) 0.045f else 0.035f))
+            .background(
+                resolvedAccent.copy(
+                    alpha = (if (darkTheme) 0.045f else 0.035f) +
+                        (if (darkTheme) 0.105f else 0.075f) * emphasisProgress,
+                )
+            )
             .border(
-                width = if (dragging) 1.5.dp else 1.dp,
-                brush = if (dragging) {
-                    Brush.verticalGradient(listOf(resolvedAccent, resolvedAccent))
+                width = when {
+                    dragging -> 1.5.dp
+                    emphasisProgress > 0f -> (1f + 0.35f * emphasisProgress).dp
+                    else -> 1.dp
+                },
+                brush = if (dragging || emphasisProgress > 0f) {
+                    Brush.verticalGradient(
+                        listOf(
+                            resolvedAccent.copy(alpha = 0.92f),
+                            resolvedAccent.copy(alpha = 0.38f + 0.30f * emphasisProgress),
+                        )
+                    )
                 } else {
                     Brush.verticalGradient(
                         listOf(colors.glassBorderTop, colors.glassBorderBottom)
@@ -275,10 +297,10 @@ internal fun <T> ReleaseCommitWheel(
                             text = optionLabel(options[index]),
                             style = textStyle,
                             fontSize = 14.sp,
-                            lineHeight = 16.sp,
+                            lineHeight = if (optionMaxLines > 1) 15.sp else 16.sp,
                             fontWeight = textWeight,
                             color = colors.onBackground.copy(alpha = itemAlpha),
-                            maxLines = 1,
+                            maxLines = optionMaxLines,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
@@ -287,11 +309,15 @@ internal fun <T> ReleaseCommitWheel(
                         text = optionLabel(options[index]),
                         style = textStyle,
                         fontSize = 14.sp,
-                        lineHeight = 16.sp,
+                        lineHeight = if (optionMaxLines > 1) 15.sp else 16.sp,
                         fontWeight = textWeight,
-                        color = colors.onBackground.copy(alpha = itemAlpha),
+                        color = if (emphasized && distance < 0.5f) {
+                            resolvedAccent.copy(alpha = itemAlpha)
+                        } else {
+                            colors.onBackground.copy(alpha = itemAlpha)
+                        },
                         textAlign = TextAlign.Center,
-                        maxLines = 1,
+                        maxLines = optionMaxLines,
                         overflow = TextOverflow.Ellipsis,
                         modifier = itemModifier,
                     )

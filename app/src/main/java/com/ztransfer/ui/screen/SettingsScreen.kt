@@ -89,7 +89,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
@@ -283,6 +282,8 @@ fun SettingsOverlay(
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
     var photoEffectsInfoViewed by remember { mutableStateOf(false) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
+    var showAutoTransferInfo by remember { mutableStateOf(false) }
+    var autoTransferInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var expandedEffectsPreview by remember {
         mutableStateOf<ExpandedEffectsPreview?>(null)
     }
@@ -452,6 +453,13 @@ fun SettingsOverlay(
                     onDismiss = { showPhotoEffectsInfo = false },
                     description = stringResource(R.string.photo_effects_info_description),
                     gestureHint = stringResource(R.string.photo_effects_gesture_hint),
+                )
+            }
+            if (showAutoTransferInfo) {
+                SettingsInfoBubble(
+                    anchorBounds = autoTransferInfoAnchorBounds,
+                    onDismiss = { showAutoTransferInfo = false },
+                    text = stringResource(R.string.auto_transfer_new_media_summary),
                 )
             }
             // 底部玻璃提示（与列表页提示条同款视觉）：文案由触发方传入。
@@ -881,41 +889,38 @@ fun SettingsOverlay(
                 CardDivider()
 
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.heightIn(min = 44.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        SectionLabel(stringResource(R.string.auto_transfer_new_media))
-                        Text(
-                            text = stringResource(R.string.auto_transfer_new_media_summary),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant,
-                        )
-                    }
-                    SettingsSwitch(
-                        checked = state.autoTransferNewMedia,
-                        onCheckedChange = viewModel::setAutoTransferNewMedia,
-                        hapticsEnabled = state.hapticsEnabled,
-                        enabled = state.transferDirUri != null,
-                    )
-                }
-
-                CardDivider()
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.heightIn(min = 44.dp),
-                ) {
-                    SectionLabel(
-                        stringResource(R.string.organize_transfers_by_date),
-                        modifier = Modifier.weight(1f),
-                    )
-                    SettingsSwitch(
+                    BooleanSettingsWheel(
+                        label = stringResource(R.string.organize_transfers_by_date),
                         checked = state.organizeTransfersByDate,
                         onCheckedChange = viewModel::setOrganizeTransfersByDate,
                         hapticsEnabled = state.hapticsEnabled,
                         enabled = state.transferDirUri != null,
+                        modifier = Modifier.weight(1f),
                     )
+                    Box(modifier = Modifier.weight(1f)) {
+                        BooleanSettingsWheel(
+                            label = stringResource(R.string.auto_transfer_new_media),
+                            checked = state.autoTransferNewMedia,
+                            onCheckedChange = viewModel::setAutoTransferNewMedia,
+                            hapticsEnabled = state.hapticsEnabled,
+                            enabled = state.transferDirUri != null,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        TipLightbulbButton(
+                            onClick = { showAutoTransferInfo = true },
+                            contentDescription = stringResource(R.string.auto_transfer_new_media_summary),
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(3.dp)
+                                .size(22.dp)
+                                .onGloballyPositioned {
+                                    autoTransferInfoAnchorBounds = it.boundsInRoot()
+                                },
+                        )
+                    }
                 }
             }
 
@@ -928,87 +933,45 @@ fun SettingsOverlay(
             )
             SettingsCard {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.heightIn(min = 44.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    ReleaseCommitWheel(
+                        options = PHOTO_COLUMN_OPTIONS,
+                        selected = state.thumbnailColumns,
+                        optionLabel = { it.toString() },
+                        onValueCommitted = viewModel::setThumbnailColumns,
+                        onDetent = haptics::tick,
+                        label = stringResource(R.string.columns),
                         modifier = Modifier.weight(1f),
-                    ) {
-                        SectionLabel(
-                            stringResource(R.string.columns),
-                            modifier = Modifier.weight(1f)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.width(88.dp),
-                        ) {
-                            (2..4).forEach { col ->
-                                SelectionChip(
-                                    label = "$col",
-                                    selected = state.thumbnailColumns == col,
-                                    onClick = { viewModel.setThumbnailColumns(col) },
-                                    textStyle = MaterialTheme.typography.labelLarge,
-                                    compact = true,
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                        }
-                    }
-                    CompactVerticalDivider()
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 12.dp),
-                    ) {
-                        SectionLabel(
-                            stringResource(R.string.collapse_burst_photos),
-                            modifier = Modifier.weight(1f)
-                        )
-                        SettingsSwitch(
-                            checked = state.collapseBurstPhotos,
-                            onCheckedChange = viewModel::setCollapseBurstPhotos,
-                            hapticsEnabled = state.hapticsEnabled,
-                        )
-                    }
+                    )
+                    BooleanSettingsWheel(
+                        label = stringResource(R.string.collapse_burst_photos),
+                        checked = state.collapseBurstPhotos,
+                        onCheckedChange = viewModel::setCollapseBurstPhotos,
+                        hapticsEnabled = state.hapticsEnabled,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
 
                 CardDivider()
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.heightIn(min = 44.dp),
-                ) {
-                    SectionLabel(
-                        stringResource(R.string.photo_interaction),
-                        modifier = Modifier.weight(0.72f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.weight(2f),
-                    ) {
-                        photoInteractionChoices.forEach { (tapToPreview, label) ->
-                            SelectionChip(
-                                label = label,
-                                selected = state.tapToPreview == tapToPreview,
-                                onClick = {
-                                    if (state.tapToPreview != tapToPreview) {
-                                        haptics.tick()
-                                        viewModel.setTapToPreview(tapToPreview)
-                                    }
-                                },
-                                textStyle = MaterialTheme.typography.labelMedium,
-                                compact = true,
-                                height = 42.dp,
-                                maxLines = 2,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    }
+                val selectedPhotoInteraction = photoInteractionChoices.first {
+                    it.first == state.tapToPreview
                 }
+                ReleaseCommitWheel(
+                    options = photoInteractionChoices,
+                    selected = selectedPhotoInteraction,
+                    optionLabel = { (_, label) -> label },
+                    onValueCommitted = { (tapToPreview, _) ->
+                        viewModel.setTapToPreview(tapToPreview)
+                    },
+                    onDetent = haptics::tick,
+                    label = stringResource(R.string.photo_interaction),
+                    optionRowHeight = 32.dp,
+                    optionMaxLines = 2,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
 
             Spacer(Modifier.height(8.dp))
@@ -1214,41 +1177,24 @@ fun SettingsOverlay(
                 CardDivider()
 
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.heightIn(min = 44.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    BooleanSettingsWheel(
+                        label = stringResource(R.string.haptic_feedback),
+                        checked = state.hapticsEnabled,
+                        onCheckedChange = viewModel::setHapticsEnabled,
+                        hapticsEnabled = state.hapticsEnabled,
+                        isHapticsPreference = true,
                         modifier = Modifier.weight(1f),
-                    ) {
-                        SectionLabel(
-                            stringResource(R.string.haptic_feedback),
-                            modifier = Modifier.weight(1f)
-                        )
-                        SettingsSwitch(
-                            checked = state.hapticsEnabled,
-                            onCheckedChange = viewModel::setHapticsEnabled,
-                            hapticsEnabled = state.hapticsEnabled,
-                            isHapticsPreference = true,
-                        )
-                    }
-                    CompactVerticalDivider()
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 12.dp),
-                    ) {
-                        SectionLabel(
-                            stringResource(R.string.keep_screen_on),
-                            modifier = Modifier.weight(1f)
-                        )
-                        SettingsSwitch(
-                            checked = state.keepScreenOn,
-                            onCheckedChange = viewModel::setKeepScreenOn,
-                            hapticsEnabled = state.hapticsEnabled,
-                        )
-                    }
+                    )
+                    BooleanSettingsWheel(
+                        label = stringResource(R.string.keep_screen_on),
+                        checked = state.keepScreenOn,
+                        onCheckedChange = viewModel::setKeepScreenOn,
+                        hapticsEnabled = state.hapticsEnabled,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
 
@@ -1420,6 +1366,37 @@ internal fun PhotoEffectsInfoBubble(
                 color = colors.onSurfaceVariant,
             )
         }
+    }
+}
+
+@Composable
+private fun SettingsInfoBubble(
+    anchorBounds: Rect?,
+    onDismiss: () -> Unit,
+    text: String,
+) {
+    val colors = AppTheme.colors
+    val density = LocalDensity.current
+    val panelTop = anchorBounds?.let {
+        with(density) { it.bottom.toDp() } + 8.dp
+    } ?: 64.dp
+    AnchorPopup(
+        anchorBounds = anchorBounds,
+        onDismiss = onDismiss,
+        panelModifier = Modifier
+            .padding(start = 18.dp, end = 18.dp, top = panelTop)
+            .widthIn(max = 320.dp)
+            .width(IntrinsicSize.Max),
+        panelAlignment = Alignment.TopEnd,
+        shape = RoundedCornerShape(16.dp),
+        dim = false,
+    ) { _ ->
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.onSurfaceVariant,
+        )
     }
 }
 
@@ -1811,6 +1788,11 @@ internal fun PhotoFrameWatermarkEditor(
     val focusManager = LocalFocusManager.current
     val proLockInteractionSource = remember { MutableInteractionSource() }
     var metadataSettingsExpanded by remember { mutableStateOf(false) }
+    val metadataChevronRotation by animateFloatAsState(
+        targetValue = if (metadataSettingsExpanded) 180f else 0f,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "frameMetadataChevronRotation",
+    )
     val metadataAvailability = remember(previewMetadata) {
         photoFrameMetadataAvailability(previewMetadata)
     }
@@ -1980,15 +1962,31 @@ internal fun PhotoFrameWatermarkEditor(
                         .weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT)
                         .height(PHOTO_EFFECTS_CONTROL_HEIGHT),
                 ) {
-                    Text(
-                        stringResource(R.string.photo_frame_metadata_button),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontSize = 14.sp,
-                        lineHeight = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            stringResource(R.string.photo_frame_metadata_button),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontSize = 14.sp,
+                            lineHeight = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Icon(
+                            imageVector = Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = colors.onSurfaceVariant,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .graphicsLayer { rotationZ = metadataChevronRotation },
+                        )
+                    }
                 }
             }
             FavoriteToggleButton(
@@ -3050,7 +3048,7 @@ private fun PhotoEffectsPreviewLayer(
 
 private const val PHOTO_EFFECTS_PREVIEW_LANDSCAPE_ASPECT_RATIO = 4f / 3f
 private const val PHOTO_EFFECTS_PREVIEW_PORTRAIT_ASPECT_RATIO = 3f / 4f
-private val PHOTO_EFFECTS_CONTROL_HEIGHT = 48.dp
+private val PHOTO_EFFECTS_CONTROL_HEIGHT = 50.dp
 // 顶部两行共用 4:3 栅格：名称类波轮更舒展，数值/开关波轮更紧凑，收藏方钮保持对齐。
 private const val PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT = 4f
 private const val PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT = 3f
@@ -3247,13 +3245,14 @@ private fun createPhotoFramePreviewSource(): Bitmap {
 }
 
 /**
- * 设置页开关统一入口：开关值真正改变时才触发轻触反馈。
+ * 设置页布尔波轮统一入口：档位真正改变时才触发轻触反馈。
  *
- * 触感反馈开关本身始终允许播放这一次确认反馈，这样从关闭切到开启时，
- * 用户能够立即知道设置已经生效；其余开关严格受全局触感偏好控制。
+ * 触感反馈波轮本身始终允许播放这一次确认反馈，这样从关闭切到开启时，
+ * 用户能够立即知道设置已经生效；其余布尔波轮严格受全局触感偏好控制。
  */
 @Composable
-private fun SettingsSwitch(
+private fun BooleanSettingsWheel(
+    label: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     hapticsEnabled: Boolean,
@@ -3261,19 +3260,28 @@ private fun SettingsSwitch(
     enabled: Boolean = true,
     isHapticsPreference: Boolean = false,
 ) {
-    val switchHaptics = rememberHaptics(hapticsEnabled || isHapticsPreference)
-    Switch(
-        checked = checked,
-        onCheckedChange = { newValue ->
-            if (newValue != checked) {
-                switchHaptics.tick()
-                onCheckedChange(newValue)
-            }
-        },
+    val colors = AppTheme.colors
+    val wheelHaptics = rememberHaptics(hapticsEnabled || isHapticsPreference)
+    val offLabel = stringResource(R.string.setting_off)
+    val onLabel = stringResource(R.string.setting_on)
+    ReleaseCommitWheel(
+        options = BOOLEAN_SETTINGS_OPTIONS,
+        selected = checked,
+        optionLabel = { value -> if (value) onLabel else offLabel },
+        onValueCommitted = onCheckedChange,
+        onDetent = wheelHaptics::tick,
+        label = label,
+        accentColor = if (checked) colors.accentBlue else colors.statusWaiting,
+        emphasized = checked,
+        wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT,
         modifier = modifier,
         enabled = enabled,
     )
 }
+
+private val BOOLEAN_SETTINGS_OPTIONS = listOf(false, true)
+private val BOOLEAN_SETTINGS_WHEEL_HEIGHT = 50.dp
+private val PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)
 
 /**
  * 设置分区卡片：面板内的一块玻璃子容器——极淡的内嵌底色 + 细描边圆角，
@@ -3381,17 +3389,6 @@ private fun CardDivider() {
             .fillMaxWidth()
             .padding(vertical = 8.dp)
             .height(1.dp)
-            .background(AppTheme.colors.glassPanelBorder)
-    )
-}
-
-@Composable
-private fun CompactVerticalDivider() {
-    Box(
-        modifier = Modifier
-            .padding(horizontal = 12.dp)
-            .width(1.dp)
-            .height(30.dp)
             .background(AppTheme.colors.glassPanelBorder)
     )
 }
@@ -3526,38 +3523,6 @@ internal fun ProBadgeButton(
                     maxLines = if (big) 2 else 1,
                 )
             }
-        }
-    }
-}
-
-/** 设置面板的选中态胶囊（列数/外观/语言三组选项共用）：选中 = 主题蓝底 + 反色字。 */
-@Composable
-private fun SelectionChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    textStyle: TextStyle = MaterialTheme.typography.labelLarge,
-    compact: Boolean = false,
-    height: Dp = if (compact) 34.dp else 40.dp,
-    maxLines: Int = 1,
-) {
-    val colors = AppTheme.colors
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
-        color = if (selected) colors.accentBlue else colors.surfaceVariant,
-        modifier = modifier.height(height)
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = label,
-                style = textStyle,
-                fontWeight = FontWeight.Bold,
-                maxLines = maxLines,
-                textAlign = TextAlign.Center,
-                color = if (selected) colors.onAccent else colors.onSurfaceVariant
-            )
         }
     }
 }
