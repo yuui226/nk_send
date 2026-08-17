@@ -52,7 +52,10 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
@@ -87,6 +90,11 @@ internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStat
 }
 
 private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
+private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
+
+/** 未知 PTP 对象(.bin 等)仍显示在列表，但不会被“照片/视频自动传输”误收。 */
+internal fun isAutoTransferMedia(file: NikonCamera.FileInfo): Boolean =
+    file.extension in AUTO_TRANSFER_MEDIA_EXTENSIONS
 
 /** Selects the newest still image deterministically; video covers must never become effect demos. */
 internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCamera.FileInfo? =
@@ -96,6 +104,16 @@ internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCa
 
 private fun NikonCamera.FileInfo.logicalIdentity(): String =
     "$fileName|$size|$captureDate"
+
+/** null 表示 handle 集合发生删除/重置，本轮只能重建基线；非 null 是确认新增的 handles。 */
+internal fun addedHandlesOrNull(
+    knownHandles: Set<Int>,
+    currentHandles: Set<Int>,
+): Set<Int>? = if (currentHandles.containsAll(knownHandles)) {
+    currentHandles - knownHandles
+} else {
+    null
+}
 
 /** 双卡备份文件仍只显示一份，但保留它在两张卡上的完整归属。 */
 internal fun mergeStorageMembership(
@@ -253,9 +271,19 @@ data class PhotoExif(
     val lensModel: String? = null,
 )
 
+data class NewCameraMedia(
+    val camera: NikonCamera,
+    val files: List<NikonCamera.FileInfo>,
+)
+
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(CameraState())
     val state: StateFlow<CameraState> = _state.asStateFlow()
+    private val _newMediaFiles = MutableSharedFlow<NewCameraMedia>(
+        extraBufferCapacity = 32,
+    )
+    /** 本次连接建立可靠基线之后，明确确认由相机新增的照片或视频。 */
+    val newMediaFiles: SharedFlow<NewCameraMedia> = _newMediaFiles.asSharedFlow()
 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
@@ -270,6 +298,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var fileScanHandleSnapshot: FileScanHandleSnapshot? = null
     // 每次 loadFiles 都递增；旧扫描即使在阻塞 IO 返回后才观察到取消，也不能覆盖新扫描状态。
     private var fileLoadGeneration = 0L
+    // 本次连接已经见过的原始 PTP handles。首次完整 GetObjectHandles 后建立，之后滚动
+    // 更新；绑定 NikonCamera 实例，断线重连后旧 handle 不参与任何比较。
+    private var knownHandlesCamera: NikonCamera? = null
+    private val knownHandles = HashSet<Int>()
     private var usbPermissionJob: Job? = null
     private var usbConnectJob: Job? = null
     private var pendingUsbPermissionDeviceId: Int? = null
@@ -810,12 +842,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 log { "FILE_SCAN pause for remote loaded=${_state.value.files.size}" }
             }
             fileLoadJob?.cancel()
-        } else if (wasActive && fileLoadPending && _state.value.isConnectedToCamera &&
-            !fhdActiveFlow.value
-        ) {
-            log { "FILE_SCAN resume after remote loaded=${_state.value.files.size}" }
-            // 监看期间可能拍摄了新照片，沿用原策略：重新取 handles 后再跳过已发布项。
-            loadFiles(preserveExisting = true)
+        } else if (wasActive) {
+            if (_state.value.isConnectedToCamera && !fhdActiveFlow.value) {
+                log { "FILE_SCAN refresh after remote loaded=${_state.value.files.size}" }
+                // 监看期间完全不处理文件事件；退出后用连接级 knownHandles 一次性补差。
+                loadFiles(preserveExisting = true, detectNewHandles = true)
+            }
         }
     }
 
@@ -1495,7 +1527,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 通道纪律(与缩略图填充同哲学,绝不打扰前台交互):
      * - 传输中完全停:不碰传输热路径;事件在相机侧排队,传完下一轮一次性补上;
      * - 遥控页打开时完全停:GetEvent 取走即消费,监看页的事件循环是彼时唯一消费者
-     *   (拍摄确认依赖 ObjectAdded,被这里抢走会破坏快门流程),它会代为转交;
+     *   (拍摄确认依赖 ObjectAdded,被这里抢走会破坏快门流程);文件变化退出监看后补差;
      * - FHD 预览/初始列表加载期间同样让路。
      * 不支持 0x90C7 的机型 rcPollEvents 恒返回空列表,循环退化为偶发一条被拒绝的
      * 小命令,无副作用。掉线后 camera 置空,循环自然退出;重连时重启。
@@ -1518,14 +1550,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * 相机新增对象(机身快门/遥控拍摄):取该 handle 的对象信息,插到列表顶部。
+     * 非监看状态的相机新增对象：取该 handle 的对象信息并插到列表顶部。
      * handle 降序 ≈ 拍摄从新到旧,新对象 handle 最大,前插即保持既有顺序;日期分组、
      * 类型筛选都由 UI 层从 files 派生,新照片自动归入当天分组。与 loadFiles 同键
      * 去重(双卡备份模式同一张照片两个 handle,只显示一份)。
-     * 遥控页打开时由其事件循环转交调用;平时由 [startEventPolling] 驱动。
+     * 监看页即使为拍摄确认调用本方法也立即返回；退出监看统一做 handle 差量。
      */
     fun onCameraObjectAdded(handle: Int) {
         val cam = camera ?: return
+        if (remoteActiveFlow.value || _state.value.isLoadingFiles) return
+        val hasKnownBaseline = knownHandlesCamera === cam
+        if (hasKnownBaseline && handle in knownHandles) return
         if (_state.value.files.any { it.handle == handle }) return
         viewModelScope.launch {
             val info = runCatching {
@@ -1535,6 +1570,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 got
             }.getOrNull() ?: return@launch
+            if (camera !== cam) return@launch
             val previousState = _state.getAndUpdate { s ->
                 val duplicateIndex = s.files.indexOfFirst {
                     it.handle == handle ||
@@ -1553,9 +1589,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val added = previousState.files.none {
                 it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
             }
-            if (added && _state.value.hasCompletedFileScan) {
-                thumbnailFillQueue.enqueueNew(info)
-                thumbnailFillWake.trySend(Unit)
+            if (knownHandlesCamera === cam) knownHandles += handle
+            if (added) {
+                // GetObjectHandles 基线尚未建立时不自动传输，避免把连接前旧对象误判新增。
+                if (hasKnownBaseline && knownHandlesCamera === cam) {
+                    if (isAutoTransferMedia(info)) {
+                        _newMediaFiles.emit(NewCameraMedia(cam, listOf(info)))
+                    }
+                    thumbnailFillQueue.enqueueNew(info)
+                    thumbnailFillWake.trySend(Unit)
+                }
             }
         }
     }
@@ -1563,6 +1606,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun loadFiles(
         preserveExisting: Boolean = false,
         resumeSnapshot: FileScanHandleSnapshot? = null,
+        detectNewHandles: Boolean = false,
     ) {
         val cam = camera ?: return
         val diskCacheForScan = activeThumbnailDiskCache
@@ -1574,6 +1618,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 新一轮枚举尚未完成时被后续暂停误复用。
         if (resumeSnapshot == null) fileScanHandleSnapshot = null
         if (!preserveExisting) {
+            knownHandlesCamera = null
+            knownHandles.clear()
             thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
             noThumbHandles.clear()      // handle 跨会话可能复用，负缓存一并作废
             effectPreviewAttemptKey = null
@@ -1615,6 +1661,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val existingFiles =
                     if (preserveExisting && camera === cam) _state.value.files else emptyList()
                 val existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
+                var newHandlesToReport: Set<Int> = emptySet()
+                val scanDiscoveredMedia = ArrayList<NikonCamera.FileInfo>()
                 val reusableSnapshot = resumeSnapshot?.takeIf { it.belongsTo(cam) }
                 val storageIds: List<Int>
                 val remainingHandleOrders: List<StorageHandleOrder>
@@ -1637,6 +1685,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (storageIds.isEmpty()) {
                         fileScanHandleSnapshot = null
                         fileLoadPending = false
+                        knownHandlesCamera = cam
+                        knownHandles.clear()
                         _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
                         if (FileOrderProbe.enabled) {
                             FileOrderProbe.finishScan("complete: no usable storage")
@@ -1663,6 +1713,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     val handleQueriesSucceeded = handleResultsByStorage.all { it.second.successful }
                     val rawHandlesByStorage = handleResultsByStorage.map { (storageId, result) ->
                         storageId to result.handles
+                    }
+                    if (fileLoadGeneration != generation || camera !== cam) return@launch
+                    if (handleQueriesSucceeded) {
+                        val currentHandles = rawHandlesByStorage
+                            .flatMapTo(HashSet()) { it.second.asIterable() }
+                        if (detectNewHandles && knownHandlesCamera === cam) {
+                            val addedHandles = addedHandlesOrNull(knownHandles, currentHandles)
+                            if (addedHandles == null) {
+                                log { "FILE_SCAN handle baseline reset: known handles disappeared" }
+                            } else {
+                                newHandlesToReport = addedHandles
+                            }
+                        }
+                        // 无论本轮是否允许报告差量，成功取得的完整列表都是下一轮基准。
+                        knownHandlesCamera = cam
+                        knownHandles.clear()
+                        knownHandles.addAll(currentHandles)
                     }
                     val handleOrders = newestFirstHandleOrders(rawHandlesByStorage)
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
@@ -1780,6 +1847,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     // onBatch 回调运行在 IO 线程，用 update 原子读改写避免与主线程写入竞争。
                     if (fileLoadGeneration == generation && camera === cam) {
                         _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
+                        if (newHandlesToReport.isNotEmpty() && additions.isNotEmpty()) {
+                            scanDiscoveredMedia += additions.filter { file ->
+                                file.handle in newHandlesToReport && isAutoTransferMedia(file)
+                            }
+                        }
                         prefetchPublishedFileBatch(
                             // 双卡备份模式下，原始 batch 可能包含不会单独显示的重复副本；
                             // 只为本批真正加入列表的逻辑照片获取一次缩略图。
@@ -1810,6 +1882,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 fileLoadPending = false
                 log { "FILE_SCAN done files=${allFiles.size}" }
                 _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                if (scanDiscoveredMedia.isNotEmpty()) {
+                    _newMediaFiles.emit(NewCameraMedia(cam, scanDiscoveredMedia))
+                }
                 if (activeSnapshot.handleQueriesSucceeded && allObjectInfoSucceeded &&
                     diskCacheForScan != null
                 ) {

@@ -951,13 +951,13 @@ object PhotoFrameExporter {
     internal fun prepareDestination(
         resolver: ContentResolver,
         treeUri: Uri,
+        parentDirectoryUri: Uri,
     ): PhotoFrameDestination {
-        val treeId = DocumentsContract.getTreeDocumentId(treeUri)
-        val rootUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeId)
-        val directoryUri = findFrameDirectory(resolver, treeUri, treeId)
+        val parentId = DocumentsContract.getDocumentId(parentDirectoryUri)
+        val directoryUri = findFrameDirectory(resolver, treeUri, parentId)
             ?: DocumentsContract.createDocument(
                 resolver,
-                rootUri,
+                parentDirectoryUri,
                 DocumentsContract.Document.MIME_TYPE_DIR,
                 PHOTO_FRAME_OUTPUT_DIRECTORY,
             )

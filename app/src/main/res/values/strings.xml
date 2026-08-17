@@ -104,6 +104,9 @@
     <string name="dir_not_set">Not set</string>
     <string name="dir_please_set">Set a transfer folder</string>
     <string name="transfer_directory_required_hint">Please set a transfer folder first</string>
+    <string name="auto_transfer_new_media">Auto transfer</string>
+    <string name="auto_transfer_new_media_summary">Automatically transfer photos and videos added while connected</string>
+    <string name="organize_transfers_by_date">Save by day</string>
     <string name="change_directory">Change folder</string>
     <string name="choose_directory">Choose folder</string>
     <string name="columns">Columns</string>

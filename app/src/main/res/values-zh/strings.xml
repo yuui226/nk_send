@@ -104,6 +104,9 @@
     <string name="dir_not_set">未设置</string>
     <string name="dir_please_set">请设置传输目录</string>
     <string name="transfer_directory_required_hint">请先设置传输目录</string>
+    <string name="auto_transfer_new_media">自动传输</string>
+    <string name="auto_transfer_new_media_summary">连接期间新增的照片和视频自动传输</string>
+    <string name="organize_transfers_by_date">按天保存</string>
     <string name="change_directory">更改目录</string>
     <string name="choose_directory">选择目录</string>
     <string name="columns">列数</string>

@@ -139,6 +139,15 @@ fun MainScreen(transferViewModel: TransferViewModel) {
         cameraViewModel.setThumbnailPriorityRange(transferState.filterDateRange)
     }
 
+    // 相机新增事件由共同宿主承接，与当前停留页面无关；开关关闭时传输 VM 静默忽略。
+    LaunchedEffect(cameraViewModel, transferViewModel) {
+        cameraViewModel.newMediaFiles.collect { event ->
+            if (cameraViewModel.getCamera() === event.camera) {
+                transferViewModel.addNewMediaToQueue(event.files, cameraViewModel::getCamera)
+            }
+        }
+    }
+
     // 屏幕常亮（设置项，默认开）：FLAG_KEEP_SCREEN_ON 只在本应用窗口前台可见时生效，
     // 切到后台/其它应用自动失效，不会全局锁屏幕。
     val view = LocalView.current

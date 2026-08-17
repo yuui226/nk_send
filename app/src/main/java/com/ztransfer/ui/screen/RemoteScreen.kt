@@ -1049,9 +1049,6 @@ private fun RemoteContent(
                 val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
                 for (event in events) {
                     eventFlow.emit(event)
-                    if (event.first == Lab.EVT_OBJECT_ADDED) {
-                        cameraViewModel.onCameraObjectAdded(event.second.toInt())
-                    }
                     if (event.first == Lab.EVT_NK_MOVIE_REC_COMPLETE ||
                         event.first == Lab.EVT_NK_MOVIE_REC_INTERRUPTED
                     ) {
@@ -1342,11 +1339,6 @@ private fun RemoteContent(
             for (e in events) {
                 eventFlow.emit(e)
                 when (e.first) {
-                    // 新照片入卡(遥控拍摄或此刻按了机身快门都会到这):转交列表层插入,
-                    // 用户退回照片列表就能看到。本页开着时 VM 的事件轮询是停的
-                    //(GetEvent 取走即消费),转交是新照片进列表的唯一通路。
-                    Lab.EVT_OBJECT_ADDED ->
-                        cameraViewModel.onCameraObjectAdded(e.second.toInt())
                     // 录像状态以相机事件为准（卡满/过热等相机自行停录也能收到）。
                     // 例外：本地刚（2s 内）发过停止命令时忽略"已开始"——那是上一次开始
                     // 的迟到回声（开始+停止落在同一轮询窗口内），别把 UI 翻回录制中。

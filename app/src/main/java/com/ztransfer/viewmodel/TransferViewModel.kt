@@ -86,6 +86,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.Locale
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.ResolverStyle
 
 enum class TransferStatus {
     WAITING, TRANSFERING, COMPLETED, FAILED, CANCELLED
@@ -158,6 +161,8 @@ data class TransferTask(
     val frameWatermarkRequested: PhotoFrameWatermark = PhotoFrameWatermark(),
     /** 入队时锁定的滤镜；与边框互相独立，null 表示原片不做颜色处理。 */
     val photoFilterRequested: PhotoFilterSelection? = null,
+    /** 非空时原图写入传输根目录下的该日期文件夹，效果图再写入其 ZTFrames 子目录。 */
+    val destinationFolderName: String? = null,
     val status: TransferStatus = TransferStatus.WAITING,
     val progress: Float = 0f,
     val speed: Long = 0,
@@ -295,6 +300,9 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
     frameGenerationElapsedMs = null,
 )
 
+private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
+    "$fileName|$size|$captureDate"
+
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
     /** 仅在任务增删或替换时递增；纯状态变化不会让照片页重建 handle -> 列表下标索引。 */
@@ -316,6 +324,10 @@ data class TransferState(
     // 屏幕常亮（默认开启）：应用在前台时不熄屏——熄屏后系统会冻结进程/让 Wi-Fi 打盹，
     // 相机连接容易断；代价是手机一直亮屏。
     val keepScreenOn: Boolean = true,
+    // 连接期间确认新增的照片和视频自动入队；默认关闭以保持旧版行为。
+    val autoTransferNewMedia: Boolean = false,
+    // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中。
+    val organizeTransfersByDate: Boolean = false,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     // UI 皮肤预设（毛玻璃/经典等），全局配色与纹理风格。
@@ -505,6 +517,22 @@ internal fun normalizedPhotoFrameWatermarkPreference(
 internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Boolean =
     enabled && isSupportedPhotoFrameSourceExtension(extension)
 
+private val TRANSFER_CAPTURE_DATE_FORMATTER =
+    DateTimeFormatter.BASIC_ISO_DATE.withResolverStyle(ResolverStyle.STRICT)
+private val DATED_TRANSFER_FOLDER_REGEX = Regex("""ZT\d{4}-\d{2}-\d{2}""")
+
+/** PTP 拍摄时间通常为 yyyyMMdd'T'HHmmss；异常或缺失时固定回退到入队当天。 */
+internal fun transferDateFolderName(
+    captureDate: String?,
+    fallbackDate: LocalDate = LocalDate.now(),
+): String {
+    val parsed = captureDate
+        ?.take(8)
+        ?.takeIf { it.length == 8 && it.all(Char::isDigit) }
+        ?.let { raw -> runCatching { LocalDate.parse(raw, TRANSFER_CAPTURE_DATE_FORMATTER) }.getOrNull() }
+    return "ZT${parsed ?: fallbackDate}"
+}
+
 /** 相机文件是否已在当前保存目录中落盘；列表对号、筛选和任务模式必须共用该判定。 */
 internal fun isTransferredOriginal(
     file: NikonCamera.FileInfo,
@@ -520,6 +548,8 @@ internal fun createQueueTasks(
     photoFrameMetadataSettings: PhotoFrameMetadataSettings =
         defaultPhotoFrameMetadataSettings(photoFramePreset),
     photoFilter: PhotoFilterSelection? = null,
+    organizeTransfersByDate: Boolean = false,
+    queuedDate: LocalDate = LocalDate.now(),
 ): List<TransferTask> = files.asSequence()
     // 同一次批量点击按相机文件去重；不同点击始终创建独立任务。
     .distinctBy { it.handle }
@@ -535,6 +565,8 @@ internal fun createQueueTasks(
             photoFilterRequested = photoFilter.takeIf {
                 isSupportedPhotoFrameSourceExtension(file.extension)
             },
+            destinationFolderName = transferDateFolderName(file.captureDate, queuedDate)
+                .takeIf { organizeTransfersByDate },
         )
     }
     .toList()
@@ -556,6 +588,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private val directoryIndexLock = Any()
     private val directoryIndexes = HashMap<String, ExistingDirectoryIndex>()
     private val directoryIndexScans = HashMap<String, Deferred<ExistingDirectoryIndex>>()
+    private val datedTransferDirectories = ConcurrentHashMap<String, Uri>()
 
     private var transferJob: Job? = null
     private var photoFilterPrewarmJob: Job? = null
@@ -585,13 +618,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private val photoFrameDestinations =
         ConcurrentHashMap<String, PhotoFrameDestination>()
 
-    private fun getOrPreparePhotoFrameDestination(treeUri: Uri): PhotoFrameDestination {
-        val key = treeUri.toString()
+    private fun getOrPreparePhotoFrameDestination(
+        treeUri: Uri,
+        parentDirectoryUri: Uri,
+    ): PhotoFrameDestination {
+        val key = "${treeUri}|${parentDirectoryUri}"
         photoFrameDestinations[key]?.let { return it }
         return synchronized(photoFrameDestinations) {
             photoFrameDestinations[key] ?: PhotoFrameExporter.prepareDestination(
                 resolver = contentResolver,
                 treeUri = treeUri,
+                parentDirectoryUri = parentDirectoryUri,
             ).also { photoFrameDestinations[key] = it }
         }
     }
@@ -853,6 +890,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 tapToPreview = prefs.getBoolean("tap_to_preview", false),
                 hapticsEnabled = prefs.getBoolean("haptics_enabled", true),
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
+                autoTransferNewMedia = prefs.getBoolean("auto_transfer_new_media", false),
+                organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", false),
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
                     ?: ThemeMode.SYSTEM,
@@ -980,6 +1019,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setKeepScreenOn(enabled: Boolean) {
         prefs.edit().putBoolean("keep_screen_on", enabled).apply()
         _state.update { it.copy(keepScreenOn = enabled) }
+    }
+
+    fun setAutoTransferNewMedia(enabled: Boolean) {
+        prefs.edit().putBoolean("auto_transfer_new_media", enabled).apply()
+        _state.update { it.copy(autoTransferNewMedia = enabled) }
+    }
+
+    fun setOrganizeTransfersByDate(enabled: Boolean) {
+        prefs.edit().putBoolean("organize_transfers_by_date", enabled).apply()
+        _state.update { it.copy(organizeTransfersByDate = enabled) }
     }
 
     /** 保存预览大图的全局旋转方向；任何照片和下次启动都复用。 */
@@ -1298,12 +1347,88 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(photoFrameMetadataSettings = updated) }
     }
 
+    private fun rootDocumentUri(treeUri: Uri): Uri =
+        DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri),
+        )
+
+    private fun directoryIndexKey(treeUri: Uri, directoryUri: Uri): String =
+        "${treeUri}|${DocumentsContract.getDocumentId(directoryUri)}"
+
+    private fun childDirectories(treeUri: Uri, parentDirectoryUri: Uri): List<Pair<String, Uri>> {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            treeUri,
+            DocumentsContract.getDocumentId(parentDirectoryUri),
+        )
+        return contentResolver.query(
+            childrenUri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+            ),
+            null,
+            null,
+            null,
+        )?.use { cursor ->
+            val nameIndex = cursor.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            )
+            val idIndex = cursor.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            )
+            val mimeIndex = cursor.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+            )
+            buildList {
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(mimeIndex) != DocumentsContract.Document.MIME_TYPE_DIR) {
+                        continue
+                    }
+                    val name = cursor.getString(nameIndex) ?: continue
+                    val documentId = cursor.getString(idIndex) ?: continue
+                    add(name to DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId))
+                }
+            }
+        }.orEmpty()
+    }
+
+    private fun getOrCreateTransferDirectory(
+        treeUri: Uri,
+        rootDirectoryUri: Uri,
+        name: String,
+    ): Uri {
+        require(DATED_TRANSFER_FOLDER_REGEX.matches(name))
+        val key = "${treeUri}|$name"
+        datedTransferDirectories[key]?.let { return it }
+        return synchronized(datedTransferDirectories) {
+            datedTransferDirectories[key] ?: run {
+                val existing = childDirectories(treeUri, rootDirectoryUri)
+                    .firstOrNull { it.first.equals(name, ignoreCase = true) }
+                    ?.second
+                val directory = existing ?: DocumentsContract.createDocument(
+                    contentResolver,
+                    rootDirectoryUri,
+                    DocumentsContract.Document.MIME_TYPE_DIR,
+                    name,
+                ) ?: childDirectories(treeUri, rootDirectoryUri)
+                    .firstOrNull { it.first.equals(name, ignoreCase = true) }
+                    ?.second
+                ?: throw java.io.IOException("Cannot create dated transfer directory")
+                datedTransferDirectories[key] = directory
+                directory
+            }
+        }
+    }
+
     private fun primeDirectoryIndexScan(uri: Uri, deleteParts: Boolean) {
-        val key = uri.toString()
+        val directoryUri = rootDocumentUri(uri)
+        val key = directoryIndexKey(uri, directoryUri)
         synchronized(directoryIndexLock) {
             if (directoryIndexes.containsKey(key) || directoryIndexScans.containsKey(key)) return
             directoryIndexScans[key] = viewModelScope.async(Dispatchers.IO) {
-                sweepAndIndexExisting(uri, deleteParts)
+                sweepAndIndexExisting(uri, directoryUri, deleteParts)
             }
         }
     }
@@ -1311,12 +1436,22 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private suspend fun getDirectoryIndex(
         uri: Uri,
         deleteParts: Boolean = false,
+    ): ExistingDirectoryIndex = getDirectoryIndex(
+        treeUri = uri,
+        directoryUri = rootDocumentUri(uri),
+        deleteParts = deleteParts,
+    )
+
+    private suspend fun getDirectoryIndex(
+        treeUri: Uri,
+        directoryUri: Uri,
+        deleteParts: Boolean = false,
     ): ExistingDirectoryIndex {
-        val key = uri.toString()
+        val key = directoryIndexKey(treeUri, directoryUri)
         val scan = synchronized(directoryIndexLock) {
             directoryIndexes[key]?.let { return it }
             directoryIndexScans[key] ?: viewModelScope.async(Dispatchers.IO) {
-                sweepAndIndexExisting(uri, deleteParts)
+                sweepAndIndexExisting(treeUri, directoryUri, deleteParts)
             }.also { directoryIndexScans[key] = it }
         }
         return try {
@@ -1346,12 +1481,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private fun invalidateDirectoryIndexes() = synchronized(directoryIndexLock) {
         directoryIndexes.clear()
         directoryIndexScans.clear()
+        datedTransferDirectories.clear()
+        photoFrameDestinations.clear()
     }
 
     private fun invalidateDirectoryIndex(uri: Uri) = synchronized(directoryIndexLock) {
-        val key = uri.toString()
-        directoryIndexes.remove(key)
-        directoryIndexScans.remove(key)
+        val prefix = "${uri}|"
+        directoryIndexes.keys.removeAll { it.startsWith(prefix) }
+        directoryIndexScans.keys.removeAll { it.startsWith(prefix) }
+        datedTransferDirectories.keys.removeAll { it.startsWith(prefix) }
+        photoFrameDestinations.keys.removeAll { it.startsWith(prefix) }
     }
 
     private suspend fun refreshExistingExportFiles(
@@ -1359,10 +1498,25 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         deleteParts: Boolean,
     ) {
         try {
-            val directoryIndex = getDirectoryIndex(uri, deleteParts)
+            val rootDirectoryUri = rootDocumentUri(uri)
+            val directoryIndexes = buildList {
+                add(getDirectoryIndex(uri, deleteParts))
+                childDirectories(uri, rootDirectoryUri)
+                    .asSequence()
+                    .filter { DATED_TRANSFER_FOLDER_REGEX.matches(it.first) }
+                    .forEach { (_, directoryUri) ->
+                        add(getDirectoryIndex(uri, directoryUri, deleteParts))
+                    }
+            }
             val snapshot = _state.value
             if (snapshot.transferDirUri != uri.toString()) return
-            if (snapshot.existingExportIndex.addAll(directoryIndex.exportedOriginalEntries())) {
+            var changed = false
+            directoryIndexes.forEach { directoryIndex ->
+                if (snapshot.existingExportIndex.addAll(directoryIndex.exportedOriginalEntries())) {
+                    changed = true
+                }
+            }
+            if (changed) {
                 _state.update { state ->
                     if (
                         state.transferDirUri == uri.toString() &&
@@ -1412,6 +1566,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 snapshot.photoFramePreset,
             ),
             photoFilter = snapshot.photoFilterSelection,
+            organizeTransfersByDate = snapshot.organizeTransfersByDate,
         )
         if (newTasks.isEmpty()) return
         _state.update { state ->
@@ -1420,6 +1575,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         pendingTransferQueue.addAll(newTasks)
         prewarmPhotoFilterFor(newTasks)
         processQueue(dirUri, cameraProvider)
+    }
+
+    /** 自动入口不改变手动重复导出的语义，只避免同一次新增事件与现有任务撞车。 */
+    fun addNewMediaToQueue(
+        files: List<NikonCamera.FileInfo>,
+        cameraProvider: () -> NikonCamera?,
+    ) {
+        val snapshot = _state.value
+        if (!snapshot.autoTransferNewMedia || snapshot.transferDirUri == null) return
+        if (cameraProvider() == null) return
+        val queued = snapshot.tasks.asSequence()
+            .mapTo(HashSet()) { it.file.autoTransferIdentity() }
+        val candidates = files.asSequence()
+            .distinctBy { it.autoTransferIdentity() }
+            .filterNot { it.autoTransferIdentity() in queued }
+            .toList()
+        if (candidates.isNotEmpty()) addToQueue(candidates, cameraProvider)
     }
 
     private fun prewarmPhotoFilterFor(tasks: Collection<TransferTask>) {
@@ -1453,10 +1625,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                 try {
                     val uri = Uri.parse(dirUri)
-                    val docUri = DocumentsContract.buildDocumentUriUsingTree(
-                        uri,
-                        DocumentsContract.getTreeDocumentId(uri)
-                    )
+                    val rootDirectoryUri = rootDocumentUri(uri)
 
                 // 队列启动前先校验传输目录仍然存在且可访问：目录被删除/改名/换存储后，
                 // 后续 createDocument 会抛 "Missing file for primary:..." 这类系统原始
@@ -1465,7 +1634,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 val dirValid = withContext(Dispatchers.IO) {
                     try {
                         contentResolver.query(
-                            docUri,
+                            rootDirectoryUri,
                             arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
                             null, null, null
                         )?.use { true } ?: false
@@ -1495,7 +1664,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                 // 启动/选目录时已建立索引；这里复用同一单飞结果。正常连续队列不再重复
                 // query SAF，后续成功文件和断点文件会增量写回该索引。
-                val directoryIndex = getDirectoryIndex(uri, deleteParts = false)
+                val rootDirectoryIndex = getDirectoryIndex(uri, deleteParts = false)
                 var taskToRecheck: TransferTask? = null
                 while (true) {
                     // 待传队列与历史展示列表分离，取下一项为 O(1)，不会随着已完成历史增长
@@ -1505,6 +1674,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         ?: break
                     val taskId = task.taskId
                     val handle = task.file.handle
+                    val destinationDirectoryUri = task.destinationFolderName?.let { folderName ->
+                        withContext(Dispatchers.IO) {
+                            getOrCreateTransferDirectory(uri, rootDirectoryUri, folderName)
+                        }
+                    } ?: rootDirectoryUri
+                    val directoryIndex = if (destinationDirectoryUri == rootDirectoryUri) {
+                        rootDirectoryIndex
+                    } else {
+                        getDirectoryIndex(uri, destinationDirectoryUri, deleteParts = false)
+                    }
 
                     // 第一查：原片存在就直接引用，不再区分“下载任务/边框任务”。
                     val localOriginal = directoryIndex.findOriginal(task.file)
@@ -1542,7 +1721,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 PhotoFrameWatermark(enabled = false)
                             }
                             val frameExists = withContext(photoFrameDispatcher) {
-                                val destination = getOrPreparePhotoFrameDestination(uri)
+                                val destination = getOrPreparePhotoFrameDestination(
+                                    uri,
+                                    destinationDirectoryUri,
+                                )
                                 destination.hasFrameFor(
                                     localOriginal.displayName,
                                     effectivePreset,
@@ -1586,6 +1768,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             launchPhotoFrameExport(
                                 taskId = taskId,
                                 treeUri = uri,
+                                destinationParentUri = destinationDirectoryUri,
                                 sourceUri = localOriginal.uri,
                                 sourceName = localOriginal.displayName,
                                 preset = effectivePreset,
@@ -1724,7 +1907,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 // 新建临时文件
                                 val createdUri = DocumentsContract.createDocument(
                                     contentResolver,
-                                    docUri,
+                                    destinationDirectoryUri,
                                     getMimeType(task.file.fileName),
                                     partFileName(task.file)
                                 ) ?: throw Exception(str(R.string.error_create_file))
@@ -1824,7 +2007,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         }
                                     }
                                     val copied = copyAsFallback(
-                                        docUri, createdUri, copyName,
+                                        destinationDirectoryUri, createdUri, copyName,
                                         getMimeType(finalName), stats.bytes
                                     )
                                     val copiedUri = copied.getOrNull()
@@ -1879,6 +2062,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         launchPhotoFrameExport(
                                             taskId = taskId,
                                             treeUri = uri,
+                                            destinationParentUri = destinationDirectoryUri,
                                             sourceUri = renamedUri,
                                             sourceName = savedName,
                                             preset = framePreset ?: PhotoFramePreset.MIST,
@@ -2014,19 +2198,21 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      */
     private fun sweepAndIndexExisting(
         treeUri: Uri,
+        directoryUri: Uri,
         deleteParts: Boolean = true
     ): ExistingDirectoryIndex {
         val index = ExistingDirectoryIndex()
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
             treeUri,
-            DocumentsContract.getTreeDocumentId(treeUri)
+            DocumentsContract.getDocumentId(directoryUri),
         )
         val cursor = contentResolver.query(
                 childrenUri,
                 arrayOf(
                     DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                     DocumentsContract.Document.COLUMN_SIZE,
-                    DocumentsContract.Document.COLUMN_DOCUMENT_ID
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
                 ),
                 null, null, null
             ) ?: throw java.io.IOException("Directory provider returned no cursor")
@@ -2034,11 +2220,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 val nameIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
                 val sizeIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
                 val idIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val mimeIdx = c.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
                 if (nameIdx < 0 || idIdx < 0) {
                     throw java.io.IOException("Directory provider omitted required columns")
                 }
                 while (c.moveToNext()) {
                         val name = c.getString(nameIdx) ?: continue
+                        if (
+                            mimeIdx >= 0 &&
+                            c.getString(mimeIdx) == DocumentsContract.Document.MIME_TYPE_DIR
+                        ) {
+                            continue
+                        }
                         if (name.startsWith(PHOTO_FRAME_PART_PREFIX)) {
                             // 边框派生临时文件不可续传：App 启动时清理；队列运行期间
                             // 只忽略不删除，避免新队列扫描误删仍在后台写入的旧队列任务。
@@ -2225,6 +2418,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     private fun launchPhotoFrameExport(
         taskId: Long,
         treeUri: Uri,
+        destinationParentUri: Uri,
         sourceUri: Uri,
         sourceName: String,
         preset: PhotoFramePreset,
@@ -2264,7 +2458,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     durationMs = android.os.SystemClock.elapsedRealtime() - probeStartedAtMs,
                 )
             }
-            val destinationKey = treeUri.toString()
+            val destinationKey = "${treeUri}|${destinationParentUri}"
             val outcome = try {
                 val destinationWasCached = photoFrameDestinations.containsKey(destinationKey)
                 val destinationStartedAtMs = if (PhotoGenerationProbe.enabled) {
@@ -2272,7 +2466,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 } else {
                     0L
                 }
-                val destination = getOrPreparePhotoFrameDestination(treeUri)
+                val destination = getOrPreparePhotoFrameDestination(
+                    treeUri,
+                    destinationParentUri,
+                )
                 if (PhotoGenerationProbe.enabled) {
                     PhotoGenerationProbe.stage(
                         sessionId = probeSession,
@@ -2435,6 +2632,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             fileName.endsWith(".nef", true) -> "image/x-nikon-nef"
             fileName.endsWith(".mov", true) -> "video/quicktime"
             fileName.endsWith(".mp4", true) -> "video/mp4"
+            fileName.endsWith(".avi", true) -> "video/x-msvideo"
             else -> "application/octet-stream"
         }
     }

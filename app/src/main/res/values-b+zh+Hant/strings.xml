@@ -104,6 +104,9 @@
     <string name="dir_not_set">未設定</string>
     <string name="dir_please_set">請設定傳輸目錄</string>
     <string name="transfer_directory_required_hint">請先設定傳輸目錄</string>
+    <string name="auto_transfer_new_media">自動傳輸</string>
+    <string name="auto_transfer_new_media_summary">連線期間新增的照片和影片自動傳輸</string>
+    <string name="organize_transfers_by_date">按天儲存</string>
     <string name="change_directory">變更目錄</string>
     <string name="choose_directory">選擇目錄</string>
     <string name="columns">欄數</string>

@@ -877,6 +877,46 @@ fun SettingsOverlay(
                         )
                     }
                 }
+
+                CardDivider()
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.heightIn(min = 44.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        SectionLabel(stringResource(R.string.auto_transfer_new_media))
+                        Text(
+                            text = stringResource(R.string.auto_transfer_new_media_summary),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    SettingsSwitch(
+                        checked = state.autoTransferNewMedia,
+                        onCheckedChange = viewModel::setAutoTransferNewMedia,
+                        hapticsEnabled = state.hapticsEnabled,
+                        enabled = state.transferDirUri != null,
+                    )
+                }
+
+                CardDivider()
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.heightIn(min = 44.dp),
+                ) {
+                    SectionLabel(
+                        stringResource(R.string.organize_transfers_by_date),
+                        modifier = Modifier.weight(1f),
+                    )
+                    SettingsSwitch(
+                        checked = state.organizeTransfersByDate,
+                        onCheckedChange = viewModel::setOrganizeTransfersByDate,
+                        hapticsEnabled = state.hapticsEnabled,
+                        enabled = state.transferDirUri != null,
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))
