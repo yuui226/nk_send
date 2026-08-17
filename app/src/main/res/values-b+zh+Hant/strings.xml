@@ -151,6 +151,7 @@
     <string name="photo_frame_immersive">沉浸</string>
     <string name="photo_frame_brand_inset">品牌內嵌</string>
     <string name="photo_frame_brand_gallery">品牌留白</string>
+    <string name="photo_frame_color_archive">色彩檔案</string>
     <string name="photo_frame_metadata_button">邊框資訊</string>
     <string name="photo_frame_metadata_focal_length">焦距</string>
     <string name="photo_frame_metadata_exposure">曝光參數</string>

@@ -73,6 +73,15 @@ private const val FILM_GALLERY_BOTTOM_TO_PHOTO_WIDTH = 0.34f
 private const val FILM_EDGE_SIDE_TO_PHOTO_WIDTH = 0.07f
 private const val FILM_EDGE_TOP_TO_PHOTO_WIDTH = 0.035f
 private const val FILM_EDGE_BOTTOM_TO_PHOTO_WIDTH = 0.085f
+private const val COLOR_ARCHIVE_SIDE_TO_PHOTO_WIDTH = 0.04f
+private const val COLOR_ARCHIVE_TOP_TO_PHOTO_WIDTH = 0.04f
+private const val COLOR_ARCHIVE_BOTTOM_TO_PHOTO_WIDTH = 0.17f
+private val COLOR_ARCHIVE_FALLBACK_PALETTE = intArrayOf(
+    0xFF262F12.toInt(),
+    0xFF697B6C.toInt(),
+    0xFFCDD8E0.toInt(),
+    0xFF4A4B26.toInt(),
+)
 
 @Suppress("NOTHING_TO_INLINE")
 private inline fun generationProbeClock(): Long =
@@ -101,6 +110,7 @@ enum class PhotoFramePreset(internal val fileSuffix: String) {
     BRAND_GALLERY("brand_gallery"),
     CLASSIC_SIGNATURE("classic_signature"),
     GALLERY_MAT("gallery_mat"),
+    COLOR_ARCHIVE("color_archive"),
     FILM_GALLERY("film_gallery"),
     FILM_EDGE("film_edge"),
 }
@@ -1276,6 +1286,7 @@ object PhotoFrameExporter {
                     calculateBrandFrameLayout(source.width, source.height, preset, longEdge)
                 PhotoFramePreset.CLASSIC_SIGNATURE,
                 PhotoFramePreset.GALLERY_MAT,
+                PhotoFramePreset.COLOR_ARCHIVE,
                 PhotoFramePreset.FILM_GALLERY,
                 PhotoFramePreset.FILM_EDGE ->
                     calculateEditorialFrameLayout(source.width, source.height, preset, longEdge)
@@ -1300,6 +1311,7 @@ object PhotoFrameExporter {
                     )
                 PhotoFramePreset.CLASSIC_SIGNATURE,
                 PhotoFramePreset.GALLERY_MAT,
+                PhotoFramePreset.COLOR_ARCHIVE,
                 PhotoFramePreset.FILM_GALLERY,
                 PhotoFramePreset.FILM_EDGE ->
                     calculateOriginalQualityEditorialFrameLayout(
@@ -1427,6 +1439,7 @@ object PhotoFrameExporter {
             PhotoFramePreset.IMMERSIVE -> 0f
             PhotoFramePreset.BRAND_INSET,
             PhotoFramePreset.BRAND_GALLERY -> 0.78f
+            PhotoFramePreset.COLOR_ARCHIVE -> 0.78f
             PhotoFramePreset.CLASSIC_SIGNATURE,
             PhotoFramePreset.GALLERY_MAT,
             PhotoFramePreset.FILM_GALLERY,
@@ -1623,6 +1636,7 @@ object PhotoFrameExporter {
                     PhotoFramePreset.BRAND_GALLERY -> Unit
                     PhotoFramePreset.CLASSIC_SIGNATURE,
                     PhotoFramePreset.GALLERY_MAT,
+                    PhotoFramePreset.COLOR_ARCHIVE,
                     PhotoFramePreset.FILM_EDGE -> Unit
                 }
             }
@@ -1631,7 +1645,8 @@ object PhotoFrameExporter {
             PhotoFramePreset.BRAND_INSET,
             PhotoFramePreset.BRAND_GALLERY -> canvas.drawColor(Color.WHITE)
             PhotoFramePreset.CLASSIC_SIGNATURE,
-            PhotoFramePreset.GALLERY_MAT -> canvas.drawColor(Color.WHITE)
+            PhotoFramePreset.GALLERY_MAT,
+            PhotoFramePreset.COLOR_ARCHIVE -> canvas.drawColor(Color.WHITE)
             PhotoFramePreset.FILM_EDGE -> canvas.drawColor(Color.rgb(8, 8, 9))
         }
     }
@@ -2024,7 +2039,8 @@ object PhotoFrameExporter {
                     PhotoFramePreset.BRAND_INSET,
                     PhotoFramePreset.BRAND_GALLERY -> Color.rgb(250, 252, 253)
                     PhotoFramePreset.CLASSIC_SIGNATURE,
-                    PhotoFramePreset.GALLERY_MAT -> Color.rgb(24, 27, 30)
+                    PhotoFramePreset.GALLERY_MAT,
+                    PhotoFramePreset.COLOR_ARCHIVE -> Color.rgb(24, 27, 30)
                     PhotoFramePreset.FILM_GALLERY,
                     PhotoFramePreset.FILM_EDGE -> Color.rgb(250, 249, 246)
                 }
@@ -2769,24 +2785,55 @@ object PhotoFrameExporter {
                 return@withRegionDecoder output
             }
             if (preset.isEditorialFrame()) {
-                val preview = if (preset == PhotoFramePreset.FILM_GALLERY) {
-                    decodeRegionPreview(decoder, orientation)
+                val basePreview = when (preset) {
+                    PhotoFramePreset.FILM_GALLERY,
+                    PhotoFramePreset.COLOR_ARCHIVE -> decodeRegionPreview(decoder, orientation)
+                    else -> null
+                }
+                val preview = if (
+                    preset == PhotoFramePreset.COLOR_ARCHIVE &&
+                    basePreview != null &&
+                    filter != null
+                ) {
+                    try {
+                        PhotoFilterRenderer.render(basePreview, filter)
+                    } finally {
+                        basePreview.recycle()
+                    }
                 } else {
-                    null
+                    basePreview
                 }
                 try {
                     drawEditorialFrameBase(canvas, preview, layout, preset)
                 } finally {
                     preview?.recycle()
                 }
-                drawPhotoRegions(
-                    decoder = decoder,
-                    canvas = canvas,
-                    photoRect = photoRect,
-                    orientation = orientation,
-                    filter = filter,
-                    probeSessionId = probeSessionId,
-                )
+                if (preset == PhotoFramePreset.COLOR_ARCHIVE) {
+                    val radius = colorArchiveCornerRadius(layout)
+                    val clip = Path().apply {
+                        addRoundRect(photoRect, radius, radius, Path.Direction.CW)
+                    }
+                    canvas.save()
+                    canvas.clipPath(clip)
+                    drawPhotoRegions(
+                        decoder = decoder,
+                        canvas = canvas,
+                        photoRect = photoRect,
+                        orientation = orientation,
+                        filter = filter,
+                        probeSessionId = probeSessionId,
+                    )
+                    canvas.restore()
+                } else {
+                    drawPhotoRegions(
+                        decoder = decoder,
+                        canvas = canvas,
+                        photoRect = photoRect,
+                        orientation = orientation,
+                        filter = filter,
+                        probeSessionId = probeSessionId,
+                    )
+                }
                 val decorationStartedAtMs = generationProbeClock()
                 drawEditorialFrameDecoration(
                     context = context,
@@ -3184,17 +3231,32 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
     ) {
-        drawEditorialFrameBase(canvas, backdropSource, layout, preset)
-        canvas.drawBitmap(
-            source,
-            null,
-            layout.photoRect(),
-            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG),
+        drawEditorialFrameBase(
+            canvas,
+            if (preset == PhotoFramePreset.COLOR_ARCHIVE) source else backdropSource,
+            layout,
+            preset,
         )
+        val photo = layout.photoRect()
+        val photoPaint = Paint(
+            Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG
+        )
+        if (preset == PhotoFramePreset.COLOR_ARCHIVE) {
+            val radius = colorArchiveCornerRadius(layout)
+            val clip = Path().apply {
+                addRoundRect(photo, radius, radius, Path.Direction.CW)
+            }
+            canvas.save()
+            canvas.clipPath(clip)
+            canvas.drawBitmap(source, null, photo, photoPaint)
+            canvas.restore()
+        } else {
+            canvas.drawBitmap(source, null, photo, photoPaint)
+        }
         drawEditorialFrameDecoration(context, canvas, layout, metadata, preset, watermark)
     }
 
-    /** The four reference-inspired frames share exact photo geometry in preview and export. */
+    /** Reference-inspired editorial frames share exact photo geometry in preview and export. */
     private fun drawEditorialFrameBase(
         canvas: Canvas,
         backdropSource: Bitmap?,
@@ -3213,6 +3275,18 @@ object PhotoFrameExporter {
                 canvas.drawRect(outer, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.rgb(7, 7, 8)
                 })
+            }
+            PhotoFramePreset.COLOR_ARCHIVE -> {
+                canvas.drawColor(Color.rgb(253, 253, 252))
+                val radius = colorArchiveCornerRadius(layout)
+                drawPhotoElevation(canvas, photo, radius, PhotoFramePreset.MINIMAL)
+                drawColorArchivePalette(
+                    canvas = canvas,
+                    layout = layout,
+                    source = requireNotNull(backdropSource) {
+                        "Color archive needs a palette source"
+                    },
+                )
             }
             PhotoFramePreset.FILM_GALLERY -> {
                 drawBackdrop(
@@ -3245,6 +3319,8 @@ object PhotoFrameExporter {
                 drawClassicSignatureDecoration(context, canvas, layout, metadata, watermark)
             PhotoFramePreset.GALLERY_MAT ->
                 drawGalleryMatDecoration(context, canvas, layout, metadata, watermark)
+            PhotoFramePreset.COLOR_ARCHIVE ->
+                drawColorArchiveDecoration(canvas, layout, metadata)
             PhotoFramePreset.FILM_GALLERY -> {
                 drawFilmStripDecoration(canvas, layout, metadata)
                 drawFilmGalleryInformation(context, canvas, layout, metadata, watermark)
@@ -3616,6 +3692,234 @@ object PhotoFrameExporter {
                 if (value.startsWith("ISO", ignoreCase = true)) value else "ISO $value"
             },
         ).joinToString("   ")
+
+    private fun drawColorArchiveDecoration(
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        metadata: PhotoFrameMetadata,
+    ) {
+        val photo = layout.photoRect()
+        val palette = colorArchivePaletteRect(layout)
+        val bandHeight = layout.canvasHeight - photo.bottom
+        val textArea = RectF(
+            photo.left,
+            photo.bottom + bandHeight * 0.12f,
+            palette.left - photo.width() * 0.045f,
+            layout.canvasHeight - bandHeight * 0.12f,
+        )
+        val identity = listOf(
+            cameraBrandLabel(metadata.make, metadata.model),
+            normalizeCameraModel(metadata.make, metadata.model),
+        ).filter(String::isNotBlank)
+            .joinToString(" ")
+            .uppercase(Locale.ROOT)
+        val rows = buildList {
+            identity.takeIf(String::isNotBlank)?.let { text ->
+                add(
+                    text to colorArchiveTextPaint(
+                        text = text,
+                        preferredSize = photo.width() * 0.027f,
+                        maxWidth = textArea.width(),
+                        typeface = Typeface.create("sans-serif", Typeface.BOLD),
+                    )
+                )
+            }
+            metadata.lensModel?.takeIf(String::isNotBlank)?.let { text ->
+                add(
+                    text to colorArchiveTextPaint(
+                        text = text,
+                        preferredSize = photo.width() * 0.0195f,
+                        maxWidth = textArea.width(),
+                        typeface = Typeface.create("sans-serif", Typeface.NORMAL),
+                    )
+                )
+            }
+            colorArchiveDetailLine(metadata).takeIf(String::isNotBlank)?.let { text ->
+                add(
+                    text to colorArchiveTextPaint(
+                        text = text,
+                        preferredSize = photo.width() * 0.022f,
+                        maxWidth = textArea.width(),
+                        typeface = Typeface.create("sans-serif", Typeface.BOLD),
+                    )
+                )
+            }
+            metadata.dateTime?.takeIf(String::isNotBlank)?.let { text ->
+                add(
+                    text to colorArchiveTextPaint(
+                        text = text,
+                        preferredSize = photo.width() * 0.0185f,
+                        maxWidth = textArea.width(),
+                        typeface = Typeface.create("sans-serif", Typeface.NORMAL),
+                    )
+                )
+            }
+        }
+        if (rows.isNotEmpty()) {
+            fun bounds(): List<FrameTextVisualBounds> = rows.map { (text, paint) ->
+                textVisualBounds(text, paint)
+            }
+            val initial = bounds()
+            val preferredGap = bandHeight * 0.055f
+            val availableTextHeight = (
+                textArea.height() - preferredGap * (rows.size - 1).coerceAtLeast(0)
+                ).coerceAtLeast(0f)
+            val scale = frameTextScaleToFit(availableTextHeight, initial)
+            if (scale < 1f) rows.forEach { (_, paint) -> paint.textSize *= scale }
+            val baselines = centeredFrameTextBaselines(
+                textArea.top,
+                textArea.bottom,
+                bounds(),
+                preferredGap,
+            )
+            rows.forEachIndexed { index, (text, paint) ->
+                canvas.drawText(text, textArea.left, baselines[index], paint)
+            }
+        }
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(28, 20, 24, 28)
+            style = Paint.Style.STROKE
+            strokeWidth = maxOf(1f, photo.width() * 0.0008f)
+            canvas.drawRoundRect(
+                photo,
+                colorArchiveCornerRadius(layout),
+                colorArchiveCornerRadius(layout),
+                this,
+            )
+        }
+    }
+
+    private fun colorArchiveTextPaint(
+        text: String,
+        preferredSize: Float,
+        maxWidth: Float,
+        typeface: Typeface,
+    ): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+        color = Color.rgb(5, 6, 7)
+        textSize = preferredSize
+        textAlign = Paint.Align.LEFT
+        this.typeface = typeface
+        val measured = measureText(text)
+        if (measured > maxWidth && measured > 0f) textSize *= maxWidth / measured
+    }
+
+    private fun colorArchiveDetailLine(metadata: PhotoFrameMetadata): String =
+        listOfNotNull(
+            metadata.focalLength,
+            metadata.aperture?.let { value ->
+                when {
+                    value.startsWith("f/", ignoreCase = true) -> value.lowercase(Locale.ROOT)
+                    value.startsWith("f", ignoreCase = true) ->
+                        "f/${value.drop(1).trimStart('/', ' ')}"
+                    else -> "f/$value"
+                }
+            },
+            metadata.iso?.replace(" ", "")?.uppercase(Locale.ROOT),
+            metadata.shutter?.let { value ->
+                if (value.endsWith("s", ignoreCase = true)) value else "${value}s"
+            },
+        ).joinToString("  ")
+
+    private fun drawColorArchivePalette(
+        canvas: Canvas,
+        layout: PhotoFrameLayout,
+        source: Bitmap,
+    ) {
+        val area = colorArchivePaletteRect(layout)
+        val colors = extractColorArchivePalette(source)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val swatchWidth = area.width() / colors.size
+        colors.forEachIndexed { index, color ->
+            paint.color = color
+            canvas.drawRect(
+                area.left + index * swatchWidth,
+                area.top,
+                if (index == colors.lastIndex) area.right else area.left + (index + 1) * swatchWidth,
+                area.bottom,
+                paint,
+            )
+        }
+    }
+
+    private fun extractColorArchivePalette(source: Bitmap): IntArray {
+        val counts = IntArray(512)
+        val redSums = IntArray(512)
+        val greenSums = IntArray(512)
+        val blueSums = IntArray(512)
+        val columns = 24
+        val rows = 16
+        repeat(rows) { row ->
+            val y = ((row + 0.5f) * source.height / rows)
+                .toInt().coerceIn(0, source.height - 1)
+            repeat(columns) columnLoop@ { column ->
+                val x = ((column + 0.5f) * source.width / columns)
+                    .toInt().coerceIn(0, source.width - 1)
+                val pixel = runCatching { source.getPixel(x, y) }.getOrNull()
+                    ?: return@columnLoop
+                if ((pixel ushr 24) < 128) return@columnLoop
+                val red = pixel ushr 16 and 0xff
+                val green = pixel ushr 8 and 0xff
+                val blue = pixel and 0xff
+                val bucket = (red ushr 5 shl 6) or (green ushr 5 shl 3) or (blue ushr 5)
+                counts[bucket] += 1
+                redSums[bucket] += red
+                greenSums[bucket] += green
+                blueSums[bucket] += blue
+            }
+        }
+        val candidates = counts.indices
+            .filter { counts[it] > 0 }
+            .sortedByDescending { counts[it] }
+            .map { bucket ->
+                val count = counts[bucket]
+                Color.rgb(
+                    redSums[bucket] / count,
+                    greenSums[bucket] / count,
+                    blueSums[bucket] / count,
+                )
+            }
+        val selected = mutableListOf<Int>()
+        candidates.forEach { candidate ->
+            if (selected.size == 4) return@forEach
+            if (selected.all { existing -> colorDistanceSquared(candidate, existing) >= 42 * 42 }) {
+                selected += candidate
+            }
+        }
+        candidates.forEach { candidate ->
+            if (selected.size == 4) return@forEach
+            if (candidate !in selected) selected += candidate
+        }
+        COLOR_ARCHIVE_FALLBACK_PALETTE.forEach { fallback ->
+            if (selected.size < 4) selected += fallback
+        }
+        val sorted = selected.take(4).sortedBy(::colorArchiveLuminance)
+        return intArrayOf(sorted[0], sorted[1], sorted[3], sorted[2])
+    }
+
+    private fun colorDistanceSquared(first: Int, second: Int): Int {
+        val red = (first ushr 16 and 0xff) - (second ushr 16 and 0xff)
+        val green = (first ushr 8 and 0xff) - (second ushr 8 and 0xff)
+        val blue = (first and 0xff) - (second and 0xff)
+        return red * red + green * green + blue * blue
+    }
+
+    private fun colorArchiveLuminance(color: Int): Int =
+        (color ushr 16 and 0xff) * 299 +
+            (color ushr 8 and 0xff) * 587 +
+            (color and 0xff) * 114
+
+    private fun colorArchivePaletteRect(layout: PhotoFrameLayout): RectF {
+        val photo = layout.photoRect()
+        val bandHeight = layout.canvasHeight - photo.bottom
+        val right = photo.right - photo.width() * 0.018f
+        val width = photo.width() * 0.23f
+        val height = photo.width() * 0.038f
+        val centerY = photo.bottom + bandHeight * 0.5f
+        return RectF(right - width, centerY - height / 2f, right, centerY + height / 2f)
+    }
+
+    private fun colorArchiveCornerRadius(layout: PhotoFrameLayout): Float =
+        layout.photoRect().width() * 0.012f
 
     private fun filmGalleryOuterRect(layout: PhotoFrameLayout): RectF {
         val photo = layout.photoRect()
@@ -4940,6 +5244,20 @@ internal fun calculateOriginalQualityEditorialFrameLayout(
                 metadataTop = top + sourceHeight,
             )
         }
+        PhotoFramePreset.COLOR_ARCHIVE -> {
+            val side = px(COLOR_ARCHIVE_SIDE_TO_PHOTO_WIDTH)
+            val top = px(COLOR_ARCHIVE_TOP_TO_PHOTO_WIDTH)
+            val bottom = px(COLOR_ARCHIVE_BOTTOM_TO_PHOTO_WIDTH)
+            PhotoFrameLayout(
+                canvasWidth = sourceWidth + side * 2,
+                canvasHeight = sourceHeight + top + bottom,
+                photoLeft = side.toFloat(),
+                photoTop = top.toFloat(),
+                photoRight = (side + sourceWidth).toFloat(),
+                photoBottom = (top + sourceHeight).toFloat(),
+                metadataTop = (top + sourceHeight).toFloat(),
+            )
+        }
         PhotoFramePreset.FILM_GALLERY -> {
             val side = px(FILM_GALLERY_SIDE_TO_PHOTO_WIDTH)
             val top = px(FILM_GALLERY_TOP_TO_PHOTO_WIDTH)
@@ -4980,6 +5298,7 @@ internal fun PhotoFramePreset.isBrandFrame(): Boolean =
 internal fun PhotoFramePreset.isEditorialFrame(): Boolean = when (this) {
     PhotoFramePreset.CLASSIC_SIGNATURE,
     PhotoFramePreset.GALLERY_MAT,
+    PhotoFramePreset.COLOR_ARCHIVE,
     PhotoFramePreset.FILM_GALLERY,
     PhotoFramePreset.FILM_EDGE -> true
     else -> false
@@ -5096,6 +5415,7 @@ private fun PhotoFrameWatermark.forEditorialPhoto(
         PhotoFramePreset.CLASSIC_SIGNATURE ->
             position == PhotoFrameWatermarkPosition.AUTO ||
                 content == PhotoFrameWatermarkContent.IMAGE
+        PhotoFramePreset.COLOR_ARCHIVE -> true
         PhotoFramePreset.GALLERY_MAT,
         PhotoFramePreset.FILM_GALLERY -> content == PhotoFrameWatermarkContent.IMAGE
         PhotoFramePreset.FILM_EDGE -> true
@@ -5602,6 +5922,7 @@ private fun resolvedWatermarkPosition(
             PhotoFramePreset.BRAND_INSET,
             PhotoFramePreset.BRAND_GALLERY -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
             PhotoFramePreset.CLASSIC_SIGNATURE,
+            PhotoFramePreset.COLOR_ARCHIVE,
             PhotoFramePreset.FILM_EDGE -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
             PhotoFramePreset.GALLERY_MAT,
             PhotoFramePreset.FILM_GALLERY -> PhotoFrameWatermarkPosition.CENTER

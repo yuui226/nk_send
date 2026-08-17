@@ -61,4 +61,30 @@ class ExistingFileNameIndexTest {
         assertTrue(index.contains(original))
         assertFalse(index.contains(original.copy(size = 99L)))
     }
+
+    @Test
+    fun exportedOriginalIndexKeepsRootAndDatedFoldersIndependent() {
+        val original = file("DSC_0001.JPG", 100L).copy(captureDate = "20260817T120000")
+        val rootIndex = ExportedOriginalIndex().apply {
+            add(original.fileName, original.size)
+        }
+        val datedIndex = ExportedOriginalIndex().apply {
+            add(original.fileName, original.size, "ZT2026-08-17")
+        }
+
+        assertTrue(isTransferredOriginal(original, rootIndex, organizeTransfersByDate = false))
+        assertFalse(isTransferredOriginal(original, rootIndex, organizeTransfersByDate = true))
+        assertFalse(isTransferredOriginal(original, datedIndex, organizeTransfersByDate = false))
+        assertTrue(isTransferredOriginal(original, datedIndex, organizeTransfersByDate = true))
+    }
+
+    @Test
+    fun datedLookupOnlyMatchesTheCaptureDateDestination() {
+        val original = file("DSC_0001.JPG", 100L).copy(captureDate = "20260817T120000")
+        val index = ExportedOriginalIndex().apply {
+            add(original.fileName, original.size, "ZT2026-08-18")
+        }
+
+        assertFalse(isTransferredOriginal(original, index, organizeTransfersByDate = true))
+    }
 }

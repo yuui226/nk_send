@@ -56,6 +56,15 @@ class PhotoFrameMetadataSettingsTest {
         assertFalse(filmGallery.showFocalLength)
         assertFalse(filmGallery.showExposure)
 
+        val colorArchive = defaultPhotoFrameMetadataSettings(PhotoFramePreset.COLOR_ARCHIVE)
+        assertTrue(colorArchive.showBrand)
+        assertTrue(colorArchive.showModel)
+        assertTrue(colorArchive.showFocalLength)
+        assertTrue(colorArchive.showExposure)
+        assertFalse(colorArchive.showLensModel)
+        assertFalse(colorArchive.showDate)
+        assertFalse(colorArchive.showTime)
+
         listOf(PhotoFramePreset.GALLERY_MAT, PhotoFramePreset.FILM_EDGE).forEach { preset ->
             val settings = defaultPhotoFrameMetadataSettings(preset)
             assertFalse(settings.showDate)

@@ -18,6 +18,7 @@ class PhotoListDerivedStateTest {
             exportedHandlesForUntransferredFilter(
                 files = listOf(file),
                 index = index,
+                organizeTransfersByDate = false,
                 enabled = false,
             ).isEmpty()
         )
@@ -26,6 +27,7 @@ class PhotoListDerivedStateTest {
             exportedHandlesForUntransferredFilter(
                 files = listOf(file),
                 index = index,
+                organizeTransfersByDate = false,
                 enabled = true,
             )
         )

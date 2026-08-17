@@ -200,29 +200,50 @@ internal fun TransferTask.finishFrameGeneration(nowElapsedMs: Long): TransferTas
 }
 
 /**
- * 当前导出目录中已落盘原片的 O(1) 查询索引。内容原地增量更新；[TransferState]
+ * 当前导出目录中已落盘原片的 O(1) 查询索引，根层与各日期目录独立分桶。内容原地增量更新；[TransferState]
  * 通过 [TransferState.existingExportRevision] 发布一次轻量版本变化，避免每完成一张
- * 都复制整个 Map<文件名, Set<大小>>。
+ * 都复制整个索引。
  */
 class ExportedOriginalIndex internal constructor() {
-    private val sizesByBaseName = ConcurrentHashMap<String, MutableSet<Long>>()
+    private val sizesByDestination =
+        ConcurrentHashMap<String, ConcurrentHashMap<String, MutableSet<Long>>>()
 
-    internal fun add(fileName: String, size: Long): Boolean =
-        sizesByBaseName
+    internal fun add(
+        fileName: String,
+        size: Long,
+        destinationFolderName: String? = null,
+    ): Boolean =
+        sizesByDestination
+            .computeIfAbsent(exportDestinationKey(destinationFolderName)) { ConcurrentHashMap() }
             .computeIfAbsent(directoryLookupKey(fileName)) { ConcurrentHashMap.newKeySet() }
             .add(size)
 
-    internal fun addAll(entries: Sequence<Pair<String, Long>>): Boolean {
+    internal fun addAll(
+        entries: Sequence<Pair<String, Long>>,
+        destinationFolderName: String? = null,
+    ): Boolean {
         var changed = false
         entries.forEach { (fileName, size) ->
-            if (add(fileName, size)) changed = true
+            if (add(fileName, size, destinationFolderName)) changed = true
         }
         return changed
     }
 
-    internal fun contains(file: NikonCamera.FileInfo): Boolean {
-        val sizes = sizesByBaseName[directoryLookupKey(file.fileName)] ?: return false
+    internal fun contains(
+        file: NikonCamera.FileInfo,
+        destinationFolderName: String? = null,
+    ): Boolean {
+        val sizes = sizesByDestination[exportDestinationKey(destinationFolderName)]
+            ?.get(directoryLookupKey(file.fileName))
+            ?: return false
         return file.size == PtpConstants.SIZE_UNKNOWN || sizes.any { it < 0L || it == file.size }
+    }
+
+    private fun exportDestinationKey(destinationFolderName: String?): String =
+        destinationFolderName?.lowercase(Locale.ROOT) ?: ROOT_EXPORT_DESTINATION
+
+    private companion object {
+        const val ROOT_EXPORT_DESTINATION = "\u0000root"
     }
 }
 
@@ -309,7 +330,7 @@ data class TransferState(
     val taskStructureRevision: Long = 0L,
     val isTransferring: Boolean = false,
     val transferDirUri: String? = null,
-    /** 导出目录内完整文件：归一化文件名 -> 已有大小集合，用于相机列表直接标记已传照片。 */
+    /** 根层及各日期目录内的完整文件索引，用于按当前保存方式标记已传照片。 */
     val existingExportIndex: ExportedOriginalIndex = ExportedOriginalIndex(),
     /** [existingExportIndex] 原地更新后的发布版本，只负责触发订阅者重新读取索引。 */
     val existingExportRevision: Long = 0L,
@@ -533,11 +554,34 @@ internal fun transferDateFolderName(
     return "ZT${parsed ?: fallbackDate}"
 }
 
+internal fun transferDestinationFolderName(
+    captureDate: String?,
+    organizeTransfersByDate: Boolean,
+    fallbackDate: LocalDate = LocalDate.now(),
+): String? {
+    if (!organizeTransfersByDate) return null
+    return transferDateFolderName(captureDate, fallbackDate)
+}
+
 /** 相机文件是否已在当前保存目录中落盘；列表对号、筛选和任务模式必须共用该判定。 */
 internal fun isTransferredOriginal(
     file: NikonCamera.FileInfo,
     existingExportIndex: ExportedOriginalIndex,
-): Boolean = existingExportIndex.contains(file)
+    organizeTransfersByDate: Boolean,
+): Boolean = existingExportIndex.contains(
+    file = file,
+    destinationFolderName = transferDestinationFolderName(
+        captureDate = file.captureDate,
+        organizeTransfersByDate = organizeTransfersByDate,
+    ),
+)
+
+/** 已入队任务使用入队时锁定的目标目录，不受之后的“按天保存”开关变化影响。 */
+internal fun isTransferredOriginal(
+    file: NikonCamera.FileInfo,
+    existingExportIndex: ExportedOriginalIndex,
+    destinationFolderName: String?,
+): Boolean = existingExportIndex.contains(file, destinationFolderName)
 
 internal fun createQueueTasks(
     files: List<NikonCamera.FileInfo>,
@@ -565,8 +609,11 @@ internal fun createQueueTasks(
             photoFilterRequested = photoFilter.takeIf {
                 isSupportedPhotoFrameSourceExtension(file.extension)
             },
-            destinationFolderName = transferDateFolderName(file.captureDate, queuedDate)
-                .takeIf { organizeTransfersByDate },
+            destinationFolderName = transferDestinationFolderName(
+                captureDate = file.captureDate,
+                organizeTransfersByDate = organizeTransfersByDate,
+                fallbackDate = queuedDate,
+            ),
         )
     }
     .toList()
@@ -1500,19 +1547,24 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         try {
             val rootDirectoryUri = rootDocumentUri(uri)
             val directoryIndexes = buildList {
-                add(getDirectoryIndex(uri, deleteParts))
+                add(null to getDirectoryIndex(uri, deleteParts))
                 childDirectories(uri, rootDirectoryUri)
                     .asSequence()
                     .filter { DATED_TRANSFER_FOLDER_REGEX.matches(it.first) }
-                    .forEach { (_, directoryUri) ->
-                        add(getDirectoryIndex(uri, directoryUri, deleteParts))
+                    .forEach { (folderName, directoryUri) ->
+                        add(folderName to getDirectoryIndex(uri, directoryUri, deleteParts))
                     }
             }
             val snapshot = _state.value
             if (snapshot.transferDirUri != uri.toString()) return
             var changed = false
-            directoryIndexes.forEach { directoryIndex ->
-                if (snapshot.existingExportIndex.addAll(directoryIndex.exportedOriginalEntries())) {
+            directoryIndexes.forEach { (destinationFolderName, directoryIndex) ->
+                if (
+                    snapshot.existingExportIndex.addAll(
+                        entries = directoryIndex.exportedOriginalEntries(),
+                        destinationFolderName = destinationFolderName,
+                    )
+                ) {
                     changed = true
                 }
             }
@@ -1535,11 +1587,16 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    private fun recordExistingExport(uri: Uri, name: String, size: Long) {
+    private fun recordExistingExport(
+        uri: Uri,
+        destinationFolderName: String?,
+        name: String,
+        size: Long,
+    ) {
         val snapshot = _state.value
         // 目录选择器在传输期间仍可能被打开；旧目录任务完成后绝不能污染新目录索引。
         if (snapshot.transferDirUri != uri.toString()) return
-        if (!snapshot.existingExportIndex.add(name, size)) return
+        if (!snapshot.existingExportIndex.add(name, size, destinationFolderName)) return
         _state.update { state ->
             if (
                 state.transferDirUri == uri.toString() &&
@@ -1689,7 +1746,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     val localOriginal = directoryIndex.findOriginal(task.file)
                     if (localOriginal != null) {
                         log { "DL_SKIP existing: ${task.file.fileName}" }
-                        recordExistingExport(uri, localOriginal.displayName, localOriginal.size)
+                        recordExistingExport(
+                            uri = uri,
+                            destinationFolderName = task.destinationFolderName,
+                            name = localOriginal.displayName,
+                            size = localOriginal.size,
+                        )
                         val preset = task.framePreset
                         val filter = task.photoFilterRequested
                         if (preset == null && filter == null) {
@@ -1853,7 +1915,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 val savedName = displayNameOf(renamed) ?: finalName
                                 directoryIndex.addFile(savedName, partSize, renamed)
                                 directoryIndex.removePart(task.file.fileName)
-                                recordExistingExport(uri, savedName, partSize)
+                                recordExistingExport(
+                                    uri = uri,
+                                    destinationFolderName = task.destinationFolderName,
+                                    name = savedName,
+                                    size = partSize,
+                                )
                                 if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
                                 // 回到循环顶部，统一走“原片存在 → 检查边框”的同一条路径。
                                 // 使用本地槽立即复查，不能放回队尾改变用户看到的 FIFO 顺序。
@@ -2024,7 +2091,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 if (renamedUri != null) {
                                     directoryIndex.addFile(savedName, stats.bytes, renamedUri)
                                     directoryIndex.removePart(task.file.fileName)
-                                    recordExistingExport(uri, savedName, stats.bytes)
+                                    recordExistingExport(
+                                        uri = uri,
+                                        destinationFolderName = task.destinationFolderName,
+                                        name = savedName,
+                                        size = stats.bytes,
+                                    )
                                     val framePreset = task.framePreset
                                     val photoFilter = task.photoFilterRequested
                                     val shouldGenerateFrame = framePreset != null || photoFilter != null

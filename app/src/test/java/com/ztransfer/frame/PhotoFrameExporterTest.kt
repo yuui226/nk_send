@@ -80,6 +80,7 @@ class PhotoFrameExporterTest {
             PhotoFramePreset.valueOf("CLASSIC_SIGNATURE"),
         )
         assertEquals(PhotoFramePreset.GALLERY_MAT, PhotoFramePreset.valueOf("GALLERY_MAT"))
+        assertEquals(PhotoFramePreset.COLOR_ARCHIVE, PhotoFramePreset.valueOf("COLOR_ARCHIVE"))
         assertEquals(PhotoFramePreset.FILM_GALLERY, PhotoFramePreset.valueOf("FILM_GALLERY"))
         assertEquals(PhotoFramePreset.FILM_EDGE, PhotoFramePreset.valueOf("FILM_EDGE"))
     }
@@ -89,6 +90,7 @@ class PhotoFrameExporterTest {
         listOf(
             PhotoFramePreset.CLASSIC_SIGNATURE,
             PhotoFramePreset.GALLERY_MAT,
+            PhotoFramePreset.COLOR_ARCHIVE,
             PhotoFramePreset.FILM_GALLERY,
             PhotoFramePreset.FILM_EDGE,
         ).forEach { preset ->
@@ -122,6 +124,13 @@ class PhotoFrameExporterTest {
             PhotoFramePreset.FILM_GALLERY,
         )
         assertTrue(film.canvasHeight - film.photoBottom > film.photoTop)
+        val archive = calculateOriginalQualityEditorialFrameLayout(
+            6000,
+            4000,
+            PhotoFramePreset.COLOR_ARCHIVE,
+        )
+        assertEquals(6000f, archive.photoRight - archive.photoLeft, 0.001f)
+        assertTrue(archive.canvasHeight - archive.photoBottom > archive.photoTop)
     }
 
     @Test

@@ -186,10 +186,13 @@ internal fun buildLatestTaskIndexByHandle(tasks: List<TransferTask>): Map<Int, I
 internal fun exportedHandlesForUntransferredFilter(
     files: List<NikonCamera.FileInfo>,
     index: ExportedOriginalIndex,
+    organizeTransfersByDate: Boolean,
     enabled: Boolean,
 ): Set<Int> = if (enabled) {
     files.asSequence()
-        .filter { file -> isTransferredOriginal(file, index) }
+        .filter { file ->
+            isTransferredOriginal(file, index, organizeTransfersByDate)
+        }
         .mapTo(HashSet()) { it.handle }
 } else {
     emptySet()
@@ -589,11 +592,13 @@ fun FileListScreen(
     val exportedHandlesForFilter: Set<Int> = remember(
         state.files,
         transferState.existingExportRevision,
+        transferState.organizeTransfersByDate,
         filterUntransferred,
     ) {
         exportedHandlesForUntransferredFilter(
             files = state.files,
             index = transferState.existingExportIndex,
+            organizeTransfersByDate = transferState.organizeTransfersByDate,
             enabled = filterUntransferred,
         )
     }
@@ -797,7 +802,11 @@ fun FileListScreen(
         buildLatestTaskIndexByHandle(transferState.tasks)
     }
     val hasLocalOriginal: (NikonCamera.FileInfo) -> Boolean = { file ->
-        isTransferredOriginal(file, transferState.existingExportIndex)
+        isTransferredOriginal(
+            file,
+            transferState.existingExportIndex,
+            transferState.organizeTransfersByDate,
+        )
     }
     // 单文件入队：列表轻触 + 预览页传输按钮共用。gating 与整组传输一致。
     val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
@@ -1050,6 +1059,7 @@ fun FileListScreen(
                 queuedIndexByHandle = queuedIndexByHandle,
                 existingExportIndex = transferState.existingExportIndex,
                 existingExportRevision = transferState.existingExportRevision,
+                organizeTransfersByDate = transferState.organizeTransfersByDate,
                 activeProgressFlow = transferViewModel.activeTransferProgress,
                 columns = transferState.thumbnailColumns,
                 isLoading = state.isLoadingFiles,
@@ -2325,6 +2335,7 @@ private fun ThumbnailGrid(
     queuedIndexByHandle: Map<Int, Int>,
     existingExportIndex: ExportedOriginalIndex,
     existingExportRevision: Long,
+    organizeTransfersByDate: Boolean,
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     columns: Int,
     isLoading: Boolean,
@@ -2615,8 +2626,13 @@ private fun ThumbnailGrid(
                                     file,
                                     existingExportIndex,
                                     existingExportRevision,
+                                    organizeTransfersByDate,
                                 ) {
-                                    isTransferredOriginal(file, existingExportIndex)
+                                    isTransferredOriginal(
+                                        file,
+                                        existingExportIndex,
+                                        organizeTransfersByDate,
+                                    )
                                 }
                                 ThumbnailCell(
                                     file = file,

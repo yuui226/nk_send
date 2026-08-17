@@ -127,7 +127,11 @@ fun TransferScreen(
     }
     val retryNeedsCamera = transferState.tasks.any {
         (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED) &&
-            !isTransferredOriginal(it.file, transferState.existingExportIndex)
+            !isTransferredOriginal(
+                it.file,
+                transferState.existingExportIndex,
+                it.destinationFolderName,
+            )
     }
     // 清空队列只作用于"不在传输中"的任务（正在传的文件会传完，中途打断会让相机关 Wi-Fi）：
     // 有可清的卡片才显示扫帚 FAB；确认后卡片集体收合退场、FAB 随之消失。
@@ -381,6 +385,7 @@ fun TransferScreen(
                                         enabled = cameraState.isConnectedToCamera || isTransferredOriginal(
                                             task.file,
                                             transferState.existingExportIndex,
+                                            task.destinationFolderName,
                                         ),
                                         onClick = {
                                             transferViewModel.retrySingleTask(
@@ -940,6 +945,7 @@ private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringReso
         PhotoFramePreset.BRAND_GALLERY -> R.string.photo_frame_brand_gallery
         PhotoFramePreset.CLASSIC_SIGNATURE -> R.string.photo_frame_classic_signature
         PhotoFramePreset.GALLERY_MAT -> R.string.photo_frame_gallery_mat
+        PhotoFramePreset.COLOR_ARCHIVE -> R.string.photo_frame_color_archive
         PhotoFramePreset.FILM_GALLERY -> R.string.photo_frame_film_gallery
         PhotoFramePreset.FILM_EDGE -> R.string.photo_frame_film_edge
     }

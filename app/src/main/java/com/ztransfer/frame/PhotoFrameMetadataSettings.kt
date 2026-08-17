@@ -46,6 +46,15 @@ internal fun defaultPhotoFrameMetadataSettings(
         showModel = false,
         showLensModel = false,
     )
+    PhotoFramePreset.COLOR_ARCHIVE -> PhotoFrameMetadataSettings(
+        showDate = false,
+        showTime = false,
+        showFocalLength = true,
+        showExposure = true,
+        showBrand = true,
+        showModel = true,
+        showLensModel = false,
+    )
     PhotoFramePreset.FILM_GALLERY -> PhotoFrameMetadataSettings(
         showDate = true,
         showTime = true,

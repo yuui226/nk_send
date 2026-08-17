@@ -996,6 +996,8 @@ fun SettingsOverlay(
                     stringResource(R.string.photo_frame_classic_signature),
                 PhotoFramePreset.GALLERY_MAT to
                     stringResource(R.string.photo_frame_gallery_mat),
+                PhotoFramePreset.COLOR_ARCHIVE to
+                    stringResource(R.string.photo_frame_color_archive),
                 PhotoFramePreset.FILM_GALLERY to
                     stringResource(R.string.photo_frame_film_gallery),
                 PhotoFramePreset.FILM_EDGE to
@@ -1808,6 +1810,7 @@ internal fun PhotoFrameWatermarkEditor(
         PhotoFramePreset.CLASSIC_SIGNATURE to
             stringResource(R.string.photo_frame_classic_signature),
         PhotoFramePreset.GALLERY_MAT to stringResource(R.string.photo_frame_gallery_mat),
+        PhotoFramePreset.COLOR_ARCHIVE to stringResource(R.string.photo_frame_color_archive),
         PhotoFramePreset.FILM_GALLERY to stringResource(R.string.photo_frame_film_gallery),
         PhotoFramePreset.FILM_EDGE to stringResource(R.string.photo_frame_film_edge),
     )
@@ -1948,45 +1951,38 @@ internal fun PhotoFrameWatermarkEditor(
                 modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
             )
             if (metadataAvailability.hasAny) {
-                GlassButton(
-                    onClick = {
-                        haptics.tick()
-                        metadataSettingsExpanded = !metadataSettingsExpanded
-                    },
-                    enabled = borderEnabled,
-                    active = borderEnabled && metadataSettingsExpanded,
-                    activeColor = frameAccent.copy(alpha = 0.10f),
-                    activeOutline = true,
-                    shape = RoundedCornerShape(13.dp),
+                val metadataLabel = stringResource(R.string.photo_frame_metadata_button)
+                Box(
                     modifier = Modifier
                         .weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT)
                         .height(PHOTO_EFFECTS_CONTROL_HEIGHT),
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            stringResource(R.string.photo_frame_metadata_button),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontSize = 14.sp,
-                            lineHeight = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(2.dp))
-                        Icon(
-                            imageVector = Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            tint = colors.onSurfaceVariant,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .graphicsLayer { rotationZ = metadataChevronRotation },
-                        )
-                    }
+                    ReleaseCommitWheel(
+                        options = listOf(Unit),
+                        selected = Unit,
+                        optionLabel = { metadataLabel },
+                        onValueCommitted = {},
+                        onActivated = {
+                            haptics.tick()
+                            metadataSettingsExpanded = !metadataSettingsExpanded
+                        },
+                        enabled = borderEnabled,
+                        wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                        showDragHint = false,
+                        accentColor = frameAccent,
+                        emphasized = metadataSettingsExpanded,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ExpandMore,
+                        contentDescription = null,
+                        tint = colors.onBackground.copy(alpha = 0.54f),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 8.dp)
+                            .size(18.dp)
+                            .graphicsLayer { rotationZ = metadataChevronRotation },
+                    )
                 }
             }
             FavoriteToggleButton(

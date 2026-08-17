@@ -76,8 +76,8 @@ internal fun wheelReleaseIndex(position: Float, lastIndex: Int): Int =
  * 设置页专用的紧凑拨轮。
  *
  * 拖动期间只更新本地预览位置，不会调用 [onValueCommitted]；正常松手时才吸附到最近一档并
- * 提交一次。手势被取消（例如父级滚动接管）时恢复已保存值，也不会误写偏好。轻点相当于一次
- * 完整的按下/松开，向下一档循环，方便无障碍服务和不习惯拖动的用户使用。
+ * 提交一次。手势被取消（例如父级滚动接管）时恢复已保存值，也不会误写偏好。轻点默认向下一档
+ * 循环；单项操作型波轮可通过 [onActivated] 执行自己的点击动作。
  */
 @Composable
 internal fun <T> ReleaseCommitWheel(
@@ -88,10 +88,12 @@ internal fun <T> ReleaseCommitWheel(
     modifier: Modifier = Modifier,
     label: String? = null,
     onDetent: () -> Unit = {},
+    onActivated: (() -> Unit)? = null,
     enabled: Boolean = true,
     wheelHeight: Dp = 50.dp,
     optionRowHeight: Dp = SETTINGS_WHEEL_ROW_HEIGHT,
     optionMaxLines: Int = 1,
+    showDragHint: Boolean = true,
     accentColor: Color? = null,
     emphasized: Boolean = false,
     favoriteOption: (T) -> Boolean = { false },
@@ -108,6 +110,7 @@ internal fun <T> ReleaseCommitWheel(
     val latestOptions by rememberUpdatedState(options)
     val latestCommit by rememberUpdatedState(onValueCommitted)
     val latestDetent by rememberUpdatedState(onDetent)
+    val latestActivated by rememberUpdatedState(onActivated)
     val latestFavoriteOption by rememberUpdatedState(favoriteOption)
 
     var dragging by remember { mutableStateOf(false) }
@@ -183,7 +186,7 @@ internal fun <T> ReleaseCommitWheel(
                 }
             }
             .pointerInput(options.size, rowPx, enabled) {
-                if (!enabled) return@pointerInput
+                if (!enabled || options.size <= 1) return@pointerInput
                 var accumulatedDy = 0f
                 try {
                     detectVerticalDragGestures(
@@ -230,6 +233,10 @@ internal fun <T> ReleaseCommitWheel(
                 }
             }
             .clickable(enabled = enabled) {
+                latestActivated?.let { activate ->
+                    activate()
+                    return@clickable
+                }
                 val currentOptions = latestOptions
                 val next = (latestSelectedIndex + 1) % currentOptions.size
                 if (next != latestSelectedIndex) {
@@ -325,17 +332,19 @@ internal fun <T> ReleaseCommitWheel(
             }
         }
 
-        // 纯视觉拖动提示：不安装任何手势或点击处理，事件仍完整交给外层波轮。
-        Text(
-            text = "↕",
-            color = colors.onBackground.copy(alpha = 0.30f),
-            fontSize = 10.sp,
-            lineHeight = 10.sp,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 8.dp, bottom = 5.dp)
-                .graphicsLayer { alpha = labelAlpha }
-                .clearAndSetSemantics { },
-        )
+        if (showDragHint) {
+            // 纯视觉拖动提示：不安装任何手势或点击处理，事件仍完整交给外层波轮。
+            Text(
+                text = "↕",
+                color = colors.onBackground.copy(alpha = 0.30f),
+                fontSize = 10.sp,
+                lineHeight = 10.sp,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 8.dp, bottom = 5.dp)
+                    .graphicsLayer { alpha = labelAlpha }
+                    .clearAndSetSemantics { },
+            )
+        }
     }
 }
