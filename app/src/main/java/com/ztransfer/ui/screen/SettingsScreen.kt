@@ -120,12 +120,12 @@ import com.ztransfer.frame.MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
 import com.ztransfer.frame.MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
 import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
 import com.ztransfer.frame.MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
+import com.ztransfer.frame.PHOTO_FRAME_DATE_PATTERNS
 import com.ztransfer.frame.PHOTO_FRAME_TIME_PATTERNS
 import com.ztransfer.frame.limitPhotoFrameWatermarkText
 import com.ztransfer.frame.isPhotoPlacement
 import com.ztransfer.frame.normalizeCaptureDateTime
 import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
-import com.ztransfer.frame.isValidPhotoFrameDatePattern
 import com.ztransfer.frame.photoFrameDatePatternExample
 import com.ztransfer.frame.photoFrameTimePatternExample
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
@@ -751,9 +751,6 @@ fun SettingsOverlay(
                     onPresetChanged = { frameDraftPreset = it },
                     onMetadataSettingsChanged = { updated ->
                         viewModel.setPhotoFrameMetadataSettings(frameDraftPreset, updated)
-                    },
-                    onMetadataSettingsReset = {
-                        viewModel.setPhotoFrameMetadataSettings(frameDraftPreset, null)
                     },
                     onWatermarkChanged = { updated ->
                         if (isPro) {
@@ -1705,7 +1702,6 @@ internal fun PhotoFrameWatermarkEditor(
     onBorderEnabledChanged: (Boolean) -> Unit,
     onPresetChanged: (PhotoFramePreset) -> Unit,
     onMetadataSettingsChanged: (PhotoFrameMetadataSettings) -> Unit,
-    onMetadataSettingsReset: () -> Unit,
     onWatermarkChanged: (PhotoFrameWatermark) -> Unit,
     onFavoriteWatermarkApplied: (PhotoFrameWatermark) -> Unit,
     onWatermarkPositionChanged: (PhotoFrameWatermarkPosition) -> Unit,
@@ -1905,10 +1901,8 @@ internal fun PhotoFrameWatermarkEditor(
             exit = fadeOut() + shrinkVertically(),
         ) {
             PhotoFrameMetadataInlineSettings(
-                preset = preset,
                 settings = metadataSettings,
                 onSettingsChanged = onMetadataSettingsChanged,
-                onRestoreDefault = onMetadataSettingsReset,
                 onDetent = haptics::tick,
                 modifier = Modifier.padding(top = 8.dp),
             )
@@ -2228,29 +2222,14 @@ internal fun PhotoFrameWatermarkEditor(
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun PhotoFrameMetadataInlineSettings(
-    preset: PhotoFramePreset,
     settings: PhotoFrameMetadataSettings,
     onSettingsChanged: (PhotoFrameMetadataSettings) -> Unit,
-    onRestoreDefault: () -> Unit,
     onDetent: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
-    val datePatterns = listOf(
-        "yyyy-MM-dd",
-        "yyyy/MM/dd",
-        "yyyy.MM.dd",
-        "dd-MM-yyyy",
-        "MM-dd-yyyy",
-    )
+    val datePatterns = PHOTO_FRAME_DATE_PATTERNS
     val timePatterns = PHOTO_FRAME_TIME_PATTERNS
-    var customDateVisible by remember(preset, settings.datePattern) {
-        mutableStateOf(settings.datePattern !in datePatterns)
-    }
-    var customDate by remember(preset, settings.datePattern) {
-        mutableStateOf(settings.datePattern)
-    }
-    val defaults = remember(preset) { defaultPhotoFrameMetadataSettings(preset) }
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
 
     LaunchedEffect(Unit) {
@@ -2275,6 +2254,9 @@ private fun PhotoFrameMetadataInlineSettings(
             Triple(R.string.photo_frame_metadata_exposure, settings.showExposure) {
                 settings.copy(showExposure = !settings.showExposure)
             },
+            Triple(R.string.photo_frame_metadata_lens_model, settings.showLensModel) {
+                settings.copy(showLensModel = !settings.showLensModel)
+            },
             Triple(R.string.photo_frame_metadata_brand, settings.showBrand) {
                 settings.copy(showBrand = !settings.showBrand)
             },
@@ -2282,20 +2264,22 @@ private fun PhotoFrameMetadataInlineSettings(
                 settings.copy(showModel = !settings.showModel)
             },
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            choices.forEach { (label, selected, update) ->
-                FilterChip(
-                    label = stringResource(label),
-                    selected = selected,
-                    onClick = {
-                        onDetent()
-                        onSettingsChanged(update())
-                    },
-                    modifier = Modifier.weight(1f),
-                )
+        choices.chunked(3).forEach { rowChoices ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                rowChoices.forEach { (label, selected, update) ->
+                    FilterChip(
+                        label = stringResource(label),
+                        selected = selected,
+                        onClick = {
+                            onDetent()
+                            onSettingsChanged(update())
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
 
@@ -2310,20 +2294,9 @@ private fun PhotoFrameMetadataInlineSettings(
                 patterns = datePatterns,
                 selectedPattern = settings.datePattern,
                 example = ::photoFrameDatePatternExample,
-                allowCustom = true,
-                customVisible = customDateVisible,
-                onDisabled = {
-                    customDateVisible = false
-                    onSettingsChanged(settings.copy(showDate = false))
-                },
+                onDisabled = { onSettingsChanged(settings.copy(showDate = false)) },
                 onPatternSelected = {
-                    customDateVisible = false
-                    customDate = it
                     onSettingsChanged(settings.copy(showDate = true, datePattern = it))
-                },
-                onCustomRequested = {
-                    customDateVisible = true
-                    onSettingsChanged(settings.copy(showDate = true))
                 },
                 onDetent = onDetent,
                 modifier = Modifier.weight(1f),
@@ -2334,55 +2307,15 @@ private fun PhotoFrameMetadataInlineSettings(
                 patterns = timePatterns,
                 selectedPattern = settings.timePattern,
                 example = ::photoFrameTimePatternExample,
-                allowCustom = false,
-                customVisible = false,
                 onDisabled = { onSettingsChanged(settings.copy(showTime = false)) },
                 onPatternSelected = {
                     onSettingsChanged(settings.copy(showTime = true, timePattern = it))
                 },
-                onCustomRequested = {},
                 onDetent = onDetent,
                 modifier = Modifier.weight(1f),
             )
         }
 
-        AnimatedVisibility(customDateVisible && settings.showDate) {
-            OutlinedTextField(
-                value = customDate,
-                onValueChange = {
-                    customDate = it
-                    if (isValidPhotoFrameDatePattern(it)) {
-                        onSettingsChanged(settings.copy(showDate = true, datePattern = it))
-                    }
-                },
-                singleLine = true,
-                isError = !isValidPhotoFrameDatePattern(customDate),
-                supportingText = {
-                    if (!isValidPhotoFrameDatePattern(customDate)) {
-                        Text(stringResource(R.string.photo_frame_metadata_format_invalid))
-                    }
-                },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = colors.accentOrange,
-                    cursorColor = colors.accentOrange,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        if (settings != defaults) {
-            TextButton(
-                onClick = {
-                    customDateVisible = defaults.datePattern !in datePatterns
-                    customDate = defaults.datePattern
-                    onRestoreDefault()
-                },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                modifier = Modifier.align(Alignment.End),
-            ) {
-                Text(stringResource(R.string.photo_frame_metadata_restore_default))
-            }
-        }
     }
 }
 
@@ -2393,45 +2326,26 @@ private fun MetadataFormatWheel(
     patterns: List<String>,
     selectedPattern: String,
     example: (String) -> String,
-    allowCustom: Boolean,
-    customVisible: Boolean,
     onDisabled: () -> Unit,
     onPatternSelected: (String) -> Unit,
-    onCustomRequested: () -> Unit,
     onDetent: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
     val accent = colors.accentOrange
     val offLabel = stringResource(R.string.photo_frame_off)
-    val customLabel = stringResource(R.string.photo_frame_metadata_custom_format)
-    val options = buildList {
-        add(MetadataFormatOption())
-        patterns.forEach { add(MetadataFormatOption(pattern = it)) }
-        if (allowCustom) add(MetadataFormatOption(custom = true))
-    }
+    val options: List<String?> = listOf(null) + patterns
     val selected = when {
         !enabled -> options.first()
-        allowCustom && (customVisible || selectedPattern !in patterns) -> options.last()
-        else -> options.firstOrNull { it.pattern == selectedPattern } ?: options[1]
+        else -> selectedPattern.takeIf { it in patterns } ?: options[1]
     }
 
     ReleaseCommitWheel(
         options = options,
         selected = selected,
-        optionLabel = { option ->
-            when {
-                option.custom -> customLabel
-                option.pattern != null -> example(option.pattern)
-                else -> offLabel
-            }
-        },
-        onValueCommitted = { option ->
-            when {
-                option.custom -> onCustomRequested()
-                option.pattern != null -> onPatternSelected(option.pattern)
-                else -> onDisabled()
-            }
+        optionLabel = { pattern -> pattern?.let(example) ?: offLabel },
+        onValueCommitted = { pattern ->
+            if (pattern == null) onDisabled() else onPatternSelected(pattern)
         },
         onDetent = onDetent,
         label = title,
@@ -2440,11 +2354,6 @@ private fun MetadataFormatWheel(
         modifier = modifier,
     )
 }
-
-private data class MetadataFormatOption(
-    val pattern: String? = null,
-    val custom: Boolean = false,
-)
 
 /**
  * 只监听没有被输入框、按钮或滚动消费的轻点；因此点空白可收起键盘，点输入框本身不会
@@ -3173,6 +3082,7 @@ private val PHOTO_EFFECTS_PREVIEW_METADATA = PhotoFrameMetadata(
     shutter = "1/250",
     iso = "ISO100",
     focalLength = "50mm",
+    lensModel = "NIKKOR Z 24-70mm f/2.8 S",
     dateTime = "2026-08-04 10:30:00",
 )
 
@@ -3193,6 +3103,13 @@ internal fun cameraEffectPreviewMetadata(
         ?: PHOTO_EFFECTS_PREVIEW_METADATA.iso,
     focalLength = exif?.focalLength?.trim()?.takeIf(String::isNotEmpty)
         ?: PHOTO_EFFECTS_PREVIEW_METADATA.focalLength,
+    // A connected photo with no LensModel must stay empty so the preview matches export. Only the
+    // disconnected/demo state uses sample lens data.
+    lensModel = if (exif == null) {
+        PHOTO_EFFECTS_PREVIEW_METADATA.lensModel
+    } else {
+        exif.lensModel?.trim()?.takeIf(String::isNotEmpty)
+    },
     dateTime = normalizeCaptureDateTime(exif?.dateTime)
         ?: PHOTO_EFFECTS_PREVIEW_METADATA.dateTime,
 )

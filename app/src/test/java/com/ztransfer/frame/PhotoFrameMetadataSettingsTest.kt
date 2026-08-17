@@ -24,6 +24,7 @@ class PhotoFrameMetadataSettingsTest {
             assertTrue(settings.showExposure)
             assertTrue(settings.showBrand)
             assertTrue(settings.showModel)
+            assertFalse(settings.showLensModel)
         }
 
         val plaque = defaultPhotoFrameMetadataSettings(PhotoFramePreset.PLAQUE)
@@ -38,6 +39,7 @@ class PhotoFrameMetadataSettingsTest {
             assertTrue(settings.showExposure)
             assertFalse(settings.showDate)
             assertFalse(settings.showTime)
+            assertFalse(settings.showLensModel)
         }
     }
 
@@ -45,8 +47,9 @@ class PhotoFrameMetadataSettingsTest {
     fun settingsRoundTripByStablePresetIdAndDiscardDefaults() {
         val mist = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
             showModel = false,
+            showLensModel = true,
             showDate = true,
-            datePattern = "dd/MM/yyyy",
+            datePattern = "yyyy/MM/dd",
         )
         val encoded = encodePhotoFrameMetadataSettings(
             mapOf(
@@ -62,11 +65,22 @@ class PhotoFrameMetadataSettingsTest {
     }
 
     @Test
-    fun invalidOrLanguageBearingPatternsFallBackToNumericDefaults() {
-        assertFalse(isValidPhotoFrameDatePattern("yyyy年MM月dd日"))
+    fun legacySettingsDecodeWithLensModelDisabled() {
+        val encoded =
+            "MIST|false|false|true|true|true|false|yyyy-MM-dd|HH:mm:ss"
+
+        val restored = decodePhotoFrameMetadataSettings(encoded).getValue(PhotoFramePreset.MIST)
+
+        assertFalse(restored.showModel)
+        assertFalse(restored.showLensModel)
+    }
+
+    @Test
+    fun unsupportedOrReverseDatePatternsFallBackToNumericDefaults() {
         assertEquals(DEFAULT_PHOTO_FRAME_DATE_PATTERN, normalizePhotoFrameDatePattern("MMM d"))
+        assertFalse(PHOTO_FRAME_DATE_PATTERNS.any { it.startsWith("dd") })
         assertEquals(DEFAULT_PHOTO_FRAME_TIME_PATTERN, normalizePhotoFrameTimePattern("hh:mm a"))
-        assertTrue(isValidPhotoFrameDatePattern("dd.MM.yyyy"))
+        assertEquals("yyyy.MM.dd", normalizePhotoFrameDatePattern("yyyy.MM.dd"))
         assertEquals("HH.mm.ss", normalizePhotoFrameTimePattern("HH.mm.ss"))
     }
 
@@ -74,10 +88,10 @@ class PhotoFrameMetadataSettingsTest {
     fun dateAndTimeCanBeShownAndFormattedIndependently() {
         val base = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST)
         assertEquals(
-            "17/08/2026",
+            "08-17-2026",
             formatPhotoFrameCaptureDateTime(
                 "2026-08-17 14:32:08",
-                base.copy(showDate = true, showTime = false, datePattern = "dd/MM/yyyy"),
+                base.copy(showDate = true, showTime = false, datePattern = "MM-dd-yyyy"),
             ),
         )
         assertEquals(
@@ -104,6 +118,7 @@ class PhotoFrameMetadataSettingsTest {
             shutter = "1/250",
             iso = "ISO100",
             focalLength = "50mm",
+            lensModel = "NIKKOR Z 24-70mm f/2.8 S",
             dateTime = "2026-08-17 14:32:08",
         )
         val visible = metadata.withPresentation(
@@ -114,6 +129,7 @@ class PhotoFrameMetadataSettingsTest {
                 showExposure = false,
                 showBrand = false,
                 showModel = true,
+                showLensModel = false,
             )
         )
 
@@ -123,6 +139,7 @@ class PhotoFrameMetadataSettingsTest {
         assertNull(visible.shutter)
         assertNull(visible.iso)
         assertNull(visible.focalLength)
+        assertNull(visible.lensModel)
         assertNull(visible.dateTime)
     }
 
@@ -135,11 +152,12 @@ class PhotoFrameMetadataSettingsTest {
             shutter = "1/250",
             iso = "ISO100",
             focalLength = "50mm",
+            lensModel = "NIKKOR Z 24-70mm f/2.8 S",
             dateTime = "2026-08-17 14:32:08",
         )
 
         PhotoFramePreset.entries.forEach { preset ->
-            repeat(64) { mask ->
+            repeat(128) { mask ->
                 val settings = defaultPhotoFrameMetadataSettings(preset).copy(
                     showDate = mask and 1 != 0,
                     showTime = mask and 2 != 0,
@@ -147,12 +165,14 @@ class PhotoFrameMetadataSettingsTest {
                     showExposure = mask and 8 != 0,
                     showBrand = mask and 16 != 0,
                     showModel = mask and 32 != 0,
+                    showLensModel = mask and 64 != 0,
                 )
                 val visible = source.withPresentation(settings)
 
                 assertEquals(settings.showBrand, visible.make != null)
                 assertEquals(settings.showModel, visible.model != null)
                 assertEquals(settings.showFocalLength, visible.focalLength != null)
+                assertEquals(settings.showLensModel, visible.lensModel != null)
                 assertEquals(settings.showExposure, visible.aperture != null)
                 assertEquals(settings.showExposure, visible.shutter != null)
                 assertEquals(settings.showExposure, visible.iso != null)
@@ -196,7 +216,7 @@ class PhotoFrameMetadataSettingsTest {
     fun hiddenDateAndTimeFormatsDoNotCreateDuplicateOutputIdentities() {
         val defaults = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST)
         val hiddenCustomFormats = defaults.copy(
-            datePattern = "dd.MM.yyyy",
+            datePattern = "yyyy.MM.dd",
             timePattern = "HH.mm.ss",
         )
 

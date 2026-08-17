@@ -8,6 +8,7 @@ import java.util.Locale
 
 internal const val DEFAULT_PHOTO_FRAME_DATE_PATTERN = "yyyy-MM-dd"
 internal const val DEFAULT_PHOTO_FRAME_TIME_PATTERN = "HH:mm:ss"
+internal val PHOTO_FRAME_DATE_PATTERNS = listOf("yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM-dd-yyyy")
 internal val PHOTO_FRAME_TIME_PATTERNS = listOf("HH:mm", "HH:mm:ss", "HH.mm", "HH.mm.ss")
 
 /** Per-preset metadata presentation. Missing map entries always fall back to preset defaults. */
@@ -18,6 +19,7 @@ data class PhotoFrameMetadataSettings(
     val showExposure: Boolean,
     val showBrand: Boolean,
     val showModel: Boolean,
+    val showLensModel: Boolean = false,
     val datePattern: String = DEFAULT_PHOTO_FRAME_DATE_PATTERN,
     val timePattern: String = DEFAULT_PHOTO_FRAME_TIME_PATTERN,
 )
@@ -31,6 +33,9 @@ internal fun defaultPhotoFrameMetadataSettings(
     showExposure = true,
     showBrand = true,
     showModel = !preset.isBrandFrame(),
+    // No existing preset rendered the lens name. Keep every current default pixel-identical and
+    // let the user opt in per frame.
+    showLensModel = false,
 )
 
 internal fun resolvedPhotoFrameMetadataSettings(
@@ -48,22 +53,12 @@ internal fun normalizePhotoFrameMetadataSettings(
 )
 
 internal fun normalizePhotoFrameDatePattern(pattern: String): String =
-    pattern.trim().takeIf(::isValidPhotoFrameDatePattern)
+    pattern.trim().takeIf { it in PHOTO_FRAME_DATE_PATTERNS }
         ?: DEFAULT_PHOTO_FRAME_DATE_PATTERN
 
 internal fun normalizePhotoFrameTimePattern(pattern: String): String =
     pattern.trim().takeIf { it in PHOTO_FRAME_TIME_PATTERNS }
         ?: DEFAULT_PHOTO_FRAME_TIME_PATTERN
-
-internal fun isValidPhotoFrameDatePattern(pattern: String): Boolean =
-    pattern.length in 1..24 &&
-        pattern.all { it in "yMd-/. " } &&
-        pattern.any { it == 'y' } &&
-        pattern.any { it == 'M' } &&
-        pattern.any { it == 'd' } &&
-        runCatching {
-            SAMPLE_CAPTURE_DATE_TIME.format(DateTimeFormatter.ofPattern(pattern, Locale.US))
-        }.isSuccess
 
 internal fun photoFrameDatePatternExample(pattern: String): String =
     formatPhotoFrameTemporalPattern(
@@ -97,6 +92,8 @@ internal fun PhotoFrameMetadata.withPresentation(
         shutter = shutter.takeIf { normalized.showExposure },
         iso = iso.takeIf { normalized.showExposure },
         focalLength = focalLength.takeIf { normalized.showFocalLength },
+        lensModel = lensModel?.trim()?.takeIf(String::isNotEmpty)
+            ?.takeIf { normalized.showLensModel },
         dateTime = formatPhotoFrameCaptureDateTime(dateTime, normalized),
     )
 }
@@ -164,6 +161,7 @@ internal fun encodePhotoFrameMetadataSettings(
         value.showExposure,
         value.showBrand,
         value.showModel,
+        value.showLensModel,
         value.datePattern,
         value.timePattern,
     ).joinToString(FIELD_SEPARATOR)
@@ -176,11 +174,15 @@ internal fun decodePhotoFrameMetadataSettings(
     val restored = linkedMapOf<PhotoFramePreset, PhotoFrameMetadataSettings>()
     encoded.split(ENTRY_SEPARATOR).forEach { entry ->
         val fields = entry.split(FIELD_SEPARATOR)
-        if (fields.size != 9) return@forEach
+        // v1 initially stored six visibility flags. Accept those entries forever and treat the
+        // later lens flag as off, matching every preset's historical appearance.
+        if (fields.size != 9 && fields.size != 10) return@forEach
         val preset = PhotoFramePreset.entries.firstOrNull { it.name == fields[0] }
             ?: return@forEach
         if (preset in restored) return@forEach
-        val booleans = fields.subList(1, 7).map { it.toBooleanStrictOrNull() }
+        val hasLensModel = fields.size == 10
+        val booleanEnd = if (hasLensModel) 8 else 7
+        val booleans = fields.subList(1, booleanEnd).map { it.toBooleanStrictOrNull() }
         if (booleans.any { it == null }) return@forEach
         val value = normalizePhotoFrameMetadataSettings(
             PhotoFrameMetadataSettings(
@@ -190,8 +192,9 @@ internal fun decodePhotoFrameMetadataSettings(
                 showExposure = checkNotNull(booleans[3]),
                 showBrand = checkNotNull(booleans[4]),
                 showModel = checkNotNull(booleans[5]),
-                datePattern = fields[7],
-                timePattern = fields[8],
+                showLensModel = if (hasLensModel) checkNotNull(booleans[6]) else false,
+                datePattern = fields[booleanEnd],
+                timePattern = fields[booleanEnd + 1],
             )
         )
         if (value != defaultPhotoFrameMetadataSettings(preset)) restored[preset] = value

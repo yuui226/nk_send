@@ -396,6 +396,7 @@ fun LocalPhotoEffectsPage(
                         shutter = null,
                         iso = null,
                         focalLength = null,
+                        lensModel = null,
                     ),
                     sourceRotationQuarterTurns = 0,
                     requestedRotationQuarterTurns = 0,
@@ -473,9 +474,6 @@ fun LocalPhotoEffectsPage(
                     } else {
                         metadataSettings + (preset to normalized)
                     }
-                },
-                onMetadataSettingsReset = {
-                    metadataSettings = metadataSettings - preset
                 },
                 onWatermarkChanged = { updated ->
                     if (isPro) {

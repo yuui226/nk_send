@@ -38,6 +38,7 @@ class CameraEffectPreviewMetadataTest {
                 iso = "ISO640",
                 focalLength = "85mm",
                 dateTime = "2026:08:10 14:25:36",
+                lensModel = "NIKKOR Z 85mm f/1.8 S",
             ),
         )
 
@@ -45,6 +46,7 @@ class CameraEffectPreviewMetadataTest {
         assertEquals("1/125", metadata.shutter)
         assertEquals("ISO640", metadata.iso)
         assertEquals("85mm", metadata.focalLength)
+        assertEquals("NIKKOR Z 85mm f/1.8 S", metadata.lensModel)
         assertEquals("2026-08-10 14:25:36", metadata.dateTime)
     }
 
@@ -65,6 +67,7 @@ class CameraEffectPreviewMetadataTest {
         assertEquals("1/250", metadata.shutter)
         assertEquals("ISO100", metadata.iso)
         assertEquals("50mm", metadata.focalLength)
+        assertEquals(null, metadata.lensModel)
         assertEquals("2026-08-04 10:30:00", metadata.dateTime)
     }
 }

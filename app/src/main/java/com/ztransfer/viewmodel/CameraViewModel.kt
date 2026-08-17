@@ -250,6 +250,7 @@ data class PhotoExif(
     val iso: String?,            // "400"
     val focalLength: String?,    // "50mm"
     val dateTime: String? = null,
+    val lensModel: String? = null,
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -2570,6 +2571,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 焦距：RATIONAL mm
         val focal = parseRational(exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH))
             ?.let { "%.0fmm".format(it) }
+        val lensModel = exif.getAttribute(ExifInterface.TAG_LENS_MODEL)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
 
         // 图像尺寸：SHORT/LONG 整数
         val dateTime = sequenceOf(
@@ -2579,7 +2583,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ).mapNotNull(exif::getAttribute)
             .firstOrNull { it.isNotBlank() }
 
-        return PhotoExif(aperture, shutter, iso, focal, dateTime)
+        return PhotoExif(aperture, shutter, iso, focal, dateTime, lensModel)
     }
 
     private fun thumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =

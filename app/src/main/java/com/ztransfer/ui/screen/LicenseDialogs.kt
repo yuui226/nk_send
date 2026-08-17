@@ -292,7 +292,31 @@ fun ProDialog(
                                     compact = compactTable,
                                 )
                                 CompareRow(
-                                    stringResource(R.string.compare_frames_watermarks),
+                                    stringResource(R.string.compare_generate_effect_image),
+                                    stringResource(R.string.compare_available),
+                                    stringResource(R.string.compare_available),
+                                    stringResource(R.string.compare_available),
+                                    valueColumnWidth = valueColumnWidth,
+                                    compact = compactTable,
+                                )
+                                CompareRow(
+                                    stringResource(R.string.compare_effect_filters),
+                                    stringResource(R.string.compare_available),
+                                    stringResource(R.string.compare_available),
+                                    stringResource(R.string.compare_available),
+                                    valueColumnWidth = valueColumnWidth,
+                                    compact = compactTable,
+                                )
+                                CompareRow(
+                                    stringResource(R.string.compare_effect_frames),
+                                    stringResource(R.string.compare_available),
+                                    stringResource(R.string.compare_available),
+                                    stringResource(R.string.compare_available),
+                                    valueColumnWidth = valueColumnWidth,
+                                    compact = compactTable,
+                                )
+                                CompareRow(
+                                    stringResource(R.string.compare_effect_watermark),
                                     stringResource(R.string.compare_watermark_free),
                                     stringResource(R.string.compare_watermark_pro),
                                     stringResource(R.string.compare_watermark_pro),

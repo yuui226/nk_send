@@ -328,7 +328,7 @@ class TransferStateTest {
         )
         val cinemaMetadata = defaultPhotoFrameMetadataSettings(PhotoFramePreset.CINEMA).copy(
             showDate = true,
-            datePattern = "dd.MM.yyyy",
+            datePattern = "yyyy.MM.dd",
         )
         val mist = createQueueTasks(
             files = listOf(jpeg),
