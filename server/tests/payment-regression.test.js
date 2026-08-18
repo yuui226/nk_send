@@ -33,6 +33,20 @@ CREATE TABLE orders (
 );
 INSERT INTO orders (out_trade_no, device_fp, amount_fen, created_at)
 VALUES ('ZTLEGACY1', '00000000000000000000000000000000', 1990, '2020-01-01T00:00:00.000Z');
+CREATE TABLE activations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL,
+  device_fp TEXT NOT NULL,
+  device_model TEXT,
+  app_ver TEXT,
+  at TEXT NOT NULL
+);
+INSERT INTO activations (code, device_fp, device_model, app_ver, at) VALUES
+  ('MGRATE', '10000000000000000000000000000000', 'Xiaomi 2211133C', '1.64', '2026-08-01T00:00:00.000Z'),
+  ('MGRATE', '20000000000000000000000000000000', 'Xiaomi 2211133C', '1.65', '2026-08-02T00:00:00.000Z'),
+  ('MGRATE', '30000000000000000000000000000000', 'Xiaomi 2112123AC', '1.65', '2026-08-03T00:00:00.000Z'),
+  ('HWMGRT', '40000000000000000000000000000000', 'HUAWEI NOH-AN00', '1.64', '2026-08-01T00:00:00.000Z'),
+  ('HWMGRT', '50000000000000000000000000000000', 'HUAWEI NOH-AN00', '1.65', '2026-08-02T00:00:00.000Z');
 `);
 oldDb.close();
 
@@ -185,6 +199,123 @@ function installUpstream(statusByOrder = new Map()) {
 test.after(() => {
     try { db.close(); } catch { /* already closed */ }
     fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('小米豁免只匹配相同的完整型号', () => {
+    assert.equal(
+        api.isSameXiaomiModel(' Xiaomi   2211133C ', 'xiaomi 2211133c'),
+        true,
+    );
+    assert.equal(
+        api.isSameXiaomiModel('Xiaomi 2211133C', 'Xiaomi 2112123AC'),
+        false,
+    );
+    assert.equal(
+        api.isSameXiaomiModel('HUAWEI VOG-AL10', 'HUAWEI VOG-AL10'),
+        false,
+    );
+    assert.equal(api.isSameXiaomiModel('', 'Xiaomi 2211133C'), false);
+    assert.equal(api.isSameXiaomiModel('Xiaomi 2211133C', ''), false);
+});
+
+test('旧激活历史仅回填连续的小米同型号事件为非换机', () => {
+    const xiaomi = db.prepare(
+        'SELECT counts_as_switch FROM activations WHERE code = ? ORDER BY at'
+    ).all('MGRATE').map((row) => row.counts_as_switch);
+    const huawei = db.prepare(
+        'SELECT counts_as_switch FROM activations WHERE code = ? ORDER BY at'
+    ).all('HWMGRT').map((row) => row.counts_as_switch);
+
+    assert.deepEqual(xiaomi, [1, 0, 1]);
+    assert.deepEqual(huawei, [1, 1]);
+});
+
+test('小米同型号新指纹持续换绑但不累计换机风控', () => {
+    const code = 'XMTEST';
+    db.prepare('INSERT INTO codes (code, note, created_at) VALUES (?, ?, ?)')
+        .run(code, 'same Xiaomi model', new Date().toISOString());
+
+    let latestFp;
+    for (let number = 1; number <= 8; number++) {
+        latestFp = number.toString(16).padStart(32, '0');
+        const result = api.apiActivate({
+            code,
+            fp: latestFp,
+            model: 'Xiaomi 2211133C',
+            app_ver: `1.${60 + number}`,
+        });
+        assert.equal(result.ok, true);
+    }
+
+    assert.equal(db.prepare('SELECT status FROM codes WHERE code = ?').get(code).status, 'active');
+    assert.equal(
+        db.prepare(`SELECT COUNT(*) AS n FROM activations
+                     WHERE code = ? AND counts_as_switch = 1`).get(code).n,
+        1,
+    );
+    assert.equal(
+        db.prepare('SELECT device_fp FROM bindings WHERE code = ?').get(code).device_fp,
+        latestFp,
+    );
+});
+
+test('小米跨型号仍累计换机并触发原有吊销阈值', () => {
+    const code = 'XMCHNG';
+    db.prepare('INSERT INTO codes (code, note, created_at) VALUES (?, ?, ?)')
+        .run(code, 'different Xiaomi models', new Date().toISOString());
+
+    const models = [
+        'Xiaomi 2211133C',
+        'Xiaomi 2112123AC',
+        'Xiaomi 2211133C',
+        'Xiaomi 2112123AC',
+        'Xiaomi 2211133C',
+        'Xiaomi 2112123AC',
+    ];
+    models.forEach((model, index) => {
+        const result = api.apiActivate({
+            code,
+            fp: (index + 20).toString(16).padStart(32, '0'),
+            model,
+            app_ver: '1.67',
+        });
+        if (index < models.length - 1) {
+            assert.equal(result.ok, true);
+        } else {
+            assert.deepEqual(result, { ok: false, err: 'CODE_REVOKED' });
+        }
+    });
+
+    assert.equal(db.prepare('SELECT status FROM codes WHERE code = ?').get(code).status, 'revoked');
+    assert.equal(
+        db.prepare(`SELECT COUNT(*) AS n FROM activations
+                     WHERE code = ? AND counts_as_switch = 1`).get(code).n,
+        6,
+    );
+});
+
+test('其他品牌同型号仍按原规则累计', () => {
+    const code = 'HWTEST';
+    db.prepare('INSERT INTO codes (code, note, created_at) VALUES (?, ?, ?)')
+        .run(code, 'same non-Xiaomi model', new Date().toISOString());
+
+    for (let index = 0; index < 6; index++) {
+        const result = api.apiActivate({
+            code,
+            fp: (index + 40).toString(16).padStart(32, '0'),
+            model: 'HUAWEI VOG-AL10',
+            app_ver: '1.67',
+        });
+        assert.equal(result.ok, index < 5);
+        if (index === 5) assert.equal(result.err, 'CODE_REVOKED');
+    }
+
+    assert.equal(db.prepare('SELECT status FROM codes WHERE code = ?').get(code).status, 'revoked');
+    assert.equal(
+        db.prepare(`SELECT COUNT(*) AS n FROM activations
+                     WHERE code = ? AND counts_as_switch = 1`).get(code).n,
+        6,
+    );
 });
 
 test('payment regression suite', async (suite) => {

@@ -69,6 +69,7 @@ object LicenseManager {
     // 硬过期由服务器写进通行证的 exp(见 verifyToken);到期且续不上就降级。
     private const val SOFT_RENEW_INTERVAL_MS = 24 * 3600_000L
     private const val PREFS = "license"
+    private const val PINNED_FINGERPRINT_KEY = "device_fingerprint_v1"
 
     private lateinit var prefs: SharedPreferences
     private var fingerprint: String = ""
@@ -95,7 +96,7 @@ object LicenseManager {
         if (::prefs.isInitialized) return
         val app = context.applicationContext
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        fingerprint = computeFingerprint(app)
+        fingerprint = loadOrPinFingerprint(app)
         val token = prefs.getString("token", null)
         val signed = verifySig(token)
         val subExpiresAt = signed?.optLong("sub", 0L)
@@ -158,6 +159,36 @@ object LicenseManager {
         )
     }
 
+    /**
+     * An in-place app update preserves license.xml, while Android backup and
+     * device-transfer explicitly exclude it. Pinning here therefore survives
+     * vendor ANDROID_ID changes without following the user to another phone.
+     */
+    @SuppressLint("ApplySharedPref")
+    private fun loadOrPinFingerprint(context: Context): String {
+        val pinned = prefs.getString(PINNED_FINGERPRINT_KEY, null)
+        // Once pinned, do not perform an extra signature verification on every
+        // process start. The token is consulted only for the one-time migration.
+        val signedTokenFingerprint = if (normalizedDeviceFingerprint(pinned) == null) {
+            verifiedTokenPayload(prefs.getString("token", null))
+                ?.takeIf { it.optString("plan") == "pro" }
+                ?.optString("fp")
+        } else {
+            null
+        }
+        val selected = selectDeviceFingerprint(
+            pinnedFingerprint = pinned,
+            signedTokenFingerprint = signedTokenFingerprint,
+            currentFingerprint = { computeFingerprint(context) },
+        )
+        if (normalizedDeviceFingerprint(pinned) != selected) {
+            // Initialization immediately reads this value again on process restart;
+            // commit makes the pin durable before any activation/renewal can begin.
+            prefs.edit().putString(PINNED_FINGERPRINT_KEY, selected).commit()
+        }
+        return selected
+    }
+
     /** Stored outside backup/transfer domains so a phone clone cannot copy the device identity. */
     private fun loadOrCreateInstallId(context: Context): String {
         val file = File(context.noBackupFilesDir, "license-install-id-v2")
@@ -178,8 +209,8 @@ object LicenseManager {
 
     // ---------------------------------------------------------------- 通行证
 
-    /** 仅验签 + 指纹核对(不查过期),通过返回 payload。续签判定要读 exp,故单拆出来。 */
-    private fun verifySig(token: String?): JSONObject? {
+    /** 只验证服务端签名与协议版本，供旧授权迁移固定指纹；不据此直接授予高级版。 */
+    private fun verifiedTokenPayload(token: String?): JSONObject? {
         if (token.isNullOrBlank()) return null
         return try {
             val parts = token.split(".")
@@ -194,12 +225,15 @@ object LicenseManager {
             }
             if (!ok) return null
             val obj = JSONObject(String(payload, Charsets.UTF_8))
-            if (obj.optInt("v") != 1 || obj.optString("fp") != fingerprint) return null
-            obj
+            obj.takeIf { it.optInt("v") == 1 }
         } catch (_: Exception) {
             null
         }
     }
+
+    /** 仅验签 + 指纹核对(不查过期),通过返回 payload。续签判定要读 exp,故单拆出来。 */
+    private fun verifySig(token: String?): JSONObject? = verifiedTokenPayload(token)
+        ?.takeIf { normalizedDeviceFingerprint(it.optString("fp")) == fingerprint }
 
     /** 见过的最大服务器时间(秒);当作"现在"的下界,防本地时钟往回调续命。 */
     private fun seenTimeSec(): Long =

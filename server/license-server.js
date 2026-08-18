@@ -229,7 +229,9 @@ function tableColumns(table) {
 }
 
 function addColumnIfMissing(table, column, definition) {
-    if (!tableColumns(table).has(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+    if (tableColumns(table).has(column)) return false;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+    return true;
 }
 
 function requireColumns(table, requirements) {
@@ -266,12 +268,13 @@ CREATE TABLE IF NOT EXISTS bindings (
 );
 CREATE INDEX IF NOT EXISTS idx_bindings_code ON bindings(code);
 CREATE TABLE IF NOT EXISTS activations (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  code         TEXT NOT NULL,
-  device_fp    TEXT NOT NULL,
-  device_model TEXT,
-  app_ver      TEXT,
-  at           TEXT NOT NULL
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  code             TEXT NOT NULL,
+  device_fp        TEXT NOT NULL,
+  device_model     TEXT,
+  app_ver          TEXT,
+  at               TEXT NOT NULL,
+  counts_as_switch INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_act_code_at ON activations(code, at);
 CREATE TABLE IF NOT EXISTS orders (
@@ -306,6 +309,29 @@ CREATE TABLE IF NOT EXISTS update_stats (
     addColumnIfMissing('orders', 'request_id', 'request_id TEXT');
     addColumnIfMissing('activations', 'device_model', 'device_model TEXT');
     addColumnIfMissing('activations', 'app_ver', 'app_ver TEXT');
+    const addedSwitchMarker = addColumnIfMissing(
+        'activations',
+        'counts_as_switch',
+        'counts_as_switch INTEGER NOT NULL DEFAULT 1',
+    );
+    if (addedSwitchMarker) {
+        // 旧记录没有显式风控标记。仅回填“紧邻上一条仍为同一小米型号”的事件；
+        // 首次激活、跨型号以及其他厂商保持原有计数，避免扩大迁移影响面。
+        db.exec(`
+            UPDATE activations
+               SET counts_as_switch = 0
+             WHERE LOWER(TRIM(COALESCE(device_model, ''))) LIKE 'xiaomi %'
+               AND LOWER(TRIM(COALESCE(device_model, ''))) = LOWER(TRIM(COALESCE((
+                   SELECT previous.device_model
+                     FROM activations AS previous
+                    WHERE previous.code = activations.code
+                      AND (previous.at < activations.at
+                           OR (previous.at = activations.at AND previous.id < activations.id))
+                    ORDER BY previous.at DESC, previous.id DESC
+                    LIMIT 1
+               ), '')))
+        `);
+    }
     // 去掉从未读取过的旧设备数列；存在才迁移，任何真实 SQL 错误都让启动失败。
     if (tableColumns('codes').has('max_devices')) db.exec('ALTER TABLE codes DROP COLUMN max_devices');
     addColumnIfMissing('codes', 'expires_at', 'expires_at TEXT');
@@ -337,6 +363,9 @@ CREATE TABLE IF NOT EXISTS update_stats (
         renew_code: null,
         pay_qr: null,
         request_id: null,
+    });
+    requireColumns('activations', {
+        counts_as_switch: (c) => c.notnull === 1 && Number(c.dflt_value) === 1,
     });
     db.exec('COMMIT');
 } catch (e) {
@@ -455,16 +484,29 @@ function rateLimited(ip, cls) {
 // ---------------------------------------------------------------- 业务
 
 // 单设备浮动授权:一个码同时只有一台在用,新设备激活即"顶替"旧设备。
-// 反滥用:一个码在滚动 30 天窗口内累计激活 ≥ CHURN_MAX 次 → 判定共享/倒卖,永久吊销整码;
+// 反滥用:一个码在滚动 30 天窗口内累计计数激活 ≥ CHURN_MAX 次 → 判定共享/倒卖,永久吊销整码;
 // 各持有设备下次联网续签即被踢成免费(离线也会在硬过期后降级)。
-// 计"激活次数"(含被顶替后又回来激活的设备,即 A↔B 来回共享的每一下);
+// 小米固件在同一机型更新后可能改变 ANDROID_ID：同一 Xiaomi 型号的新指纹仍完成换绑并留档，
+// 但不计入风控；跨型号仍计数。其他厂商保持原规则。
 // 不含:当前在用设备原地重装(幂等)。授权恢复只接受用户明确输入激活码。
-// 代价:在自有两台设备间频繁来回切换的正版用户可能被误判(与两人共享机器上无法区分)。
+// 代价:多台完全相同型号的小米手机共享时不会触发换机吊销，但仍只有最后一台保持绑定。
 const CHURN_WINDOW_MS = 30 * 24 * 3600_000;
 const CHURN_MAX = 6;
 
+function normalizedDeviceModel(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function isSameXiaomiModel(currentModel, incomingModel) {
+    const current = normalizedDeviceModel(currentModel);
+    const incoming = normalizedDeviceModel(incomingModel);
+    return incoming.startsWith('xiaomi ') && current === incoming;
+}
+
 function apiActivate(body) {
     const code = normCode(body.code), fp = String(body.fp || '').toLowerCase();
+    const model = String(body.model || '').trim();
+    const appVer = String(body.app_ver || '').trim();
     if (!CODE_RE.test(code) || !FP_RE.test(fp)) return { ok: false, err: 'CODE_NOT_FOUND' };
 
     const row = db.prepare('SELECT status, expires_at FROM codes WHERE code = ?').get(code);
@@ -475,8 +517,6 @@ function apiActivate(body) {
     const bound = db.prepare('SELECT id FROM bindings WHERE code = ? AND device_fp = ?').get(code, fp);
     if (bound) {
         // 幂等:同一设备重复激活(卸载重装/再次点激活)直接重发通行证,不算换机、不计查重
-        const model = String(body.model || '').trim();
-        const appVer = String(body.app_ver || '').trim();
         db.prepare(`UPDATE bindings
                        SET last_renew_at = ?,
                            app_ver = CASE WHEN ? <> '' THEN ? ELSE app_ver END,
@@ -508,13 +548,20 @@ function apiActivate(body) {
         return { ok: true, token: issueToken(code, fp, row.expires_at) };
     }
 
-    // 新设备:记一次激活事件(含机型/版本,永久保留作历史与取证;查重只看近 30 天窗口)
-    db.prepare('INSERT INTO activations (code, device_fp, device_model, app_ver, at) VALUES (?, ?, ?, ?, ?)')
-        .run(code, fp, String(body.model || ''), String(body.app_ver || ''), now());
+    const currentBinding = db.prepare(
+        'SELECT device_model FROM bindings WHERE code = ? ORDER BY id DESC LIMIT 1'
+    ).get(code);
+    const countsAsSwitch = isSameXiaomiModel(currentBinding?.device_model, model) ? 0 : 1;
+    // 新指纹始终留档；小米同型号更新导致的变化只豁免风控计数，不跳过实际重新绑定。
+    db.prepare(`INSERT INTO activations
+                (code, device_fp, device_model, app_ver, at, counts_as_switch)
+                VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(code, fp, model, appVer, now(), countsAsSwitch);
     const uses = db.prepare(
-        'SELECT COUNT(*) AS n FROM activations WHERE code = ? AND at > ?'
+        `SELECT COUNT(*) AS n FROM activations
+          WHERE code = ? AND at > ? AND counts_as_switch = 1`
     ).get(code, new Date(Date.now() - CHURN_WINDOW_MS).toISOString()).n;
-    if (uses >= CHURN_MAX) {
+    if (countsAsSwitch === 1 && uses >= CHURN_MAX) {
         db.prepare(`UPDATE codes SET status = 'revoked', revoked_at = ?, revoke_reason = ?
                     WHERE code = ? AND status = 'active'`).run(now(), 'abuse:churn', code);
         log(`ABUSE_REVOKE ${code} uses=${uses}/30d`);
@@ -525,8 +572,8 @@ function apiActivate(body) {
     const kicked = db.prepare('DELETE FROM bindings WHERE code = ?').run(code).changes;
     db.prepare(`INSERT INTO bindings (code, device_fp, device_model, app_ver, activated_at, last_renew_at)
                 VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(code, fp, String(body.model || ''), String(body.app_ver || ''), now(), now());
-    log(`ACTIVATE ${code} fp=${fp.slice(0, 8)} model=${body.model || '-'} kicked=${kicked}`);
+        .run(code, fp, model, appVer, now(), now());
+    log(`ACTIVATE ${code} fp=${fp.slice(0, 8)} model=${model || '-'} kicked=${kicked} switch=${countsAsSwitch}`);
     return { ok: true, token: issueToken(code, fp, row.expires_at) };
 }
 
@@ -579,11 +626,18 @@ function adminListCodes() {
         });
     }
     // 激活历史(含被顶替过的旧设备,永久保留):机型/版本/时间,供取证与统计
-    const acts = db.prepare('SELECT code, device_fp, device_model, app_ver, at FROM activations ORDER BY at').all();
+    const acts = db.prepare(`SELECT code, device_fp, device_model, app_ver, at, counts_as_switch
+                               FROM activations ORDER BY at`).all();
     const actByCode = new Map();
     for (const a of acts) {
         if (!actByCode.has(a.code)) actByCode.set(a.code, []);
-        actByCode.get(a.code).push({ fp: a.device_fp, model: a.device_model, app_ver: a.app_ver, at: a.at });
+        actByCode.get(a.code).push({
+            fp: a.device_fp,
+            model: a.device_model,
+            app_ver: a.app_ver,
+            at: a.at,
+            counts_as_switch: a.counts_as_switch,
+        });
     }
     return {
         ok: true,
@@ -1783,6 +1837,7 @@ module.exports = {
         cfg,
         pricing,
         apiPricing,
+        apiActivate,
         adminSetPricing,
         adminGetUpdate,
         adminPublishUpdate,
@@ -1798,6 +1853,7 @@ module.exports = {
         xhHash,
         xhSignatureValid,
         parseFeeFen,
+        isSameXiaomiModel,
         setPaymentPost(fn) { paymentPost = fn; },
         resetPaymentPost() { paymentPost = xhPost; },
         resetOrderThrottle() { orderCheckAt.clear(); },

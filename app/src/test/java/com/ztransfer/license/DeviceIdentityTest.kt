@@ -34,4 +34,40 @@ class DeviceIdentityTest {
         assertNotEquals("793843504c099edbb6c7d97dad20313f", first)
         assertNotEquals(first, second)
     }
+
+    @Test
+    fun `pinned fingerprint wins over token and current platform identity`() {
+        assertEquals(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            selectDeviceFingerprint(
+                pinnedFingerprint = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+                signedTokenFingerprint = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                currentFingerprint = { error("platform identity should not be read") },
+            ),
+        )
+    }
+
+    @Test
+    fun `signed token migrates an existing installation before platform identity`() {
+        assertEquals(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            selectDeviceFingerprint(
+                pinnedFingerprint = "corrupt",
+                signedTokenFingerprint = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                currentFingerprint = { error("platform identity should not be read") },
+            ),
+        )
+    }
+
+    @Test
+    fun `new installation pins the current platform identity`() {
+        assertEquals(
+            "cccccccccccccccccccccccccccccccc",
+            selectDeviceFingerprint(
+                pinnedFingerprint = null,
+                signedTokenFingerprint = null,
+                currentFingerprint = { "cccccccccccccccccccccccccccccccc" },
+            ),
+        )
+    }
 }
