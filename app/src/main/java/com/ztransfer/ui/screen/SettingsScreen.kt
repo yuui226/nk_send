@@ -1790,11 +1790,6 @@ internal fun PhotoFrameWatermarkEditor(
     val focusManager = LocalFocusManager.current
     val proLockInteractionSource = remember { MutableInteractionSource() }
     var metadataSettingsExpanded by remember { mutableStateOf(false) }
-    val metadataChevronRotation by animateFloatAsState(
-        targetValue = if (metadataSettingsExpanded) 180f else 0f,
-        animationSpec = tween(180, easing = FastOutSlowInEasing),
-        label = "frameMetadataChevronRotation",
-    )
     val metadataAvailability = remember(previewMetadata) {
         photoFrameMetadataAvailability(previewMetadata)
     }
@@ -1952,38 +1947,22 @@ internal fun PhotoFrameWatermarkEditor(
             )
             if (metadataAvailability.hasAny) {
                 val metadataLabel = stringResource(R.string.photo_frame_metadata_button)
-                Box(
-                    modifier = Modifier
-                        .weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT)
-                        .height(PHOTO_EFFECTS_CONTROL_HEIGHT),
-                ) {
-                    ReleaseCommitWheel(
-                        options = listOf(Unit),
-                        selected = Unit,
-                        optionLabel = { metadataLabel },
-                        onValueCommitted = {},
-                        onActivated = {
-                            haptics.tick()
-                            metadataSettingsExpanded = !metadataSettingsExpanded
-                        },
-                        enabled = borderEnabled,
-                        wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                        showDragHint = false,
-                        accentColor = frameAccent,
-                        emphasized = metadataSettingsExpanded,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    Icon(
-                        imageVector = Icons.Default.ExpandMore,
-                        contentDescription = null,
-                        tint = colors.onBackground.copy(alpha = 0.54f),
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 8.dp)
-                            .size(18.dp)
-                            .graphicsLayer { rotationZ = metadataChevronRotation },
-                    )
-                }
+                ReleaseCommitWheel(
+                    options = listOf(Unit),
+                    selected = Unit,
+                    optionLabel = { metadataLabel },
+                    onValueCommitted = {},
+                    onActivated = {
+                        haptics.tick()
+                        metadataSettingsExpanded = !metadataSettingsExpanded
+                    },
+                    enabled = borderEnabled,
+                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                    showDragHint = false,
+                    accentColor = frameAccent,
+                    emphasized = metadataSettingsExpanded,
+                    modifier = Modifier.weight(PHOTO_EFFECTS_SECONDARY_WHEEL_WEIGHT),
+                )
             }
             FavoriteToggleButton(
                 favorite = borderEnabled && preset in favoriteByPreset,
