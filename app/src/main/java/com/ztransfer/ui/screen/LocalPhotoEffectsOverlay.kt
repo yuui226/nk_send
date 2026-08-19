@@ -20,7 +20,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -208,6 +207,18 @@ fun LocalPhotoEffectsPage(
             )
         }
     }
+    val launchPhotoPicker = {
+        photoPicker.launch(
+            Intent(Intent.ACTION_PICK).apply {
+                setDataAndType(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    "image/*",
+                )
+                putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        )
+    }
     val watermarkImagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -317,18 +328,7 @@ fun LocalPhotoEffectsPage(
                 )
                 Spacer(Modifier.width(8.dp))
                 GlassButton(
-                    onClick = {
-                        photoPicker.launch(
-                            Intent(Intent.ACTION_PICK).apply {
-                                setDataAndType(
-                                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                                    "image/*",
-                                )
-                                putExtra(Intent.EXTRA_LOCAL_ONLY, true)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                        )
-                    },
+                    onClick = launchPhotoPicker,
                     enabled = !sourceLoading && !saving,
                     contentPadding = PaddingValues(horizontal = 11.dp, vertical = 7.dp),
                     modifier = Modifier.height(38.dp),
@@ -369,26 +369,24 @@ fun LocalPhotoEffectsPage(
                 )
             }
             if (previewBitmap == null) {
-                Box(
-                    contentAlignment = Alignment.Center,
+                Surface(
+                    onClick = launchPhotoPicker,
+                    enabled = !sourceLoading && !saving,
+                    shape = RoundedCornerShape(12.dp),
+                    color = colors.onBackground.copy(alpha = 0.035f),
+                    border = BorderStroke(1.dp, colors.glassPanelBorder),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(4f / 3f)
-                        .background(colors.onBackground.copy(alpha = 0.035f), RoundedCornerShape(12.dp))
-                        .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(12.dp)),
+                        .aspectRatio(4f / 3f),
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Default.Image,
-                            contentDescription = null,
-                            tint = colors.onSurfaceVariant.copy(alpha = 0.62f),
-                            modifier = Modifier.size(32.dp),
-                        )
-                        Spacer(Modifier.height(8.dp))
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
                         Text(
-                            text = stringResource(R.string.local_photo_preview_prompt),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant,
+                            text = stringResource(R.string.local_photo_choose_short),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = colors.accentBlue,
                         )
                     }
                 }

@@ -499,7 +499,6 @@
     <string name="local_photo_effects_gesture_hint">预览：长按对比滤镜前后</string>
     <string name="local_photo_choose_short">选择图片</string>
     <string name="local_photo_replace">更换图片</string>
-    <string name="local_photo_preview_prompt">选择照片后在这里预览效果</string>
     <string name="local_photo_same_folder_hint">优先保存到原目录；不可写时自动保存到 Pictures/ZTransfer</string>
     <string name="local_photo_generate">生成并保存</string>
     <string name="local_photo_generating">正在生成…</string>

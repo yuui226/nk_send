@@ -501,7 +501,6 @@
     <string name="local_photo_effects_gesture_hint">Preview: Hold to compare with the unfiltered version</string>
     <string name="local_photo_choose_short">Choose photo</string>
     <string name="local_photo_replace">Replace photo</string>
-    <string name="local_photo_preview_prompt">Choose a photo to preview the result</string>
     <string name="local_photo_same_folder_hint">Saved beside the original, or to Pictures/ZTransfer when needed</string>
     <string name="local_photo_generate">Generate and save</string>
     <string name="local_photo_generating">Generating…</string>
