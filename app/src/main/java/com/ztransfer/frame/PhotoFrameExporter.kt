@@ -42,7 +42,6 @@ import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -270,16 +269,6 @@ data class PhotoFrameExportResult(
     val displayName: String,
     val relativePath: String? = null,
 )
-
-internal data class PhotoFrameLocationOverride(
-    val latitude: Double,
-    val longitude: Double,
-) {
-    init {
-        require(latitude.isFinite() && latitude in -90.0..90.0)
-        require(longitude.isFinite() && longitude in -180.0..180.0)
-    }
-}
 
 internal const val LOCAL_PHOTO_FALLBACK_RELATIVE_PATH = "Pictures/ZTransfer"
 private const val PHOTO_FRAME_EXPORT_TAG = "PhotoFrameExporter"
@@ -695,7 +684,6 @@ object PhotoFrameExporter {
         borderEnabled: Boolean = true,
         metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
         filter: PhotoFilterSelection? = null,
-        locationOverride: PhotoFrameLocationOverride? = null,
     ): Result<PhotoFrameExportResult> {
         return try {
             currentCoroutineContext().ensureActive()
@@ -720,7 +708,6 @@ object PhotoFrameExporter {
                     borderEnabled = borderEnabled,
                     metadataSettings = metadataSettings,
                     filter = filter,
-                    locationOverride = locationOverride,
                     bitmap = rendered,
                 )
             } finally {
@@ -2617,7 +2604,6 @@ object PhotoFrameExporter {
         targetUri: Uri,
         width: Int,
         height: Int,
-        locationOverride: PhotoFrameLocationOverride? = null,
     ) {
         val attributes = runCatching {
             resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
@@ -2627,9 +2613,9 @@ object PhotoFrameExporter {
                 }
             }
         }.getOrNull()
-        if (attributes == null && locationOverride == null) return
+        if (attributes == null) return
 
-        val writeResult = runCatching {
+        runCatching {
             resolver.openFileDescriptor(targetUri, "rw")?.use { descriptor ->
                 val target = ExifInterface(descriptor.fileDescriptor)
                 attributes.orEmpty().forEach { (tag, value) -> target.setAttribute(tag, value) }
@@ -2641,20 +2627,9 @@ object PhotoFrameExporter {
                 target.setAttribute(ExifInterface.TAG_IMAGE_LENGTH, height.toString())
                 target.setAttribute(ExifInterface.TAG_PIXEL_X_DIMENSION, width.toString())
                 target.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION, height.toString())
-                locationOverride?.let { location ->
-                    target.setLatLong(location.latitude, location.longitude)
-                }
                 target.saveAttributes()
             } ?: error("Target provider does not expose a writable descriptor")
-            locationOverride?.let { location ->
-                val verified = resolver.openFileDescriptor(targetUri, "r")?.use { descriptor ->
-                    ExifInterface(descriptor.fileDescriptor).latLong
-                } ?: error("Cannot verify custom photo location")
-                check(abs(verified[0] - location.latitude) < 0.000001)
-                check(abs(verified[1] - location.longitude) < 0.000001)
-            }
-        }
-        writeResult.onFailure { error ->
+        }.onFailure { error ->
             // Some cloud/custom DocumentsProviders expose writable streams but not seekable rw
             // descriptors. The high-quality image is still valid; metadata copying is best effort.
             Log.w(
@@ -2662,9 +2637,6 @@ object PhotoFrameExporter {
                 "Cannot preserve derived EXIF (${error.javaClass.simpleName}: ${error.message})",
             )
         }
-        // A user-requested location is output content, not optional metadata preservation. Keep
-        // the MediaStore row pending (and therefore removable) when it cannot be verified.
-        if (locationOverride != null) writeResult.getOrThrow()
     }
 
     /**
@@ -4583,7 +4555,6 @@ object PhotoFrameExporter {
         borderEnabled: Boolean,
         metadataSettings: PhotoFrameMetadataSettings,
         filter: PhotoFilterSelection?,
-        locationOverride: PhotoFrameLocationOverride?,
         bitmap: Bitmap,
     ): PhotoFrameExportResult {
         val preferred = photoFrameOutputName(
@@ -4593,7 +4564,6 @@ object PhotoFrameExporter {
             borderEnabled = borderEnabled,
             metadataSettings = metadataSettings,
             filter = filter,
-            locationOverride = locationOverride,
         )
         val name = uniqueName(preferred, source.occupiedNames)
         val originalPath = source.relativePath
@@ -4614,7 +4584,6 @@ object PhotoFrameExporter {
                     name = name,
                     bitmap = bitmap,
                     occupiedNames = source.occupiedNames,
-                    locationOverride = locationOverride,
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -4650,7 +4619,6 @@ object PhotoFrameExporter {
                 name = name,
                 bitmap = bitmap,
                 occupiedNames = source.occupiedNames,
-                locationOverride = locationOverride,
             )
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -4669,7 +4637,6 @@ object PhotoFrameExporter {
         name: String,
         bitmap: Bitmap,
         occupiedNames: MutableSet<String>,
-        locationOverride: PhotoFrameLocationOverride?,
     ): PhotoFrameExportResult {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
@@ -4706,7 +4673,6 @@ object PhotoFrameExporter {
                 targetUri = target,
                 width = bitmap.width,
                 height = bitmap.height,
-                locationOverride = locationOverride,
             )
             currentCoroutineContext().ensureActive()
             val published = resolver.update(
@@ -5766,7 +5732,7 @@ internal fun isCurrentPhotoFrameTempName(name: String): Boolean =
 private val PHOTO_FRAME_OUTPUT_PATTERN = Regex(
     pattern = "(?:_frame_(${PhotoFramePreset.entries.joinToString("|") { preset ->
         Regex.escape(preset.fileSuffix)
-    }})|_watermark|_filter|_location)(?:_w[0-9a-f]{12})?(?:_f[0-9a-f]{8}i\\d{1,3})?" +
+    }})|_watermark|_filter)(?:_w[0-9a-f]{12})?(?:_f[0-9a-f]{8}i\\d{1,3})?" +
         "(?: \\(\\d+\\)|_\\d+)?\\.jpe?g$",
     option = RegexOption.IGNORE_CASE,
 )
@@ -5790,7 +5756,6 @@ internal fun photoFrameOutputName(
     borderEnabled: Boolean = true,
     metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     filter: PhotoFilterSelection? = null,
-    locationOverride: PhotoFrameLocationOverride? = null,
 ): String {
     // v2 调整了默认字体与透明度语义，所有成片都带配置摘要，避免误命中升级前旧图。
     val renderedWatermark = watermark.forBorderMode(borderEnabled)
@@ -5812,7 +5777,6 @@ internal fun photoFrameOutputName(
         borderEnabled -> "frame_${preset.fileSuffix}"
         renderedWatermark.enabled -> "watermark"
         filter != null -> "filter"
-        locationOverride != null -> "location"
         else -> "watermark"
     }
     return "${File(sourceName).nameWithoutExtension}_${styleSuffix}" +

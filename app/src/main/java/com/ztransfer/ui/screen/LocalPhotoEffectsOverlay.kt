@@ -46,7 +46,6 @@ import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.frame.PhotoFrameExporter
-import com.ztransfer.frame.PhotoFrameLocationOverride
 import com.ztransfer.frame.PhotoFrameMediaStoreSource
 import com.ztransfer.frame.PhotoFrameMetadata
 import com.ztransfer.frame.PhotoFrameWatermark
@@ -119,11 +118,6 @@ fun LocalPhotoEffectsPage(
     var favoriteFrameEffects by remember {
         mutableStateOf(initialSettings.favoriteFrameEffects)
     }
-    var debugLocationOverride by remember {
-        mutableStateOf<PhotoFrameLocationOverride?>(null)
-    }
-    var debugLocationEnabled by remember { mutableStateOf(false) }
-
     val currentSettings = LocalPhotoEffectsSettings(
         decorationEnabled = decorationEnabled,
         borderEnabled = borderEnabled,
@@ -269,8 +263,6 @@ fun LocalPhotoEffectsPage(
         renderWatermark = requestedRenderWatermark
     }
     val hasEffect = decorationEnabled || selectedFilter != null
-    val hasOutputChange = hasEffect || debugLocationOverride != null
-    val locationInputInvalid = debugLocationEnabled && debugLocationOverride == null
 
     Box(
         modifier = Modifier
@@ -421,6 +413,68 @@ fun LocalPhotoEffectsPage(
             }
 
             Spacer(Modifier.height(10.dp))
+            GlassButton(
+                onClick = {
+                    val selectedSource = selection?.destination ?: run {
+                        showHint(selectFailedText)
+                        return@GlassButton
+                    }
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                    saving = true
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            PhotoFrameExporter.exportBesideSource(
+                                context = context,
+                                resolver = context.contentResolver,
+                                source = selectedSource,
+                                preset = preset,
+                                watermark = renderWatermark,
+                                borderEnabled = decorationEnabled && borderEnabled,
+                                metadataSettings = resolvedPhotoFrameMetadataSettings(
+                                    metadataSettings,
+                                    preset,
+                                ),
+                                filter = selectedFilter,
+                            )
+                        }
+                        saving = false
+                        result.fold(
+                            onSuccess = { exportResult ->
+                                val savedDirectory = exportResult.relativePath
+                                    ?.trimEnd('/', '\\')
+                                    ?.takeIf(String::isNotBlank)
+                                    ?: LOCAL_PHOTO_FALLBACK_RELATIVE_PATH
+                                showHint(savedFormat.format(savedDirectory))
+                            },
+                            onFailure = { showHint(saveFailedText) },
+                        )
+                    }
+                },
+                enabled = selection != null && hasEffect && !saving && !sourceLoading,
+                active = selection != null && hasEffect,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+            ) {
+                if (saving) {
+                    CircularProgressIndicator(
+                        color = colors.accentBlue,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                Text(
+                    text = stringResource(
+                        if (saving) R.string.local_photo_generating else R.string.local_photo_generate
+                    ),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onBackground,
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
             PhotoFilterEditor(
                 filters = state.photoFilters,
                 favoriteFilters = favoritePhotoFilters,
@@ -540,85 +594,6 @@ fun LocalPhotoEffectsPage(
                 },
             )
 
-            DebugPhotoLocationSettingsCard(
-                onStateChanged = { enabled, config ->
-                    debugLocationEnabled = enabled
-                    debugLocationOverride = config
-                },
-            )
-
-            Spacer(Modifier.height(12.dp))
-            GlassButton(
-                onClick = {
-                    val selectedSource = selection?.destination ?: run {
-                        showHint(selectFailedText)
-                        return@GlassButton
-                    }
-                    focusManager.clearFocus()
-                    keyboardController?.hide()
-                    val locationForExport = debugLocationOverride
-                    saving = true
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            PhotoFrameExporter.exportBesideSource(
-                                context = context,
-                                resolver = context.contentResolver,
-                                source = selectedSource,
-                                preset = preset,
-                                watermark = renderWatermark,
-                                borderEnabled = decorationEnabled && borderEnabled,
-                                metadataSettings = resolvedPhotoFrameMetadataSettings(
-                                    metadataSettings,
-                                    preset,
-                                ),
-                                filter = selectedFilter,
-                                locationOverride = locationForExport,
-                            )
-                        }
-                        saving = false
-                        result.fold(
-                            onSuccess = { exportResult ->
-                                val savedDirectory = exportResult.relativePath
-                                    ?.trimEnd('/', '\\')
-                                    ?.takeIf(String::isNotBlank)
-                                    ?: LOCAL_PHOTO_FALLBACK_RELATIVE_PATH
-                                showHint(savedFormat.format(savedDirectory))
-                            },
-                            onFailure = { showHint(saveFailedText) },
-                        )
-                    }
-                },
-                enabled = selection != null && hasOutputChange && !locationInputInvalid &&
-                    !saving && !sourceLoading,
-                active = selection != null && hasOutputChange && !locationInputInvalid,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-            ) {
-                if (saving) {
-                    CircularProgressIndicator(
-                        color = colors.accentBlue,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(19.dp),
-                    )
-                }
-                Text(
-                    text = stringResource(
-                        if (saving) R.string.local_photo_generating else R.string.local_photo_generate
-                    ),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onBackground,
-                )
-            }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                text = stringResource(R.string.local_photo_same_folder_hint),
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.onSurfaceVariant.copy(alpha = 0.82f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
             Spacer(Modifier.height(18.dp))
         }
         AnimatedVisibility(
@@ -650,7 +625,10 @@ fun LocalPhotoEffectsPage(
                 onDismiss = { showPhotoEffectsInfo = false },
                 description = stringResource(R.string.local_photo_effects_info_description),
                 gestureHint = stringResource(R.string.local_photo_effects_gesture_hint),
-                extraHint = stringResource(R.string.local_photo_effects_exif_hint),
+                extraHints = listOf(
+                    stringResource(R.string.local_photo_effects_exif_hint),
+                    stringResource(R.string.local_photo_same_folder_hint),
+                ),
                 parentTopInset = pageTopInset,
             )
         }

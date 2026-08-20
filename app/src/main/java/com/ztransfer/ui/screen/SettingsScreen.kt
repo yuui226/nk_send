@@ -1321,7 +1321,7 @@ internal fun PhotoEffectsInfoBubble(
     onDismiss: () -> Unit,
     description: String,
     gestureHint: String,
-    extraHint: String? = null,
+    extraHints: List<String> = emptyList(),
     parentTopInset: Dp = 0.dp,
 ) {
     val colors = AppTheme.colors
@@ -1347,13 +1347,15 @@ internal fun PhotoEffectsInfoBubble(
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
             )
-            if (!extraHint.isNullOrBlank()) {
-                Spacer(Modifier.height(7.dp))
-                Text(
-                    extraHint,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                )
+            extraHints.forEach { extraHint ->
+                if (extraHint.isNotBlank()) {
+                    Spacer(Modifier.height(7.dp))
+                    Text(
+                        extraHint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
             }
             Spacer(Modifier.height(7.dp))
             Text(
@@ -1790,6 +1792,7 @@ internal fun PhotoFrameWatermarkEditor(
     val focusManager = LocalFocusManager.current
     val proLockInteractionSource = remember { MutableInteractionSource() }
     var metadataSettingsExpanded by remember { mutableStateOf(false) }
+    var watermarkSettingsExpanded by remember { mutableStateOf(false) }
     val metadataAvailability = remember(previewMetadata) {
         photoFrameMetadataAvailability(previewMetadata)
     }
@@ -1880,8 +1883,14 @@ internal fun PhotoFrameWatermarkEditor(
     LaunchedEffect(metadataAvailability.hasAny) {
         if (!metadataAvailability.hasAny) metadataSettingsExpanded = false
     }
+    LaunchedEffect(watermark.enabled) {
+        if (!watermark.enabled) watermarkSettingsExpanded = false
+    }
     BackHandler(enabled = metadataSettingsExpanded) {
         metadataSettingsExpanded = false
+    }
+    BackHandler(enabled = watermarkSettingsExpanded) {
+        watermarkSettingsExpanded = false
     }
 
     fun commitWatermarkChange(updated: PhotoFrameWatermark) {
@@ -2001,38 +2010,61 @@ internal fun PhotoFrameWatermarkEditor(
                 )
                 .padding(8.dp),
         ) {
-            Box(modifier = Modifier.fillMaxWidth()) {
-                ReleaseCommitWheel(
-                    options = watermarkEnabledChoices,
-                    selected = watermarkEnabledChoices.first { it.first == watermark.enabled },
-                    optionLabel = { it.second },
-                    onValueCommitted = {
-                        focusManager.clearFocus()
-                        commitWatermarkChange(watermark.copy(enabled = it.first))
-                    },
-                    onDetent = haptics::tick,
-                    label = stringResource(R.string.photo_frame_watermark_short),
-                    enabled = isPro,
-                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                    accentColor = watermarkAccent,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (!isPro) {
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .clip(RoundedCornerShape(13.dp))
-                            .clickable(
-                                interactionSource = proLockInteractionSource,
-                                indication = null,
-                                onClick = onProRequired,
-                            ),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    ReleaseCommitWheel(
+                        options = watermarkEnabledChoices,
+                        selected = watermarkEnabledChoices.first { it.first == watermark.enabled },
+                        optionLabel = { it.second },
+                        onValueCommitted = {
+                            focusManager.clearFocus()
+                            commitWatermarkChange(watermark.copy(enabled = it.first))
+                        },
+                        onDetent = haptics::tick,
+                        label = stringResource(R.string.photo_frame_watermark_short),
+                        enabled = isPro,
+                        wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                        accentColor = watermarkAccent,
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                    if (!isPro) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clip(RoundedCornerShape(13.dp))
+                                .clickable(
+                                    interactionSource = proLockInteractionSource,
+                                    indication = null,
+                                    onClick = onProRequired,
+                                ),
+                        )
+                    }
                 }
+                val watermarkSettingsLabel =
+                    stringResource(R.string.photo_frame_watermark_settings_button)
+                ReleaseCommitWheel(
+                    options = listOf(Unit),
+                    selected = Unit,
+                    optionLabel = { watermarkSettingsLabel },
+                    onValueCommitted = {},
+                    onActivated = {
+                        haptics.tick()
+                        watermarkSettingsExpanded = !watermarkSettingsExpanded
+                    },
+                    enabled = watermark.enabled,
+                    wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+                    showDragHint = false,
+                    accentColor = watermarkAccent,
+                    emphasized = watermarkSettingsExpanded,
+                    modifier = Modifier.weight(1f),
+                )
             }
 
             AnimatedVisibility(
-                visible = watermark.enabled,
+                visible = watermark.enabled && watermarkSettingsExpanded,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically(),
             ) {

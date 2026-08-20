@@ -171,6 +171,7 @@
     <string name="photo_frame_no_watermark">No watermark</string>
     <string name="photo_frame_style_short">Frame</string>
     <string name="photo_frame_watermark_short">Watermark</string>
+    <string name="photo_frame_watermark_settings_button">Watermark settings</string>
     <string name="photo_frame_and_watermark_short">Frame &amp; watermark</string>
     <string name="photo_frame_summary_line">Frame: %1$s</string>
     <string name="photo_watermark_summary_line">Watermark: %1$s</string>

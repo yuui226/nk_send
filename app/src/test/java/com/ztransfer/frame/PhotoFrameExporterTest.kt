@@ -661,27 +661,7 @@ class PhotoFrameExporterTest {
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_dark_123456.jpeg"))
         assertTrue(isPhotoFrameOutputName("DSC_0123_frame_plaque.jpg"))
         assertTrue(isPhotoFrameOutputName("DSC_0123_watermark_w123456789abc.jpg"))
-        assertTrue(isPhotoFrameOutputName("DSC_0123_location.jpg"))
         assertTrue(!isPhotoFrameOutputName("DSC_0123.JPG"))
-    }
-
-    @Test
-    fun locationOnlyOutputHasAnHonestDerivedName() {
-        val location = PhotoFrameLocationOverride(
-            latitude = 39.916,
-            longitude = 116.397,
-        )
-
-        val name = photoFrameOutputName(
-            sourceName = "DSC_0123.JPG",
-            preset = PhotoFramePreset.MIST,
-            watermark = PhotoFrameWatermark(enabled = false),
-            borderEnabled = false,
-            locationOverride = location,
-        )
-
-        assertEquals("DSC_0123_location.jpg", name)
-        assertTrue(isPhotoFrameOutputName(name))
     }
 
     @Test

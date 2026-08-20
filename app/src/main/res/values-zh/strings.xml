@@ -171,6 +171,7 @@
     <string name="photo_frame_no_watermark">无水印</string>
     <string name="photo_frame_style_short">边框</string>
     <string name="photo_frame_watermark_short">水印</string>
+    <string name="photo_frame_watermark_settings_button">水印设置</string>
     <string name="photo_frame_and_watermark_short">边框和水印</string>
     <string name="photo_frame_summary_line">边框：%1$s</string>
     <string name="photo_watermark_summary_line">水印：%1$s</string>
