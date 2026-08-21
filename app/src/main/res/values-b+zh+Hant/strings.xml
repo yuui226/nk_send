@@ -463,7 +463,6 @@
     <string name="err_purchase_activation_failed">啟用失敗，請聯絡客服</string>
     <string name="err_purchase_price_missing">無法確認本單金額，已停止付款。請重試。</string>
     <string name="err_purchase_qr_failed">付款二維碼載入失敗，請重試，不要重複付款。</string>
-    <string name="err_purchase_product_mismatch">訂單商品與所選方案不一致，已停止付款。請返回後重新選擇。</string>
     <string name="purchase_back_to_plans">返回選擇方案</string>
 
     <!-- 檢查更新（設定頁腳） -->

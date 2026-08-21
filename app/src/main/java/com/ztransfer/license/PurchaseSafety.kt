@@ -14,7 +14,19 @@ internal enum class PaymentQrSource {
 
 internal fun hasUsableLockedPrice(priceFen: Int): Boolean = priceFen > 0
 
-internal fun shouldReplaceRecoveredOrder(hasPaymentSource: Boolean): Boolean = !hasPaymentSource
+/**
+ * 是否应跳过本地旧订单，按用户当前选中的商品创建新订单。
+ *
+ * 重要：年费和永久版是两个可独立购买的商品。用户切换商品后，即使旧商品仍有可支付
+ * 二维码，也必须尊重当前选择并创建对应的新订单；旧二维码由服务端继续独立维护。
+ * 这是刻意的产品规则，不能简化成“只要旧订单可支付就一律恢复”，否则切换方案会错误地
+ * 恢复另一个商品并中止当前购买。只有商品相同且支付入口仍有效时才恢复旧订单。
+ */
+internal fun shouldCreateSelectedOrder(
+    selectedProduct: LicenseManager.ProductId,
+    recoveredProduct: LicenseManager.ProductId,
+    hasPaymentSource: Boolean,
+): Boolean = recoveredProduct != selectedProduct || !hasPaymentSource
 
 internal fun paymentQrSource(payUrl: String?, payQr: String?): PaymentQrSource =
     when {

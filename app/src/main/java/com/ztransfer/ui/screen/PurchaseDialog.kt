@@ -72,7 +72,7 @@ import com.ztransfer.license.hasUsableLockedPrice
 import com.ztransfer.license.nextOrderRetryDelay
 import com.ztransfer.license.orderFailureAction
 import com.ztransfer.license.paymentQrSource
-import com.ztransfer.license.shouldReplaceRecoveredOrder
+import com.ztransfer.license.shouldCreateSelectedOrder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -199,10 +199,14 @@ fun PurchaseDialog(
         } else {
             null
         }
+        // 刻意按“当前选择的商品”恢复：同商品且二维码有效才续用；年费↔永久切换必须
+        // 新建所选商品的订单。不要改成无条件保护任意旧二维码，详见 shouldCreateSelectedOrder。
         val r: LicenseManager.OrderResult? = if (recovered == null ||
             (recovered is LicenseManager.OrderResult.Failed && recovered.err == "NOT_FOUND") ||
             (recovered is LicenseManager.OrderResult.Pending &&
-                shouldReplaceRecoveredOrder(
+                shouldCreateSelectedOrder(
+                    selectedProduct = product,
+                    recoveredProduct = recovered.product,
                     hasPaymentSource = recovered.payUrl != null || recovered.payQr != null,
                 ))
         ) {
@@ -212,7 +216,7 @@ fun PurchaseDialog(
         }
         if (r is LicenseManager.OrderResult.Pending && r.product != product) {
             productMismatch = true
-            error = R.string.err_purchase_product_mismatch
+            error = R.string.err_purchase_failed
             return@LaunchedEffect
         }
         when (r) {
@@ -240,7 +244,7 @@ fun PurchaseDialog(
             is LicenseManager.OrderResult.Failed -> {
                 if (r.err == "PENDING_OTHER_PRODUCT" || r.err == "BAD_PRODUCT") {
                     productMismatch = true
-                    error = R.string.err_purchase_product_mismatch
+                    error = R.string.err_purchase_failed
                 } else {
                     error = R.string.err_purchase_failed
                 }
@@ -291,7 +295,7 @@ fun PurchaseDialog(
             when {
                 r is LicenseManager.OrderResult.Pending && r.product != product -> {
                     productMismatch = true
-                    error = R.string.err_purchase_product_mismatch
+                    error = R.string.err_purchase_failed
                 }
                 r is LicenseManager.OrderResult.Paid -> {
                     code = r.code
@@ -305,7 +309,7 @@ fun PurchaseDialog(
                     when (orderFailureAction(r.err)) {
                         OrderFailureAction.PRODUCT_MISMATCH -> {
                             productMismatch = true
-                            error = R.string.err_purchase_product_mismatch
+                            error = R.string.err_purchase_failed
                         }
                         OrderFailureAction.TERMINAL -> error = R.string.err_purchase_failed
                         OrderFailureAction.RETRY -> {

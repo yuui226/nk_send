@@ -28,14 +28,40 @@ class PurchaseSafetyTest {
     }
 
     @Test
-    fun payableRecoveredOrderIsNeverOverwritten() {
+    fun sameProductWithPayableSourceResumesExistingOrder() {
         assertFalse(
-            shouldReplaceRecoveredOrder(
+            shouldCreateSelectedOrder(
+                selectedProduct = LicenseManager.ProductId.ANNUAL,
+                recoveredProduct = LicenseManager.ProductId.ANNUAL,
+                hasPaymentSource = true,
+            )
+        )
+    }
+
+    @Test
+    fun switchingProductIntentionallyCreatesTheCurrentlySelectedOrder() {
+        assertTrue(
+            shouldCreateSelectedOrder(
+                selectedProduct = LicenseManager.ProductId.LIFETIME,
+                recoveredProduct = LicenseManager.ProductId.ANNUAL,
                 hasPaymentSource = true,
             )
         )
         assertTrue(
-            shouldReplaceRecoveredOrder(
+            shouldCreateSelectedOrder(
+                selectedProduct = LicenseManager.ProductId.ANNUAL,
+                recoveredProduct = LicenseManager.ProductId.LIFETIME,
+                hasPaymentSource = true,
+            )
+        )
+    }
+
+    @Test
+    fun missingPaymentSourceCreatesReplacementEvenForSameProduct() {
+        assertTrue(
+            shouldCreateSelectedOrder(
+                selectedProduct = LicenseManager.ProductId.LIFETIME,
+                recoveredProduct = LicenseManager.ProductId.LIFETIME,
                 hasPaymentSource = false,
             )
         )

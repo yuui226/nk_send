@@ -467,7 +467,6 @@
     <string name="err_purchase_activation_failed">激活失败，请联系客服</string>
     <string name="err_purchase_price_missing">无法确认本单金额，已停止支付。请重试。</string>
     <string name="err_purchase_qr_failed">支付二维码加载失败，请重试，不要重复付款。</string>
-    <string name="err_purchase_product_mismatch">订单商品与所选方案不一致，已停止支付。请返回后重新选择。</string>
     <string name="purchase_back_to_plans">返回选择方案</string>
 
     <!-- 检查更新（设置页脚） -->
