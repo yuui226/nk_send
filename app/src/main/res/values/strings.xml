@@ -13,7 +13,7 @@
     <string name="camera_session_channel_name">Wireless camera connection</string>
     <string name="camera_session_notification_title">Wireless camera connected</string>
     <string name="camera_session_notification_text">ZTransfer is keeping the wireless camera session active</string>
-    <string name="notification_permission_first_launch_hint">Notification access helps reduce the chance of ZTransfer being stopped while running in the background. No other notifications will be sent, so you can safely enable it.</string>
+    <string name="notification_permission_first_launch_hint">Notification access keeps ZTransfer running. No other notifications will be sent, so you can safely enable it.</string>
 
     <!-- Home / connection -->
     <string name="usb_unknown_error">Unknown USB error</string>

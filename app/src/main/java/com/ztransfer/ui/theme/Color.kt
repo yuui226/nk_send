@@ -7,6 +7,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import com.ztransfer.R
 
 /**
@@ -76,8 +78,8 @@ val LightStatusWaiting = Color(0xFF8E8E93)
 @Immutable
 data class AppColors(
     val background: Color,
-    /** 页面背景纵向微渐变（顶部略亮→底部略暗）：替代纯平底色，给页面一点纵深。
-     *  [background] 仍是名义底色（取中间值），供叠层/渐变遮罩等继续引用。 */
+    /** 页面背景明暗端点：深色主题用于纵向微渐变，浅色主题用于顶部内容遮罩。
+     *  浅色页面本身使用 [background] 纯色，避免近白渐变在截图压缩后量化成水平色带。 */
     val backgroundTop: Color,
     val backgroundBottom: Color,
     val surface: Color,
@@ -222,15 +224,19 @@ object AppTheme {
 }
 
 /**
- * 页面背景渐变刷（[AppColors.backgroundTop] → [AppColors.backgroundBottom]）。
- * Scaffold 底与"需要不透明根"的页面（列表/队列页，转场层叠不透底）共用同一渐变，
- * 保证各页背景纵深一致。
+ * 全局页面背景刷。浅色主题用纯色，根治近白渐变在截图/WebP 压缩中形成的
+ * 水平色带；深色主题仍保留 [AppColors.backgroundTop] 到 [AppColors.backgroundBottom]
+ * 的微渐变。Scaffold 与需要不透明根的页面共用此刷，转场时不会透底。
  */
 @Composable
 fun rememberAppBackgroundBrush(): Brush {
     val colors = AppTheme.colors
     return remember(colors) {
-        Brush.verticalGradient(listOf(colors.backgroundTop, colors.backgroundBottom))
+        if (colors.background.luminance() >= 0.5f) {
+            SolidColor(colors.background)
+        } else {
+            Brush.verticalGradient(listOf(colors.backgroundTop, colors.backgroundBottom))
+        }
     }
 }
 

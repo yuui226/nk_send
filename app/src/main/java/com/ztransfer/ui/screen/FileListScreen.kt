@@ -861,7 +861,7 @@ fun FileListScreen(
         }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
-    // 用全局背景渐变刷（而非纯 background 色），与 Scaffold 底的纵深一致。
+    // 与 Scaffold 共用全局背景刷（浅色纯色/深色微渐变）。
     // 遥控页入口是左下角圆钮（曾试过横滑手势进入，误触率高已去掉）。
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
@@ -1281,20 +1281,20 @@ fun FileListScreen(
 
         // ---------- 顶部渐变 scrim：edge-to-edge 内容滚到状态栏后面时，保证状态栏图标
         // 与悬浮控件在任何内容上都可读，也让顶栏更有"浮在雾面上"的层次 ----------
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(topInset + 56.dp)
-                .background(
-                    // 用 backgroundTop（页面顶端的实际底色）而非名义中间色，
-                    // 否则在渐变底上会压出一条色差带。
-                    Brush.verticalGradient(
-                        0f to colors.backgroundTop.copy(alpha = 0.85f),
-                        0.45f to colors.backgroundTop.copy(alpha = 0.5f),
-                        1f to Color.Transparent
+        if (!atTop) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(topInset + 56.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to colors.backgroundTop.copy(alpha = 0.85f),
+                            0.45f to colors.backgroundTop.copy(alpha = 0.5f),
+                            1f to Color.Transparent
+                        )
                     )
-                )
-        )
+            )
+        }
 
         // ---------- 悬浮顶部控件（不占高度，浮在内容上）----------
         Row(

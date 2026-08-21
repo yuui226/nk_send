@@ -30,6 +30,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,7 +40,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -113,6 +116,13 @@ fun TransferScreen(
     val clearScope = rememberCoroutineScope()
     // 触感反馈（与"Z传"页同一开关）；本页胶囊负责传输全部完成时的成功震动。
     val haptics = rememberHaptics(transferState.hapticsEnabled)
+    // 队列清空后再加入任务时从顶部开始，避免沿用上一批任务的滚动位置与遮罩状态。
+    val listState = key(transferState.tasks.isEmpty()) { rememberLazyListState() }
+    val listAtTop by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 8
+        }
+    }
     // 卡片顶部 sheen 高光刷（与玻璃面板同族材质）；提升到列表外，所有卡片共用一个实例。
     // 透明度封顶 10%：面板用的 glassSheen 在浅色主题高达 55%（白面板上白高光看不出来），
     // 直接叠在蓝/绿调的状态卡上会把卡片上半部洗白；深色主题 8% 原样通过。
@@ -156,7 +166,7 @@ fun TransferScreen(
     )
 
     // 根需不透明底色：与"Z传"页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
-    // 用全局背景渐变刷（而非纯 background 色），与 Scaffold 底的纵深一致。
+    // 与 Scaffold 共用全局背景刷（浅色纯色/深色微渐变）。
     Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (transferState.tasks.isEmpty()) {
@@ -197,6 +207,7 @@ fun TransferScreen(
             }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = listPadding
                 // 行距烘焙在条目底部（8dp），随移除收合动画一起消失；
@@ -438,20 +449,20 @@ fun TransferScreen(
         }
 
         // ---------- 顶部渐变 scrim：与"Z传"页同款，保证状态栏与悬浮控件在内容上可读 ----------
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(topInset + 56.dp)
-                .background(
-                    // 用 backgroundTop（页面顶端的实际底色）而非名义中间色，
-                    // 否则在渐变底上会压出一条色差带。
-                    Brush.verticalGradient(
-                        0f to colors.backgroundTop.copy(alpha = 0.85f),
-                        0.45f to colors.backgroundTop.copy(alpha = 0.5f),
-                        1f to Color.Transparent
+        if (!listAtTop && transferState.tasks.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(topInset + 56.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to colors.backgroundTop.copy(alpha = 0.85f),
+                            0.45f to colors.backgroundTop.copy(alpha = 0.5f),
+                            1f to Color.Transparent
+                        )
                     )
-                )
-        )
+            )
+        }
 
         // ---------- 悬浮顶部控件（毛玻璃，浮在内容上，与 "Z传" 页同款）----------
         Row(

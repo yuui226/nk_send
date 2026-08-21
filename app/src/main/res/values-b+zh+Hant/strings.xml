@@ -13,7 +13,7 @@
     <string name="camera_session_channel_name">相機無線連線</string>
     <string name="camera_session_notification_title">無線相機已連線</string>
     <string name="camera_session_notification_text">Z傳正在保持無線相機工作階段</string>
-    <string name="notification_permission_first_launch_hint">通知權限用於降低 Z傳在後台運行時被系統終止的可能，不會傳送其他通知，可放心開啟。</string>
+    <string name="notification_permission_first_launch_hint">通知權限用於保活，不會有其他通知，可放心開啟。</string>
 
     <!-- 連線頁 -->
     <string name="usb_unknown_error">未知 USB 錯誤</string>

@@ -18,7 +18,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import com.ztransfer.ui.theme.Motion
 import androidx.compose.foundation.background
@@ -86,7 +85,7 @@ class MainActivity : ComponentActivity() {
                     var hintVisible by remember { mutableStateOf(showFirstLaunchNotificationHint) }
                     LaunchedEffect(showFirstLaunchNotificationHint) {
                         if (!showFirstLaunchNotificationHint) return@LaunchedEffect
-                        // 先让顶部气泡绘制一帧，再呼出系统权限框；两者同时可见且不重叠。
+                        // 先让居中气泡绘制一帧，再呼出系统权限框。
                         withFrameNanos { }
                         requestNotificationPermissionIfNeeded()
                         delay(FIRST_LAUNCH_HINT_DURATION_MS)
@@ -95,13 +94,11 @@ class MainActivity : ComponentActivity() {
                     AnimatedVisibility(
                         visible = hintVisible,
                         enter = fadeIn(tween(200)) +
-                            slideInVertically(tween(200)) { -it / 3 },
+                            scaleIn(initialScale = 0.96f, animationSpec = tween(200)),
                         exit = fadeOut(tween(260)),
                         modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .statusBarsPadding()
+                            .align(Alignment.Center)
                             .padding(horizontal = 24.dp)
-                            .padding(top = 60.dp)
                     ) {
                         FirstLaunchNotificationHint()
                     }
@@ -169,7 +166,6 @@ private fun FirstLaunchNotificationHint() {
         modifier = Modifier.widthIn(max = 380.dp),
         shape = RoundedCornerShape(22.dp),
         color = colors.glassSurfaceHeavy,
-        shadowElevation = 6.dp,
         border = BorderStroke(1.dp, colors.glassPanelBorder)
     ) {
         Text(
@@ -239,8 +235,8 @@ fun MainScreen(transferViewModel: TransferViewModel) {
         onDispose { window?.clearFlags(flag) }
     }
 
-    // 页面底色：纵向微渐变（顶部略亮→底部略暗）替代纯平色，各页共用这一处，
-    // 换一处全局生效。恒黑页（遥控/预览）自绘黑底不受影响。
+    // 页面底色：浅色用纯色防止截图出现水平色带，深色保留纵向微渐变；
+    // 各页共用这一处。恒黑页（遥控/预览）自绘黑底不受影响。
     val backgroundBrush = rememberAppBackgroundBrush()
     Box(Modifier.fillMaxSize()) {
         Scaffold(
