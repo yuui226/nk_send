@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -48,7 +48,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.ui.theme.AppTheme
@@ -273,13 +272,17 @@ internal fun <T> ReleaseCommitWheel(
                 if (!dragging && index != idleCenter) continue
                 val distance = abs(index - position)
                 val itemAlpha = if (distance < 0.5f) 1f else 0.38f
+                val itemOffsetY = (rowPx * (index - position)).roundToInt()
                 val itemModifier = Modifier
                     .fillMaxWidth()
-                    .offset {
-                        IntOffset(
-                            x = 0,
-                            y = (rowPx * (index - position)).roundToInt(),
-                        )
+                    // The lambda offset overload places every full-width text row in a separate
+                    // graphics layer. On screenshot capture that layer boundary can become a faint
+                    // wheel-wide band. A layout-only offset keeps identical motion without a layer.
+                    .layout { measurable, constraints ->
+                        val placeable = measurable.measure(constraints)
+                        layout(placeable.width, placeable.height) {
+                            placeable.placeRelative(0, itemOffsetY)
+                        }
                     }
                 val textStyle = MaterialTheme.typography.labelMedium
                 val textWeight = if (distance < 0.5f) {
