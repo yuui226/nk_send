@@ -238,6 +238,9 @@ function Get-Ledger {
 
 function Show-Ledger($resp) {
     $codes = @($resp.codes)
+    # 接口按最新优先返回，适合程序查询；交互终端改为旧码先打印、最新码最后打印，
+    # 这样长台账输出结束时，管理员无需向上翻页就能直接看到最关心的新激活码。
+    [array]::Reverse($codes)
     $paidUnbound = @($resp.paid_unbound)
     if ($paidUnbound.Count -gt 0) {
         Write-Host ""
