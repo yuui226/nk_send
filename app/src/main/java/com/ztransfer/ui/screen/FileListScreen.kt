@@ -79,6 +79,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -359,6 +360,9 @@ fun FileListScreen(
     // 普通重组、继续分批加载以及离开子页面再返回都仍复用当前状态。
     val gridState = key(state.files.isEmpty()) { rememberLazyGridState() }
     val scrollScope = rememberCoroutineScope()
+    val previewDensity = LocalDensity.current
+    // 提升到页面层：关闭预览前需要用同一份折叠状态定位照片所在的真实 LazyGrid 下标。
+    val collapsedDates = remember { mutableStateMapOf<String, Boolean>() }
     val atTop by remember {
         derivedStateOf {
             gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset < 8
@@ -725,6 +729,8 @@ fun FileListScreen(
     var previewAnchor by remember { mutableStateOf<Rect?>(null) }
     var previewSourceAtOpen by remember { mutableStateOf<Any?>(null) }
     var previewBuildJob by remember { mutableStateOf<Job?>(null) }
+    var previewReturnHandle by remember { mutableStateOf<Int?>(null) }
+    var previewReturnNonce by remember { mutableStateOf(0) }
     // 预览会话固定为打开瞬间的展示模型。“未传输”激活时，当前照片在
     // 后台传完会从网格派生列表移除；若预览仍直接引用实时模型，固定下标会
     // 突然指向下一张，末尾项还会直接让 overlay 消失。快照保证当次浏览稳定，
@@ -808,35 +814,45 @@ fun FileListScreen(
             transferState.organizeTransfersByDate,
         )
     }
-    // 单文件入队：列表轻触 + 预览页传输按钮共用。gating 与整组传输一致。
-    val onTapFile: (NikonCamera.FileInfo) -> Unit = onTapFile@{ file ->
-        if (transferState.transferDirUri == null) {
-            // 预览层盖在设置面板之上，先关掉预览再弹设置，否则用户看不见。
-            previewIndex = null
-            previewItems = emptyList()
-            previewSourceAtOpen = null
-            requestTransferDirectory()
-            return@onTapFile
-        }
-        if (!state.isConnectedToCamera && !hasLocalOriginal(file)) {
-            signalPulse++
-            showHint(notConnectedHint)
-        } else {
-            haptics.tick()
-            transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
-            // 单张"吸入":缩略图从格子位置起飞(count=1 → 单卡无叠影),
-            // 同一条弧线进胶囊。预览中格子若仍在注册表则照常飞；滚出屏幕则只入队无动画。
-            val fromCell = cellBoundsRegistry[file.handle]
-            // 同源去重:同帧双击防重复残影。
-            if (fromCell != null && queueFlights.none { it.from == fromCell }) {
-                queueFlights += QueueFlight(
-                    id = nextFlightId++, from = fromCell,
-                    packs = emptyList(), count = 1,
-                    topThumb = cameraViewModel.cachedThumbnail(file.handle)
-                )
-                heldFiles += 1
+    // 单文件入队共用同一套前置检查与任务创建；只有动画按操作来源分流：列表继续
+    // QueueFlight，预览页由自己的上滑投递动画反馈，不能隔着遮罩再飞一次底层格子。
+    val enqueueSingleFile: (NikonCamera.FileInfo, Boolean) -> Unit =
+        enqueueSingleFile@{ file, animateFromList ->
+            if (transferState.transferDirUri == null) {
+                // 预览层盖在设置面板之上，先关掉预览再弹设置，否则用户看不见。
+                previewIndex = null
+                previewItems = emptyList()
+                previewSourceAtOpen = null
+                requestTransferDirectory()
+                return@enqueueSingleFile
+            }
+            if (!state.isConnectedToCamera && !hasLocalOriginal(file)) {
+                signalPulse++
+                showHint(notConnectedHint)
+            } else {
+                haptics.tick()
+                transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
+                if (animateFromList) {
+                    // 单张"吸入":缩略图从格子位置起飞(count=1 → 单卡无叠影),
+                    // 同一条弧线进胶囊。预览来源明确不走这里。
+                    val fromCell = cellBoundsRegistry[file.handle]
+                    // 同源去重:同帧双击防重复残影。
+                    if (fromCell != null && queueFlights.none { it.from == fromCell }) {
+                        queueFlights += QueueFlight(
+                            id = nextFlightId++, from = fromCell,
+                            packs = emptyList(), count = 1,
+                            topThumb = cameraViewModel.cachedThumbnail(file.handle)
+                        )
+                        heldFiles += 1
+                    }
+                }
             }
         }
+    val onTapFile: (NikonCamera.FileInfo) -> Unit = { file ->
+        enqueueSingleFile(file, true)
+    }
+    val onTransferFromPreview: (NikonCamera.FileInfo) -> Unit = { file ->
+        enqueueSingleFile(file, false)
     }
 
     val onTransferBurstPreview: (List<NikonCamera.FileInfo>) -> Unit =
@@ -858,6 +874,84 @@ fun FileListScreen(
             // 全屏合集没有可信的列表坐标，不伪造飞行动画起点；整组只震一次、直接入队。
             haptics.tick()
             transferViewModel.addToQueue(remaining, cameraViewModel::getCamera)
+        }
+
+    // 关闭预览前把当前照片放回视野。很远时先在全黑预览层后无感预定位到相邻几行，
+    // 再走 LazyGrid 自身的短程平滑滚动；这样不会让框架为性能做的长距离跳段暴露出来。
+    val preparePreviewDismissTarget: suspend (NikonCamera.FileInfo) -> Rect? =
+        prepare@{ file ->
+            val groupsSnapshot = groups
+            val stillInCurrentResults = withContext(Dispatchers.Default) {
+                groupsSnapshot.any { group ->
+                    group.files.any { it.handle == file.handle }
+                }
+            }
+            // 预览期间可能因“未传输”等筛选条件自动移出当前照片。此时既不乱滚，
+            // 也不为了一个已不可见目标擅自展开连拍合集，直接使用原地淡出。
+            if (!stillInCurrentResults) return@prepare null
+
+            // 当前照片若来自折叠连拍，底层只有合集封面、没有 A 自己的格子。先在黑幕下
+            // 展开该合集，确保后续缩回和双脉冲都落在 A，而不是误指合集封面。
+            val returnBurstId = burstIdByHandle[file.handle]
+            if (transferState.collapseBurstPhotos && returnBurstId != null &&
+                expandedBurstCollections[returnBurstId] != true
+            ) {
+                expandedBurstCollections[returnBurstId] = true
+                withFrameNanos { }
+            }
+            val alreadyVisible = gridState.layoutInfo.visibleItemsInfo.any {
+                it.key == file.handle
+            }
+            if (!alreadyVisible) {
+                // 只在关闭时计算一次，且把可能有几千项的纯模型扫描移出主线程。
+                val collapsedSnapshot = collapsedDates.filterValues { it }.keys
+                val burstIdsSnapshot = expandedBurstCollections.keys.toSet()
+                val collapseBursts = transferState.collapseBurstPhotos
+                val target = withContext(Dispatchers.Default) {
+                    var lazyIndex = 0
+                    var found: Int? = null
+                    for (group in groupsSnapshot) {
+                        lazyIndex += 1 // 日期标题
+                        if (group.date in collapsedSnapshot) continue
+                        val groupItems = buildThumbnailGridItems(
+                            files = group.files,
+                            burstIdByHandle = burstIdByHandle,
+                            collapseBurstPhotos = collapseBursts,
+                            expandedBurstIds = burstIdsSnapshot,
+                        )
+                        for (item in groupItems) {
+                            if (item is ThumbnailGridItem.Photo && item.file.handle == file.handle) {
+                                found = lazyIndex
+                                break
+                            }
+                            lazyIndex += 1
+                        }
+                        if (found != null) break
+                    }
+                    found
+                }
+                target ?: return@prepare null
+                val current = gridState.firstVisibleItemIndex
+                val runway = transferState.thumbnailColumns.coerceIn(1, 4) * 3
+                if (abs(target - current) > runway * 2) {
+                    val nearby = if (target > current) {
+                        (target - runway).coerceAtLeast(0)
+                    } else {
+                        target + runway
+                    }
+                    gridState.scrollToItem(nearby)
+                    withFrameNanos { }
+                }
+                // 目标最终停在顶栏下方一段舒适留白处，而非生硬贴住屏幕顶边。
+                gridState.animateScrollToItem(
+                    index = target,
+                    scrollOffset = -with(previewDensity) { 88.dp.roundToPx() },
+                )
+                withFrameNanos { }
+            }
+            // 等一帧让 onGloballyPositioned 注册最新根坐标；找不到就退化为原地淡出。
+            withFrameNanos { }
+            cellBoundsRegistry[file.handle]
         }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
@@ -976,13 +1070,9 @@ fun FileListScreen(
         }
 
         if (state.files.isNotEmpty()) {
-            // 各日期分组的收起状态（key=日期）。收起的组不渲染其条目/缩略图，
-            // 因而缩略图不会加载；展开后条目重新 emit 才恢复加载。跨渐进加载持久保留。
-            val collapsedDates = remember { mutableStateMapOf<String, Boolean>() }
-
             // 分组批量传输。gating 用响应式的 isConnectedToCamera；
             // 队列内部经 provider 现取当前相机实例，中途重连后续传任务自动用新连接。
-            // 单文件入队见外层 onTapFile（列表点击与预览页按钮共用）。
+            // 单文件入队见外层 enqueueSingleFile；这里仅处理日期整组。
             val onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit = onTransferGroup@{ remaining, fromBounds ->
                 if (transferState.transferDirUri == null) {
                     requestTransferDirectory()
@@ -1096,6 +1186,8 @@ fun FileListScreen(
                 filterRevealWindow = filterRevealWindow,
                 exitingExportHandles = exitingExportHandles.keys,
                 exportReflowActive = exportReflowActive,
+                returnFocusHandle = previewReturnHandle,
+                returnFocusNonce = previewReturnNonce,
                 onExportExitFinished = { handle ->
                     if (handle in exitingExportHandles) {
                         finishedExportExitHandles = finishedExportExitHandles + handle
@@ -1314,9 +1406,13 @@ fun FileListScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                // 预览入队时只把真实队列胶囊抬到黑幕之上，残影才能确实落进胶囊并让
+                // 既有接收回弹可见；其余顶栏按钮在下方条件块中隐藏，不干扰沉浸预览。
+                .zIndex(if (previewIndex != null) 2f else 0f),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (previewIndex == null) {
             // 左：双 Z 标悬浮按钮（原"Z传"文本，换成自绘的尼康 Z 系列标志更简洁），
             // 本身即为设置入口（点击打开设置弹窗）。毛玻璃观感复用 GlassButton。
             GlassButton(
@@ -1412,6 +1508,7 @@ fun FileListScreen(
                     fillProgress = filterMarkFill,
                     contentDescription = stringResource(R.string.cd_filter_type)
                 )
+            }
             }
 
             // 右：传输胶囊（悬浮）。用"占满剩余宽度 + 靠右对齐"的 Box 承载，
@@ -1530,26 +1627,44 @@ fun FileListScreen(
                 PhotoPreviewOverlay(
                     items = previewItems,
                     initialIndex = idx,
-                    // 只有底层列表仍是打开瞬间的同一实例时，原格子坐标才可信。
-                    // 传输完成/文件增量加载/合集展开导致展示模型更换后，收起改为原地淡出，
-                    // 避免飞向已被其他照片占据的旧位置。引用比较是 O(1)，不扫描大列表。
+                    // 打开仍从原格子坐标展开；关闭时会重新定位当前照片并使用最新坐标，
+                    // 此处的旧坐标只负责首帧，模型改变也不会再缩回错误格位。
                     anchorRect = previewAnchor.takeIf { previewSourceAtOpen === previewSourceIdentity },
                     cameraViewModel = cameraViewModel,
                     hapticsEnabled = transferState.hapticsEnabled,
                     transfersBusy = transfersBusy,
                     initialRotationQuarterTurns = transferState.previewRotationQuarterTurns,
                     burstHandles = burstHandles,
-                    onTransfer = onTapFile,
+                    queueTaskFor = { file ->
+                        queuedIndexByHandle[file.handle]
+                            ?.let(transferState.tasks::getOrNull)
+                            ?.takeIf { it.file.handle == file.handle }
+                    },
+                    isTransferred = hasLocalOriginal,
+                    activeProgressFlow = transferViewModel.activeTransferProgress,
+                    queueTargetBounds = queueArea,
+                    onQueueFlightCaught = { pillCatchNonce++ },
+                    onTransfer = onTransferFromPreview,
                     onTransferBurst = onTransferBurstPreview,
                     onBurstExpandedChange = { id, expanded ->
                         if (expanded) expandedBurstCollections[id] = true
                         else expandedBurstCollections.remove(id)
                     },
                     onRotationChanged = transferViewModel::setPreviewRotationQuarterTurns,
-                    onDismiss = {
+                    prepareDismissTarget = preparePreviewDismissTarget,
+                    onDismiss = { returnFile ->
                         previewIndex = null
                         previewItems = emptyList()
                         previewSourceAtOpen = null
+                        returnFile?.let { file ->
+                            val nonce = previewReturnNonce + 1
+                            previewReturnNonce = nonce
+                            previewReturnHandle = file.handle
+                            scrollScope.launch {
+                                delay(760)
+                                if (previewReturnNonce == nonce) previewReturnHandle = null
+                            }
+                        }
                     }
                 )
             }
@@ -2378,6 +2493,8 @@ private fun ThumbnailGrid(
     filterRevealWindow: Boolean = false,
     exitingExportHandles: Set<Int> = emptySet(),
     exportReflowActive: Boolean = false,
+    returnFocusHandle: Int? = null,
+    returnFocusNonce: Int = 0,
     onExportExitFinished: (Int) -> Unit = {}
 ) {
     val colors = AppTheme.colors
@@ -2675,6 +2792,9 @@ private fun ThumbnailGrid(
                                     revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
                                     revealKey = filterRevealTick,
                                     exiting = file.handle in exitingExportHandles,
+                                    returnFocusNonce = returnFocusNonce.takeIf {
+                                        returnFocusHandle == file.handle
+                                    },
                                     onExitFinished = onExportExitFinished,
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -2954,6 +3074,7 @@ private fun ThumbnailCell(
     // 变化即重播入场动画（筛选确定时存量格子也要重播）；平时保持不变。
     revealKey: Any? = null,
     exiting: Boolean = false,
+    returnFocusNonce: Int? = null,
     onExitFinished: (Int) -> Unit = {}
 ) {
     val colors = AppTheme.colors
@@ -2969,6 +3090,7 @@ private fun ThumbnailCell(
     // 仅当前完成传输的格子缩小淡出。动画结束后父层才把它加入过滤集合，
     // 因而 LazyGrid 有完整的旧、 新位置可用于其余条目的补位动画。
     val exitProgress = remember(file.handle) { Animatable(1f) }
+    val returnFocusPulse = remember(file.handle) { Animatable(0f) }
     val latestOnExitFinished by rememberUpdatedState(onExitFinished)
     LaunchedEffect(exiting) {
         if (exiting) {
@@ -2999,6 +3121,16 @@ private fun ThumbnailCell(
             cellBoundsRegistry.remove(file.handle)
         }
     }
+    LaunchedEffect(returnFocusNonce) {
+        if (returnFocusNonce != null) {
+            returnFocusPulse.snapTo(0f)
+            repeat(2) {
+                returnFocusPulse.animateTo(1f, tween(110, easing = FastOutSlowInEasing))
+                returnFocusPulse.animateTo(0f, tween(155, easing = FastOutSlowInEasing))
+                delay(35)
+            }
+        }
+    }
 
     val thumbnailShape = RoundedCornerShape(8.dp)
     val thumbnailBorderWidth = if (inExpandedBurstCollection) 1.dp else THUMBNAIL_THEME_BORDER_WIDTH
@@ -3018,8 +3150,9 @@ private fun ThumbnailCell(
                 val revealScale = if (reveal) 0.94f + 0.06f * revealP else 1f
                 val exitScale = 0.82f + 0.18f * exitP
                 val s = revealScale * exitScale
-                scaleX = s
-                scaleY = s
+                val returnScale = 1f + 0.055f * returnFocusPulse.value
+                scaleX = s * returnScale
+                scaleY = s * returnScale
             }
             .clip(thumbnailShape)
             .background(colors.thumbPlaceholder)
@@ -3174,6 +3307,15 @@ private fun ThumbnailCell(
         ) {
             TransferredIndicator()
         }
+        if (returnFocusNonce != null) {
+            // 只给目标格子挂一层短命亮度脉冲；alpha 在图层阶段读取，不逐帧重组网格。
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer { alpha = returnFocusPulse.value * 0.11f }
+                    .background(Color.White)
+            )
+        }
     }
 }
 
@@ -3188,7 +3330,7 @@ internal fun showsQueueStatusOverlay(status: TransferStatus): Boolean =
     }
 
 @Composable
-private fun TransferredIndicator() {
+internal fun TransferredIndicator() {
     val colors = AppTheme.colors
     // 已传输是状态徽标而不是可点击按钮：复用全局玻璃材质，但不挂点击、投影或按压反馈。
     // heavy 实底保证叠在任何明暗照片上都清楚，绿色细边与对号共同表达“已完成”。
@@ -3970,7 +4112,7 @@ internal fun BurstCollectionBadge(
  * 与"分类类"的彩色角贴(左上类型/右上连拍)分层。
  */
 @Composable
-private fun TransferStatusIndicator(
+internal fun TransferStatusIndicator(
     task: TransferTask,
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
 ) {
@@ -4055,7 +4197,7 @@ internal val ProtectBadgeColor = Color(0xFFFFC107)
 
 // "吸入"节奏:前段缓(残影凝聚成形、离巢慢),后段陡(加速俯冲进胶囊)——
 // 到达时带着冲量,与胶囊的"接住"弹跳在动量上衔接。
-private val FlightEasing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.35f)
+internal val QueueFlightEasing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.35f)
 
 /**
  * "打包 → 吸入"两幕连播:
@@ -4089,7 +4231,7 @@ private fun QueueFlightGhost(flight: QueueFlight, target: Rect?, onDone: () -> U
         if (flight.packs.isNotEmpty()) {
             pack.animateTo(1f, tween(420, easing = LinearEasing))
         }
-        progress.animateTo(1f, tween(560, easing = FlightEasing))
+        progress.animateTo(1f, tween(560, easing = QueueFlightEasing))
         currentOnDone()
     }
 
