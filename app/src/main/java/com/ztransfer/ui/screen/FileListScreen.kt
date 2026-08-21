@@ -1033,7 +1033,7 @@ fun FileListScreen(
             }
 
             // 筛选后无匹配：给出指认原因的空态（原始列表非空，只是被筛掉了）。
-            if (groups.isEmpty() && state.hasCompletedFileScan) {
+            if (filterActive && groups.isEmpty() && state.hasCompletedFileScan) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         // 空态缓慢呼吸（与其余空态同参数）。
@@ -1049,6 +1049,19 @@ fun FileListScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(stringResource(R.string.no_photos_match_filter), color = colors.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(18.dp))
+                        GlassButton(
+                            onClick = {
+                                transferViewModel.setFilters(PhotoFilterCriteria())
+                            }
+                        ) {
+                            Text(
+                                text = stringResource(R.string.clear_filters),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.onBackground,
+                            )
+                        }
                     }
                 }
             }

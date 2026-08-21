@@ -47,6 +47,7 @@
     <string name="camera_not_connected">相机未连接</string>
     <string name="press_back_to_exit">再按一次退出</string>
     <string name="no_photos_match_filter">没有符合筛选的照片</string>
+    <string name="clear_filters">清除筛选</string>
     <string name="loading_more">正在加载更多…</string>
     <string name="unknown_date">未知日期</string>
     <string name="filter_all">全部</string>

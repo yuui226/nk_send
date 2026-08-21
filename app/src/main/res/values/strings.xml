@@ -47,6 +47,7 @@
     <string name="camera_not_connected">Camera not connected</string>
     <string name="press_back_to_exit">Press back again to exit</string>
     <string name="no_photos_match_filter">No photos match the filter</string>
+    <string name="clear_filters">Clear filters</string>
     <string name="loading_more">Loading more…</string>
     <string name="unknown_date">Unknown date</string>
     <string name="filter_all">All</string>
