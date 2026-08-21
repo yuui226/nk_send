@@ -28,8 +28,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -78,6 +80,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
@@ -118,6 +121,7 @@ import com.ztransfer.protocol.liveViewWarmupRemainingMs
 import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcAngleLevelRoll
 import com.ztransfer.protocol.rcAutoIsoCandidateProps
+import com.ztransfer.protocol.rcBatteryPercentage
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
 import com.ztransfer.protocol.rcChangeApplicationMode
@@ -144,7 +148,9 @@ import com.ztransfer.protocol.movieStartNeedsLiveViewRestart
 import com.ztransfer.protocol.movieProhibitIndicatesRecording
 import com.ztransfer.protocol.diagnosticSummary
 import com.ztransfer.ui.theme.AppTheme
+import com.ztransfer.ui.theme.LocalButtonTexturePalette
 import com.ztransfer.ui.theme.Motion
+import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
@@ -515,6 +521,7 @@ object RemoteTrialNotice {
 
 /** 首帧到达前的取景器占位宽高比（尼康监看常见 3:2）；有帧后一律用帧的真实比例。 */
 private const val DEFAULT_VIEWFINDER_ASPECT = 3f / 2f
+private const val BATTERY_REFRESH_INTERVAL_MS = 120_000L
 
 @Composable
 private fun RemoteContent(
@@ -559,6 +566,9 @@ private fun RemoteContent(
     // 只表示本页面成功启动且仍存续的主体追踪。协议端另有相机级状态负责成对结束命令；
     // 这里用于决定是否持续绘制相机每帧返回的移动框。
     var subjectTrackingActive by remember { mutableStateOf(false) }
+    // 标准 PTP BatteryLevel(0x5001)：保留属性描述以便后续只读标量值，
+    // 避免 120s 兜底刷新时重复拉取 DevicePropDesc。
+    var batteryParam by remember { mutableStateOf<RcParam?>(null) }
     val params = remember { mutableStateMapOf<Int, RcParam>() }
     // 每个参数一个待发送任务：乐观更新后合并发送最终值（声明在前，事件循环要引用）
     val pendingSets = remember { mutableMapOf<Int, Job>() }
@@ -682,6 +692,18 @@ private fun RemoteContent(
     suspend fun refreshParam(prop: Int) {
         val cam = cameraViewModel.getCamera() ?: return
         runCatching { cam.rcGetCompatibleParam(prop) }.getOrNull()?.let { params[prop] = it }
+    }
+
+    suspend fun refreshBattery(forceDescribe: Boolean = false) {
+        val cam = cameraViewModel.getCamera() ?: return
+        val current = batteryParam
+        val refreshed = if (current == null || forceDescribe) {
+            runCatching { cam.rcGetParam(Lab.PROP_BATTERY_LEVEL) }.getOrNull()
+        } else {
+            runCatching { cam.rcRefreshParam(current) }.getOrNull()
+        }
+        // 瞬时忙/通信失败时保留上次有效读数，避免顶栏无意义闪烁。
+        if (refreshed != null) batteryParam = refreshed
     }
 
     suspend fun refreshAutoIso() {
@@ -1140,6 +1162,7 @@ private fun RemoteContent(
             // 依然先于轮询，与首次进页同样不抢锁。
             initialLoaded = false
             movieMode = false
+            batteryParam = null
             return@LaunchedEffect
         }
         val sessionCamera = cameraViewModel.getCamera() ?: return@LaunchedEffect
@@ -1147,6 +1170,7 @@ private fun RemoteContent(
             // 新连接不继承上一条连接的拨杆状态。首次读取失败时按照片模式处理，优先
             // 保证机身画面与快门不被错误锁进电脑控制模式。
             movieMode = false
+            batteryParam = null
             // 先确定照片/视频拨杆，再只读取对应的一组参数。旧流程先读照片组、随后切到
             // 视频组，会表现为参数出现、清空、再加载一遍。
             refreshMovieMode(refreshExposureOnChange = false)
@@ -1167,6 +1191,8 @@ private fun RemoteContent(
             refreshAutoIso()
             refreshMode()
             refreshFocusMode()
+            // 进页先读一次，电量能与曝光参数一起在首帧前显示。
+            refreshBattery(forceDescribe = true)
             initialLoaded = true
             startSession(hdLiveView)
             awaitCancellation()
@@ -1190,6 +1216,20 @@ private fun RemoteContent(
                     devLog("SetControlMode(0) resp=0x%04X".format(rc and 0xFFFF))
                 }
             }
+        }
+    }
+
+    // 部分机身不发 BatteryLevel 变更事件：每 120s 兜底刷新。首读失败时
+    // 也会重新拉取属性描述，避免进页瞬间相机忙导致整次会话一直显示未知。
+    // 拍摄/录像命令期间等忙状态结束再读，不抢占实时取景的共用 ioMutex。
+    LaunchedEffect(connected, initialLoaded) {
+        if (!connected || !initialLoaded) return@LaunchedEffect
+        while (isActive) {
+            delay(BATTERY_REFRESH_INTERVAL_MS)
+            while (isActive && (!liveViewStable || capturing || recording || recBusy)) {
+                delay(1_000L)
+            }
+            refreshBattery()
         }
     }
 
@@ -1365,6 +1405,7 @@ private fun RemoteContent(
                     Lab.EVT_DEVICE_PROP_CHANGED -> {
                         val reportedProp = e.second.toInt()
                         val prop = rcCanonicalExposureProp(reportedProp)
+                        if (reportedProp == Lab.PROP_BATTERY_LEVEL) refreshBattery()
                         if (reportedProp in ALL_AUTO_ISO_PROPS) refreshAutoIso()
                         if (reportedProp == Lab.PROP_NK_ISO_CONTROL_SENSITIVITY &&
                             autoIsoProp?.let { params[it]?.current != 0L } == true
@@ -2334,11 +2375,14 @@ private fun RemoteContent(
                     enter = fadeIn(tween(260, easing = FastOutSlowInEasing)),
                     exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
                 ) {
-                    SignalPill(
-                        rssi = camState.wifiRssi,
-                        connected = connected,
-                        connectionType = camState.connectionType
-                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SignalPill(
+                            rssi = camState.wifiRssi,
+                            connected = connected,
+                            connectionType = camState.connectionType
+                        )
+                        BatteryPill(percent = rcBatteryPercentage(batteryParam))
+                    }
                 }
                 Spacer(Modifier.weight(1f))
                 GlassButton(
@@ -2880,11 +2924,14 @@ private fun RemoteContent(
                         enter = fadeIn(tween(260, easing = FastOutSlowInEasing)),
                         exit = fadeOut(tween(180, easing = FastOutSlowInEasing))
                     ) {
-                        SignalPill(
-                            rssi = camState.wifiRssi,
-                            connected = connected,
-                            connectionType = camState.connectionType
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            SignalPill(
+                                rssi = camState.wifiRssi,
+                                connected = connected,
+                                connectionType = camState.connectionType
+                            )
+                            BatteryPill(percent = rcBatteryPercentage(batteryParam))
+                        }
                     }
                     GlassButton(
                         onClick = {
@@ -3148,6 +3195,126 @@ private fun RemoteContent(
             }
         }
     }
+
+@Composable
+private fun BatteryPill(percent: Int?) {
+    val colors = AppTheme.colors
+    var expanded by remember { mutableStateOf(false) }
+    val level = when {
+        percent == null || percent <= 0 -> 0
+        percent <= 33 -> 1
+        percent <= 66 -> 2
+        else -> 3
+    }
+    val color = when {
+        percent == null -> colors.onSurfaceVariant
+        percent <= 20 -> colors.statusError
+        percent <= 50 -> colors.accentOrange
+        else -> colors.statusConnected
+    }
+    val skin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val dark = colors.background.luminance() < 0.5f
+    val bars = remember(skin, dark, level, color, colors.onSurfaceVariant) {
+        if (percent == null) {
+            SignalBarPalette(
+                lit = colors.onSurfaceVariant,
+                unlit = colors.onSurfaceVariant.copy(alpha = 0.28f)
+            )
+        } else {
+            signalBarPalette(
+                skin = skin,
+                dark = dark,
+                // 木纹调色器以 4 为强、2 为中、0 为弱；电池图标本身仍画 3 格。
+                level = when (level) {
+                    3 -> 4
+                    2 -> 2
+                    else -> 0
+                },
+                defaultLit = color,
+                defaultUnlit = colors.onSurfaceVariant.copy(alpha = 0.28f)
+            )
+        }
+    }
+    val valueText = percent?.let { "$it%" } ?: "--"
+    val batteryContentDescription = "${stringResource(R.string.cd_camera_battery)} $valueText"
+
+    GlassButton(
+        onClick = { expanded = !expanded },
+        shape = RoundedCornerShape(22.dp),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
+        modifier = Modifier
+            .height(36.dp)
+            .widthIn(min = 48.dp)
+            .semantics {
+                contentDescription = batteryContentDescription
+            }
+    ) {
+        Row(
+            modifier = Modifier.height(15.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 收起时只留电池轮廓和 3 格电量；未知值画空格，不从其他状态反推。
+            Row(
+                modifier = Modifier
+                    .width(21.dp)
+                    .height(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier
+                        .width(18.dp)
+                        .fillMaxHeight()
+                        .border(1.dp, bars.lit, RoundedCornerShape(2.5.dp))
+                        .padding(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(1.dp)
+                ) {
+                    repeat(3) { index ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(1.dp))
+                                .background(if (index < level) bars.lit else bars.unlit)
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(topEnd = 1.5.dp, bottomEnd = 1.5.dp))
+                        .background(bars.lit)
+                )
+            }
+            // 与 SignalPill 使用同一套展开弹性和收起时序，宽度随百分比自然过渡。
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandHorizontally(
+                    animationSpec = Motion.bouncy(),
+                    expandFrom = Alignment.Start
+                ) + fadeIn(),
+                exit = shrinkHorizontally(
+                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.Start
+                ) + fadeOut(tween(160))
+            ) {
+                Text(
+                    text = valueText,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontFeatureSettings = "tnum"
+                    ),
+                    fontWeight = FontWeight.Medium,
+                    color = bars.lit,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier
+                        .padding(start = 6.dp)
+                        .wrapContentHeight(unbounded = true)
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun ViewfinderStatusBadge(text: String, weight: FontWeight) {

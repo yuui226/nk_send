@@ -67,6 +67,7 @@ object Lab {
     const val NK_NOT_LIVE_VIEW = 0xA00B
 
     // ---- 关注的属性 ----
+    const val PROP_BATTERY_LEVEL = 0x5001
     const val PROP_WHITE_BALANCE = 0x5005
     const val PROP_F_NUMBER = 0x5007
     const val PROP_FOCUS_MODE = 0x500A
@@ -154,6 +155,7 @@ object Lab {
     )
 
     val INTEREST_PROPS = linkedMapOf(
+        PROP_BATTERY_LEVEL to "BatteryLevel",
         PROP_F_NUMBER to "FNumber",
         PROP_NK_SHUTTER to "NikonShutterSpeed",
         PROP_EXPOSURE_TIME_STD to "ExposureTime(std)",
@@ -845,6 +847,19 @@ data class RcTapFocusResult(
     val trackingStarted: Boolean,
     val afResult: RcAfResult?
 )
+
+/**
+ * 相机上报的标准 PTP BatteryLevel(0x5001)。该属性规定为 UINT8 0..100；
+ * 值域外的数字（部分机身可能用 0xFF 表示未知）不猜测、不折算。
+ */
+fun rcBatteryPercentage(param: RcParam?): Int? = param
+    ?.takeIf {
+        it.prop == Lab.PROP_BATTERY_LEVEL &&
+            it.dataType == 0x0002 &&
+            it.current in 0L..100L
+    }
+    ?.current
+    ?.toInt()
 
 internal data class RcTapFocusStartResult(
     val moveResponseCode: Int?,

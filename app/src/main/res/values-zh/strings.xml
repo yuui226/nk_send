@@ -506,4 +506,5 @@
     <string name="local_photo_saved">已保存到：%1$s</string>
     <string name="local_photo_select_failed">请选择保存在本机相册中且可写入的照片</string>
     <string name="local_photo_save_failed">生成失败，原照片未受影响</string>
+    <string name="cd_camera_battery">相机电量</string>
 </resources>
