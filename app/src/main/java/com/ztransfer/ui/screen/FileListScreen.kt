@@ -211,6 +211,34 @@ internal fun queuePillMode(
     else -> PillMode.DONE
 }
 
+/**
+ * 队列胶囊可安全共用宽度的文本类别。同单位、同整数位数的速度在 tnum 下等宽；
+ * 单位、速度整数位数或计数位数变化时必须重新测量，不能沿用此前的最大宽度。
+ */
+internal data class QueuePillWidthKey(
+    val mode: PillMode,
+    val speedUnit: String?,
+    val speedIntegerDigits: Int,
+    val countDigits: Int,
+)
+
+internal fun queuePillWidthKey(
+    mode: PillMode,
+    speedText: String?,
+    count: Int,
+): QueuePillWidthKey {
+    if (mode != PillMode.COUNTING) {
+        return QueuePillWidthKey(mode, speedUnit = null, speedIntegerDigits = 0, countDigits = 0)
+    }
+    val numericPart = speedText?.substringBefore(' ')
+    return QueuePillWidthKey(
+        mode = mode,
+        speedUnit = speedText?.substringAfter(' ', missingDelimiterValue = ""),
+        speedIntegerDigits = numericPart?.substringBefore('.')?.length ?: 0,
+        countDigits = count.coerceAtLeast(0).toString().length,
+    )
+}
+
 internal fun queuePillDisplayRemaining(actualRemaining: Int, heldCount: Int): Int {
     val actual = actualRemaining.coerceAtLeast(0)
     if (actual == 0) return 0
@@ -1783,12 +1811,16 @@ fun QueuePill(
     // real non-empty queue into the completed state and collapse the pill.
     val allDone = downloadRemaining == 0 && generationRemaining == 0
     val transferring = transferState.isTransferring
-    val showingGeneration = downloadRemaining == 0 && generationRemaining > 0
     val activeProgress = liveProgress?.takeIf {
         it.taskId == taskSummary.activeDownloadTaskId
     }
     // Keep the last valid batch speed across the short preparation gap between two files.
     val activeSpeed = liveProgress?.retainedBytesPerSecond ?: 0L
+    val activeSpeedText = activeSpeed
+        .takeIf { transferring && it > 0L }
+        ?.let(::formatSpeed)
+    val mode = queuePillMode(downloadRemaining, generationRemaining)
+    val widthKey = queuePillWidthKey(mode, activeSpeedText, remaining)
     val hasActive = taskSummary.hasActive
     // 数字延迟显现：刚入队的任务可能马上被"已存在"跳过（remaining 1→0 一闪而过），
     // 那种情况只播 done→图标转场、不闪数字。真正开始下载(TRANSFERING)立即显示数字；
@@ -1855,16 +1887,16 @@ fun QueuePill(
     val density = LocalDensity.current
     var contentWidthPx by remember { mutableStateOf(0) }
     var activeQueueMaxWidthPx by remember { mutableStateOf(0) }
-    LaunchedEffect(allDone) {
-        if (allDone) activeQueueMaxWidthPx = 0
-    }
+    var measuredWidthKey by remember { mutableStateOf<QueuePillWidthKey?>(null) }
     val collapsedWidthPx = with(density) { 46.dp.toPx() } // 22dp 图标 + 左右各 12dp
     val widthAnim = remember { Animatable(0f) }
     var firstMeasure by remember { mutableStateOf(true) }
-    val stableContentWidthPx = if (allDone || showingGeneration) {
-        contentWidthPx
-    } else {
+    val stableContentWidthPx = if (
+        mode == PillMode.COUNTING && measuredWidthKey == widthKey
+    ) {
         maxOf(contentWidthPx, activeQueueMaxWidthPx)
+    } else {
+        contentWidthPx
     }
     val targetWidthPx = if (collapsedToIcon) collapsedWidthPx else stableContentWidthPx.toFloat()
     LaunchedEffect(targetWidthPx) {
@@ -1964,14 +1996,18 @@ fun QueuePill(
             Box(modifier = Modifier.wrapContentWidth(Alignment.End, unbounded = true)) {
                 Box(modifier = Modifier.onGloballyPositioned {
                     contentWidthPx = it.size.width
-                    if (!allDone && !showingGeneration && it.size.width > activeQueueMaxWidthPx) {
+                    if (measuredWidthKey != widthKey) {
+                        measuredWidthKey = widthKey
+                        activeQueueMaxWidthPx = it.size.width
+                    } else if (
+                        mode == PillMode.COUNTING && it.size.width > activeQueueMaxWidthPx
+                    ) {
                         activeQueueMaxWidthPx = it.size.width
                     }
                 }) {
                     // 胶囊内部的 Done / 计数切换用交叉淡化 + 轻微缩放过渡，不硬切。
                     // 尺寸动画交给外层的弹性宽度弹簧（snap 禁用 AnimatedContent 自带的尺寸
                     // 动画，避免两套叠加）；计数态内部的数字/速度更新不触发转场，原地刷新。
-                    val mode = queuePillMode(downloadRemaining, generationRemaining)
                     AnimatedContent(
                         targetState = mode,
                         // 胶囊右缘钉死、向左伸缩：新旧内容必须都锚定右缘（CenterEnd），
@@ -2026,9 +2062,9 @@ fun QueuePill(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     // 速度在前（仅传输且有速度时显示）。tnum：等宽数字，位数相同则宽度恒定。
-                                    if (transferring && activeSpeed > 0L) {
+                                    if (activeSpeedText != null) {
                                         Text(
-                                            text = formatSpeed(activeSpeed),
+                                            text = activeSpeedText,
                                             style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                             color = colors.accentBlue,
                                             fontWeight = FontWeight.Bold
