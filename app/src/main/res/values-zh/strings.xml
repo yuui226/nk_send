@@ -13,6 +13,7 @@
     <string name="camera_session_channel_name">相机无线连接</string>
     <string name="camera_session_notification_title">无线相机已连接</string>
     <string name="camera_session_notification_text">Z传正在保持无线相机会话</string>
+    <string name="notification_permission_first_launch_hint">通知权限用于降低 Z传在后台运行时被系统终止的可能，不会发送其他通知，可放心开启。</string>
 
     <!-- 连接页 -->
     <string name="usb_unknown_error">未知 USB 错误</string>

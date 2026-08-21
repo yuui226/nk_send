@@ -2,4 +2,6 @@
 <full-backup-content>
     <!-- Tokens, activation codes and pending payment orders are bearer credentials. -->
     <exclude domain="sharedpref" path="license.xml" />
+    <!-- 首启提示标记不随云备份恢复；卸载重装后应再显示一次。 -->
+    <exclude domain="sharedpref" path="ztransfer_first_launch.xml" />
 </full-backup-content>

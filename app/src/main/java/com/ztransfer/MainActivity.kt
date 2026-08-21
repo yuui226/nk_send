@@ -11,21 +11,29 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import com.ztransfer.ui.theme.Motion
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -42,6 +50,7 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -61,14 +70,42 @@ class MainActivity : ComponentActivity() {
         // 每 6 小时至多检查一次；软更新每日最多提示一次，硬更新始终阻止继续使用。
         AppUpdateManager.init(applicationContext)
         enableEdgeToEdge()   // 内容延伸到系统栏后面，各屏自行处理 inset
-        requestNotificationPermissionIfNeeded()
+        val showFirstLaunchNotificationHint = shouldShowFirstLaunchNotificationHint(
+            sdkInt = Build.VERSION.SDK_INT,
+            firstLaunch = claimFirstLaunch(),
+            permissionGranted = hasNotificationPermission()
+        )
         setContent {
             // 主题模式存在 TransferViewModel（与其它设置同处持久化），
             // 在主题之上先取出来，切换即全局重排配色。
             val transferViewModel: TransferViewModel = viewModel()
             val transferState by transferViewModel.state.collectAsState()
             ZTransferTheme(themeMode = transferState.themeMode, skinPreset = transferState.skinPreset) {
-                MainScreen(transferViewModel)
+                Box(Modifier.fillMaxSize()) {
+                    MainScreen(transferViewModel)
+                    var hintVisible by remember { mutableStateOf(showFirstLaunchNotificationHint) }
+                    LaunchedEffect(showFirstLaunchNotificationHint) {
+                        if (!showFirstLaunchNotificationHint) return@LaunchedEffect
+                        // 先让顶部气泡绘制一帧，再呼出系统权限框；两者同时可见且不重叠。
+                        withFrameNanos { }
+                        requestNotificationPermissionIfNeeded()
+                        delay(FIRST_LAUNCH_HINT_DURATION_MS)
+                        hintVisible = false
+                    }
+                    AnimatedVisibility(
+                        visible = hintVisible,
+                        enter = fadeIn(tween(200)) +
+                            slideInVertically(tween(200)) { -it / 3 },
+                        exit = fadeOut(tween(260)),
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .statusBarsPadding()
+                            .padding(horizontal = 24.dp)
+                            .padding(top = 60.dp)
+                    ) {
+                        FirstLaunchNotificationHint()
+                    }
+                }
             }
         }
     }
@@ -79,15 +116,33 @@ class MainActivity : ComponentActivity() {
         com.ztransfer.license.LicenseManager.onAppForeground()
     }
 
-    /** Android 13+ 需运行时授权才能展示前台传输通知；拒绝不影响服务运行，仅隐藏通知。 */
+    private fun hasNotificationPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+
+    /** 读取并记录“安装后首次启动”，Activity 重建和以后启动都返回 false。 */
+    private fun claimFirstLaunch(): Boolean {
+        val prefs = getSharedPreferences(FIRST_LAUNCH_PREFERENCES, MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_HAS_LAUNCHED, false)) return false
+        prefs.edit().putBoolean(KEY_HAS_LAUNCHED, true).apply()
+        return true
+    }
+
+    /** Android 13+ 需运行时授权才能在通知栏展示前台任务状态。 */
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val granted = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.POST_NOTIFICATIONS
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!granted) {
+        if (!hasNotificationPermission()) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    private companion object {
+        const val FIRST_LAUNCH_PREFERENCES = "ztransfer_first_launch"
+        const val KEY_HAS_LAUNCHED = "has_launched"
+        const val FIRST_LAUNCH_HINT_DURATION_MS = 4_000L
     }
 }
 
@@ -100,6 +155,32 @@ sealed class Screen(val route: String) {
 
 internal fun shouldPreferHighThroughputTransfers(route: String?): Boolean =
     route == Screen.Files.route || route == Screen.Transfer.route
+
+internal fun shouldShowFirstLaunchNotificationHint(
+    sdkInt: Int,
+    firstLaunch: Boolean,
+    permissionGranted: Boolean
+): Boolean = sdkInt >= Build.VERSION_CODES.TIRAMISU && firstLaunch && !permissionGranted
+
+@Composable
+private fun FirstLaunchNotificationHint() {
+    val colors = AppTheme.colors
+    Surface(
+        modifier = Modifier.widthIn(max = 380.dp),
+        shape = RoundedCornerShape(22.dp),
+        color = colors.glassSurfaceHeavy,
+        shadowElevation = 6.dp,
+        border = BorderStroke(1.dp, colors.glassPanelBorder)
+    ) {
+        Text(
+            text = stringResource(R.string.notification_permission_first_launch_hint),
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.onBackground,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+        )
+    }
+}
 
 @Composable
 fun MainScreen(transferViewModel: TransferViewModel) {
