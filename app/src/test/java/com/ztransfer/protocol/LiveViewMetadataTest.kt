@@ -19,13 +19,14 @@ class LiveViewMetadataTest {
     private fun z30Packet(
         judgement: Int = 2,
         frameCount: Int = 1,
-        selectedIndex: Int = 0
+        selectedIndex: Int = 0,
+        headerSize: Int = 512
     ): ByteArray {
         val jpegSize = 32
-        return ByteArray(512 + jpegSize).also { data ->
+        return ByteArray(headerSize + jpegSize).also { data ->
             putBe16(data, 0, 1)
             putBe16(data, 2, 0)
-            putBe32(data, 8, 512)
+            putBe32(data, 8, headerSize)
             putBe32(data, 12, jpegSize)
             putBe16(data, 16, 5568)
             putBe16(data, 18, 3712)
@@ -38,9 +39,9 @@ class LiveViewMetadataTest {
             putBe16(data, 50, 314)
             putBe16(data, 52, 2784)
             putBe16(data, 54, 878)
-            data[512] = 0xFF.toByte()
-            data[513] = 0xD8.toByte()
-            data[514] = 0xFF.toByte()
+            data[headerSize] = 0xFF.toByte()
+            data[headerSize + 1] = 0xD8.toByte()
+            data[headerSize + 2] = 0xFF.toByte()
         }
     }
 
@@ -185,5 +186,87 @@ class LiveViewMetadataTest {
         assertNotNull(metadata)
         assertNull(metadata?.focusCoordinateWidth)
         assertNull(metadata?.focusCoordinateHeight)
+    }
+
+    @Test
+    fun parsesStereoSoundLevelsFrom512ByteHeader() {
+        val packet = z30Packet().also {
+            // +312 是旧的尾部推断，会稳定命中保留区；即使放入非法值也不应影响
+            // 已由真机差分确认的 +388..+391。
+            it[512 - 200] = 0x7F
+            it[388] = 11
+            it[389] = 9
+            it[390] = 7
+            it[391] = 4
+        }
+
+        val sound = parseLiveViewMetadata(
+            packet,
+            jpegOffset = 512,
+            operation = Lab.NK_GET_LIVE_VIEW_IMG_EX
+        )?.soundLevels
+
+        assertNotNull(sound)
+        assertEquals(11, sound?.peakLeft)
+        assertEquals(9, sound?.peakRight)
+        assertEquals(7, sound?.currentLeft)
+        assertEquals(4, sound?.currentRight)
+    }
+
+    @Test
+    fun parsesStereoSoundLevelsFrom1024ByteHeader() {
+        val packet = z30Packet(headerSize = 1024).also {
+            val soundOffset = 1024 - 200
+            it[soundOffset] = 14
+            it[soundOffset + 1] = 13
+            it[soundOffset + 2] = 10
+            it[soundOffset + 3] = 8
+        }
+
+        val sound = parseLiveViewMetadata(
+            packet,
+            jpegOffset = 1024,
+            operation = Lab.NK_GET_LIVE_VIEW_IMG_EX
+        )?.soundLevels
+
+        assertNotNull(sound)
+        assertEquals(14, sound?.peakLeft)
+        assertEquals(8, sound?.currentRight)
+    }
+
+    @Test
+    fun invalidExtendedSoundLevelsDoNotDiscardFocusMetadata() {
+        val packet = z30Packet(headerSize = 1024).also {
+            it[824 + 2] = 15
+        }
+
+        val metadata = parseLiveViewMetadata(
+            packet,
+            jpegOffset = 1024,
+            operation = Lab.NK_GET_LIVE_VIEW_IMG_EX
+        )
+
+        assertNotNull(metadata)
+        assertEquals(LiveViewFocusJudgement.FOCUSED, metadata?.focusJudgement)
+        assertNotNull(metadata?.selectedFocusFrame)
+        assertNull(metadata?.soundLevels)
+    }
+
+    @Test
+    fun invalidCompactSoundLevelsDoNotDiscardFocusMetadata() {
+        val packet = z30Packet().also {
+            it[390] = 15
+        }
+
+        val metadata = parseLiveViewMetadata(
+            packet,
+            jpegOffset = 512,
+            operation = Lab.NK_GET_LIVE_VIEW_IMG_EX
+        )
+
+        assertNotNull(metadata)
+        assertEquals(LiveViewFocusJudgement.FOCUSED, metadata?.focusJudgement)
+        assertNotNull(metadata?.selectedFocusFrame)
+        assertNull(metadata?.soundLevels)
     }
 }

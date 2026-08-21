@@ -350,6 +350,7 @@
     <string name="lab_copy_log">复制日志</string>
     <string name="cd_remote_zebra">斑马纹</string>
     <string name="cd_remote_level">水平仪</string>
+    <string name="cd_remote_audio_levels">音频电平</string>
     <string name="cd_remote_rec_start">录制</string>
     <string name="cd_remote_rec_pause">暂停录制</string>
     <string name="cd_remote_rec_resume">恢复录制</string>

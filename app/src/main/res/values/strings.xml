@@ -350,6 +350,7 @@
     <string name="lab_copy_log">Copy log</string>
     <string name="cd_remote_zebra">Zebra stripes</string>
     <string name="cd_remote_level">Level</string>
+    <string name="cd_remote_audio_levels">Audio levels</string>
     <string name="cd_remote_rec_start">Record</string>
     <string name="cd_remote_rec_pause">Pause recording</string>
     <string name="cd_remote_rec_resume">Resume recording</string>

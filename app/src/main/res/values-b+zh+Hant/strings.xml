@@ -346,6 +346,7 @@
     <string name="lab_copy_log">複製日誌</string>
     <string name="cd_remote_zebra">斑馬紋</string>
     <string name="cd_remote_level">水平儀</string>
+    <string name="cd_remote_audio_levels">音訊電平</string>
     <string name="cd_remote_rec_start">錄製</string>
     <string name="cd_remote_rec_pause">暫停錄製</string>
     <string name="cd_remote_rec_resume">恢復錄製</string>

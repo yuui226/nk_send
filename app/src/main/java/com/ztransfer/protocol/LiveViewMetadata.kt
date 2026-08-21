@@ -23,6 +23,23 @@ data class LiveViewFocusFrame(
     val height: Float
 )
 
+/**
+ * 相机在 LiveViewObject 帧头中给出的双声道音频电平。
+ *
+ * 四个值都直接对应机身的 15 段电平表：0 为静音，14 为最高段。峰值由相机
+ * 自己保持，UI 不需要根据手机麦克风或 JPEG 内容估算声音。
+ */
+data class LiveViewSoundLevels(
+    val peakLeft: Int,
+    val peakRight: Int,
+    val currentLeft: Int,
+    val currentRight: Int
+) {
+    companion object {
+        const val MAX_SEGMENT = 14
+    }
+}
+
 data class LiveViewMetadata(
     val focusJudgement: LiveViewFocusJudgement,
     val selectedFocusFrame: LiveViewFocusFrame?,
@@ -31,7 +48,9 @@ data class LiveViewMetadata(
     val trackingCoordinateHeight: Int,
     /** `ChangeAfArea(x, y)` 使用的相机显示坐标网格；未知头型时由 UI 回退 JPEG 尺寸。 */
     val focusCoordinateWidth: Int?,
-    val focusCoordinateHeight: Int?
+    val focusCoordinateHeight: Int?,
+    /** 视频 Live View 的机内 L/R 电平；头型不支持或字段校验失败时为 null。 */
+    val soundLevels: LiveViewSoundLevels?
 )
 
 /** 一帧完整 Live View 载荷；JPEG 直接从 [jpegOffset] 解码，避免热路径复制。 */
@@ -49,8 +68,13 @@ private fun ByteArray.be16(offset: Int): Int =
 private fun ByteArray.be32(offset: Int): Long =
     ((be16(offset).toLong() shl 16) or be16(offset + 2).toLong()) and 0xFFFFFFFFL
 
+private const val COMPACT_LIVE_VIEW_HEADER_SIZE = 512
+private const val COMPACT_SOUND_LEVELS_OFFSET = 388
+private const val EXTENDED_LIVE_VIEW_HEADER_SIZE = 1024
+private const val EXTENDED_SOUND_LEVELS_OFFSET = 824
+
 /**
- * 解析 Nikon GetLiveViewImageEx(0x9428) 的 512-byte Display Information Data。
+ * 解析 Nikon GetLiveViewImageEx(0x9428) 的 Display Information Data。
  *
  * 该布局由 Z 30 / fw 1.20 的 SnapBridge 实抓确认：
  * - 大端字段；
@@ -60,8 +84,10 @@ private fun ByteArray.be32(offset: Int): Long =
  * - +42 为对焦判断（0 无信息、1 未合焦、2 合焦）；
  * - +44/+45 为 AF 框数量/选中索引；
  * - +48 起每框 8 字节：宽、高、中心 X、中心 Y。
+ * - 512-byte 帧头的 +388、1024-byte 扩展帧头的 +824 起，依次为 L/R 峰值
+ *   和 L/R 当前电平。两种布局都是各自的绝对偏移，不能按距帧尾推断。
  *
- * 当前未解析（跳过的）字节范围：
+ * 512-byte v1 帧头当前未解析（跳过的）字节范围：
  * - +4 ~ +7（4 字节）：未知；
  * - +20 ~ +27（8 字节）：未知；
  * - +32 ~ +41（10 字节）：未知；
@@ -79,7 +105,7 @@ internal fun parseLiveViewMetadata(
 ): LiveViewMetadata? {
     if (
         operation != Lab.NK_GET_LIVE_VIEW_IMG_EX ||
-        jpegOffset != 512 ||
+        (jpegOffset != 512 && jpegOffset != 1024) ||
         payload.size < jpegOffset + 3
     ) {
         return null
@@ -155,12 +181,55 @@ internal fun parseLiveViewMetadata(
         null
     }
 
+    val soundLevels = parseLiveViewSoundLevels(payload, jpegOffset)
+
     return LiveViewMetadata(
         focusJudgement = judgement,
         selectedFocusFrame = selectedFrame,
         trackingCoordinateWidth = coordinateWidth,
         trackingCoordinateHeight = coordinateHeight,
         focusCoordinateWidth = focusCoordinateWidth.takeIf { validFocusCoordinateGrid },
-        focusCoordinateHeight = focusCoordinateHeight.takeIf { validFocusCoordinateGrid }
+        focusCoordinateHeight = focusCoordinateHeight.takeIf { validFocusCoordinateGrid },
+        soundLevels = soundLevels
+    )
+}
+
+/**
+ * 1024-byte 扩展帧头使用绝对偏移 +824；Z 30 的 512-byte 帧头经真机安静/拍手
+ * 差分确认使用绝对偏移 +388。前两字节为保持时间较长的 L/R 峰值，后两字节
+ * 为逐帧变化的 L/R 当前电平；响度升高时四值均可达到 14。
+ *
+ * 旧的 `headerSize - 200` 推断在 512-byte 头中会落到 +312 保留区并稳定读出假 0，
+ * 因此必须按头型选择已验证的绝对偏移。未确认头型返回 null，不影响其他元数据。
+ */
+private fun parseLiveViewSoundLevels(
+    payload: ByteArray,
+    headerSize: Int
+): LiveViewSoundLevels? {
+    val soundOffset = when (headerSize) {
+        COMPACT_LIVE_VIEW_HEADER_SIZE -> COMPACT_SOUND_LEVELS_OFFSET
+        EXTENDED_LIVE_VIEW_HEADER_SIZE -> EXTENDED_SOUND_LEVELS_OFFSET
+        else -> return null
+    }
+    if (payload.size < soundOffset + 4) return null
+
+    val peakLeft = payload[soundOffset].toInt() and 0xFF
+    val peakRight = payload[soundOffset + 1].toInt() and 0xFF
+    val currentLeft = payload[soundOffset + 2].toInt() and 0xFF
+    val currentRight = payload[soundOffset + 3].toInt() and 0xFF
+    if (
+        peakLeft !in 0..LiveViewSoundLevels.MAX_SEGMENT ||
+        peakRight !in 0..LiveViewSoundLevels.MAX_SEGMENT ||
+        currentLeft !in 0..LiveViewSoundLevels.MAX_SEGMENT ||
+        currentRight !in 0..LiveViewSoundLevels.MAX_SEGMENT
+    ) {
+        return null
+    }
+
+    return LiveViewSoundLevels(
+        peakLeft = peakLeft,
+        peakRight = peakRight,
+        currentLeft = currentLeft,
+        currentRight = currentRight
     )
 }

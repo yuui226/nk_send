@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -73,6 +74,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -111,6 +114,7 @@ import com.ztransfer.protocol.LiveViewFocusFrame
 import com.ztransfer.protocol.LiveViewFocusJudgement
 import com.ztransfer.protocol.LiveViewMetadata
 import com.ztransfer.protocol.LiveViewPacket
+import com.ztransfer.protocol.LiveViewSoundLevels
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.RcParam
@@ -522,6 +526,7 @@ object RemoteTrialNotice {
 /** 首帧到达前的取景器占位宽高比（尼康监看常见 3:2）；有帧后一律用帧的真实比例。 */
 private const val DEFAULT_VIEWFINDER_ASPECT = 3f / 2f
 private const val BATTERY_REFRESH_INTERVAL_MS = 120_000L
+private const val REMOTE_AUDIO_LEVELS_VISIBLE_KEY = "remote_audio_levels_visible"
 
 @Composable
 private fun RemoteContent(
@@ -605,6 +610,20 @@ private fun RemoteContent(
     var framingGrid by remember { mutableStateOf(ViewfinderGrid.OFF) }
     var showZebra by remember { mutableStateOf(false) }
     var showLevel by remember { mutableStateOf(false) }
+    val remotePreferences = remember(context) {
+        context.getSharedPreferences("ztransfer", Context.MODE_PRIVATE)
+    }
+    var showAudioLevels by remember {
+        mutableStateOf(
+            remotePreferences.getBoolean(REMOTE_AUDIO_LEVELS_VISIBLE_KEY, true)
+        )
+    }
+    fun toggleAudioLevels() {
+        showAudioLevels = !showAudioLevels
+        remotePreferences.edit()
+            .putBoolean(REMOTE_AUDIO_LEVELS_VISIBLE_KEY, showAudioLevels)
+            .apply()
+    }
     // 相机机身的滚转角（0xD067），null=还没读到/机身不支持，此时水平仪一笔都不画
     var levelRoll by remember { mutableStateOf<Float?>(null) }
     var probing by remember { mutableStateOf(false) }
@@ -2419,6 +2438,8 @@ private fun RemoteContent(
                 showHistogram = showHistogram,
                 modeText = modeText,
                 focusModeText = focusModeText,
+                movieMode = movieMode,
+                showAudioLevels = showAudioLevels,
                 recording = recording,
                 recSeconds = recSeconds,
                 afHeld = afHeld,
@@ -2436,7 +2457,6 @@ private fun RemoteContent(
                 showZebra = showZebra,
                 showLevel = showLevel,
                 levelRoll = levelRoll,
-                trialLeftSeconds = trialLeftSeconds,
                 modifier = Modifier.fillMaxWidth().aspectRatio(viewfinderAspect)
             )
             Spacer(Modifier.height(8.dp))
@@ -2481,6 +2501,13 @@ private fun RemoteContent(
                         contentDescription = stringResource(R.string.dev_fps_overlay),
                         onClick = { toggleFpsControl() }
                     ) { FpsMark() }
+                })
+                add(@Composable {
+                    AudioLevelsToolButton(
+                        visible = movieMode,
+                        active = showAudioLevels,
+                        onClick = ::toggleAudioLevels
+                    )
                 })
                 add(@Composable {
                     TopIconToggle(
@@ -2708,6 +2735,8 @@ private fun RemoteContent(
                     showHistogram = showHistogram,
                     modeText = modeText,
                     focusModeText = focusModeText,
+                    movieMode = movieMode,
+                    showAudioLevels = showAudioLevels,
                     recording = recording,
                     recSeconds = recSeconds,
                     afHeld = afHeld,
@@ -2725,7 +2754,6 @@ private fun RemoteContent(
                     showZebra = showZebra,
                     showLevel = showLevel,
                     levelRoll = levelRoll,
-                    trialLeftSeconds = trialLeftSeconds,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
                         .size(width = imageWidth, height = imageHeight)
@@ -2799,6 +2827,11 @@ private fun RemoteContent(
                                     contentDescription = stringResource(R.string.dev_fps_overlay),
                                     onClick = { toggleFpsControl() }
                                 ) { FpsMark() }
+                                AudioLevelsToolButton(
+                                    visible = movieMode,
+                                    active = showAudioLevels,
+                                    onClick = ::toggleAudioLevels
+                                )
                                 TopIconToggle(
                                     active = showHistogram,
                                     contentDescription = stringResource(R.string.cd_remote_histogram),
@@ -2962,6 +2995,20 @@ private fun RemoteContent(
                 }
             }
         }
+        }
+
+        // 免费监看余量属于整页状态，不跟随取景器尺寸或全屏动画。竖屏避开系统
+        // 导航栏；横屏安全区已由外层旋转容器换算成左右 inset，无需重复留白。
+        if (trialLeftSeconds != null) {
+            RemoteTrialTimeBadge(
+                seconds = trialLeftSeconds,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .then(
+                        if (rotation == 0) Modifier.navigationBarsPadding() else Modifier
+                    )
+                    .padding(end = 16.dp, bottom = 12.dp)
+            )
         }
 
         // 顶部提示条：视觉与照片列表页的底部玻璃提示条同款（22dp 玻璃 Surface + 投影 +
@@ -3316,6 +3363,37 @@ private fun BatteryPill(percent: Int?) {
     }
 }
 
+/** 免费监看余量固定在整页右下角，不占用取景器内的状态叠层空间。 */
+@Composable
+private fun RemoteTrialTimeBadge(
+    seconds: Int,
+    modifier: Modifier = Modifier
+) {
+    val colors = AppTheme.colors
+    val safeSeconds = seconds.coerceAtLeast(0)
+    val shape = RoundedCornerShape(9.dp)
+    Box(
+        modifier = modifier
+            .background(colors.glassSurfaceHeavy, shape)
+            .border(1.dp, colors.glassPanelBorder, shape)
+            .padding(horizontal = 10.dp, vertical = 5.dp)
+    ) {
+        Text(
+            text = stringResource(
+                R.string.remote_trial_left,
+                "%d:%02d".format(safeSeconds / 60, safeSeconds % 60)
+            ),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
 @Composable
 private fun ViewfinderStatusBadge(text: String, weight: FontWeight) {
     Text(
@@ -3337,6 +3415,8 @@ private fun RemoteViewfinderPanel(
     showHistogram: Boolean,
     modeText: String?,
     focusModeText: String?,
+    movieMode: Boolean,
+    showAudioLevels: Boolean,
     recording: Boolean,
     recSeconds: Int,
     afHeld: Boolean,
@@ -3355,7 +3435,6 @@ private fun RemoteViewfinderPanel(
     showLevel: Boolean = false,
     /** 相机机身滚转角；null=没有可用角度，水平仪什么都不画。 */
     levelRoll: Float? = null,
-    trialLeftSeconds: Int? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
@@ -3380,26 +3459,14 @@ private fun RemoteViewfinderPanel(
             showZebra = showZebra
         )
 
+        ViewfinderSoundMeterOverlay(
+            enabled = connected && movieMode && showAudioLevels,
+            frameProvider = frameProvider,
+            modifier = Modifier.matchParentSize()
+        )
+
         if (showLevel) {
             ViewfinderLevelOverlay(rollDegrees = levelRoll, modifier = Modifier.matchParentSize())
-        }
-
-        if (trialLeftSeconds != null) {
-            val sec = trialLeftSeconds
-            Box(
-                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
-                    .background(colors.glassSurfaceHeavy, RoundedCornerShape(7.dp))
-                    .border(1.dp, colors.glassPanelBorder, RoundedCornerShape(7.dp))
-                    .padding(horizontal = 7.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    stringResource(R.string.remote_trial_left, "%d:%02d".format(sec / 60, sec % 60)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.onSurfaceVariant,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp
-                )
-            }
         }
 
         if (modeText != null || focusModeText != null) {
@@ -3476,6 +3543,145 @@ private fun RemoteViewfinderPanel(
                     .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             )
+        }
+    }
+}
+
+/**
+ * 取景器内的机内双声道电平。只有本组件读取逐帧 metadata，外层页面和工具栏不会
+ * 跟随 Live View 帧率重组；相机已经提供 current/peak 两组值，本地只做很短的视觉插值。
+ */
+@Composable
+private fun ViewfinderSoundMeterOverlay(
+    enabled: Boolean,
+    frameProvider: () -> RemoteLiveFrame?,
+    modifier: Modifier = Modifier
+) {
+    BoxWithConstraints(modifier) {
+        val levels = if (enabled) frameProvider()?.metadata?.soundLevels else null
+        val availableWidth = (maxWidth - 16.dp).coerceAtLeast(0.dp)
+        val meterWidth = (maxWidth * 0.23f)
+            .coerceIn(92.dp, 132.dp)
+            .coerceAtMost(availableWidth)
+        AnimatedVisibility(
+            visible = levels != null,
+            enter = fadeIn(tween(160, easing = FastOutSlowInEasing)) +
+                scaleIn(tween(180, easing = FastOutSlowInEasing), initialScale = 0.97f),
+            exit = fadeOut(tween(140, easing = FastOutSlowInEasing)),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 8.dp, bottom = 8.dp)
+        ) {
+            StereoSoundMeter(
+                levels = levels ?: LiveViewSoundLevels(0, 0, 0, 0),
+                modifier = Modifier.width(meterWidth)
+            )
+        }
+    }
+}
+
+@Composable
+private fun StereoSoundMeter(
+    levels: LiveViewSoundLevels,
+    modifier: Modifier = Modifier
+) {
+    val leftLevel by animateFloatAsState(
+        targetValue = levels.currentLeft.toFloat(),
+        animationSpec = tween(80, easing = FastOutSlowInEasing),
+        label = "audioLevelLeft"
+    )
+    val rightLevel by animateFloatAsState(
+        targetValue = levels.currentRight.toFloat(),
+        animationSpec = tween(80, easing = FastOutSlowInEasing),
+        label = "audioLevelRight"
+    )
+    val leftPeak by animateFloatAsState(
+        targetValue = levels.peakLeft.toFloat(),
+        animationSpec = tween(90, easing = FastOutSlowInEasing),
+        label = "audioPeakLeft"
+    )
+    val rightPeak by animateFloatAsState(
+        targetValue = levels.peakRight.toFloat(),
+        animationSpec = tween(90, easing = FastOutSlowInEasing),
+        label = "audioPeakRight"
+    )
+    val shape = RoundedCornerShape(7.dp)
+    Column(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.56f), shape)
+            .border(0.5.dp, Color.White.copy(alpha = 0.14f), shape)
+            .padding(horizontal = 5.dp, vertical = 3.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        SoundMeterChannel(label = "L", level = leftLevel, peak = leftPeak)
+        SoundMeterChannel(label = "R", level = rightLevel, peak = rightPeak)
+    }
+}
+
+@Composable
+private fun SoundMeterChannel(
+    label: String,
+    level: Float,
+    peak: Float
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.86f),
+            fontSize = 7.sp,
+            fontWeight = FontWeight.Bold,
+            lineHeight = 7.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.width(10.dp)
+        )
+        Spacer(Modifier.width(3.dp))
+        Canvas(Modifier.weight(1f).height(4.dp)) {
+            val segmentCount = 15
+            val gap = 1.dp.toPx()
+            val segmentWidth =
+                ((size.width - gap * (segmentCount - 1)) / segmentCount).coerceAtLeast(0f)
+            val activeCount = (
+                level.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
+                    LiveViewSoundLevels.MAX_SEGMENT * segmentCount
+                ).roundToInt().coerceIn(0, segmentCount)
+            val yellow = Color(0xFFFFC247)
+            val red = Color(0xFFFF4D55)
+            val radius = CornerRadius(size.height / 2f, size.height / 2f)
+            repeat(segmentCount) { index ->
+                val zoneColor = when {
+                    index >= 13 -> red
+                    index >= 11 -> yellow
+                    else -> Color.White
+                }
+                val color = if (index < activeCount) {
+                    zoneColor.copy(alpha = 0.94f)
+                } else {
+                    Color.White.copy(alpha = 0.16f)
+                }
+                val x = index * (segmentWidth + gap)
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(x, 0f),
+                    size = Size(segmentWidth, size.height),
+                    cornerRadius = radius
+                )
+            }
+
+            if (peak > 0f && segmentWidth > 0f) {
+                val peakIndex = (
+                    peak.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
+                        LiveViewSoundLevels.MAX_SEGMENT * (segmentCount - 1)
+                    ).roundToInt().coerceIn(0, segmentCount - 1)
+                val markerWidth = minOf(1.dp.toPx(), segmentWidth)
+                val segmentX = peakIndex * (segmentWidth + gap)
+                val markerX = segmentX + (segmentWidth - markerWidth) / 2f
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.96f),
+                    topLeft = Offset(markerX, -1.dp.toPx()),
+                    size = Size(markerWidth, size.height + 2.dp.toPx()),
+                    cornerRadius = CornerRadius(markerWidth / 2f, markerWidth / 2f)
+                )
+            }
         }
     }
 }
@@ -4289,7 +4495,14 @@ private fun AdaptiveRemoteToolBar(
         val placeables = measurables.map { it.measure(Constraints()) }
         val pinnedCount = pinnedEndCount.coerceIn(0, placeables.size)
         val regularEnd = placeables.size - pinnedCount
-        val pinnedIndices = (regularEnd until placeables.size).toList()
+        // AnimatedVisibility 完全收起后会留下 0×0 measurable。它不能占按钮间距，
+        // 否则照片模式仍会被视频专属音频按钮暗中撑开 1 个 gap。
+        val regularIndices = (0 until regularEnd).filter {
+            placeables[it].width > 0 && placeables[it].height > 0
+        }
+        val pinnedIndices = (regularEnd until placeables.size).filter {
+            placeables[it].width > 0 && placeables[it].height > 0
+        }
         val pinnedWidth = pinnedIndices.sumOf { placeables[it].width } +
             gapPx * (pinnedIndices.size - 1).coerceAtLeast(0)
 
@@ -4304,26 +4517,28 @@ private fun AdaptiveRemoteToolBar(
         val firstRow = mutableListOf<Int>()
         var nextTool = 0
         var firstRowWidth = 0
-        while (nextTool < regularEnd) {
-            val placeable = placeables[nextTool]
+        while (nextTool < regularIndices.size) {
+            val index = regularIndices[nextTool]
+            val placeable = placeables[index]
             val candidateWidth =
                 firstRowWidth + (if (firstRow.isEmpty()) 0 else gapPx) + placeable.width
             if (candidateWidth > firstRowCapacity) break
-            firstRow += nextTool
+            firstRow += index
             firstRowWidth = candidateWidth
             nextTool++
         }
 
         val rows = mutableListOf<MutableList<Int>>(firstRow)
-        while (nextTool < regularEnd) {
+        while (nextTool < regularIndices.size) {
             val row = mutableListOf<Int>()
             var rowWidth = 0
-            while (nextTool < regularEnd) {
-                val placeable = placeables[nextTool]
+            while (nextTool < regularIndices.size) {
+                val index = regularIndices[nextTool]
+                val placeable = placeables[index]
                 val candidateWidth =
                     rowWidth + (if (row.isEmpty()) 0 else gapPx) + placeable.width
                 if (row.isNotEmpty() && candidateWidth > maxWidth) break
-                row += nextTool
+                row += index
                 rowWidth = candidateWidth
                 nextTool++
                 // 单颗按钮理论上比整个窗口还宽时仍保持固有宽度，只独占一行。
@@ -4362,6 +4577,41 @@ private fun AdaptiveRemoteToolBar(
                 }
                 y += rowHeight + rowGapPx
             }
+        }
+    }
+}
+
+/** 视频模式专属的音频电平显示开关；横向展开让其后的工具自然平滑让位。 */
+@Composable
+private fun AudioLevelsToolButton(
+    visible: Boolean,
+    active: Boolean,
+    onClick: () -> Unit
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(150, easing = FastOutSlowInEasing)) +
+            expandHorizontally(
+                animationSpec = tween(220, easing = FastOutSlowInEasing),
+                expandFrom = Alignment.Start
+            ),
+        exit = fadeOut(tween(130, easing = FastOutSlowInEasing)) +
+            shrinkHorizontally(
+                animationSpec = tween(200, easing = FastOutSlowInEasing),
+                shrinkTowards = Alignment.Start
+            )
+    ) {
+        TopIconToggle(
+            active = active,
+            contentDescription = stringResource(R.string.cd_remote_audio_levels),
+            onClick = onClick
+        ) {
+            // 灰/蓝只表示“隐藏/显示电平”，始终使用有声图标，避免误解为关闭相机录音。
+            Icon(
+                Icons.Default.VolumeUp,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
