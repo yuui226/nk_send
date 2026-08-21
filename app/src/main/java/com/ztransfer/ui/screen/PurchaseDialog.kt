@@ -5,8 +5,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color as AndroidColor
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Build
 import android.provider.MediaStore
 import androidx.compose.foundation.Image
@@ -80,19 +78,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.ztransfer.ui.theme.AppTheme
-
-/**
- * 当前网络是否真的能上外网。相机 Wi-Fi 有连接但无外网,系统会把它标记为"未验证"(VALIDATED 为假),
- * 正好用来在下单前拦住"没网就点购买"——否则要等 8 秒超时才报错。
- * 查的是【默认网络】,也正是微信付款要用的那张网:这里通过 = 微信也能付。
- * 拿不到系统服务时保守返回 true(不误拦,交给后续请求自然失败)。
- */
-private fun hasInternet(context: Context): Boolean {
-    val cm = context.getSystemService(ConnectivityManager::class.java) ?: return true
-    val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
-    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-}
 
 /** 把支付链接画成二维码位图(白底黑码,四周留白便于识别)。 */
 private fun encodeQr(text: String, sizePx: Int): Bitmap? = runCatching {
@@ -202,15 +187,9 @@ fun PurchaseDialog(
             paidRenew = false
             paidOrder = null
         }
-        // 付款全流程都要外网。刚松开相机 Wi-Fi 后系统切到蜂窝需要一两秒,
-        // 故给一段等待再判定"没网",避免刚进来就误报。
-        var online = hasInternet(context)
-        var waited = 0
-        while (!online && waited < 6000) {
-            delay(300); waited += 300
-            online = hasInternet(context)
-        }
-        if (!online) {
+        // 付款全流程都要外网。相机 Wi-Fi 已在 DisposableEffect 中释放；健康检查会在
+        // 同一个 2 秒窗口内容纳默认网络切回蜂窝的短暂过渡，并真实验证授权服务器可达。
+        if (!LicenseManager.waitForServerReachability()) {
             error = R.string.err_purchase_no_network
             return@LaunchedEffect
         }

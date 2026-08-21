@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.Network
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
 import com.ztransfer.BuildConfig
@@ -70,6 +71,7 @@ object LicenseManager {
     private const val SOFT_RENEW_INTERVAL_MS = 24 * 3600_000L
     private const val PREFS = "license"
     private const val PINNED_FINGERPRINT_KEY = "device_fingerprint_v1"
+    const val SERVER_REACHABILITY_TIMEOUT_MS = 2_000L
 
     private lateinit var prefs: SharedPreferences
     private var fingerprint: String = ""
@@ -902,22 +904,64 @@ object LicenseManager {
 
     // ---------------------------------------------------------------- 网络
 
+    /**
+     * 在用户即将激活或购买前确认授权服务器可达。
+     *
+     * 相机 Wi-Fi 释放后默认网络可能要几百毫秒才切回蜂窝，因此快速失败时会在同一个
+     * 2 秒总窗口内重试；每次请求的连接与读取预算之和不超过剩余时间。只要固定证书的
+     * `/healthz` 返回了合法 JSON 就视为可达（包括服务端限流响应），业务结果由后续接口处理。
+     */
+    suspend fun waitForServerReachability(
+        timeoutMs: Long = SERVER_REACHABILITY_TIMEOUT_MS,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs.coerceAtLeast(1L)
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining <= 0L) break
+            // healthz 响应极小，把大部分预算留给移动网络建连和 TLS 握手。
+            val readTimeoutMs = minOf(400L, maxOf(1L, remaining / 4L)).toInt()
+            val connectTimeoutMs = maxOf(1L, remaining - readTimeoutMs).toInt()
+            if (get(
+                    path = "/healthz",
+                    connectTimeoutMs = connectTimeoutMs,
+                    readTimeoutMs = readTimeoutMs,
+                ) != null
+            ) {
+                return@withContext true
+            }
+            val retryDelayMs = minOf(100L, deadline - SystemClock.elapsedRealtime())
+            if (retryDelayMs <= 0L) break
+            delay(retryDelayMs)
+        }
+        false
+    }
+
     /** 依次尝试所有服务器地址;全部失败返回 null。业务成败由响应 JSON 的 ok/err 表达。 */
     private fun post(path: String, body: JSONObject): JSONObject? = request(path, body)
 
-    private fun get(path: String): JSONObject? = request(path, null)
+    private fun get(
+        path: String,
+        connectTimeoutMs: Int = 8_000,
+        readTimeoutMs: Int? = null,
+    ): JSONObject? = request(path, null, connectTimeoutMs, readTimeoutMs)
 
     /** [body] 非空走 POST(JSON),为空走 GET;证书 pin 与超时两者共用。 */
-    private fun request(path: String, body: JSONObject?): JSONObject? {
+    private fun request(
+        path: String,
+        body: JSONObject?,
+        connectTimeoutMs: Int = 8_000,
+        readTimeoutMs: Int? = null,
+    ): JSONObject? {
         for (base in SERVERS) {
             try {
                 val conn = URL(base + path).openConnection() as HttpsURLConnection
                 conn.sslSocketFactory = pinnedSocketFactory
                 // 证书本身已由 pin 唯一确认,无需再校验主机名(自签证书对裸 IP 签发)
                 conn.hostnameVerifier = HostnameVerifier { _, _ -> true }
-                conn.connectTimeout = 8000
+                conn.connectTimeout = connectTimeoutMs
                 // 兼容旧发布记录时可能仍需解析第三方地址；下载入口保留更完整的响应窗口。
-                conn.readTimeout = if (path == "/v1/app/download-url") 20_000 else 8000
+                conn.readTimeout = readTimeoutMs
+                    ?: if (path == "/v1/app/download-url") 20_000 else 8_000
                 if (body != null) {
                     conn.requestMethod = "POST"
                     conn.doOutput = true

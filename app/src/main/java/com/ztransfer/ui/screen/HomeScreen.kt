@@ -80,8 +80,8 @@ import kotlin.math.sin
  * 连接（引导）页：展示连接状态与引导。左上角 "Z传" 玻璃按钮为设置入口，
  * 与照片列表页完全一致（同一 GlassButton + SettingsOverlay，点击从按钮变形展开设置面板）。
  * 连接成功后自动跳到文件列表，且用户不会再返回本页。
- * 右上角"解锁高级版"徽标（免费版）打开的弹窗是全 app 唯一带"输入激活码"的入口——
- * 本页尚未连相机热点，多半还有外网；进入 app 深处后连着相机 Wi-Fi 无法在线激活。
+ * 右上角"解锁高级版"徽标（免费版）可打开购买与激活入口——
+ * 本页尚未连相机热点，多半还有外网；连接后则按 USB/Wi-Fi 与实时连接状态处理激活入口。
  */
 @Composable
 fun HomeScreen(
@@ -386,7 +386,7 @@ fun HomeScreen(
 
         // ---------- 左上角 "Z传" 悬浮按钮（设置入口，与照片列表页一致）；
         // 右上角：免费版显示"解锁高级版"金徽标。本页尚未连相机热点、多半还有外网，
-        // 因此是全 app 唯一放"输入激活码"入口的弹窗（其余页面连着相机 Wi-Fi 无外网）----------
+        // 连接后设置页也保留输入激活码与客服入口，并按相机连接状态判断是否可访问服务器。----------
         // 已解锁：金徽标改显"高级版"，点击不弹窗，每点一次放一发独立烟花（可连点并发）。
         val fireworks = rememberFireworksState()
         Row(
@@ -412,7 +412,7 @@ fun HomeScreen(
             }
             Spacer(modifier = Modifier.weight(1f))
             DebugSimulatorButton(onClick = viewModel::connectDebugSimulator)
-            // 免费版：金徽标"解锁高级版"，点击开介绍弹窗（全 app 唯一激活码入口）。
+            // 免费版：金徽标"解锁高级版"，点击开介绍弹窗。
             // 已解锁：金徽标"高级版"，点击不弹窗，放烟花彩蛋。
             if (!isPro) {
                 ProBadgeButton(
@@ -449,7 +449,6 @@ fun HomeScreen(
         if (showPro) {
             ProDialog(
                 onDismiss = { showPro = false },
-                showEnterCode = true,
                 onCelebrate = { fireworks.launch() },
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
                 // 普通解锁入口只负责新购；只有尚未到期的订阅才显示续费入口并续原码。

@@ -461,7 +461,7 @@
     <string name="purchase_paid_not_active">已收到付款但自动激活未成功，请复制上方激活码，用「输入激活码」完成激活。</string>
     <string name="purchase_code_copied">已复制激活码</string>
     <string name="purchase_done">完成</string>
-    <string name="err_purchase_no_network">需要连接互联网</string>
+    <string name="err_purchase_no_network">请先连接互联网</string>
     <string name="err_purchase_unreachable">无法连接服务器。若当前连着相机 Wi-Fi，请先断开，用有外网的网络重试。</string>
     <string name="err_purchase_failed">下单失败，请稍后重试或联系客服。</string>
     <string name="err_purchase_activation_failed">激活失败，请联系客服</string>

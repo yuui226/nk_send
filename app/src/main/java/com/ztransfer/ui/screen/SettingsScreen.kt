@@ -138,6 +138,7 @@ import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.rememberHaptics
@@ -199,7 +200,9 @@ fun SettingsOverlay(
     // 已解锁时右上角徽标点击的回调（放烟花彩蛋）；由承载页提供其页面级 FireworksState。
     onPlayFireworks: () -> Unit = {},
     // 购买期间临时松开对相机 Wi-Fi 的占用（相机热点没外网，付款联不上）；由承载页接到 CameraViewModel。
-    onHoldCameraWifi: (Boolean) -> Unit = {}
+    onHoldCameraWifi: (Boolean) -> Unit = {},
+    cameraConnectionType: CameraConnectionType? = null,
+    cameraConnected: Boolean = false,
 ) {
     val state by viewModel.state.collectAsState()
     // 弹窗一出现就开始准备效果演示图；ViewModel 会按照片身份去重，重复打开不重复读取。
@@ -817,6 +820,8 @@ fun SettingsOverlay(
                     onDismiss = { showPro = false },
                     onCelebrate = onPlayFireworks,
                     onHoldCameraWifi = onHoldCameraWifi,
+                    connectionType = cameraConnectionType,
+                    cameraConnected = cameraConnected,
                     renew = false
                 )
             }

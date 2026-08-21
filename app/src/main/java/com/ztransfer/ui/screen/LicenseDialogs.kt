@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -64,8 +65,10 @@ import androidx.compose.ui.unit.sp
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
+import com.ztransfer.protocol.CameraConnectionType
 import androidx.compose.ui.text.font.FontWeight
 import com.ztransfer.ui.theme.AppTheme
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -89,6 +92,17 @@ internal fun formatSubDate(sec: Long): String =
 internal fun subDaysLeft(sec: Long): Int =
     ceil((sec - System.currentTimeMillis() / 1000) / 86400.0).toInt().coerceAtLeast(0)
 
+internal enum class EnterCodeAction { OPEN, SHOW_NETWORK_HINT, PROBE_SERVER }
+
+internal fun enterCodeAction(
+    connectionType: CameraConnectionType?,
+    cameraConnected: Boolean,
+): EnterCodeAction = when {
+    connectionType != CameraConnectionType.WIFI -> EnterCodeAction.OPEN
+    cameraConnected -> EnterCodeAction.SHOW_NETWORK_HINT
+    else -> EnterCodeAction.PROBE_SERVER
+}
+
 /**
  * 高级版介绍对话框("解锁高级版"徽标打开,连接页与设置面板共用):
  * 自定义毛玻璃面板(与设置/筛选面板同一玻璃语言,不用 M3 AlertDialog 原生样式)。
@@ -99,18 +113,17 @@ internal fun subDaysLeft(sec: Long): Int =
  *   购买页:对比表 → 定价 → 全宽金色"立即购买" → 一排玻璃小按钮[输入激活码 | 客服]
  *   激活页:头部左上换成毛玻璃返回箭头 + 设备码 → 输入框 + 激活 → 状态行
  *
- * [showEnterCode] 控制整排次级入口(输入激活码 / 客服):仅连接页开——彼时尚未连
- * 相机热点,多半还有外网;设置面板关:连着相机 Wi-Fi 无外网,在线激活必失败,
- * 而找客服在设置页脚本来就有"反馈"入口,不必重复。
- * 购买同理需要外网,但入口不藏:下单失败的报错文案会引导先断开相机 Wi-Fi。
+ * 输入激活码与客服入口始终显示。USB/连接页可直接进入激活页；Wi-Fi 会话仍连接时
+ * 提示先联网，已断开时先用 2 秒健康检查确认授权服务器可达。客服只是复制 QQ，始终可用。
  */
 @Composable
 fun ProDialog(
     onDismiss: () -> Unit,
-    showEnterCode: Boolean = false,
     onCelebrate: () -> Unit = {},
     // 购买期间需临时松开对相机 Wi-Fi 的占用(相机热点没外网,付款联不上);由承载页接到 CameraViewModel。
     onHoldCameraWifi: (Boolean) -> Unit = {},
+    connectionType: CameraConnectionType? = null,
+    cameraConnected: Boolean = false,
     // 订阅用户买年费时续原码；改选永久版时另发永久码，原年费码保持有效。
     renew: Boolean = false,
 ) {
@@ -124,6 +137,9 @@ fun ProDialog(
     val price by LicenseManager.pricing.collectAsState()
     var selectedProduct by remember { mutableStateOf(LicenseManager.ProductId.ANNUAL) }
     var copied by remember { mutableStateOf(false) }
+    var checkingServer by remember { mutableStateOf(false) }
+    var enterCodeProbeJob by remember { mutableStateOf<Job?>(null) }
+    var internetHintNonce by remember { mutableIntStateOf(0) }
     // 购买流程叠在本弹窗之上;关闭后回到本弹窗(成功后由用户自行关闭)。
     var showPurchase by remember { mutableStateOf(false) }
     if (showPurchase) {
@@ -143,6 +159,13 @@ fun ProDialog(
     var error by remember { mutableStateOf<Int?>(null) }        // 文案资源 id
     var errorArg by remember { mutableStateOf("") }              // err_generic 的错误码参数
     var success by remember { mutableStateOf(false) }
+    LaunchedEffect(internetHintNonce) {
+        if (internetHintNonce > 0) {
+            val shownNonce = internetHintNonce
+            delay(2_000)
+            if (internetHintNonce == shownNonce) internetHintNonce = 0
+        }
+    }
     // 激活成功:短暂显示成功后关闭本弹窗并放烟花庆祝。
     if (success) {
         LaunchedEffect(Unit) { delay(1200); onDismiss(); onCelebrate() }
@@ -382,59 +405,92 @@ fun ProDialog(
                         val selectedPrice = price.forProduct(selectedProduct)
                         ProBadgeButton(
                             label = purchaseCta(selectedProduct, selectedPrice),
-                            onClick = { showPurchase = true },
+                            onClick = { if (!checkingServer) showPurchase = true },
                             modifier = Modifier.fillMaxWidth(),
                             big = true,
-                            enabled = selectedPrice.available && selectedPrice.priceFen > 0,
+                            enabled = !checkingServer &&
+                                selectedPrice.available && selectedPrice.priceFen > 0,
                         )
 
-                        // ---- 次级：输入激活码 / 客服。授权只凭用户持有的激活码恢复，
-                        // 不再按设备指纹猜测历史权益。整排仅连接页给(showEnterCode)。----
-                        if (showEnterCode) {
-                            Spacer(Modifier.height(12.dp))
-                            val subShape = RoundedCornerShape(12.dp)
-                            val subPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp)
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.fillMaxWidth()
+                        // ---- 次级：输入激活码 / 客服。两颗始终可见；仅激活入口需要联网。----
+                        Spacer(Modifier.height(12.dp))
+                        val subShape = RoundedCornerShape(12.dp)
+                        val subPadding = PaddingValues(horizontal = 4.dp, vertical = 10.dp)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            GlassButton(
+                                enabled = !checkingServer,
+                                onClick = {
+                                    copied = false
+                                    when (enterCodeAction(connectionType, cameraConnected)) {
+                                        EnterCodeAction.OPEN -> {
+                                            internetHintNonce = 0
+                                            codeMode = true
+                                            error = null
+                                        }
+                                        EnterCodeAction.SHOW_NETWORK_HINT -> {
+                                            internetHintNonce++
+                                        }
+                                        EnterCodeAction.PROBE_SERVER -> {
+                                            internetHintNonce = 0
+                                            checkingServer = true
+                                            enterCodeProbeJob = scope.launch {
+                                                try {
+                                                    val reachable =
+                                                        LicenseManager.waitForServerReachability()
+                                                    if (reachable) {
+                                                        codeMode = true
+                                                        error = null
+                                                    } else {
+                                                        internetHintNonce++
+                                                    }
+                                                } finally {
+                                                    checkingServer = false
+                                                    enterCodeProbeJob = null
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                shape = subShape,
+                                panel = true,
+                                contentPadding = subPadding,
+                                modifier = Modifier.weight(1f)
                             ) {
-                                GlassButton(
-                                    onClick = { codeMode = true; error = null },
-                                    shape = subShape,
-                                    panel = true,
-                                    contentPadding = subPadding,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    SubActionLabel(stringResource(R.string.enter_code))
-                                }
-                                GlassButton(
-                                    onClick = {
-                                        clipboard.setText(AnnotatedString(QQ_NUMBER))
-                                        copied = true
-                                    },
-                                    shape = subShape,
-                                    panel = true,
-                                    contentPadding = subPadding,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    SubActionLabel(stringResource(R.string.contact_support))
-                                }
+                                SubActionLabel(stringResource(R.string.enter_code))
                             }
-                            // 客服 QQ 复制反馈。
-                            val feedback: Pair<String, Color>? = when {
-                                copied -> stringResource(R.string.qq_group_copied, QQ_NUMBER) to colors.statusConnected
-                                else -> null
+                            GlassButton(
+                                onClick = {
+                                    enterCodeProbeJob?.cancel()
+                                    internetHintNonce = 0
+                                    clipboard.setText(AnnotatedString(QQ_NUMBER))
+                                    copied = true
+                                },
+                                shape = subShape,
+                                panel = true,
+                                contentPadding = subPadding,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                SubActionLabel(stringResource(R.string.contact_support))
                             }
-                            if (feedback != null) {
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    feedback.first,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = feedback.second,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
+                        }
+                        // 复用同一行反馈位置：联网提示优先于客服复制成功。
+                        val feedback: Pair<String, Color>? = when {
+                            internetHintNonce > 0 -> stringResource(R.string.err_purchase_no_network) to colors.accentOrange
+                            copied -> stringResource(R.string.qq_group_copied, QQ_NUMBER) to colors.statusConnected
+                            else -> null
+                        }
+                        if (feedback != null) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                feedback.first,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = feedback.second,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     } else {
                         // ================= 激活页（顶掉购买内容，弹窗不增高）=================
