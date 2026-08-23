@@ -1197,8 +1197,10 @@ internal fun PhotoPreviewOverlay(
                 ) {
                     if (memberCollectionPage in 0 until pagerState.currentPage) {
                         BurstMemberCollapseButton(
-                            enabled = !burstTransitionBusy && !queueAnimating &&
-                                !queueGestureActive && queueMotionJob?.isActive != true,
+                            // 进入成员页时按钮直接以完整形态出现；连拍过渡的防重由
+                            // collapsePreviewBurstMember 统一拦截，不借禁用态制造透明渐变。
+                            enabled = !queueAnimating && !queueGestureActive &&
+                                queueMotionJob?.isActive != true,
                             onClick = {
                                 memberBurstId?.let(collapsePreviewBurstMember)
                             },
