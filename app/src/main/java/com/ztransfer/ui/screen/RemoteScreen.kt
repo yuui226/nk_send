@@ -2728,6 +2728,10 @@ private fun RemoteContent(
                     animationSpec = tween(boundsDuration, easing = FastOutSlowInEasing),
                     label = "fullscreenViewfinderHeight"
                 )
+                // 录像画面按比例适配后，横屏/全屏通常会在取景器左侧留下空白。
+                // 至少 44dp 时把 30dp 宽的电平表放到画面外，并保留 6dp 间隔。
+                val audioMeterSlotWidth = 44.dp
+                val audioMeterOutside = imageX >= audioMeterSlotWidth
 
                 RemoteViewfinderPanel(
                     frameProvider = { frame },
@@ -2754,10 +2758,22 @@ private fun RemoteContent(
                     showZebra = showZebra,
                     showLevel = showLevel,
                     levelRoll = levelRoll,
+                    showEmbeddedAudioMeter = !audioMeterOutside,
                     modifier = Modifier
                         .offset(x = imageX, y = imageY)
                         .size(width = imageWidth, height = imageHeight)
                 )
+
+                if (audioMeterOutside) {
+                    ViewfinderSoundMeterOverlay(
+                        enabled = connected && movieMode && showAudioLevels,
+                        frameProvider = { frame },
+                        bottomInset = 0.dp,
+                        modifier = Modifier
+                            .offset(x = imageX - audioMeterSlotWidth, y = imageY)
+                            .size(width = audioMeterSlotWidth, height = imageHeight)
+                    )
+                }
 
                 // 操作区独立淡出/淡入，取景器尺寸动画不会重建或交叉切换帧画面。
                 AnimatedVisibility(
@@ -3435,9 +3451,11 @@ private fun RemoteViewfinderPanel(
     showLevel: Boolean = false,
     /** 相机机身滚转角；null=没有可用角度，水平仪什么都不画。 */
     levelRoll: Float? = null,
+    showEmbeddedAudioMeter: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
+    val soundMeterEnabled = connected && movieMode && showAudioLevels
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
@@ -3459,11 +3477,14 @@ private fun RemoteViewfinderPanel(
             showZebra = showZebra
         )
 
-        ViewfinderSoundMeterOverlay(
-            enabled = connected && movieMode && showAudioLevels,
-            frameProvider = frameProvider,
-            modifier = Modifier.matchParentSize()
-        )
+        if (showEmbeddedAudioMeter) {
+            ViewfinderSoundMeterOverlay(
+                enabled = soundMeterEnabled,
+                frameProvider = frameProvider,
+                bottomInset = if (showHistogram) 78.dp else 8.dp,
+                modifier = Modifier.matchParentSize()
+            )
+        }
 
         if (showLevel) {
             ViewfinderLevelOverlay(rollDegrees = levelRoll, modifier = Modifier.matchParentSize())
@@ -3555,14 +3576,22 @@ private fun RemoteViewfinderPanel(
 private fun ViewfinderSoundMeterOverlay(
     enabled: Boolean,
     frameProvider: () -> RemoteLiveFrame?,
+    bottomInset: androidx.compose.ui.unit.Dp = 8.dp,
     modifier: Modifier = Modifier
 ) {
     BoxWithConstraints(modifier) {
         val levels = if (enabled) frameProvider()?.metadata?.soundLevels else null
-        val availableWidth = (maxWidth - 16.dp).coerceAtLeast(0.dp)
-        val meterWidth = (maxWidth * 0.23f)
-            .coerceIn(92.dp, 132.dp)
-            .coerceAtMost(availableWidth)
+        // 短竖条高度封顶，避免横屏/全屏时向挖孔侧延伸。
+        // 横屏优先放在取景器外；空间不足时回落到画面内，并在直方图上方显示。
+        val availableHeight = (maxHeight - 16.dp).coerceAtLeast(0.dp)
+        val targetMeterHeight = (maxHeight * 0.24f)
+            .coerceIn(56.dp, 72.dp)
+            .coerceAtMost(availableHeight)
+        val meterHeight by animateDpAsState(
+            targetValue = targetMeterHeight,
+            animationSpec = tween(220, easing = FastOutSlowInEasing),
+            label = "audioMeterHeight"
+        )
         AnimatedVisibility(
             visible = levels != null,
             enter = fadeIn(tween(160, easing = FastOutSlowInEasing)) +
@@ -3570,11 +3599,11 @@ private fun ViewfinderSoundMeterOverlay(
             exit = fadeOut(tween(140, easing = FastOutSlowInEasing)),
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 8.dp, bottom = 8.dp)
+                .padding(start = 8.dp, bottom = bottomInset)
         ) {
             StereoSoundMeter(
                 levels = levels ?: LiveViewSoundLevels(0, 0, 0, 0),
-                modifier = Modifier.width(meterWidth)
+                modifier = Modifier.height(meterHeight)
             )
         }
     }
@@ -3606,15 +3635,25 @@ private fun StereoSoundMeter(
         label = "audioPeakRight"
     )
     val shape = RoundedCornerShape(7.dp)
-    Column(
+    Row(
         modifier = modifier
             .background(Color.Black.copy(alpha = 0.56f), shape)
             .border(0.5.dp, Color.White.copy(alpha = 0.14f), shape)
-            .padding(horizontal = 5.dp, vertical = 3.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        SoundMeterChannel(label = "L", level = leftLevel, peak = leftPeak)
-        SoundMeterChannel(label = "R", level = rightLevel, peak = rightPeak)
+        SoundMeterChannel(
+            label = "L",
+            level = leftLevel,
+            peak = leftPeak,
+            modifier = Modifier.fillMaxHeight()
+        )
+        SoundMeterChannel(
+            label = "R",
+            level = rightLevel,
+            peak = rightPeak,
+            modifier = Modifier.fillMaxHeight()
+        )
     }
 }
 
@@ -3622,9 +3661,55 @@ private fun StereoSoundMeter(
 private fun SoundMeterChannel(
     label: String,
     level: Float,
-    peak: Float
+    peak: Float,
+    modifier: Modifier = Modifier
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Canvas(Modifier.width(9.dp).weight(1f)) {
+            val segmentCount = 15
+            val gap = 1.dp.toPx()
+            val segmentHeight =
+                ((size.height - gap * (segmentCount - 1)) / segmentCount).coerceAtLeast(0f)
+            val activeCount = (
+                level.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
+                    LiveViewSoundLevels.MAX_SEGMENT * segmentCount
+                ).roundToInt().coerceIn(0, segmentCount)
+            val peakIndex = if (peak > 0f) {
+                (
+                    peak.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
+                        LiveViewSoundLevels.MAX_SEGMENT * (segmentCount - 1)
+                    ).roundToInt().coerceIn(0, segmentCount - 1)
+            } else {
+                -1
+            }
+            val yellow = Color(0xFFFFC247)
+            val red = Color(0xFFFF4D55)
+            val radius = CornerRadius(segmentHeight / 2f, segmentHeight / 2f)
+            repeat(segmentCount) { index ->
+                val zoneColor = when {
+                    index >= 13 -> red
+                    index >= 11 -> yellow
+                    else -> Color.White
+                }
+                val color = when {
+                    index < activeCount -> zoneColor.copy(alpha = 0.94f)
+                    index == peakIndex -> zoneColor.copy(alpha = 0.68f)
+                    else -> Color.White.copy(alpha = 0.14f)
+                }
+                // index=0 从最底部开始，形成由下向上点亮的横杠堆栈。
+                val y = size.height - segmentHeight - index * (segmentHeight + gap)
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(0f, y),
+                    size = Size(size.width, segmentHeight),
+                    cornerRadius = radius
+                )
+            }
+        }
+        Spacer(Modifier.height(2.dp))
         Text(
             text = label,
             color = Color.White.copy(alpha = 0.86f),
@@ -3632,57 +3717,8 @@ private fun SoundMeterChannel(
             fontWeight = FontWeight.Bold,
             lineHeight = 7.sp,
             textAlign = TextAlign.Center,
-            modifier = Modifier.width(10.dp)
+            modifier = Modifier.width(9.dp)
         )
-        Spacer(Modifier.width(3.dp))
-        Canvas(Modifier.weight(1f).height(4.dp)) {
-            val segmentCount = 15
-            val gap = 1.dp.toPx()
-            val segmentWidth =
-                ((size.width - gap * (segmentCount - 1)) / segmentCount).coerceAtLeast(0f)
-            val activeCount = (
-                level.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
-                    LiveViewSoundLevels.MAX_SEGMENT * segmentCount
-                ).roundToInt().coerceIn(0, segmentCount)
-            val yellow = Color(0xFFFFC247)
-            val red = Color(0xFFFF4D55)
-            val radius = CornerRadius(size.height / 2f, size.height / 2f)
-            repeat(segmentCount) { index ->
-                val zoneColor = when {
-                    index >= 13 -> red
-                    index >= 11 -> yellow
-                    else -> Color.White
-                }
-                val color = if (index < activeCount) {
-                    zoneColor.copy(alpha = 0.94f)
-                } else {
-                    Color.White.copy(alpha = 0.16f)
-                }
-                val x = index * (segmentWidth + gap)
-                drawRoundRect(
-                    color = color,
-                    topLeft = Offset(x, 0f),
-                    size = Size(segmentWidth, size.height),
-                    cornerRadius = radius
-                )
-            }
-
-            if (peak > 0f && segmentWidth > 0f) {
-                val peakIndex = (
-                    peak.coerceIn(0f, LiveViewSoundLevels.MAX_SEGMENT.toFloat()) /
-                        LiveViewSoundLevels.MAX_SEGMENT * (segmentCount - 1)
-                    ).roundToInt().coerceIn(0, segmentCount - 1)
-                val markerWidth = minOf(1.dp.toPx(), segmentWidth)
-                val segmentX = peakIndex * (segmentWidth + gap)
-                val markerX = segmentX + (segmentWidth - markerWidth) / 2f
-                drawRoundRect(
-                    color = Color.White.copy(alpha = 0.96f),
-                    topLeft = Offset(markerX, -1.dp.toPx()),
-                    size = Size(markerWidth, size.height + 2.dp.toPx()),
-                    cornerRadius = CornerRadius(markerWidth / 2f, markerWidth / 2f)
-                )
-            }
-        }
     }
 }
 
