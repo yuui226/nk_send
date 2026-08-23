@@ -63,6 +63,39 @@ class PhotoPreviewItemsTest {
     }
 
     @Test
+    fun everyMemberInSmallAndLargeBurstsReturnsToTheSameCollectionPage() {
+        listOf(3, 100).forEach { memberCount ->
+            val collection = PhotoPreviewItem.BurstCollection(
+                id = "burst-$memberCount",
+                files = (1..memberCount).map(::file),
+            )
+            val collectionPage = 1
+            val expanded = expandPreviewBurst(
+                items = listOf(PhotoPreviewItem.Photo(file(500)), collection),
+                collectionPage = collectionPage,
+                collection = collection,
+            )
+            val memberPages = listOf(
+                collectionPage + 1,
+                collectionPage + 1 + memberCount / 2,
+                collectionPage + memberCount,
+            )
+
+            memberPages.forEach { memberPage ->
+                assertEquals(
+                    collectionPage,
+                    previewBurstCollectionPage(expanded, memberPage),
+                )
+            }
+            assertEquals(null, previewBurstCollectionPage(expanded, collectionPage))
+
+            val collapsed = collapsePreviewBurst(expanded, collection.id)
+            assertEquals(2, collapsed.size)
+            assertSame(collection, collapsed[collectionPage])
+        }
+    }
+
+    @Test
     fun videoMetadataUsesObjectInfoSizeAndCaptureTime() {
         assertEquals(
             "1.5 MB  ·  2026-07-24 12:34:56",

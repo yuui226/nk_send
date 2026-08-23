@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BurstMode
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.CircularProgressIndicator
@@ -221,6 +222,19 @@ internal fun collapsePreviewBurst(
 ): List<PhotoPreviewItem> =
     items.filterNot { it is PhotoPreviewItem.Photo && it.burstId == burstId }
 
+/** 当前页必须是合集之后的真实成员；成员数量和所在序号不会影响返回的合集页。 */
+internal fun previewBurstCollectionPage(
+    items: List<PhotoPreviewItem>,
+    memberPage: Int,
+): Int? {
+    val burstId = (items.getOrNull(memberPage) as? PhotoPreviewItem.Photo)?.burstId
+        ?: return null
+    val collectionPage = items.indexOfFirst {
+        it is PhotoPreviewItem.BurstCollection && it.id == burstId
+    }
+    return collectionPage.takeIf { it in 0 until memberPage }
+}
+
 /**
  * 大图期间默认禁止远程缩略图；只有当前页 FHD 已确认不可用且 EXIF 已收尾时才兜底。
  */
@@ -288,6 +302,7 @@ internal fun PhotoPreviewOverlay(
     var collapseAnchorRect by remember { mutableStateOf(anchorRect) }
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
+    var burstTransitionBusy by remember { mutableStateOf(false) }
     val latestCurrentFile by rememberUpdatedState(currentFile)
     val latestPrepareDismissTarget by rememberUpdatedState(prepareDismissTarget)
     val latestOnDismiss by rememberUpdatedState(onDismiss)
@@ -316,7 +331,11 @@ internal fun PhotoPreviewOverlay(
             latestOnDismiss(returnFile.takeIf { collapseAnchorRect != null })
         }
     }
-    val startClose: () -> Unit = { closing = true }
+    // 连拍过渡只有约 260ms；这段时间吞掉关闭请求，避免在不可见切页的单帧里
+    // 把合集页误当成“当前照片”参与退出定位。
+    val startClose: () -> Unit = {
+        if (!burstTransitionBusy) closing = true
+    }
     BackHandler(enabled = !closing) { startClose() }
 
     // ---- FHD 预览：优先级加载 + 即时淘汰 + RGB_565 解码 ----
@@ -353,6 +372,14 @@ internal fun PhotoPreviewOverlay(
     var queueFlightRotation by remember { mutableFloatStateOf(0f) }
     var queueFlightTarget by remember { mutableStateOf<Rect?>(null) }
     var queueMotionJob by remember { mutableStateOf<Job?>(null) }
+    // 连拍展开/收起只驱动 Pager 与合集卡片的图层，不复制位图，也不创建额外页面。
+    // 收起时必须先回到仍存在的合集页，再移除成员，避免页数骤减造成闪现或越界。
+    val burstStackMotion = remember { Animatable(0f) }
+    val burstPagerScale = remember { Animatable(1f) }
+    val burstPagerAlpha = remember { Animatable(1f) }
+    // 归组时用归一化屏宽位移模拟一次“返回左侧合集页”，不横穿中间所有成员。
+    val burstPagerSlide = remember { Animatable(0f) }
+    var animatedBurstId by remember { mutableStateOf<String?>(null) }
 
     fun settleQueuePhoto() {
         queueMotionJob?.cancel()
@@ -445,24 +472,138 @@ internal fun PhotoPreviewOverlay(
         queueAnimating = false
     }
 
-    fun collectionExpandedAt(page: Int, id: String): Boolean =
-        isPreviewBurstExpanded(previewItems, page, id)
-
-    val togglePreviewBurst: (PhotoPreviewItem.BurstCollection) -> Unit = { collection ->
-        val page = pagerState.currentPage
-        val expanded = collectionExpandedAt(page, collection.id)
-        haptics.tick()
-        if (expanded) {
-            // 只可能从合集页触发收起；当前页不变，安全移除其后的成员。
-            previewItems = collapsePreviewBurst(previewItems, collection.id)
-            onBurstExpandedChange(collection.id, false)
-        } else {
-            previewItems = expandPreviewBurst(previewItems, page, collection)
-            onBurstExpandedChange(collection.id, true)
-            // 插入完成后一帧平滑进入第一张；合集页仍保留在左侧，用户可滑回并收起。
+    val expandPreviewBurstCollection: (PhotoPreviewItem.BurstCollection) -> Unit =
+        expand@{ collection ->
+            if (closing || burstTransitionBusy || collection.files.isEmpty()) return@expand
+            val page = pagerState.currentPage
+            if (previewItems.getOrNull(page) != collection) return@expand
+            val alreadyExpanded = isPreviewBurstExpanded(previewItems, page, collection.id)
+            burstTransitionBusy = true
+            animatedBurstId = collection.id
+            haptics.tick()
             previewScope.launch {
+                try {
+                    // 这个按钮永远只表示“展开并进入第一张”，不根据 expanded 改图标或语义。
+                    // 用户滑回已展开的合集页再次点击时，只回到第一张，不重复更新列表模型。
+                    burstStackMotion.snapTo(0f)
+                    if (!alreadyExpanded) {
+                        previewItems = expandPreviewBurst(previewItems, page, collection)
+                        onBurstExpandedChange(collection.id, true)
+                        withFrameNanos { }
+                    }
+                    coroutineScope {
+                        launch {
+                            burstStackMotion.animateTo(
+                                1f,
+                                tween(165, easing = FastOutSlowInEasing),
+                            )
+                        }
+                        launch {
+                            delay(24)
+                            pagerState.animateScrollToPage(
+                                page = page + 1,
+                                animationSpec = tween(205, easing = FastOutSlowInEasing),
+                            )
+                        }
+                    }
+                } finally {
+                    burstStackMotion.snapTo(0f)
+                    burstPagerScale.snapTo(1f)
+                    burstPagerAlpha.snapTo(1f)
+                    burstPagerSlide.snapTo(0f)
+                    animatedBurstId = null
+                    burstTransitionBusy = false
+                }
+            }
+        }
+
+    val collapsePreviewBurstMember: (String) -> Unit = collapseMember@{ burstId ->
+        if (closing || burstTransitionBusy || queueAnimating || queueGestureActive ||
+            queueMotionJob?.isActive == true
+        ) {
+            return@collapseMember
+        }
+        val memberPage = pagerState.currentPage
+        val member = previewItems.getOrNull(memberPage) as? PhotoPreviewItem.Photo
+            ?: return@collapseMember
+        if (member.burstId != burstId) return@collapseMember
+        val collectionPage = previewBurstCollectionPage(previewItems, memberPage)
+            ?: return@collapseMember
+
+        burstTransitionBusy = true
+        animatedBurstId = burstId
+        haptics.tick()
+        previewScope.launch {
+            try {
+                // 无论当前是第几张，都模拟一次标准的“返回上一页”：成员向右离场，
+                // 合集从左侧进入。在不可见的交接帧定位合集，避免横穿几十张成员。
+                burstStackMotion.snapTo(1f)
+                coroutineScope {
+                    launch {
+                        burstPagerScale.animateTo(
+                            0.985f,
+                            tween(120, easing = FastOutSlowInEasing),
+                        )
+                    }
+                    launch {
+                        burstPagerAlpha.animateTo(
+                            0f,
+                            tween(120, easing = FastOutSlowInEasing),
+                        )
+                    }
+                    launch {
+                        burstPagerSlide.animateTo(
+                            0.22f,
+                            tween(120, easing = FastOutSlowInEasing),
+                        )
+                    }
+                }
+                pagerState.scrollToPage(collectionPage)
+
+                // 当前页已经稳定落在合集上，此时原子移除成员不会改变用户正在看的页面。
+                previewItems = collapsePreviewBurst(previewItems, burstId)
+                onBurstExpandedChange(burstId, false)
+                burstPagerSlide.snapTo(-0.22f)
                 withFrameNanos { }
-                pagerState.animateScrollToPage(page + 1)
+                coroutineScope {
+                    launch {
+                        burstStackMotion.animateTo(
+                            0f,
+                            spring(
+                                dampingRatio = 0.7f,
+                                stiffness = Spring.StiffnessHigh,
+                            ),
+                        )
+                    }
+                    launch {
+                        burstPagerScale.animateTo(
+                            1f,
+                            spring(
+                                dampingRatio = 0.68f,
+                                stiffness = Spring.StiffnessHigh,
+                            ),
+                        )
+                    }
+                    launch {
+                        burstPagerAlpha.animateTo(
+                            1f,
+                            tween(150, easing = FastOutSlowInEasing),
+                        )
+                    }
+                    launch {
+                        burstPagerSlide.animateTo(
+                            0f,
+                            tween(165, easing = FastOutSlowInEasing),
+                        )
+                    }
+                }
+            } finally {
+                burstStackMotion.snapTo(0f)
+                burstPagerScale.snapTo(1f)
+                burstPagerAlpha.snapTo(1f)
+                burstPagerSlide.snapTo(0f)
+                animatedBurstId = null
+                burstTransitionBusy = false
             }
         }
     }
@@ -670,7 +811,8 @@ internal fun PhotoPreviewOverlay(
             state = pagerState,
             beyondViewportPageCount = 1,
             key = { page -> previewItems[page].key },
-            userScrollEnabled = !currentZoomed && !queueGestureActive && !queueAnimating,
+            userScrollEnabled = !currentZoomed && !queueGestureActive && !queueAnimating &&
+                !burstTransitionBusy,
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
@@ -702,11 +844,14 @@ internal fun PhotoPreviewOverlay(
                             1f
                         }
                     }
-                    if (queueLift > 0f) transformOrigin = TransformOrigin.Center
-                    scaleX = baseScale * queueScale
-                    scaleY = baseScale * queueScale
+                    if (queueLift > 0f || burstPagerScale.value != 1f) {
+                        transformOrigin = TransformOrigin.Center
+                    }
+                    scaleX = baseScale * queueScale * burstPagerScale.value
+                    scaleY = baseScale * queueScale * burstPagerScale.value
+                    translationX = size.width * burstPagerSlide.value
                     translationY = queueOffsetY
-                    alpha = baseAlpha * queueAlpha
+                    alpha = baseAlpha * queueAlpha * burstPagerAlpha.value
                 }
         ) { page ->
             when (val item = previewItems[page]) {
@@ -736,6 +881,9 @@ internal fun PhotoPreviewOverlay(
                         loadEnabled = deferredLoadsEnabled,
                         isCurrent = page == pagerState.currentPage,
                         onZoomedChange = { currentZoomed = it },
+                        stackMotionProgress = {
+                            if (animatedBurstId == item.id) burstStackMotion.value else 0f
+                        },
                         onTap = startClose
                     )
                 }
@@ -851,7 +999,8 @@ internal fun PhotoPreviewOverlay(
                         val swipe =
                             (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
                                 .coerceIn(0f, 1f)
-                        alpha = progress.value * swipe
+                        translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                        alpha = progress.value * swipe * burstPagerAlpha.value
                     },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -894,7 +1043,8 @@ internal fun PhotoPreviewOverlay(
                         val swipe =
                             (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
                                 .coerceIn(0f, 1f)
-                        alpha = progress.value * swipe
+                        translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                        alpha = progress.value * swipe * burstPagerAlpha.value
                     }
             ) {
                 if (currentFile.handle in burstHandles) {
@@ -971,7 +1121,10 @@ internal fun PhotoPreviewOverlay(
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .height(2.dp)
-                    .graphicsLayer { alpha = progress.value }
+                    .graphicsLayer {
+                        translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                        alpha = progress.value * burstPagerAlpha.value
+                    }
             )
         }
 
@@ -1005,7 +1158,9 @@ internal fun PhotoPreviewOverlay(
                             val swipe =
                                 (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
                                     .coerceIn(0f, 1f)
-                            alpha = progress.value * swipe * loadedAlpha
+                            translationX =
+                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                            alpha = progress.value * swipe * loadedAlpha * burstPagerAlpha.value
                         },
                     verticalAlignment = Alignment.Bottom
                 ) {
@@ -1022,47 +1177,73 @@ internal fun PhotoPreviewOverlay(
         when (val item = currentItem) {
             is PhotoPreviewItem.Photo -> {
                 val current = item.file
+                val memberBurstId = item.burstId
+                val memberCollectionPage = previewBurstCollectionPage(
+                    previewItems,
+                    pagerState.currentPage,
+                ) ?: -1
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .navigationBarsPadding()
                         .padding(end = 20.dp, bottom = 80.dp)
-                        .graphicsLayer { alpha = progress.value },
+                        .graphicsLayer {
+                            translationX =
+                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                            alpha = progress.value * burstPagerAlpha.value
+                        },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (memberCollectionPage in 0 until pagerState.currentPage) {
+                        BurstMemberCollapseButton(
+                            enabled = !burstTransitionBusy && !queueAnimating &&
+                                !queueGestureActive && queueMotionJob?.isActive != true,
+                            onClick = {
+                                memberBurstId?.let(collapsePreviewBurstMember)
+                            },
+                        )
+                    }
                     if (current.extension !in VIDEO_EXTENSIONS) {
                         PreviewRotationButton(onClick = {
-                            val nextDegrees = rotationDegrees - 90f
-                            rotationDegrees = nextDegrees
-                            // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
-                            val nextTurns = Math.floorMod((-nextDegrees / 90f).toInt(), 4)
-                            onRotationChanged(nextTurns)
+                            if (!burstTransitionBusy) {
+                                val nextDegrees = rotationDegrees - 90f
+                                rotationDegrees = nextDegrees
+                                // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
+                                val nextTurns = Math.floorMod((-nextDegrees / 90f).toInt(), 4)
+                                onRotationChanged(nextTurns)
+                            }
                         })
                     }
                     TransferQueueButton(
-                        onClick = { enqueueFromPreview(current) }
+                        onClick = {
+                            if (!burstTransitionBusy) enqueueFromPreview(current)
+                        }
                     )
                 }
             }
             is PhotoPreviewItem.BurstCollection -> {
-                val expanded = collectionExpandedAt(pagerState.currentPage, item.id)
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
                         .padding(bottom = 112.dp)
-                        .graphicsLayer { alpha = progress.value },
+                        .graphicsLayer {
+                            translationX =
+                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                            alpha = progress.value * burstPagerAlpha.value
+                        },
                     horizontalArrangement = Arrangement.spacedBy(22.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TransferQueueButton(
-                        onClick = { onTransferBurst(item.files) },
+                        onClick = {
+                            if (!burstTransitionBusy) onTransferBurst(item.files)
+                        },
                         buttonSize = 48.dp
                     )
-                    BurstPreviewToggleButton(
-                        expanded = expanded,
-                        onClick = { togglePreviewBurst(item) }
+                    BurstCollectionExpandButton(
+                        onClick = { expandPreviewBurstCollection(item) }
                     )
                 }
             }
@@ -1195,6 +1376,7 @@ private fun BurstCollectionPreviewPage(
     loadEnabled: Boolean,
     isCurrent: Boolean,
     onZoomedChange: (Boolean) -> Unit,
+    stackMotionProgress: () -> Float = { 0f },
     onTap: () -> Unit
 ) {
     val a11y = stringResource(R.string.burst_collection_a11y, collection.files.size)
@@ -1215,6 +1397,7 @@ private fun BurstCollectionPreviewPage(
         Box(modifier = Modifier.size(stackSize)) {
             val stackFiles = collection.files.take(3).reversed()
             val stackInset = stackSize * 0.07f + 6.dp
+            val stackSpreadPx = with(LocalDensity.current) { 6.dp.toPx() }
             stackFiles.forEachIndexed { index, file ->
                 val last = stackFiles.lastIndex
                 val rotation = when (stackFiles.size) {
@@ -1231,6 +1414,11 @@ private fun BurstCollectionPreviewPage(
                     index % 2 == 0 -> (-12).dp
                     else -> 12.dp
                 }
+                val spreadDirection = when {
+                    index == last -> 0f
+                    index % 2 == 0 -> -1f
+                    else -> 1f
+                }
                 BurstStackPhoto(
                     file = file,
                     cameraViewModel = cameraViewModel,
@@ -1241,7 +1429,14 @@ private fun BurstCollectionPreviewPage(
                         .fillMaxSize(0.86f)
                         .align(Alignment.Center)
                         .offset(x = x, y = if (index == last) 2.dp else 5.dp)
-                        .graphicsLayer { rotationZ = rotation }
+                        .graphicsLayer {
+                            val motion = stackMotionProgress().coerceIn(0f, 1f)
+                            rotationZ = rotation
+                            translationX = spreadDirection * stackSpreadPx * motion
+                            val motionScale = 1f + 0.012f * motion
+                            scaleX = motionScale
+                            scaleY = motionScale
+                        }
                 )
             }
 
@@ -1257,32 +1452,55 @@ private fun BurstCollectionPreviewPage(
 }
 
 @Composable
-private fun BurstPreviewToggleButton(
-    expanded: Boolean,
-    onClick: () -> Unit
+private fun BurstCollectionExpandButton(onClick: () -> Unit) =
+    BurstCollectionNavigationButton(
+        expand = true,
+        enabled = true,
+        onClick = onClick,
+    )
+
+/** 成员页专属的“回到并收起合集”按钮，放在旋转按钮上方。 */
+@Composable
+private fun BurstMemberCollapseButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+) = BurstCollectionNavigationButton(
+    expand = false,
+    enabled = enabled,
+    onClick = onClick,
+)
+
+/** 展开与缩起使用固定的右/左折角；按钮本身不跟随合集状态变形。 */
+@Composable
+private fun BurstCollectionNavigationButton(
+    expand: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(240, easing = FastOutSlowInEasing),
-        label = "previewBurstChevron"
-    )
+    val description = stringResource(if (expand) R.string.cd_expand else R.string.cd_collapse)
     GlassButton(
         onClick = onClick,
-        modifier = Modifier.size(48.dp),
+        enabled = enabled,
+        modifier = Modifier.size(44.dp),
         shape = CircleShape,
-        contentPadding = PaddingValues(0.dp)
+        contentPadding = PaddingValues(0.dp),
     ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .semantics { contentDescription = description },
+            contentAlignment = Alignment.Center,
+        ) {
             Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = stringResource(
-                    if (expanded) R.string.cd_collapse else R.string.cd_expand
-                ),
+                imageVector = if (expand) {
+                    Icons.Default.ChevronRight
+                } else {
+                    Icons.Default.ChevronLeft
+                },
+                contentDescription = null,
                 tint = colors.accentBlue,
-                modifier = Modifier
-                    .size(25.dp)
-                    .graphicsLayer { rotationZ = rotation }
+                modifier = Modifier.size(25.dp),
             )
         }
     }

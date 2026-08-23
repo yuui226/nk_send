@@ -806,8 +806,8 @@ fun FileListScreen(
     val onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit =
         onPreviewBurst@{ burstId, files, rect ->
             val first = files.firstOrNull() ?: return@onPreviewBurst
-            // 快照立即包含目标成员，保证底层展开动画尚未提交时也能直接落到第一张；
-            // 向左仍可回到合集页。折叠合集的长按会由卡片先触发同一个展开状态机。
+            // 快照直接包含目标成员并落到第一张；长按不提前改变底层网格，避免预览层
+            // 挂载前露出合集重排/箭头旋转。退出成员预览时会在黑幕下无感展开底层合集。
             haptics.longPress()
             val sourceAtOpen = previewSourceIdentity
             val expandedAtOpen = expandedBurstIds + burstId
@@ -2863,8 +2863,6 @@ private fun BurstCollectionCell(
     val a11y = stringResource(R.string.burst_collection_a11y, files.size)
     var plusBounds by remember { mutableStateOf<Rect?>(null) }
     var collectionBounds by remember { mutableStateOf<Rect?>(null) }
-    val latestExpanded by rememberUpdatedState(expanded)
-    val latestOnToggle by rememberUpdatedState(onToggle)
     val latestOnPreviewFirst by rememberUpdatedState(onPreviewFirst)
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
@@ -2956,8 +2954,8 @@ private fun BurstCollectionCell(
                 .pointerInput(files.firstOrNull()?.handle) {
                     detectTapGestures(
                         onLongPress = {
-                            // 与右下按钮走同一展开状态机：折叠时先展开，已展开则不重复切换。
-                            if (!latestExpanded) latestOnToggle()
+                            // 长按只建立“合集 + 成员”的预览快照并直达第一张；底层列表不在
+                            // 预览出现前重排，从而不会短暂闪出展开成员或箭头旋转。
                             collectionBounds?.let(latestOnPreviewFirst)
                         }
                     )
