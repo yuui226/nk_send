@@ -1170,7 +1170,11 @@ fun FileListScreen(
                         Spacer(modifier = Modifier.height(18.dp))
                         GlassButton(
                             onClick = {
-                                transferViewModel.setFilters(PhotoFilterCriteria())
+                                // 直接恢复整套默认筛选，不能只清当前可见项；同时丢弃可能
+                                // 仍存活的筛选面板草稿，避免旧日期范围随后被再次提交。
+                                showFilter = false
+                                openedFilterAnchor = null
+                                transferViewModel.clearFilters()
                             }
                         ) {
                             Text(
@@ -3545,7 +3549,8 @@ private fun FilterOverlay(
         .coerceAtMost(screenWidth - panelWidth - FILTER_PANEL_SCREEN_MARGIN)
         .coerceAtLeast(FILTER_PANEL_SCREEN_MARGIN)
 
-    var working by remember { mutableStateOf(current) }
+    // 外部“一键清除”发生时同步丢弃面板草稿，不能让旧日期范围继续存活。
+    var working by remember(current) { mutableStateOf(current) }
 
     val otherLabel = stringResource(R.string.filter_other)
     fun extLabel(ext: String) = ext.removePrefix(".").uppercase().ifEmpty { otherLabel }

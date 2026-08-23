@@ -418,7 +418,11 @@ data class PhotoFilterCriteria(
     val untransferredOnly: Boolean = false,
     val storageSlot: Int? = null,
     val dateRange: PhotoDateRange? = null,
-)
+) {
+    companion object {
+        val Default = PhotoFilterCriteria()
+    }
+}
 
 internal fun normalizeThumbnailColumns(columns: Int): Int = columns.coerceIn(2, 4)
 
@@ -1348,6 +1352,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             )
         }
     }
+
+    /** 恢复文件页的整套默认筛选；日期和以后新增的默认项都以同一快照为准。 */
+    fun clearFilters() = setFilters(PhotoFilterCriteria.Default)
 
     fun setTransferDirUri(uri: Uri) {
         contentResolver.takePersistableUriPermission(
