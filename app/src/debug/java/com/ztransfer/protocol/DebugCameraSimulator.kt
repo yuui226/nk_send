@@ -332,6 +332,14 @@ internal object DebugCameraSimulator {
             val height = featuredItem?.height ?: generated.second
             val image = featuredItem?.image ?: generated.third
             val thumbnail = featuredItem?.thumbnail ?: image
+            // 连拍识别使用“同扩展名 + 连续文件编号 + 相邻 0..1 秒 + 至少 3 张”。
+            // 保留两段固定样本在列表前部，Debug 包连接模拟相机后无需真实相机即可
+            // 同时检查 5 张与 4 张合集的列表叠放、展开和全屏预览效果。
+            val captureTimeMs = when (index) {
+                in 1..5 -> now - 20L * 60L * 1000L + (index - 1) * 1000L
+                in 12..15 -> now - 3L * 60L * 60L * 1000L + (index - 12) * 1000L
+                else -> now - index * 5L * 60L * 60L * 1000L
+            }
             handle to SimObject(
                 handle = handle,
                 storageId = if (index % 2 == 0) STORAGE_ID_1 else STORAGE_ID_2,
@@ -340,7 +348,7 @@ internal object DebugCameraSimulator {
                     index + 1,
                     if (isFeatured) "JPG" else "PNG",
                 ),
-                captureDate = formatter.format(Date(now - index * 5L * 60L * 60L * 1000L)),
+                captureDate = formatter.format(Date(captureTimeMs)),
                 protected = index % 11 == 1,
                 format = if (isFeatured) FORMAT_JPEG else FORMAT_PNG,
                 image = image,
