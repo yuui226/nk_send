@@ -41,6 +41,12 @@ object PtpConstants {
     // 参数: handle，返回 1920×1080 JPEG。比 GetThumb (160×120) 清晰得多，
     // 用于长按预览提高清晰度；固件不支持时静默回退到缩略图。
     const val NK_GET_FHD_PICTURE = 0x920F
+    // Nikon “连接到计算机”首次配对状态下使用的私有操作码（来自实机抓包）。
+    const val NK_PAIRING_QUERY = 0x952B
+    const val NK_PAIRING_RESULT = 0x935A
+
+    const val EVENT = 8
+    const val EVENT_DEVICE_INFO_CHANGED = 0x4008
 
     // 响应码
     const val RESPONSE_OK = 0x2001

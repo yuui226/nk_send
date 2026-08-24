@@ -97,8 +97,9 @@ internal enum class EnterCodeAction { OPEN, SHOW_NETWORK_HINT, PROBE_SERVER }
 internal fun enterCodeAction(
     connectionType: CameraConnectionType?,
     cameraConnected: Boolean,
+    isStaConnection: Boolean = false,
 ): EnterCodeAction = when {
-    connectionType != CameraConnectionType.WIFI -> EnterCodeAction.OPEN
+    connectionType != CameraConnectionType.WIFI || isStaConnection -> EnterCodeAction.OPEN
     cameraConnected -> EnterCodeAction.SHOW_NETWORK_HINT
     else -> EnterCodeAction.PROBE_SERVER
 }
@@ -124,6 +125,7 @@ fun ProDialog(
     onHoldCameraWifi: (Boolean) -> Unit = {},
     connectionType: CameraConnectionType? = null,
     cameraConnected: Boolean = false,
+    isStaConnection: Boolean = false,
     // 订阅用户买年费时续原码；改选永久版时另发永久码，原年费码保持有效。
     renew: Boolean = false,
 ) {
@@ -424,7 +426,11 @@ fun ProDialog(
                                 enabled = !checkingServer,
                                 onClick = {
                                     copied = false
-                                    when (enterCodeAction(connectionType, cameraConnected)) {
+                                    when (enterCodeAction(
+                                        connectionType,
+                                        cameraConnected,
+                                        isStaConnection,
+                                    )) {
                                         EnterCodeAction.OPEN -> {
                                             internetHintNonce = 0
                                             codeMode = true

@@ -49,6 +49,7 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.viewmodel.WirelessMode
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
@@ -330,7 +331,8 @@ fun MainScreen(transferViewModel: TransferViewModel) {
             }
         }
         AppUpdateHost(
-            cameraUsesWifi = cameraState.connectionType == CameraConnectionType.WIFI
+            cameraUsesWifi = cameraState.connectionType == CameraConnectionType.WIFI &&
+                cameraState.wirelessMode == WirelessMode.AP
         )
     }
 }

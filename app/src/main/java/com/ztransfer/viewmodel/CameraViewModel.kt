@@ -31,7 +31,9 @@ import com.ztransfer.protocol.CameraEndpointOverride
 import com.ztransfer.protocol.CameraRefusedException
 import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PtpConstants
+import com.ztransfer.protocol.PtpIpDiscovery
 import com.ztransfer.protocol.UsbPtpConnection
 import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.service.CameraSessionService
@@ -81,6 +83,21 @@ enum class WifiConnectionStatus {
     RECONNECTING
 }
 
+enum class StaConnectionStatus {
+    IDLE,
+    DISCOVERING,
+    CONNECTING,
+    FAILED,
+}
+
+enum class WirelessMode {
+    AP,
+    STA,
+}
+
+internal fun restoredWirelessMode(value: String?): WirelessMode =
+    runCatching { WirelessMode.valueOf(value.orEmpty()) }.getOrDefault(WirelessMode.AP)
+
 internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStatus = when (error) {
     is CameraRefusedException -> WifiConnectionStatus.REFUSED
     is ConnectException,
@@ -88,6 +105,12 @@ internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStat
     is SocketTimeoutException -> WifiConnectionStatus.NOT_FOUND
     else -> WifiConnectionStatus.FAILED
 }
+
+/** STA reconnection is selected only for an established STA-origin Wi-Fi session. */
+internal fun shouldReconnectUsingSta(
+    connectionType: CameraConnectionType?,
+    wirelessMode: WirelessMode,
+): Boolean = connectionType == CameraConnectionType.WIFI && wirelessMode == WirelessMode.STA
 
 private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
@@ -239,6 +262,13 @@ data class CameraState(
     val isConnectedToCamera: Boolean = false,
     val isConnecting: Boolean = false,
     val connectionType: CameraConnectionType? = null,
+    /** Explicit user choice for wireless discovery. Cold starts always begin in the legacy AP mode. */
+    val wirelessMode: WirelessMode = WirelessMode.AP,
+    /** True when the active/most recent Wi-Fi session was reached through STA discovery. */
+    val isStaConnection: Boolean = false,
+    val staConnectionStatus: StaConnectionStatus = StaConnectionStatus.IDLE,
+    val staDiscoveryProgress: String? = null,
+    val staConnectionError: String? = null,
     /** PTP DeviceInfo identity for the active session; null when the camera did not report it. */
     val cameraManufacturer: String? = null,
     val cameraModel: String? = null,
@@ -277,7 +307,17 @@ data class NewCameraMedia(
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
-    private val _state = MutableStateFlow(CameraState())
+    private val connectionPreferences = application.getSharedPreferences(
+        CONNECTION_PREFERENCES,
+        Context.MODE_PRIVATE,
+    )
+    private val _state = MutableStateFlow(
+        CameraState(
+            wirelessMode = restoredWirelessMode(
+                connectionPreferences.getString(WIRELESS_MODE_PREFERENCE, null),
+            ),
+        ),
+    )
     val state: StateFlow<CameraState> = _state.asStateFlow()
     private val _newMediaFiles = MutableSharedFlow<NewCameraMedia>(
         extraBufferCapacity = 32,
@@ -304,6 +344,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val knownHandles = HashSet<Int>()
     private var usbPermissionJob: Job? = null
     private var usbConnectJob: Job? = null
+    private var staDiscoveryJob: Job? = null
+    private var staReconnectJob: Job? = null
+    private var staReconnectAttempt = 0
+    private var staConnectingCamera: NikonCamera? = null
+    private var staDiscoveryGeneration = 0L
+    private var staLastFailureMessage: String? = null
+    private var wirelessModeGeneration = 0L
+    private var apConnectingCamera: NikonCamera? = null
+    private var wirelessCleanupJob: Job? = null
     private var pendingUsbPermissionDeviceId: Int? = null
     private var usbConnectFailures = 0
     private var usbRetryPaused = false
@@ -373,6 +422,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    // Discovery stays cold until STA is actually searched. Restoring the selected tab only reads
+    // the small connection preference and does not initialize NSD or LAN scanning.
+    private val ptpIpDiscovery by lazy(LazyThreadSafetyMode.NONE) {
+        PtpIpDiscovery(application.applicationContext)
+    }
     @Suppress("DEPRECATION")
     private val wifiManager = application.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
@@ -520,8 +574,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun onUsbDeviceAvailable(device: UsbDevice) {
         if (connectionDiscoveryPaused) return
         // Wi-Fi 会话期间忽略 USB 插拔；连接页识别到 PTP 设备后，本次会话锁定为 USB。
-        if (_state.value.connectionType == CameraConnectionType.WIFI) return
+        if (_state.value.connectionType == CameraConnectionType.WIFI &&
+            _state.value.isConnectedToCamera
+        ) return
         if (UsbPtpConnection.findPtpInterface(device) == null) return
+        suspendWirelessDiscoveryForUsb()
         val isNewAttachment = attachedUsbDevice?.deviceId != device.deviceId
         if (isNewAttachment) {
             usbConnectFailures = 0
@@ -753,7 +810,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun onUsbDeviceDetached(device: UsbDevice) {
-        if (_state.value.connectionType == CameraConnectionType.WIFI) return
+        if (_state.value.connectionType == CameraConnectionType.WIFI &&
+            _state.value.isConnectedToCamera
+        ) return
         val wasPending = pendingUsbPermissionDeviceId == device.deviceId
         val wasAttached = attachedUsbDevice?.deviceId == device.deviceId
         val wasActive = activeUsbDeviceId == device.deviceId
@@ -764,17 +823,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             usbPermissionJob = null
             pendingUsbPermissionDeviceId = null
         }
+        if (wasAttached && !wasActive) {
+            // The cable can be removed while OpenSession is still running. Cancel that owner
+            // before wireless discovery resumes so its stale result cannot overwrite AP/STA state.
+            usbConnectJob?.cancel()
+            usbConnectJob = null
+        }
         if (wasAttached) attachedUsbDevice = null
         usbRetryPaused = false
         usbConnectFailures = 0
         _state.update {
             it.copy(
                 isConnecting = false,
-                usbConnectionError = null
+                usbConnectionError = null,
+                connectionType = if (it.connectionType == CameraConnectionType.USB) {
+                    null
+                } else {
+                    it.connectionType
+                },
             )
         }
         if (!wasActive) {
             // Also covers a cable removed while USB OpenSession is still in flight.
+            resumeSelectedWirelessDiscovery()
             return
         }
 
@@ -788,10 +859,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             it.copy(
                 isConnectedToCamera = false,
                 isConnecting = false,
-                connectionType = CameraConnectionType.USB
+                connectionType = null,
             )
         }
         cleanupScope.launch { cam?.close() }
+        resumeSelectedWirelessDiscovery()
     }
 
     private suspend fun reconnectSelectedTransport() {
@@ -801,13 +873,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val usb = attachedUsbDevice
                 if (usb != null && usbManager.hasPermission(usb)) connectUsbDevice(usb)
             }
-            CameraConnectionType.WIFI -> connectToCameraWithRetry()
+            CameraConnectionType.WIFI -> {
+                val reconnectUsingSta = shouldReconnectUsingSta(
+                    _state.value.connectionType,
+                    _state.value.wirelessMode,
+                )
+                if (reconnectUsingSta) startStaDiscovery(reconnect = true) else connectToCameraWithRetry()
+            }
             null -> {
                 val usb = attachedUsbDevice
                 if (usb != null && usbManager.hasPermission(usb)) {
                     connectUsbDevice(usb)
                 } else {
-                    connectToCameraWithRetry()
+                    when (_state.value.wirelessMode) {
+                        WirelessMode.AP -> connectToCameraWithRetry()
+                        WirelessMode.STA -> startStaDiscovery(reconnect = true)
+                    }
                 }
             }
         }
@@ -919,8 +1000,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     init {
         registerUsbReceiver()
         scanAttachedUsbCamera()
-        if (_state.value.connectionType != CameraConnectionType.USB) registerNetworkCallback()
-        startConnectionWatcher()
+        if (_state.value.connectionType != CameraConnectionType.USB &&
+            _state.value.wirelessMode == WirelessMode.AP
+        ) {
+            registerNetworkCallback()
+            startConnectionWatcher()
+        }
         // 启动时只清理超过 90 天未连接的相机目录和遗留临时文件，不设容量上限。
         viewModelScope.launch(Dispatchers.IO) {
             val result = thumbnailDiskCache.cleanupExpiredCameraCaches()
@@ -1104,8 +1189,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (connectionDiscoveryPaused == paused) return
         connectionDiscoveryPaused = paused
         if (paused) {
+            if (staDiscoveryJob?.isActive == true || staReconnectJob?.isActive == true) {
+                cancelStaDiscoveryInternal()
+            }
             watcherJob?.cancel()
             watcherJob = null
+            wirelessModeGeneration++
+            apConnectingCamera?.let(::closePendingWirelessCamera)
+            apConnectingCamera = null
             usbPermissionJob?.cancel()
             usbPermissionJob = null
             pendingUsbPermissionDeviceId = null
@@ -1117,11 +1208,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
-        if (_state.value.connectionType != CameraConnectionType.USB) registerNetworkCallback()
-        startConnectionWatcher()
+        if (_state.value.connectionType != CameraConnectionType.USB &&
+            _state.value.wirelessMode == WirelessMode.AP
+        ) {
+            registerNetworkCallback()
+            startConnectionWatcher()
+        }
         if (!_state.value.isConnectedToCamera) {
             scanAttachedUsbCamera()
-            if (_state.value.connectionType != CameraConnectionType.USB) onWifiChanged()
+            if (_state.value.connectionType != CameraConnectionType.USB &&
+                _state.value.wirelessMode == WirelessMode.AP
+            ) onWifiChanged()
+            if (_state.value.connectionType != CameraConnectionType.USB &&
+                _state.value.wirelessMode == WirelessMode.STA &&
+                _state.value.isStaConnection
+            ) startStaDiscovery(reconnect = true)
         }
         log { "CONNECTION_DISCOVERY resumed after local photo workspace" }
     }
@@ -1132,15 +1233,50 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 相机 Wi-Fi 就连上"。isNikonWifi() 仅读本地 DHCP 网关，开销极小；网关命中仅表示值得
      * 探测，真正身份仍以 PTP/IP 握手为准，避免把同为 192.168.1.1 的普通路由器当成相机。
      */
-    private fun startConnectionWatcher() {
+    private fun suspendWirelessDiscoveryForUsb() {
+        wirelessModeGeneration++
         watcherJob?.cancel()
-        if (connectionDiscoveryPaused) {
+        watcherJob = null
+        apConnectingCamera?.let(::closePendingWirelessCamera)
+        apConnectingCamera = null
+        if (staDiscoveryJob?.isActive == true || staReconnectJob?.isActive == true) {
+            cancelStaDiscoveryInternal()
+        }
+    }
+
+    private fun resumeSelectedWirelessDiscovery() {
+        if (connectionDiscoveryPaused || purchaseHold || _state.value.isConnectedToCamera ||
+            _state.value.connectionType == CameraConnectionType.USB
+        ) return
+        when (_state.value.wirelessMode) {
+            WirelessMode.AP -> {
+                registerNetworkCallback()
+                startConnectionWatcher()
+                onWifiChanged()
+            }
+            WirelessMode.STA -> startStaDiscovery(reconnect = true)
+        }
+    }
+
+    private fun closePendingWirelessCamera(candidate: NikonCamera) {
+        val previousCleanup = wirelessCleanupJob
+        wirelessCleanupJob = cleanupScope.launch {
+            previousCleanup?.join()
+            candidate.close()
+        }
+    }
+
+    private fun startConnectionWatcher() {
+        if (connectionDiscoveryPaused || _state.value.wirelessMode != WirelessMode.AP) {
+            watcherJob?.cancel()
             watcherJob = null
             return
         }
+        if (watcherJob?.isActive == true) return
         watcherJob = viewModelScope.launch {
             while (isActive) {
                 if (connectionDiscoveryPaused) break
+                if (_state.value.wirelessMode != WirelessMode.AP) break
                 if (_state.value.connectionType == CameraConnectionType.USB) {
                     delay(WATCH_INTERVAL_MS)
                     continue
@@ -1169,6 +1305,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun registerNetworkCallback() {
         if (_state.value.connectionType == CameraConnectionType.USB) return
+        if (_state.value.wirelessMode != WirelessMode.AP) return
         // Debug 内置相机使用进程内回环端点，不依赖 Wi-Fi；Release 实现恒返回 null。
         if (CameraEndpointOverride.hostOrNull() != null) return
         if (wifiHeld) return
@@ -1224,6 +1361,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             purchaseHold = false
             return
         }
+        if (_state.value.wirelessMode == WirelessMode.STA) {
+            // STA uses a phone hotspot or shared LAN and does not reserve the camera's no-internet
+            // SoftAP network. Keep the PTP session alive; payment/update traffic can use the
+            // system's validated default network independently.
+            purchaseHold = false
+            return
+        }
         purchaseHold = !hold
         if (hold) {
             registerNetworkCallback()
@@ -1258,9 +1402,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun onWifiChanged() {
         if (connectionDiscoveryPaused) return
+        if (_state.value.wirelessMode != WirelessMode.AP) return
         if (_state.value.connectionType == CameraConnectionType.USB) return
         viewModelScope.launch {
             if (connectionDiscoveryPaused) return@launch
+            if (_state.value.wirelessMode != WirelessMode.AP) return@launch
             val loopback = CameraEndpointOverride.hostOrNull() != null
             val onNikonWifi = loopback || linkSaysCameraWifi || checkNikonWifi()
             val rssi = if (onNikonWifi && !loopback) {
@@ -1268,6 +1414,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 null
             }
+            if (_state.value.wirelessMode != WirelessMode.AP) return@launch
             updateWifiCandidate(onNikonWifi, rssi)
 
             // 只在"已在相机 Wi-Fi 但尚未连上相机"时发起连接。
@@ -1282,8 +1429,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Debug 入口主动开启进程内模拟相机；Release 源集返回 false，因此不会改变正式连接流程。 */
     fun connectDebugSimulator() {
+        selectApMode()
         viewModelScope.launch {
             if (connectionDiscoveryPaused) return@launch
+            if (_state.value.wirelessMode != WirelessMode.AP) return@launch
             if (_state.value.isConnectedToCamera || _state.value.isConnecting) return@launch
             val enabled = withContext(Dispatchers.IO) {
                 CameraEndpointOverride.enableSimulator(getApplication())
@@ -1291,6 +1440,285 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (!enabled || _state.value.isConnectedToCamera || _state.value.isConnecting) return@launch
             updateWifiCandidate(candidate = true, rssi = null)
             connectToCameraWithRetry()
+        }
+    }
+
+    /** Selects the legacy camera-hosted hotspot path and resumes only its discovery machinery. */
+    fun selectApMode() {
+        val current = _state.value
+        if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
+        persistWirelessMode(WirelessMode.AP)
+        if (current.wirelessMode == WirelessMode.AP) {
+            resumeSelectedWirelessDiscovery()
+            return
+        }
+
+        cancelStaDiscoveryInternal()
+        wirelessModeGeneration++
+        _state.update {
+            it.copy(
+                wirelessMode = WirelessMode.AP,
+                isStaConnection = false,
+                isConnecting = false,
+                connectionType = null,
+                staConnectionStatus = StaConnectionStatus.IDLE,
+                staDiscoveryProgress = null,
+                staConnectionError = null,
+                wifiConnectionStatus = WifiConnectionStatus.IDLE,
+            )
+        }
+        resumeSelectedWirelessDiscovery()
+    }
+
+    /** Selects STA/LAN without starting a scan; used before sending the user to hotspot settings. */
+    fun selectStaMode() {
+        val current = _state.value
+        if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
+        persistWirelessMode(WirelessMode.STA)
+        if (current.wirelessMode == WirelessMode.STA) return
+
+        wirelessModeGeneration++
+        watcherJob?.cancel()
+        watcherJob = null
+        apConnectingCamera?.let(::closePendingWirelessCamera)
+        apConnectingCamera = null
+        if (wifiHeld) releaseWifiNetworkRequest()
+        _state.update {
+            it.copy(
+                wirelessMode = WirelessMode.STA,
+                isConnecting = false,
+                connectionType = null,
+                isWifiCandidate = false,
+                wifiRssi = null,
+                wifiConnectionStatus = WifiConnectionStatus.IDLE,
+                staConnectionStatus = StaConnectionStatus.IDLE,
+                staDiscoveryProgress = null,
+                staConnectionError = null,
+            )
+        }
+    }
+
+    private fun persistWirelessMode(mode: WirelessMode) {
+        connectionPreferences.edit()
+            .putString(WIRELESS_MODE_PREFERENCE, mode.name)
+            .apply()
+    }
+
+    /** Starts the explicit STA/LAN camera search shown by the experimental card. */
+    fun discoverStaCamera() {
+        staReconnectAttempt = 0
+        staReconnectJob?.cancel()
+        staReconnectJob = null
+        startStaDiscovery(reconnect = false)
+    }
+
+    private fun startStaDiscovery(reconnect: Boolean) {
+        if (connectionDiscoveryPaused || purchaseHold) return
+        if (_state.value.isConnectedToCamera ||
+            _state.value.connectionType == CameraConnectionType.USB
+        ) return
+        selectStaMode()
+        if (_state.value.wirelessMode != WirelessMode.STA || staDiscoveryJob?.isActive == true) return
+
+        val generation = ++staDiscoveryGeneration
+        staLastFailureMessage = null
+        // STA uses the phone's tether/LAN interface, not Android's client Wi-Fi Network. Keeping
+        // the camera-hotspot request active can make some ROMs switch routes during the scan.
+        if (wifiHeld) releaseWifiNetworkRequest()
+        _state.update {
+            it.copy(
+                isConnecting = true,
+                staConnectionStatus = StaConnectionStatus.DISCOVERING,
+                staDiscoveryProgress = null,
+                staConnectionError = null,
+                wifiConnectionStatus = WifiConnectionStatus.IDLE,
+            )
+        }
+        staDiscoveryJob = viewModelScope.launch {
+            try {
+                wirelessCleanupJob?.join()
+                if (generation != staDiscoveryGeneration ||
+                    _state.value.wirelessMode != WirelessMode.STA
+                ) return@launch
+                val lastIp = connectionPreferences.getString(STA_LAST_CAMERA_IP, null)
+                val found = ptpIpDiscovery.discover(
+                    lastIp = lastIp,
+                    onProgress = { ip ->
+                        if (generation == staDiscoveryGeneration) {
+                            _state.update {
+                                it.copy(
+                                    staConnectionStatus = StaConnectionStatus.DISCOVERING,
+                                    staDiscoveryProgress = ip,
+                                )
+                            }
+                        }
+                    },
+                    tryCandidate = { ip -> tryConnectStaCandidate(ip, generation) },
+                )
+                if (generation != staDiscoveryGeneration) return@launch
+                if (found == null && !_state.value.isConnectedToCamera) {
+                    val localized = com.ztransfer.AppLocale.wrap(getApplication())
+                    _state.update {
+                        it.copy(
+                            isConnecting = false,
+                            staConnectionStatus = StaConnectionStatus.FAILED,
+                            staDiscoveryProgress = null,
+                            staConnectionError = staLastFailureMessage
+                                ?: localized.getString(com.ztransfer.R.string.sta_camera_not_found),
+                        )
+                    }
+                    if (reconnect) scheduleStaReconnect()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (generation == staDiscoveryGeneration &&
+                    _state.value.wirelessMode == WirelessMode.STA
+                ) {
+                    val localized = com.ztransfer.AppLocale.wrap(getApplication())
+                    _state.update {
+                        it.copy(
+                            isConnecting = false,
+                            staConnectionStatus = StaConnectionStatus.FAILED,
+                            staDiscoveryProgress = null,
+                            staConnectionError = error.message
+                                ?: localized.getString(com.ztransfer.R.string.sta_camera_not_found),
+                        )
+                    }
+                    if (reconnect) scheduleStaReconnect()
+                }
+            } finally {
+                if (generation == staDiscoveryGeneration) {
+                    staDiscoveryJob = null
+                    staConnectingCamera = null
+                    if (!_state.value.isConnectedToCamera &&
+                        _state.value.staConnectionStatus != StaConnectionStatus.FAILED
+                    ) {
+                        _state.update {
+                            it.copy(
+                                isConnecting = false,
+                                staConnectionStatus = StaConnectionStatus.IDLE,
+                                staDiscoveryProgress = null,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Cancels a manual STA scan without changing an already established camera session. */
+    fun cancelStaDiscovery() = cancelStaDiscoveryInternal()
+
+    private fun cancelStaDiscoveryInternal() {
+        if (_state.value.isConnectedToCamera) return
+        staReconnectJob?.cancel()
+        staReconnectJob = null
+        staDiscoveryGeneration++
+        staDiscoveryJob?.cancel()
+        staDiscoveryJob = null
+        staConnectingCamera?.let(::closePendingWirelessCamera)
+        staConnectingCamera = null
+        _state.update {
+            it.copy(
+                isConnecting = false,
+                staConnectionStatus = StaConnectionStatus.IDLE,
+                staDiscoveryProgress = null,
+                staConnectionError = null,
+            )
+        }
+    }
+
+    private suspend fun tryConnectStaCandidate(ip: String, generation: Long): Boolean {
+        if (generation != staDiscoveryGeneration || purchaseHold ||
+            _state.value.connectionType == CameraConnectionType.USB ||
+            _state.value.wirelessMode != WirelessMode.STA ||
+            _state.value.isConnectedToCamera
+        ) return false
+
+        _state.update {
+            it.copy(
+                isConnecting = true,
+                staConnectionStatus = StaConnectionStatus.CONNECTING,
+                staDiscoveryProgress = ip,
+            )
+        }
+        val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
+        repeat(2) { attempt ->
+            if (generation != staDiscoveryGeneration || purchaseHold ||
+                _state.value.wirelessMode != WirelessMode.STA
+            ) return false
+            val candidateCamera = NikonCamera(localizedContext)
+            staConnectingCamera = candidateCamera
+            val result = candidateCamera.connectSta(ip)
+            if (generation != staDiscoveryGeneration || purchaseHold ||
+                _state.value.connectionType == CameraConnectionType.USB
+                || _state.value.wirelessMode != WirelessMode.STA
+                || _state.value.isConnectedToCamera
+            ) {
+                candidateCamera.close()
+                return false
+            }
+            result.fold(
+                onSuccess = {
+                    staConnectingCamera = null
+                    staReconnectAttempt = 0
+                    camera = candidateCamera
+                    activateThumbnailDiskCache(candidateCamera)
+                    acquireSessionWifiLock()
+                    connectionPreferences.edit().putString(STA_LAST_CAMERA_IP, ip).apply()
+                    _state.update {
+                        it.copy(
+                            isConnectedToCamera = true,
+                            isConnecting = false,
+                            connectionType = CameraConnectionType.WIFI,
+                            isStaConnection = true,
+                            cameraManufacturer = candidateCamera.deviceManufacturer,
+                            cameraModel = candidateCamera.deviceModel,
+                            wifiConnectionStatus = WifiConnectionStatus.IDLE,
+                            staConnectionStatus = StaConnectionStatus.IDLE,
+                            staDiscoveryProgress = null,
+                            staConnectionError = null,
+                        )
+                    }
+                    CameraSessionService.start(getApplication())
+                    startKeepalive()
+                    loadFiles()
+                    startEventPolling()
+                    return true
+                },
+                onFailure = { error ->
+                    staLastFailureMessage = error.message ?: error.javaClass.simpleName
+                },
+            )
+            staConnectingCamera = null
+            candidateCamera.close()
+            if (result.exceptionOrNull() !is PairingCompletedException || attempt > 0) {
+                return false
+            }
+            // A first-time pairing changes the camera service; the verified trace becomes ready
+            // again roughly 6.6 seconds later, then the same address can open a browsing session.
+            staLastFailureMessage = null
+            delay(STA_PAIRING_RECONNECT_DELAY_MS)
+        }
+        return false
+    }
+
+    private fun scheduleStaReconnect() {
+        if (connectionDiscoveryPaused || purchaseHold ||
+            _state.value.wirelessMode != WirelessMode.STA ||
+            _state.value.isConnectedToCamera ||
+            _state.value.connectionType == CameraConnectionType.USB
+        ) return
+        staReconnectJob?.cancel()
+        val delayMs = STA_RECONNECT_DELAYS_MS[
+            staReconnectAttempt.coerceAtMost(STA_RECONNECT_DELAYS_MS.lastIndex)
+        ]
+        staReconnectAttempt++
+        staReconnectJob = viewModelScope.launch {
+            delay(delayMs)
+            staReconnectJob = null
+            startStaDiscovery(reconnect = true)
         }
     }
 
@@ -1349,8 +1777,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     private suspend fun connectToCameraWithRetry() {
         if (connectionDiscoveryPaused || purchaseHold ||
+            _state.value.wirelessMode != WirelessMode.AP ||
             _state.value.connectionType == CameraConnectionType.USB ||
             _state.value.isConnecting || _state.value.isConnectedToCamera
+        ) return
+        val modeGeneration = wirelessModeGeneration
+        wirelessCleanupJob?.join()
+        if (modeGeneration != wirelessModeGeneration ||
+            _state.value.wirelessMode != WirelessMode.AP ||
+            _state.value.connectionType == CameraConnectionType.USB ||
+            _state.value.isConnectedToCamera
         ) return
         _state.update {
             it.copy(
@@ -1374,12 +1810,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // purchaseHold 也随轮检查:重试循环可能在购买挂起前就已在跑,得让它当轮退出。
         var failedAttempts = 0
         while (!connectionDiscoveryPaused && !purchaseHold &&
+            modeGeneration == wirelessModeGeneration &&
+            _state.value.wirelessMode == WirelessMode.AP &&
             _state.value.connectionType != CameraConnectionType.USB &&
             (CameraEndpointOverride.hostOrNull() != null ||
                 linkSaysCameraWifi || checkNikonWifi()) &&
             !_state.value.isConnectedToCamera
         ) {
             val cam = NikonCamera(localizedContext)
+            apConnectingCamera = cam
             var connected = false
             var failure: Throwable? = null
             val overrideHost = CameraEndpointOverride.hostOrNull()
@@ -1390,6 +1829,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     network = if (overrideHost == null) wifiNetwork else null
                 )
             } catch (cancelled: CancellationException) {
+                if (apConnectingCamera === cam) apConnectingCamera = null
                 cam.close()
                 throw cancelled
             }
@@ -1398,10 +1838,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     // USB 可能在 Wi-Fi 握手期间接入；此时不发布短暂的 Wi-Fi 成功态，
                     // 先释放刚建立的会话，再由循环出口切换到 USB。
                     if (connectionDiscoveryPaused || purchaseHold ||
-                        _state.value.connectionType == CameraConnectionType.USB
+                        modeGeneration != wirelessModeGeneration ||
+                        _state.value.wirelessMode != WirelessMode.AP ||
+                        _state.value.connectionType == CameraConnectionType.USB ||
+                        _state.value.isConnectedToCamera
                     ) {
                         cam.close()
                     } else {
+                        apConnectingCamera = null
                         camera = cam
                         activateThumbnailDiskCache(cam)
                         acquireSessionWifiLock()   // 会话保活：连着就不让 Wi-Fi 打盹
@@ -1410,6 +1854,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 isConnectedToCamera = true,
                                 isConnecting = false,
                                 connectionType = CameraConnectionType.WIFI,
+                                wirelessMode = WirelessMode.AP,
+                                isStaConnection = false,
                                 cameraManufacturer = cam.deviceManufacturer,
                                 cameraModel = cam.deviceModel,
                                 wifiConnectionStatus = WifiConnectionStatus.IDLE
@@ -1427,6 +1873,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     cam.close()
                 }
             )
+            if (apConnectingCamera === cam) apConnectingCamera = null
             if (connected) {
                 // 握手期间购买挂起被置起(connect 要几秒,窗口真实存在):
                 // 立即拆掉刚建立的会话,不给相机热点续命。
@@ -1434,7 +1881,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 return
             }
 
-            if (connectionDiscoveryPaused) break
+            if (connectionDiscoveryPaused || modeGeneration != wirelessModeGeneration ||
+                _state.value.wirelessMode != WirelessMode.AP
+            ) break
 
             // 一次真实握手失败后结束可见的“识别中”，但保留原有后台自动重试。
             // 候选网络可能只是使用 192.168.1.1 的普通路由器，绝不能继续呈现成功场景。
@@ -1463,18 +1912,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         // 已离开相机 Wi-Fi（或已连上）；清除“连接中”状态，等待下次网络变化再触发。
-        _state.update {
-            it.copy(
-                isConnecting = false,
-                wifiConnectionStatus = if (
-                    it.isConnectedToCamera ||
-                    it.isWifiCandidate
-                ) {
-                    it.wifiConnectionStatus
-                } else {
-                    WifiConnectionStatus.IDLE
-                }
-            )
+        if (modeGeneration == wirelessModeGeneration &&
+            _state.value.wirelessMode == WirelessMode.AP
+        ) {
+            _state.update {
+                it.copy(
+                    isConnecting = false,
+                    wifiConnectionStatus = if (
+                        it.isConnectedToCamera ||
+                        it.isWifiCandidate
+                    ) {
+                        it.wifiConnectionStatus
+                    } else {
+                        WifiConnectionStatus.IDLE
+                    }
+                )
+            }
         }
         if (camera == null) CameraSessionService.stop(getApplication())
         if (_state.value.connectionType == CameraConnectionType.USB) {
@@ -2694,6 +3147,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         keepaliveJob?.cancel()
         watcherJob?.cancel()
         usbPermissionJob?.cancel()
+        staDiscoveryJob?.cancel()
+        staReconnectJob?.cancel()
+        staConnectingCamera?.let { cleanupScope.launch { it.close() } }
+        apConnectingCamera?.let { cleanupScope.launch { it.close() } }
         if (wifiHeld) releaseWifiNetworkRequest()
         if (usbReceiverRegistered) {
             runCatching { getApplication<Application>().unregisterReceiver(usbReceiver) }
@@ -2720,6 +3177,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val RETRY_INTERVAL_MS = 1_000L
         const val WIFI_BACKGROUND_RETRY_INTERVAL_MS = 3_000L
         const val WATCH_INTERVAL_MS = 1_000L
+        const val STA_PAIRING_RECONNECT_DELAY_MS = 6_600L
+        val STA_RECONNECT_DELAYS_MS = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L)
+        private const val CONNECTION_PREFERENCES = "sta_connection"
+        private const val WIRELESS_MODE_PREFERENCE = "wireless_mode"
+        const val STA_LAST_CAMERA_IP = "last_sta_camera_ip"
         internal const val FILE_THUMBNAIL_PIPELINE_BATCH_SIZE = 12
         const val EFFECT_PREVIEW_SOURCE_EDGE = 1_920
         const val MAX_FHD_PREVIEW_EDGE = 1_920

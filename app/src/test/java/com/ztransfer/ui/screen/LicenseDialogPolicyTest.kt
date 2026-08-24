@@ -28,6 +28,18 @@ class LicenseDialogPolicyTest {
     }
 
     @Test
+    fun connectedStaWifiOpensCodeEntryDirectly() {
+        assertEquals(
+            EnterCodeAction.OPEN,
+            enterCodeAction(
+                CameraConnectionType.WIFI,
+                cameraConnected = true,
+                isStaConnection = true,
+            ),
+        )
+    }
+
+    @Test
     fun disconnectedWifiProbesServerBeforeOpeningCodeEntry() {
         assertEquals(
             EnterCodeAction.PROBE_SERVER,

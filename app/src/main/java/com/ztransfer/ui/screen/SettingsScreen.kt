@@ -203,6 +203,7 @@ fun SettingsOverlay(
     onHoldCameraWifi: (Boolean) -> Unit = {},
     cameraConnectionType: CameraConnectionType? = null,
     cameraConnected: Boolean = false,
+    cameraIsStaMode: Boolean = false,
 ) {
     val state by viewModel.state.collectAsState()
     // 弹窗一出现就开始准备效果演示图；ViewModel 会按照片身份去重，重复打开不重复读取。
@@ -822,6 +823,7 @@ fun SettingsOverlay(
                     onHoldCameraWifi = onHoldCameraWifi,
                     connectionType = cameraConnectionType,
                     cameraConnected = cameraConnected,
+                    isStaConnection = cameraIsStaMode,
                     renew = false
                 )
             }

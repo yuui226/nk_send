@@ -258,6 +258,8 @@ internal fun endToEndBytesPerSecond(
 internal fun transferredBytesThisAttempt(downloaded: Long, resumeOffset: Long): Long =
     (downloaded - resumeOffset).coerceAtLeast(0L)
 
+internal class PairingCompletedException : Exception("Nikon pairing completed; reconnect required")
+
 class NikonCamera(private val context: Context) {
     private var cmdSocket: Socket? = null
     private var evtSocket: Socket? = null
@@ -291,6 +293,9 @@ class NikonCamera(private val context: Context) {
     // 能力状态。一次成功后保持 true，避免后续单个 handle 的异常推翻已验证能力。
     // 每次 connect 新建 NikonCamera 实例，故换相机自动重新探测。仅 ioMutex 内访问。
     @Volatile private var fhdSupported: Boolean? = null
+    // STA 握手会用 GetStorageIDs 验证已经进入浏览能力集；把结果交给首次文件扫描消费，
+    // 避免紧接着重复同一条命令触发部分固件的状态异常。
+    private var prefetchedStorageIds: List<Int>? = null
     // 遥控监看的取帧操作码：首次取帧从 DeviceInfo 解析并缓存。
     // 新机优先 0x9428（带 Display Information Data），不支持时回退 0x9203。
     // 每次连接都会新建 NikonCamera，因此不会把上一台机身的判断带进新会话。
@@ -353,6 +358,7 @@ class NikonCamera(private val context: Context) {
         const val TAG = "ZTransfer"
         // 命令/事件通道的常规读超时。
         const val SO_TIMEOUT_MS = 60_000
+        private const val STA_HANDSHAKE_TIMEOUT_MS = 5_000
         private const val USB_CONNECT_TIMEOUT_MS = 5_000
         // 仅给 Android USB Host 释放接口留一个调度窗口。真机验证表明更长的固定等待
         // 不会改善首次取帧，反而让页面看起来冻结。
@@ -360,6 +366,15 @@ class NikonCamera(private val context: Context) {
         // TCP 连接超时：本地热点正常握手 <300ms；缩短它让"相机侧 PTP 服务还没就绪"的
         // 失败尝试更快结束、更快进入下一轮重试。
         const val CONNECT_TIMEOUT_MS = 3_000
+        private const val NIKON_COMPATIBILITY_INIT = 0x941C
+        private const val PAIRING_EVENT_TIMEOUT_MS = 8_000L
+        private val PAIRING_ONLY_OPERATIONS = setOf(
+            PtpConstants.GET_DEVICE_INFO,
+            PtpConstants.OPEN_SESSION,
+            PtpConstants.CLOSE_SESSION,
+            PtpConstants.NK_PAIRING_QUERY,
+            PtpConstants.NK_PAIRING_RESULT,
+        )
         // 取消下载的排空安全阀：已向相机发送 Cancel 包后，在途数据只剩 ≈TCP 窗口的数 MB，
         // 排空应秒级完成；若累计排空超过该预算仍没等到响应包，说明机型不支持 Cancel、
         // 还在发整个文件——此时才断开由心跳/看护自动重连（断开会让相机侧会话挂起甚至
@@ -501,6 +516,91 @@ class NikonCamera(private val context: Context) {
         } catch (e: Exception) {
             close()
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Explicit STA-only connection entry. This is intentionally separate from [connect] so the
+     * established camera-hotspot handshake remains byte-for-byte and control-flow unchanged.
+     */
+    internal suspend fun connectSta(ip: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            if (FileOrderProbe.enabled) FileOrderProbe.beginConnection("PTP/IP STA")
+            fun newSocket(): Socket = Socket()
+
+            cmdSocket = newSocket().apply {
+                tcpNoDelay = true
+                soTimeout = STA_HANDSHAKE_TIMEOUT_MS
+                receiveBufferSize = 4 * 1024 * 1024
+                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
+            }
+            cmdInput = java.io.BufferedInputStream(cmdSocket!!.getInputStream(), 64 * 1024)
+            cmdOutput = cmdSocket!!.getOutputStream()
+            cmdOutput!!.write(makeStaInitReq())
+            cmdOutput!!.flush()
+
+            val commandAck = cmdReader.readPacket(cmdInput!!)
+            if (commandAck.type != PtpConstants.INIT_CMD_ACK) {
+                return@withContext Result.failure(
+                    if (commandAck.type == PtpConstants.INIT_FAIL) CameraRefusedException(
+                        context.getString(R.string.error_camera_refused)
+                    ) else Exception(context.getString(R.string.error_handshake_bad_ack))
+                )
+            }
+            val payload = commandAck.payload ?: return@withContext Result.failure(
+                Exception(context.getString(R.string.error_handshake_empty))
+            )
+            val connectionNumber = payload.getIntLE(0)
+            if (payload.size >= 20) {
+                responderGuid = payload.copyOfRange(4, 20)
+                    .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+            }
+
+            evtSocket = newSocket().apply {
+                soTimeout = STA_HANDSHAKE_TIMEOUT_MS
+                connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
+            }
+            evtInput = evtSocket!!.getInputStream()
+            val eventInit = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
+                putInt(12)
+                putInt(PtpConstants.INIT_EVT_REQ)
+                putInt(connectionNumber)
+            }.array()
+            evtSocket!!.getOutputStream().write(eventInit)
+            evtSocket!!.getOutputStream().flush()
+            val eventAck = evtReader.readPacket(evtInput!!)
+            if (eventAck.type != PtpConstants.INIT_EVT_ACK) {
+                return@withContext Result.failure(
+                    Exception(context.getString(R.string.error_event_handshake))
+                )
+            }
+
+            // Nikon PC/STA traces always open PTP session 1 from transaction 0; the Init ACK value
+            // above is only the Event socket's connection number.
+            tid = -1
+            sendCmd(PtpConstants.OPEN_SESSION, 1)
+            val openResponse = recvResp()
+            if (openResponse != PtpConstants.RESPONSE_OK &&
+                openResponse != PtpConstants.SESSION_ALREADY_OPEN
+            ) {
+                return@withContext Result.failure(
+                    Exception(
+                        context.getString(
+                            R.string.error_open_session,
+                            PtpConstants.translateResponse(context, openResponse),
+                        )
+                    )
+                )
+            }
+            sessionOpen = true
+            initializeStaBrowsingSession()
+            cmdSocket?.soTimeout = SO_TIMEOUT_MS
+            evtSocket?.soTimeout = SO_TIMEOUT_MS
+            startEvtThread()
+            Result.success(Unit)
+        } catch (error: Exception) {
+            close()
+            Result.failure(error)
         }
     }
 
@@ -704,6 +804,10 @@ class NikonCamera(private val context: Context) {
     suspend fun getStorageIds(): List<Int> = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             try {
+                prefetchedStorageIds?.let { storageIds ->
+                    prefetchedStorageIds = null
+                    return@withContext storageIds
+                }
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
                 val (respCode, data) = recvRespWithPayload()
                 if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
@@ -1427,6 +1531,123 @@ class NikonCamera(private val context: Context) {
         closeQuietly()
     }
 
+    /**
+     * Replays the verified Nikon PC/STA ordering. A successful storage probe proves that the
+     * camera is already in browsing mode. Only a rejected probe is allowed to enter pairing;
+     * querying DeviceInfo unconditionally breaks browsing on some firmware versions.
+     */
+    private fun initializeStaBrowsingSession() {
+        sendCmd(NIKON_COMPATIBILITY_INIT)
+        val (compatibilityResponse, _) = recvRespWithPayload()
+        if (compatibilityResponse != PtpConstants.RESPONSE_OK) {
+            throw java.io.IOException(
+                "Nikon STA initialization failed: 0x${compatibilityResponse.toString(16)}",
+            )
+        }
+
+        sendCmd(PtpConstants.GET_STORAGE_IDS)
+        val (storageResponse, storageData) = recvRespWithPayload()
+        if (storageResponse == PtpConstants.RESPONSE_OK) {
+            prefetchedStorageIds = parseUInt32Array(storageData)
+            return
+        }
+
+        sendCmd(PtpConstants.GET_DEVICE_INFO)
+        val (deviceInfoResponse, deviceInfoData) = recvRespWithPayload()
+        val operations = if (
+            deviceInfoResponse == PtpConstants.RESPONSE_OK && deviceInfoData != null
+        ) {
+            runCatching { parseDeviceInfo(deviceInfoData).operations }.getOrDefault(emptySet())
+        } else {
+            emptySet()
+        }
+        if (operations.containsAll(PAIRING_ONLY_OPERATIONS)) {
+            completeInitialPairing()
+            throw PairingCompletedException()
+        }
+        throw java.io.IOException(
+            "GetStorageIDs failed in Nikon STA mode: 0x${storageResponse.toString(16)}",
+        )
+    }
+
+    /** Completes the one-time Nikon PC-mode pairing and leaves reconnection to the caller. */
+    private fun completeInitialPairing() {
+        sendCmd(PtpConstants.NK_PAIRING_QUERY)
+        val (queryResponse, _) = recvRespWithPayload()
+        if (queryResponse != PtpConstants.RESPONSE_OK) {
+            throw java.io.IOException(
+                "Nikon pairing query failed: 0x${queryResponse.toString(16)}",
+            )
+        }
+
+        sendCmd(PtpConstants.NK_PAIRING_RESULT, PtpConstants.RESPONSE_OK)
+        val resultResponse = recvResp()
+        if (resultResponse != PtpConstants.RESPONSE_OK) {
+            throw java.io.IOException(
+                "Nikon pairing result failed: 0x${resultResponse.toString(16)}",
+            )
+        }
+
+        // The OK response is authoritative. The following DeviceInfoChanged event is useful for
+        // pacing but is missing on some firmware, so timeout only affects the reconnect delay.
+        val previousTimeout = evtSocket?.soTimeout ?: SO_TIMEOUT_MS
+        val deadlineNanos = System.nanoTime() + PAIRING_EVENT_TIMEOUT_MS * 1_000_000L
+        try {
+            while (System.nanoTime() < deadlineNanos) {
+                val remainingMs = ((deadlineNanos - System.nanoTime()) / 1_000_000L)
+                    .coerceAtLeast(1L)
+                evtSocket?.soTimeout = remainingMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                val packet = evtReader.readPacket(evtInput!!)
+                if (packet.type == PtpConstants.PING) {
+                    sendPong(evtSocket?.getOutputStream())
+                    continue
+                }
+                val eventCode = if (
+                    packet.type == PtpConstants.EVENT && (packet.payload?.size ?: 0) >= 2
+                ) {
+                    packet.payload!!.getUShortLE(0)
+                } else {
+                    0
+                }
+                if (eventCode == PtpConstants.EVENT_DEVICE_INFO_CHANGED) break
+            }
+        } catch (_: Exception) {
+            // Pairing was already acknowledged; reconnect below even without the optional event.
+        } finally {
+            evtSocket?.soTimeout = previousTimeout
+        }
+
+        runCatching {
+            sendCmd(PtpConstants.CLOSE_SESSION)
+            recvResp()
+            sessionOpen = false
+        }
+    }
+
+    private fun persistentInitiatorId(): ByteArray {
+        val preferences = context.applicationContext.getSharedPreferences(
+            "ptpip_identity",
+            Context.MODE_PRIVATE,
+        )
+        var id = preferences.getString("initiator_id", null)
+        if (id == null || !id.matches(Regex("[0-9a-f]{16}"))) {
+            id = ByteArray(8)
+                .also { java.security.SecureRandom().nextBytes(it) }
+                .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+            preferences.edit().putString("initiator_id", id).commit()
+        }
+        return id.toByteArray(Charsets.US_ASCII)
+    }
+
+    /** Safely parses a PTP AUINT32 without trusting a malformed count field. */
+    private fun parseUInt32Array(data: ByteArray?): List<Int> {
+        if (data == null || data.size < 4) return emptyList()
+        val count = data.getIntLE(0)
+        if (count < 0 || count > (data.size - 4) / 4) return emptyList()
+        return List(count) { index -> data.getIntLE(4 + index * 4) }
+    }
+
+    /** Existing camera-hotspot InitCommandRequest; keep byte-for-byte behavior unchanged. */
     private fun makeInitReq(): ByteArray {
         val hostname = "NikonPTP"
         val nameBytes = hostname.toByteArray(Charsets.UTF_16LE) + byteArrayOf(0, 0)
@@ -1438,6 +1659,21 @@ class NikonCamera(private val context: Context) {
             put(guid)
             put(nameBytes)
             putShort(1)
+        }.array()
+        return pkt
+    }
+
+    /** Nikon PC/STA mode needs a stable initiator and the standard 32-bit protocol version. */
+    private fun makeStaInitReq(): ByteArray {
+        val nameBytes = "ZTransfer".toByteArray(Charsets.UTF_16LE) + byteArrayOf(0, 0)
+        val guid = persistentInitiatorId()
+        val length = 8 + 16 + nameBytes.size + 4
+        val pkt = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(length)
+            putInt(PtpConstants.INIT_CMD_REQ)
+            put(guid)
+            put(nameBytes)
+            putInt(0x00010000)
         }.array()
         return pkt
     }

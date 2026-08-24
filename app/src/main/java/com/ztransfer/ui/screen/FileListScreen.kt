@@ -1647,6 +1647,7 @@ fun FileListScreen(
                 onPlayFireworks = { fireworks.launch() },
                 cameraConnectionType = state.connectionType,
                 cameraConnected = state.isConnectedToCamera,
+                cameraIsStaMode = state.isStaConnection,
                 // 本页是连着相机时的主界面,购买入口多半从这里进——不接上这条,
                 // 购买时就不会断开相机、相机热点不关、付款没网。
                 onHoldCameraWifi = { cameraViewModel.holdCameraWifi(it) }

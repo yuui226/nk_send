@@ -1,7 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="connection_usb">USB</string>
+    <string name="connection_wifi">Wi-Fi</string>
     <string name="connection_wifi_hotspot">Camera hotspot</string>
+    <string name="sta_card_description">Search a phone hotspot or shared LAN</string>
+    <string name="sta_connect_action">Search</string>
+    <string name="sta_hotspot_settings_short">Hotspot</string>
+    <string name="sta_status_searching">Searching for a PTP/IP camera…</string>
+    <string name="sta_status_searching_ip">Scanning · %1$s</string>
+    <string name="sta_status_connecting_ip">Connecting · %1$s</string>
+    <string name="sta_camera_not_found_short">Camera not found</string>
+    <string name="sta_camera_not_found">No compatible camera found. Check that both devices are on the same hotspot or LAN.</string>
     <string name="usb_step_power">Keep the camera powered on</string>
     <string name="usb_step_cable">Connect the camera and phone with a USB-C to USB-C cable</string>
     <string name="connection_failed_short">Connection failed</string>
@@ -36,6 +45,10 @@
     <string name="tip_ap_mode">PS: This corresponds to the camera\'s Wi-Fi AP mode</string>
     <string name="tip_body">Add “Wi-Fi connection” to the camera\'s i menu, then press i to turn it on quickly.</string>
     <string name="tip_path">MENU → Custom Settings Menu → Controls → Customize i menu → pick a slot → Wi-Fi connection</string>
+    <string name="tip_sta_title">About STA connections</string>
+    <string name="tip_sta_mode">Use this mode for a phone hotspot or shared LAN</string>
+    <string name="tip_sta_body">Connect the camera and phone to the same network, then return and tap Search. Confirm the pairing request on the camera the first time.</string>
+    <string name="tip_sta_networks">Supported networks: this phone’s hotspot, another phone’s hotspot, or the same router LAN</string>
 
     <!-- File list -->
     <string name="loading_file_list">Loading file list…</string>

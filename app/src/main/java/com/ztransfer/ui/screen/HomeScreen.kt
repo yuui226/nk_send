@@ -69,7 +69,9 @@ import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.ui.theme.*
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.StaConnectionStatus
 import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.viewmodel.WirelessMode
 import com.ztransfer.viewmodel.WifiConnectionStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -128,7 +130,6 @@ fun HomeScreen(
             celebrate = false
         }
     }
-
     // 用户不需要点卡片作出强选择：App 观察真实链路，先识别到哪种传输就点亮哪张卡片。
     val selectedConnection = homeSelectedConnection(
         connected = connected,
@@ -164,7 +165,14 @@ fun HomeScreen(
     }
     // USB 一经识别，本次会话的连接反馈就只属于有线卡片。即使网络回调还有一帧
     // 迟到状态，也不能让 Wi-Fi 提示在卡片退场动画中闪现。
-    val wifiFeedback = if (!shouldShowWifiConnectionFeedback(state.connectionType)) null else when (state.wifiConnectionStatus) {
+    val wifiFeedback = if (
+        !shouldShowCameraHotspotFeedback(
+            connectionType = state.connectionType,
+            isStaConnection = state.isStaConnection,
+            staStatus = state.staConnectionStatus,
+            wirelessMode = state.wirelessMode,
+        )
+    ) null else when (state.wifiConnectionStatus) {
         WifiConnectionStatus.PROBING -> if (showWifiProbing) {
             ConnectionCardFeedback(
                 title = stringResource(R.string.wifi_identifying_camera),
@@ -197,6 +205,36 @@ fun HomeScreen(
             busy = true
         )
         WifiConnectionStatus.IDLE -> null
+    }
+    val staBusy = state.staConnectionStatus == StaConnectionStatus.DISCOVERING ||
+        state.staConnectionStatus == StaConnectionStatus.CONNECTING
+    val staFeedback = if (state.wirelessMode != WirelessMode.STA) null else when {
+        state.isStaConnection -> null
+        state.staConnectionStatus == StaConnectionStatus.DISCOVERING -> ConnectionCardFeedback(
+            title = if (state.staDiscoveryProgress == null) {
+                stringResource(R.string.sta_status_searching)
+            } else {
+                stringResource(R.string.sta_status_searching_ip, state.staDiscoveryProgress.orEmpty())
+            },
+            body = null,
+            accent = colors.accentBlue,
+            busy = true,
+        )
+        state.staConnectionStatus == StaConnectionStatus.CONNECTING -> ConnectionCardFeedback(
+            title = stringResource(
+                R.string.sta_status_connecting_ip,
+                state.staDiscoveryProgress.orEmpty(),
+            ),
+            body = null,
+            accent = colors.accentBlue,
+            busy = true,
+        )
+        state.staConnectionStatus == StaConnectionStatus.FAILED -> ConnectionCardFeedback(
+            title = stringResource(R.string.sta_camera_not_found_short),
+            body = state.staConnectionError ?: stringResource(R.string.sta_camera_not_found),
+            accent = colors.statusError,
+        )
+        else -> null
     }
     // 识别传输方式后立即停止提示动画；具体动画在卡片图层内运行，避免每帧重组整个页面。
     val connectionAttentionActive = selectedConnection == null
@@ -274,13 +312,35 @@ fun HomeScreen(
                                 modifier = iconModifier
                             )
                         },
-                        title = stringResource(R.string.connection_wifi_hotspot),
+                        title = stringResource(R.string.connection_wifi),
                         accent = colors.accentBlue,
                         materialSeed = WIFI_CARD_BADGE_TEXTURE_SEED,
-                        steps = listOf(
-                            stringResource(R.string.step_camera_wifi),
-                            stringResource(R.string.step_phone_wifi)
-                        ),
+                        steps = when (state.wirelessMode) {
+                            WirelessMode.AP -> listOf(
+                                stringResource(R.string.step_camera_wifi),
+                                stringResource(R.string.step_phone_wifi),
+                            )
+                            WirelessMode.STA -> if (staFeedback == null) {
+                                listOf(stringResource(R.string.sta_card_description))
+                            } else {
+                                emptyList()
+                            }
+                        },
+                        modeSelector = {
+                            WifiModeTabs(
+                                selectedMode = state.wirelessMode,
+                                enabled = !connected &&
+                                    state.connectionType != CameraConnectionType.USB,
+                                onSelectAp = {
+                                    tipsPopupAnchor = null
+                                    viewModel.selectApMode()
+                                },
+                                onSelectSta = {
+                                    tipsPopupAnchor = null
+                                    viewModel.selectStaMode()
+                                },
+                            )
+                        },
                         selected = selectedConnection == CameraConnectionType.WIFI,
                         success = celebrate && selectedConnection == CameraConnectionType.WIFI,
                         attentionActive = connectionAttentionActive,
@@ -288,41 +348,122 @@ fun HomeScreen(
                         selectionScene = selectionScene.value,
                         goldBurst = isPro,
                         onSuccessAnimationFinished = onConnectionCelebrationFinished,
-                        feedback = wifiFeedback,
+                        feedback = if (state.wirelessMode == WirelessMode.AP) {
+                            wifiFeedback
+                        } else {
+                            staFeedback
+                        },
                         footer = {
-                            TipLightbulbButton(
-                                onClick = {
-                                    tipsPopupAnchor = liveTipsButtonBounds.value
-                                },
-                                contentDescription = stringResource(R.string.tip_title),
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .onGloballyPositioned {
-                                        liveTipsButtonBounds.value = it.boundsInRoot()
+                            if (state.wirelessMode == WirelessMode.AP) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TipLightbulbButton(
+                                        onClick = {
+                                            tipsPopupAnchor = liveTipsButtonBounds.value
+                                        },
+                                        contentDescription = stringResource(R.string.tip_title),
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .onGloballyPositioned {
+                                                liveTipsButtonBounds.value = it.boundsInRoot()
+                                            },
+                                    )
+                                    GlassButton(
+                                        onClick = {
+                                            try {
+                                                context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                                            } catch (_: Exception) {}
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                        textureSeed = WIFI_SETTINGS_BUTTON_TEXTURE_SEED,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(36.dp)
+                                    ) {
+                                        Text(
+                                            stringResource(R.string.open_wifi_settings),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = wifiSettingsTextColor,
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.fillMaxWidth(),
+                                        )
+                                    }
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    TipLightbulbButton(
+                                        onClick = {
+                                            tipsPopupAnchor = liveTipsButtonBounds.value
+                                        },
+                                        contentDescription = stringResource(R.string.tip_sta_title),
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .onGloballyPositioned {
+                                                liveTipsButtonBounds.value = it.boundsInRoot()
+                                            },
+                                    )
+                                    GlassButton(
+                                        onClick = {
+                                            viewModel.cancelStaDiscovery()
+                                            openHotspotSettings(context)
+                                        },
+                                        enabled = !connected,
+                                        shape = RoundedCornerShape(11.dp),
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(34.dp),
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.sta_hotspot_settings_short),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.onSurfaceVariant,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(7.dp))
+                                GlassButton(
+                                    onClick = {
+                                        if (staBusy) {
+                                            viewModel.cancelStaDiscovery()
+                                        } else {
+                                            viewModel.discoverStaCamera()
+                                        }
                                     },
-                            )
-                            GlassButton(
-                                onClick = {
-                                    try {
-                                        context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-                                    } catch (_: Exception) {}
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
-                                textureSeed = WIFI_SETTINGS_BUTTON_TEXTURE_SEED,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(36.dp)
-                            ) {
-                                Text(
-                                    stringResource(R.string.open_wifi_settings),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = wifiSettingsTextColor,
-                                    maxLines = 1,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                    enabled = !connected,
+                                    shape = RoundedCornerShape(11.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    textureSeed = WIFI_SETTINGS_BUTTON_TEXTURE_SEED,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(34.dp),
+                                ) {
+                                    Text(
+                                        text = stringResource(
+                                            when {
+                                                staBusy -> R.string.cancel
+                                                state.staConnectionStatus == StaConnectionStatus.FAILED -> R.string.retry
+                                                else -> R.string.sta_connect_action
+                                            },
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.accentBlue,
+                                        maxLines = 1,
+                                    )
+                                }
                             }
                         }
                     )
@@ -480,6 +621,7 @@ fun HomeScreen(
         tipsPopupAnchor?.let { frozenAnchor ->
             TipsBubble(
                 anchorBounds = frozenAnchor,
+                wirelessMode = state.wirelessMode,
                 onDismiss = { tipsPopupAnchor = null },
             )
         }
@@ -496,6 +638,17 @@ private const val CONNECTION_ATTENTION_MS = 2_400
 private const val WIFI_PROBING_FEEDBACK_DELAY_MS = 350L
 private const val USB_CARD_BADGE_TEXTURE_SEED = 0x554253
 private const val WIFI_CARD_BADGE_TEXTURE_SEED = 0x57494649
+
+private fun openHotspotSettings(context: android.content.Context) {
+    val candidates = listOf(
+        Intent("android.settings.TETHER_SETTINGS"),
+        Intent(Settings.ACTION_WIRELESS_SETTINGS),
+    )
+    val intent = candidates.firstOrNull { candidate ->
+        candidate.resolveActivity(context.packageManager) != null
+    } ?: return
+    runCatching { context.startActivity(intent) }
+}
 
 /**
  * 物理链路只是候选证据。无线模式必须等真实相机会话建立后才能进入 hero 场景；
@@ -514,12 +667,67 @@ internal fun shouldShowWifiConnectionFeedback(
     connectionType: CameraConnectionType?
 ): Boolean = connectionType != CameraConnectionType.USB
 
+internal fun shouldShowCameraHotspotFeedback(
+    connectionType: CameraConnectionType?,
+    isStaConnection: Boolean = false,
+    staStatus: StaConnectionStatus = StaConnectionStatus.IDLE,
+    wirelessMode: WirelessMode = WirelessMode.AP,
+): Boolean = shouldShowWifiConnectionFeedback(connectionType) &&
+    wirelessMode == WirelessMode.AP && !isStaConnection &&
+    staStatus == StaConnectionStatus.IDLE
+
 private data class ConnectionCardFeedback(
     val title: String,
     val body: String?,
     val accent: Color,
     val busy: Boolean = false
 )
+
+@Composable
+private fun WifiModeTabs(
+    selectedMode: WirelessMode,
+    enabled: Boolean,
+    onSelectAp: () -> Unit,
+    onSelectSta: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val containerShape = remember { RoundedCornerShape(10.dp) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(30.dp)
+            .clip(containerShape)
+            .background(colors.onBackground.copy(alpha = 0.055f))
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        listOf(
+            WirelessMode.AP to onSelectAp,
+            WirelessMode.STA to onSelectSta,
+        ).forEach { (mode, onClick) ->
+            val selected = selectedMode == mode
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (selected) colors.accentBlue.copy(alpha = 0.16f)
+                        else Color.Transparent,
+                    )
+                    .clickable(enabled = enabled && !selected, onClick = onClick),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = mode.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (selected) colors.accentBlue else colors.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
 
 /**
  * 每轮只有一个峰值：缓入吸气、柔和呼气、短暂停顿；另一张卡错开半拍。
@@ -545,6 +753,7 @@ private fun ConnectionMethodCard(
     accent: Color,
     materialSeed: Int,
     steps: List<String>,
+    modeSelector: (@Composable () -> Unit)? = null,
     selected: Boolean,
     success: Boolean,
     attentionActive: Boolean,
@@ -554,7 +763,7 @@ private fun ConnectionMethodCard(
     error: String? = null,
     goldBurst: Boolean = false,
     feedback: ConnectionCardFeedback? = null,
-    footer: (@Composable RowScope.() -> Unit)? = null
+    footer: (@Composable () -> Unit)? = null
 ) {
     val colors = AppTheme.colors
     val shape = remember { RoundedCornerShape(24.dp) }
@@ -693,7 +902,11 @@ private fun ConnectionMethodCard(
                         )
                     }
 
-                    Spacer(Modifier.height(20.dp))
+                    Spacer(Modifier.height(if (modeSelector == null) 20.dp else 10.dp))
+                    modeSelector?.let {
+                        it()
+                        Spacer(Modifier.height(12.dp))
+                    }
                     steps.forEachIndexed { index, text ->
                         ConnectionStep(index + 1, text, accent)
                         if (index != steps.lastIndex) Spacer(Modifier.height(13.dp))
@@ -814,12 +1027,7 @@ private fun ConnectionMethodCard(
 
                     Spacer(Modifier.weight(1f))
                     if (footer != null) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            content = footer
-                        )
+                        footer()
                     }
                 }
 
@@ -1113,7 +1321,11 @@ private class LayoutBoundsHolder(var value: Rect? = null)
  * 介绍把「Wi-Fi 连接」加进相机 i 菜单以省去层层翻菜单，并给出设置路径；内容全部走多语言资源。
  */
 @Composable
-private fun TipsBubble(anchorBounds: Rect?, onDismiss: () -> Unit) {
+private fun TipsBubble(
+    anchorBounds: Rect?,
+    wirelessMode: WirelessMode,
+    onDismiss: () -> Unit,
+) {
     val colors = AppTheme.colors
     val density = LocalDensity.current
     // 按钮位于卡片底部内边距中，留 24dp 才能让气泡完整落在卡片之外。
@@ -1132,8 +1344,11 @@ private fun TipsBubble(anchorBounds: Rect?, onDismiss: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Lightbulb, contentDescription = null, tint = colors.accentOrange, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    stringResource(R.string.tip_title),
+            Text(
+                stringResource(
+                    if (wirelessMode == WirelessMode.AP) R.string.tip_title
+                    else R.string.tip_sta_title,
+                ),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = colors.onBackground
@@ -1141,14 +1356,20 @@ private fun TipsBubble(anchorBounds: Rect?, onDismiss: () -> Unit) {
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                stringResource(R.string.tip_ap_mode),
+                stringResource(
+                    if (wirelessMode == WirelessMode.AP) R.string.tip_ap_mode
+                    else R.string.tip_sta_mode,
+                ),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Medium,
                 color = colors.accentBlue,
             )
             Spacer(Modifier.height(10.dp))
             Text(
-                stringResource(R.string.tip_body),
+                stringResource(
+                    if (wirelessMode == WirelessMode.AP) R.string.tip_body
+                    else R.string.tip_sta_body,
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurfaceVariant
             )
@@ -1162,7 +1383,10 @@ private fun TipsBubble(anchorBounds: Rect?, onDismiss: () -> Unit) {
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
                 Text(
-                    stringResource(R.string.tip_path),
+                    stringResource(
+                        if (wirelessMode == WirelessMode.AP) R.string.tip_path
+                        else R.string.tip_sta_networks,
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     color = colors.accentBlue
