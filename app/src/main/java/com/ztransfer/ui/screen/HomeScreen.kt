@@ -633,7 +633,7 @@ private const val WIFI_PROBING_FEEDBACK_DELAY_MS = 350L
 private const val USB_CARD_BADGE_TEXTURE_SEED = 0x554253
 private const val WIFI_CARD_BADGE_TEXTURE_SEED = 0x57494649
 
-private fun openHotspotSettings(context: android.content.Context) {
+internal fun openHotspotSettings(context: android.content.Context) {
     val candidates = listOf(
         // AOSP's hotspot detail action deliberately uses the Settings package namespace
         // ("com.android.settings"), not the public "android.settings" namespace.  The old

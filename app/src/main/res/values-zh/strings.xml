@@ -11,6 +11,8 @@
     <string name="sta_camera_not_found_short">未找到相机</string>
     <string name="sta_camera_not_found">没有找到兼容相机，请确认手机和相机处于同一热点或局域网。</string>
     <string name="sta_camera_refused_repair">相机拒绝连接，请重新配对。</string>
+    <string name="sta_signal_connected">STA 相机已连接</string>
+    <string name="sta_signal_disconnected_hotspot">STA 相机已断开，打开个人热点设置。</string>
     <string name="usb_step_power">相机电源开启</string>
     <string name="usb_step_cable">使用 C to C 数据线连接相机与手机</string>
     <string name="connection_failed_short">连接失败</string>

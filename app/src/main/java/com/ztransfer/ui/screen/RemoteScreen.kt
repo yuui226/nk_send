@@ -2398,7 +2398,9 @@ private fun RemoteContent(
                         SignalPill(
                             rssi = camState.wifiRssi,
                             connected = connected,
-                            connectionType = camState.connectionType
+                            connectionType = camState.connectionType,
+                            staMode = camState.isStaConnection,
+                            onStaDisconnectedClick = cameraViewModel::cancelStaDiscovery,
                         )
                         BatteryPill(percent = rcBatteryPercentage(batteryParam))
                     }
@@ -2977,7 +2979,9 @@ private fun RemoteContent(
                             SignalPill(
                                 rssi = camState.wifiRssi,
                                 connected = connected,
-                                connectionType = camState.connectionType
+                                connectionType = camState.connectionType,
+                                staMode = camState.isStaConnection,
+                                onStaDisconnectedClick = cameraViewModel::cancelStaDiscovery,
                             )
                             BatteryPill(percent = rcBatteryPercentage(batteryParam))
                         }

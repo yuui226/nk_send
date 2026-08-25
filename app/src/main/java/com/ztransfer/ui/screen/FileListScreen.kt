@@ -82,12 +82,14 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -1472,7 +1474,9 @@ fun FileListScreen(
                 rssi = state.wifiRssi,
                 connected = state.isConnectedToCamera,
                 pulseTrigger = signalPulse,
-                connectionType = state.connectionType
+                connectionType = state.connectionType,
+                staMode = state.isStaConnection,
+                onStaDisconnectedClick = cameraViewModel::cancelStaDiscovery,
             )
 
             // 信号按钮右侧：类型筛选按钮。信号条展开/收起的宽度动画是逐帧真实布局，
@@ -2210,8 +2214,8 @@ internal fun signalBarPalette(
 }
 
 /**
- * 连接状态毛玻璃按钮：Wi-Fi 显示信号格与 dBm，USB 显示经典三叉标；
- * Wi-Fi 断开时点击进入系统设置，USB 断开则等待重新插线。
+ * 连接状态毛玻璃按钮：AP 显示信号格与 dBm，STA 显示专属拓扑状态，USB 显示经典三叉标；
+ * AP 断开进入 Wi-Fi 设置，STA 断开进入个人热点设置，USB 断开则等待重新插线。
  * [pulseTrigger] 递增时按钮轻微放大再弹性缩回（断开时点缩略图的"病因指向"反馈）。
  * "Z传"页与队列页顶栏共用。
  */
@@ -2220,12 +2224,14 @@ fun SignalPill(
     rssi: Int?,
     connected: Boolean,
     pulseTrigger: Int = 0,
-    connectionType: CameraConnectionType? = null
+    connectionType: CameraConnectionType? = null,
+    staMode: Boolean = false,
+    onStaDisconnectedClick: () -> Unit = {},
 ) {
     val colors = AppTheme.colors
     var expanded by remember { mutableStateOf(false) }
     val usbMode = connectionType == CameraConnectionType.USB
-    val online = connected && (usbMode || rssi != null)
+    val online = connected && (usbMode || staMode || rssi != null)
     val r = rssi ?: -999
     // dBm 越接近 0 越强。判定从严：满格只给极好信号，稍差立刻掉格。
     //  -30↑ 满格 / -45↑ 三格 / -55↑ 两格 / -65↑ 一格 / 更弱 0 格。
@@ -2239,6 +2245,8 @@ fun SignalPill(
     val color = when {
         usbMode && connected -> colors.accentBlue
         usbMode -> colors.statusError
+        staMode && connected -> colors.statusConnected
+        staMode -> colors.statusError
         level == 4 -> colors.statusConnected
         level >= 2 -> colors.accentOrange
         else -> colors.statusError
@@ -2277,7 +2285,13 @@ fun SignalPill(
     val context = LocalContext.current
     GlassButton(
         onClick = {
-            if (online) expanded = !expanded
+            if (staMode) {
+                expanded = false
+                if (!connected) {
+                    onStaDisconnectedClick()
+                    openHotspotSettings(context)
+                }
+            } else if (online) expanded = !expanded
             // 断开态：断连图标即"去连 Wi-Fi"的入口，跳系统 Wi-Fi 设置（与连接页
             // 的 Wi-Fi 按钮同款行为）；离线时展开 dBm 本来就无意义。
             else if (!usbMode) try {
@@ -2307,54 +2321,64 @@ fun SignalPill(
             modifier = Modifier.height(15.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 在线：4 格信号条；断开：红色断连图标。两态交叉淡化切换。
+            // AP、STA、USB 各自使用独立图形；连接状态变化时交叉淡化切换。
             Crossfade(
                 targetState = when {
-                    usbMode -> 2
-                    online -> 1
-                    else -> 0
+                    usbMode -> SignalPillMode.USB
+                    staMode && connected -> SignalPillMode.STA_ONLINE
+                    staMode -> SignalPillMode.STA_OFFLINE
+                    online -> SignalPillMode.WIFI_ONLINE
+                    else -> SignalPillMode.WIFI_OFFLINE
                 },
                 animationSpec = tween(220),
                 label = "signalMode"
             ) { mode ->
-                if (mode == 2) {
-                    ClassicUsbIcon(
+                when (mode) {
+                    SignalPillMode.USB -> ClassicUsbIcon(
+                            tint = color,
+                            modifier = Modifier
+                                .wrapContentHeight(unbounded = true)
+                                .size(18.dp),
+                        )
+
+                    SignalPillMode.STA_ONLINE,
+                    SignalPillMode.STA_OFFLINE -> StaSignalIcon(
+                        connected = mode == SignalPillMode.STA_ONLINE,
                         tint = color,
                         modifier = Modifier
                             .wrapContentHeight(unbounded = true)
-                            .size(18.dp)
+                            .size(19.dp),
                     )
-                } else if (mode == 1) {
-                    Row(
-                        modifier = Modifier.fillMaxHeight(),
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(2.5.dp)
-                    ) {
-                        repeat(4) { i ->
-                            val lit = i < level.coerceAtLeast(1)   // 至少亮一格，表示"在连接中"
-                            Box(
-                                modifier = Modifier
-                                    .width(4.dp)
-                                    .height((6 + i * 3).dp)
-                                    .clip(RoundedCornerShape(1.5.dp))
-                                    .background(if (lit) signalBars.lit else signalBars.unlit)
-                            )
+
+                    SignalPillMode.WIFI_ONLINE -> Row(
+                            modifier = Modifier.fillMaxHeight(),
+                            verticalAlignment = Alignment.Bottom,
+                            horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+                        ) {
+                            repeat(4) { i ->
+                                val lit = i < level.coerceAtLeast(1)
+                                Box(
+                                    modifier = Modifier
+                                        .width(4.dp)
+                                        .height((6 + i * 3).dp)
+                                        .clip(RoundedCornerShape(1.5.dp))
+                                        .background(if (lit) signalBars.lit else signalBars.unlit),
+                                )
+                            }
                         }
-                    }
-                } else {
-                    Icon(
-                        Icons.Default.WifiOff,
-                        contentDescription = stringResource(R.string.camera_not_connected),
-                        tint = colors.statusError,
-                        // 图标比 15dp 内容行略大，溢出居中进 padding（与 dBm 文本同法）。
-                        modifier = Modifier
-                            .wrapContentHeight(unbounded = true)
-                            .size(18.dp)
-                    )
+
+                    SignalPillMode.WIFI_OFFLINE -> Icon(
+                            Icons.Default.WifiOff,
+                            contentDescription = stringResource(R.string.camera_not_connected),
+                            tint = colors.statusError,
+                            modifier = Modifier
+                                .wrapContentHeight(unbounded = true)
+                                .size(18.dp),
+                        )
                 }
             }
             AnimatedVisibility(
-                visible = expanded && online,
+                visible = expanded && online && !staMode,
                 // 展开带一点弹性（与胶囊同款手感），从左侧展开、文字先露出开头。
                 enter = expandHorizontally(
                     animationSpec = Motion.bouncy(),
@@ -2378,6 +2402,54 @@ fun SignalPill(
                         .wrapContentHeight(unbounded = true)
                 )
             }
+        }
+    }
+}
+
+private enum class SignalPillMode {
+    WIFI_OFFLINE,
+    WIFI_ONLINE,
+    STA_OFFLINE,
+    STA_ONLINE,
+    USB,
+}
+
+/** STA does not expose a meaningful client-Wi-Fi RSSI, so it uses a topology icon instead. */
+@Composable
+private fun StaSignalIcon(
+    connected: Boolean,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    val description = stringResource(
+        if (connected) R.string.sta_signal_connected
+        else R.string.sta_signal_disconnected_hotspot,
+    )
+    Canvas(
+        modifier = modifier.semantics { contentDescription = description },
+    ) {
+        val stroke = 1.7.dp.toPx()
+        val center = Offset(size.width / 2f, size.height * 0.78f)
+        drawCircle(color = tint, radius = 1.55.dp.toPx(), center = center)
+        listOf(5.2.dp.toPx(), 8.2.dp.toPx()).forEach { radius ->
+            drawArc(
+                color = tint,
+                startAngle = 215f,
+                sweepAngle = 110f,
+                useCenter = false,
+                topLeft = Offset(center.x - radius, center.y - radius),
+                size = Size(radius * 2f, radius * 2f),
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+        }
+        if (!connected) {
+            drawLine(
+                color = tint,
+                start = Offset(size.width * 0.18f, size.height * 0.16f),
+                end = Offset(size.width * 0.84f, size.height * 0.86f),
+                strokeWidth = 2.dp.toPx(),
+                cap = StrokeCap.Round,
+            )
         }
     }
 }
