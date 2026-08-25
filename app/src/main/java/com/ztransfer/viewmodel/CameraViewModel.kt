@@ -41,6 +41,7 @@ import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.service.CameraSessionService
 import com.ztransfer.util.applyExifOrientation
 import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
@@ -110,7 +111,9 @@ internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStat
 
 /** A saved STA profile can become reachable slightly before Nikon's PTP/IP service is ready. */
 internal fun isTransientStaServiceReadinessFailure(error: Throwable?): Boolean =
-    error is SocketTimeoutException || error is ConnectException
+    error is SocketTimeoutException ||
+        error is ConnectException ||
+        (error is IOException && error.message?.startsWith("STA album access unavailable") == true)
 
 /** STA reconnection is selected only for an established STA-origin Wi-Fi session. */
 internal fun shouldReconnectUsingSta(
@@ -1768,38 +1771,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             albumCamera.close()
         }
 
-        if (explorationReports.isNotEmpty() &&
-            generation == staDiscoveryGeneration &&
-            _state.value.wirelessMode == WirelessMode.STA
-        ) {
-            // Keep the known paired monitor session available after both album routes fail. This
-            // preserves the existing "no photos" screen and its Debug timing-log entry, where the
-            // complete STA transcript can now be copied.
-            delay(STA_EXPLORER_RECONNECT_DELAY_MS)
-            val monitorCamera = NikonCamera(localizedContext)
-            staConnectingCamera = monitorCamera
-            val monitorResult = monitorCamera.connectSta(
-                ip = ip,
-                identity = StaInitiatorIdentity.PAIRED_COMPUTER,
-                allowPairing = true,
-                exploreAlbumAccess = false,
-                forceProfilePairing = true,
-                allowMonitorOnlyFallback = true,
-            )
-            recordStaDiagnostic(ip, "monitor-fallback", monitorCamera, explorationReports)
-            if (monitorResult.isSuccess &&
-                generation == staDiscoveryGeneration &&
-                !purchaseHold &&
-                _state.value.connectionType != CameraConnectionType.USB &&
-                _state.value.wirelessMode == WirelessMode.STA &&
-                !_state.value.isConnectedToCamera
-            ) {
-                activateStaCamera(monitorCamera, ip)
-                return true
-            }
-            staConnectingCamera = null
-            monitorCamera.close()
-        }
+        // A monitor-only PTP profile is not a successful photo-browser connection. Activating it
+        // used to play the connected transition and then publish a completed empty album. Leave
+        // discovery in the failed/retry path instead; a later attempt can still obtain the full
+        // paired album session once the camera service is ready.
         return false
     }
 
@@ -1836,6 +1811,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 staConnectionStatus = StaConnectionStatus.IDLE,
                 staDiscoveryProgress = null,
                 staConnectionError = null,
+                // Publish the album's loading state atomically with the connection. Otherwise a
+                // slow reconnect can expose the previous session's completed-empty state for a
+                // frame and send the user straight to the false "no photos" screen.
+                isLoadingFiles = candidateCamera.staAlbumAccessValidated,
+                hasCompletedFileScan = false,
             )
         }
         CameraSessionService.start(getApplication())
@@ -2287,6 +2267,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 "existing=${_state.value.files.size}"
         }
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            var staScanRetryScheduled = false
+            var staScanTransportFailed = false
+            var staRetryableScanFailure = false
             try {
                 val existingFiles =
                     if (preserveExisting && camera === cam) _state.value.files else emptyList()
@@ -2339,7 +2322,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             0L
                         }
                         val queryStorageId = objectHandleQueryStorageId(storageId, staScan)
-                        val result = cam.getObjectHandlesWithStatus(queryStorageId)
+                        var attempts = 1
+                        var result = cam.getObjectHandlesWithStatus(queryStorageId)
+                        // The paired STA service can briefly answer DeviceBusy immediately after
+                        // the connected transition. Retry response-level failures in place; a
+                        // transport exception is handled by reconnecting the session below.
+                        while (staScan && !result.successful && result.error == null && attempts < 3) {
+                            delay(STA_FILE_SCAN_RETRY_DELAY_MS)
+                            attempts++
+                            result = cam.getObjectHandlesWithStatus(queryStorageId)
+                        }
                         if (PhotoGenerationProbe.enabled && _state.value.isStaConnection) {
                             val response = result.responseCode?.let { "0x%04X".format(it) }
                                 ?: "<transport-error>"
@@ -2350,11 +2342,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 "STA-SCAN",
                                 ("GetObjectHandles storage=0x%08X query=0x%08X " +
                                     "response=%s success=%s " +
-                                    "payloadBytes=%d count=%d sample=[%s] error=%s").format(
+                                    "attempts=%d payloadBytes=%d count=%d sample=[%s] error=%s").format(
                                         storageId,
                                         queryStorageId,
                                         response,
                                         result.successful,
+                                        attempts,
                                         result.payloadBytes,
                                         result.handles.size,
                                         sample,
@@ -2367,6 +2360,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 storageId = storageId,
                                 handles = result.handles,
                                 elapsedMs = SystemClock.elapsedRealtime() - startedAtMs,
+                            )
+                        }
+                        if (staScan && !result.successful) {
+                            staScanTransportFailed = result.error != null
+                            staRetryableScanFailure = !staScanTransportFailed
+                            throw IOException(
+                                "STA GetObjectHandles failed for 0x%08X: %s".format(
+                                    storageId,
+                                    result.error ?: result.responseCode?.let {
+                                        "response=0x%04X".format(it)
+                                    } ?: "unknown",
+                                ),
                             )
                         }
                         storageId to result
@@ -2610,8 +2615,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // 扫描中断（掉线/读超时）：保留已加载的部分，掉线由心跳发现并触发重连。
                 if (fileLoadGeneration == generation && camera === cam) {
                     fileScanHandleSnapshot = null
-                    fileLoadPending = false
-                    _state.update { it.copy(isLoadingFiles = false) }
+                    if (_state.value.isStaConnection && staRetryableScanFailure) {
+                        // A response-level STA failure is not an empty card. Keep the loading state
+                        // and retry the catalog without discarding an already published first page.
+                        staScanRetryScheduled = true
+                        fileLoadPending = true
+                        _state.update {
+                            it.copy(isLoadingFiles = true, hasCompletedFileScan = false)
+                        }
+                        viewModelScope.launch {
+                            delay(STA_FILE_SCAN_RETRY_DELAY_MS)
+                            if (fileLoadGeneration == generation && camera === cam &&
+                                _state.value.isConnectedToCamera && !isFileScanPaused()
+                            ) {
+                                loadFiles(preserveExisting = _state.value.files.isNotEmpty())
+                            }
+                        }
+                    } else {
+                        fileLoadPending = false
+                        _state.update { it.copy(isLoadingFiles = false) }
+                        if (staScanTransportFailed) onCameraTransportLost(cam)
+                    }
                 }
                 if (FileOrderProbe.enabled) {
                     FileOrderProbe.finishScan(
@@ -2623,7 +2647,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // loading 状态清掉。
                 if (fileLoadJob === coroutineContext[Job]) {
                     fileLoadJob = null
-                    _state.update { it.copy(isLoadingFiles = false) }
+                    if (!staScanRetryScheduled) {
+                        _state.update { it.copy(isLoadingFiles = false) }
+                    }
                 }
             }
         }
@@ -2747,16 +2773,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (expectedCamera.staDirectObjectReadValidated) {
             if (cached != null) staScanThumbnailDiskHits++ else staScanThumbnailDiskMisses++
-            val probed = staScanThumbnailDiskHits + staScanThumbnailDiskMisses
-            if (PhotoGenerationProbe.enabled && probed <= 4) {
-                PhotoGenerationProbe.note(
-                    "STA-CACHE",
-                    "item=$probed handle=0x%08X disk=%s".format(
-                        handle,
-                        if (cached != null) "hit" else "miss",
-                    ),
-                )
-            }
         }
         if (cached != null) return true
         // Direct STA RAW/video thumbnails need bounded multi-MiB partial reads. Treat them as lazy-visible
@@ -3207,16 +3223,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ): Bitmap? {
         val cam = camera ?: return null
         val startedAt = android.os.SystemClock.elapsedRealtime()
-        if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
-            PhotoGenerationProbe.note(
-                "STA-PREVIEW",
-                "viewModel request handle=0x%08X type=%s size=%d".format(
-                    file.handle,
-                    file.extension,
-                    file.size,
-                ),
-            )
-        }
         val bytes = try {
             // STA probes camera-generated FHD/LargeThumb data only. It never substitutes a full
             // original-object download. AP retains its established 0x920F path unchanged.
@@ -3490,6 +3496,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val STA_PAIRING_RECONNECT_DELAY_MS = 6_600L
         const val STA_SERVICE_READY_RETRY_DELAY_MS = 1_200L
         const val STA_EXPLORER_RECONNECT_DELAY_MS = 900L
+        const val STA_FILE_SCAN_RETRY_DELAY_MS = 750L
         val STA_RECONNECT_DELAYS_MS = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L)
         private const val CONNECTION_PREFERENCES = "sta_connection"
         private const val WIRELESS_MODE_PREFERENCE = "wireless_mode"

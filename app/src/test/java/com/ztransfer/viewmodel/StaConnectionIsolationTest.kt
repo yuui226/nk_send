@@ -1,6 +1,7 @@
 package com.ztransfer.viewmodel
 
 import com.ztransfer.protocol.CameraConnectionType
+import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
@@ -35,9 +36,15 @@ class StaConnectionIsolationTest {
     }
 
     @Test
-    fun staServiceReadinessRetryIsLimitedToShortLivedTcpFailures() {
+    fun staServiceReadinessRetryIsLimitedToShortLivedStartupFailures() {
         assertTrue(isTransientStaServiceReadinessFailure(SocketTimeoutException("starting")))
         assertTrue(isTransientStaServiceReadinessFailure(ConnectException("starting")))
+        assertTrue(
+            isTransientStaServiceReadinessFailure(
+                IOException("STA album access unavailable (0x2001)"),
+            ),
+        )
+        assertFalse(isTransientStaServiceReadinessFailure(IOException("unrelated IO failure")))
         assertFalse(isTransientStaServiceReadinessFailure(NoRouteToHostException("offline")))
         assertFalse(isTransientStaServiceReadinessFailure(IllegalStateException("protocol")))
         assertFalse(isTransientStaServiceReadinessFailure(null))

@@ -127,7 +127,7 @@
         <tbody>
           <tr><td class="feature">网络拓扑</td><td>相机开热点，手机连接相机 Wi‑Fi。</td><td>相机连接手机热点或现有局域网，APP 在同一网络发现相机。</td><td><span class="status warn">协议差异</span> 这是模式本身的定义，不应强行统一。</td></tr>
           <tr><td class="feature">相机端配置持久化</td><td>相机热点配置为 AP 路径；手机侧可记住 Wi‑Fi。</td><td>首次完成“连接至计算机”配对，相机保存配置文件，下次可直接选择该配置。</td><td><span class="status ok">已实现</span> STA 的核心价值。</td></tr>
-          <tr><td class="feature">连接发现</td><td>按相机网关与固定地址连接。</td><td>优先上次 IP，再通过局域网/热点候选发现 PTP/IP 服务。</td><td><span class="status warn">实现不同</span> 复杂 LAN 的发现时间可能高于 AP。</td></tr>
+          <tr><td class="feature">连接发现</td><td>按相机网关与固定地址连接。</td><td>优先上次 IP，再通过局域网/热点候选发现 PTP/IP 服务；只有完整相册能力验证成功才发布“已连接”，仅监看会话不会再伪装成空相册。</td><td><span class="status warn">实现不同</span> 复杂 LAN 的发现时间可能高于 AP。</td></tr>
           <tr><td class="feature">断线与重连</td><td>网络回调 + 心跳自动重连。</td><td>心跳、上次 IP、STA 发现与退避重连。</td><td><span class="status ok">行为对齐</span> 实现因拓扑不同而独立。</td></tr>
           <tr><td class="feature">列表 UI / 日期分组</td><td>共用 FileListScreen。</td><td>共用 FileListScreen。</td><td><span class="status ok">完全共用</span></td></tr>
           <tr><td class="feature">类型筛选</td><td>由 ObjectInfo 提供真实扩展名。</td><td>Z30 已验证 JPG / NEF / MP4；已知 handle 类型直接识别，未知类型回退读文件头。</td><td><span class="status ok">当前机型可用</span> 新 handle 类型需实机补充。</td></tr>
@@ -140,13 +140,13 @@
           <tr><td class="feature">渐进首屏</td><td>12 项 ObjectInfo 一批，批间补缩略图。</td><td>语义相同；STA 内部用 1 → 3 → 12 的发布粒度抵消私有命令延迟。</td><td><span class="status ok">体验对齐</span> 只是 STA 协议层调度补偿。</td></tr>
           <tr><td class="feature">内存 / 磁盘缩略图缓存</td><td>内存 LRU + 按相机隔离的磁盘缓存。</td><td>同一套缓存；直接模式主键使用 handle + size，并兼容文件身份备用键。</td><td><span class="status ok">已生效</span> 暖缓存不再逐项读 128 KiB 文件头。</td></tr>
           <tr><td class="feature">JPG 缩略图</td><td>相机 GetThumb。</td><td>磁盘命中零网络；未命中时从 128 KiB EXIF 头提取。</td><td><span class="status ok">可用</span> 冷缓存比 AP 多传文件头。</td></tr>
-          <tr><td class="feature">NEF 缩略图</td><td>相机 GetThumb，通常成本较小。</td><td>从 NEF IFD 或 JPEG 扫描定位内嵌预览；只对可见项按需加载，探针从 256 KiB 递增。</td><td><span class="status warn">可用但更慢</span> 不做整卡后台 RAW 探测，避免拖垮列表。</td></tr>
+          <tr><td class="feature">NEF 缩略图</td><td>相机 GetThumb，通常成本较小。</td><td>从 NEF IFD 或 JPEG 扫描定位内嵌预览；只对可见项按需加载，首张以 256 KiB 可靠探测，后续复用已校验的同会话偏移并在失败时自动回退；最近编码缩略图采用 4 MiB LRU，取消重建格子不会重复下载。</td><td><span class="status warn">可用但仍慢于 AP</span> 不做整卡后台 RAW 探测，避免拖垮列表。</td></tr>
           <tr><td class="feature">视频缩略图</td><td>相机 GetThumb。</td><td>先读 128 KiB 内嵌封面；缺失才扩大到有界 8 MiB 并尝试抽帧。</td><td><span class="status warn">可用但实现不同</span></td></tr>
           <tr><td class="feature">大图交互顺序</td><td>已有缩略图立即显示 → 当前页 FHD → EXIF → 相邻页预取。</td><td>完全复用同一 PhotoPreview 顺序、动画、旋转、缩放和内存窗口。</td><td><span class="status ok">完全共用</span></td></tr>
           <tr><td class="feature">JPG FHD 预览</td><td><code>GetFhdPicture(0x920F)</code> 返回相机生成预览。</td><td>新机型先尝试相机 FHD；Z30 配对档案拒绝后，读取 MPF 精确 FHD 项（实测 1620×1080）。</td><td><span class="status ok">已实现</span> 不是原图模拟，不下载主 JPEG。</td></tr>
-          <tr><td class="feature">NEF 大图</td><td>由相机 FHD 能力决定。</td><td>读取 NEF 最大的已索引内嵌 JPEG；未知索引时进行有界前缀探测。</td><td><span class="status warn">可用</span> 不保证每个 NEF 都含可解析预览。</td></tr>
+          <tr><td class="feature">NEF 大图</td><td>由相机 FHD 能力决定。</td><td>从小到大验证已索引内嵌 JPEG，优先选择首个达到 FHD 长边的候选；未知索引时进行有界前缀探测。</td><td><span class="status warn">可用</span> 避免为了预览默认传输最大的内嵌 JPEG；不保证每个 NEF 都含可解析预览。</td></tr>
           <tr><td class="feature">视频大图 / 播放</td><td>当前预览页不会对视频请求 FHD，也没有在线播放。</td><td>相同。</td><td><span class="status no">两种模式均不支持在线播放</span></td></tr>
-          <tr><td class="feature">EXIF 展示</td><td>读取 128 KiB 文件头并走共用解析。</td><td>同一解析；STA 会复用刚为 MPF/缩略图读取的最近文件头，避免重复网络读取。</td><td><span class="status ok">已对齐并适配</span></td></tr>
+          <tr><td class="feature">EXIF 展示</td><td>读取 128 KiB 文件头并走共用解析。</td><td>同一解析；STA 最多保留 4 项、每项 512 KiB 的最近前缀，供 MPF、RAW 索引和 EXIF 复用。</td><td><span class="status ok">已对齐并适配</span></td></tr>
           <tr><td class="feature">连拍合集 / 筛选 / 展开</td><td>前端从文件名和日期派生。</td><td>共用同一算法和 UI。</td><td><span class="status ok">完全共用</span> 依赖恢复后的文件编号与日期准确。</td></tr>
           <tr><td class="feature">手动选择传输</td><td>单张、整组、预览上滑、批量选择。</td><td>共用相同入口与队列。</td><td><span class="status ok">完全共用</span></td></tr>
           <tr><td class="feature">已传判定</td><td>文件名 + 大小，并兼容副本后缀。</td><td>共用同一判定。</td><td><span class="status warn">逻辑共用</span> 自定义文件名前缀场景受原名恢复限制。</td></tr>

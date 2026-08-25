@@ -1193,20 +1193,25 @@ class NikonCamera(private val context: Context) {
     private val staDirectMetadataDiagnostics = java.util.concurrent.ConcurrentHashMap<String, String>()
     internal val staDirectMetadataDiagnosticReports: List<String>
         get() = staDirectMetadataDiagnostics.toSortedMap().values.toList()
-    // Direct-STA metadata scanning extracts embedded EXIF thumbnails while the same 64 KiB header
-    // is already in memory. The regular thumbnail pipeline consumes these entries immediately.
-    private val staDirectThumbnails = HashMap<Int, ByteArray>()
+    // Encoded thumbnail bytes use a bounded LRU rather than a one-shot handoff. A visible cell can
+    // be cancelled after camera IO but before disk write/decode; retaining recent bytes lets its
+    // replacement finish locally instead of downloading the same RAW preview again.
+    private val staDirectThumbnails = LinkedHashMap<Int, ByteArray>(16, 0.75f, true)
+    private var staDirectThumbnailBytes = 0
     private val staDirectNoThumbnail = HashSet<Int>()
     private val staDirectFiles = HashMap<Int, FileInfo>()
     private val staDirectJpegMpfPreviews = HashMap<Int, List<JpegMpfPreviewReference>>()
     private val staDirectRawPreviews = HashMap<Int, List<NefPreviewReference>>()
+    // Same-camera NEFs usually place their grid JPEG at a stable offset. This session-only hint is
+    // always JPEG-validated and falls back to the full prefix parser on the first mismatch.
+    private var staDirectRawThumbnailHint: NefPreviewReference? = null
     // A scan-only thumbnail is not proof that the RAW's largest preview was found. Keep indexed
     // IFD references separate so full-screen preview never mistakes the first small JPEG for FHD.
     private val staDirectRawIndexedPreviews = HashSet<Int>()
     private val staDirectOriginalFileNames = HashMap<Int, String>()
     private val staDirectCaptureDates = HashMap<Int, String>()
-    // 最近读取的少量 128 KiB 文件头同时服务 MPF、EXIF 与缩略图；限制为 4 项，避免冷缓存
-    // 扫描把整卡文件头留在堆中。所有访问都在同一 PTP IO gate 内串行。
+    // 最近读取的少量文件前缀同时服务 MPF、EXIF、RAW 索引与缩略图；每项最多 512 KiB、
+    // 总共 4 项，避免冷缓存扫描把整卡数据留在堆中。所有访问都在同一 PTP IO gate 内串行。
     private val staDirectRecentHeaders = LinkedHashMap<Int, ByteArray>(4, 0.75f, true)
     private var staDirectFileNumberAnchor: NikonFileNumberAnchor? = null
     private val staDirectEmbeddedFileNameAvailable = HashMap<String, Boolean>()
@@ -1316,6 +1321,13 @@ class NikonCamera(private val context: Context) {
         internal const val STA_DIRECT_CATALOG_HEADER_BYTES = 128 * 1024
         private const val STA_DIRECT_VIDEO_TAIL_BYTES = 256 * 1024
         private const val STA_DIRECT_VIDEO_THUMBNAIL_PREFIX_BYTES = 8 * 1024 * 1024
+        private const val STA_DIRECT_RECENT_PREFIX_BYTES = 512 * 1024
+        private const val STA_DIRECT_RECENT_PREFIX_COUNT = 4
+        private const val STA_DIRECT_THUMBNAIL_CACHE_BYTES = 4 * 1024 * 1024
+        private const val STA_DIRECT_RAW_THUMBNAIL_HINT_MIN_BYTES = 192 * 1024
+        private const val STA_DIRECT_RAW_THUMBNAIL_HINT_MARGIN_BYTES = 64 * 1024
+        private const val STA_DIRECT_RAW_FHD_MIN_BYTES = 512 * 1024
+        private const val STA_DIRECT_RAW_FHD_MIN_LONG_EDGE = 1_600
         private val STA_DIRECT_RAW_PROBE_PREFIX_BYTES = intArrayOf(
             256 * 1024,
             512 * 1024,
@@ -1480,7 +1492,6 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean = true,
         exploreAlbumAccess: Boolean = false,
         forceProfilePairing: Boolean = false,
-        allowMonitorOnlyFallback: Boolean = false,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             staAlbumAccessValidated = false
@@ -1489,10 +1500,12 @@ class NikonCamera(private val context: Context) {
             staLargeThumbSupported = null
             staDirectMetadataDiagnostics.clear()
             staDirectThumbnails.clear()
+            staDirectThumbnailBytes = 0
             staDirectNoThumbnail.clear()
             staDirectFiles.clear()
             staDirectJpegMpfPreviews.clear()
             staDirectRawPreviews.clear()
+            staDirectRawThumbnailHint = null
             staDirectRawIndexedPreviews.clear()
             staDirectOriginalFileNames.clear()
             staDirectCaptureDates.clear()
@@ -1579,7 +1592,6 @@ class NikonCamera(private val context: Context) {
                 allowPairing = allowPairing,
                 exploreAlbumAccess = exploreAlbumAccess,
                 forceProfilePairing = forceProfilePairing,
-                allowMonitorOnlyFallback = allowMonitorOnlyFallback,
             )
             cmdSocket?.soTimeout = SO_TIMEOUT_MS
             evtSocket?.soTimeout = SO_TIMEOUT_MS
@@ -1905,7 +1917,7 @@ class NikonCamera(private val context: Context) {
     suspend fun getThumbnail(handle: Int): ByteArray? = ioMutex.withLock {
         withContext(Dispatchers.IO) {
             if (staDirectObjectReadValidated) {
-                staDirectThumbnails.remove(handle)?.let { return@withContext it }
+                staDirectThumbnails[handle]?.let { return@withContext it }
                 if (handle in staDirectNoThumbnail) return@withContext null
                 val file = staDirectFiles[handle]
                 val thumbnail = when (file?.extension) {
@@ -1922,7 +1934,10 @@ class NikonCamera(private val context: Context) {
                         result.thumbnail
                     }
                 }
-                thumbnail?.let { return@withContext it }
+                thumbnail?.let { bytes ->
+                    rememberStaDirectThumbnail(handle, bytes)
+                    return@withContext bytes
+                }
                 // A bounded RAW/video probe returning null does not prove that the object has no
                 // preview. Do not permanently suppress a later visible retry in this session.
                 if (file == null || file.extension == ".jpg") {
@@ -2042,21 +2057,6 @@ class NikonCamera(private val context: Context) {
                         if (knownSupport == false ||
                             (operation == PtpConstants.NK_GET_LARGE_THUMB && !advertised)
                         ) {
-                            if (PhotoGenerationProbe.enabled) {
-                                PhotoGenerationProbe.note(
-                                    "STA-PREVIEW",
-                                    "camera:%s handle=0x%08X skipped=%s advertised=%s".format(
-                                        operationName,
-                                        handle,
-                                        if (knownSupport == false) {
-                                            "session-unsupported"
-                                        } else {
-                                            "not-advertised"
-                                        },
-                                        advertised,
-                                    ),
-                                )
-                            }
                             continue
                         }
 
@@ -2126,11 +2126,14 @@ class NikonCamera(private val context: Context) {
                     return null
                 }
 
-                requestCameraPreview()
-                    ?: readStaDirectJpegMpfPreviewInternal(handle)
-                    ?: staDirectFiles[handle]
-                        ?.takeIf { it.extension == ".nef" }
-                        ?.let(::readStaDirectRawPreviewInternal)
+                requestCameraPreview() ?: when (val file = staDirectFiles[handle]) {
+                    null -> null
+                    else -> when (file.extension) {
+                        ".jpg" -> readStaDirectJpegMpfPreviewInternal(handle)
+                        ".nef" -> readStaDirectRawPreviewInternal(file)
+                        else -> null
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -2162,15 +2165,6 @@ class NikonCamera(private val context: Context) {
                 try {
                     if (staDirectObjectReadValidated) {
                         staDirectRecentHeaders[handle]?.let { cached ->
-                            if (PhotoGenerationProbe.enabled) {
-                                PhotoGenerationProbe.note(
-                                    "STA-PREVIEW",
-                                    "EXIF header-cache handle=0x%08X bytes=%d".format(
-                                        handle,
-                                        minOf(maxSize, cached.size),
-                                    ),
-                                )
-                            }
                             return@withContext if (cached.size <= maxSize) {
                                 cached
                             } else {
@@ -2382,12 +2376,41 @@ class NikonCamera(private val context: Context) {
     private fun cacheStaDirectObjectHeader(handle: Int, result: StaDirectObjectHeader) {
         result.file?.let { file ->
             staDirectFiles[handle] = file
-            result.thumbnail?.let { bytes -> staDirectThumbnails[handle] = bytes }
+            result.thumbnail?.let { bytes -> rememberStaDirectThumbnail(handle, bytes) }
             // RAW/video bounded probes are lazy and non-authoritative. JPEG's parsed EXIF envelope is
             // authoritative, so a missing thumbnail can retain the existing session negative cache.
             if (result.thumbnailChecked && result.thumbnail == null && file.extension == ".jpg") {
                 staDirectNoThumbnail += handle
             }
+        }
+    }
+
+    /** Keeps recent encoded thumbnails under a strict byte budget; STA PTP IO serializes access. */
+    private fun rememberStaDirectThumbnail(handle: Int, bytes: ByteArray) {
+        val previous = staDirectThumbnails.put(handle, bytes)
+        staDirectThumbnailBytes += bytes.size - (previous?.size ?: 0)
+        while (staDirectThumbnailBytes > STA_DIRECT_THUMBNAIL_CACHE_BYTES &&
+            staDirectThumbnails.size > 1
+        ) {
+            val eldest = staDirectThumbnails.entries.iterator().next()
+            staDirectThumbnailBytes -= eldest.value.size
+            staDirectThumbnails.remove(eldest.key)
+        }
+    }
+
+    /** Retains only the useful beginning of a recent STA object; larger prefixes never grow the cap. */
+    private fun rememberStaDirectPrefix(handle: Int, bytes: ByteArray, validLength: Int = bytes.size) {
+        val retainedLength = minOf(validLength, bytes.size, STA_DIRECT_RECENT_PREFIX_BYTES)
+        if (retainedLength <= 0) return
+        val existing = staDirectRecentHeaders[handle]
+        if (existing != null && existing.size >= retainedLength) return
+        staDirectRecentHeaders[handle] = if (retainedLength == bytes.size) {
+            bytes
+        } else {
+            bytes.copyOf(retainedLength)
+        }
+        while (staDirectRecentHeaders.size > STA_DIRECT_RECENT_PREFIX_COUNT) {
+            staDirectRecentHeaders.remove(staDirectRecentHeaders.keys.first())
         }
     }
 
@@ -2498,10 +2521,7 @@ class NikonCamera(private val context: Context) {
         if (response != PtpConstants.RESPONSE_OK || header == null || header.isEmpty()) {
             return StaDirectObjectHeader(null, null, false)
         }
-        staDirectRecentHeaders[handle] = header
-        while (staDirectRecentHeaders.size > 4) {
-            staDirectRecentHeaders.remove(staDirectRecentHeaders.keys.first())
-        }
+        rememberStaDirectPrefix(handle, header)
 
         val detectedExtension = staDirectObjectExtension(header)
         val embeddedNames = if (
@@ -2834,6 +2854,54 @@ class NikonCamera(private val context: Context) {
             return cachedResult
         }
 
+        // After one NEF establishes the embedded grid-JPEG offset, later files from the same
+        // camera/session can skip the unused TIFF prefix. The bounded margin absorbs normal JPEG
+        // size variation; a missing SOI/EOI simply falls through to the proven prefix parser.
+        staDirectRawThumbnailHint?.let { hint ->
+            val available = file.size - hint.offset
+            if (hint.offset >= 0L && available > 0L) {
+                val target = minOf(
+                    available,
+                    maxOf(
+                        STA_DIRECT_RAW_THUMBNAIL_HINT_MIN_BYTES,
+                        hint.length + STA_DIRECT_RAW_THUMBNAIL_HINT_MARGIN_BYTES,
+                    ).toLong(),
+                ).toInt()
+                val chunk = readStaDirectPartialInternal(
+                    handle = file.handle,
+                    offset = hint.offset,
+                    maxSize = target,
+                )
+                val localReference = chunk?.let { bytes -> largestEmbeddedJpegRange(bytes) }
+                if (chunk != null && localReference != null) {
+                    val result = chunk.copyOfRange(
+                        localReference.offset.toInt(),
+                        localReference.offset.toInt() + localReference.length,
+                    )
+                    val absoluteReference = NefPreviewReference(
+                        offset = hint.offset + localReference.offset,
+                        length = localReference.length,
+                    )
+                    staDirectRawThumbnailHint = absoluteReference
+                    staDirectRawPreviews[file.handle] = listOf(absoluteReference)
+                    if (PhotoGenerationProbe.enabled) {
+                        PhotoGenerationProbe.note(
+                            "STA-THUMB",
+                            ("RAW handle=0x%08X source=hint probeBytes=%d range=%d+%d " +
+                                "thumbnail=%dB").format(
+                                    file.handle,
+                                    chunk.size,
+                                    absoluteReference.offset,
+                                    absoluteReference.length,
+                                    result.size,
+                                ),
+                        )
+                    }
+                    return result
+                }
+            }
+        }
+
         val maximumProbeBytes = minOf(
             file.size,
             STA_DIRECT_RAW_PROBE_PREFIX_BYTES.last().toLong(),
@@ -2842,10 +2910,16 @@ class NikonCamera(private val context: Context) {
 
         // Allocate only the current step. Most Z30 NEFs expose the preview index inside 256 KiB;
         // reserving the full 16 MiB cap for every visible cell causes avoidable GC pauses.
+        val cachedPrefix = staDirectRecentHeaders[file.handle]
+        val reusedPrefixBytes = minOf(cachedPrefix?.size ?: 0, maximumProbeBytes)
         var accumulated = ByteArray(
-            minOf(STA_DIRECT_RAW_PROBE_PREFIX_BYTES.first(), maximumProbeBytes),
+            maxOf(
+                minOf(STA_DIRECT_RAW_PROBE_PREFIX_BYTES.first(), maximumProbeBytes),
+                reusedPrefixBytes,
+            ),
         )
-        var loadedBytes = 0
+        cachedPrefix?.copyInto(accumulated, endIndex = reusedPrefixBytes)
+        var loadedBytes = reusedPrefixBytes
         val probeSteps = ArrayList<Int>()
         var discoveredReference: NefPreviewReference? = null
         var discoveredReferences: List<NefPreviewReference> = emptyList()
@@ -2870,6 +2944,7 @@ class NikonCamera(private val context: Context) {
                 )
                 loadedBytes += accepted
             }
+            rememberStaDirectPrefix(file.handle, accumulated, loadedBytes)
 
             probeSteps += loadedBytes
 
@@ -2907,6 +2982,9 @@ class NikonCamera(private val context: Context) {
             staDirectRawPreviews[file.handle] = discoveredReferences
             if (source == "ifd") staDirectRawIndexedPreviews += file.handle
         }
+        if (result != null && discoveredReference != null) {
+            staDirectRawThumbnailHint = discoveredReference
+        }
         if (PhotoGenerationProbe.enabled) {
             val reference = discoveredReference
             PhotoGenerationProbe.note(
@@ -2928,7 +3006,7 @@ class NikonCamera(private val context: Context) {
         return result
     }
 
-    /** Must be called while [ioMutex] is held; selects the largest indexed RAW preview for FHD. */
+    /** Must be called while [ioMutex] is held; selects the smallest indexed RAW preview that is FHD. */
     private fun readStaDirectRawPreviewInternal(file: FileInfo): ByteArray? {
         fun readReference(reference: NefPreviewReference): ByteArray? =
             readStaDirectPartialInternal(
@@ -2937,26 +3015,91 @@ class NikonCamera(private val context: Context) {
                 maxSize = reference.length,
             )?.takeIf { bytes ->
                 bytes.size == reference.length &&
-                    bytes.size >= 2 &&
+                    bytes.size >= 4 &&
                     bytes[0] == 0xFF.toByte() &&
-                    bytes[1] == 0xD8.toByte()
+                    bytes[1] == 0xD8.toByte() &&
+                    bytes[bytes.lastIndex - 1] == 0xFF.toByte() &&
+                    bytes[bytes.lastIndex] == 0xD9.toByte()
             }
+
+        fun readIndexedPreview(
+            references: List<NefPreviewReference>,
+            source: String,
+            probeSteps: List<Int> = emptyList(),
+        ): ByteArray? {
+            if (references.isEmpty()) return null
+            // Nikon NEFs commonly index both an approximately 1620x1080 display JPEG and a much
+            // larger embedded JPEG. Length order alone used to select the largest one, making the
+            // Z30 transfer 2-3 MiB even though the smaller entry already satisfies FHD preview.
+            // Try plausible display previews from smallest to largest, validate their dimensions,
+            // and only advance when the candidate is genuinely below the preview requirement.
+            val ordered = references.distinct().sortedBy(NefPreviewReference::length)
+            val plausible = ordered.filter { it.length >= STA_DIRECT_RAW_FHD_MIN_BYTES }
+                .ifEmpty { ordered }
+            var largestValid: ByteArray? = null
+            var largestDimensions = 0 to 0
+            val startedAt = SystemClock.elapsedRealtime()
+            for (reference in plausible) {
+                val bytes = readReference(reference) ?: continue
+                val bounds = BitmapFactory.Options().also { options ->
+                    options.inJustDecodeBounds = true
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) continue
+                largestValid = bytes
+                largestDimensions = bounds.outWidth to bounds.outHeight
+                val longEdge = maxOf(bounds.outWidth, bounds.outHeight)
+                if (longEdge >= STA_DIRECT_RAW_FHD_MIN_LONG_EDGE) {
+                    if (PhotoGenerationProbe.enabled) {
+                        PhotoGenerationProbe.note(
+                            "STA-PREVIEW",
+                            ("RAW handle=0x%08X source=%s probeSteps=%s candidates=%s " +
+                                "selected=%d+%d dimensions=%dx%d bytes=%d networkMs=%d").format(
+                                    file.handle,
+                                    source,
+                                    probeSteps.joinToString(",").ifEmpty { "<cached>" },
+                                    references.take(4).joinToString(",") {
+                                        "${it.offset}+${it.length}"
+                                    },
+                                    reference.offset,
+                                    reference.length,
+                                    bounds.outWidth,
+                                    bounds.outHeight,
+                                    bytes.size,
+                                    SystemClock.elapsedRealtime() - startedAt,
+                                ),
+                        )
+                    }
+                    return bytes
+                }
+            }
+            val fallback = largestValid ?: return null
+            if (PhotoGenerationProbe.enabled) {
+                PhotoGenerationProbe.note(
+                    "STA-PREVIEW",
+                    ("RAW handle=0x%08X source=%s candidates=%s fallbackDimensions=%dx%d " +
+                        "bytes=%d networkMs=%d").format(
+                            file.handle,
+                            source,
+                            references.take(4).joinToString(",") {
+                                "${it.offset}+${it.length}"
+                            },
+                            largestDimensions.first,
+                            largestDimensions.second,
+                            fallback.size,
+                            SystemClock.elapsedRealtime() - startedAt,
+                        ),
+                )
+            }
+            return fallback
+        }
 
         // References parsed from the TIFF IFD describe all embedded previews and are sorted
         // largest-first. A grid scan may cache only the first small JPEG, so it is intentionally
         // not trusted here unless it was backed by the IFD index.
         if (file.handle in staDirectRawIndexedPreviews) {
-            staDirectRawPreviews[file.handle]?.firstOrNull()?.let { reference ->
-                readReference(reference)?.let { result ->
-                    if (PhotoGenerationProbe.enabled) {
-                        PhotoGenerationProbe.note(
-                            "STA-PREVIEW",
-                            "RAW handle=0x%08X source=indexed-cache range=%d+%d bytes=%d"
-                                .format(file.handle, reference.offset, reference.length, result.size),
-                        )
-                    }
-                    return result
-                }
+            staDirectRawPreviews[file.handle]?.let { references ->
+                readIndexedPreview(references, "indexed-cache")?.let { return it }
             }
         }
 
@@ -2966,10 +3109,16 @@ class NikonCamera(private val context: Context) {
         ).toInt()
         if (maximumProbeBytes <= 0) return null
 
+        val cachedPrefix = staDirectRecentHeaders[file.handle]
+        val reusedPrefixBytes = minOf(cachedPrefix?.size ?: 0, maximumProbeBytes)
         var accumulated = ByteArray(
-            minOf(STA_DIRECT_RAW_PROBE_PREFIX_BYTES.first(), maximumProbeBytes),
+            maxOf(
+                minOf(STA_DIRECT_RAW_PROBE_PREFIX_BYTES.first(), maximumProbeBytes),
+                reusedPrefixBytes,
+            ),
         )
-        var loadedBytes = 0
+        cachedPrefix?.copyInto(accumulated, endIndex = reusedPrefixBytes)
+        var loadedBytes = reusedPrefixBytes
         val probeSteps = ArrayList<Int>()
         var bestScanned: NefPreviewReference? = null
 
@@ -2987,29 +3136,14 @@ class NikonCamera(private val context: Context) {
                 chunk.copyInto(accumulated, destinationOffset = loadedBytes, endIndex = accepted)
                 loadedBytes += accepted
             }
+            rememberStaDirectPrefix(file.handle, accumulated, loadedBytes)
             probeSteps += loadedBytes
 
             val indexed = parseNefHeaderMetadata(accumulated, loadedBytes).previews
             if (indexed.isNotEmpty()) {
                 staDirectRawPreviews[file.handle] = indexed
                 staDirectRawIndexedPreviews += file.handle
-                val reference = indexed.first()
-                val result = readReference(reference)
-                if (PhotoGenerationProbe.enabled) {
-                    PhotoGenerationProbe.note(
-                        "STA-PREVIEW",
-                        ("RAW handle=0x%08X source=ifd probeSteps=%s candidates=%s " +
-                            "range=%d+%d bytes=%d").format(
-                            file.handle,
-                            probeSteps.joinToString(","),
-                            indexed.take(4).joinToString(",") { "${it.offset}+${it.length}" },
-                            reference.offset,
-                            reference.length,
-                            result?.size ?: 0,
-                        ),
-                    )
-                }
-                if (result != null) return result
+                readIndexedPreview(indexed, "ifd", probeSteps)?.let { return it }
             }
 
             largestEmbeddedJpegRange(accumulated, loadedBytes)?.let { candidate ->
@@ -3626,7 +3760,6 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean,
         exploreAlbumAccess: Boolean,
         forceProfilePairing: Boolean,
-        allowMonitorOnlyFallback: Boolean,
     ) {
         sendCmd(NIKON_COMPATIBILITY_INIT)
         val (compatibilityResponse, _) = recvRespWithPayload()
@@ -3658,7 +3791,7 @@ class NikonCamera(private val context: Context) {
         // only the upload queue. During exploration, StorageIDs alone are therefore not proof of
         // full-card browsing; continue through handle and application-mode probes.
         if (hasUsableStaAlbumStorage(storageResponse, initialStorageIds) &&
-            !exploreAlbumAccess && !allowMonitorOnlyFallback
+            !exploreAlbumAccess
         ) {
             prefetchedStorageIds = initialStorageIds
             staAlbumAccessValidated = true
@@ -3735,11 +3868,6 @@ class NikonCamera(private val context: Context) {
                         "ChangeApplicationMode(0)=${hexResponse(rollbackResponse)}"
                 }
             }
-        }
-        if (allowMonitorOnlyFallback && storageResponse == PtpConstants.RESPONSE_OK) {
-            prefetchedStorageIds = emptyList()
-            staDiagnosticLines += "result=MONITOR_ONLY_FALLBACK"
-            return
         }
         staDiagnosticLines += "result=FULL_ALBUM_UNAVAILABLE"
         throw java.io.IOException(
