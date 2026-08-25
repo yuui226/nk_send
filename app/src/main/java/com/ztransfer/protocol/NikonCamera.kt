@@ -731,6 +731,56 @@ internal fun nikonDefaultCameraFileName(
 }
 
 /**
+ * Nikon 0x9434 的 Z 系列对象索引记录。载荷为 u32 version、u32 count，随后每项 16 字节：
+ * handle、4 字节保留值、0/秒/分/时/日/月/年(u16 LE)。只接受完整且有效的记录，未知固件
+ * 布局直接返回空表，让调用方安全回退到逐对象文件头解析。
+ */
+internal fun parseNikonObjectsMetadataCaptureDates(data: ByteArray?): Map<Int, String> {
+    if (data == null || data.size < 8) return emptyMap()
+    fun u32(offset: Int): Int =
+        (data[offset].toInt() and 0xFF) or
+            ((data[offset + 1].toInt() and 0xFF) shl 8) or
+            ((data[offset + 2].toInt() and 0xFF) shl 16) or
+            ((data[offset + 3].toInt() and 0xFF) shl 24)
+
+    val version = u32(0)
+    val count = u32(4)
+    if (version != 100 || count <= 0 || count > (data.size - 8) / 16 ||
+        8L + count * 16L != data.size.toLong()
+    ) {
+        return emptyMap()
+    }
+    val result = LinkedHashMap<Int, String>(count)
+    repeat(count) { index ->
+        val offset = 8 + index * 16
+        val handle = u32(offset)
+        val second = data[offset + 9].toInt() and 0xFF
+        val minute = data[offset + 10].toInt() and 0xFF
+        val hour = data[offset + 11].toInt() and 0xFF
+        val day = data[offset + 12].toInt() and 0xFF
+        val month = data[offset + 13].toInt() and 0xFF
+        val year = (data[offset + 14].toInt() and 0xFF) or
+            ((data[offset + 15].toInt() and 0xFF) shl 8)
+        if (handle != 0 && year in 1990..2200 && month in 1..12 && day in 1..31 &&
+            hour in 0..23 && minute in 0..59 && second in 0..60
+        ) {
+            result[handle] = "%04d%02d%02dT%02d%02d%02d".format(
+                year, month, day, hour, minute, second,
+            )
+        }
+    }
+    return result
+}
+
+/** Z30 配对 STA 的 handle 高字节是媒体种类；未知值必须回退读文件头，不能猜格式。 */
+internal fun staDirectExtensionFromHandle(handle: Int): String? = when (handle ushr 24 and 0xFF) {
+    0x29 -> ".jpg"
+    0x09 -> ".nef"
+    0x61 -> ".mp4"
+    else -> null
+}
+
+/**
  * Reads Nikon MakerNote tag 0x00B8 (FileInfo) from a bounded JPEG/NEF prefix.
  * FileInfo contains the DCF directory and four-digit file number even when paired STA denies
  * ObjectInfo. It intentionally does not guess the camera-configurable three-character prefix.
@@ -1154,10 +1204,15 @@ class NikonCamera(private val context: Context) {
     // IFD references separate so full-screen preview never mistakes the first small JPEG for FHD.
     private val staDirectRawIndexedPreviews = HashSet<Int>()
     private val staDirectOriginalFileNames = HashMap<Int, String>()
+    private val staDirectCaptureDates = HashMap<Int, String>()
+    // 最近读取的少量 128 KiB 文件头同时服务 MPF、EXIF 与缩略图；限制为 4 项，避免冷缓存
+    // 扫描把整卡文件头留在堆中。所有访问都在同一 PTP IO gate 内串行。
+    private val staDirectRecentHeaders = LinkedHashMap<Int, ByteArray>(4, 0.75f, true)
     private var staDirectFileNumberAnchor: NikonFileNumberAnchor? = null
     private val staDirectEmbeddedFileNameAvailable = HashMap<String, Boolean>()
     private var staDirectFileNameListAttempted = false
     private var staDirectFileNameValueSupported: Boolean? = null
+    private var staDirectObjectsMetadataAttempted = false
     // internal 而非 private:遥控实验(RemoteLab.kt)以扩展函数复用同一互斥与收发原语,
     // 保证实验命令与传输/缩略图/心跳严格串行,不引入第二条 IO 路径。
     private val ioGate = CameraIoGate()
@@ -1440,10 +1495,13 @@ class NikonCamera(private val context: Context) {
             staDirectRawPreviews.clear()
             staDirectRawIndexedPreviews.clear()
             staDirectOriginalFileNames.clear()
+            staDirectCaptureDates.clear()
+            staDirectRecentHeaders.clear()
             staDirectFileNumberAnchor = null
             staDirectEmbeddedFileNameAvailable.clear()
             staDirectFileNameListAttempted = false
             staDirectFileNameValueSupported = null
+            staDirectObjectsMetadataAttempted = false
             staDiagnosticLines.clear()
             staDiagnosticLines += "identity=${identity.name}"
             if (FileOrderProbe.enabled) FileOrderProbe.beginConnection("PTP/IP STA")
@@ -1852,8 +1910,17 @@ class NikonCamera(private val context: Context) {
                 val file = staDirectFiles[handle]
                 val thumbnail = when (file?.extension) {
                     ".nef" -> readStaDirectRawThumbnailInternal(file)
-                    ".mov", ".mp4" -> readStaDirectVideoThumbnailInternal(file)
-                    else -> readStaDirectObjectHeaderInternal(handle).thumbnail
+                    ".mov", ".mp4" -> {
+                        // Z30 通常把视频封面放在最前 128 KiB。先走与旧目录扫描相同的
+                        // 小探针，只有确实没有封面时才扩大到有界 8 MiB 视频解析。
+                        val headerResult = readStaDirectObjectHeaderInternal(handle)
+                        cacheStaDirectObjectHeader(handle, headerResult)
+                        headerResult.thumbnail ?: readStaDirectVideoThumbnailInternal(file)
+                    }
+                    else -> readStaDirectObjectHeaderInternal(handle).let { result ->
+                        cacheStaDirectObjectHeader(handle, result)
+                        result.thumbnail
+                    }
                 }
                 thumbnail?.let { return@withContext it }
                 // A bounded RAW/video probe returning null does not prove that the object has no
@@ -2093,6 +2160,24 @@ class NikonCamera(private val context: Context) {
         ioGate.withInteractive {
             withContext(Dispatchers.IO) {
                 try {
+                    if (staDirectObjectReadValidated) {
+                        staDirectRecentHeaders[handle]?.let { cached ->
+                            if (PhotoGenerationProbe.enabled) {
+                                PhotoGenerationProbe.note(
+                                    "STA-PREVIEW",
+                                    "EXIF header-cache handle=0x%08X bytes=%d".format(
+                                        handle,
+                                        minOf(maxSize, cached.size),
+                                    ),
+                                )
+                            }
+                            return@withContext if (cached.size <= maxSize) {
+                                cached
+                            } else {
+                                cached.copyOf(maxSize)
+                            }
+                        }
+                    }
                     sendCmd(PtpConstants.NK_GET_PARTIAL_OBJECT_EX, handle, 0, 0, maxSize, 0)
                     val (respCode, data) = recvRespWithPayload()
                     if (respCode == PtpConstants.RESPONSE_OK && data != null && data.isNotEmpty()) data
@@ -2165,6 +2250,7 @@ class NikonCamera(private val context: Context) {
      */
     suspend fun streamStaDirectFileInfo(
         handles: List<Int>,
+        storageIds: List<Int> = emptyList(),
         batchSize: Int = 12,
         onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
@@ -2176,6 +2262,8 @@ class NikonCamera(private val context: Context) {
         var allSucceeded = true
         ioMutex.withLock {
             loadStaDirectOriginalFileNamesInternal()
+            loadStaDirectObjectsMetadataInternal(storageIds)
+            ensureStaDirectFileNumberAnchorInternal(handles)
         }
         var nextHandleIndex = 0
         while (nextHandleIndex < total) {
@@ -2192,17 +2280,10 @@ class NikonCamera(private val context: Context) {
             val files = ioMutex.withLock {
                 batch.mapNotNull { handle ->
                     loadContext.ensureActive()
-                    val result = readStaDirectObjectHeaderInternal(handle)
+                    val result = readStaDirectIndexedObjectInternal(handle)
                     if (!result.successful) allSucceeded = false
-                    result.file?.also { file ->
-                        staDirectFiles[handle] = file
-                        result.thumbnail?.let { bytes -> staDirectThumbnails[handle] = bytes }
-                        // RAW/video previews are intentionally lazy; only JPEG has a cheap EXIF
-                        // thumbnail available during the catalog pass.
-                        if (result.thumbnail == null && file.extension == ".jpg") {
-                            staDirectNoThumbnail += handle
-                        }
-                    }
+                    cacheStaDirectObjectHeader(handle, result)
+                    result.file
                 }
             }
             processed += batch.size
@@ -2212,10 +2293,109 @@ class NikonCamera(private val context: Context) {
         allSucceeded
     }
 
+    /** Must be called while [ioMutex] is held. One tiny index replaces one 128 KiB date probe/item. */
+    private fun loadStaDirectObjectsMetadataInternal(storageIds: List<Int>) {
+        if (staDirectObjectsMetadataAttempted) return
+        staDirectObjectsMetadataAttempted = true
+        val advertised = cachedDeviceInfo?.operations
+            ?.contains(PtpConstants.NK_GET_OBJECTS_METADATA) == true
+        if (!advertised) {
+            staDirectMetadataDiagnostics.putIfAbsent(
+                "objects-metadata",
+                "direct GetObjectsMetaData advertised=false response=<skipped> mapped=0",
+            )
+            return
+        }
+
+        val queries = storageIds.filter { it != 0 && it != -1 }.distinct().ifEmpty { listOf(-1) }
+        val reports = ArrayList<String>(queries.size)
+        queries.forEach { storageId ->
+            sendCmd(PtpConstants.NK_GET_OBJECTS_METADATA, storageId, 0, 0)
+            val (response, data) = recvRespWithPayload()
+            val dates = if (response == PtpConstants.RESPONSE_OK) {
+                parseNikonObjectsMetadataCaptureDates(data)
+            } else {
+                emptyMap()
+            }
+            staDirectCaptureDates.putAll(dates)
+            reports += "0x%08X:%s/%dB/%d".format(
+                storageId,
+                hexResponse(response),
+                data?.size ?: 0,
+                dates.size,
+            )
+        }
+        staDirectMetadataDiagnostics.putIfAbsent(
+            "objects-metadata",
+            "direct GetObjectsMetaData advertised=true queries=[${reports.joinToString(",")}] " +
+                "mapped=${staDirectCaptureDates.size}",
+        )
+    }
+
+    /**
+     * One real JPEG/NEF MakerNote anchors Nikon's monotonically increasing file number. This is the
+     * only unconditional 128 KiB catalog read; all other headers become thumbnail/preview cache misses.
+     */
+    private fun ensureStaDirectFileNumberAnchorInternal(handles: List<Int>) {
+        if (staDirectFileNumberAnchor != null) return
+        val anchorHandle = handles.firstOrNull { handle ->
+            staDirectExtensionFromHandle(handle) == ".jpg" ||
+                staDirectExtensionFromHandle(handle) == ".nef"
+        } ?: return
+        cacheStaDirectObjectHeader(anchorHandle, readStaDirectObjectHeaderInternal(anchorHandle))
+    }
+
+    /** Fast warm-cache catalog path; any uncertain field falls back to the proven header parser. */
+    private fun readStaDirectIndexedObjectInternal(handle: Int): StaDirectObjectHeader {
+        staDirectFiles[handle]?.let { cached ->
+            return StaDirectObjectHeader(
+                file = cached,
+                thumbnail = staDirectThumbnails[handle],
+                successful = true,
+                thumbnailChecked = handle in staDirectThumbnails || handle in staDirectNoThumbnail,
+            )
+        }
+        val extension = staDirectExtensionFromHandle(handle)
+            ?: return readStaDirectObjectHeaderInternal(handle)
+        val captureDate = staDirectCaptureDates[handle]
+            ?: return readStaDirectObjectHeaderInternal(handle)
+        val size = getObjectSizeInternal(handle)
+            ?: return StaDirectObjectHeader(null, null, false)
+        val fileName = staDirectOriginalFileNames[handle]
+            ?: staDirectFileNumberAnchor
+                ?.let { deriveNikonMakerFileInfo(it, handle) }
+                ?.let { nikonDefaultCameraFileName(it, extension) }
+            ?: return readStaDirectObjectHeaderInternal(handle)
+        return StaDirectObjectHeader(
+            file = FileInfo(
+                handle = handle,
+                size = size,
+                fileName = fileName,
+                captureDate = captureDate,
+            ),
+            thumbnail = null,
+            successful = true,
+            thumbnailChecked = false,
+        )
+    }
+
+    private fun cacheStaDirectObjectHeader(handle: Int, result: StaDirectObjectHeader) {
+        result.file?.let { file ->
+            staDirectFiles[handle] = file
+            result.thumbnail?.let { bytes -> staDirectThumbnails[handle] = bytes }
+            // RAW/video bounded probes are lazy and non-authoritative. JPEG's parsed EXIF envelope is
+            // authoritative, so a missing thumbnail can retain the existing session negative cache.
+            if (result.thumbnailChecked && result.thumbnail == null && file.extension == ".jpg") {
+                staDirectNoThumbnail += handle
+            }
+        }
+    }
+
     private data class StaDirectObjectHeader(
         val file: FileInfo?,
         val thumbnail: ByteArray?,
         val successful: Boolean,
+        val thumbnailChecked: Boolean = true,
     )
 
     /** Must be called while [ioMutex] is held. Prefer exact standard MTP names when advertised. */
@@ -2303,7 +2483,8 @@ class NikonCamera(private val context: Context) {
     /** Must be called while [ioMutex] is held. */
     private fun readStaDirectObjectHeaderInternal(handle: Int): StaDirectObjectHeader {
         val protocolFileName = readStaDirectOriginalFileNameInternal(handle)
-        val size = getObjectSizeInternal(handle)
+        val size = staDirectFiles[handle]?.size?.takeIf { it > 0L }
+            ?: getObjectSizeInternal(handle)
             ?: return StaDirectObjectHeader(null, null, false)
         sendCmd(
             PtpConstants.NK_GET_PARTIAL_OBJECT_EX,
@@ -2316,6 +2497,10 @@ class NikonCamera(private val context: Context) {
         val (response, header) = recvRespWithPayload()
         if (response != PtpConstants.RESPONSE_OK || header == null || header.isEmpty()) {
             return StaDirectObjectHeader(null, null, false)
+        }
+        staDirectRecentHeaders[handle] = header
+        while (staDirectRecentHeaders.size > 4) {
+            staDirectRecentHeaders.remove(staDirectRecentHeaders.keys.first())
         }
 
         val detectedExtension = staDirectObjectExtension(header)
@@ -2385,7 +2570,7 @@ class NikonCamera(private val context: Context) {
         } else {
             detectedExtension
         }
-        var captureDate: String? = null
+        var captureDate: String? = staDirectCaptureDates[handle]
         var thumbnail: ByteArray? = null
         when (extension) {
             ".jpg" -> {
@@ -2393,7 +2578,7 @@ class NikonCamera(private val context: Context) {
                 val mpfPreviews = parseJpegMpfPreviews(header, size)
                 if (mpfPreviews.isNotEmpty()) staDirectJpegMpfPreviews[handle] = mpfPreviews
                 val exifResult = parseStaDirectExif(envelope ?: header, isRaw = false)
-                captureDate = exifResult.captureDate
+                captureDate = exifResult.captureDate ?: captureDate
                 thumbnail = exifResult.thumbnail
                 staDirectMetadataDiagnostics.putIfAbsent(
                     "jpeg",
@@ -2424,7 +2609,7 @@ class NikonCamera(private val context: Context) {
                 staDirectRawPreviews[handle] = rawMetadata.previews
                 if (rawMetadata.previews.isNotEmpty()) staDirectRawIndexedPreviews += handle
                 val exifResult = parseStaDirectExif(header, isRaw = true)
-                captureDate = rawMetadata.captureDate ?: exifResult.captureDate
+                captureDate = rawMetadata.captureDate ?: exifResult.captureDate ?: captureDate
                 thumbnail = rawMetadata.previews.firstOrNull { reference ->
                     reference.offset + reference.length <= header.size
                 }?.let { reference ->
@@ -2455,7 +2640,7 @@ class NikonCamera(private val context: Context) {
                 )
             }
             ".mov", ".mp4" -> {
-                captureDate = staDirectVideoCaptureDate(header)
+                captureDate = staDirectVideoCaptureDate(header) ?: captureDate
                 var tailBytes = 0
                 if (captureDate == null && size > header.size) {
                     val requestSize = minOf(size, STA_DIRECT_VIDEO_TAIL_BYTES.toLong()).toInt()
@@ -2559,6 +2744,9 @@ class NikonCamera(private val context: Context) {
 
     /** Must be called while [ioMutex] is held; reads only an MPF-indexed secondary JPEG. */
     private fun readStaDirectJpegMpfPreviewInternal(handle: Int): ByteArray? {
+        if (staDirectJpegMpfPreviews[handle].isNullOrEmpty()) {
+            cacheStaDirectObjectHeader(handle, readStaDirectObjectHeaderInternal(handle))
+        }
         val references = staDirectJpegMpfPreviews[handle].orEmpty()
         if (references.isEmpty()) {
             if (PhotoGenerationProbe.enabled) {

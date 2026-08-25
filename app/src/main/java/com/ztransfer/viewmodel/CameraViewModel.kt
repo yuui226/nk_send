@@ -418,6 +418,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var thumbnailCacheSessionGeneration = 0L
     private var staScanThumbnailDiskHits = 0
     private var staScanThumbnailDiskMisses = 0
+    private var reportedStaMetadataCamera: NikonCamera? = null
+    private val reportedStaMetadataDiagnostics = HashSet<String>()
     // 本轮发生真实写入失败（含磁盘满）后停止后台落盘；换相机/重连时重新尝试。
     private var thumbnailDiskWritesBlocked = false
     private val thumbnailFillQueue = ThumbnailFillQueue()
@@ -440,6 +442,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (camera === cam) {
             activeThumbnailDiskCache = opened
             thumbnailDiskWritesBlocked = false
+            if (cam.staDirectObjectReadValidated && reportedStaMetadataCamera !== cam) {
+                reportedStaMetadataCamera = cam
+                reportedStaMetadataDiagnostics.clear()
+            }
             if (cam.staDirectObjectReadValidated && PhotoGenerationProbe.enabled) {
                 PhotoGenerationProbe.note(
                     "STA-CACHE",
@@ -2176,7 +2182,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val info = runCatching {
                 var got: NikonCamera.FileInfo? = null
                 if (cam.staDirectObjectReadValidated) {
-                    cam.streamStaDirectFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
+                    cam.streamStaDirectFileInfo(
+                        handles = listOf(handle),
+                        storageIds = _state.value.storageIds,
+                        batchSize = 1,
+                    ) { batch, _, _ ->
                         got = batch.firstOrNull()
                     }
                 } else {
@@ -2226,7 +2236,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         val cam = camera ?: return
         val diskCacheForScan = activeThumbnailDiskCache
-        if (cam.staDirectObjectReadValidated) {
+        if (cam.staDirectObjectReadValidated && !preserveExisting) {
             staScanThumbnailDiskHits = 0
             staScanThumbnailDiskMisses = 0
         }
@@ -2447,7 +2457,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                 val allFiles = existingFiles.toMutableList()
                 var publishedFiles = BatchPublishedList.from(existingFiles)
-                val reportedDirectMetadataDiagnostics = HashSet<String>()
                 // 备份模式下同一张照片在两张卡各有一份（handle 不同）：按 名称+大小+拍摄时间
                 // 去重，列表只显示一份；溢出/RAW+JPG 分卡等模式互不相同，不受影响。
                 val indexByIdentity = HashMap<String, Int>(
@@ -2501,7 +2510,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
                         if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
                             cam.staDirectMetadataDiagnosticReports.forEach { diagnostic ->
-                                if (reportedDirectMetadataDiagnostics.add(diagnostic)) {
+                                if (reportedStaMetadataCamera === cam &&
+                                    reportedStaMetadataDiagnostics.add(diagnostic)
+                                ) {
                                     PhotoGenerationProbe.note("STA-SCAN", diagnostic)
                                 }
                             }
@@ -2523,7 +2534,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
                     PhotoGenerationProbe.note(
                         "STA-SCAN",
-                        "direct catalog started handles=$remainingHandleCount headerBytes=" +
+                        "direct catalog started handles=$remainingHandleCount " +
+                            "index=GetObjectsMetaData fallbackHeaderBytes=" +
                             NikonCamera.STA_DIRECT_CATALOG_HEADER_BYTES,
                     )
                 }
@@ -2532,6 +2544,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         handles = nonEmptyRemainingOrders.flatMap {
                             it.newestFirstHandles
                         },
+                        storageIds = storageIds,
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
                         onBatch = publishBatch,
                     )

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ZTransfer AP / STA 模式能力与性能对比</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --text: #18202b;
+      --muted: #667085;
+      --line: #dfe4ea;
+      --ap: #2563eb;
+      --sta: #7c3aed;
+      --ok: #16794b;
+      --warn: #a15c00;
+      --no: #b42318;
+      --soft-ok: #eaf8f1;
+      --soft-warn: #fff5df;
+      --soft-no: #fff0ee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      line-height: 1.55;
+    }
+    main { width: min(1480px, calc(100% - 32px)); margin: 28px auto 60px; }
+    .hero, section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 8px 30px rgba(16, 24, 40, .05);
+    }
+    .hero { padding: 28px 30px; margin-bottom: 18px; }
+    h1 { margin: 0 0 8px; font-size: clamp(25px, 3vw, 38px); letter-spacing: -.03em; }
+    h2 { margin: 0 0 14px; font-size: 21px; }
+    p { margin: 8px 0; }
+    .sub { color: var(--muted); }
+    .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .pill, .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .pill { background: #eef2f7; color: #344054; }
+    .status.ok { background: var(--soft-ok); color: var(--ok); }
+    .status.warn { background: var(--soft-warn); color: var(--warn); }
+    .status.no { background: var(--soft-no); color: var(--no); }
+    section { padding: 24px; margin-top: 18px; overflow: hidden; }
+    .callout {
+      border-left: 4px solid var(--sta);
+      background: color-mix(in srgb, var(--sta) 8%, var(--card));
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin: 14px 0 0;
+    }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+    table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; padding: 12px 13px; border-bottom: 1px solid var(--line); }
+    th { position: sticky; top: 0; background: #f8fafc; color: #475467; font-size: 12px; letter-spacing: .03em; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: rgba(124, 58, 237, .035); }
+    .feature { width: 16%; font-weight: 750; }
+    .ap { border-top: 3px solid var(--ap); }
+    .sta { border-top: 3px solid var(--sta); }
+    code { padding: 2px 5px; border-radius: 5px; background: #eef2f7; font-family: "Cascadia Code", monospace; }
+    ul, ol { margin: 8px 0 0; padding-left: 22px; }
+    li + li { margin-top: 5px; }
+    .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+    .metric { padding: 15px; border: 1px solid var(--line); border-radius: 12px; background: #fafbfc; }
+    .metric strong { display: block; font-size: 22px; margin: 2px 0 4px; }
+    .metric small { color: var(--muted); }
+    .foot { color: var(--muted); font-size: 12px; margin-top: 16px; }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1218; --card: #171b23; --text: #eef2f7; --muted: #a6adbb;
+        --line: #303744; --soft-ok: #123827; --soft-warn: #422d0c; --soft-no: #441e1b;
+      }
+      th, .metric { background: #1d222c; }
+      .pill, code { background: #282f3b; color: #d5dae2; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <div class="hero">
+    <h1>ZTransfer AP / STA 模式能力与性能对比</h1>
+    <p class="sub">以成熟 AP 行为为基准，记录当前 STA 的已实现能力、协议必需差异、已知限制和下一步验证项。</p>
+    <div class="facts">
+      <span class="pill">更新：2026-08-25</span>
+      <span class="pill">版本：1.73</span>
+      <span class="pill">实机：Nikon Z30</span>
+      <span class="pill">STA 身份：PAIRED_COMPUTER</span>
+      <span class="pill">原则：不修改 AP / USB 路径</span>
+    </div>
+    <div class="callout">
+      当前结论：STA 已经实现“保存配置后重新连接、相册浏览、缩略图、手动选择传输、监看、JPEG FHD 预览”。
+      用户交互和队列/传输逻辑与 AP 共用；差异集中在相机拒绝 <code>GetObjectInfo</code>、<code>GetThumb</code>
+      和标准 FHD 私有操作后的 STA 协议适配层。
+    </div>
+  </div>
+
+  <section>
+    <h2>状态说明</h2>
+    <span class="status ok">已对齐</span>
+    <span class="status warn">可用但实现不同 / 待实机验证</span>
+    <span class="status no">当前不支持</span>
+  </section>
+
+  <section>
+    <h2>完整能力对比</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th class="feature">能力</th><th class="ap">AP 模式</th><th class="sta">STA 模式（当前）</th><th>状态与说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="feature">网络拓扑</td><td>相机开热点，手机连接相机 Wi‑Fi。</td><td>相机连接手机热点或现有局域网，APP 在同一网络发现相机。</td><td><span class="status warn">协议差异</span> 这是模式本身的定义，不应强行统一。</td></tr>
+          <tr><td class="feature">相机端配置持久化</td><td>相机热点配置为 AP 路径；手机侧可记住 Wi‑Fi。</td><td>首次完成“连接至计算机”配对，相机保存配置文件，下次可直接选择该配置。</td><td><span class="status ok">已实现</span> STA 的核心价值。</td></tr>
+          <tr><td class="feature">连接发现</td><td>按相机网关与固定地址连接。</td><td>优先上次 IP，再通过局域网/热点候选发现 PTP/IP 服务。</td><td><span class="status warn">实现不同</span> 复杂 LAN 的发现时间可能高于 AP。</td></tr>
+          <tr><td class="feature">断线与重连</td><td>网络回调 + 心跳自动重连。</td><td>心跳、上次 IP、STA 发现与退避重连。</td><td><span class="status ok">行为对齐</span> 实现因拓扑不同而独立。</td></tr>
+          <tr><td class="feature">列表 UI / 日期分组</td><td>共用 FileListScreen。</td><td>共用 FileListScreen。</td><td><span class="status ok">完全共用</span></td></tr>
+          <tr><td class="feature">类型筛选</td><td>由 ObjectInfo 提供真实扩展名。</td><td>Z30 已验证 JPG / NEF / MP4；已知 handle 类型直接识别，未知类型回退读文件头。</td><td><span class="status ok">当前机型可用</span> 新 handle 类型需实机补充。</td></tr>
+          <tr><td class="feature">拍摄日期</td><td>ObjectInfo 直接返回。</td><td><code>GetObjectsMetaData(0x9434)</code> 一次返回整卡日期；未知布局回退文件头。</td><td><span class="status ok">已优化</span> Z30：829 项仅 13,272 B。</td></tr>
+          <tr><td class="feature">文件大小</td><td>ObjectInfo 32 位字段；超大文件用 GetObjectSize。</td><td>每项使用 8 字节 GetObjectSize 结果。</td><td><span class="status ok">数值可靠</span> STA 多一条小命令/文件。</td></tr>
+          <tr><td class="feature">文件原名</td><td>ObjectInfo 返回相机精确原名。</td><td>Z30 拒绝文件名属性；通过 MakerNote 锚点和 handle 序列恢复 <code>DSC_####</code>。</td><td><span class="status warn">默认前缀可用</span> 相机自定义三字符前缀目前无法保证精确恢复。</td></tr>
+          <tr><td class="feature">保护状态</td><td>ObjectInfo 的 ProtectionStatus，列表筛选和锁标识可用。</td><td>配对 Z30 拒绝 ObjectInfo，当前没有可靠来源。</td><td><span class="status no">当前不支持</span> STA 中默认按未保护处理。</td></tr>
+          <tr><td class="feature">双卡 / 卡槽筛选</td><td>ObjectInfo 提供每个文件的 StorageID，可归属卡槽并合并去重。</td><td>可枚举 StorageID，但直接读取模式尚不能可靠得到每个对象的精确卡槽归属。</td><td><span class="status no">未完整支持</span> Z30 单卡不受影响；双卡 STA 需实机研究。</td></tr>
+          <tr><td class="feature">新到旧顺序</td><td>每卡反转原始 handle 顺序；双卡按真实日期流式归并。</td><td>同样使用新到旧 handle 顺序和共用发布模型；批量日期索引提供真实日期。</td><td><span class="status ok">单卡已对齐</span> 双卡归属仍受上一项限制。</td></tr>
+          <tr><td class="feature">渐进首屏</td><td>12 项 ObjectInfo 一批，批间补缩略图。</td><td>语义相同；STA 内部用 1 → 3 → 12 的发布粒度抵消私有命令延迟。</td><td><span class="status ok">体验对齐</span> 只是 STA 协议层调度补偿。</td></tr>
+          <tr><td class="feature">内存 / 磁盘缩略图缓存</td><td>内存 LRU + 按相机隔离的磁盘缓存。</td><td>同一套缓存；直接模式主键使用 handle + size，并兼容文件身份备用键。</td><td><span class="status ok">已生效</span> 暖缓存不再逐项读 128 KiB 文件头。</td></tr>
+          <tr><td class="feature">JPG 缩略图</td><td>相机 GetThumb。</td><td>磁盘命中零网络；未命中时从 128 KiB EXIF 头提取。</td><td><span class="status ok">可用</span> 冷缓存比 AP 多传文件头。</td></tr>
+          <tr><td class="feature">NEF 缩略图</td><td>相机 GetThumb，通常成本较小。</td><td>从 NEF IFD 或 JPEG 扫描定位内嵌预览；只对可见项按需加载，探针从 256 KiB 递增。</td><td><span class="status warn">可用但更慢</span> 不做整卡后台 RAW 探测，避免拖垮列表。</td></tr>
+          <tr><td class="feature">视频缩略图</td><td>相机 GetThumb。</td><td>先读 128 KiB 内嵌封面；缺失才扩大到有界 8 MiB 并尝试抽帧。</td><td><span class="status warn">可用但实现不同</span></td></tr>
+          <tr><td class="feature">大图交互顺序</td><td>已有缩略图立即显示 → 当前页 FHD → EXIF → 相邻页预取。</td><td>完全复用同一 PhotoPreview 顺序、动画、旋转、缩放和内存窗口。</td><td><span class="status ok">完全共用</span></td></tr>
+          <tr><td class="feature">JPG FHD 预览</td><td><code>GetFhdPicture(0x920F)</code> 返回相机生成预览。</td><td>新机型先尝试相机 FHD；Z30 配对档案拒绝后，读取 MPF 精确 FHD 项（实测 1620×1080）。</td><td><span class="status ok">已实现</span> 不是原图模拟，不下载主 JPEG。</td></tr>
+          <tr><td class="feature">NEF 大图</td><td>由相机 FHD 能力决定。</td><td>读取 NEF 最大的已索引内嵌 JPEG；未知索引时进行有界前缀探测。</td><td><span class="status warn">可用</span> 不保证每个 NEF 都含可解析预览。</td></tr>
+          <tr><td class="feature">视频大图 / 播放</td><td>当前预览页不会对视频请求 FHD，也没有在线播放。</td><td>相同。</td><td><span class="status no">两种模式均不支持在线播放</span></td></tr>
+          <tr><td class="feature">EXIF 展示</td><td>读取 128 KiB 文件头并走共用解析。</td><td>同一解析；STA 会复用刚为 MPF/缩略图读取的最近文件头，避免重复网络读取。</td><td><span class="status ok">已对齐并适配</span></td></tr>
+          <tr><td class="feature">连拍合集 / 筛选 / 展开</td><td>前端从文件名和日期派生。</td><td>共用同一算法和 UI。</td><td><span class="status ok">完全共用</span> 依赖恢复后的文件编号与日期准确。</td></tr>
+          <tr><td class="feature">手动选择传输</td><td>单张、整组、预览上滑、批量选择。</td><td>共用相同入口与队列。</td><td><span class="status ok">完全共用</span></td></tr>
+          <tr><td class="feature">已传判定</td><td>文件名 + 大小，并兼容副本后缀。</td><td>共用同一判定。</td><td><span class="status warn">逻辑共用</span> 自定义文件名前缀场景受原名恢复限制。</td></tr>
+          <tr><td class="feature">下载 / 断点续传 / 取消</td><td>共用队列、SAF 临时文件、完整性校验和分块让路。</td><td>共用全部上层逻辑；协议层强制使用已验证可用的 PartialObjectEx。</td><td><span class="status ok">已验证可传输</span></td></tr>
+          <tr><td class="feature">传输与前台交互优先级</td><td>分块之间让 FHD / EXIF / 可见缩略图插入；监看与扫描互斥。</td><td>共用同一 CameraIoGate 与暂停/恢复快照。</td><td><span class="status ok">完全共用</span></td></tr>
+          <tr><td class="feature">新拍媒体自动入队</td><td>ObjectAdded + 连接级 handle 差量。</td><td>代码路径共用；单个新增对象会回退读取自己的头部元数据。</td><td><span class="status warn">待持续实机验证</span> 依赖配对 STA 事件投递可靠性。</td></tr>
+          <tr><td class="feature">遥控 / 监看与图传并存</td><td>退出监看后按 handle 差量补列表，扫描期间前台交互优先。</td><td>配对 Z30 已可监看和浏览/传输；同样通过暂停扫描、退出后续扫实现共存。</td><td><span class="status ok">当前目标已打通</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>本次日志的性能结论</h2>
+    <div class="metric-grid">
+      <div class="metric"><small>整卡日期索引</small><strong>13,272 B</strong><span>一次映射 829 项，已成功。</span></div>
+      <div class="metric"><small>旧方案日期文件头流量</small><strong>约 103.6 MiB</strong><span>829 × 128 KiB，现已从暖缓存路径移除。</span></div>
+      <div class="metric"><small>RAW 可见缩略图</small><strong>256 KiB / 项起</strong><span>本次两张均在首个探针找到内嵌 JPEG。</span></div>
+      <div class="metric"><small>JPEG MPF FHD</small><strong>1.09 MiB / 7.84 s</strong><span>约 146 KiB/s，主要瓶颈已是实际链路吞吐。</span></div>
+      <div class="metric"><small>被拒绝的 FHD 探测</small><strong>66 ms / 会话</strong><span>0x920F + 0x90C4 会话内熔断，不是主要问题。</span></div>
+    </div>
+    <div class="callout">
+      日志中的第二组 filename / JPEG / GetObjectsMetaData 行是扫描暂停后恢复时重新输出了会话诊断，
+      并不代表这些命令全部再次执行；现已改为每个相机会话只输出一次元数据诊断。<code>handles=717</code>
+      表示打开大图前已经处理 112 / 829 项，关闭后从快照剩余位置继续，不是从头重扫。
+    </div>
+  </section>
+
+  <section>
+    <h2>下一步讨论清单</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>优先级</th><th>方向</th><th>预期收益</th><th>风险 / 所需样本</th></tr></thead>
+        <tbody>
+          <tr><td>P0</td><td>确认新版本首屏、完整扫描耗时</td><td>验证批量索引后真实总体提升，并量出 829 次 GetObjectSize 的剩余成本。</td><td>需要一份从连接开始到 <code>metadata complete</code> 的完整日志，中途不要打开预览。</td></tr>
+          <tr><td>P1</td><td>研究 0x9434 记录中的 4 字节保留值</td><td>若它包含保护/卡槽标志，可补齐 STA 的保护筛选与双卡归属。</td><td>需要同一张卡上“保护/取消保护”同一文件前后的原始 16 字节记录对比。</td></tr>
+          <tr><td>P1</td><td>测量传输与 MPF 的吞吐差异</td><td>判断 146 KiB/s 是随机偏移读取限制、热点干扰，还是 socket/相机命令策略问题。</td><td>需要同一网络下普通 JPG 传输速度和该 JPG MPF 的 networkMs。</td></tr>
+          <tr><td>P2</td><td>持久化 STA 协议索引</td><td>可能省掉重连后的文件编号锚点头部与部分预览索引读取。</td><td>必须正确处理换卡、格式化、handle 复用；属于内部性能缓存，不改变 UI。</td></tr>
+          <tr><td>P2</td><td>自定义文件名前缀</td><td>让已传判定与用户文件名在非 DSC 前缀时仍精确。</td><td>需要一组相机改前缀后的 JPG/NEF/MP4 头部和日志；当前协议属性明确被拒绝。</td></tr>
+          <tr><td>不做</td><td>原图模拟 FHD、增加 VGA 中间层、后台全扫 RAW/视频</td><td>避免错误语义和额外流量，保持 AP 的预览交互模型。</td><td>明确排除。</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="foot">此表描述当前代码和 Z30 实测结果；“新机型支持”必须以相应机型的 DeviceInfo 与实机响应为准。</p>
+  </section>
+</main>
+</body>
+</html>

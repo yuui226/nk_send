@@ -42,6 +42,9 @@ object PtpConstants {
     // 标准 ObjectInfo(0x1008) 的 size 字段是 32 位，>4GB 文件报 0xFFFFFFFF；
     // 调此操作码获取真实 64 位字节数。参数: handle，返回 8 字节小端 u64。
     const val NK_GET_OBJECT_SIZE = 0x9421
+    // Nikon 批量对象索引（libgphoto2: PTP_OC_NIKON_GetObjectsMetaData）。
+    // 参数: storageId, format, association；Z30 返回固定 16 字节记录，包含 handle 与拍摄时间。
+    const val NK_GET_OBJECTS_METADATA = 0x9434
     // Nikon camera-generated large preview (libgphoto2: PTP_OC_NIKON_GetLargeThumb).
     // 参数: handle；返回 JPEG 预览，不读取原始照片对象。
     const val NK_GET_LARGE_THUMB = 0x90C4
