@@ -38,6 +38,7 @@ class PtpIpDiscovery(private val context: Context) {
         tryCandidate: suspend (String) -> Boolean,
     ): String? {
         val tried = HashSet<String>()
+        val subnets = localSubnets()
         suspend fun tryOnce(ip: String, source: String): Boolean {
             if (!tried.add(ip)) return false
             Log.i(TAG, "candidate source=$source ip=$ip")
@@ -45,10 +46,18 @@ class PtpIpDiscovery(private val context: Context) {
             return tryCandidate(ip)
         }
 
-        if (!lastIp.isNullOrBlank() && tryOnce(lastIp, "last_ip")) return lastIp
+        // A saved address from a different hotspot/LAN used to enter the full Nikon handshake and
+        // readiness retry, wasting more than seven seconds before discovery reached the current
+        // subnet. Only probe it when it belongs to an active local subnet and port 15740 is open.
+        val lastIpSubnet = lastIp?.takeIf(String::isNotBlank)?.let { savedIp ->
+            subnets.firstOrNull { subnet -> subnetContains(subnet, savedIp) }
+        }
+        if (lastIp != null && lastIpSubnet != null &&
+            isPtpPortOpen(lastIp, lastIpSubnet.address) && tryOnce(lastIp, "last_ip")
+        ) return lastIp
         discoverMdns().forEach { if (tryOnce(it, "mdns")) return it }
 
-        for (subnet in localSubnets()) {
+        for (subnet in subnets) {
             Log.i(
                 TAG,
                 "scan iface=${subnet.interfaceName} " +
@@ -191,6 +200,24 @@ class PtpIpDiscovery(private val context: Context) {
         val localIp = ipv4ToLong(subnet.address)
         val mask = (0xFFFFFFFFL shl (32 - subnet.prefixLength)) and 0xFFFFFFFFL
         return "${localIp and mask}/${subnet.prefixLength}"
+    }
+
+    private fun subnetContains(subnet: Subnet, candidateIp: String): Boolean {
+        val candidate = parseIpv4(candidateIp) ?: return false
+        val localIp = ipv4ToLong(subnet.address)
+        val mask = (0xFFFFFFFFL shl (32 - subnet.prefixLength)) and 0xFFFFFFFFL
+        return (candidate and mask) == (localIp and mask) && candidate != localIp
+    }
+
+    private fun parseIpv4(value: String): Long? {
+        val parts = value.split('.')
+        if (parts.size != 4) return null
+        var result = 0L
+        for (part in parts) {
+            val octet = part.toIntOrNull()?.takeIf { it in 0..255 } ?: return null
+            result = (result shl 8) or octet.toLong()
+        }
+        return result
     }
 
     private fun hosts(subnet: Subnet): List<String> {

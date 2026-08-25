@@ -688,15 +688,9 @@ internal fun PhotoPreviewOverlay(
         pagerState.currentPage,
         currentHandle,
         cameraState.isConnectedToCamera,
-        cameraState.isStaConnection,
         deferredLoadsEnabled
     ) {
-        // Preserve AP's proven connection guard. STA can publish a usable catalog just before its
-        // generic connection flag catches up, so only that mode may use the live camera object as
-        // the authority during the short state-publication window.
-        if (!deferredLoadsEnabled ||
-            (!cameraState.isConnectedToCamera && !cameraState.isStaConnection)
-        ) return@LaunchedEffect
+        if (!deferredLoadsEnabled || !cameraState.isConnectedToCamera) return@LaunchedEffect
         val cp = pagerState.currentPage
         cameraViewModel.withInteractivePreviewPriority {
             if (loadFhdPage(cp, awaitExisting = true)) haptics.tick()

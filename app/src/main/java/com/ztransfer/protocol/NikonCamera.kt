@@ -1187,6 +1187,8 @@ class NikonCamera(private val context: Context) {
         get() = staDiagnosticLines.joinToString("\n")
     @Volatile internal var staAlbumAccessValidated = false
         private set
+    @Volatile internal var staStorageProbeReached = false
+        private set
     /** ObjectInfo/GetThumb are denied, but size and partial original reads were verified. */
     @Volatile internal var staDirectObjectReadValidated = false
         private set
@@ -1245,6 +1247,13 @@ class NikonCamera(private val context: Context) {
     // STA 握手会用 GetStorageIDs 验证已经进入浏览能力集；把结果交给首次文件扫描消费，
     // 避免紧接着重复同一条命令触发部分固件的状态异常。
     private var prefetchedStorageIds: List<Int>? = null
+    private data class PrefetchedStaObjectHandles(
+        val queryStorageId: Int,
+        val handles: List<Int>,
+    )
+    // Album validation already enumerates every handle. Single-storage sessions can hand that
+    // exact result to the first catalog scan instead of immediately repeating GetObjectHandles.
+    private var prefetchedStaObjectHandles: PrefetchedStaObjectHandles? = null
     // 遥控监看的取帧操作码：首次取帧从 DeviceInfo 解析并缓存。
     // 新机优先 0x9428（带 Display Information Data），不支持时回退 0x9203。
     // 每次连接都会新建 NikonCamera，因此不会把上一台机身的判断带进新会话。
@@ -1495,6 +1504,7 @@ class NikonCamera(private val context: Context) {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             staAlbumAccessValidated = false
+            staStorageProbeReached = false
             staDirectObjectReadValidated = false
             staFhdPictureSupported = null
             staLargeThumbSupported = null
@@ -1515,6 +1525,7 @@ class NikonCamera(private val context: Context) {
             staDirectFileNameListAttempted = false
             staDirectFileNameValueSupported = null
             staDirectObjectsMetadataAttempted = false
+            prefetchedStaObjectHandles = null
             staDiagnosticLines.clear()
             staDiagnosticLines += "identity=${identity.name}"
             if (FileOrderProbe.enabled) FileOrderProbe.beginConnection("PTP/IP STA")
@@ -1822,6 +1833,67 @@ class NikonCamera(private val context: Context) {
         }
     }
 
+    internal data class StorageIdsResult(
+        val storageIds: List<Int>,
+        val successful: Boolean,
+        val responseCode: Int?,
+        val payloadBytes: Int,
+        val error: String? = null,
+    )
+
+    /** STA-only status-preserving variant; an IO/response failure must not become an empty card. */
+    internal suspend fun getStaStorageIdsWithStatus(): StorageIdsResult = ioMutex.withLock {
+        withContext(Dispatchers.IO) {
+            prefetchedStorageIds?.let { storageIds ->
+                prefetchedStorageIds = null
+                return@withContext StorageIdsResult(
+                    storageIds = storageIds,
+                    successful = true,
+                    responseCode = PtpConstants.RESPONSE_OK,
+                    payloadBytes = 4 + storageIds.size * 4,
+                )
+            }
+            try {
+                sendCmd(PtpConstants.GET_STORAGE_IDS)
+                val (response, data) = recvRespWithPayload()
+                if (response != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
+                    return@withContext StorageIdsResult(
+                        storageIds = emptyList(),
+                        successful = false,
+                        responseCode = response,
+                        payloadBytes = data?.size ?: 0,
+                    )
+                }
+                val count = data.getIntLE(0)
+                if (count < 0 || count > (data.size - 4) / 4) {
+                    return@withContext StorageIdsResult(
+                        storageIds = emptyList(),
+                        successful = false,
+                        responseCode = response,
+                        payloadBytes = data.size,
+                        error = "malformed-count=$count",
+                    )
+                }
+                StorageIdsResult(
+                    storageIds = (0 until count).map { data.getIntLE(4 + it * 4) },
+                    successful = true,
+                    responseCode = response,
+                    payloadBytes = data.size,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                StorageIdsResult(
+                    storageIds = emptyList(),
+                    successful = false,
+                    responseCode = null,
+                    payloadBytes = 0,
+                    error = "${error.javaClass.simpleName}:${error.message.orEmpty()}",
+                )
+            }
+        }
+    }
+
     suspend fun keepalive(): Boolean = ioGate.withIdleCommand(skippedValue = true) {
         withContext(Dispatchers.IO) {
             try {
@@ -1843,12 +1915,23 @@ class NikonCamera(private val context: Context) {
         val responseCode: Int?,
         val payloadBytes: Int,
         val error: String? = null,
+        val fromPrefetch: Boolean = false,
     )
 
     internal suspend fun getObjectHandlesWithStatus(
         storageId: Int = -1,
     ): ObjectHandlesResult = ioMutex.withLock {
         withContext(Dispatchers.IO) {
+            prefetchedStaObjectHandles?.takeIf { it.queryStorageId == storageId }?.let { cached ->
+                prefetchedStaObjectHandles = null
+                return@withContext ObjectHandlesResult(
+                    handles = cached.handles,
+                    successful = true,
+                    responseCode = PtpConstants.RESPONSE_OK,
+                    payloadBytes = 4 + cached.handles.size * 4,
+                    fromPrefetch = true,
+                )
+            }
             try {
                 sendCmd(PtpConstants.GET_OBJECT_HANDLES, storageId, -1, 0)
                 val (respCode, data) = recvRespWithPayload()
@@ -2387,6 +2470,12 @@ class NikonCamera(private val context: Context) {
 
     /** Keeps recent encoded thumbnails under a strict byte budget; STA PTP IO serializes access. */
     private fun rememberStaDirectThumbnail(handle: Int, bytes: ByteArray) {
+        if (bytes.size > STA_DIRECT_THUMBNAIL_CACHE_BYTES) {
+            staDirectThumbnails.remove(handle)?.let { previous ->
+                staDirectThumbnailBytes -= previous.size
+            }
+            return
+        }
         val previous = staDirectThumbnails.put(handle, bytes)
         staDirectThumbnailBytes += bytes.size - (previous?.size ?: 0)
         while (staDirectThumbnailBytes > STA_DIRECT_THUMBNAIL_CACHE_BYTES &&
@@ -3772,6 +3861,7 @@ class NikonCamera(private val context: Context) {
 
         sendCmd(PtpConstants.GET_STORAGE_IDS)
         val (storageResponse, storageData) = recvRespWithPayload()
+        staStorageProbeReached = true
         val initialStorageIds = parseUInt32Array(storageData)
         staDiagnosticLines +=
             "GetStorageIDs=${hexResponse(storageResponse)} ids=${formatStorageIds(initialStorageIds)}"
@@ -3779,9 +3869,9 @@ class NikonCamera(private val context: Context) {
             forceProfilePairing && allowPairing && !hasCompletedStaPairing()
         ) {
             // Z30 exposes full storage temporarily while the computer profile wizard is still
-            // waiting for host pairing. For the STA exploration build, finish that one-time
-            // pairing first; otherwise the camera never saves/completes the reusable profile and
-            // this apparent album success only tests the pre-pairing loophole again.
+            // waiting for host pairing. Finish that one-time pairing first; otherwise the camera
+            // never saves/completes the reusable profile and this apparent album success only
+            // tests the pre-pairing loophole again.
             staDiagnosticLines += "state=FORCED_PROFILE_PAIRING"
             completeInitialPairing()
             markStaPairingCompleted()
@@ -3818,11 +3908,11 @@ class NikonCamera(private val context: Context) {
         }
 
         // Some paired/newer Nikon bodies expose application-mode switching. Probe it only on the
-        // explicit STA exploration path; AP and the normal successful STA album path never execute
+        // explicit STA compatibility path; AP and the normal successful STA album path never execute
         // these commands. A failed probe restores mode 0 before the transport is closed.
         if (exploreAlbumAccess) {
             if (hasUsableStaAlbumStorage(storageResponse, initialStorageIds) &&
-                validateStaObjectAccess("baseline")
+                validateStaObjectAccess("baseline", initialStorageIds)
             ) {
                 prefetchedStorageIds = initialStorageIds
                 staAlbumAccessValidated = true
@@ -3851,7 +3941,7 @@ class NikonCamera(private val context: Context) {
                     "mode:GetStorageIDs=${hexResponse(modeStorageResponse)} " +
                         "ids=${formatStorageIds(modeStorageIds)}"
                 if (hasUsableStaAlbumStorage(modeStorageResponse, modeStorageIds) &&
-                    validateStaObjectAccess("application-mode")
+                    validateStaObjectAccess("application-mode", modeStorageIds)
                 ) {
                     prefetchedStorageIds = modeStorageIds
                     staAlbumAccessValidated = true
@@ -3876,7 +3966,7 @@ class NikonCamera(private val context: Context) {
     }
 
     /** Validates full-card browsing with bounded samples; one AccessDenied rejects the route. */
-    private fun validateStaObjectAccess(label: String): Boolean {
+    private fun validateStaObjectAccess(label: String, storageIds: List<Int>): Boolean {
         sendCmd(PtpConstants.GET_OBJECT_HANDLES, -1, -1, 0)
         val (handlesResponse, handlesData) = recvRespWithPayload()
         val handles = parseUInt32Array(handlesData)
@@ -3936,11 +4026,21 @@ class NikonCamera(private val context: Context) {
                 partialData != null && partialData.isNotEmpty()
             if (directAccessible) {
                 staDirectObjectReadValidated = true
+                rememberValidatedStaObjectHandles(storageIds, handles)
                 staDiagnosticLines += "$label:access=DIRECT_OBJECT_READ"
                 return true
             }
         }
+        if (allAccessible) rememberValidatedStaObjectHandles(storageIds, handles)
         return allAccessible
+    }
+
+    private fun rememberValidatedStaObjectHandles(storageIds: List<Int>, handles: List<Int>) {
+        val usable = storageIds.filter { it != 0 && it != -1 }
+        if (usable.size != 1) return
+        val storageId = usable.single()
+        val queryStorageId = if (storageId and 0xFFFF == 0) -1 else storageId
+        prefetchedStaObjectHandles = PrefetchedStaObjectHandles(queryStorageId, handles)
     }
 
     /** Completes the one-time Nikon PC-mode pairing and leaves reconnection to the caller. */

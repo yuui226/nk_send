@@ -127,7 +127,7 @@
         <tbody>
           <tr><td class="feature">网络拓扑</td><td>相机开热点，手机连接相机 Wi‑Fi。</td><td>相机连接手机热点或现有局域网，APP 在同一网络发现相机。</td><td><span class="status warn">协议差异</span> 这是模式本身的定义，不应强行统一。</td></tr>
           <tr><td class="feature">相机端配置持久化</td><td>相机热点配置为 AP 路径；手机侧可记住 Wi‑Fi。</td><td>首次完成“连接至计算机”配对，相机保存配置文件，下次可直接选择该配置。</td><td><span class="status ok">已实现</span> STA 的核心价值。</td></tr>
-          <tr><td class="feature">连接发现</td><td>按相机网关与固定地址连接。</td><td>优先上次 IP，再通过局域网/热点候选发现 PTP/IP 服务；只有完整相册能力验证成功才发布“已连接”，仅监看会话不会再伪装成空相册。</td><td><span class="status warn">实现不同</span> 复杂 LAN 的发现时间可能高于 AP。</td></tr>
+          <tr><td class="feature">连接发现</td><td>按相机网关与固定地址连接。</td><td>上次 IP 仅在当前子网内才尝试，再通过 mDNS 与局域网/热点候选发现 PTP/IP 服务；只有完整相册能力验证成功才发布“已连接”，仅监看会话不会再伪装成空相册。</td><td><span class="status warn">实现不同</span> 避免旧热点地址触发数秒无效握手；复杂 LAN 的发现时间仍可能高于 AP。</td></tr>
           <tr><td class="feature">断线与重连</td><td>网络回调 + 心跳自动重连。</td><td>心跳、上次 IP、STA 发现与退避重连。</td><td><span class="status ok">行为对齐</span> 实现因拓扑不同而独立。</td></tr>
           <tr><td class="feature">列表 UI / 日期分组</td><td>共用 FileListScreen。</td><td>共用 FileListScreen。</td><td><span class="status ok">完全共用</span></td></tr>
           <tr><td class="feature">类型筛选</td><td>由 ObjectInfo 提供真实扩展名。</td><td>Z30 已验证 JPG / NEF / MP4；已知 handle 类型直接识别，未知类型回退读文件头。</td><td><span class="status ok">当前机型可用</span> 新 handle 类型需实机补充。</td></tr>
@@ -137,7 +137,7 @@
           <tr><td class="feature">保护状态</td><td>ObjectInfo 的 ProtectionStatus，列表筛选和锁标识可用。</td><td>配对 Z30 拒绝 ObjectInfo，当前没有可靠来源。</td><td><span class="status no">当前不支持</span> STA 中默认按未保护处理。</td></tr>
           <tr><td class="feature">双卡 / 卡槽筛选</td><td>ObjectInfo 提供每个文件的 StorageID，可归属卡槽并合并去重。</td><td>可枚举 StorageID，但直接读取模式尚不能可靠得到每个对象的精确卡槽归属。</td><td><span class="status no">未完整支持</span> Z30 单卡不受影响；双卡 STA 需实机研究。</td></tr>
           <tr><td class="feature">新到旧顺序</td><td>每卡反转原始 handle 顺序；双卡按真实日期流式归并。</td><td>同样使用新到旧 handle 顺序和共用发布模型；批量日期索引提供真实日期。</td><td><span class="status ok">单卡已对齐</span> 双卡归属仍受上一项限制。</td></tr>
-          <tr><td class="feature">渐进首屏</td><td>12 项 ObjectInfo 一批，批间补缩略图。</td><td>语义相同；STA 内部用 1 → 3 → 12 的发布粒度抵消私有命令延迟。</td><td><span class="status ok">体验对齐</span> 只是 STA 协议层调度补偿。</td></tr>
+          <tr><td class="feature">渐进首屏</td><td>12 项 ObjectInfo 一批，批间补缩略图。</td><td>语义相同；STA 内部用 1 → 3 → 12 的发布粒度抵消私有命令延迟，并复用连接验证阶段已经取得的单卡 handles。</td><td><span class="status ok">体验对齐</span> 首次目录不再紧接着重复 GetObjectHandles。</td></tr>
           <tr><td class="feature">内存 / 磁盘缩略图缓存</td><td>内存 LRU + 按相机隔离的磁盘缓存。</td><td>同一套缓存；直接模式主键使用 handle + size，并兼容文件身份备用键。</td><td><span class="status ok">已生效</span> 暖缓存不再逐项读 128 KiB 文件头。</td></tr>
           <tr><td class="feature">JPG 缩略图</td><td>相机 GetThumb。</td><td>磁盘命中零网络；未命中时从 128 KiB EXIF 头提取。</td><td><span class="status ok">可用</span> 冷缓存比 AP 多传文件头。</td></tr>
           <tr><td class="feature">NEF 缩略图</td><td>相机 GetThumb，通常成本较小。</td><td>从 NEF IFD 或 JPEG 扫描定位内嵌预览；只对可见项按需加载，首张以 256 KiB 可靠探测，后续复用已校验的同会话偏移并在失败时自动回退；最近编码缩略图采用 4 MiB LRU，取消重建格子不会重复下载。</td><td><span class="status warn">可用但仍慢于 AP</span> 不做整卡后台 RAW 探测，避免拖垮列表。</td></tr>
@@ -164,9 +164,10 @@
     <div class="metric-grid">
       <div class="metric"><small>整卡日期索引</small><strong>13,272 B</strong><span>一次映射 829 项，已成功。</span></div>
       <div class="metric"><small>旧方案日期文件头流量</small><strong>约 103.6 MiB</strong><span>829 × 128 KiB，现已从暖缓存路径移除。</span></div>
-      <div class="metric"><small>RAW 可见缩略图</small><strong>256 KiB / 项起</strong><span>本次两张均在首个探针找到内嵌 JPEG。</span></div>
-      <div class="metric"><small>JPEG MPF FHD</small><strong>1.09 MiB / 7.84 s</strong><span>约 146 KiB/s，主要瓶颈已是实际链路吞吐。</span></div>
-      <div class="metric"><small>被拒绝的 FHD 探测</small><strong>66 ms / 会话</strong><span>0x920F + 0x90C4 会话内熔断，不是主要问题。</span></div>
+      <div class="metric"><small>RAW 可见缩略图</small><strong>首张 256 KiB，后续约 192 KiB 起</strong><span>同会话偏移命中时减少约 25% 前缀流量，失配自动回退。</span></div>
+      <div class="metric"><small>JPEG MPF FHD</small><strong>约 0.96 MiB / 2.25 s</strong><span>实测 1620×1080；耗时主要取决于当前 STA 链路吞吐。</span></div>
+      <div class="metric"><small>NEF 内嵌 FHD</small><strong>约 0.86 MiB / 2.35 s</strong><span>尺寸校验后选择 1620×1080 候选，未读取同文件约 2.03 MiB 的更大预览。</span></div>
+      <div class="metric"><small>被拒绝的 FHD 探测</small><strong>约 0.34 s / 会话</strong><span>0x920F + 0x90C4 首次拒绝后会话内熔断，不会逐张重复。</span></div>
     </div>
     <div class="callout">
       日志中的第二组 filename / JPEG / GetObjectsMetaData 行是扫描暂停后恢复时重新输出了会话诊断，

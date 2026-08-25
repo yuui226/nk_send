@@ -284,7 +284,7 @@ data class CameraState(
     val isConnectedToCamera: Boolean = false,
     val isConnecting: Boolean = false,
     val connectionType: CameraConnectionType? = null,
-    /** Explicit user choice for wireless discovery. Cold starts always begin in the legacy AP mode. */
+    /** Persisted user choice for wireless discovery; unknown/legacy preferences fall back to AP. */
     val wirelessMode: WirelessMode = WirelessMode.AP,
     /** True when the active/most recent Wi-Fi session was reached through STA discovery. */
     val isStaConnection: Boolean = false,
@@ -1540,7 +1540,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             .apply()
     }
 
-    /** Starts the explicit STA/LAN camera search shown by the experimental card. */
+    /** Starts the explicit STA/LAN camera search shown by the Wi-Fi card's STA tab. */
     fun discoverStaCamera() {
         staReconnectAttempt = 0
         staReconnectJob?.cancel()
@@ -1680,7 +1680,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
-        val explorationReports = ArrayList<String>(3)
+        var pairedReachedStorageProbe = false
         var pairingReconnectUsed = false
         var readinessRetryUsed = false
         while (true) {
@@ -1705,7 +1705,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 return false
             }
             val route = if (readinessRetryUsed) "paired-ready-retry" else "paired"
-            recordStaDiagnostic(ip, route, candidateCamera, explorationReports)
+            recordStaDiagnostic(ip, route, candidateCamera)
+            pairedReachedStorageProbe = pairedReachedStorageProbe ||
+                candidateCamera.staStorageProbeReached
             if (result.isSuccess) {
                 activateStaCamera(candidateCamera, ip)
                 return true
@@ -1734,11 +1736,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // STA exploration route 2: keep the successfully saved Wi-Fi profile, but identify this
+        // STA compatibility route 2: keep the successfully saved Wi-Fi profile, but identify this
         // album session separately from Nikon's paired transfer/control host. Pairing is forbidden
-        // on this identity, so the experiment cannot replace the camera's stored host binding.
-        val pairedReportReachedStorage = explorationReports.any { "GetStorageIDs=" in it }
-        if (pairedReportReachedStorage &&
+        // on this identity, so probing cannot replace the camera's stored host binding.
+        if (pairedReachedStorageProbe &&
             generation == staDiscoveryGeneration &&
             _state.value.wirelessMode == WirelessMode.STA
         ) {
@@ -1752,7 +1753,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 exploreAlbumAccess = true,
                 forceProfilePairing = false,
             )
-            recordStaDiagnostic(ip, "album", albumCamera, explorationReports)
+            recordStaDiagnostic(ip, "album", albumCamera)
             if (generation != staDiscoveryGeneration || purchaseHold ||
                 _state.value.connectionType == CameraConnectionType.USB ||
                 _state.value.wirelessMode != WirelessMode.STA ||
@@ -1782,21 +1783,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ip: String,
         route: String,
         candidateCamera: NikonCamera,
-        reports: MutableList<String>,
     ) {
         val report = candidateCamera.staDiagnosticReport.takeIf(String::isNotBlank) ?: return
         val labeled = "[$ip / $route]\n$report"
-        reports += labeled
         if (PhotoGenerationProbe.enabled) {
             PhotoGenerationProbe.note("STA", labeled)
         }
     }
 
     private suspend fun activateStaCamera(candidateCamera: NikonCamera, ip: String) {
+        check(candidateCamera.staAlbumAccessValidated) {
+            "STA camera must validate album access before activation"
+        }
         staConnectingCamera = null
         staReconnectAttempt = 0
         camera = candidateCamera
-        activateThumbnailDiskCache(candidateCamera)
         acquireSessionWifiLock()
         connectionPreferences.edit().putString(STA_LAST_CAMERA_IP, ip).apply()
         _state.update {
@@ -1814,37 +1815,28 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // Publish the album's loading state atomically with the connection. Otherwise a
                 // slow reconnect can expose the previous session's completed-empty state for a
                 // frame and send the user straight to the false "no photos" screen.
-                isLoadingFiles = candidateCamera.staAlbumAccessValidated,
+                isLoadingFiles = true,
                 hasCompletedFileScan = false,
+                files = emptyList(),
+                storageIds = emptyList(),
+                effectPreviewBitmap = null,
+                effectPreviewFileKey = null,
+                effectPreviewExif = null,
             )
         }
         CameraSessionService.start(getApplication())
         startKeepalive()
-        if (candidateCamera.staAlbumAccessValidated) {
-            loadFiles()
-            startEventPolling()
-        } else {
-            eventPollJob?.cancel()
-            eventPollJob = null
-            fileLoadPending = false
-            fileScanHandleSnapshot = null
-            knownHandlesCamera = candidateCamera
-            knownHandles.clear()
-            _state.update {
-                it.copy(
-                    files = emptyList(),
-                    storageIds = emptyList(),
-                    isLoadingFiles = false,
-                    hasCompletedFileScan = true,
-                )
-            }
-            if (PhotoGenerationProbe.enabled) {
-                PhotoGenerationProbe.note(
-                    "STA-SCAN",
-                    "album enumeration skipped: sampled GetObjectInfo was not accessible",
-                )
-            }
+        try {
+            activateThumbnailDiskCache(candidateCamera)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            // Thumbnail persistence is an optimization, not a prerequisite for browsing.
+            log { "STA thumbnail cache unavailable: ${error.javaClass.simpleName}" }
         }
+        if (camera !== candidateCamera || !_state.value.isConnectedToCamera) return
+        loadFiles()
+        startEventPolling()
     }
 
     private fun scheduleStaReconnect() {
@@ -2267,9 +2259,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 "existing=${_state.value.files.size}"
         }
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
-            var staScanRetryScheduled = false
-            var staScanTransportFailed = false
-            var staRetryableScanFailure = false
+            var staScanRequiresReconnect = false
             try {
                 val existingFiles =
                     if (preserveExisting && camera === cam) _state.value.files else emptyList()
@@ -2288,15 +2278,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 } else {
                     // 双卡机型（Z5 II / Z6 III 等）：枚举【所有】存储卡的对象并合并，单卡机型
                     // 行为不变。PTP StorageID 低 16 位为逻辑存储号，0 表示卡槽无卡，跳过。
-                    val staScan = _state.value.isStaConnection
-                    val rawStorageIds = cam.getStorageIds()
+                    // Protocol routing belongs to the active camera session, not historical UI
+                    // state: isStaConnection intentionally survives a disconnect for reconnect UI.
+                    val staScan = cam.staAlbumAccessValidated
+                    var storageAttempts = 1
+                    var staStorageResult = if (staScan) cam.getStaStorageIdsWithStatus() else null
+                    while (staScan && staStorageResult?.successful == false &&
+                        staStorageResult.responseCode == PtpConstants.DEVICE_BUSY &&
+                        storageAttempts < 3
+                    ) {
+                        delay(STA_FILE_SCAN_RETRY_DELAY_MS)
+                        storageAttempts++
+                        staStorageResult = cam.getStaStorageIdsWithStatus()
+                    }
+                    if (staScan && staStorageResult?.successful == false) {
+                        val failure = checkNotNull(staStorageResult)
+                        staScanRequiresReconnect = true
+                        throw IOException(
+                            "STA GetStorageIDs failed: " +
+                                (failure.error ?: failure.responseCode?.let {
+                                    "response=0x%04X".format(it)
+                                } ?: "unknown"),
+                        )
+                    }
+                    val rawStorageIds = staStorageResult?.storageIds ?: cam.getStorageIds()
                     storageIds = usableStorageIds(rawStorageIds, staScan)
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
                     if (FileOrderProbe.enabled) FileOrderProbe.recordStorageIds(storageIds)
-                    if (PhotoGenerationProbe.enabled && _state.value.isStaConnection) {
+                    if (PhotoGenerationProbe.enabled && staScan) {
                         PhotoGenerationProbe.note(
                             "STA-SCAN",
-                            "StorageIDs raw=" +
+                            "StorageIDs attempts=$storageAttempts raw=" +
                                 rawStorageIds.joinToString(",") { "0x%08X".format(it) } +
                                 " usable=" +
                                 storageIds.joinToString(",") { "0x%08X".format(it) },
@@ -2327,12 +2339,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         // The paired STA service can briefly answer DeviceBusy immediately after
                         // the connected transition. Retry response-level failures in place; a
                         // transport exception is handled by reconnecting the session below.
-                        while (staScan && !result.successful && result.error == null && attempts < 3) {
+                        while (staScan && !result.successful &&
+                            result.responseCode == PtpConstants.DEVICE_BUSY && attempts < 3
+                        ) {
                             delay(STA_FILE_SCAN_RETRY_DELAY_MS)
                             attempts++
                             result = cam.getObjectHandlesWithStatus(queryStorageId)
                         }
-                        if (PhotoGenerationProbe.enabled && _state.value.isStaConnection) {
+                        if (PhotoGenerationProbe.enabled && staScan) {
                             val response = result.responseCode?.let { "0x%04X".format(it) }
                                 ?: "<transport-error>"
                             val sample = result.handles.take(12).joinToString(",") {
@@ -2341,12 +2355,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             PhotoGenerationProbe.note(
                                 "STA-SCAN",
                                 ("GetObjectHandles storage=0x%08X query=0x%08X " +
-                                    "response=%s success=%s " +
+                                    "response=%s success=%s source=%s " +
                                     "attempts=%d payloadBytes=%d count=%d sample=[%s] error=%s").format(
                                         storageId,
                                         queryStorageId,
                                         response,
                                         result.successful,
+                                        if (result.fromPrefetch) "validation" else "command",
                                         attempts,
                                         result.payloadBytes,
                                         result.handles.size,
@@ -2363,8 +2378,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             )
                         }
                         if (staScan && !result.successful) {
-                            staScanTransportFailed = result.error != null
-                            staRetryableScanFailure = !staScanTransportFailed
+                            staScanRequiresReconnect = true
                             throw IOException(
                                 "STA GetObjectHandles failed for 0x%08X: %s".format(
                                     storageId,
@@ -2569,7 +2583,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
 
-                if (PhotoGenerationProbe.enabled && _state.value.isStaConnection) {
+                if (PhotoGenerationProbe.enabled && cam.staAlbumAccessValidated) {
                     PhotoGenerationProbe.note(
                         "STA-SCAN",
                         "metadata complete mode=" +
@@ -2612,30 +2626,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (FileOrderProbe.enabled) FileOrderProbe.finishScan("paused/cancelled")
                 throw e
             } catch (e: Exception) {
-                // 扫描中断（掉线/读超时）：保留已加载的部分，掉线由心跳发现并触发重连。
+                // 扫描中断：保留已发布部分；STA 目录入口连续失败时立即重建会话。
                 if (fileLoadGeneration == generation && camera === cam) {
                     fileScanHandleSnapshot = null
-                    if (_state.value.isStaConnection && staRetryableScanFailure) {
-                        // A response-level STA failure is not an empty card. Keep the loading state
-                        // and retry the catalog without discarding an already published first page.
-                        staScanRetryScheduled = true
-                        fileLoadPending = true
-                        _state.update {
-                            it.copy(isLoadingFiles = true, hasCompletedFileScan = false)
-                        }
-                        viewModelScope.launch {
-                            delay(STA_FILE_SCAN_RETRY_DELAY_MS)
-                            if (fileLoadGeneration == generation && camera === cam &&
-                                _state.value.isConnectedToCamera && !isFileScanPaused()
-                            ) {
-                                loadFiles(preserveExisting = _state.value.files.isNotEmpty())
-                            }
-                        }
-                    } else {
-                        fileLoadPending = false
-                        _state.update { it.copy(isLoadingFiles = false) }
-                        if (staScanTransportFailed) onCameraTransportLost(cam)
-                    }
+                    fileLoadPending = false
+                    _state.update { it.copy(isLoadingFiles = false) }
+                    // Three response-level retries already cover a brief DeviceBusy. Continuing
+                    // to poll the same rejected STA session would be an unbounded battery/network
+                    // loop; reconnect so Nikon can publish a fresh capability set.
+                    if (staScanRequiresReconnect) onCameraTransportLost(cam)
                 }
                 if (FileOrderProbe.enabled) {
                     FileOrderProbe.finishScan(
@@ -2647,9 +2646,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 // loading 状态清掉。
                 if (fileLoadJob === coroutineContext[Job]) {
                     fileLoadJob = null
-                    if (!staScanRetryScheduled) {
-                        _state.update { it.copy(isLoadingFiles = false) }
-                    }
+                    _state.update { it.copy(isLoadingFiles = false) }
                 }
             }
         }
