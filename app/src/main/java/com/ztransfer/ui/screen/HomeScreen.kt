@@ -445,13 +445,9 @@ fun HomeScreen(
                                         .height(34.dp),
                                 ) {
                                     Text(
-                                        text = stringResource(
-                                            when {
-                                                staBusy -> R.string.cancel
-                                                state.staConnectionStatus == StaConnectionStatus.FAILED -> R.string.retry
-                                                else -> R.string.sta_connect_action
-                                            },
-                                        ),
+                                        // Keep a stable action label while the existing click
+                                        // behaviour continues to follow the STA connection state.
+                                        text = stringResource(R.string.sta_connect_action),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.SemiBold,
                                         color = colors.accentBlue,

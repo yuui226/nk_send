@@ -1,6 +1,7 @@
 package com.ztransfer.viewmodel
 
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.StaInitiatorIdentity
 import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -33,6 +34,60 @@ class StaConnectionIsolationTest {
     @Test
     fun onlyStaOriginWifiSessionUsesStaReconnectPath() {
         assertTrue(shouldReconnectUsingSta(CameraConnectionType.WIFI, WirelessMode.STA))
+    }
+
+    @Test
+    fun completedPairingKeepsManualDiscoveryAliveForCameraServiceRestart() {
+        assertTrue(
+            shouldKeepStaDiscoveryAlive(
+                reconnectRequested = false,
+                hasReusableProfile = true,
+            ),
+        )
+    }
+
+    @Test
+    fun firstPairingSearchCanStillStopBeforeAProfileExists() {
+        assertFalse(
+            shouldKeepStaDiscoveryAlive(
+                reconnectRequested = false,
+                hasReusableProfile = false,
+            ),
+        )
+    }
+
+    @Test
+    fun automaticReconnectDoesNotDependOnProfileMigration() {
+        assertTrue(
+            shouldKeepStaDiscoveryAlive(
+                reconnectRequested = true,
+                hasReusableProfile = false,
+            ),
+        )
+    }
+
+    @Test
+    fun savedStaInitiatorIdentitySurvivesAppRelaunch() {
+        assertEquals(
+            StaInitiatorIdentity.ALBUM_EXPLORER,
+            restoredStaInitiatorIdentity("ALBUM_EXPLORER"),
+        )
+        assertEquals(
+            StaInitiatorIdentity.PAIRED_COMPUTER,
+            restoredStaInitiatorIdentity("PAIRED_COMPUTER"),
+        )
+    }
+
+    @Test
+    fun legacyProfileDefaultsToThePairingIdentity() {
+        assertEquals(
+            StaInitiatorIdentity.PAIRED_COMPUTER,
+            restoredStaInitiatorIdentity(null),
+        )
+        assertEquals(
+            StaInitiatorIdentity.PAIRED_COMPUTER,
+            restoredStaInitiatorIdentity("unknown"),
+        )
     }
 
     @Test

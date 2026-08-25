@@ -4,13 +4,14 @@
     <string name="connection_wifi">Wi-Fi</string>
     <string name="connection_wifi_hotspot">Camera hotspot</string>
     <string name="sta_card_description">Connect through a phone hotspot or Wi-Fi router</string>
-    <string name="sta_connect_action">Search</string>
+    <string name="sta_connect_action">Connect camera</string>
     <string name="sta_hotspot_settings_short">Hotspot</string>
     <string name="sta_status_searching">Searching for a PTP/IP camera…</string>
     <string name="sta_status_connecting">Connecting to camera…</string>
     <string name="sta_camera_not_found_short">Camera not found</string>
     <string name="sta_camera_not_found">No compatible camera found. Check the camera network profile and connection.</string>
     <string name="sta_camera_refused_repair">Camera refused the connection. Pair the camera again.</string>
+    <string name="sta_camera_refused_retrying">Camera is not ready yet. Keep it powered on; reconnection will retry automatically.</string>
     <string name="sta_signal_connected">STA camera connected</string>
     <string name="sta_signal_disconnected_hotspot">STA camera disconnected. Open hotspot settings.</string>
     <string name="usb_step_power">Keep the camera powered on</string>

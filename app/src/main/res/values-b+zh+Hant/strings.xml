@@ -4,13 +4,14 @@
     <string name="connection_wifi">Wi-Fi</string>
     <string name="connection_wifi_hotspot">相機熱點</string>
     <string name="sta_card_description">透過手機熱點或路由器連接相機</string>
-    <string name="sta_connect_action">搜尋相機</string>
+    <string name="sta_connect_action">連接相機</string>
     <string name="sta_hotspot_settings_short">熱點設定</string>
     <string name="sta_status_searching">正在搜尋 PTP/IP 相機…</string>
     <string name="sta_status_connecting">正在連線相機…</string>
     <string name="sta_camera_not_found_short">找不到相機</string>
     <string name="sta_camera_not_found">找不到相容相機，請檢查相機的網路設定與連線狀態。</string>
     <string name="sta_camera_refused_repair">相機拒絕連線，請重新配對。</string>
+    <string name="sta_camera_refused_retrying">相機尚未就緒，請保持開機，稍後將自動重新連線。</string>
     <string name="sta_signal_connected">STA 相機已連線</string>
     <string name="sta_signal_disconnected_hotspot">STA 相機已斷線，開啟個人熱點設定。</string>
     <string name="usb_step_power">相機電源開啟</string>

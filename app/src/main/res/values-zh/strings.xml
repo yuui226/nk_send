@@ -4,13 +4,14 @@
     <string name="connection_wifi">Wi-Fi</string>
     <string name="connection_wifi_hotspot">相机热点</string>
     <string name="sta_card_description">通过手机热点或路由器连接相机</string>
-    <string name="sta_connect_action">搜索相机</string>
+    <string name="sta_connect_action">连接相机</string>
     <string name="sta_hotspot_settings_short">热点设置</string>
     <string name="sta_status_searching">正在搜索 PTP/IP 相机…</string>
     <string name="sta_status_connecting">正在连接相机…</string>
     <string name="sta_camera_not_found_short">未找到相机</string>
     <string name="sta_camera_not_found">未找到兼容相机，请检查相机的网络配置与连接状态。</string>
     <string name="sta_camera_refused_repair">相机拒绝连接，请重新配对。</string>
+    <string name="sta_camera_refused_retrying">相机尚未就绪，请保持开机，稍后将自动重连。</string>
     <string name="sta_signal_connected">STA 相机已连接</string>
     <string name="sta_signal_disconnected_hotspot">STA 相机已断开，打开个人热点设置。</string>
     <string name="usb_step_power">相机电源开启</string>
