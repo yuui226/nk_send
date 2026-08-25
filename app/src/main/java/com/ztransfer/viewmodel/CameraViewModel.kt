@@ -416,6 +416,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var activeThumbnailDiskCache: ThumbnailDiskCache.CameraCache? = null
     // 每次成功切入一个相机会话递增，阻止旧会话迟到的磁盘解码结果污染 handle 级内存缓存。
     private var thumbnailCacheSessionGeneration = 0L
+    private var staScanThumbnailDiskHits = 0
+    private var staScanThumbnailDiskMisses = 0
     // 本轮发生真实写入失败（含磁盘满）后停止后台落盘；换相机/重连时重新尝试。
     private var thumbnailDiskWritesBlocked = false
     private val thumbnailFillQueue = ThumbnailFillQueue()
@@ -438,6 +440,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (camera === cam) {
             activeThumbnailDiskCache = opened
             thumbnailDiskWritesBlocked = false
+            if (cam.staDirectObjectReadValidated && PhotoGenerationProbe.enabled) {
+                PhotoGenerationProbe.note(
+                    "STA-CACHE",
+                    "open directory=${opened.directory.name} entries=${opened.cachedNames().size}",
+                )
+            }
         }
     }
     private val connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -2218,6 +2226,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         val cam = camera ?: return
         val diskCacheForScan = activeThumbnailDiskCache
+        if (cam.staDirectObjectReadValidated) {
+            staScanThumbnailDiskHits = 0
+            staScanThumbnailDiskMisses = 0
+        }
         val generation = ++fileLoadGeneration
         fileLoadJob?.cancel()
         thumbnailFillQueue.beginScan()
@@ -2435,7 +2447,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                 val allFiles = existingFiles.toMutableList()
                 var publishedFiles = BatchPublishedList.from(existingFiles)
-                var directMetadataDiagnosticReported = false
+                val reportedDirectMetadataDiagnostics = HashSet<String>()
                 // 备份模式下同一张照片在两张卡各有一份（handle 不同）：按 名称+大小+拍摄时间
                 // 去重，列表只显示一份；溢出/RAW+JPG 分卡等模式互不相同，不受影响。
                 val indexByIdentity = HashMap<String, Int>(
@@ -2487,12 +2499,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     // onBatch 回调运行在 IO 线程，用 update 原子读改写避免与主线程写入竞争。
                     if (fileLoadGeneration == generation && camera === cam) {
                         _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
-                        if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated &&
-                            !directMetadataDiagnosticReported
-                        ) {
-                            cam.staDirectMetadataDiagnostic?.let { diagnostic ->
-                                directMetadataDiagnosticReported = true
-                                PhotoGenerationProbe.note("STA-SCAN", diagnostic)
+                        if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
+                            cam.staDirectMetadataDiagnosticReports.forEach { diagnostic ->
+                                if (reportedDirectMetadataDiagnostics.add(diagnostic)) {
+                                    PhotoGenerationProbe.note("STA-SCAN", diagnostic)
+                                }
                             }
                         }
                         if (newHandlesToReport.isNotEmpty() && additions.isNotEmpty()) {
@@ -2548,6 +2559,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             " success=$allObjectInfoSucceeded " +
                             "requested=$remainingHandleCount files=${allFiles.size}",
                     )
+                    if (cam.staDirectObjectReadValidated) {
+                        PhotoGenerationProbe.note(
+                            "STA-CACHE",
+                            "scan thumbnail diskHits=$staScanThumbnailDiskHits " +
+                                "diskMisses=$staScanThumbnailDiskMisses " +
+                                "entries=${diskCacheForScan?.cachedNames()?.size ?: 0}",
+                        )
+                    }
                 }
 
                 if (fileLoadGeneration != generation || camera !== cam) return@launch
@@ -2707,9 +2726,29 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val diskCache = activeThumbnailDiskCache ?: return false
         val cacheFileName = thumbnailDiskCacheFileName(file)
         val cached = withContext(Dispatchers.IO) {
-            diskCache.findCachedFile(cacheFileName, legacyThumbnailDiskCacheFileName(file))
+            diskCache.findCachedFile(
+                cacheFileName,
+                legacyThumbnailDiskCacheFileName(file),
+                alternateThumbnailDiskCacheFileName(file),
+            )
+        }
+        if (expectedCamera.staDirectObjectReadValidated) {
+            if (cached != null) staScanThumbnailDiskHits++ else staScanThumbnailDiskMisses++
+            val probed = staScanThumbnailDiskHits + staScanThumbnailDiskMisses
+            if (PhotoGenerationProbe.enabled && probed <= 4) {
+                PhotoGenerationProbe.note(
+                    "STA-CACHE",
+                    "item=$probed handle=0x%08X disk=%s".format(
+                        handle,
+                        if (cached != null) "hit" else "miss",
+                    ),
+                )
+            }
         }
         if (cached != null) return true
+        // Direct STA RAW/video thumbnails need bounded multi-MiB partial reads. Treat them as lazy-visible
+        // work instead of blocking the progressive 829-object catalog with background prefetch.
+        if (expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg") return true
         if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
         // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
@@ -2936,7 +2975,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val expectedCacheGeneration = thumbnailCacheSessionGeneration
         val cacheFileName = thumbnailDiskCacheFileName(file)
         val disk = withContext(Dispatchers.IO) {
-            diskCache.findCachedFile(cacheFileName, legacyThumbnailDiskCacheFileName(file))
+            diskCache.findCachedFile(
+                cacheFileName,
+                legacyThumbnailDiskCacheFileName(file),
+                alternateThumbnailDiskCacheFileName(file),
+            )
         } ?: return null
         if (thumbnailCacheSessionGeneration != expectedCacheGeneration) return null
         return try {
@@ -2987,7 +3030,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 thumbnailCacheSessionGeneration != expectedCacheGeneration
             ) return null
             if (bytes == null || bytes.isEmpty()) {
-                noThumbHandles.add(handle)   // 相机明确表示无缩略图：负缓存，不再重试
+                // Direct STA RAW/video only performed a bounded fallback probe. Null is not the
+                // camera's authoritative NoThumbnail response, so a later visible retry remains valid.
+                if (!(expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg")) {
+                    noThumbHandles.add(handle)
+                }
                 log { "THUMB no-thumb handle=$handle (resp non-OK / empty)" }
                 return null
             }
@@ -3087,7 +3134,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (diskCache != null) {
                 withContext(Dispatchers.IO) { diskCache.remove(cacheFileName, disk) }
             }
-            if (!fromDisk && thumbnailCacheSessionGeneration == expectedCacheGeneration) {
+            if (!fromDisk &&
+                thumbnailCacheSessionGeneration == expectedCacheGeneration &&
+                !(camera?.staDirectObjectReadValidated == true && file.extension != ".jpg")
+            ) {
                 noThumbHandles.add(file.handle)
             }
             log {
@@ -3144,8 +3194,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ): Bitmap? {
         val cam = camera ?: return null
         val startedAt = android.os.SystemClock.elapsedRealtime()
+        if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
+            PhotoGenerationProbe.note(
+                "STA-PREVIEW",
+                "viewModel request handle=0x%08X type=%s size=%d".format(
+                    file.handle,
+                    file.extension,
+                    file.size,
+                ),
+            )
+        }
         val bytes = try {
-            cam.getFhdPicture(file.handle, retryDeviceBusy = retryDeviceBusy)
+            // STA probes camera-generated FHD/LargeThumb data only. It never substitutes a full
+            // original-object download. AP retains its established 0x920F path unchanged.
+            if (cam.staDirectObjectReadValidated) {
+                cam.getStaFhdPicture(file.handle, retryDeviceBusy = retryDeviceBusy)
+            } else {
+                cam.getFhdPicture(file.handle, retryDeviceBusy = retryDeviceBusy)
+            }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (_: Exception) {
@@ -3335,7 +3401,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun thumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =
-        thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
+        if (camera?.staDirectObjectReadValidated == true) {
+            staThumbnailCacheFileName(file.handle, file.size)
+        } else {
+            thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
+        }
+
+    private fun alternateThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String? =
+        if (camera?.staDirectObjectReadValidated == true) {
+            thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
+        } else {
+            null
+        }
 
     private fun legacyThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =
         legacyThumbnailCacheFileName(file.fileName, file.size, file.captureDate)

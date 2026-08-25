@@ -641,13 +641,27 @@ private const val WIFI_CARD_BADGE_TEXTURE_SEED = 0x57494649
 
 private fun openHotspotSettings(context: android.content.Context) {
     val candidates = listOf(
+        // AOSP's hotspot detail action deliberately uses the Settings package namespace
+        // ("com.android.settings"), not the public "android.settings" namespace.  The old
+        // spelling did not resolve on stock-compatible ROMs, so the code always fell through
+        // to the broader tethering page and made the user tap "Personal hotspot" once more.
+        Intent("com.android.settings.WIFI_TETHER_SETTINGS"),
+        // Some OEMs remove the action filter but retain the stock exported activity.
+        Intent().setClassName(
+            "com.android.settings",
+            "com.android.settings.Settings\$WifiTetherSettingsActivity",
+        ),
+        // Keep the non-standard spelling as an OEM compatibility fallback only.
+        Intent("android.settings.WIFI_TETHER_SETTINGS"),
         Intent("android.settings.TETHER_SETTINGS"),
         Intent(Settings.ACTION_WIRELESS_SETTINGS),
     )
-    val intent = candidates.firstOrNull { candidate ->
-        candidate.resolveActivity(context.packageManager) != null
-    } ?: return
-    runCatching { context.startActivity(intent) }
+    // A resolvable OEM activity can still reject a third-party launch. Try the next candidate
+    // instead of selecting once and silently doing nothing after SecurityException.
+    candidates.firstOrNull { candidate ->
+        candidate.resolveActivity(context.packageManager) != null &&
+            runCatching { context.startActivity(candidate) }.isSuccess
+    }
 }
 
 /**

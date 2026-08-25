@@ -116,6 +116,26 @@ class ThumbnailDiskCacheTest {
     }
 
     @Test
+    fun `sta display-name cache is moved to stable object identity`() {
+        val root = newRoot()
+        val camera = ThumbnailDiskCache(root).openCamera("current-camera")
+        val displayNameKey = thumbnailCacheFileName("DSC_8693.JPG", 123L, "20260824T204540")
+        val stableKey = staThumbnailCacheFileName(0x291961F5, 123L)
+        assertTrue(camera.write(displayNameKey, jpegBytes(7)))
+
+        val resolved = camera.findCachedFile(
+            stableKey,
+            "missing-legacy.jpg",
+            displayNameKey,
+        )
+
+        assertEquals(camera.targetFile(stableKey), resolved)
+        assertTrue(resolved?.isFile == true)
+        assertFalse(camera.targetFile(displayNameKey).exists())
+        assertEquals(setOf(stableKey), camera.cachedNames())
+    }
+
+    @Test
     fun `failed write never creates a cached index entry`() {
         val root = newRoot()
         val camera = ThumbnailDiskCache(root).openCamera("current-camera")
@@ -166,6 +186,17 @@ class ThumbnailDiskCacheTest {
         assertEquals(first, same)
         assertNotEquals(first, different)
         assertTrue(first.matches(Regex("[0-9a-f]{64}\\.jpg")))
+    }
+
+    @Test
+    fun `sta keys ignore progressive filename and date discovery`() {
+        val beforeMetadata = staThumbnailCacheFileName(0x291961F5, 12_345L)
+        val afterMetadata = staThumbnailCacheFileName(0x291961F5, 12_345L)
+        val differentObject = staThumbnailCacheFileName(0x291961F4, 12_345L)
+
+        assertEquals(beforeMetadata, afterMetadata)
+        assertNotEquals(beforeMetadata, differentObject)
+        assertTrue(beforeMetadata.matches(Regex("[0-9a-f]{64}\\.jpg")))
     }
 
     private fun newRoot(): File = Files.createTempDirectory("thumbnail-cache-test").toFile()

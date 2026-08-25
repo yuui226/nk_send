@@ -1,8 +1,11 @@
 package com.ztransfer.protocol
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.media.MediaMetadataRetriever
 import android.net.Network
 import android.os.SystemClock
 import androidx.exifinterface.media.ExifInterface
@@ -21,12 +24,17 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.OutputStream
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 private fun normalizedCameraIdentifier(value: String?): String? {
     val normalized = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
@@ -273,6 +281,133 @@ internal fun isStaPairingOnlyOperationSet(operations: Set<Int>): Boolean = opera
     PtpConstants.NK_PAIRING_RESULT,
 )
 
+private fun cameraBaseFileName(value: String): String? {
+    val baseName = value.substringAfterLast('/').substringAfterLast('\\').trim()
+    return baseName.takeIf { name ->
+        name.isNotEmpty() &&
+            name.length <= 255 &&
+            name.none { it.code < 0x20 || it == ':' }
+    }
+}
+
+/** Decodes a standalone PTP string and rejects truncated or unsafe filename values. */
+internal fun parsePtpObjectFileName(data: ByteArray, offset: Int = 0): Pair<String, Int>? {
+    if (offset !in data.indices) return null
+    val codeUnits = data[offset].toInt() and 0xFF
+    if (codeUnits <= 1) return null
+    val byteCount = codeUnits * 2
+    val valueOffset = offset + 1
+    if (valueOffset + byteCount > data.size) return null
+    if (!hasUtf16NullTerminator(data, valueOffset, codeUnits)) return null
+    val decoded = String(data, valueOffset, byteCount, Charsets.UTF_16LE).trimEnd('\u0000')
+    val fileName = cameraBaseFileName(decoded) ?: return null
+    return fileName to (valueOffset + byteCount)
+}
+
+internal data class EmbeddedCameraFileName(
+    val offset: Int,
+    val value: String,
+    val encoding: String,
+)
+
+private val CAMERA_MEDIA_EXTENSIONS = setOf("jpg", "jpeg", "nef", "mov", "mp4")
+
+private fun isPlausibleCameraFileName(value: String): Boolean {
+    val dot = value.lastIndexOf('.')
+    if (dot !in 1 until value.lastIndex) return false
+    val stem = value.substring(0, dot)
+    val extension = value.substring(dot + 1).lowercase()
+    return extension in CAMERA_MEDIA_EXTENSIONS &&
+        stem.length in 2..32 &&
+        stem.any(Char::isDigit) &&
+        stem.all { it.isLetterOrDigit() || it == '_' || it == '-' }
+}
+
+/** Finds filename-shaped PTP strings or plain ASCII fields in Nikon metadata/file headers. */
+internal fun findEmbeddedCameraFileNames(
+    data: ByteArray,
+    includePtpStrings: Boolean = true,
+): List<EmbeddedCameraFileName> {
+    val results = LinkedHashMap<String, EmbeddedCameraFileName>()
+    if (includePtpStrings) {
+        data.indices.forEach { offset ->
+            val declaredLength = data[offset].toInt() and 0xFF
+            if (declaredLength !in 6..40) return@forEach
+            parsePtpObjectFileName(data, offset)?.first
+                ?.takeIf(::isPlausibleCameraFileName)
+                ?.let { name ->
+                    results.putIfAbsent(
+                        "$offset:$name",
+                        EmbeddedCameraFileName(offset, name, "ptp-string"),
+                    )
+                }
+        }
+    }
+
+    fun isStemByte(value: Int): Boolean =
+        value in 'A'.code..'Z'.code ||
+            value in 'a'.code..'z'.code ||
+            value in '0'.code..'9'.code ||
+            value == '_'.code || value == '-'.code
+
+    var dot = 2
+    while (dot + 4 <= data.size) {
+        if (data[dot] != '.'.code.toByte()) {
+            dot++
+            continue
+        }
+        var end = dot + 1
+        while (end < data.size && end - dot <= 5 && isStemByte(data[end].toInt() and 0xFF)) end++
+        var start = dot - 1
+        while (start >= 0 && dot - start <= 32 && isStemByte(data[start].toInt() and 0xFF)) start--
+        start++
+        if (start < dot && end > dot + 1) {
+            val candidate = data.copyOfRange(start, end).toString(Charsets.US_ASCII)
+            if (isPlausibleCameraFileName(candidate)) {
+                results.putIfAbsent(
+                    "$start:$candidate",
+                    EmbeddedCameraFileName(start, candidate, "ascii"),
+                )
+            }
+        }
+        dot++
+    }
+    return results.values.toList()
+}
+
+/** Parses GetObjectPropList queried specifically for ObjectFileName (0xDC07). */
+internal fun parseObjectFileNamePropertyList(data: ByteArray): Map<Int, String> {
+    fun int32Le(offset: Int): Int =
+        (data[offset].toInt() and 0xFF) or
+            ((data[offset + 1].toInt() and 0xFF) shl 8) or
+            ((data[offset + 2].toInt() and 0xFF) shl 16) or
+            ((data[offset + 3].toInt() and 0xFF) shl 24)
+
+    fun uint16Le(offset: Int): Int =
+        (data[offset].toInt() and 0xFF) or
+            ((data[offset + 1].toInt() and 0xFF) shl 8)
+
+    if (data.size < 4) return emptyMap()
+    val count = int32Le(0).toLong() and 0xFFFFFFFFL
+    if (count > (data.size - 4) / 9L) return emptyMap()
+    val names = LinkedHashMap<Int, String>(count.toInt().coerceAtMost(4096))
+    var offset = 4
+    repeat(count.toInt()) {
+        if (offset + 8 > data.size) return emptyMap()
+        val handle = int32Le(offset)
+        val propertyCode = uint16Le(offset + 4)
+        val dataType = uint16Le(offset + 6)
+        offset += 8
+        if (propertyCode != PtpConstants.OBJECT_PROP_OBJECT_FILE_NAME || dataType != 0xFFFF) {
+            return emptyMap()
+        }
+        val parsed = parsePtpObjectFileName(data, offset) ?: return emptyMap()
+        names[handle] = parsed.first
+        offset = parsed.second
+    }
+    return names
+}
+
 internal fun hasUsableStaAlbumStorage(response: Int, storageIds: List<Int>): Boolean =
     response == PtpConstants.RESPONSE_OK && storageIds.isNotEmpty()
 
@@ -351,6 +486,639 @@ internal fun jpegExifEnvelope(header: ByteArray): ByteArray? {
     return null
 }
 
+/** Bounded JPEG marker audit used to decide whether an independent MPF preview really exists. */
+internal fun jpegContainerDiagnostics(bytes: ByteArray): String {
+    if (bytes.size < 4 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) {
+        return "not-jpeg"
+    }
+    val segments = ArrayList<String>(8)
+    var offset = 2
+    while (offset + 1 < bytes.size && segments.size < 12) {
+        while (offset < bytes.size && bytes[offset] == 0xFF.toByte()) offset++
+        if (offset >= bytes.size) break
+        val marker = bytes[offset].toInt() and 0xFF
+        offset++
+        if (marker == 0xD9) {
+            segments += "EOI"
+            break
+        }
+        if (marker == 0xDA) {
+            segments += "SOS"
+            break
+        }
+        if (marker == 0x01 || marker in 0xD0..0xD7) continue
+        if (offset + 2 > bytes.size) {
+            segments += "0x%02X:truncated".format(marker)
+            break
+        }
+        val segmentLength = ((bytes[offset].toInt() and 0xFF) shl 8) or
+            (bytes[offset + 1].toInt() and 0xFF)
+        if (segmentLength < 2 || offset.toLong() + segmentLength > bytes.size.toLong()) {
+            segments += "0x%02X:%d/incomplete".format(marker, segmentLength)
+            break
+        }
+        val payloadOffset = offset + 2
+        val payloadLength = segmentLength - 2
+        val name = when (marker) {
+            in 0xE0..0xEF -> "APP${marker - 0xE0}"
+            0xDB -> "DQT"
+            in 0xC0..0xCF -> "SOF/0x%02X".format(marker)
+            else -> "0x%02X".format(marker)
+        }
+        val signature = when {
+            marker == 0xE1 && payloadLength >= 6 &&
+                bytes.copyOfRange(payloadOffset, payloadOffset + 6).contentEquals(
+                    byteArrayOf('E'.code.toByte(), 'x'.code.toByte(), 'i'.code.toByte(),
+                        'f'.code.toByte(), 0, 0),
+                ) -> "Exif"
+            marker == 0xE2 && payloadLength >= 4 &&
+                bytes.copyOfRange(payloadOffset, payloadOffset + 4).contentEquals(
+                    byteArrayOf('M'.code.toByte(), 'P'.code.toByte(), 'F'.code.toByte(), 0),
+                ) -> "MPF"
+            else -> null
+        }
+        segments += "$name:$segmentLength${signature?.let { "/$it" }.orEmpty()}"
+        offset += segmentLength
+    }
+    return segments.joinToString(",").ifEmpty { "empty" }
+}
+
+internal data class JpegMpfPreviewReference(
+    val offset: Long,
+    val length: Int,
+    val imageType: Int,
+)
+
+/**
+ * Parses the MP Index IFD in a JPEG APP2 `MPF\0` segment. MP image offsets are relative to the
+ * TIFF byte-order field at the start of the MP header; only independently stored large-thumbnail
+ * JPEGs are returned. The primary image at offset 0 is deliberately excluded.
+ */
+internal fun parseJpegMpfPreviews(
+    bytes: ByteArray,
+    objectSize: Long = Long.MAX_VALUE,
+): List<JpegMpfPreviewReference> {
+    data class MpfSegment(val tiffBase: Int, val end: Int)
+
+    fun findMpfSegment(): MpfSegment? {
+        if (bytes.size < 4 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) return null
+        var offset = 2
+        while (offset + 1 < bytes.size) {
+            while (offset < bytes.size && bytes[offset] == 0xFF.toByte()) offset++
+            if (offset >= bytes.size) return null
+            val marker = bytes[offset].toInt() and 0xFF
+            offset++
+            if (marker == 0xD9 || marker == 0xDA) return null
+            if (marker == 0x01 || marker in 0xD0..0xD7) continue
+            if (offset + 2 > bytes.size) return null
+            val segmentLength = ((bytes[offset].toInt() and 0xFF) shl 8) or
+                (bytes[offset + 1].toInt() and 0xFF)
+            if (segmentLength < 2 || offset.toLong() + segmentLength > bytes.size.toLong()) {
+                return null
+            }
+            val payload = offset + 2
+            if (marker == 0xE2 && segmentLength >= 14 &&
+                bytes[payload] == 'M'.code.toByte() &&
+                bytes[payload + 1] == 'P'.code.toByte() &&
+                bytes[payload + 2] == 'F'.code.toByte() &&
+                bytes[payload + 3] == 0.toByte()
+            ) {
+                return MpfSegment(tiffBase = payload + 4, end = offset + segmentLength)
+            }
+            offset += segmentLength
+        }
+        return null
+    }
+
+    val segment = findMpfSegment() ?: return emptyList()
+    val littleEndian = when {
+        bytes[segment.tiffBase] == 'I'.code.toByte() &&
+            bytes[segment.tiffBase + 1] == 'I'.code.toByte() -> true
+        bytes[segment.tiffBase] == 'M'.code.toByte() &&
+            bytes[segment.tiffBase + 1] == 'M'.code.toByte() -> false
+        else -> return emptyList()
+    }
+
+    fun u16(offset: Int): Int? {
+        if (offset < segment.tiffBase || offset + 2 > segment.end) return null
+        val a = bytes[offset].toInt() and 0xFF
+        val b = bytes[offset + 1].toInt() and 0xFF
+        return if (littleEndian) a or (b shl 8) else (a shl 8) or b
+    }
+
+    fun u32(offset: Int): Long? {
+        if (offset < segment.tiffBase || offset + 4 > segment.end) return null
+        var value = 0L
+        if (littleEndian) {
+            repeat(4) { index ->
+                value = value or ((bytes[offset + index].toLong() and 0xFF) shl (index * 8))
+            }
+        } else {
+            repeat(4) { index ->
+                value = (value shl 8) or (bytes[offset + index].toLong() and 0xFF)
+            }
+        }
+        return value
+    }
+
+    if (u16(segment.tiffBase + 2) != 42) return emptyList()
+    val ifdOffset = u32(segment.tiffBase + 4) ?: return emptyList()
+    val ifdStartLong = segment.tiffBase.toLong() + ifdOffset
+    if (ifdStartLong !in segment.tiffBase.toLong() until segment.end.toLong()) return emptyList()
+    val ifdStart = ifdStartLong.toInt()
+    val entryCount = u16(ifdStart) ?: return emptyList()
+    if (entryCount > 64 || ifdStart.toLong() + 2L + entryCount.toLong() * 12L > segment.end) {
+        return emptyList()
+    }
+
+    var declaredImageCount: Int? = null
+    var mpEntryOffset: Int? = null
+    var mpEntryBytes = 0
+    repeat(entryCount) { index ->
+        val entry = ifdStart + 2 + index * 12
+        val tag = u16(entry) ?: return@repeat
+        val type = u16(entry + 2) ?: return@repeat
+        val count = u32(entry + 4) ?: return@repeat
+        when (tag) {
+            0xB001 -> if (type == 4 && count == 1L) {
+                declaredImageCount = u32(entry + 8)?.toInt()
+            }
+            0xB002 -> if (type == 7 && count in 16L..(16L * 64L) && count % 16L == 0L) {
+                val relative = u32(entry + 8) ?: return@repeat
+                val absolute = segment.tiffBase.toLong() + relative
+                if (absolute >= segment.tiffBase && absolute + count <= segment.end) {
+                    mpEntryOffset = absolute.toInt()
+                    mpEntryBytes = count.toInt()
+                }
+            }
+        }
+    }
+
+    val entriesStart = mpEntryOffset ?: return emptyList()
+    val availableCount = mpEntryBytes / 16
+    val imageCount = minOf(declaredImageCount ?: availableCount, availableCount, 64)
+    val previews = ArrayList<JpegMpfPreviewReference>(imageCount)
+    repeat(imageCount) { index ->
+        val entry = entriesStart + index * 16
+        val attributes = u32(entry) ?: return@repeat
+        val length = u32(entry + 4) ?: return@repeat
+        val relativeOffset = u32(entry + 8) ?: return@repeat
+        val imageFormat = (attributes ushr 24) and 0x07
+        val imageType = (attributes and 0x00FFFFFF).toInt()
+        val absoluteOffset = segment.tiffBase.toLong() + relativeOffset
+        if (imageFormat == 0L && imageType in 0x010001..0x010005 &&
+            relativeOffset > 0L &&
+            length in 4L..STA_DIRECT_MAX_EMBEDDED_PREVIEW_BYTES.toLong() &&
+            absoluteOffset > 0L && absoluteOffset + length <= objectSize
+        ) {
+            previews += JpegMpfPreviewReference(
+                offset = absoluteOffset,
+                length = length.toInt(),
+                imageType = imageType,
+            )
+        }
+    }
+    return previews.distinct().sortedWith(
+        compareBy<JpegMpfPreviewReference> {
+            when (it.imageType) {
+                0x010002 -> 0 // exact FHD
+                0x010003 -> 1 // 4K if FHD is absent
+                0x010001 -> 2 // VGA is still better than the EXIF thumbnail
+                else -> 3
+            }
+        }.thenBy(JpegMpfPreviewReference::length),
+    )
+}
+
+internal data class NikonMakerFileInfo(
+    val directoryNumber: Int,
+    val fileNumber: Int,
+)
+
+internal data class NikonFileNumberAnchor(
+    val handleSequence: Int,
+    val directoryNumber: Int,
+    val fileNumber: Int,
+)
+
+/**
+ * Nikon's paired-STA handles retain the camera's monotonically increasing 24-bit file sequence;
+ * the high byte only identifies JPG/RAW/video. A MakerNote FileInfo record therefore anchors the
+ * exact DCF number for neighbouring objects, including MP4 files that carry no EXIF MakerNote.
+ */
+internal fun deriveNikonMakerFileInfo(
+    anchor: NikonFileNumberAnchor,
+    handle: Int,
+): NikonMakerFileInfo? {
+    val sequence = handle and 0x00FFFFFF
+    val delta = sequence.toLong() - anchor.handleSequence.toLong()
+    val absoluteFileNumber = anchor.fileNumber.toLong() + delta
+    val directoryDelta = Math.floorDiv(absoluteFileNumber, 10_000L)
+    val fileNumber = Math.floorMod(absoluteFileNumber, 10_000L).toInt()
+    val directoryNumber = anchor.directoryNumber.toLong() + directoryDelta
+    return NikonMakerFileInfo(directoryNumber.toInt(), fileNumber).takeIf {
+        directoryNumber in 99L..999L
+    }
+}
+
+internal fun nikonDefaultCameraFileName(
+    fileInfo: NikonMakerFileInfo,
+    extension: String,
+): String? {
+    val normalizedExtension = extension.removePrefix(".").uppercase()
+    if (normalizedExtension.lowercase() !in CAMERA_MEDIA_EXTENSIONS) return null
+    return "DSC_%04d.%s".format(fileInfo.fileNumber, normalizedExtension)
+}
+
+/**
+ * Reads Nikon MakerNote tag 0x00B8 (FileInfo) from a bounded JPEG/NEF prefix.
+ * FileInfo contains the DCF directory and four-digit file number even when paired STA denies
+ * ObjectInfo. It intentionally does not guess the camera-configurable three-character prefix.
+ */
+internal fun nikonMakerFileInfo(bytes: ByteArray): NikonMakerFileInfo? {
+    fun tiffStart(): Int? {
+        if (bytes.size >= 8 &&
+            ((bytes[0] == 'I'.code.toByte() && bytes[1] == 'I'.code.toByte()) ||
+                (bytes[0] == 'M'.code.toByte() && bytes[1] == 'M'.code.toByte()))
+        ) {
+            return 0
+        }
+        if (bytes.size < 12 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) return null
+        var offset = 2
+        while (offset + 4 <= bytes.size) {
+            if (bytes[offset] != 0xFF.toByte()) return null
+            while (offset < bytes.size && bytes[offset] == 0xFF.toByte()) offset++
+            if (offset >= bytes.size) return null
+            val marker = bytes[offset].toInt() and 0xFF
+            offset++
+            if (marker == 0xD9 || marker == 0xDA) return null
+            if (marker == 0x01 || marker in 0xD0..0xD7) continue
+            if (offset + 2 > bytes.size) return null
+            val length = ((bytes[offset].toInt() and 0xFF) shl 8) or
+                (bytes[offset + 1].toInt() and 0xFF)
+            if (length < 2 || offset + length > bytes.size) return null
+            val payload = offset + 2
+            if (marker == 0xE1 && payload + 14 <= offset + length &&
+                bytes.copyOfRange(payload, payload + 6).contentEquals(
+                    byteArrayOf('E'.code.toByte(), 'x'.code.toByte(), 'i'.code.toByte(),
+                        'f'.code.toByte(), 0, 0),
+                )
+            ) {
+                return payload + 6
+            }
+            offset += length
+        }
+        return null
+    }
+
+    data class Entry(val type: Int, val count: Long, val value: Long, val inlineOffset: Int)
+
+    fun byteOrder(base: Int): Boolean? = when {
+        base + 8 > bytes.size -> null
+        bytes[base] == 'I'.code.toByte() && bytes[base + 1] == 'I'.code.toByte() -> true
+        bytes[base] == 'M'.code.toByte() && bytes[base + 1] == 'M'.code.toByte() -> false
+        else -> null
+    }
+
+    fun u16(offset: Int, littleEndian: Boolean): Int? {
+        if (offset < 0 || offset + 2 > bytes.size) return null
+        val a = bytes[offset].toInt() and 0xFF
+        val b = bytes[offset + 1].toInt() and 0xFF
+        return if (littleEndian) a or (b shl 8) else (a shl 8) or b
+    }
+
+    fun u32(offset: Int, littleEndian: Boolean): Long? {
+        if (offset < 0 || offset + 4 > bytes.size) return null
+        var value = 0L
+        if (littleEndian) {
+            repeat(4) { index ->
+                value = value or ((bytes[offset + index].toLong() and 0xFF) shl (index * 8))
+            }
+        } else {
+            repeat(4) { index ->
+                value = (value shl 8) or (bytes[offset + index].toLong() and 0xFF)
+            }
+        }
+        return value
+    }
+
+    fun findEntry(ifdOffset: Int, littleEndian: Boolean, tag: Int): Entry? {
+        if (ifdOffset < 0 || ifdOffset.toLong() + 2L > bytes.size.toLong()) return null
+        val count = u16(ifdOffset, littleEndian) ?: return null
+        val entriesEnd = ifdOffset.toLong() + 2L + count.toLong() * 12L + 4L
+        if (count > 512 || entriesEnd > bytes.size.toLong()) return null
+        repeat(count) { index ->
+            val entry = ifdOffset + 2 + index * 12
+            if (u16(entry, littleEndian) == tag) {
+                return Entry(
+                    type = u16(entry + 2, littleEndian) ?: return null,
+                    count = u32(entry + 4, littleEndian) ?: return null,
+                    value = u32(entry + 8, littleEndian) ?: return null,
+                    inlineOffset = entry + 8,
+                )
+            }
+        }
+        return null
+    }
+
+    fun entryDataOffset(base: Int, entry: Entry, requiredBytes: Int): Int? {
+        if (requiredBytes < 0) return null
+        val unitSize = when (entry.type) {
+            1, 2, 7 -> 1
+            3 -> 2
+            4, 9 -> 4
+            5, 10 -> 8
+            else -> return null
+        }
+        if (entry.count <= 0 || entry.count > Int.MAX_VALUE.toLong() / unitSize) return null
+        val declaredBytes = entry.count * unitSize
+        if (declaredBytes < requiredBytes.toLong()) return null
+        val offset = if (declaredBytes <= 4) {
+            entry.inlineOffset
+        } else {
+            val absolute = base.toLong() + entry.value
+            absolute.takeIf { it in 0L..Int.MAX_VALUE.toLong() }?.toInt() ?: return null
+        }
+        return offset.takeIf {
+            it >= 0 && it.toLong() + requiredBytes.toLong() <= bytes.size.toLong()
+        }
+    }
+
+    fun relativeOffset(base: Int, relative: Long): Int? {
+        val absolute = base.toLong() + relative
+        return absolute.takeIf { it in 0L until bytes.size.toLong() }?.toInt()
+    }
+
+    val outerBase = tiffStart() ?: return null
+    val outerLittle = byteOrder(outerBase) ?: return null
+    if (u16(outerBase + 2, outerLittle) != 42) return null
+    val ifd0 = relativeOffset(outerBase, u32(outerBase + 4, outerLittle) ?: return null)
+        ?: return null
+    val exifPointer = findEntry(ifd0, outerLittle, 0x8769) ?: return null
+    if (exifPointer.type != 4 || exifPointer.count != 1L) return null
+    val exifIfd = relativeOffset(outerBase, exifPointer.value) ?: return null
+    val makerEntry = findEntry(exifIfd, outerLittle, 0x927C) ?: return null
+    val makerOffset = entryDataOffset(outerBase, makerEntry, requiredBytes = 18) ?: return null
+    if (bytes[makerOffset] != 'N'.code.toByte() ||
+        bytes[makerOffset + 1] != 'i'.code.toByte() ||
+        bytes[makerOffset + 2] != 'k'.code.toByte() ||
+        bytes[makerOffset + 3] != 'o'.code.toByte() ||
+        bytes[makerOffset + 4] != 'n'.code.toByte() ||
+        bytes[makerOffset + 5] != 0.toByte()
+    ) {
+        return null
+    }
+
+    val makerBase = makerOffset + 10
+    val makerLittle = byteOrder(makerBase) ?: return null
+    if (u16(makerBase + 2, makerLittle) != 42) return null
+    val makerIfd = relativeOffset(makerBase, u32(makerBase + 4, makerLittle) ?: return null)
+        ?: return null
+    val fileInfoEntry = findEntry(makerIfd, makerLittle, 0x00B8) ?: return null
+    val fileInfo = entryDataOffset(makerBase, fileInfoEntry, requiredBytes = 10) ?: return null
+
+    fun candidate(littleEndian: Boolean): NikonMakerFileInfo? {
+        val directory = u16(fileInfo + 6, littleEndian) ?: return null
+        val file = u16(fileInfo + 8, littleEndian) ?: return null
+        return NikonMakerFileInfo(directory, file).takeIf {
+            it.directoryNumber in 99..999 && it.fileNumber in 0..9999
+        }
+    }
+    val little = candidate(true)
+    val big = candidate(false)
+    return when {
+        little != null && big == null -> little
+        big != null && little == null -> big
+        makerLittle -> little ?: big
+        else -> big ?: little
+    }
+}
+
+/** Reads QuickTime/MP4 `mvhd.creation_time` (seconds since 1904-01-01, big-endian). */
+internal fun staDirectVideoCaptureDate(bytes: ByteArray): String? {
+    var index = 0
+    while (index + 12 <= bytes.size) {
+        if (bytes[index] == 'm'.code.toByte() &&
+            bytes[index + 1] == 'v'.code.toByte() &&
+            bytes[index + 2] == 'h'.code.toByte() &&
+            bytes[index + 3] == 'd'.code.toByte()
+        ) {
+            val version = bytes[index + 4].toInt() and 0xFF
+            val creationOffset = index + 8
+            val byteCount = if (version == 0) 4 else if (version == 1) 8 else return null
+            if (creationOffset + byteCount > bytes.size) return null
+            var secondsSince1904 = 0L
+            repeat(byteCount) { offset ->
+                secondsSince1904 = (secondsSince1904 shl 8) or
+                    (bytes[creationOffset + offset].toLong() and 0xFF)
+            }
+            val unixSeconds = secondsSince1904 - QUICKTIME_EPOCH_OFFSET_SECONDS
+            if (unixSeconds <= 0L) return null
+            return runCatching {
+                STA_DIRECT_DATE_FORMATTER.format(Instant.ofEpochSecond(unixSeconds))
+            }.getOrNull()
+        }
+        index++
+    }
+    return null
+}
+
+internal data class NefPreviewReference(val offset: Long, val length: Int)
+
+/** Returns the exact range of the largest complete JPEG embedded in a bounded RAW prefix. */
+internal fun largestEmbeddedJpegRange(
+    bytes: ByteArray,
+    validLength: Int = bytes.size,
+): NefPreviewReference? {
+    val limit = validLength.coerceIn(0, bytes.size)
+    var bestStart = -1
+    var bestEnd = -1
+    var start = -1
+    var index = 0
+    while (index + 1 < limit) {
+        val first = bytes[index].toInt() and 0xFF
+        val second = bytes[index + 1].toInt() and 0xFF
+        if (first == 0xFF && second == 0xD8) {
+            start = index
+            index += 2
+            continue
+        }
+        if (start >= 0 && first == 0xFF && second == 0xD9) {
+            val end = index + 2
+            if (end - start > bestEnd - bestStart) {
+                bestStart = start
+                bestEnd = end
+            }
+            start = -1
+            index += 2
+            continue
+        }
+        index++
+    }
+    return if (bestStart >= 0) {
+        NefPreviewReference(bestStart.toLong(), bestEnd - bestStart)
+    } else {
+        null
+    }
+}
+
+/** Returns the largest complete JPEG embedded in a bounded RAW prefix. */
+internal fun largestEmbeddedJpeg(bytes: ByteArray): ByteArray? =
+    largestEmbeddedJpegRange(bytes)?.let { range ->
+        bytes.copyOfRange(range.offset.toInt(), range.offset.toInt() + range.length)
+    }
+
+internal data class NefHeaderMetadata(
+    val captureDate: String?,
+    val previews: List<NefPreviewReference>,
+)
+
+/** Parses the bounded TIFF directory tree and returns exact embedded-JPEG ranges. */
+internal fun parseNefHeaderMetadata(
+    bytes: ByteArray,
+    validLength: Int = bytes.size,
+): NefHeaderMetadata {
+    val limit = validLength.coerceIn(0, bytes.size)
+    if (limit < 8) return NefHeaderMetadata(null, emptyList())
+    val littleEndian = when {
+        bytes[0] == 'I'.code.toByte() && bytes[1] == 'I'.code.toByte() -> true
+        bytes[0] == 'M'.code.toByte() && bytes[1] == 'M'.code.toByte() -> false
+        else -> return NefHeaderMetadata(null, emptyList())
+    }
+
+    fun u16(offset: Int): Int? {
+        if (offset < 0 || offset + 2 > limit) return null
+        val first = bytes[offset].toInt() and 0xFF
+        val second = bytes[offset + 1].toInt() and 0xFF
+        return if (littleEndian) first or (second shl 8) else (first shl 8) or second
+    }
+    fun u32(offset: Int): Long? {
+        if (offset < 0 || offset + 4 > limit) return null
+        var value = 0L
+        if (littleEndian) {
+            repeat(4) { index ->
+                value = value or ((bytes[offset + index].toLong() and 0xFF) shl (index * 8))
+            }
+        } else {
+            repeat(4) { index ->
+                value = (value shl 8) or (bytes[offset + index].toLong() and 0xFF)
+            }
+        }
+        return value
+    }
+    if (u16(2) != 42) return NefHeaderMetadata(null, emptyList())
+
+    val previews = ArrayList<NefPreviewReference>()
+    val visited = HashSet<Int>()
+    var bestDate: Pair<Int, String>? = null
+
+    fun typeSize(type: Int): Int = when (type) {
+        1, 2, 7 -> 1
+        3 -> 2
+        4, 9 -> 4
+        5, 10 -> 8
+        else -> 0
+    }
+
+    fun valueOffset(entryOffset: Int, type: Int, count: Long): Int? {
+        val unit = typeSize(type)
+        if (unit == 0 || count <= 0 || count > Int.MAX_VALUE / unit) return null
+        val byteCount = count.toInt() * unit
+        return if (byteCount <= 4) entryOffset + 8 else u32(entryOffset + 8)?.toInt()
+    }
+
+    fun numericValues(entryOffset: Int, type: Int, count: Long): List<Long> {
+        if (type != 3 && type != 4) return emptyList()
+        val start = valueOffset(entryOffset, type, count) ?: return emptyList()
+        val step = if (type == 3) 2 else 4
+        if (count > 64 || start < 0 || start + count * step > limit) return emptyList()
+        return (0 until count.toInt()).mapNotNull { index ->
+            if (type == 3) u16(start + index * step)?.toLong() else u32(start + index * step)
+        }
+    }
+
+    fun asciiValue(entryOffset: Int, type: Int, count: Long): String? {
+        if (type != 2 || count <= 1 || count > 128) return null
+        val start = valueOffset(entryOffset, type, count) ?: return null
+        val length = count.toInt()
+        if (start < 0 || start + length > limit) return null
+        return bytes.copyOfRange(start, start + length)
+            .toString(Charsets.US_ASCII)
+            .trimEnd('\u0000', ' ')
+            .takeIf(String::isNotBlank)
+    }
+
+    fun parseIfd(ifdOffset: Int, depth: Int) {
+        if (depth > 8 || ifdOffset < 8 || !visited.add(ifdOffset)) return
+        val count = u16(ifdOffset) ?: return
+        if (count > 512) return
+        val entriesStart = ifdOffset + 2
+        if (entriesStart + count * 12 + 4 > limit) return
+
+        var jpegOffsets = emptyList<Long>()
+        var jpegLengths = emptyList<Long>()
+        var stripOffsets = emptyList<Long>()
+        var stripLengths = emptyList<Long>()
+        var compression: Long? = null
+        val childIfds = ArrayList<Int>()
+
+        repeat(count) { index ->
+            val entry = entriesStart + index * 12
+            val tag = u16(entry) ?: return@repeat
+            val type = u16(entry + 2) ?: return@repeat
+            val valueCount = u32(entry + 4) ?: return@repeat
+            val values = numericValues(entry, type, valueCount)
+            when (tag) {
+                0x0103 -> compression = values.firstOrNull()
+                0x0111 -> stripOffsets = values
+                0x0117 -> stripLengths = values
+                0x014A, 0x8769 -> values.mapTo(childIfds) { it.toInt() }
+                0x0201 -> jpegOffsets = values
+                0x0202 -> jpegLengths = values
+                0x0132, 0x9003, 0x9004 -> {
+                    val priority = when (tag) {
+                        0x9003 -> 3
+                        0x9004 -> 2
+                        else -> 1
+                    }
+                    asciiValue(entry, type, valueCount)?.let { raw ->
+                        staDirectCaptureDate(raw)?.let { date ->
+                            if (bestDate == null || priority > checkNotNull(bestDate).first) {
+                                bestDate = priority to date
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        fun addRanges(offsets: List<Long>, lengths: List<Long>) {
+            offsets.zip(lengths).forEach { (offset, length) ->
+                if (offset > 0L && length in 4..STA_DIRECT_MAX_EMBEDDED_PREVIEW_BYTES.toLong()) {
+                    previews += NefPreviewReference(offset, length.toInt())
+                }
+            }
+        }
+        addRanges(jpegOffsets, jpegLengths)
+        if (compression == 6L) addRanges(stripOffsets, stripLengths)
+
+        val nextIfdOffset = u32(entriesStart + count * 12)?.toInt() ?: 0
+        if (nextIfdOffset > 0) childIfds += nextIfdOffset
+        childIfds.forEach { child -> parseIfd(child, depth + 1) }
+    }
+
+    parseIfd(u32(4)?.toInt() ?: return NefHeaderMetadata(null, emptyList()), 0)
+    return NefHeaderMetadata(
+        captureDate = bestDate?.second,
+        previews = previews.distinct().sortedByDescending(NefPreviewReference::length),
+    )
+}
+
+private const val QUICKTIME_EPOCH_OFFSET_SECONDS = 2_082_844_800L
+private const val STA_DIRECT_MAX_EMBEDDED_PREVIEW_BYTES = 16 * 1024 * 1024
+private val STA_DIRECT_DATE_FORMATTER: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss").withZone(ZoneId.systemDefault())
+
 class NikonCamera(private val context: Context) {
     private var cmdSocket: Socket? = null
     private var evtSocket: Socket? = null
@@ -372,12 +1140,24 @@ class NikonCamera(private val context: Context) {
     /** ObjectInfo/GetThumb are denied, but size and partial original reads were verified. */
     @Volatile internal var staDirectObjectReadValidated = false
         private set
-    @Volatile internal var staDirectMetadataDiagnostic: String? = null
-        private set
+    private val staDirectMetadataDiagnostics = java.util.concurrent.ConcurrentHashMap<String, String>()
+    internal val staDirectMetadataDiagnosticReports: List<String>
+        get() = staDirectMetadataDiagnostics.toSortedMap().values.toList()
     // Direct-STA metadata scanning extracts embedded EXIF thumbnails while the same 64 KiB header
     // is already in memory. The regular thumbnail pipeline consumes these entries immediately.
     private val staDirectThumbnails = HashMap<Int, ByteArray>()
     private val staDirectNoThumbnail = HashSet<Int>()
+    private val staDirectFiles = HashMap<Int, FileInfo>()
+    private val staDirectJpegMpfPreviews = HashMap<Int, List<JpegMpfPreviewReference>>()
+    private val staDirectRawPreviews = HashMap<Int, List<NefPreviewReference>>()
+    // A scan-only thumbnail is not proof that the RAW's largest preview was found. Keep indexed
+    // IFD references separate so full-screen preview never mistakes the first small JPEG for FHD.
+    private val staDirectRawIndexedPreviews = HashSet<Int>()
+    private val staDirectOriginalFileNames = HashMap<Int, String>()
+    private var staDirectFileNumberAnchor: NikonFileNumberAnchor? = null
+    private val staDirectEmbeddedFileNameAvailable = HashMap<String, Boolean>()
+    private var staDirectFileNameListAttempted = false
+    private var staDirectFileNameValueSupported: Boolean? = null
     // internal 而非 private:遥控实验(RemoteLab.kt)以扩展函数复用同一互斥与收发原语,
     // 保证实验命令与传输/缩略图/心跳严格串行,不引入第二条 IO 路径。
     private val ioGate = CameraIoGate()
@@ -398,6 +1178,10 @@ class NikonCamera(private val context: Context) {
     // 能力状态。一次成功后保持 true，避免后续单个 handle 的异常推翻已验证能力。
     // 每次 connect 新建 NikonCamera 实例，故换相机自动重新探测。仅 ioMutex 内访问。
     @Volatile private var fhdSupported: Boolean? = null
+    // Paired STA uses an independent, read-only preview capability probe. Keeping these separate
+    // ensures the established AP FHD latch and request behavior remain byte-for-byte unchanged.
+    private var staFhdPictureSupported: Boolean? = null
+    private var staLargeThumbSupported: Boolean? = null
     // STA 握手会用 GetStorageIDs 验证已经进入浏览能力集；把结果交给首次文件扫描消费，
     // 避免紧接着重复同一条命令触发部分固件的状态异常。
     private var prefetchedStorageIds: List<Int>? = null
@@ -475,6 +1259,17 @@ class NikonCamera(private val context: Context) {
         private const val NIKON_CHANGE_APPLICATION_MODE = 0x9435
         private const val STA_SAMPLE_BYTES = 64 * 1024
         internal const val STA_DIRECT_CATALOG_HEADER_BYTES = 128 * 1024
+        private const val STA_DIRECT_VIDEO_TAIL_BYTES = 256 * 1024
+        private const val STA_DIRECT_VIDEO_THUMBNAIL_PREFIX_BYTES = 8 * 1024 * 1024
+        private val STA_DIRECT_RAW_PROBE_PREFIX_BYTES = intArrayOf(
+            256 * 1024,
+            512 * 1024,
+            1024 * 1024,
+            2 * 1024 * 1024,
+            4 * 1024 * 1024,
+            8 * 1024 * 1024,
+            16 * 1024 * 1024,
+        )
         private const val PAIRING_EVENT_TIMEOUT_MS = 8_000L
         // 取消下载的排空安全阀：已向相机发送 Cancel 包后，在途数据只剩 ≈TCP 窗口的数 MB，
         // 排空应秒级完成；若累计排空超过该预算仍没等到响应包，说明机型不支持 Cancel、
@@ -635,9 +1430,20 @@ class NikonCamera(private val context: Context) {
         try {
             staAlbumAccessValidated = false
             staDirectObjectReadValidated = false
-            staDirectMetadataDiagnostic = null
+            staFhdPictureSupported = null
+            staLargeThumbSupported = null
+            staDirectMetadataDiagnostics.clear()
             staDirectThumbnails.clear()
             staDirectNoThumbnail.clear()
+            staDirectFiles.clear()
+            staDirectJpegMpfPreviews.clear()
+            staDirectRawPreviews.clear()
+            staDirectRawIndexedPreviews.clear()
+            staDirectOriginalFileNames.clear()
+            staDirectFileNumberAnchor = null
+            staDirectEmbeddedFileNameAvailable.clear()
+            staDirectFileNameListAttempted = false
+            staDirectFileNameValueSupported = null
             staDiagnosticLines.clear()
             staDiagnosticLines += "identity=${identity.name}"
             if (FileOrderProbe.enabled) FileOrderProbe.beginConnection("PTP/IP STA")
@@ -1043,9 +1849,18 @@ class NikonCamera(private val context: Context) {
             if (staDirectObjectReadValidated) {
                 staDirectThumbnails.remove(handle)?.let { return@withContext it }
                 if (handle in staDirectNoThumbnail) return@withContext null
-                val direct = readStaDirectObjectHeaderInternal(handle)
-                direct.thumbnail?.let { return@withContext it }
-                staDirectNoThumbnail += handle
+                val file = staDirectFiles[handle]
+                val thumbnail = when (file?.extension) {
+                    ".nef" -> readStaDirectRawThumbnailInternal(file)
+                    ".mov", ".mp4" -> readStaDirectVideoThumbnailInternal(file)
+                    else -> readStaDirectObjectHeaderInternal(handle).thumbnail
+                }
+                thumbnail?.let { return@withContext it }
+                // A bounded RAW/video probe returning null does not prove that the object has no
+                // preview. Do not permanently suppress a later visible retry in this session.
+                if (file == null || file.extension == ".jpg") {
+                    staDirectNoThumbnail += handle
+                }
                 return@withContext null
             }
             sendCmd(PtpConstants.GET_THUMB, handle)
@@ -1123,6 +1938,146 @@ class NikonCamera(private val context: Context) {
             } catch (e: Exception) {
                 // 未完整收完响应的连接不可再复用，否则下一条命令可能读到本事务残包。
                 log { "GetFhdPicture transport failed: ${e.javaClass.simpleName}: ${e.message}" }
+                closeQuietly()
+                null
+            }
+        }
+    }
+
+    /**
+     * Paired-STA preview. Prefer the camera-generated FHD/LargeThumb operation when the current
+     * profile permits it; paired-computer profiles that deny those operations fall back to the
+     * exact independent JPEG range described by the object's MPF index. No path reads the original
+     * primary JPEG stream.
+     */
+    suspend fun getStaFhdPicture(
+        handle: Int,
+        retryDeviceBusy: Boolean = true,
+    ): ByteArray? = ioGate.withInteractive {
+        withContext(Dispatchers.IO) {
+            if (!staDirectObjectReadValidated) return@withContext null
+            val advertisedOperations = cachedDeviceInfo?.operations.orEmpty()
+            val candidates = listOf(
+                PtpConstants.NK_GET_FHD_PICTURE to "GetFhdPicture",
+                PtpConstants.NK_GET_LARGE_THUMB to "GetLargeThumb",
+            )
+            try {
+                suspend fun requestCameraPreview(): ByteArray? {
+                    for ((operation, operationName) in candidates) {
+                        val advertised = operation in advertisedOperations
+                        val knownSupport = when (operation) {
+                            PtpConstants.NK_GET_FHD_PICTURE -> staFhdPictureSupported
+                            else -> staLargeThumbSupported
+                        }
+                        // GetLargeThumb is a fallback only when the current camera declares it. The
+                        // historical 0x920F path is still probed once because Nikon bodies do not
+                        // consistently include every private operation in DeviceInfo.
+                        if (knownSupport == false ||
+                            (operation == PtpConstants.NK_GET_LARGE_THUMB && !advertised)
+                        ) {
+                            if (PhotoGenerationProbe.enabled) {
+                                PhotoGenerationProbe.note(
+                                    "STA-PREVIEW",
+                                    "camera:%s handle=0x%08X skipped=%s advertised=%s".format(
+                                        operationName,
+                                        handle,
+                                        if (knownSupport == false) {
+                                            "session-unsupported"
+                                        } else {
+                                            "not-advertised"
+                                        },
+                                        advertised,
+                                    ),
+                                )
+                            }
+                            continue
+                        }
+
+                        var busyRetriesRemaining = if (retryDeviceBusy) FHD_DEVICE_BUSY_RETRIES else 0
+                        while (true) {
+                            val startedAt = SystemClock.elapsedRealtime()
+                            sendCmd(operation, handle)
+                            val (response, data) = recvRespWithPayload()
+                            val payload = data?.takeIf {
+                                response == PtpConstants.RESPONSE_OK && it.isNotEmpty()
+                            }
+                            val bounds = payload?.let { bytes ->
+                                BitmapFactory.Options().also { options ->
+                                    options.inJustDecodeBounds = true
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+                                }
+                            }
+                            val isJpeg = payload?.let {
+                                it.size >= 2 && it[0] == 0xFF.toByte() && it[1] == 0xD8.toByte()
+                            } ?: false
+                            val validPreview = payload?.takeIf {
+                                isJpeg && (bounds?.outWidth ?: 0) > 0 &&
+                                    (bounds?.outHeight ?: 0) > 0
+                            }
+                            if (PhotoGenerationProbe.enabled) {
+                                PhotoGenerationProbe.note(
+                                    "STA-PREVIEW",
+                                    ("camera:%s handle=0x%08X opcode=0x%04X advertised=%s " +
+                                        "response=0x%04X bytes=%d jpeg=%s dimensions=%dx%d " +
+                                        "networkMs=%d").format(
+                                        operationName,
+                                        handle,
+                                        operation,
+                                        advertised,
+                                        response,
+                                        data?.size ?: 0,
+                                        isJpeg,
+                                        bounds?.outWidth ?: 0,
+                                        bounds?.outHeight ?: 0,
+                                        SystemClock.elapsedRealtime() - startedAt,
+                                    ),
+                                )
+                            }
+                            if (validPreview != null) {
+                                if (operation == PtpConstants.NK_GET_FHD_PICTURE) {
+                                    staFhdPictureSupported = true
+                                } else {
+                                    staLargeThumbSupported = true
+                                }
+                                return validPreview
+                            }
+                            if (response == PtpConstants.DEVICE_BUSY && busyRetriesRemaining > 0) {
+                                busyRetriesRemaining--
+                                delay(FHD_DEVICE_BUSY_RETRY_DELAY_MS)
+                                continue
+                            }
+                            if (response == PtpConstants.OPERATION_NOT_SUPPORTED || response == 0x200F) {
+                                if (operation == PtpConstants.NK_GET_FHD_PICTURE) {
+                                    staFhdPictureSupported = false
+                                } else {
+                                    staLargeThumbSupported = false
+                                }
+                            }
+                            break
+                        }
+                    }
+                    return null
+                }
+
+                requestCameraPreview()
+                    ?: readStaDirectJpegMpfPreviewInternal(handle)
+                    ?: staDirectFiles[handle]
+                        ?.takeIf { it.extension == ".nef" }
+                        ?.let(::readStaDirectRawPreviewInternal)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (PhotoGenerationProbe.enabled) {
+                    PhotoGenerationProbe.note(
+                        "STA-PREVIEW",
+                        "preview handle=0x%08X error=%s:%s".format(
+                            handle,
+                            e.javaClass.simpleName,
+                            e.message.orEmpty(),
+                        ),
+                    )
+                }
+                // A transport failure can leave a partial PTP/IP data phase behind.
                 closeQuietly()
                 null
             }
@@ -1219,20 +2174,40 @@ class NikonCamera(private val context: Context) {
         val total = handles.size
         var processed = 0
         var allSucceeded = true
-        handles.chunked(batchSize).forEach { batch ->
+        ioMutex.withLock {
+            loadStaDirectOriginalFileNamesInternal()
+        }
+        var nextHandleIndex = 0
+        while (nextHandleIndex < total) {
+            // Direct STA needs a 128 KiB header read per object. Publishing the first item
+            // immediately avoids holding an empty screen until a full 12-object batch completes;
+            // after the first four items we return to the normal batch size to limit UI churn.
+            val currentBatchSize = when {
+                nextHandleIndex == 0 -> 1
+                nextHandleIndex < 4 -> minOf(3, batchSize)
+                else -> batchSize
+            }
+            val batchEnd = minOf(nextHandleIndex + currentBatchSize, total)
+            val batch = handles.subList(nextHandleIndex, batchEnd)
             val files = ioMutex.withLock {
                 batch.mapNotNull { handle ->
                     loadContext.ensureActive()
                     val result = readStaDirectObjectHeaderInternal(handle)
                     if (!result.successful) allSucceeded = false
-                    result.file?.also {
+                    result.file?.also { file ->
+                        staDirectFiles[handle] = file
                         result.thumbnail?.let { bytes -> staDirectThumbnails[handle] = bytes }
-                        if (result.thumbnail == null) staDirectNoThumbnail += handle
+                        // RAW/video previews are intentionally lazy; only JPEG has a cheap EXIF
+                        // thumbnail available during the catalog pass.
+                        if (result.thumbnail == null && file.extension == ".jpg") {
+                            staDirectNoThumbnail += handle
+                        }
                     }
                 }
             }
             processed += batch.size
             if (files.isNotEmpty()) onBatch(files, processed, total)
+            nextHandleIndex = batchEnd
         }
         allSucceeded
     }
@@ -1243,8 +2218,91 @@ class NikonCamera(private val context: Context) {
         val successful: Boolean,
     )
 
+    /** Must be called while [ioMutex] is held. Prefer exact standard MTP names when advertised. */
+    private fun loadStaDirectOriginalFileNamesInternal() {
+        if (staDirectFileNameListAttempted) return
+        staDirectFileNameListAttempted = true
+        val operations = cachedDeviceInfo?.operations.orEmpty()
+        val propertyListAdvertised = PtpConstants.GET_OBJECT_PROP_LIST in operations
+        var propertyResponse: Int? = null
+        var propertyData: ByteArray? = null
+        var propertyNames: Map<Int, String> = emptyMap()
+        if (propertyListAdvertised) {
+            sendCmd(
+                PtpConstants.GET_OBJECT_PROP_LIST,
+                -1,
+                0,
+                PtpConstants.OBJECT_PROP_OBJECT_FILE_NAME,
+                0,
+                0,
+            )
+            val result = recvRespWithPayload()
+            propertyResponse = result.first
+            propertyData = result.second
+            if (propertyResponse == PtpConstants.RESPONSE_OK && propertyData != null) {
+                propertyNames = parseObjectFileNamePropertyList(propertyData)
+                staDirectOriginalFileNames.putAll(propertyNames)
+            }
+        }
+        staDirectMetadataDiagnostics.putIfAbsent(
+            "filename-list",
+            ("direct filename GetObjectPropList advertised=%s response=%s " +
+                "payloadBytes=%d names=%d sample=%s").format(
+                    propertyListAdvertised,
+                    propertyResponse?.let(::hexResponse) ?: "<skipped>",
+                    propertyData?.size ?: 0,
+                    propertyNames.size,
+                    propertyNames.entries.take(4).joinToString(",") {
+                        "0x%08X:%s".format(it.key, it.value)
+                    }.ifEmpty { "<none>" },
+                ),
+        )
+    }
+
+    /** Must be called while [ioMutex] is held. Used only when the one-shot list missed a handle. */
+    private fun readStaDirectOriginalFileNameInternal(handle: Int): String? {
+        staDirectOriginalFileNames[handle]?.let { return it }
+        if (staDirectFileNameValueSupported == false) return null
+        val advertised = cachedDeviceInfo?.operations
+            ?.contains(PtpConstants.GET_OBJECT_PROP_VALUE) == true
+        if (!advertised) {
+            staDirectFileNameValueSupported = false
+            staDirectMetadataDiagnostics.putIfAbsent(
+                "filename-value",
+                "direct filename GetObjectPropValue advertised=false response=<skipped> name=<none>",
+            )
+            return null
+        }
+        sendCmd(
+            PtpConstants.GET_OBJECT_PROP_VALUE,
+            handle,
+            PtpConstants.OBJECT_PROP_OBJECT_FILE_NAME,
+        )
+        val (response, data) = recvRespWithPayload()
+        val fileName = if (response == PtpConstants.RESPONSE_OK && data != null) {
+            parsePtpObjectFileName(data)?.first
+        } else {
+            null
+        }
+        staDirectFileNameValueSupported = fileName != null
+        fileName?.let { staDirectOriginalFileNames[handle] = it }
+        staDirectMetadataDiagnostics.putIfAbsent(
+            "filename-value",
+            ("direct filename GetObjectPropValue advertised=%s handle=0x%08X " +
+                "response=%s payloadBytes=%d name=%s").format(
+                    advertised,
+                    handle,
+                    hexResponse(response),
+                    data?.size ?: 0,
+                    fileName ?: "<none>",
+                ),
+        )
+        return fileName
+    }
+
     /** Must be called while [ioMutex] is held. */
     private fun readStaDirectObjectHeaderInternal(handle: Int): StaDirectObjectHeader {
+        val protocolFileName = readStaDirectOriginalFileNameInternal(handle)
         val size = getObjectSizeInternal(handle)
             ?: return StaDirectObjectHeader(null, null, false)
         sendCmd(
@@ -1260,37 +2318,173 @@ class NikonCamera(private val context: Context) {
             return StaDirectObjectHeader(null, null, false)
         }
 
-        val extension = staDirectObjectExtension(header)
+        val detectedExtension = staDirectObjectExtension(header)
+        val embeddedNames = if (
+            protocolFileName == null && staDirectEmbeddedFileNameAvailable[detectedExtension] != false
+        ) {
+            findEmbeddedCameraFileNames(header, includePtpStrings = false)
+        } else {
+            emptyList()
+        }
+        val embeddedFileName = embeddedNames.firstOrNull { candidate ->
+            candidate.value.substringAfterLast('.', missingDelimiterValue = "")
+                .equals(detectedExtension.removePrefix("."), ignoreCase = true)
+        }?.value
+        if (protocolFileName == null && detectedExtension !in staDirectEmbeddedFileNameAvailable) {
+            staDirectEmbeddedFileNameAvailable[detectedExtension] = embeddedFileName != null
+        }
+        val makerFileInfo = if (detectedExtension == ".jpg" || detectedExtension == ".nef") {
+            nikonMakerFileInfo(header)
+        } else {
+            null
+        }
+        if (makerFileInfo != null) {
+            staDirectFileNumberAnchor = NikonFileNumberAnchor(
+                handleSequence = handle and 0x00FFFFFF,
+                directoryNumber = makerFileInfo.directoryNumber,
+                fileNumber = makerFileInfo.fileNumber,
+            )
+        }
+        val derivedFileInfo = makerFileInfo ?: staDirectFileNumberAnchor?.let { anchor ->
+            deriveNikonMakerFileInfo(anchor, handle)
+        }
+        val derivedFileName = derivedFileInfo?.let { fileInfo ->
+            nikonDefaultCameraFileName(fileInfo, detectedExtension)
+        }
+        val originalFileName = protocolFileName ?: embeddedFileName ?: derivedFileName
+        originalFileName?.let { staDirectOriginalFileNames[handle] = it }
+        if (protocolFileName == null) {
+            staDirectMetadataDiagnostics.putIfAbsent(
+                "filename-header-$detectedExtension",
+                ("direct filename header type=%s handle=0x%08X candidates=%s selected=%s " +
+                    "number=%s source=%s").format(
+                    detectedExtension,
+                    handle,
+                    embeddedNames.take(6).joinToString(",") {
+                        "${it.offset}:${it.value}/${it.encoding}"
+                    }.ifEmpty { "<none>" },
+                    originalFileName ?: "<none>",
+                    derivedFileInfo?.let {
+                        "%03d/%04d".format(it.directoryNumber, it.fileNumber)
+                    } ?: "<none>",
+                    when {
+                        embeddedFileName != null -> "embedded"
+                        makerFileInfo != null -> "maker-note"
+                        derivedFileName != null -> "handle-sequence"
+                        else -> "fallback"
+                    },
+                ),
+            )
+        }
+        val originalExtension = originalFileName
+            ?.substringAfterLast('.', missingDelimiterValue = "")
+            ?.takeIf(String::isNotEmpty)
+            ?.let { ".$it".lowercase() }
+        val extension = if (detectedExtension == ".bin" && originalExtension != null) {
+            originalExtension
+        } else {
+            detectedExtension
+        }
         var captureDate: String? = null
         var thumbnail: ByteArray? = null
-        if (extension == ".jpg") {
-            val envelope = jpegExifEnvelope(header)
-            val exifResult = runCatching {
-                val exif = ExifInterface(ByteArrayInputStream(envelope ?: header))
-                captureDate = staDirectCaptureDate(
-                    sequenceOf(
-                        ExifInterface.TAG_DATETIME_ORIGINAL,
-                        ExifInterface.TAG_DATETIME_DIGITIZED,
-                        ExifInterface.TAG_DATETIME,
-                    ).mapNotNull(exif::getAttribute).firstOrNull(String::isNotBlank),
-                )
-                if (exif.hasThumbnail()) thumbnail = exif.thumbnailBytes
-            }
-            if (staDirectMetadataDiagnostic == null) {
-                staDirectMetadataDiagnostic =
-                    ("direct EXIF handle=0x%08X header=%dB envelope=%dB " +
-                        "date=%s thumbnail=%dB error=%s").format(
+        when (extension) {
+            ".jpg" -> {
+                val envelope = jpegExifEnvelope(header)
+                val mpfPreviews = parseJpegMpfPreviews(header, size)
+                if (mpfPreviews.isNotEmpty()) staDirectJpegMpfPreviews[handle] = mpfPreviews
+                val exifResult = parseStaDirectExif(envelope ?: header, isRaw = false)
+                captureDate = exifResult.captureDate
+                thumbnail = exifResult.thumbnail
+                staDirectMetadataDiagnostics.putIfAbsent(
+                    "jpeg",
+                    ("direct JPEG handle=0x%08X header=%dB envelope=%dB container=%s mpf=%s " +
+                        "fileInfo=%s date=%s thumbnail=%dB error=%s").format(
                         handle,
                         header.size,
                         envelope?.size ?: 0,
+                        jpegContainerDiagnostics(header),
+                        mpfPreviews.joinToString(",") {
+                            "type=0x%06X/range=%d+%d".format(
+                                it.imageType,
+                                it.offset,
+                                it.length,
+                            )
+                        }.ifEmpty { "<none>" },
+                        makerFileInfo?.let {
+                            "%03d/%04d".format(it.directoryNumber, it.fileNumber)
+                        } ?: "<none>",
                         captureDate ?: "<none>",
                         thumbnail?.size ?: 0,
-                        exifResult.exceptionOrNull()?.javaClass?.simpleName ?: "<none>",
+                        exifResult.error ?: "<none>",
+                    ),
+                )
+            }
+            ".nef" -> {
+                val rawMetadata = parseNefHeaderMetadata(header)
+                staDirectRawPreviews[handle] = rawMetadata.previews
+                if (rawMetadata.previews.isNotEmpty()) staDirectRawIndexedPreviews += handle
+                val exifResult = parseStaDirectExif(header, isRaw = true)
+                captureDate = rawMetadata.captureDate ?: exifResult.captureDate
+                thumbnail = rawMetadata.previews.firstOrNull { reference ->
+                    reference.offset + reference.length <= header.size
+                }?.let { reference ->
+                    header.copyOfRange(
+                        reference.offset.toInt(),
+                        reference.offset.toInt() + reference.length,
                     )
+                } ?: largestEmbeddedJpeg(header) ?: exifResult.thumbnail
+                staDirectMetadataDiagnostics.putIfAbsent(
+                    "raw",
+                    ("direct RAW handle=0x%08X header=%dB refs=%s requiredPrefix=%s " +
+                        "fileInfo=%s date=%s thumbnail=%dB error=%s").format(
+                        handle,
+                        header.size,
+                        rawMetadata.previews.take(4).joinToString(",") {
+                            "${it.offset}+${it.length}"
+                        }.ifEmpty { "<none>" },
+                        rawMetadata.previews.firstOrNull()?.let {
+                            (it.offset + it.length).toString()
+                        } ?: "<none>",
+                        makerFileInfo?.let {
+                            "%03d/%04d".format(it.directoryNumber, it.fileNumber)
+                        } ?: "<none>",
+                        captureDate ?: "<none>",
+                        thumbnail?.size ?: 0,
+                        exifResult.error ?: "<none>",
+                    ),
+                )
+            }
+            ".mov", ".mp4" -> {
+                captureDate = staDirectVideoCaptureDate(header)
+                var tailBytes = 0
+                if (captureDate == null && size > header.size) {
+                    val requestSize = minOf(size, STA_DIRECT_VIDEO_TAIL_BYTES.toLong()).toInt()
+                    val tail = readStaDirectPartialInternal(
+                        handle = handle,
+                        offset = (size - requestSize).coerceAtLeast(0L),
+                        maxSize = requestSize,
+                    )
+                    tailBytes = tail?.size ?: 0
+                    captureDate = tail?.let(::staDirectVideoCaptureDate)
+                }
+                thumbnail = largestEmbeddedJpeg(header)
+                staDirectMetadataDiagnostics.putIfAbsent(
+                    "video",
+                    ("direct VIDEO handle=0x%08X header=%dB tail=%dB date=%s thumbnail=%dB").format(
+                        handle,
+                        header.size,
+                        tailBytes,
+                        captureDate ?: "<none>",
+                        thumbnail?.size ?: 0,
+                    ),
+                )
             }
         }
         val dateStem = captureDate?.filter(Char::isDigit)?.take(14)
-        val fileName = buildString {
+        val fileName = originalFileName?.takeIf { original ->
+            original.substringAfterLast('.', missingDelimiterValue = "")
+                .equals(extension.removePrefix("."), ignoreCase = true)
+        } ?: buildString {
             append("ZTransfer_")
             if (!dateStem.isNullOrEmpty()) append(dateStem).append('_')
             append("%08X".format(handle))
@@ -1306,6 +2500,406 @@ class NikonCamera(private val context: Context) {
             thumbnail = thumbnail,
             successful = true,
         )
+    }
+
+    private data class StaDirectExifResult(
+        val captureDate: String?,
+        val thumbnail: ByteArray?,
+        val error: String?,
+    )
+
+    private fun parseStaDirectExif(bytes: ByteArray, isRaw: Boolean): StaDirectExifResult {
+        var temp: File? = null
+        return try {
+            val exif = if (isRaw) {
+                File.createTempFile("sta_direct_", ".nef", context.cacheDir).also {
+                    temp = it
+                    it.writeBytes(bytes)
+                }.let(::ExifInterface)
+            } else {
+                ExifInterface(ByteArrayInputStream(bytes))
+            }
+            val captureDate = staDirectCaptureDate(
+                sequenceOf(
+                    ExifInterface.TAG_DATETIME_ORIGINAL,
+                    ExifInterface.TAG_DATETIME_DIGITIZED,
+                    ExifInterface.TAG_DATETIME,
+                ).mapNotNull(exif::getAttribute).firstOrNull(String::isNotBlank),
+            )
+            StaDirectExifResult(
+                captureDate = captureDate,
+                thumbnail = if (exif.hasThumbnail()) exif.thumbnailBytes else null,
+                error = null,
+            )
+        } catch (error: Exception) {
+            StaDirectExifResult(null, null, error.javaClass.simpleName)
+        } finally {
+            temp?.delete()
+        }
+    }
+
+    /** Must be called while [ioMutex] is held. */
+    private fun readStaDirectPartialInternal(
+        handle: Int,
+        offset: Long,
+        maxSize: Int,
+    ): ByteArray? {
+        if (maxSize <= 0) return null
+        sendCmd(
+            PtpConstants.NK_GET_PARTIAL_OBJECT_EX,
+            handle,
+            (offset and 0xFFFFFFFFL).toInt(),
+            (offset ushr 32).toInt(),
+            maxSize,
+            0,
+        )
+        val (response, data) = recvRespWithPayload()
+        return data?.takeIf { response == PtpConstants.RESPONSE_OK && it.isNotEmpty() }
+    }
+
+    /** Must be called while [ioMutex] is held; reads only an MPF-indexed secondary JPEG. */
+    private fun readStaDirectJpegMpfPreviewInternal(handle: Int): ByteArray? {
+        val references = staDirectJpegMpfPreviews[handle].orEmpty()
+        if (references.isEmpty()) {
+            if (PhotoGenerationProbe.enabled) {
+                PhotoGenerationProbe.note(
+                    "STA-PREVIEW",
+                    "MPF handle=0x%08X candidates=<none>".format(handle),
+                )
+            }
+            return null
+        }
+
+        for (reference in references) {
+            val startedAt = SystemClock.elapsedRealtime()
+            val bytes = readStaDirectPartialInternal(
+                handle = handle,
+                offset = reference.offset,
+                maxSize = reference.length,
+            )
+            val isCompleteJpeg = bytes?.let {
+                it.size == reference.length && it.size >= 4 &&
+                    it[0] == 0xFF.toByte() && it[1] == 0xD8.toByte() &&
+                    it[it.lastIndex - 1] == 0xFF.toByte() && it[it.lastIndex] == 0xD9.toByte()
+            } ?: false
+            val bounds = bytes?.takeIf { isCompleteJpeg }?.let { jpeg ->
+                BitmapFactory.Options().also { options ->
+                    options.inJustDecodeBounds = true
+                    BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, options)
+                }
+            }
+            val validPreview = bytes?.takeIf {
+                isCompleteJpeg && (bounds?.outWidth ?: 0) > 0 && (bounds?.outHeight ?: 0) > 0
+            }
+            if (PhotoGenerationProbe.enabled) {
+                PhotoGenerationProbe.note(
+                    "STA-PREVIEW",
+                    ("MPF handle=0x%08X type=0x%06X range=%d+%d bytes=%d jpeg=%s " +
+                        "dimensions=%dx%d networkMs=%d").format(
+                        handle,
+                        reference.imageType,
+                        reference.offset,
+                        reference.length,
+                        bytes?.size ?: 0,
+                        isCompleteJpeg,
+                        bounds?.outWidth ?: 0,
+                        bounds?.outHeight ?: 0,
+                        SystemClock.elapsedRealtime() - startedAt,
+                    ),
+                )
+            }
+            if (validPreview != null) return validPreview
+        }
+        return null
+    }
+
+    /** Must be called while [ioMutex] is held; invoked only for a visible RAW thumbnail. */
+    private fun readStaDirectRawThumbnailInternal(file: FileInfo): ByteArray? {
+        fun readReference(reference: NefPreviewReference): ByteArray? =
+            readStaDirectPartialInternal(
+                handle = file.handle,
+                offset = reference.offset,
+                maxSize = reference.length,
+            )?.takeIf { bytes ->
+                bytes.size >= 2 &&
+                    bytes[0] == 0xFF.toByte() &&
+                    bytes[1] == 0xD8.toByte()
+            }
+
+        // Parser order is largest-first for full-screen preview; the grid should transfer the
+        // smallest available embedded JPEG to minimize camera IO and decode work.
+        staDirectRawPreviews[file.handle]?.lastOrNull()?.let { reference ->
+            val cachedResult = readReference(reference)
+            if (PhotoGenerationProbe.enabled) {
+                PhotoGenerationProbe.note(
+                    "STA-THUMB",
+                    "RAW handle=0x%08X source=cached range=%d+%d requiredPrefix=%d thumbnail=%dB"
+                        .format(
+                            file.handle,
+                            reference.offset,
+                            reference.length,
+                            reference.offset + reference.length,
+                            cachedResult?.size ?: 0,
+                        ),
+                )
+            }
+            return cachedResult
+        }
+
+        val maximumProbeBytes = minOf(
+            file.size,
+            STA_DIRECT_RAW_PROBE_PREFIX_BYTES.last().toLong(),
+        ).toInt()
+        if (maximumProbeBytes <= 0) return null
+
+        // Allocate only the current step. Most Z30 NEFs expose the preview index inside 256 KiB;
+        // reserving the full 16 MiB cap for every visible cell causes avoidable GC pauses.
+        var accumulated = ByteArray(
+            minOf(STA_DIRECT_RAW_PROBE_PREFIX_BYTES.first(), maximumProbeBytes),
+        )
+        var loadedBytes = 0
+        val probeSteps = ArrayList<Int>()
+        var discoveredReference: NefPreviewReference? = null
+        var discoveredReferences: List<NefPreviewReference> = emptyList()
+        var source = "none"
+        var result: ByteArray? = null
+
+        for (configuredTarget in STA_DIRECT_RAW_PROBE_PREFIX_BYTES) {
+            val target = minOf(configuredTarget, maximumProbeBytes)
+            if (accumulated.size < target) accumulated = accumulated.copyOf(target)
+            val missing = target - loadedBytes
+            if (missing > 0) {
+                val chunk = readStaDirectPartialInternal(
+                    handle = file.handle,
+                    offset = loadedBytes.toLong(),
+                    maxSize = missing,
+                ) ?: break
+                val accepted = minOf(chunk.size, maximumProbeBytes - loadedBytes)
+                chunk.copyInto(
+                    destination = accumulated,
+                    destinationOffset = loadedBytes,
+                    endIndex = accepted,
+                )
+                loadedBytes += accepted
+            }
+
+            probeSteps += loadedBytes
+
+            val indexedReferences = parseNefHeaderMetadata(
+                bytes = accumulated,
+                validLength = loadedBytes,
+            ).previews
+            val indexedReference = indexedReferences.lastOrNull()
+            if (indexedReference != null) {
+                val indexedResult = readReference(indexedReference)
+                if (indexedResult != null) {
+                    discoveredReference = indexedReference
+                    discoveredReferences = indexedReferences
+                    source = "ifd"
+                    result = indexedResult
+                    break
+                }
+            }
+
+            val scannedReference = largestEmbeddedJpegRange(accumulated, loadedBytes)
+            if (scannedReference != null) {
+                discoveredReference = scannedReference
+                discoveredReferences = listOf(scannedReference)
+                source = "scan"
+                result = accumulated.copyOfRange(
+                    scannedReference.offset.toInt(),
+                    scannedReference.offset.toInt() + scannedReference.length,
+                )
+                break
+            }
+            if (loadedBytes >= maximumProbeBytes || loadedBytes < target) break
+        }
+
+        if (discoveredReferences.isNotEmpty()) {
+            staDirectRawPreviews[file.handle] = discoveredReferences
+            if (source == "ifd") staDirectRawIndexedPreviews += file.handle
+        }
+        if (PhotoGenerationProbe.enabled) {
+            val reference = discoveredReference
+            PhotoGenerationProbe.note(
+                "STA-THUMB",
+                ("RAW handle=0x%08X source=%s probeSteps=%s candidates=%s range=%s " +
+                    "requiredPrefix=%s thumbnail=%dB").format(
+                        file.handle,
+                        source,
+                        probeSteps.joinToString(","),
+                        discoveredReferences.take(4).joinToString(",") {
+                            "${it.offset}+${it.length}"
+                        }.ifEmpty { "<none>" },
+                        reference?.let { "${it.offset}+${it.length}" } ?: "<none>",
+                        reference?.let { (it.offset + it.length).toString() } ?: "<none>",
+                        result?.size ?: 0,
+                    ),
+            )
+        }
+        return result
+    }
+
+    /** Must be called while [ioMutex] is held; selects the largest indexed RAW preview for FHD. */
+    private fun readStaDirectRawPreviewInternal(file: FileInfo): ByteArray? {
+        fun readReference(reference: NefPreviewReference): ByteArray? =
+            readStaDirectPartialInternal(
+                handle = file.handle,
+                offset = reference.offset,
+                maxSize = reference.length,
+            )?.takeIf { bytes ->
+                bytes.size == reference.length &&
+                    bytes.size >= 2 &&
+                    bytes[0] == 0xFF.toByte() &&
+                    bytes[1] == 0xD8.toByte()
+            }
+
+        // References parsed from the TIFF IFD describe all embedded previews and are sorted
+        // largest-first. A grid scan may cache only the first small JPEG, so it is intentionally
+        // not trusted here unless it was backed by the IFD index.
+        if (file.handle in staDirectRawIndexedPreviews) {
+            staDirectRawPreviews[file.handle]?.firstOrNull()?.let { reference ->
+                readReference(reference)?.let { result ->
+                    if (PhotoGenerationProbe.enabled) {
+                        PhotoGenerationProbe.note(
+                            "STA-PREVIEW",
+                            "RAW handle=0x%08X source=indexed-cache range=%d+%d bytes=%d"
+                                .format(file.handle, reference.offset, reference.length, result.size),
+                        )
+                    }
+                    return result
+                }
+            }
+        }
+
+        val maximumProbeBytes = minOf(
+            file.size,
+            STA_DIRECT_RAW_PROBE_PREFIX_BYTES.last().toLong(),
+        ).toInt()
+        if (maximumProbeBytes <= 0) return null
+
+        var accumulated = ByteArray(
+            minOf(STA_DIRECT_RAW_PROBE_PREFIX_BYTES.first(), maximumProbeBytes),
+        )
+        var loadedBytes = 0
+        val probeSteps = ArrayList<Int>()
+        var bestScanned: NefPreviewReference? = null
+
+        for (configuredTarget in STA_DIRECT_RAW_PROBE_PREFIX_BYTES) {
+            val target = minOf(configuredTarget, maximumProbeBytes)
+            if (accumulated.size < target) accumulated = accumulated.copyOf(target)
+            val missing = target - loadedBytes
+            if (missing > 0) {
+                val chunk = readStaDirectPartialInternal(
+                    handle = file.handle,
+                    offset = loadedBytes.toLong(),
+                    maxSize = missing,
+                ) ?: break
+                val accepted = minOf(chunk.size, maximumProbeBytes - loadedBytes)
+                chunk.copyInto(accumulated, destinationOffset = loadedBytes, endIndex = accepted)
+                loadedBytes += accepted
+            }
+            probeSteps += loadedBytes
+
+            val indexed = parseNefHeaderMetadata(accumulated, loadedBytes).previews
+            if (indexed.isNotEmpty()) {
+                staDirectRawPreviews[file.handle] = indexed
+                staDirectRawIndexedPreviews += file.handle
+                val reference = indexed.first()
+                val result = readReference(reference)
+                if (PhotoGenerationProbe.enabled) {
+                    PhotoGenerationProbe.note(
+                        "STA-PREVIEW",
+                        ("RAW handle=0x%08X source=ifd probeSteps=%s candidates=%s " +
+                            "range=%d+%d bytes=%d").format(
+                            file.handle,
+                            probeSteps.joinToString(","),
+                            indexed.take(4).joinToString(",") { "${it.offset}+${it.length}" },
+                            reference.offset,
+                            reference.length,
+                            result?.size ?: 0,
+                        ),
+                    )
+                }
+                if (result != null) return result
+            }
+
+            largestEmbeddedJpegRange(accumulated, loadedBytes)?.let { candidate ->
+                val previous = bestScanned
+                if (previous == null || candidate.length > previous.length) {
+                    bestScanned = candidate
+                }
+            }
+            if (loadedBytes >= maximumProbeBytes || loadedBytes < target) break
+        }
+
+        val reference = bestScanned ?: return null
+        val end = reference.offset + reference.length
+        if (end > loadedBytes) return null
+        val result = accumulated.copyOfRange(reference.offset.toInt(), end.toInt())
+        if (PhotoGenerationProbe.enabled) {
+            PhotoGenerationProbe.note(
+                "STA-PREVIEW",
+                "RAW handle=0x%08X source=scan probeSteps=%s range=%d+%d bytes=%d".format(
+                    file.handle,
+                    probeSteps.joinToString(","),
+                    reference.offset,
+                    reference.length,
+                    result.size,
+                ),
+            )
+        }
+        return result
+    }
+
+    /** Must be called while [ioMutex] is held; never reads the full video. */
+    private fun readStaDirectVideoThumbnailInternal(file: FileInfo): ByteArray? {
+        val requestSize = minOf(
+            file.size,
+            STA_DIRECT_VIDEO_THUMBNAIL_PREFIX_BYTES.toLong(),
+        ).toInt()
+        val bytes = readStaDirectPartialInternal(file.handle, 0L, requestSize) ?: return null
+        val embedded = largestEmbeddedJpeg(bytes)
+        val result = embedded ?: extractVideoFrame(bytes, file.extension)
+        if (PhotoGenerationProbe.enabled) {
+            PhotoGenerationProbe.note(
+                "STA-THUMB",
+                "VIDEO handle=0x%08X prefix=%dB embedded=%dB thumbnail=%dB".format(
+                    file.handle,
+                    bytes.size,
+                    embedded?.size ?: 0,
+                    result?.size ?: 0,
+                ),
+            )
+        }
+        return result
+    }
+
+    private fun extractVideoFrame(bytes: ByteArray, extension: String): ByteArray? {
+        val temp = File.createTempFile("sta_video_", extension, context.cacheDir)
+        val retriever = MediaMetadataRetriever()
+        return try {
+            temp.writeBytes(bytes)
+            retriever.setDataSource(temp.absolutePath)
+            val bitmap = retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: return null
+            try {
+                ByteArrayOutputStream().use { output ->
+                    if (bitmap.compress(Bitmap.CompressFormat.JPEG, 86, output)) {
+                        output.toByteArray()
+                    } else {
+                        null
+                    }
+                }
+            } finally {
+                bitmap.recycle()
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+            temp.delete()
+        }
     }
 
     /**

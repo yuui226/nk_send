@@ -29,6 +29,11 @@ object PtpConstants {
     const val GET_OBJECT_INFO = 0x1008
     const val GET_OBJECT = 0x1009
     const val GET_THUMB = 0x100A
+    // MTP/PTP 1.1 object-property operations. Paired Nikon STA may deny GetObjectInfo while still
+    // exposing ObjectFileName through these narrower metadata operations.
+    const val GET_OBJECT_PROP_VALUE = 0x9803
+    const val GET_OBJECT_PROP_LIST = 0x9805
+    const val OBJECT_PROP_OBJECT_FILE_NAME = 0xDC07
     // Nikon 专有分块读取 (libgphoto2: PTP_OC_NIKON_GetPartialObjectEx)
     // 标准 PTP 0x101B 在 Nikon 机身上不被识别（返回 0x2004），须用此操作码。
     // 参数: handle, offset_low, offset_high, maxsize_low, maxsize_high (均为 u32)
@@ -37,6 +42,9 @@ object PtpConstants {
     // 标准 ObjectInfo(0x1008) 的 size 字段是 32 位，>4GB 文件报 0xFFFFFFFF；
     // 调此操作码获取真实 64 位字节数。参数: handle，返回 8 字节小端 u64。
     const val NK_GET_OBJECT_SIZE = 0x9421
+    // Nikon camera-generated large preview (libgphoto2: PTP_OC_NIKON_GetLargeThumb).
+    // 参数: handle；返回 JPEG 预览，不读取原始照片对象。
+    const val NK_GET_LARGE_THUMB = 0x90C4
     // Nikon 专有 FHD 预览图 (libgphoto2: PTP_OC_NIKON_GetFhdPicture)
     // 参数: handle，返回 1920×1080 JPEG。比 GetThumb (160×120) 清晰得多，
     // 用于长按预览提高清晰度；固件不支持时静默回退到缩略图。

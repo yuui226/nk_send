@@ -19,6 +19,10 @@ internal fun thumbnailCacheFileName(
     captureDate: String?,
 ): String = sha256("$fileName\u0000$size\u0000${captureDate.orEmpty()}") + ".jpg"
 
+/** STA metadata is discovered progressively, so its cache identity must not change with names/dates. */
+internal fun staThumbnailCacheFileName(handle: Int, size: Long): String =
+    sha256("sta\u0000${handle.toLong() and 0xFFFFFFFFL}\u0000$size") + ".jpg"
+
 internal fun legacyThumbnailCacheFileName(
     fileName: String,
     size: Long,
@@ -158,7 +162,11 @@ internal class ThumbnailDiskCache(
         fun targetFile(cacheFileName: String): File = File(directory, cacheFileName)
 
         /** 返回真实存在的缓存；旧版扁平文件命中时尽量无损迁入当前相机目录。 */
-        fun findCachedFile(cacheFileName: String, legacyFileName: String): File? =
+        fun findCachedFile(
+            cacheFileName: String,
+            legacyFileName: String,
+            alternateCameraFileName: String? = null,
+        ): File? =
             synchronized(lock) {
                 ensureDirectoryLocked()
                 val target = targetFile(cacheFileName)
@@ -167,6 +175,22 @@ internal class ThumbnailDiskCache(
                 }
                 index.remove(cacheFileName)
                 if (target.exists()) target.delete()
+
+                // STA used to key entries by display name/date. Migrate that same-camera entry
+                // to the stable handle+size key before considering the much older flat cache.
+                alternateCameraFileName?.takeIf { it != cacheFileName }?.let { alternateName ->
+                    val alternate = targetFile(alternateName)
+                    if (alternateName in index && alternate.isFile && alternate.length() > 0L) {
+                        if (alternate.renameTo(target) && target.isFile && target.length() > 0L) {
+                            index.remove(alternateName)
+                            index += cacheFileName
+                            return@synchronized target
+                        }
+                        return@synchronized alternate
+                    }
+                    index.remove(alternateName)
+                    if (alternate.exists()) alternate.delete()
+                }
 
                 val legacy = File(legacyRoot, legacyFileName)
                 if (!legacy.isFile || legacy.length() <= 0L) return@synchronized null
