@@ -240,6 +240,48 @@ internal fun newestFirstHandleOrders(
 }
 
 /**
+ * STA direct browsing cannot ask ObjectInfo for an object's StorageID. Derive the membership from
+ * the per-storage GetObjectHandles responses, but only expose the card filter when those responses
+ * are unambiguous. A handle returned for two physical slots means the camera ignored/aliased the
+ * storage selector; treating every such object as belonging to both cards would be misleading.
+ */
+internal data class StaDirectStorageLayout(
+    val storageIdsByHandle: Map<Int, Set<Int>>,
+    val filterStorageIds: List<Int>,
+    val crossSlotOverlapCount: Int,
+)
+
+internal fun analyzeStaDirectStorageLayout(
+    rawHandlesByStorage: List<Pair<Int, List<Int>>>,
+): StaDirectStorageLayout {
+    val storageIds = rawHandlesByStorage.map { it.first }.distinct().sorted()
+    val slotByStorageId = buildMap {
+        storageIdsBySlot(storageIds).forEach { (slot, ids) ->
+            ids.forEach { storageId -> put(storageId, slot) }
+        }
+    }
+    val observedStorageIds = LinkedHashMap<Int, MutableSet<Int>>()
+    rawHandlesByStorage.forEach { (storageId, handles) ->
+        handles.forEach { handle ->
+            observedStorageIds.getOrPut(handle) { linkedSetOf() } += storageId
+        }
+    }
+    val crossSlotOverlapCount = observedStorageIds.values.count { memberships ->
+        memberships.mapNotNull(slotByStorageId::get).distinct().size > 1
+    }
+    val reliable = crossSlotOverlapCount == 0
+    return StaDirectStorageLayout(
+        storageIdsByHandle = if (reliable) {
+            observedStorageIds.mapValues { (_, ids) -> ids.toSet() }
+        } else {
+            emptyMap()
+        },
+        filterStorageIds = if (reliable) storageIds else emptyList(),
+        crossSlotOverlapCount = crossSlotOverlapCount,
+    )
+}
+
+/**
  * 一次相机会话内的整卡枚举快照。大图预览只暂停 ObjectInfo 阶段，关闭后可直接复用
  * 已经取得的每卡 handles；相机会话一旦更换，handle 不再可信，必须重新枚举。
  */
@@ -248,6 +290,10 @@ internal data class FileScanHandleSnapshot(
     val storageIds: List<Int>,
     val handleOrders: List<StorageHandleOrder>,
     val handleQueriesSucceeded: Boolean = true,
+    /** Only STA direct scans populate this; AP/USB continue to trust ObjectInfo StorageID. */
+    val staDirectStorageIdsByHandle: Map<Int, Set<Int>> = emptyMap(),
+    /** May be empty when a paired camera returns an ambiguous aggregate catalog for both slots. */
+    val filterStorageIds: List<Int> = storageIds,
 ) {
     // 备份模式下第二张卡的副本会合并进第一条，状态列表不再保留它自己的 handle；单靠
     // existingHandles 无法知道它已读过。快照额外记住真正发布过的 handle，FHD 恢复时
@@ -2173,12 +2219,34 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val info = runCatching {
                 var got: NikonCamera.FileInfo? = null
                 if (cam.staDirectObjectReadValidated) {
-                    cam.streamStaDirectFileInfo(
-                        handles = listOf(handle),
-                        storageIds = _state.value.storageIds,
-                        batchSize = 1,
-                    ) { batch, _, _ ->
-                        got = batch.firstOrNull()
+                    val currentStorageIds = _state.value.storageIds
+                    val memberships = resolveStaDirectStorageMembership(
+                        cam = cam,
+                        handle = handle,
+                        storageIds = currentStorageIds,
+                    )
+                    val onBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
+                        { batch, _, _ ->
+                            got = batch.firstOrNull()?.let { file ->
+                                if (memberships.isEmpty()) file
+                                else file.copy(storageIds = memberships)
+                            }
+                        }
+                    val storageId = memberships.singleOrNull()
+                    if (storageId != null) {
+                        cam.streamStaDirectMergedFileInfo(
+                            newestFirstHandlesByStorage = listOf(storageId to listOf(handle)),
+                            storageIds = currentStorageIds,
+                            batchSize = 1,
+                            onBatch = onBatch,
+                        )
+                    } else {
+                        cam.streamStaDirectFileInfo(
+                            handles = listOf(handle),
+                            storageIds = currentStorageIds,
+                            batchSize = 1,
+                            onBatch = onBatch,
+                        )
                     }
                 } else {
                     cam.streamFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
@@ -2218,6 +2286,25 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+    }
+
+    /** Resolve a newly announced direct-STA object without adding any AP/USB polling work. */
+    private suspend fun resolveStaDirectStorageMembership(
+        cam: NikonCamera,
+        handle: Int,
+        storageIds: List<Int>,
+    ): Set<Int> {
+        if (storageIds.isEmpty()) return emptySet()
+        if (storageIds.size == 1) return setOf(storageIds.single())
+        val rawHandlesByStorage = ArrayList<Pair<Int, List<Int>>>(storageIds.size)
+        for (storageId in storageIds) {
+            val queryStorageId = objectHandleQueryStorageId(storageId, isStaConnection = true)
+            val result = cam.getObjectHandlesWithStatus(queryStorageId)
+            if (!result.successful) return emptySet()
+            rawHandlesByStorage += storageId to result.handles
+        }
+        val layout = analyzeStaDirectStorageLayout(rawHandlesByStorage)
+        return layout.storageIdsByHandle[handle].orEmpty()
     }
 
     private fun loadFiles(
@@ -2333,7 +2420,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 storageIds.joinToString(",") { "0x%08X".format(it) },
                         )
                     }
-                    _state.update { it.copy(storageIds = storageIds) }
+                    // ObjectInfo supplies authoritative membership on the standard path. STA direct
+                    // must first compare the per-storage handle sets; exposing both slots before
+                    // that check can create a filter which hides every object on aggregate cameras.
+                    _state.update {
+                        it.copy(
+                            storageIds = if (cam.staDirectObjectReadValidated) emptyList()
+                            else storageIds,
+                        )
+                    }
                     if (storageIds.isEmpty()) {
                         fileScanHandleSnapshot = null
                         fileLoadPending = false
@@ -2413,6 +2508,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     val rawHandlesByStorage = handleResultsByStorage.map { (storageId, result) ->
                         storageId to result.handles
                     }
+                    val staDirectStorageLayout = if (cam.staDirectObjectReadValidated) {
+                        analyzeStaDirectStorageLayout(rawHandlesByStorage)
+                    } else {
+                        null
+                    }
+                    if (PhotoGenerationProbe.enabled && staScan && staDirectStorageLayout != null) {
+                        val membershipCount = staDirectStorageLayout.storageIdsByHandle.size
+                        PhotoGenerationProbe.note(
+                            "STA-SCAN",
+                            "storage membership mapped=$membershipCount " +
+                                "crossSlotOverlap=${staDirectStorageLayout.crossSlotOverlapCount} " +
+                                "filterStorageIds=" +
+                                staDirectStorageLayout.filterStorageIds.joinToString(",") {
+                                    "0x%08X".format(it)
+                                }.ifEmpty { "<disabled>" },
+                        )
+                    }
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
                     if (handleQueriesSucceeded) {
                         val currentHandles = rawHandlesByStorage
@@ -2456,6 +2568,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         storageIds = storageIds,
                         handleOrders = handleOrders,
                         handleQueriesSucceeded = handleQueriesSucceeded,
+                        staDirectStorageIdsByHandle =
+                            staDirectStorageLayout?.storageIdsByHandle.orEmpty(),
+                        filterStorageIds = staDirectStorageLayout?.filterStorageIds ?: storageIds,
                     )
                     fileScanHandleSnapshot = activeSnapshot
                     if (FileOrderProbe.enabled) {
@@ -2477,7 +2592,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 if (fileLoadGeneration != generation || camera !== cam) return@launch
-                _state.update { it.copy(storageIds = storageIds) }
+                _state.update { it.copy(storageIds = activeSnapshot.filterStorageIds) }
                 val nonEmptyRemainingOrders = remainingHandleOrders.filter {
                     it.newestFirstHandles.isNotEmpty()
                 }
@@ -2516,7 +2631,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     it.newestFirstHandles.isNotEmpty()
                 } > 1
                 val publishBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
-                    { batch, loaded, total ->
+                    { rawBatch, loaded, total ->
+                    val batch = if (cam.staDirectObjectReadValidated &&
+                        activeSnapshot.staDirectStorageIdsByHandle.isNotEmpty()
+                    ) {
+                        rawBatch.map { file ->
+                            val memberships = activeSnapshot.staDirectStorageIdsByHandle[file.handle]
+                                .orEmpty()
+                            if (memberships.isEmpty() || memberships == file.storageIds) file
+                            else file.copy(storageIds = memberships)
+                        }
+                    } else {
+                        rawBatch
+                    }
                     activeSnapshot.markProcessed(batch.map { it.handle })
                     if (FileOrderProbe.enabled && dynamicDualCardSchedule) {
                         FileOrderProbe.appendScheduledHandles(batch.map { it.handle })
@@ -2586,9 +2713,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
                 val allObjectInfoSucceeded = if (cam.staDirectObjectReadValidated) {
-                    cam.streamStaDirectFileInfo(
-                        handles = nonEmptyRemainingOrders.flatMap {
-                            it.newestFirstHandles
+                    cam.streamStaDirectMergedFileInfo(
+                        newestFirstHandlesByStorage = nonEmptyRemainingOrders.map { order ->
+                            order.storageId to order.newestFirstHandles
                         },
                         storageIds = storageIds,
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,

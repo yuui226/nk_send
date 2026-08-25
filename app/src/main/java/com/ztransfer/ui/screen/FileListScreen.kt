@@ -80,6 +80,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -89,7 +90,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -2245,7 +2245,7 @@ fun SignalPill(
     val color = when {
         usbMode && connected -> colors.accentBlue
         usbMode -> colors.statusError
-        staMode && connected -> colors.statusConnected
+        staMode && connected -> colors.accentBlue
         staMode -> colors.statusError
         level == 4 -> colors.statusConnected
         level >= 2 -> colors.accentOrange
@@ -2414,7 +2414,7 @@ private enum class SignalPillMode {
     USB,
 }
 
-/** STA does not expose a meaningful client-Wi-Fi RSSI, so it uses a topology icon instead. */
+/** STA does not expose a meaningful client-Wi-Fi RSSI, so connected state stays visually full. */
 @Composable
 private fun StaSignalIcon(
     connected: Boolean,
@@ -2428,26 +2428,29 @@ private fun StaSignalIcon(
     Canvas(
         modifier = modifier.semantics { contentDescription = description },
     ) {
-        val stroke = 1.7.dp.toPx()
-        val center = Offset(size.width / 2f, size.height * 0.78f)
-        drawCircle(color = tint, radius = 1.55.dp.toPx(), center = center)
-        listOf(5.2.dp.toPx(), 8.2.dp.toPx()).forEach { radius ->
-            drawArc(
-                color = tint,
-                startAngle = 215f,
-                sweepAngle = 110f,
-                useCenter = false,
-                topLeft = Offset(center.x - radius, center.y - radius),
-                size = Size(radius * 2f, radius * 2f),
-                style = Stroke(width = stroke, cap = StrokeCap.Round),
+        val barWidth = 3.2.dp.toPx()
+        val gap = 1.65.dp.toPx()
+        val bottom = size.height * 0.88f
+        val barHeights = floatArrayOf(5.dp.toPx(), 8.dp.toPx(), 11.dp.toPx(), 14.dp.toPx())
+        val totalWidth = barWidth * barHeights.size + gap * (barHeights.size - 1)
+        val startX = (size.width - totalWidth) / 2f
+        val barColor = if (connected) tint else tint.copy(alpha = 0.28f)
+
+        barHeights.forEachIndexed { index, height ->
+            drawRoundRect(
+                color = barColor,
+                topLeft = Offset(startX + index * (barWidth + gap), bottom - height),
+                size = Size(barWidth, height),
+                cornerRadius = CornerRadius(1.35.dp.toPx()),
             )
         }
+
         if (!connected) {
             drawLine(
                 color = tint,
-                start = Offset(size.width * 0.18f, size.height * 0.16f),
-                end = Offset(size.width * 0.84f, size.height * 0.86f),
-                strokeWidth = 2.dp.toPx(),
+                start = Offset(size.width * 0.15f, size.height * 0.12f),
+                end = Offset(size.width * 0.87f, size.height * 0.88f),
+                strokeWidth = 2.15.dp.toPx(),
                 cap = StrokeCap.Round,
             )
         }

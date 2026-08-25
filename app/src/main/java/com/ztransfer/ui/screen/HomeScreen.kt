@@ -1402,7 +1402,7 @@ private fun TipsBubble(
                 Text(
                     stringResource(
                         if (wirelessMode == WirelessMode.AP) R.string.tip_path
-                        else R.string.tip_sta_networks,
+                        else R.string.tip_sta_steps,
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,

@@ -3,13 +3,13 @@
     <string name="connection_usb">USB</string>
     <string name="connection_wifi">Wi-Fi</string>
     <string name="connection_wifi_hotspot">相機熱點</string>
-    <string name="sta_card_description">搜尋手機熱點或同一區域網路中的相機</string>
+    <string name="sta_card_description">透過手機熱點或路由器連接相機</string>
     <string name="sta_connect_action">搜尋相機</string>
     <string name="sta_hotspot_settings_short">熱點設定</string>
     <string name="sta_status_searching">正在搜尋 PTP/IP 相機…</string>
     <string name="sta_status_connecting">正在連線相機…</string>
     <string name="sta_camera_not_found_short">找不到相機</string>
-    <string name="sta_camera_not_found">找不到相容相機，請確認手機與相機位於同一熱點或區域網路。</string>
+    <string name="sta_camera_not_found">找不到相容相機，請檢查相機的網路設定與連線狀態。</string>
     <string name="sta_camera_refused_repair">相機拒絕連線，請重新配對。</string>
     <string name="sta_signal_connected">STA 相機已連線</string>
     <string name="sta_signal_disconnected_hotspot">STA 相機已斷線，開啟個人熱點設定。</string>
@@ -47,10 +47,10 @@
     <string name="tip_ap_mode">PS：本模式對應相機中的 Wi-Fi AP 模式</string>
     <string name="tip_body">可將「Wi-Fi 連線」加入相機的 i 選單，之後按 i 鍵即可快速開啟。</string>
     <string name="tip_path">選單 → 自訂設定選單 → 控制 → 自訂 i 選單 → 選個順手的格子 → Wi-Fi 連線</string>
-    <string name="tip_sta_title">STA 連線說明</string>
-    <string name="tip_sta_mode">本模式用於手機熱點或共享區域網路中的相機</string>
-    <string name="tip_sta_body">先讓相機與手機加入同一網路，再返回點擊「搜尋相機」。首次連線時，請在相機上確認配對要求。</string>
-    <string name="tip_sta_networks">可用網路：本機熱點、另一台手機熱點或同一路由器區域網路</string>
+    <string name="tip_sta_title">STA 連線</string>
+    <string name="tip_sta_mode">相機連接手機熱點或路由器 Wi-Fi</string>
+    <string name="tip_sta_body">首次設定：</string>
+    <string name="tip_sta_steps">1. 手機開啟個人熱點，或連接路由器 Wi-Fi\n2. Z30／較早機型：設定選單 → 連接至電腦 → 網路設定 → 建立設定檔 → 搜尋 Wi-Fi 網路\n3. 較新機型：網路選單 → 連接至電腦 → 網路設定 → 建立設定檔 → 連接至現有網路（Wi-Fi 用戶端模式）\n4. 相機選擇 Wi-Fi 並輸入密碼；返回本頁搜尋，首次連線依相機提示確認配對</string>
 
     <!-- 檔案清單 -->
     <string name="loading_file_list">正在取得檔案清單…</string>

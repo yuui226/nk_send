@@ -53,6 +53,49 @@ class CameraStorageTest {
         assertSame(merged, mergeStorageMembership(merged, card2))
     }
 
+    @Test
+    fun `direct sta disjoint handle sets preserve exact card membership`() {
+        val layout = analyzeStaDirectStorageLayout(
+            listOf(
+                0x00010001 to listOf(11, 12),
+                0x00020001 to listOf(21, 22),
+            ),
+        )
+
+        assertEquals(setOf(0x00010001), layout.storageIdsByHandle[11])
+        assertEquals(setOf(0x00020001), layout.storageIdsByHandle[22])
+        assertEquals(listOf(0x00010001, 0x00020001), layout.filterStorageIds)
+        assertEquals(0, layout.crossSlotOverlapCount)
+    }
+
+    @Test
+    fun `direct sta aggregate responses disable misleading cross-slot filter`() {
+        val layout = analyzeStaDirectStorageLayout(
+            listOf(
+                0x00010001 to listOf(11, 12, 13),
+                0x00020001 to listOf(11, 12, 13),
+            ),
+        )
+
+        assertEquals(emptyMap<Int, Set<Int>>(), layout.storageIdsByHandle)
+        assertEquals(emptyList<Int>(), layout.filterStorageIds)
+        assertEquals(3, layout.crossSlotOverlapCount)
+    }
+
+    @Test
+    fun `overlapping logical stores on one physical card remain usable`() {
+        val layout = analyzeStaDirectStorageLayout(
+            listOf(
+                0x00010001 to listOf(11, 12),
+                0x00010002 to listOf(12, 13),
+            ),
+        )
+
+        assertEquals(setOf(0x00010001, 0x00010002), layout.storageIdsByHandle[12])
+        assertEquals(listOf(0x00010001, 0x00010002), layout.filterStorageIds)
+        assertEquals(0, layout.crossSlotOverlapCount)
+    }
+
     private fun file(handle: Int, storageId: Int) = NikonCamera.FileInfo(
         handle = handle,
         size = 1024L,

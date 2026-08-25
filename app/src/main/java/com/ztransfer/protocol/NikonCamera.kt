@@ -1216,6 +1216,9 @@ class NikonCamera(private val context: Context) {
     // 总共 4 项，避免冷缓存扫描把整卡数据留在堆中。所有访问都在同一 PTP IO gate 内串行。
     private val staDirectRecentHeaders = LinkedHashMap<Int, ByteArray>(4, 0.75f, true)
     private var staDirectFileNumberAnchor: NikonFileNumberAnchor? = null
+    // A dual-card body may maintain independent object-handle sequences per slot. A single anchor
+    // inferred from card 1 must never be used to fabricate card 2's filename.
+    private val staDirectFileNumberAnchorsByStorage = HashMap<Int, NikonFileNumberAnchor>()
     private val staDirectEmbeddedFileNameAvailable = HashMap<String, Boolean>()
     private var staDirectFileNameListAttempted = false
     private var staDirectFileNameValueSupported: Boolean? = null
@@ -1521,6 +1524,7 @@ class NikonCamera(private val context: Context) {
             staDirectCaptureDates.clear()
             staDirectRecentHeaders.clear()
             staDirectFileNumberAnchor = null
+            staDirectFileNumberAnchorsByStorage.clear()
             staDirectEmbeddedFileNameAvailable.clear()
             staDirectFileNameListAttempted = false
             staDirectFileNameValueSupported = null
@@ -2340,7 +2344,9 @@ class NikonCamera(private val context: Context) {
         ioMutex.withLock {
             loadStaDirectOriginalFileNamesInternal()
             loadStaDirectObjectsMetadataInternal(storageIds)
-            ensureStaDirectFileNumberAnchorInternal(handles)
+            ensureStaDirectFileNumberAnchorsInternal(
+                listOf((storageIds.singleOrNull() ?: -1) to handles),
+            )
         }
         var nextHandleIndex = 0
         while (nextHandleIndex < total) {
@@ -2357,7 +2363,10 @@ class NikonCamera(private val context: Context) {
             val files = ioMutex.withLock {
                 batch.mapNotNull { handle ->
                     loadContext.ensureActive()
-                    val result = readStaDirectIndexedObjectInternal(handle)
+                    val result = readStaDirectIndexedObjectInternal(
+                        handle = handle,
+                        storageId = storageIds.singleOrNull(),
+                    )
                     if (!result.successful) allSucceeded = false
                     cacheStaDirectObjectHeader(handle, result)
                     result.file
@@ -2366,6 +2375,91 @@ class NikonCamera(private val context: Context) {
             processed += batch.size
             if (files.isNotEmpty()) onBatch(files, processed, total)
             nextHandleIndex = batchEnd
+        }
+        allSucceeded
+    }
+
+    /**
+     * STA-direct counterpart of [streamMergedFileInfo]. ObjectInfo is unavailable in this mode, so
+     * each card keeps its own filename anchor and the already indexed capture date decides which
+     * head is published next. The first publication still uses the small 1 -> 3 -> batch ramp to
+     * preserve the proven STA first-screen behaviour.
+     */
+    suspend fun streamStaDirectMergedFileInfo(
+        newestFirstHandlesByStorage: List<Pair<Int, List<Int>>>,
+        storageIds: List<Int> = newestFirstHandlesByStorage.map { it.first },
+        batchSize: Int = 12,
+        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+    ): Boolean = withContext(Dispatchers.IO) {
+        check(staDirectObjectReadValidated) { "STA direct object reads were not validated" }
+        require(batchSize > 0) { "batchSize must be positive" }
+        val groups = newestFirstHandlesByStorage.filter { it.second.isNotEmpty() }
+        if (groups.isEmpty()) return@withContext true
+
+        val loadContext = coroutineContext
+        ioMutex.withLock {
+            loadStaDirectOriginalFileNamesInternal()
+            loadStaDirectObjectsMetadataInternal(storageIds)
+            ensureStaDirectFileNumberAnchorsInternal(groups)
+        }
+
+        val total = groups.sumOf { it.second.size }
+        val cursors = IntArray(groups.size)
+        val heads = MutableList<FileInfo?>(groups.size) { null }
+        var completed = 0
+        var allSucceeded = true
+
+        while (completed < total) {
+            val currentBatchSize = when {
+                completed == 0 -> 1
+                completed < 4 -> minOf(3, batchSize)
+                else -> batchSize
+            }
+            var requestedHandles = 0
+            val completedBeforeBatch = completed
+            val requestBudget = maxOf(groups.size, currentBatchSize + groups.size - 1)
+            val output = ioMutex.withLock {
+                buildList {
+                    while (size < currentBatchSize && completed < total) {
+                        groups.indices.forEach { groupIndex ->
+                            if (heads[groupIndex] != null) return@forEach
+                            val (storageId, handles) = groups[groupIndex]
+                            while (cursors[groupIndex] < handles.size) {
+                                if (requestedHandles >= requestBudget) return@forEach
+                                loadContext.ensureActive()
+                                val handle = handles[cursors[groupIndex]++]
+                                requestedHandles++
+                                val result = readStaDirectIndexedObjectInternal(handle, storageId)
+                                cacheStaDirectObjectHeader(handle, result)
+                                if (!result.successful) allSucceeded = false
+                                val file = result.file
+                                if (file == null) {
+                                    completed++
+                                } else {
+                                    heads[groupIndex] = file
+                                    break
+                                }
+                            }
+                        }
+
+                        val hasUnresolvedGroup = groups.indices.any { groupIndex ->
+                            heads[groupIndex] == null &&
+                                cursors[groupIndex] < groups[groupIndex].second.size
+                        }
+                        if (hasUnresolvedGroup) break
+
+                        val selected = selectNewestFileHeadIndex(heads) ?: break
+                        add(checkNotNull(heads[selected]))
+                        heads[selected] = null
+                        completed++
+                    }
+                }
+            }
+            if (output.isNotEmpty()) {
+                onBatch(output, completed, total)
+            } else if (completed == completedBeforeBatch && requestedHandles == 0) {
+                error("Merged STA direct scan made no progress")
+            }
         }
         allSucceeded
     }
@@ -2413,17 +2507,36 @@ class NikonCamera(private val context: Context) {
      * One real JPEG/NEF MakerNote anchors Nikon's monotonically increasing file number. This is the
      * only unconditional 128 KiB catalog read; all other headers become thumbnail/preview cache misses.
      */
-    private fun ensureStaDirectFileNumberAnchorInternal(handles: List<Int>) {
-        if (staDirectFileNumberAnchor != null) return
-        val anchorHandle = handles.firstOrNull { handle ->
-            staDirectExtensionFromHandle(handle) == ".jpg" ||
-                staDirectExtensionFromHandle(handle) == ".nef"
-        } ?: return
-        cacheStaDirectObjectHeader(anchorHandle, readStaDirectObjectHeaderInternal(anchorHandle))
+    private fun ensureStaDirectFileNumberAnchorsInternal(
+        newestFirstHandlesByStorage: List<Pair<Int, List<Int>>>,
+    ) {
+        newestFirstHandlesByStorage.forEach { (storageId, handles) ->
+            if (storageId != -1 && storageId in staDirectFileNumberAnchorsByStorage) {
+                return@forEach
+            }
+            val anchorHandle = handles.firstOrNull { handle ->
+                staDirectExtensionFromHandle(handle) == ".jpg" ||
+                    staDirectExtensionFromHandle(handle) == ".nef"
+            } ?: return@forEach
+            val result = readStaDirectObjectHeaderInternal(anchorHandle)
+            cacheStaDirectObjectHeader(anchorHandle, result)
+            val makerFileInfo = staDirectRecentHeaders[anchorHandle]?.let(::nikonMakerFileInfo)
+                ?: return@forEach
+            val anchor = NikonFileNumberAnchor(
+                handleSequence = anchorHandle and 0x00FFFFFF,
+                directoryNumber = makerFileInfo.directoryNumber,
+                fileNumber = makerFileInfo.fileNumber,
+            )
+            staDirectFileNumberAnchor = anchor
+            if (storageId != -1) staDirectFileNumberAnchorsByStorage[storageId] = anchor
+        }
     }
 
     /** Fast warm-cache catalog path; any uncertain field falls back to the proven header parser. */
-    private fun readStaDirectIndexedObjectInternal(handle: Int): StaDirectObjectHeader {
+    private fun readStaDirectIndexedObjectInternal(
+        handle: Int,
+        storageId: Int? = null,
+    ): StaDirectObjectHeader {
         staDirectFiles[handle]?.let { cached ->
             return StaDirectObjectHeader(
                 file = cached,
@@ -2438,11 +2551,17 @@ class NikonCamera(private val context: Context) {
             ?: return readStaDirectObjectHeaderInternal(handle)
         val size = getObjectSizeInternal(handle)
             ?: return StaDirectObjectHeader(null, null, false)
+        val fileNumberAnchor = storageId?.let(staDirectFileNumberAnchorsByStorage::get)
+            ?: staDirectFileNumberAnchor.takeIf { storageId == null }
         val fileName = staDirectOriginalFileNames[handle]
-            ?: staDirectFileNumberAnchor
+            ?: fileNumberAnchor
                 ?.let { deriveNikonMakerFileInfo(it, handle) }
                 ?.let { nikonDefaultCameraFileName(it, extension) }
-            ?: return readStaDirectObjectHeaderInternal(handle)
+            ?: return readStaDirectObjectHeaderInternal(
+                handle = handle,
+                preferredFileNumberAnchor = fileNumberAnchor,
+                allowSessionFileNumberAnchor = storageId == null,
+            )
         return StaDirectObjectHeader(
             file = FileInfo(
                 handle = handle,
@@ -2593,7 +2712,11 @@ class NikonCamera(private val context: Context) {
     }
 
     /** Must be called while [ioMutex] is held. */
-    private fun readStaDirectObjectHeaderInternal(handle: Int): StaDirectObjectHeader {
+    private fun readStaDirectObjectHeaderInternal(
+        handle: Int,
+        preferredFileNumberAnchor: NikonFileNumberAnchor? = null,
+        allowSessionFileNumberAnchor: Boolean = true,
+    ): StaDirectObjectHeader {
         val protocolFileName = readStaDirectOriginalFileNameInternal(handle)
         val size = staDirectFiles[handle]?.size?.takeIf { it > 0L }
             ?: getObjectSizeInternal(handle)
@@ -2639,7 +2762,9 @@ class NikonCamera(private val context: Context) {
                 fileNumber = makerFileInfo.fileNumber,
             )
         }
-        val derivedFileInfo = makerFileInfo ?: staDirectFileNumberAnchor?.let { anchor ->
+        val derivedFileInfo = makerFileInfo ?: preferredFileNumberAnchor
+            ?.let { anchor -> deriveNikonMakerFileInfo(anchor, handle) }
+            ?: staDirectFileNumberAnchor.takeIf { allowSessionFileNumberAnchor }?.let { anchor ->
             deriveNikonMakerFileInfo(anchor, handle)
         }
         val derivedFileName = derivedFileInfo?.let { fileInfo ->
