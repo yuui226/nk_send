@@ -1718,7 +1718,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 return true
             }
             val error = result.exceptionOrNull()
-            staLastFailureMessage = error?.message ?: error?.javaClass?.simpleName
+            staLastFailureMessage = staFailureMessage(localizedContext, error)
             staConnectingCamera = null
             candidateCamera.close()
             when {
@@ -1771,8 +1771,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 activateStaCamera(albumCamera, ip)
                 return true
             }
-            staLastFailureMessage = albumResult.exceptionOrNull()?.message
-                ?: staLastFailureMessage
+            // The paired-computer route is authoritative. Z30 may intentionally reject the
+            // secondary album identity, so that expected compatibility-probe result must not hide
+            // the actual paired-route failure shown to the user.
+            if (staLastFailureMessage == null) {
+                staLastFailureMessage = staFailureMessage(
+                    localizedContext,
+                    albumResult.exceptionOrNull(),
+                )
+            }
             staConnectingCamera = null
             albumCamera.close()
         }
@@ -1782,6 +1789,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // discovery in the failed/retry path instead; a later attempt can still obtain the full
         // paired album session once the camera service is ready.
         return false
+    }
+
+    private fun staFailureMessage(context: Context, error: Throwable?): String? = when (error) {
+        is CameraRefusedException ->
+            context.getString(com.ztransfer.R.string.sta_camera_refused_repair)
+        null -> null
+        else -> error.message ?: error.javaClass.simpleName
     }
 
     private fun recordStaDiagnostic(

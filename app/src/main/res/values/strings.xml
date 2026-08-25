@@ -7,10 +7,10 @@
     <string name="sta_connect_action">Search</string>
     <string name="sta_hotspot_settings_short">Hotspot</string>
     <string name="sta_status_searching">Searching for a PTP/IP camera…</string>
-    <string name="sta_status_searching_ip">Scanning · %1$s</string>
-    <string name="sta_status_connecting_ip">Connecting · %1$s</string>
+    <string name="sta_status_connecting">Connecting to camera…</string>
     <string name="sta_camera_not_found_short">Camera not found</string>
     <string name="sta_camera_not_found">No compatible camera found. Check that both devices are on the same hotspot or LAN.</string>
+    <string name="sta_camera_refused_repair">Camera refused the connection. Pair the camera again.</string>
     <string name="usb_step_power">Keep the camera powered on</string>
     <string name="usb_step_cable">Connect the camera and phone with a USB-C to USB-C cable</string>
     <string name="connection_failed_short">Connection failed</string>

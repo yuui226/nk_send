@@ -7,10 +7,10 @@
     <string name="sta_connect_action">搜尋相機</string>
     <string name="sta_hotspot_settings_short">熱點設定</string>
     <string name="sta_status_searching">正在搜尋 PTP/IP 相機…</string>
-    <string name="sta_status_searching_ip">正在掃描 · %1$s</string>
-    <string name="sta_status_connecting_ip">正在連線 · %1$s</string>
+    <string name="sta_status_connecting">正在連線相機…</string>
     <string name="sta_camera_not_found_short">找不到相機</string>
     <string name="sta_camera_not_found">找不到相容相機，請確認手機與相機位於同一熱點或區域網路。</string>
+    <string name="sta_camera_refused_repair">相機拒絕連線，請重新配對。</string>
     <string name="usb_step_power">相機電源開啟</string>
     <string name="usb_step_cable">使用 C to C 資料線連接相機與手機</string>
     <string name="connection_failed_short">連接失敗</string>

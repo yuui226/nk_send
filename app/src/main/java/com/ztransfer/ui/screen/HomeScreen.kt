@@ -211,20 +211,13 @@ fun HomeScreen(
     val staFeedback = if (state.wirelessMode != WirelessMode.STA) null else when {
         state.isStaConnection -> null
         state.staConnectionStatus == StaConnectionStatus.DISCOVERING -> ConnectionCardFeedback(
-            title = if (state.staDiscoveryProgress == null) {
-                stringResource(R.string.sta_status_searching)
-            } else {
-                stringResource(R.string.sta_status_searching_ip, state.staDiscoveryProgress.orEmpty())
-            },
+            title = stringResource(R.string.sta_status_searching),
             body = null,
             accent = colors.accentBlue,
             busy = true,
         )
         state.staConnectionStatus == StaConnectionStatus.CONNECTING -> ConnectionCardFeedback(
-            title = stringResource(
-                R.string.sta_status_connecting_ip,
-                state.staDiscoveryProgress.orEmpty(),
-            ),
+            title = stringResource(R.string.sta_status_connecting),
             body = null,
             accent = colors.accentBlue,
             busy = true,
@@ -233,6 +226,7 @@ fun HomeScreen(
             title = stringResource(R.string.sta_camera_not_found_short),
             body = state.staConnectionError ?: stringResource(R.string.sta_camera_not_found),
             accent = colors.statusError,
+            multiline = true,
         )
         else -> null
     }
@@ -694,7 +688,8 @@ private data class ConnectionCardFeedback(
     val title: String,
     val body: String?,
     val accent: Color,
-    val busy: Boolean = false
+    val busy: Boolean = false,
+    val multiline: Boolean = false,
 )
 
 @Composable
@@ -996,16 +991,24 @@ private fun ConnectionMethodCard(
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Bold,
                                             color = animatedFeedback.accent,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
+                                            maxLines = if (animatedFeedback.multiline) 2 else 1,
+                                            overflow = if (animatedFeedback.multiline) {
+                                                TextOverflow.Clip
+                                            } else {
+                                                TextOverflow.Ellipsis
+                                            },
                                         )
                                         animatedFeedback.body?.let { body ->
                                             Text(
                                                 text = body,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = colors.onSurfaceVariant,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
+                                                maxLines = if (animatedFeedback.multiline) 4 else 1,
+                                                overflow = if (animatedFeedback.multiline) {
+                                                    TextOverflow.Clip
+                                                } else {
+                                                    TextOverflow.Ellipsis
+                                                },
                                             )
                                         }
                                     }
