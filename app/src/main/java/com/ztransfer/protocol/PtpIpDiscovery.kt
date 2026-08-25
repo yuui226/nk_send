@@ -55,29 +55,57 @@ class PtpIpDiscovery(private val context: Context) {
         if (lastIp != null && lastIpSubnet != null &&
             isPtpPortOpen(lastIp, lastIpSubnet.address) && tryOnce(lastIp, "last_ip")
         ) return lastIp
-        discoverMdns().forEach { if (tryOnce(it, "mdns")) return it }
-
-        for (subnet in subnets) {
-            Log.i(
-                TAG,
-                "scan iface=${subnet.interfaceName} " +
-                    "address=${subnet.address.hostAddress}/${subnet.prefixLength}",
-            )
-            for (batch in hosts(subnet).chunked(SCAN_BATCH_SIZE)) {
-                val openHosts = coroutineScope {
-                    val gate = Semaphore(SCAN_CONCURRENCY)
-                    batch.map { ip ->
-                        async(Dispatchers.IO) {
-                            gate.withPermit {
-                                if (isPtpPortOpen(ip, subnet.address)) ip else null
-                            }
-                        }
-                    }.awaitAll().filterNotNull()
+        // mDNS and the bounded /24 port scan are independent discovery signals. Running them
+        // concurrently removes up to 3.1 seconds of purely sequential waiting on first use while
+        // keeping all Nikon handshakes serialized through tryOnce below.
+        return coroutineScope {
+            val mdns = async { discoverMdns() }
+            var mdnsConsumed = false
+            suspend fun tryMdns(waitForCompletion: Boolean): String? {
+                if (mdnsConsumed || (!waitForCompletion && !mdns.isCompleted)) return null
+                mdnsConsumed = true
+                val addresses = try {
+                    mdns.await()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    emptyList()
                 }
-                for (ip in openHosts) if (tryOnce(ip, "subnet")) return ip
+                for (ip in addresses) if (tryOnce(ip, "mdns")) return ip
+                return null
+            }
+
+            try {
+                for (subnet in subnets) {
+                    Log.i(
+                        TAG,
+                        "scan iface=${subnet.interfaceName} " +
+                            "address=${subnet.address.hostAddress}/${subnet.prefixLength}",
+                    )
+                    for (batch in hosts(subnet).chunked(SCAN_BATCH_SIZE)) {
+                        tryMdns(waitForCompletion = false)?.let { return@coroutineScope it }
+                        val openHosts = coroutineScope {
+                            val gate = Semaphore(SCAN_CONCURRENCY)
+                            batch.map { ip ->
+                                async(Dispatchers.IO) {
+                                    gate.withPermit {
+                                        if (isPtpPortOpen(ip, subnet.address)) ip else null
+                                    }
+                                }
+                            }.awaitAll().filterNotNull()
+                        }
+                        // Preserve mDNS priority when both signals complete in the same batch.
+                        tryMdns(waitForCompletion = false)?.let { return@coroutineScope it }
+                        for (ip in openHosts) {
+                            if (tryOnce(ip, "subnet")) return@coroutineScope ip
+                        }
+                    }
+                }
+                tryMdns(waitForCompletion = true)
+            } finally {
+                mdns.cancel()
             }
         }
-        return null
     }
 
     private suspend fun discoverMdns(): List<String> {

@@ -417,6 +417,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 缩略图按机身稳定身份分目录保存，无容量上限；当前相机完整扫描成功后才同步清理。
     private val thumbnailDiskCache = ThumbnailDiskCache(File(application.cacheDir, "thumbs"))
     private var activeThumbnailDiskCache: ThumbnailDiskCache.CameraCache? = null
+    // Retained across a disconnect with the active cache so preserved STA grid items keep using
+    // their handle+size keys even while camera == null. Replaced atomically for every new session.
+    private var activeThumbnailDiskCacheUsesStaKeys = false
     // 每次成功切入一个相机会话递增，阻止旧会话迟到的磁盘解码结果污染 handle 级内存缓存。
     private var thumbnailCacheSessionGeneration = 0L
     private var staScanThumbnailDiskHits = 0
@@ -439,11 +442,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         thumbnailCacheSessionGeneration++
         thumbnailFillQueue.reset()
         activeThumbnailDiskCache = null
+        activeThumbnailDiskCacheUsesStaKeys = false
         val opened = withContext(Dispatchers.IO) {
             thumbnailDiskCache.openCamera(cam.thumbnailCacheIdentity)
         }
         if (camera === cam) {
             activeThumbnailDiskCache = opened
+            activeThumbnailDiskCacheUsesStaKeys = cam.staDirectObjectReadValidated
             thumbnailDiskWritesBlocked = false
             if (cam.staDirectObjectReadValidated && reportedStaMetadataCamera !== cam) {
                 reportedStaMetadataCamera = cam
@@ -2418,7 +2423,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         fileLoadPending = false
                         _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
                         if (handleQueriesSucceeded && diskCacheForScan != null) {
-                            reconcileThumbnailCache(diskCacheForScan, emptyList())
+                            reconcileThumbnailCache(
+                                diskCacheForScan,
+                                emptyList(),
+                                cam.staDirectObjectReadValidated,
+                            )
                         } else {
                             log { "THUMB_CACHE reconcile skipped: handle query failed" }
                         }
@@ -2466,7 +2475,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     fileLoadPending = false
                     _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
                     if (activeSnapshot.handleQueriesSucceeded && diskCacheForScan != null) {
-                        reconcileThumbnailCache(diskCacheForScan, existingFiles)
+                        reconcileThumbnailCache(
+                            diskCacheForScan,
+                            existingFiles,
+                            cam.staDirectObjectReadValidated,
+                        )
                     }
                     if (FileOrderProbe.enabled) {
                         FileOrderProbe.finishScan("complete: nothing remaining")
@@ -2612,7 +2625,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (activeSnapshot.handleQueriesSucceeded && allObjectInfoSucceeded &&
                     diskCacheForScan != null
                 ) {
-                    reconcileThumbnailCache(diskCacheForScan, allFiles)
+                    reconcileThumbnailCache(
+                        diskCacheForScan,
+                        allFiles,
+                        cam.staDirectObjectReadValidated,
+                    )
                 } else if (!activeSnapshot.handleQueriesSucceeded || !allObjectInfoSucceeded) {
                     // 任一 ObjectInfo 没有明确返回时都不能据此判定照片已从卡中删除。
                     log { "THUMB_CACHE reconcile skipped: incomplete handle/ObjectInfo responses" }
@@ -3416,15 +3433,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return PhotoExif(aperture, shutter, iso, focal, dateTime, lensModel)
     }
 
-    private fun thumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =
-        if (camera?.staDirectObjectReadValidated == true) {
+    private fun thumbnailDiskCacheFileName(
+        file: NikonCamera.FileInfo,
+        useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
+    ): String =
+        if (useStaKeys) {
             staThumbnailCacheFileName(file.handle, file.size)
         } else {
             thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
         }
 
-    private fun alternateThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String? =
-        if (camera?.staDirectObjectReadValidated == true) {
+    private fun alternateThumbnailDiskCacheFileName(
+        file: NikonCamera.FileInfo,
+        useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
+    ): String? =
+        if (useStaKeys) {
             thumbnailCacheFileName(file.fileName, file.size, file.captureDate)
         } else {
             null
@@ -3436,10 +3459,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun reconcileThumbnailCache(
         diskCache: ThumbnailDiskCache.CameraCache,
         files: List<NikonCamera.FileInfo>,
+        useStaKeys: Boolean,
     ) {
         withContext(Dispatchers.IO) {
             val validCacheNames = files.mapTo(HashSet(files.size)) {
-                thumbnailDiskCacheFileName(it)
+                thumbnailDiskCacheFileName(it, useStaKeys)
             }
             val removed = diskCache.reconcile(validCacheNames)
             log { "THUMB_CACHE reconcile removed=$removed active=${validCacheNames.size}" }

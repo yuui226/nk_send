@@ -2021,8 +2021,8 @@ class NikonCamera(private val context: Context) {
                     rememberStaDirectThumbnail(handle, bytes)
                     return@withContext bytes
                 }
-                // A bounded RAW/video probe returning null does not prove that the object has no
-                // preview. Do not permanently suppress a later visible retry in this session.
+                // RAW/video parsers negative-cache only a completed deterministic miss. Do not
+                // blanket-cache null here: short reads and rejected commands must remain retryable.
                 if (file == null || file.extension == ".jpg") {
                     staDirectNoThumbnail += handle
                 }
@@ -3012,6 +3012,7 @@ class NikonCamera(private val context: Context) {
         val probeSteps = ArrayList<Int>()
         var discoveredReference: NefPreviewReference? = null
         var discoveredReferences: List<NefPreviewReference> = emptyList()
+        var previewReferenceFound = false
         var source = "none"
         var result: ByteArray? = null
 
@@ -3043,6 +3044,7 @@ class NikonCamera(private val context: Context) {
             ).previews
             val indexedReference = indexedReferences.lastOrNull()
             if (indexedReference != null) {
+                previewReferenceFound = true
                 val indexedResult = readReference(indexedReference)
                 if (indexedResult != null) {
                     discoveredReference = indexedReference
@@ -3055,6 +3057,7 @@ class NikonCamera(private val context: Context) {
 
             val scannedReference = largestEmbeddedJpegRange(accumulated, loadedBytes)
             if (scannedReference != null) {
+                previewReferenceFound = true
                 discoveredReference = scannedReference
                 discoveredReferences = listOf(scannedReference)
                 source = "scan"
@@ -3073,6 +3076,12 @@ class NikonCamera(private val context: Context) {
         }
         if (result != null && discoveredReference != null) {
             staDirectRawThumbnailHint = discoveredReference
+        }
+        // Repeating the exact same fully-read bounded prefix cannot reveal a different preview.
+        // Cache only that deterministic miss; a short read, rejected command, or referenced JPEG
+        // fetch failure remains retryable so transient transport trouble never becomes "no thumb".
+        if (result == null && !previewReferenceFound && loadedBytes >= maximumProbeBytes) {
+            staDirectNoThumbnail += file.handle
         }
         if (PhotoGenerationProbe.enabled) {
             val reference = discoveredReference
@@ -3272,6 +3281,9 @@ class NikonCamera(private val context: Context) {
         val bytes = readStaDirectPartialInternal(file.handle, 0L, requestSize) ?: return null
         val embedded = largestEmbeddedJpeg(bytes)
         val result = embedded ?: extractVideoFrame(bytes, file.extension)
+        // The same bounded prefix and decoder would produce the same miss on every recomposition.
+        // A null partial read returned above and remains retryable; only a completed probe is cached.
+        if (result == null && bytes.size == requestSize) staDirectNoThumbnail += file.handle
         if (PhotoGenerationProbe.enabled) {
             PhotoGenerationProbe.note(
                 "STA-THUMB",

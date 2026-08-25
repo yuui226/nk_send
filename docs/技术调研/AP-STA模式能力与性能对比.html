@@ -127,7 +127,7 @@
         <tbody>
           <tr><td class="feature">网络拓扑</td><td>相机开热点，手机连接相机 Wi‑Fi。</td><td>相机连接手机热点或现有局域网，APP 在同一网络发现相机。</td><td><span class="status warn">协议差异</span> 这是模式本身的定义，不应强行统一。</td></tr>
           <tr><td class="feature">相机端配置持久化</td><td>相机热点配置为 AP 路径；手机侧可记住 Wi‑Fi。</td><td>首次完成“连接至计算机”配对，相机保存配置文件，下次可直接选择该配置。</td><td><span class="status ok">已实现</span> STA 的核心价值。</td></tr>
-          <tr><td class="feature">连接发现</td><td>按相机网关与固定地址连接。</td><td>上次 IP 仅在当前子网内才尝试，再通过 mDNS 与局域网/热点候选发现 PTP/IP 服务；只有完整相册能力验证成功才发布“已连接”，仅监看会话不会再伪装成空相册。</td><td><span class="status warn">实现不同</span> 避免旧热点地址触发数秒无效握手；复杂 LAN 的发现时间仍可能高于 AP。</td></tr>
+          <tr><td class="feature">连接发现</td><td>按相机网关与固定地址连接。</td><td>上次 IP 仅在当前子网内才尝试，mDNS 与有界局域网/热点扫描并行发现 PTP/IP 服务；只有完整相册能力验证成功才发布“已连接”，仅监看会话不会再伪装成空相册。</td><td><span class="status warn">实现不同</span> 避免旧热点地址和串行发现触发数秒无效等待；复杂 LAN 的发现时间仍可能高于 AP。</td></tr>
           <tr><td class="feature">断线与重连</td><td>网络回调 + 心跳自动重连。</td><td>心跳、上次 IP、STA 发现与退避重连。</td><td><span class="status ok">行为对齐</span> 实现因拓扑不同而独立。</td></tr>
           <tr><td class="feature">列表 UI / 日期分组</td><td>共用 FileListScreen。</td><td>共用 FileListScreen。</td><td><span class="status ok">完全共用</span></td></tr>
           <tr><td class="feature">类型筛选</td><td>由 ObjectInfo 提供真实扩展名。</td><td>Z30 已验证 JPG / NEF / MP4；已知 handle 类型直接识别，未知类型回退读文件头。</td><td><span class="status ok">当前机型可用</span> 新 handle 类型需实机补充。</td></tr>
@@ -138,10 +138,10 @@
           <tr><td class="feature">双卡 / 卡槽筛选</td><td>ObjectInfo 提供每个文件的 StorageID，可归属卡槽并合并去重。</td><td>可枚举 StorageID，但直接读取模式尚不能可靠得到每个对象的精确卡槽归属。</td><td><span class="status no">未完整支持</span> Z30 单卡不受影响；双卡 STA 需实机研究。</td></tr>
           <tr><td class="feature">新到旧顺序</td><td>每卡反转原始 handle 顺序；双卡按真实日期流式归并。</td><td>同样使用新到旧 handle 顺序和共用发布模型；批量日期索引提供真实日期。</td><td><span class="status ok">单卡已对齐</span> 双卡归属仍受上一项限制。</td></tr>
           <tr><td class="feature">渐进首屏</td><td>12 项 ObjectInfo 一批，批间补缩略图。</td><td>语义相同；STA 内部用 1 → 3 → 12 的发布粒度抵消私有命令延迟，并复用连接验证阶段已经取得的单卡 handles。</td><td><span class="status ok">体验对齐</span> 首次目录不再紧接着重复 GetObjectHandles。</td></tr>
-          <tr><td class="feature">内存 / 磁盘缩略图缓存</td><td>内存 LRU + 按相机隔离的磁盘缓存。</td><td>同一套缓存；直接模式主键使用 handle + size，并兼容文件身份备用键。</td><td><span class="status ok">已生效</span> 暖缓存不再逐项读 128 KiB 文件头。</td></tr>
+          <tr><td class="feature">内存 / 磁盘缩略图缓存</td><td>内存 LRU + 按相机隔离的磁盘缓存。</td><td>同一套缓存；直接模式主键使用 handle + size，并兼容文件身份备用键；断线保留列表时继续使用当前 STA 会话缓存键。</td><td><span class="status ok">已生效</span> 暖缓存不再逐项读 128 KiB 文件头。</td></tr>
           <tr><td class="feature">JPG 缩略图</td><td>相机 GetThumb。</td><td>磁盘命中零网络；未命中时从 128 KiB EXIF 头提取。</td><td><span class="status ok">可用</span> 冷缓存比 AP 多传文件头。</td></tr>
-          <tr><td class="feature">NEF 缩略图</td><td>相机 GetThumb，通常成本较小。</td><td>从 NEF IFD 或 JPEG 扫描定位内嵌预览；只对可见项按需加载，首张以 256 KiB 可靠探测，后续复用已校验的同会话偏移并在失败时自动回退；最近编码缩略图采用 4 MiB LRU，取消重建格子不会重复下载。</td><td><span class="status warn">可用但仍慢于 AP</span> 不做整卡后台 RAW 探测，避免拖垮列表。</td></tr>
-          <tr><td class="feature">视频缩略图</td><td>相机 GetThumb。</td><td>先读 128 KiB 内嵌封面；缺失才扩大到有界 8 MiB 并尝试抽帧。</td><td><span class="status warn">可用但实现不同</span></td></tr>
+          <tr><td class="feature">NEF 缩略图</td><td>相机 GetThumb，通常成本较小。</td><td>从 NEF IFD 或 JPEG 扫描定位内嵌预览；只对可见项按需加载，首张以 256 KiB 可靠探测，后续复用已校验的同会话偏移并在失败时自动回退；最近编码缩略图采用 4 MiB LRU，完整探测确认无图后本会话不再重复读取。</td><td><span class="status warn">可用但仍慢于 AP</span> 不做整卡后台 RAW 探测，避免拖垮列表。</td></tr>
+          <tr><td class="feature">视频缩略图</td><td>相机 GetThumb。</td><td>先读 128 KiB 内嵌封面；缺失才扩大到有界 8 MiB 并尝试抽帧；完整前缀确认无图后本会话不重复解析。</td><td><span class="status warn">可用但实现不同</span></td></tr>
           <tr><td class="feature">大图交互顺序</td><td>已有缩略图立即显示 → 当前页 FHD → EXIF → 相邻页预取。</td><td>完全复用同一 PhotoPreview 顺序、动画、旋转、缩放和内存窗口。</td><td><span class="status ok">完全共用</span></td></tr>
           <tr><td class="feature">JPG FHD 预览</td><td><code>GetFhdPicture(0x920F)</code> 返回相机生成预览。</td><td>新机型先尝试相机 FHD；Z30 配对档案拒绝后，读取 MPF 精确 FHD 项（实测 1620×1080）。</td><td><span class="status ok">已实现</span> 不是原图模拟，不下载主 JPEG。</td></tr>
           <tr><td class="feature">NEF 大图</td><td>由相机 FHD 能力决定。</td><td>从小到大验证已索引内嵌 JPEG，优先选择首个达到 FHD 长边的候选；未知索引时进行有界前缀探测。</td><td><span class="status warn">可用</span> 避免为了预览默认传输最大的内嵌 JPEG；不保证每个 NEF 都含可解析预览。</td></tr>
