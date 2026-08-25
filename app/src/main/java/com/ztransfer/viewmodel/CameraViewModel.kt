@@ -127,6 +127,12 @@ internal fun shouldKeepStaDiscoveryAlive(
     hasReusableProfile: Boolean,
 ): Boolean = reconnectRequested || hasReusableProfile
 
+/** A reconnect request that overlaps the tail of the previous scan must be retried, not dropped. */
+internal fun shouldScheduleStaDiscoveryRetry(
+    reconnectRequested: Boolean,
+    discoveryInProgress: Boolean,
+): Boolean = reconnectRequested && discoveryInProgress
+
 internal fun restoredStaInitiatorIdentity(value: String?): StaInitiatorIdentity =
     runCatching { StaInitiatorIdentity.valueOf(value.orEmpty()) }
         .getOrDefault(StaInitiatorIdentity.PAIRED_COMPUTER)
@@ -377,7 +383,19 @@ data class PhotoExif(
     val focalLength: String?,    // "50mm"
     val dateTime: String? = null,
     val lensModel: String? = null,
+    /** Non-zero exposure compensation intent recorded by the camera, e.g. "+0.7 EV". */
+    val exposureCompensation: String? = null,
 )
+
+internal fun formatExposureCompensation(value: Float?): String? {
+    val ev = value?.takeIf { it.isFinite() } ?: return null
+    if (kotlin.math.abs(ev) < 0.05f) return null
+    return if (ev > 0f) {
+        String.format(java.util.Locale.ROOT, "+%.1f EV", ev)
+    } else {
+        String.format(java.util.Locale.ROOT, "%.1f EV", ev)
+    }
+}
 
 data class NewCameraMedia(
     val camera: NikonCamera,
@@ -1656,7 +1674,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _state.value.connectionType == CameraConnectionType.USB
         ) return
         selectStaMode()
-        if (_state.value.wirelessMode != WirelessMode.STA || staDiscoveryJob?.isActive == true) return
+        if (_state.value.wirelessMode != WirelessMode.STA) return
+        val discoveryInProgress = staDiscoveryJob?.isActive == true
+        if (discoveryInProgress) {
+            // A freshly activated session can lose transport before the discovery coroutine reaches
+            // its finally block. The old code silently discarded that reconnect request because the
+            // previous job was technically still active, leaving STA disconnected indefinitely.
+            if (shouldScheduleStaDiscoveryRetry(reconnect, discoveryInProgress)) {
+                log { "STA_DISCOVERY reconnect deferred until active discovery exits" }
+                scheduleStaReconnect()
+            }
+            return
+        }
 
         val generation = ++staDiscoveryGeneration
         staLastFailureMessage = null
@@ -2228,26 +2257,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 delay(KEEPALIVE_INTERVAL_MS)
                 val cam = camera ?: break
                 if (!cam.keepalive()) {
-                    camera = null
-                    if (cam.connectionType == CameraConnectionType.WIFI) releaseSessionWifiLock()
-                    cam.close()
-                    // 掉线不报错，直接进入重连（新协程，避免与当前心跳协程的取消纠缠）。
-                    // 不清空文件列表：网格保留（缩略图走缓存），断开状态由顶栏信号按钮
-                    // 承担（红色断连图标），点击缩略图有抖动+提示反馈；重连后 loadFiles
-                    // 整表刷新，不存在陈旧 handle 被使用的问题（点击已被连接检查挡住）。
-                    _state.update {
-                        it.copy(
-                            isConnectedToCamera = false,
-                            wifiConnectionStatus = if (
-                                cam.connectionType == CameraConnectionType.WIFI
-                            ) {
-                                WifiConnectionStatus.RECONNECTING
-                            } else {
-                                it.wifiConnectionStatus
-                            }
-                        )
-                    }
-                    viewModelScope.launch { reconnectSelectedTransport() }
+                    // Keep the current camera reference intact until the centralized handler claims
+                    // it. Clearing it here first would trip that handler's stale-session guard.
+                    onCameraTransportLost(cam)
                     break
                 }
             }
@@ -3537,7 +3549,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * 加载文件的 EXIF 元数据（光圈/快门/ISO/焦距）。先从 [exifCache] 命中，
+     * 加载文件的 EXIF 元数据（光圈/快门/ISO/曝光补偿/焦距）。先从 [exifCache] 命中，
      * 未命中时通过 [NikonCamera.readExifHeader] 下载文件头 128KB，再用
      * [androidx.exifinterface.media.ExifInterface] 解析标准标签 + Nikon MakerNote。
      * 任何环节失败返回 null——EXIF 是纯体验增强，静默失败。
@@ -3637,6 +3649,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val isoRaw = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
         val iso = if (isoRaw != null) "ISO$isoRaw" else null
 
+        // Exposure compensation is the photographer's metering intent and cannot be inferred from
+        // the final aperture/shutter/ISO values. Keep the common 0 EV case out of the preview bar.
+        val exposureCompensation = formatExposureCompensation(
+            parseRational(exif.getAttribute(ExifInterface.TAG_EXPOSURE_BIAS_VALUE)),
+        )
+
         // 焦距：RATIONAL mm
         val focal = parseRational(exif.getAttribute(ExifInterface.TAG_FOCAL_LENGTH))
             ?.let { "%.0fmm".format(it) }
@@ -3652,7 +3670,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ).mapNotNull(exif::getAttribute)
             .firstOrNull { it.isNotBlank() }
 
-        return PhotoExif(aperture, shutter, iso, focal, dateTime, lensModel)
+        return PhotoExif(
+            aperture = aperture,
+            shutterSpeed = shutter,
+            iso = iso,
+            focalLength = focal,
+            dateTime = dateTime,
+            lensModel = lensModel,
+            exposureCompensation = exposureCompensation,
+        )
     }
 
     private fun thumbnailDiskCacheFileName(

@@ -67,6 +67,28 @@ class StaConnectionIsolationTest {
     }
 
     @Test
+    fun reconnectOverlappingPreviousDiscoveryIsDeferredInsteadOfDropped() {
+        assertTrue(
+            shouldScheduleStaDiscoveryRetry(
+                reconnectRequested = true,
+                discoveryInProgress = true,
+            ),
+        )
+        assertFalse(
+            shouldScheduleStaDiscoveryRetry(
+                reconnectRequested = false,
+                discoveryInProgress = true,
+            ),
+        )
+        assertFalse(
+            shouldScheduleStaDiscoveryRetry(
+                reconnectRequested = true,
+                discoveryInProgress = false,
+            ),
+        )
+    }
+
+    @Test
     fun savedStaInitiatorIdentitySurvivesAppRelaunch() {
         assertEquals(
             StaInitiatorIdentity.ALBUM_EXPLORER,

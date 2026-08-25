@@ -356,6 +356,7 @@
     <string name="dev_panel_title">Developer</string>
     <string name="dev_hd_liveview">XGA live view</string>
     <string name="cd_remote_histogram">Live view histogram</string>
+    <string name="cd_preview_histogram">Photo histogram</string>
     <string name="cd_remote_grid">Framing grid</string>
     <string name="cd_remote_rotate">Rotate screen</string>
     <string name="cd_remote_fullscreen_enter">Fullscreen monitor</string>

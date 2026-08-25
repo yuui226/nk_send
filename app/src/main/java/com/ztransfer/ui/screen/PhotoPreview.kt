@@ -35,10 +35,12 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +48,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -58,6 +61,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -86,7 +90,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.protocol.NikonCamera
@@ -345,6 +351,9 @@ internal fun PhotoPreviewOverlay(
     // 只有当前照片的 FHD 确认不可用、且当前 EXIF 已经读取完毕后，才允许向相机请求
     // 一张缩略图兜底。这样占位图不会跑到 FHD / EXIF 前面争抢相机通道。
     val fhdUnavailable = remember { mutableStateMapOf<Int, Boolean>() }
+    // PreviewPage owns thumbnail fallback loading. Publish the actual bitmap it renders so the
+    // shared monitor histogram can analyse that exact image without another decode or camera read.
+    val displayedBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
     val exifData = remember { mutableStateMapOf<Int, PhotoExif?>() }
     val exifLoading = remember { mutableStateMapOf<Int, Boolean>() }
     val exifFinished = remember { mutableStateMapOf<Int, Boolean>() }
@@ -360,6 +369,23 @@ internal fun PhotoPreviewOverlay(
     val currentOnTransfer by rememberUpdatedState(onTransfer)
     val currentQueueTargetBounds by rememberUpdatedState(queueTargetBounds)
     val currentOnQueueFlightCaught by rememberUpdatedState(onQueueFlightCaught)
+    var showHistogram by remember { mutableStateOf(false) }
+    val histogramSource = currentHandle?.let(displayedBitmaps::get)
+    val previewHistogram by produceState<LuminanceHistogram?>(
+        initialValue = null,
+        showHistogram,
+        currentHandle,
+        histogramSource,
+    ) {
+        value = null
+        if (showHistogram && histogramSource != null &&
+            currentFile.extension !in VIDEO_EXTENSIONS
+        ) {
+            value = withContext(Dispatchers.Default) {
+                calculateLuminanceHistogram(histogramSource.asAndroidBitmap())
+            }
+        }
+    }
 
     // 预览入队只变换 Pager 图层，并用当前已解码位图多绘制一个短命影子：不复制 Bitmap、
     // 不重新读取相机，也不创建列表 QueueFlight；抵达时仅触发现有胶囊视觉回弹。
@@ -675,6 +701,7 @@ internal fun PhotoPreviewOverlay(
             (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file?.handle
         }.toSet()
         fhdBitmaps.keys.filter { it !in keepH }.forEach { fhdBitmaps.remove(it) }
+        displayedBitmaps.keys.filter { it !in keepH }.forEach { displayedBitmaps.remove(it) }
         fhdUnavailable.keys.filter { it !in keepH }.forEach { fhdUnavailable.remove(it) }
         exifData.keys.filter { it !in keepH }.forEach { exifData.remove(it) }
         exifFinished.keys.filter { it !in keepH }.forEach { exifFinished.remove(it) }
@@ -870,6 +897,10 @@ internal fun PhotoPreviewOverlay(
                         loadEnabled = deferredLoadsEnabled,
                         rotationDegrees = rotationDegrees,
                         isCurrent = page == pagerState.currentPage,
+                        onDisplayBitmapChanged = { bitmap ->
+                            if (bitmap == null) displayedBitmaps.remove(file.handle)
+                            else displayedBitmaps[file.handle] = bitmap
+                        },
                         onZoomedChange = { currentZoomed = it },
                         onTap = startClose
                     )
@@ -977,6 +1008,28 @@ internal fun PhotoPreviewOverlay(
                             0.82f * progress.value
                     },
             )
+        }
+
+        if (showHistogram && currentFile != null &&
+            currentFile.extension !in VIDEO_EXTENSIONS
+        ) {
+            previewHistogram?.let { histogram ->
+                HistogramOverlay(
+                    histogram = histogram,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .navigationBarsPadding()
+                        .padding(start = 20.dp, bottom = 92.dp)
+                        .graphicsLayer {
+                            val swipe =
+                                (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
+                                    .coerceIn(0f, 1f)
+                            translationX =
+                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                            alpha = progress.value * swipe * burstPagerAlpha.value
+                        },
+                )
+            }
         }
 
         // 顶部信息带与右侧队列胶囊严格共用 36dp 高度和 6dp 顶边距。文件名左对齐，
@@ -1138,7 +1191,8 @@ internal fun PhotoPreviewOverlay(
             val curExif = exifData[file.handle]
             val displayExif = curExif?.takeIf {
                 it.aperture != null || it.shutterSpeed != null ||
-                    it.iso != null || it.focalLength != null
+                    it.iso != null || it.exposureCompensation != null ||
+                    it.focalLength != null
             }
             val loadedAlpha by animateFloatAsState(
                 targetValue = if (displayExif != null) 1f else 0f,
@@ -1207,6 +1261,10 @@ internal fun PhotoPreviewOverlay(
                         )
                     }
                     if (current.extension !in VIDEO_EXTENSIONS) {
+                        PreviewHistogramButton(
+                            active = showHistogram,
+                            onClick = { showHistogram = !showHistogram },
+                        )
                         PreviewRotationButton(onClick = {
                             if (!burstTransitionBusy) {
                                 val nextDegrees = rotationDegrees - 90f
@@ -1509,7 +1567,7 @@ private fun BurstCollectionNavigationButton(
 }
 
 /**
- * 底部毛玻璃参数条：光圈 / 快门 / ISO / 焦距。
+ * 底部毛玻璃参数条：光圈 / 快门 / ISO / 非零曝光补偿 / 焦距。
  * 淡入淡出由外层（overlay 展开进度 × 翻页跟手 × 加载完成度）统一驱动，本身不管透明度。
  */
 @Composable
@@ -1518,7 +1576,13 @@ private fun ExifMetadataBar(
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
-    val parts = listOfNotNull(exif.aperture, exif.shutterSpeed, exif.iso, exif.focalLength)
+    val parts = listOfNotNull(
+        exif.aperture,
+        exif.shutterSpeed,
+        exif.iso,
+        exif.exposureCompensation,
+        exif.focalLength,
+    )
     if (parts.isEmpty()) return
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -1534,6 +1598,36 @@ private fun ExifMetadataBar(
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
         )
+    }
+}
+
+/** Preview-styled switch around the monitor page's shared histogram icon and analysis overlay. */
+@Composable
+private fun PreviewHistogramButton(
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val description = stringResource(R.string.cd_preview_histogram)
+    GlassButton(
+        onClick = onClick,
+        modifier = Modifier.size(44.dp),
+        shape = CircleShape,
+        contentPadding = PaddingValues(0.dp),
+        active = active,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .semantics {
+                    contentDescription = description
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            CompositionLocalProvider(LocalContentColor provides colors.accentBlue) {
+                HistogramMark(Modifier.size(20.dp))
+            }
+        }
     }
 }
 
@@ -1579,6 +1673,7 @@ private fun PreviewPage(
     loadEnabled: Boolean,
     rotationDegrees: Float,
     isCurrent: Boolean,
+    onDisplayBitmapChanged: (ImageBitmap?) -> Unit,
     onZoomedChange: (Boolean) -> Unit,
     onTap: () -> Unit
 ) {
@@ -1627,6 +1722,9 @@ private fun PreviewPage(
     }
 
     val displayBitmap = fhdBitmap ?: thumbnail
+    LaunchedEffect(displayBitmap, isCurrent) {
+        if (isCurrent) onDisplayBitmapChanged(displayBitmap)
+    }
     val isVideo = file.extension in VIDEO_EXTENSIONS
     ZoomablePreviewViewport(
         imageSize = displayBitmap?.let { IntSize(it.width, it.height) },
