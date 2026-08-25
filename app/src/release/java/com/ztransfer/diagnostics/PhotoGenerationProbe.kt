@@ -9,4 +9,5 @@ object PhotoGenerationProbe {
     fun begin(sourceName: String, configuration: String): Long = NO_SESSION
     fun stage(sessionId: Long, name: String, durationMs: Long, detail: String = "") = Unit
     fun finish(sessionId: Long, outcome: String, totalMs: Long) = Unit
+    fun note(category: String, message: String) = Unit
 }

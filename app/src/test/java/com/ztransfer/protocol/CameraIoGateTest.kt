@@ -270,6 +270,14 @@ class CameraIoGateTest {
                 preferHighThroughput = true,
             ),
         )
+        assertTrue(
+            shouldUsePartialObjectDownload(
+                partialObjectSupported = true,
+                effectiveSize = 26L * 1024L * 1024L,
+                preferHighThroughput = true,
+                forcePartial = true,
+            ),
+        )
     }
 
     @Test

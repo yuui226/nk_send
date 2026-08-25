@@ -14,6 +14,13 @@ object PhotoGenerationProbe {
     const val enabled: Boolean = true
     const val NO_SESSION: Long = -1L
     private const val MAX_SESSIONS = 12
+    private const val MAX_NOTES = 24
+
+    private data class DiagnosticNote(
+        val elapsedMs: Long,
+        val category: String,
+        val message: String,
+    )
 
     private data class Stage(
         val name: String,
@@ -36,6 +43,7 @@ object PhotoGenerationProbe {
     private val ids = AtomicLong(0L)
     private val lock = Any()
     private val sessions = linkedMapOf<Long, Session>()
+    private val notes = arrayListOf<DiagnosticNote>()
     private val _version = MutableStateFlow(0)
     val version: StateFlow<Int> = _version.asStateFlow()
 
@@ -81,17 +89,42 @@ object PhotoGenerationProbe {
         bump()
     }
 
+    /** Shares the existing bottom Debug log with low-frequency protocol diagnostics. */
+    fun note(category: String, message: String) {
+        if (message.isBlank()) return
+        synchronized(lock) {
+            notes += DiagnosticNote(
+                elapsedMs = SystemClock.elapsedRealtime(),
+                category = category,
+                message = message,
+            )
+            while (notes.size > MAX_NOTES) notes.removeAt(0)
+        }
+        bump()
+    }
+
     fun clear() {
-        synchronized(lock) { sessions.clear() }
+        synchronized(lock) {
+            sessions.clear()
+            notes.clear()
+        }
         bump()
     }
 
     fun displayLines(): List<String> = synchronized(lock) {
         buildList {
-            if (sessions.isEmpty()) {
-                add("暂无记录：传输一张启用了滤镜或边框的 JPG")
+            if (sessions.isEmpty() && notes.isEmpty()) {
+                add("暂无记录：连接一次 STA，或传输一张启用了滤镜/边框的 JPG")
                 return@buildList
             }
+            if (notes.isNotEmpty()) {
+                add("STA / 协议诊断")
+                notes.forEach { note ->
+                    add("[${note.category}] t=${note.elapsedMs}ms")
+                    note.message.lineSequence().forEach { add("  $it") }
+                }
+            }
+            if (notes.isNotEmpty() && sessions.isNotEmpty()) add("")
             sessions.values.toList().asReversed().forEachIndexed { index, session ->
                 if (index > 0) add("")
                 add(
@@ -112,7 +145,7 @@ object PhotoGenerationProbe {
 
     fun report(): String = synchronized(lock) {
         buildString {
-            appendLine("ZTransfer photo-generation probe v1")
+            appendLine("ZTransfer debug timing/protocol log v2")
             appendLine("generated=${Instant.now()}")
             appendLine("clock=SystemClock.elapsedRealtime")
             appendLine("note=total stages include their child stages; do not sum every line")
@@ -122,9 +155,13 @@ object PhotoGenerationProbe {
     }
 
     private fun displayLinesLocked(): List<String> = buildList {
-        if (sessions.isEmpty()) {
+        if (sessions.isEmpty() && notes.isEmpty()) {
             add("<no sessions>")
             return@buildList
+        }
+        notes.forEach { note ->
+            add("note category=${note.category} elapsedMs=${note.elapsedMs}")
+            note.message.lineSequence().forEach { add("  $it") }
         }
         sessions.values.forEach { session ->
             add(

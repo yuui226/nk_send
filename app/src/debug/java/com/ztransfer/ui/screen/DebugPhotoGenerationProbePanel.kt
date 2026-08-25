@@ -33,7 +33,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,16 +56,16 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val version by PhotoGenerationProbe.version.collectAsState()
     var open by remember { mutableStateOf(false) }
-    val lines = remember(version, open) {
-        if (open) PhotoGenerationProbe.displayLines() else emptyList()
-    }
+    var lines by remember { mutableStateOf<List<String>>(emptyList()) }
 
     Box(modifier = modifier) {
         if (!open) {
             GlassButton(
-                onClick = { open = true },
+                onClick = {
+                    lines = PhotoGenerationProbe.displayLines()
+                    open = true
+                },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
@@ -84,7 +83,7 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
                 )
                 Spacer(Modifier.width(5.dp))
                 Text(
-                    "生成耗时",
+                    "耗时日志",
                     color = colors.onBackground,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -122,13 +121,13 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "照片生成分段耗时",
+                                "Debug 耗时与协议日志",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.onBackground,
                             )
                             Text(
-                                "生成完成后复制报告，用于定位 25 秒异常",
+                                "记录照片生成耗时和 STA 协议探索结果",
                                 fontSize = 11.sp,
                                 color = colors.onSurfaceVariant,
                             )
@@ -136,24 +135,27 @@ internal fun DebugPhotoGenerationProbePanel(modifier: Modifier = Modifier) {
                         GlassButton(
                             onClick = {
                                 clipboard.setText(AnnotatedString(PhotoGenerationProbe.report()))
-                                Toast.makeText(context, "生成耗时报告已复制", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Debug 日志已复制", Toast.LENGTH_SHORT).show()
                             },
                             contentPadding = PaddingValues(8.dp),
                         ) {
                             Icon(
                                 Icons.Default.ContentCopy,
-                                contentDescription = "复制生成耗时报告",
+                                contentDescription = "复制 Debug 日志",
                                 tint = colors.accentBlue,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
                         GlassButton(
-                            onClick = { PhotoGenerationProbe.clear() },
+                            onClick = {
+                                PhotoGenerationProbe.clear()
+                                lines = PhotoGenerationProbe.displayLines()
+                            },
                             contentPadding = PaddingValues(8.dp),
                         ) {
                             Icon(
                                 Icons.Default.DeleteSweep,
-                                contentDescription = "清空生成耗时",
+                                contentDescription = "清空 Debug 日志",
                                 tint = colors.onSurfaceVariant,
                                 modifier = Modifier.size(16.dp),
                             )

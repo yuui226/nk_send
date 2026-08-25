@@ -26,6 +26,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.diagnostics.FileOrderProbe
+import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
 import com.ztransfer.protocol.CameraRefusedException
@@ -34,6 +35,7 @@ import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.PtpIpDiscovery
+import com.ztransfer.protocol.StaInitiatorIdentity
 import com.ztransfer.protocol.UsbPtpConnection
 import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.service.CameraSessionService
@@ -106,11 +108,28 @@ internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStat
     else -> WifiConnectionStatus.FAILED
 }
 
+/** A saved STA profile can become reachable slightly before Nikon's PTP/IP service is ready. */
+internal fun isTransientStaServiceReadinessFailure(error: Throwable?): Boolean =
+    error is SocketTimeoutException || error is ConnectException
+
 /** STA reconnection is selected only for an established STA-origin Wi-Fi session. */
 internal fun shouldReconnectUsingSta(
     connectionType: CameraConnectionType?,
     wirelessMode: WirelessMode,
 ): Boolean = connectionType == CameraConnectionType.WIFI && wirelessMode == WirelessMode.STA
+
+/** AP keeps the proven slot filter; STA also accepts Nikon's non-zero aggregate storage IDs. */
+internal fun usableStorageIds(rawIds: List<Int>, isStaConnection: Boolean): List<Int> = rawIds
+    .filter { storageId ->
+        if (isStaConnection) storageId != 0 && storageId != -1
+        else storageId and 0xFFFF != 0
+    }
+    .distinct()
+    .sorted()
+
+/** Paired Nikon STA exposes its aggregate store through wildcard object enumeration. */
+internal fun objectHandleQueryStorageId(storageId: Int, isStaConnection: Boolean): Int =
+    if (isStaConnection && storageId and 0xFFFF == 0) -1 else storageId
 
 private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
@@ -1644,13 +1663,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
-        repeat(2) { attempt ->
+        val explorationReports = ArrayList<String>(3)
+        var pairingReconnectUsed = false
+        var readinessRetryUsed = false
+        while (true) {
             if (generation != staDiscoveryGeneration || purchaseHold ||
                 _state.value.wirelessMode != WirelessMode.STA
             ) return false
             val candidateCamera = NikonCamera(localizedContext)
             staConnectingCamera = candidateCamera
-            val result = candidateCamera.connectSta(ip)
+            val result = candidateCamera.connectSta(
+                ip = ip,
+                identity = StaInitiatorIdentity.PAIRED_COMPUTER,
+                allowPairing = true,
+                exploreAlbumAccess = true,
+                forceProfilePairing = true,
+            )
             if (generation != staDiscoveryGeneration || purchaseHold ||
                 _state.value.connectionType == CameraConnectionType.USB
                 || _state.value.wirelessMode != WirelessMode.STA
@@ -1659,49 +1687,170 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 candidateCamera.close()
                 return false
             }
-            result.fold(
-                onSuccess = {
-                    staConnectingCamera = null
-                    staReconnectAttempt = 0
-                    camera = candidateCamera
-                    activateThumbnailDiskCache(candidateCamera)
-                    acquireSessionWifiLock()
-                    connectionPreferences.edit().putString(STA_LAST_CAMERA_IP, ip).apply()
-                    _state.update {
-                        it.copy(
-                            isConnectedToCamera = true,
-                            isConnecting = false,
-                            connectionType = CameraConnectionType.WIFI,
-                            isStaConnection = true,
-                            cameraManufacturer = candidateCamera.deviceManufacturer,
-                            cameraModel = candidateCamera.deviceModel,
-                            wifiConnectionStatus = WifiConnectionStatus.IDLE,
-                            staConnectionStatus = StaConnectionStatus.IDLE,
-                            staDiscoveryProgress = null,
-                            staConnectionError = null,
-                        )
-                    }
-                    CameraSessionService.start(getApplication())
-                    startKeepalive()
-                    loadFiles()
-                    startEventPolling()
-                    return true
-                },
-                onFailure = { error ->
-                    staLastFailureMessage = error.message ?: error.javaClass.simpleName
-                },
-            )
+            val route = if (readinessRetryUsed) "paired-ready-retry" else "paired"
+            recordStaDiagnostic(ip, route, candidateCamera, explorationReports)
+            if (result.isSuccess) {
+                activateStaCamera(candidateCamera, ip)
+                return true
+            }
+            val error = result.exceptionOrNull()
+            staLastFailureMessage = error?.message ?: error?.javaClass?.simpleName
             staConnectingCamera = null
             candidateCamera.close()
-            if (result.exceptionOrNull() !is PairingCompletedException || attempt > 0) {
+            when {
+                error is PairingCompletedException && !pairingReconnectUsed -> {
+                    // A first-time pairing changes the camera service; the verified trace becomes
+                    // ready again roughly 6.6 seconds later.
+                    pairingReconnectUsed = true
+                    staLastFailureMessage = null
+                    delay(STA_PAIRING_RECONNECT_DELAY_MS)
+                }
+                isTransientStaServiceReadinessFailure(error) && !readinessRetryUsed -> {
+                    // The camera may expose its saved-profile address before port 15740 is ready.
+                    // Retry this STA-only probe once so album validation is not skipped merely due
+                    // to that short startup window.
+                    readinessRetryUsed = true
+                    staLastFailureMessage = null
+                    delay(STA_SERVICE_READY_RETRY_DELAY_MS)
+                }
+                else -> break
+            }
+        }
+
+        // STA exploration route 2: keep the successfully saved Wi-Fi profile, but identify this
+        // album session separately from Nikon's paired transfer/control host. Pairing is forbidden
+        // on this identity, so the experiment cannot replace the camera's stored host binding.
+        val pairedReportReachedStorage = explorationReports.any { "GetStorageIDs=" in it }
+        if (pairedReportReachedStorage &&
+            generation == staDiscoveryGeneration &&
+            _state.value.wirelessMode == WirelessMode.STA
+        ) {
+            delay(STA_EXPLORER_RECONNECT_DELAY_MS)
+            val albumCamera = NikonCamera(localizedContext)
+            staConnectingCamera = albumCamera
+            val albumResult = albumCamera.connectSta(
+                ip = ip,
+                identity = StaInitiatorIdentity.ALBUM_EXPLORER,
+                allowPairing = false,
+                exploreAlbumAccess = true,
+                forceProfilePairing = false,
+            )
+            recordStaDiagnostic(ip, "album", albumCamera, explorationReports)
+            if (generation != staDiscoveryGeneration || purchaseHold ||
+                _state.value.connectionType == CameraConnectionType.USB ||
+                _state.value.wirelessMode != WirelessMode.STA ||
+                _state.value.isConnectedToCamera
+            ) {
+                albumCamera.close()
                 return false
             }
-            // A first-time pairing changes the camera service; the verified trace becomes ready
-            // again roughly 6.6 seconds later, then the same address can open a browsing session.
-            staLastFailureMessage = null
-            delay(STA_PAIRING_RECONNECT_DELAY_MS)
+            if (albumResult.isSuccess) {
+                activateStaCamera(albumCamera, ip)
+                return true
+            }
+            staLastFailureMessage = albumResult.exceptionOrNull()?.message
+                ?: staLastFailureMessage
+            staConnectingCamera = null
+            albumCamera.close()
+        }
+
+        if (explorationReports.isNotEmpty() &&
+            generation == staDiscoveryGeneration &&
+            _state.value.wirelessMode == WirelessMode.STA
+        ) {
+            // Keep the known paired monitor session available after both album routes fail. This
+            // preserves the existing "no photos" screen and its Debug timing-log entry, where the
+            // complete STA transcript can now be copied.
+            delay(STA_EXPLORER_RECONNECT_DELAY_MS)
+            val monitorCamera = NikonCamera(localizedContext)
+            staConnectingCamera = monitorCamera
+            val monitorResult = monitorCamera.connectSta(
+                ip = ip,
+                identity = StaInitiatorIdentity.PAIRED_COMPUTER,
+                allowPairing = true,
+                exploreAlbumAccess = false,
+                forceProfilePairing = true,
+                allowMonitorOnlyFallback = true,
+            )
+            recordStaDiagnostic(ip, "monitor-fallback", monitorCamera, explorationReports)
+            if (monitorResult.isSuccess &&
+                generation == staDiscoveryGeneration &&
+                !purchaseHold &&
+                _state.value.connectionType != CameraConnectionType.USB &&
+                _state.value.wirelessMode == WirelessMode.STA &&
+                !_state.value.isConnectedToCamera
+            ) {
+                activateStaCamera(monitorCamera, ip)
+                return true
+            }
+            staConnectingCamera = null
+            monitorCamera.close()
         }
         return false
+    }
+
+    private fun recordStaDiagnostic(
+        ip: String,
+        route: String,
+        candidateCamera: NikonCamera,
+        reports: MutableList<String>,
+    ) {
+        val report = candidateCamera.staDiagnosticReport.takeIf(String::isNotBlank) ?: return
+        val labeled = "[$ip / $route]\n$report"
+        reports += labeled
+        if (PhotoGenerationProbe.enabled) {
+            PhotoGenerationProbe.note("STA", labeled)
+        }
+    }
+
+    private suspend fun activateStaCamera(candidateCamera: NikonCamera, ip: String) {
+        staConnectingCamera = null
+        staReconnectAttempt = 0
+        camera = candidateCamera
+        activateThumbnailDiskCache(candidateCamera)
+        acquireSessionWifiLock()
+        connectionPreferences.edit().putString(STA_LAST_CAMERA_IP, ip).apply()
+        _state.update {
+            it.copy(
+                isConnectedToCamera = true,
+                isConnecting = false,
+                connectionType = CameraConnectionType.WIFI,
+                isStaConnection = true,
+                cameraManufacturer = candidateCamera.deviceManufacturer,
+                cameraModel = candidateCamera.deviceModel,
+                wifiConnectionStatus = WifiConnectionStatus.IDLE,
+                staConnectionStatus = StaConnectionStatus.IDLE,
+                staDiscoveryProgress = null,
+                staConnectionError = null,
+            )
+        }
+        CameraSessionService.start(getApplication())
+        startKeepalive()
+        if (candidateCamera.staAlbumAccessValidated) {
+            loadFiles()
+            startEventPolling()
+        } else {
+            eventPollJob?.cancel()
+            eventPollJob = null
+            fileLoadPending = false
+            fileScanHandleSnapshot = null
+            knownHandlesCamera = candidateCamera
+            knownHandles.clear()
+            _state.update {
+                it.copy(
+                    files = emptyList(),
+                    storageIds = emptyList(),
+                    isLoadingFiles = false,
+                    hasCompletedFileScan = true,
+                )
+            }
+            if (PhotoGenerationProbe.enabled) {
+                PhotoGenerationProbe.note(
+                    "STA-SCAN",
+                    "album enumeration skipped: sampled GetObjectInfo was not accessible",
+                )
+            }
+        }
     }
 
     private fun scheduleStaReconnect() {
@@ -2018,8 +2167,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val info = runCatching {
                 var got: NikonCamera.FileInfo? = null
-                cam.streamFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
-                    got = batch.firstOrNull()
+                if (cam.staDirectObjectReadValidated) {
+                    cam.streamStaDirectFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
+                        got = batch.firstOrNull()
+                    }
+                } else {
+                    cam.streamFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
+                        got = batch.firstOrNull()
+                    }
                 }
                 got
             }.getOrNull() ?: return@launch
@@ -2128,12 +2283,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 } else {
                     // 双卡机型（Z5 II / Z6 III 等）：枚举【所有】存储卡的对象并合并，单卡机型
                     // 行为不变。PTP StorageID 低 16 位为逻辑存储号，0 表示卡槽无卡，跳过。
-                    storageIds = cam.getStorageIds()
-                        .filter { it and 0xFFFF != 0 }
-                        .distinct()
-                        .sorted()
+                    val staScan = _state.value.isStaConnection
+                    val rawStorageIds = cam.getStorageIds()
+                    storageIds = usableStorageIds(rawStorageIds, staScan)
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
                     if (FileOrderProbe.enabled) FileOrderProbe.recordStorageIds(storageIds)
+                    if (PhotoGenerationProbe.enabled && _state.value.isStaConnection) {
+                        PhotoGenerationProbe.note(
+                            "STA-SCAN",
+                            "StorageIDs raw=" +
+                                rawStorageIds.joinToString(",") { "0x%08X".format(it) } +
+                                " usable=" +
+                                storageIds.joinToString(",") { "0x%08X".format(it) },
+                        )
+                    }
                     _state.update { it.copy(storageIds = storageIds) }
                     if (storageIds.isEmpty()) {
                         fileScanHandleSnapshot = null
@@ -2153,7 +2316,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         } else {
                             0L
                         }
-                        val result = cam.getObjectHandlesWithStatus(storageId)
+                        val queryStorageId = objectHandleQueryStorageId(storageId, staScan)
+                        val result = cam.getObjectHandlesWithStatus(queryStorageId)
+                        if (PhotoGenerationProbe.enabled && _state.value.isStaConnection) {
+                            val response = result.responseCode?.let { "0x%04X".format(it) }
+                                ?: "<transport-error>"
+                            val sample = result.handles.take(12).joinToString(",") {
+                                "0x%08X".format(it)
+                            }
+                            PhotoGenerationProbe.note(
+                                "STA-SCAN",
+                                ("GetObjectHandles storage=0x%08X query=0x%08X " +
+                                    "response=%s success=%s " +
+                                    "payloadBytes=%d count=%d sample=[%s] error=%s").format(
+                                        storageId,
+                                        queryStorageId,
+                                        response,
+                                        result.successful,
+                                        result.payloadBytes,
+                                        result.handles.size,
+                                        sample,
+                                        result.error.orEmpty(),
+                                    ),
+                            )
+                        }
                         if (FileOrderProbe.enabled) {
                             FileOrderProbe.recordRawHandles(
                                 storageId = storageId,
@@ -2249,6 +2435,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                 val allFiles = existingFiles.toMutableList()
                 var publishedFiles = BatchPublishedList.from(existingFiles)
+                var directMetadataDiagnosticReported = false
                 // 备份模式下同一张照片在两张卡各有一份（handle 不同）：按 名称+大小+拍摄时间
                 // 去重，列表只显示一份；溢出/RAW+JPG 分卡等模式互不相同，不受影响。
                 val indexByIdentity = HashMap<String, Int>(
@@ -2300,6 +2487,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     // onBatch 回调运行在 IO 线程，用 update 原子读改写避免与主线程写入竞争。
                     if (fileLoadGeneration == generation && camera === cam) {
                         _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
+                        if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated &&
+                            !directMetadataDiagnosticReported
+                        ) {
+                            cam.staDirectMetadataDiagnostic?.let { diagnostic ->
+                                directMetadataDiagnosticReported = true
+                                PhotoGenerationProbe.note("STA-SCAN", diagnostic)
+                            }
+                        }
                         if (newHandlesToReport.isNotEmpty() && additions.isNotEmpty()) {
                             scanDiscoveredMedia += additions.filter { file ->
                                 file.handle in newHandlesToReport && isAutoTransferMedia(file)
@@ -2314,7 +2509,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         )
                     }
                 }
-                val allObjectInfoSucceeded = if (nonEmptyRemainingOrders.size == 1) {
+                if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
+                    PhotoGenerationProbe.note(
+                        "STA-SCAN",
+                        "direct catalog started handles=$remainingHandleCount headerBytes=" +
+                            NikonCamera.STA_DIRECT_CATALOG_HEADER_BYTES,
+                    )
+                }
+                val allObjectInfoSucceeded = if (cam.staDirectObjectReadValidated) {
+                    cam.streamStaDirectFileInfo(
+                        handles = nonEmptyRemainingOrders.flatMap {
+                            it.newestFirstHandles
+                        },
+                        batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
+                        onBatch = publishBatch,
+                    )
+                } else if (nonEmptyRemainingOrders.size == 1) {
                     cam.streamFileInfo(
                         handles = nonEmptyRemainingOrders.single().newestFirstHandles,
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
@@ -2327,6 +2537,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         },
                         batchSize = FILE_THUMBNAIL_PIPELINE_BATCH_SIZE,
                         onBatch = publishBatch,
+                    )
+                }
+
+                if (PhotoGenerationProbe.enabled && _state.value.isStaConnection) {
+                    PhotoGenerationProbe.note(
+                        "STA-SCAN",
+                        "metadata complete mode=" +
+                            (if (cam.staDirectObjectReadValidated) "direct" else "object-info") +
+                            " success=$allObjectInfoSucceeded " +
+                            "requested=$remainingHandleCount files=${allFiles.size}",
                     )
                 }
 
@@ -3178,6 +3398,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val WIFI_BACKGROUND_RETRY_INTERVAL_MS = 3_000L
         const val WATCH_INTERVAL_MS = 1_000L
         const val STA_PAIRING_RECONNECT_DELAY_MS = 6_600L
+        const val STA_SERVICE_READY_RETRY_DELAY_MS = 1_200L
+        const val STA_EXPLORER_RECONNECT_DELAY_MS = 900L
         val STA_RECONNECT_DELAYS_MS = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L)
         private const val CONNECTION_PREFERENCES = "sta_connection"
         private const val WIRELESS_MODE_PREFERENCE = "wireless_mode"
