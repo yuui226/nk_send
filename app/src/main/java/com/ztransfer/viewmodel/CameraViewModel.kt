@@ -122,7 +122,7 @@ internal fun shouldReconnectUsingSta(
     wirelessMode: WirelessMode,
 ): Boolean = connectionType == CameraConnectionType.WIFI && wirelessMode == WirelessMode.STA
 
-/** Once pairing has completed, discovery stays alive across Nikon's service restart and app relaunch. */
+/** Keeps an already-started STA discovery alive through Nikon's service restart or reconnect. */
 internal fun shouldKeepStaDiscoveryAlive(
     reconnectRequested: Boolean,
     hasReusableProfile: Boolean,
@@ -1133,14 +1133,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         startThumbnailFill()
         startEffectPreviewPrefetch()
-        if (_state.value.connectionType != CameraConnectionType.USB &&
-            _state.value.wirelessMode == WirelessMode.STA &&
-            hasReusableStaProfile()
-        ) {
-            // A paired Nikon profile already knows the hotspot/router. Keep looking in the
-            // background so the user only has to power on the camera after the first pairing.
-            startStaDiscovery(reconnect = true)
-        }
+        // STA 的首次检测只由“连接相机”按钮对应的 discoverStaCamera() 触发。
     }
 
     /**
