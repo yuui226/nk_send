@@ -2,6 +2,7 @@ package com.ztransfer.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.VerticalPager
@@ -10,17 +11,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 private const val CONNECTION_PAGE = 0
@@ -46,7 +44,24 @@ fun HomeWorkspacePager(
 ) {
     val pagerState = rememberPagerState(pageCount = { 2 })
     val scope = rememberCoroutineScope()
-    val cameraState by cameraViewModel.state.collectAsState()
+    // 相册扫描会频繁发布 files；主页容器只观察“是否该释放修图工作台”这一位状态。
+    val releaseLocalWorkspace by remember(cameraViewModel) {
+        cameraViewModel.state
+            .map { state ->
+                shouldReleaseLocalWorkspace(
+                    isConnecting = state.isConnecting,
+                    isConnected = state.isConnectedToCamera,
+                )
+            }
+            .distinctUntilChanged()
+    }.collectAsState(
+        initial = cameraViewModel.state.value.let { state ->
+            shouldReleaseLocalWorkspace(
+                isConnecting = state.isConnecting,
+                isConnected = state.isConnectedToCamera,
+            )
+        }
+    )
     val snapThreshold = if (pagerState.settledPage == LOCAL_EFFECTS_PAGE) {
         WORKSPACE_RETURN_SNAP_THRESHOLD
     } else {
@@ -60,23 +75,8 @@ fun HomeWorkspacePager(
         snapPositionalThreshold = snapThreshold,
     )
 
-    // 相邻页常驻才能在普通返回连接页时保留原图、效果状态和渲染缓存。
-    // 真正进入相机握手（或已连上）时递增代次，key 会一次性销毁整棵工作台组合：
-    // rememberCoroutineScope 取消正在进行的解码/导出，DisposableEffect 关闭渲染缓存，Bitmap 引用随之释放。
-    var localWorkspaceGeneration by remember { mutableIntStateOf(0) }
-    var releasedForCurrentConnection by remember { mutableStateOf(false) }
-    val releaseLocalWorkspace = shouldReleaseLocalWorkspace(
-        isConnecting = cameraState.isConnecting,
-        isConnected = cameraState.isConnectedToCamera,
-    )
-    LaunchedEffect(releaseLocalWorkspace) {
-        if (releaseLocalWorkspace && !releasedForCurrentConnection) {
-            localWorkspaceGeneration++
-            releasedForCurrentConnection = true
-        } else if (!releaseLocalWorkspace) {
-            releasedForCurrentConnection = false
-        }
-    }
+    // 普通上下翻页时相邻页常驻并保留编辑会话；开始连接后直接替换为空占位，真正释放
+    // 解码、导出协程和 Bitmap。不能只更换 key，否则 Pager 会立刻把整张离屏编辑页重建。
 
     // Pause as soon as a gesture commits toward the lower page, and resume only after the upper
     // page has fully settled. This closes the race in which Wi-Fi connects during the transition.
@@ -122,7 +122,9 @@ fun HomeWorkspacePager(
                     scope.launch { pagerState.animateScrollToPage(LOCAL_EFFECTS_PAGE) }
                 },
             )
-            LOCAL_EFFECTS_PAGE -> key(localWorkspaceGeneration) {
+            LOCAL_EFFECTS_PAGE -> if (releaseLocalWorkspace) {
+                Box(Modifier.fillMaxSize())
+            } else {
                 LocalPhotoEffectsPage(
                     viewModel = transferViewModel,
                     onNavigateUp = returnToConnectionPage,

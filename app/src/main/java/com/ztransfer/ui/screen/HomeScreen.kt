@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -48,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.boundsInRoot
@@ -68,22 +70,51 @@ import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.ui.theme.*
+import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.StaConnectionStatus
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.WirelessMode
 import com.ztransfer.viewmodel.WifiConnectionStatus
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlin.math.cos
 import kotlin.math.sin
+
+/** 连接页只观察自身会展示的字段，照片扫描批次不再打断成功动画。 */
+internal data class HomeConnectionUiState(
+    val isConnectedToCamera: Boolean,
+    val connectionType: CameraConnectionType?,
+    val wirelessMode: WirelessMode,
+    val isStaConnection: Boolean,
+    val staConnectionStatus: StaConnectionStatus,
+    val staConnectionError: String?,
+    val usbConnectionError: String?,
+    val wifiConnectionStatus: WifiConnectionStatus,
+)
+
+internal fun CameraState.toHomeConnectionUiState(): HomeConnectionUiState =
+    HomeConnectionUiState(
+        isConnectedToCamera = isConnectedToCamera,
+        connectionType = connectionType,
+        wirelessMode = wirelessMode,
+        isStaConnection = isStaConnection,
+        staConnectionStatus = staConnectionStatus,
+        staConnectionError = staConnectionError,
+        usbConnectionError = usbConnectionError,
+        wifiConnectionStatus = wifiConnectionStatus,
+    )
+
+internal fun shouldShowSubscriptionExpiryNotice(isPro: Boolean, daysLeft: Int): Boolean =
+    isPro && daysLeft in 0..SUB_ALERT_DAYS
 
 /**
  * 连接（引导）页：展示连接状态与引导。左上角 "Z传" 玻璃按钮为设置入口，
  * 与照片列表页完全一致（同一 GlassButton + SettingsOverlay，点击从按钮变形展开设置面板）。
  * 连接成功后自动跳到文件列表，且用户不会再返回本页。
- * 右上角"解锁高级版"徽标（免费版）可打开购买与激活入口——
- * 本页尚未连相机热点，多半还有外网；连接后则按 USB/Wi-Fi 与实时连接状态处理激活入口。
+ * 高级版购买、激活与续费入口统一收进设置面板，连接页本身只承担相机连接引导。
  */
 @Composable
 fun HomeScreen(
@@ -92,17 +123,21 @@ fun HomeScreen(
     onConnectionCelebrationFinished: () -> Unit,
     onOpenLocalPhotoEffects: () -> Unit,
 ) {
-    val state by viewModel.state.collectAsState()
+    val state by remember(viewModel) {
+        viewModel.state
+            .map(CameraState::toHomeConnectionUiState)
+            .distinctUntilChanged()
+    }.collectAsState(initial = viewModel.state.value.toHomeConnectionUiState())
     val transferState by transferViewModel.state.collectAsState()
     val context = LocalContext.current
-    // 右上角"解锁高级版"入口的显隐 + 成功爆发的金色粒子彩蛋都依赖它。
+    // 连接成功时高级版专属的金色粒子彩蛋依赖它；购买入口已经统一移入设置面板。
     val isPro by LicenseManager.isPro.collectAsState()
     // 当前设备的通行证过期且续签联不上网 → 顶部提示连网续期(连上重开自动续签)。
     val renewalNeeded by LicenseManager.renewalNeeded.collectAsState()
-    var showPro by remember { mutableStateOf(false) }
-    // 徽标左侧"续费"按钮打开的续费弹窗(剩余天数 + 续费价,再进付款);
-    // 常驻与临期入口共用同一个确认弹窗，避免绕过套餐与锁价确认。
+    // 右上角临期提示打开续费弹窗（剩余天数 + 续费价，再进付款）。
     var showRenewInfo by remember { mutableStateOf(false) }
+    // 只在购买/续费真正成功后递增；打开或取消续费窗不会改变临期标签。
+    var licenseRefreshNonce by remember { mutableStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
@@ -136,6 +171,8 @@ fun HomeScreen(
         connectionType = state.connectionType
     )
     val selectionScene = remember { Animatable(0f) }
+    // 进度只允许在 graphicsLayer 中读取；稳定 lambda 避免 620ms 起飞期间重组整页。
+    val selectionSceneProgress = remember(selectionScene) { { selectionScene.value } }
     LaunchedEffect(selectedConnection) {
         if (selectedConnection == null) {
             selectionScene.animateTo(
@@ -233,12 +270,14 @@ fun HomeScreen(
     // 识别传输方式后立即停止提示动画；具体动画在卡片图层内运行，避免每帧重组整个页面。
     val connectionAttentionActive = selectedConnection == null
     val soonDays = if (isPro) {
-        val subExp = remember(showRenewInfo) { LicenseManager.subExpiresAtSec() }
+        val subExp = remember(isPro, licenseRefreshNonce) {
+            LicenseManager.subExpiresAtSec()
+        }
         if (subExp > 0L) subDaysLeft(subExp) else -1
     } else -1
-    val banner: Pair<String, Boolean>? = when {   // (文案, 点了能不能续费)
+    val renewalNotice: Pair<String, Boolean>? = when {   // (文案, 点了能不能续费)
         renewalNeeded -> stringResource(R.string.renewal_needed) to false
-        soonDays in 0..SUB_ALERT_DAYS ->
+        shouldShowSubscriptionExpiryNotice(isPro, soonDays) ->
             pluralStringResource(R.plurals.sub_expiring_soon, soonDays, soonDays) to true
         else -> null
     }
@@ -288,7 +327,7 @@ fun HomeScreen(
                         success = celebrate && selectedConnection == CameraConnectionType.USB,
                         attentionActive = connectionAttentionActive,
                         attentionPhaseOffset = 0f,
-                        selectionScene = selectionScene.value,
+                        selectionSceneProgress = selectionSceneProgress,
                         error = usbError?.takeIf {
                             selectedConnection == CameraConnectionType.USB
                         },
@@ -339,7 +378,7 @@ fun HomeScreen(
                         success = celebrate && selectedConnection == CameraConnectionType.WIFI,
                         attentionActive = connectionAttentionActive,
                         attentionPhaseOffset = 0.5f,
-                        selectionScene = selectionScene.value,
+                        selectionSceneProgress = selectionSceneProgress,
                         goldBurst = isPro,
                         onSuccessAnimationFinished = onConnectionCelebrationFinished,
                         feedback = if (state.wirelessMode == WirelessMode.AP) {
@@ -463,28 +502,6 @@ fun HomeScreen(
                     )
                 }
 
-                // 原有订阅提示逻辑完整保留在双卡下方。
-                Spacer(modifier = Modifier.height(14.dp))
-                if (banner != null) {
-                    val (bannerText, renewable) = banner
-                    val bannerShape = RoundedCornerShape(10.dp)
-                    Text(
-                        text = bannerText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.accentOrange,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier
-                            // clip 在 clickable 之前:否则水波纹是方的,溢出圆角提示条。
-                            .then(
-                                if (renewable) Modifier
-                                    .clip(bannerShape)
-                                    .clickable { showRenewInfo = true }
-                                else Modifier
-                            )
-                            .background(colors.accentOrange.copy(alpha = 0.12f), bannerShape)
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                    )
-                }
                 Spacer(Modifier.weight(1f))
 
                 // 工作台在空间关系上位于连接页下方，入口贴近屏幕底部提示下滑方向。
@@ -519,10 +536,8 @@ fun HomeScreen(
             }
         }
 
-        // ---------- 左上角 "Z传" 悬浮按钮（设置入口，与照片列表页一致）；
-        // 右上角：免费版显示"解锁高级版"金徽标。本页尚未连相机热点、多半还有外网，
-        // 连接后设置页也保留输入激活码与客服入口，并按相机连接状态判断是否可访问服务器。----------
-        // 已解锁：金徽标改显"高级版"，点击不弹窗，每点一次放一发独立烟花（可连点并发）。
+        // ---------- 左上角 "Z传" 设置入口；右上角只保留必要的订阅续期提示。
+        // 高级版购买、激活、已激活状态和常驻续费入口全部统一放进设置面板。 ----------
         val fireworks = rememberFireworksState()
         Row(
             modifier = Modifier
@@ -545,69 +560,40 @@ fun HomeScreen(
                 // 双 Z 标（原"Z传"文本，换成自绘的尼康 Z 系列标志更简洁）。
                 ZMark(modifier = Modifier.height(20.dp))
             }
-            Spacer(modifier = Modifier.weight(1f))
             DebugSimulatorButton(onClick = viewModel::connectDebugSimulator)
-            // 免费版：金徽标"解锁高级版"，点击开介绍弹窗。
-            // 已解锁：金徽标"高级版"，点击不弹窗，放烟花彩蛋。
-            if (!isPro) {
-                ProBadgeButton(
-                    label = stringResource(R.string.unlock_pro),
-                    onClick = { showPro = true }
-                )
-            } else {
-                // 订阅用户(有到期日;永久码没有):徽标左侧一颗与顶栏同规格的"续费"玻璃按钮。
-                // 常驻但安静——想续随时点得到,不想理它也不碍眼;到期日等细节都收进弹窗里。
-                val subExp = remember(showRenewInfo) { LicenseManager.subExpiresAtSec() }
-                if (subExp > 0L) {
-                    // 与右邻的"高级版"徽标同高同圆角(28dp/14dp),两颗并排像一对。
-                    GlassButton(
-                        onClick = { showRenewInfo = true },
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        modifier = Modifier.height(28.dp)
-                    ) {
-                        Text(
-                            stringResource(R.string.renew_action),
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.accentBlue
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-                ProBadgeButton(
-                    label = stringResource(R.string.pro_label),
-                    onClick = { fireworks.launch() }
+            Spacer(modifier = Modifier.weight(1f))
+            renewalNotice?.let { (noticeText, renewable) ->
+                RenewalNoticeTag(
+                    text = noticeText,
+                    renewable = renewable,
+                    onClick = { showRenewInfo = true },
                 )
             }
         }
-        if (showPro) {
-            ProDialog(
-                onDismiss = { showPro = false },
-                onCelebrate = { fireworks.launch() },
-                onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
-                // 普通解锁入口只负责新购；只有尚未到期的订阅才显示续费入口并续原码。
-                renew = false
-            )
-        }
-        // 徽标左侧"续费"按钮:先看剩余天数与价格,认可了再进付款。
         if (showRenewInfo) {
             RenewDialog(
                 onDismiss = { showRenewInfo = false },
-                onCelebrate = { fireworks.launch() },
+                onCelebrate = {
+                    licenseRefreshNonce++
+                    fireworks.launch()
+                },
                 onHoldCameraWifi = { viewModel.holdCameraWifi(it) }
             )
         }
-        // 提示条与常驻入口都先进入续费确认弹窗。
+        // 临期标签继续进入原有续费确认弹窗；设置页中的常驻续费入口保持独立。
         // ---------- 设置面板：从 "Z传" 按钮位置变形展开 ----------
         if (showSettings) {
             SettingsOverlay(
                 viewModel = transferViewModel,
                 showPhotoEffectsEntry = false,
-                // 连接页顶栏已经有购买入口，设置弹窗不再重复展示高级版徽标。
-                showProBadge = false,
                 anchorBounds = zAnchor,
                 onDismiss = { showSettings = false },
+                onPlayFireworks = { fireworks.launch() },
+                onLicenseUpdated = { licenseRefreshNonce++ },
+                onHoldCameraWifi = { viewModel.holdCameraWifi(it) },
+                cameraConnectionType = state.connectionType,
+                cameraConnected = connected,
+                cameraIsStaMode = state.isStaConnection,
             )
         }
 
@@ -767,7 +753,7 @@ private fun ConnectionMethodCard(
     success: Boolean,
     attentionActive: Boolean,
     attentionPhaseOffset: Float,
-    selectionScene: Float,
+    selectionSceneProgress: () -> Float,
     onSuccessAnimationFinished: () -> Unit,
     error: String? = null,
     goldBurst: Boolean = false,
@@ -809,7 +795,7 @@ private fun ConnectionMethodCard(
         },
         label = "connectionCardPress"
     )
-    val probeProgress by animateFloatAsState(
+    val probeProgress = animateFloatAsState(
         targetValue = if (feedback?.busy == true && !selected) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.62f, stiffness = 420f),
         label = "connectionProbeLift"
@@ -819,10 +805,17 @@ private fun ConnectionMethodCard(
         val x = value.coerceIn(0f, 1f)
         return x * x * (3f - 2f * x)
     }
-    val sceneProgress = eased(selectionScene)
-    // 失败时让胜出卡恢复，继续承载错误信息；正常流程中两张卡一起退场。
-    val cardExitProgress = if (selected && error != null) 0f else sceneProgress
-    val heroProgress = if (selected && error == null) sceneProgress else 0f
+    // 场景进度只在图层阶段求值，避免动画状态把整张卡片带入逐帧重组。
+    fun cardExitProgress(): Float {
+        val scene = eased(selectionSceneProgress())
+        // 失败时让胜出卡恢复，继续承载错误信息；正常流程中两张卡一起退场。
+        return if (selected && error != null) 0f else scene
+    }
+    fun heroProgress(): Float = if (selected && error == null) {
+        eased(selectionSceneProgress())
+    } else {
+        0f
+    }
     // 用真实屏幕坐标定位飞出终点：横向严格居中，纵向落在屏幕上三分之一处。
     val targetCenterX = view.width / 2f
     val targetCenterY = view.height / 3f
@@ -847,11 +840,12 @@ private fun ConnectionMethodCard(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val exitScale = 1f - cardExitProgress * 0.045f
+                    val exitProgress = cardExitProgress()
+                    val exitScale = 1f - exitProgress * 0.045f
                     scaleX = exitScale
                     scaleY = exitScale
-                    translationY = cardExitProgress * 8.dp.toPx()
-                    alpha = 1f - cardExitProgress
+                    translationY = exitProgress * 8.dp.toPx()
+                    alpha = 1f - exitProgress
                 },
             shape = shape,
             tint = when {
@@ -1059,45 +1053,40 @@ private fun ConnectionMethodCard(
                 .size(42.dp)
                 .zIndex(4f)
                 .onGloballyPositioned { coordinates ->
-                    if (selectionScene <= 0.001f || iconCenterInRoot == null) {
+                    if (!selected || iconCenterInRoot == null) {
                         iconCenterInRoot = coordinates.boundsInRoot().center
                     }
                 }
                 .graphicsLayer {
-                    translationX = heroTravelX * heroProgress
-                    translationY = heroTravelY * heroProgress -
-                        kotlin.math.sin(heroProgress * Math.PI.toFloat()) * 10.dp.toPx() -
-                        probeProgress * 5.dp.toPx()
+                    val heroSceneProgress = heroProgress()
+                    translationX = heroTravelX * heroSceneProgress
+                    translationY = heroTravelY * heroSceneProgress -
+                        kotlin.math.sin(heroSceneProgress * Math.PI.toFloat()) * 10.dp.toPx() -
+                        probeProgress.value * 5.dp.toPx()
                 }
         ) {
             val badgeAccent = if (success) colors.statusConnected else accent
-            SkinMaterialBadge(
+            ConnectionModeBadge(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        val heroScale = (1f + heroProgress * 1.12f) *
-                            (1f + probeProgress * 0.04f)
+                        val heroSceneProgress = heroProgress()
+                        val exitProgress = cardExitProgress()
+                        val heroScale = (1f + heroSceneProgress * 1.12f) *
+                            (1f + probeProgress.value * 0.04f)
                         scaleX = heroScale
                         scaleY = heroScale
-                        alpha = if (selected) 1f else 1f - cardExitProgress
+                        alpha = if (selected) 1f else 1f - exitProgress
                     },
                 shape = badgeShape,
                 accentColor = badgeAccent,
                 contentColor = accent,
-                emphasis = if (success) {
-                    1f
-                } else {
-                    (if (attentionActive) 0.18f else 0.08f) + probeProgress * 0.48f
-                },
+                success = success,
+                attentionActive = attentionActive,
+                probeProgress = probeProgress,
                 textureSeed = materialSeed,
-            ) { badgeContentColor ->
-                modeIcon(
-                    badgeContentColor,
-                    Modifier
-                        .size(22.dp)
-                        .align(Alignment.Center)
-                )
-            }
+                modeIcon = modeIcon,
+            )
 
             ConnectionSuccessOverlay(
                 success = success,
@@ -1108,6 +1097,72 @@ private fun ConnectionMethodCard(
                     .requiredSize(220.dp)
             )
         }
+    }
+}
+
+/** 连接页右上角的轻量订阅标签；仅临期状态可点击进入原有续费确认流程。 */
+@Composable
+private fun RenewalNoticeTag(
+    text: String,
+    renewable: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val shape = RoundedCornerShape(7.dp)
+    Row(
+        modifier = Modifier
+            .widthIn(max = 240.dp)
+            .height(26.dp)
+            .clip(shape)
+            .then(if (renewable) Modifier.clickable(onClick = onClick) else Modifier)
+            .background(colors.accentOrange.copy(alpha = 0.12f), shape)
+            .border(1.dp, colors.accentOrange.copy(alpha = 0.28f), shape)
+            .padding(horizontal = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.accentOrange,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 探测抬升只重组 42dp 图标底座，不再把整张连接卡拖进动画热路径。 */
+@Composable
+private fun ConnectionModeBadge(
+    modifier: Modifier,
+    shape: RoundedCornerShape,
+    accentColor: Color,
+    contentColor: Color,
+    success: Boolean,
+    attentionActive: Boolean,
+    probeProgress: State<Float>,
+    textureSeed: Int,
+    modeIcon: @Composable (Color, Modifier) -> Unit,
+) {
+    val probe = probeProgress.value
+    SkinMaterialBadge(
+        modifier = modifier,
+        shape = shape,
+        accentColor = accentColor,
+        contentColor = contentColor,
+        emphasis = if (success) {
+            1f
+        } else {
+            (if (attentionActive) 0.18f else 0.08f) + probe * 0.48f
+        },
+        textureSeed = textureSeed,
+    ) { badgeContentColor ->
+        modeIcon(
+            badgeContentColor,
+            Modifier
+                .size(22.dp)
+                .align(Alignment.Center)
+        )
     }
 }
 
@@ -1153,87 +1208,82 @@ private fun ConnectionSuccessOverlay(
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
-    var progress by remember { mutableFloatStateOf(0f) }
+    val progress = remember { mutableFloatStateOf(0f) }
+    val readProgress = remember(progress) { { progress.floatValue } }
     val currentOnFinished by rememberUpdatedState(onFinished)
     LaunchedEffect(success) {
         if (success) {
-            progress = 0f
+            progress.floatValue = 0f
             val startedAt = SystemClock.uptimeMillis()
             while (isActive) {
                 val elapsed = SystemClock.uptimeMillis() - startedAt
                 val linearProgress =
                     (elapsed.toFloat() / CONNECTION_SUCCESS_DURATION_MS).coerceIn(0f, 1f)
-                progress = FastOutSlowInEasing.transform(linearProgress)
+                progress.floatValue = FastOutSlowInEasing.transform(linearProgress)
                 if (linearProgress >= 1f) break
                 delay(CONNECTION_SUCCESS_FRAME_MS)
             }
             if (isActive) currentOnFinished()
         } else {
-            progress = 0f
+            progress.floatValue = 0f
         }
     }
-    if (!success && progress == 0f) return
+    if (!success) return
 
-    val p = progress
-    Box(
+    Canvas(
         modifier = modifier
-            .graphicsLayer { alpha = (p * 5f).coerceAtMost(1f) },
-        contentAlignment = Alignment.Center
+            .graphicsLayer {
+                alpha = (readProgress() * 5f).coerceAtMost(1f)
+            }
     ) {
+        val p = readProgress()
         if (goldBurst) {
-            PremiumSuccessEffect(
-                progress = p,
-                modifier = Modifier.fillMaxSize()
-            )
+            drawPremiumSuccessEffect(p)
         }
 
         repeat(2) { index ->
             val ringProgress = ((p - index * 0.14f) / 0.72f).coerceIn(0f, 1f)
-            Box(
-                modifier = Modifier
-                    .size(82.dp)
-                    .graphicsLayer {
-                        val ringScale = 0.72f + ringProgress * 1.72f
-                        scaleX = ringScale
-                        scaleY = ringScale
-                        alpha = (1f - ringProgress) * 0.62f
-                    }
-                    .border(1.5.dp, colors.statusConnected, CircleShape)
+            val ringScale = 0.72f + ringProgress * 1.72f
+            drawCircle(
+                color = colors.statusConnected.copy(
+                    alpha = (1f - ringProgress) * 0.62f,
+                ),
+                radius = (41.dp.toPx() - 0.75.dp.toPx()) * ringScale,
+                style = Stroke(width = 1.5.dp.toPx() * ringScale),
             )
         }
 
         if (goldBurst) {
             repeat(10) { index ->
-                Box(
-                    modifier = Modifier
-                        .size(if (index % 3 == 0) 6.dp else 4.dp)
-                        .graphicsLayer {
-                            val angle = (index * 36f + if (index % 2 == 0) 7f else -5f) *
-                                (Math.PI.toFloat() / 180f)
-                            val distance = (48 + (index % 3) * 11).dp.toPx() * p
-                            translationX = cos(angle) * distance
-                            translationY = sin(angle) * distance
-                            alpha = (p * 5f).coerceAtMost(1f) * (1f - p)
-                        }
-                        .clip(CircleShape)
-                        .background(if (index % 2 == 0) Color(0xFFFFE082) else Color(0xFFF0A93B))
+                val angle = (index * 36f + if (index % 2 == 0) 7f else -5f) *
+                    (Math.PI.toFloat() / 180f)
+                val distance = (48 + (index % 3) * 11).dp.toPx() * p
+                drawCircle(
+                    color = (if (index % 2 == 0) {
+                        Color(0xFFFFE082)
+                    } else {
+                        Color(0xFFF0A93B)
+                    }).copy(alpha = (p * 5f).coerceAtMost(1f) * (1f - p)),
+                    radius = (if (index % 3 == 0) 3.dp else 2.dp).toPx(),
+                    center = Offset(
+                        center.x + cos(angle) * distance,
+                        center.y + sin(angle) * distance,
+                    ),
                 )
             }
         }
 
         // 不再绘制另一枚“成功图标”；只给原模式图标增加一圈确认脉冲。
         val coreScale = 0.82f + kotlin.math.sin(p * Math.PI.toFloat()) * 0.22f
-        Box(
-            modifier = Modifier
-                .size(78.dp)
-                .graphicsLayer {
-                    scaleX = coreScale
-                    scaleY = coreScale
-                    alpha = (1f - p).coerceAtLeast(0.16f)
-                }
-                .clip(CircleShape)
-                .background(colors.statusConnected.copy(alpha = 0.08f))
-                .border(1.5.dp, colors.statusConnected.copy(alpha = 0.70f), CircleShape)
+        val coreAlpha = (1f - p).coerceAtLeast(0.16f)
+        drawCircle(
+            color = colors.statusConnected.copy(alpha = 0.08f * coreAlpha),
+            radius = 39.dp.toPx() * coreScale,
+        )
+        drawCircle(
+            color = colors.statusConnected.copy(alpha = 0.70f * coreAlpha),
+            radius = (39.dp.toPx() - 0.75.dp.toPx()) * coreScale,
+            style = Stroke(width = 1.5.dp.toPx() * coreScale),
         )
     }
 }
@@ -1242,83 +1292,77 @@ private fun ConnectionSuccessOverlay(
  * 高级版专属成功层：暖金能量晕、旋转断续光环和星芒从同一模式图标中心展开。
  * 免费版不进入该分支，原有绿色双脉冲的外观和节奏保持不变。
  */
-@Composable
-private fun PremiumSuccessEffect(
-    progress: Float,
-    modifier: Modifier = Modifier
-) {
+private fun DrawScope.drawPremiumSuccessEffect(progress: Float) {
     val gold = Color(0xFFFFD66B)
     val warmGold = Color(0xFFF0A93B)
-    Canvas(modifier = modifier) {
-        val p = progress.coerceIn(0f, 1f)
-        val appear = (p / 0.16f).coerceIn(0f, 1f)
-        val fade = ((1f - p) / 0.30f).coerceIn(0f, 1f)
-        val visibility = appear * fade
-        val center = this.center
+    val p = progress.coerceIn(0f, 1f)
+    val appear = (p / 0.16f).coerceIn(0f, 1f)
+    val fade = ((1f - p) / 0.30f).coerceIn(0f, 1f)
+    val visibility = appear * fade
+    val center = this.center
 
-        // 短促的暖金光晕先托起图标，不形成持续的大色块。
-        val haloPulse = sin((p.coerceAtMost(0.72f) / 0.72f) * Math.PI.toFloat())
-            .coerceAtLeast(0f)
-        drawCircle(
-            color = gold.copy(alpha = 0.12f * haloPulse),
-            radius = size.minDimension * (0.16f + p * 0.16f),
-            center = center
-        )
-        drawCircle(
-            color = warmGold.copy(alpha = 0.07f * haloPulse),
-            radius = size.minDimension * (0.24f + p * 0.12f),
-            center = center
-        )
+    // 短促的暖金光晕先托起图标，不形成持续的大色块。
+    val haloPulse = sin((p.coerceAtMost(0.72f) / 0.72f) * Math.PI.toFloat())
+        .coerceAtLeast(0f)
+    drawCircle(
+        color = gold.copy(alpha = 0.12f * haloPulse),
+        radius = size.minDimension * (0.16f + p * 0.16f),
+        center = center
+    )
+    drawCircle(
+        color = warmGold.copy(alpha = 0.07f * haloPulse),
+        radius = size.minDimension * (0.24f + p * 0.12f),
+        center = center
+    )
 
-        // 三段旋转断续光环，比免费版完整绿色圆环更精致，也不会抢模式图标。
-        rotate(degrees = -32f + p * 118f, pivot = center) {
-            val orbitRadius = size.minDimension * (0.22f + p * 0.10f)
-            val orbitTopLeft = Offset(center.x - orbitRadius, center.y - orbitRadius)
-            val orbitSize = androidx.compose.ui.geometry.Size(orbitRadius * 2f, orbitRadius * 2f)
-            repeat(3) { index ->
-                drawArc(
-                    color = if (index == 1) gold.copy(alpha = 0.92f * visibility)
-                    else warmGold.copy(alpha = 0.72f * visibility),
-                    startAngle = index * 120f + 8f,
-                    sweepAngle = 54f,
-                    useCenter = false,
-                    topLeft = orbitTopLeft,
-                    size = orbitSize,
-                    style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round)
-                )
-            }
-        }
-
-        // 六枚星芒沿轻微旋转的轨迹展开；长短交错，让高级版具有可辨识的“签名”。
-        repeat(6) { index ->
-            val phase = ((p - index * 0.025f) / 0.78f).coerceIn(0f, 1f)
-            val angle = index * 60f * (Math.PI.toFloat() / 180f) + phase * 0.28f
-            val distance = size.minDimension * (0.19f + phase * 0.25f)
-            val sparkleCenter = Offset(
-                center.x + cos(angle) * distance,
-                center.y + sin(angle) * distance
-            )
-            val sparkleFade = (phase * 5f).coerceAtMost(1f) * (1f - phase)
-            val longArm = (if (index % 2 == 0) 7.dp else 5.dp).toPx() *
-                (0.7f + sparkleFade * 0.6f)
-            val shortArm = longArm * 0.42f
-            val sparkleColor = if (index % 2 == 0) gold else Color.White
-            val alpha = sparkleFade * 0.95f
-            drawLine(
-                sparkleColor.copy(alpha = alpha),
-                Offset(sparkleCenter.x, sparkleCenter.y - longArm),
-                Offset(sparkleCenter.x, sparkleCenter.y + longArm),
-                strokeWidth = 1.5.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                sparkleColor.copy(alpha = alpha),
-                Offset(sparkleCenter.x - shortArm, sparkleCenter.y),
-                Offset(sparkleCenter.x + shortArm, sparkleCenter.y),
-                strokeWidth = 1.5.dp.toPx(),
-                cap = StrokeCap.Round
+    // 三段旋转断续光环，比免费版完整绿色圆环更精致，也不会抢模式图标。
+    rotate(degrees = -32f + p * 118f, pivot = center) {
+        val orbitRadius = size.minDimension * (0.22f + p * 0.10f)
+        val orbitTopLeft = Offset(center.x - orbitRadius, center.y - orbitRadius)
+        val orbitSize = androidx.compose.ui.geometry.Size(orbitRadius * 2f, orbitRadius * 2f)
+        repeat(3) { index ->
+            drawArc(
+                color = if (index == 1) gold.copy(alpha = 0.92f * visibility)
+                else warmGold.copy(alpha = 0.72f * visibility),
+                startAngle = index * 120f + 8f,
+                sweepAngle = 54f,
+                useCenter = false,
+                topLeft = orbitTopLeft,
+                size = orbitSize,
+                style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round)
             )
         }
+    }
+
+    // 六枚星芒沿轻微旋转的轨迹展开；长短交错，让高级版具有可辨识的“签名”。
+    repeat(6) { index ->
+        val phase = ((p - index * 0.025f) / 0.78f).coerceIn(0f, 1f)
+        val angle = index * 60f * (Math.PI.toFloat() / 180f) + phase * 0.28f
+        val distance = size.minDimension * (0.19f + phase * 0.25f)
+        val sparkleCenter = Offset(
+            center.x + cos(angle) * distance,
+            center.y + sin(angle) * distance
+        )
+        val sparkleFade = (phase * 5f).coerceAtMost(1f) * (1f - phase)
+        val longArm = (if (index % 2 == 0) 7.dp else 5.dp).toPx() *
+            (0.7f + sparkleFade * 0.6f)
+        val shortArm = longArm * 0.42f
+        val sparkleColor = if (index % 2 == 0) gold else Color.White
+        val alpha = sparkleFade * 0.95f
+        drawLine(
+            sparkleColor.copy(alpha = alpha),
+            Offset(sparkleCenter.x, sparkleCenter.y - longArm),
+            Offset(sparkleCenter.x, sparkleCenter.y + longArm),
+            strokeWidth = 1.5.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            sparkleColor.copy(alpha = alpha),
+            Offset(sparkleCenter.x - shortArm, sparkleCenter.y),
+            Offset(sparkleCenter.x + shortArm, sparkleCenter.y),
+            strokeWidth = 1.5.dp.toPx(),
+            cap = StrokeCap.Round
+        )
     }
 }
 

@@ -461,7 +461,7 @@
     <string name="purchase_qr_expired">付款已逾時</string>
     <string name="purchase_qr_refresh">重新發起付款</string>
     <string name="renewal_needed">高級版授權已過期，請連接網路後重開 App 自動續期。</string>
-    <!-- 訂閱到期（設定頁徽標註腳 + 首頁提示條） -->
+    <!-- 訂閱到期（設定頁續費入口/彈窗 + 連接頁臨期標籤） -->
     <string name="sub_expires_on">%1$s 到期</string>
     <string name="renew_action">續費</string>
     <string name="renew_or_upgrade">續費或升級</string>
@@ -470,7 +470,7 @@
         <item quantity="other">剩 %1$d 天到期</item>
     </plurals>
     <plurals name="sub_expiring_soon">
-        <item quantity="other">高級版還有 %1$d 天到期</item>
+        <item quantity="other">高級版剩餘 %1$d 天</item>
     </plurals>
     <string name="purchase_renewed">續費成功 · 有效期延長至 %1$s</string>
     <string name="purchase_opening_alipay">正在開啟支付寶…</string>

@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.StaConnectionStatus
 import com.ztransfer.viewmodel.WirelessMode
 import org.junit.Assert.assertEquals
@@ -10,6 +11,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeConnectionPresentationTest {
+    @Test
+    fun albumScanChangesDoNotInvalidateConnectionPresentation() {
+        val initial = CameraState().toHomeConnectionUiState()
+        val scanning = CameraState(
+            isLoadingFiles = true,
+            hasCompletedFileScan = true,
+            storageIds = listOf(0x00010001),
+        ).toHomeConnectionUiState()
+
+        assertEquals(initial, scanning)
+        assertTrue(
+            initial != CameraState(
+                isConnectedToCamera = true,
+                connectionType = CameraConnectionType.WIFI,
+            ).toHomeConnectionUiState()
+        )
+    }
+
     @Test
     fun disconnectedWifiNeverEntersTheSelectedScene() {
         assertNull(
@@ -92,5 +111,13 @@ class HomeConnectionPresentationTest {
             CameraConnectionType.WIFI,
             disconnectedConnectionType(CameraConnectionType.WIFI)
         )
+    }
+
+    @Test
+    fun subscriptionExpiryNoticeUsesTheOriginalSevenDayWindow() {
+        assertFalse(shouldShowSubscriptionExpiryNotice(isPro = true, daysLeft = 8))
+        assertTrue(shouldShowSubscriptionExpiryNotice(isPro = true, daysLeft = 7))
+        assertTrue(shouldShowSubscriptionExpiryNotice(isPro = true, daysLeft = 0))
+        assertFalse(shouldShowSubscriptionExpiryNotice(isPro = false, daysLeft = 7))
     }
 }

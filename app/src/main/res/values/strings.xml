@@ -465,7 +465,7 @@
     <string name="purchase_qr_expired">Payment timed out</string>
     <string name="purchase_qr_refresh">Start payment again</string>
     <string name="renewal_needed">Pro license expired — connect to the internet and reopen to renew automatically.</string>
-    <!-- Subscription expiry (home renew button/dialog + home banner) -->
+    <!-- Subscription expiry (settings renewal entry/dialog + connection-page expiry tag) -->
     <string name="sub_expires_on">Expires %1$s</string>
     <string name="renew_action">Renew</string>
     <string name="renew_or_upgrade">Renew or upgrade</string>
@@ -475,8 +475,8 @@
         <item quantity="other">%1$d days left</item>
     </plurals>
     <plurals name="sub_expiring_soon">
-        <item quantity="one">Pro expires in %1$d day</item>
-        <item quantity="other">Pro expires in %1$d days</item>
+        <item quantity="one">Pro · %1$d day left</item>
+        <item quantity="other">Pro · %1$d days left</item>
     </plurals>
     <string name="purchase_renewed">Renewed · Valid until %1$s</string>
     <string name="purchase_opening_alipay">Opening Alipay…</string>

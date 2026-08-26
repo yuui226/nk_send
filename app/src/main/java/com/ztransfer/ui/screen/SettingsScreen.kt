@@ -188,7 +188,6 @@ internal fun transferDirectoryNeedsAttention(
 fun SettingsOverlay(
     viewModel: TransferViewModel,
     showPhotoEffectsEntry: Boolean = true,
-    showProBadge: Boolean = true,
     effectPreviewSource: Bitmap? = null,
     effectPreviewCameraManufacturer: String? = null,
     effectPreviewCameraModel: String? = null,
@@ -199,6 +198,8 @@ fun SettingsOverlay(
     onDismiss: () -> Unit,
     // 已解锁时右上角徽标点击的回调（放烟花彩蛋）；由承载页提供其页面级 FireworksState。
     onPlayFireworks: () -> Unit = {},
+    // 购买或续费成功后通知承载页刷新授权派生信息（例如连接页的临期标签）。
+    onLicenseUpdated: () -> Unit = {},
     // 购买期间临时松开对相机 Wi-Fi 的占用（相机热点没外网，付款联不上）；由承载页接到 CameraViewModel。
     onHoldCameraWifi: (Boolean) -> Unit = {},
     cameraConnectionType: CameraConnectionType? = null,
@@ -273,8 +274,13 @@ fun SettingsOverlay(
         )
     }
 
-    // 显示右上角"解锁高级版"徽标时，由它打开介绍对话框（免费/高级版对比 + 解锁按钮复制 QQ 号）。
+    // 设置页顶部的"解锁高级版"徽标打开介绍对话框（免费/高级版对比 + 解锁按钮复制 QQ 号）。
     var showPro by remember { mutableStateOf(false) }
+    // 订阅制高级版的续费入口与高级版徽标统一放在设置页顶部；永久版没有到期日，不显示。
+    var showRenewInfo by remember { mutableStateOf(false) }
+    val subscriptionExpiresAt = remember(isPro, showRenewInfo) {
+        if (isPro) LicenseManager.subExpiresAtSec() else 0L
+    }
     // 页脚"我要换机"打开的对话框（取激活码 + 换机后果告知）。
     var showSwitchDevice by remember { mutableStateOf(false) }
     var settingsPage by remember { mutableStateOf(SettingsPage.MAIN) }
@@ -588,22 +594,39 @@ fun SettingsOverlay(
                 }
                 Spacer(Modifier.weight(1f))
                 if (page == SettingsPage.MAIN) {
-                    if (showProBadge) {
-                        // 未解锁：金徽标"解锁高级版"，点击开介绍弹窗。
-                        // 已解锁：金徽标改显"高级版"，点击不弹窗，放烟花彩蛋。
-                        if (isPro) {
-                            ProBadgeButton(
-                                label = stringResource(R.string.pro_label),
-                                onClick = onPlayFireworks
-                            )
-                        } else {
-                            ProBadgeButton(
-                                label = stringResource(R.string.unlock_pro),
-                                onClick = { showPro = true }
-                            )
+                    // 未解锁：金徽标"解锁高级版"，点击开介绍弹窗。
+                    // 已解锁：金徽标改显"高级版"，点击不弹窗，放烟花彩蛋。
+                    if (isPro) {
+                        if (subscriptionExpiresAt > 0L) {
+                            GlassButton(
+                                onClick = { showRenewInfo = true },
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(
+                                    horizontal = 12.dp,
+                                    vertical = 0.dp,
+                                ),
+                                modifier = Modifier.height(28.dp),
+                            ) {
+                                Text(
+                                    stringResource(R.string.renew_action),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.accentBlue,
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
                         }
-                        Spacer(Modifier.width(8.dp))
+                        ProBadgeButton(
+                            label = stringResource(R.string.pro_label),
+                            onClick = onPlayFireworks
+                        )
+                    } else {
+                        ProBadgeButton(
+                            label = stringResource(R.string.unlock_pro),
+                            onClick = { showPro = true }
+                        )
                     }
+                    Spacer(Modifier.width(8.dp))
                     IconButton(onClick = close, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Close, contentDescription = stringResource(R.string.cd_close), tint = colors.onSurfaceVariant)
                     }
@@ -825,12 +848,25 @@ fun SettingsOverlay(
             if (showPro) {
                 ProDialog(
                     onDismiss = { showPro = false },
-                    onCelebrate = onPlayFireworks,
+                    onCelebrate = {
+                        onLicenseUpdated()
+                        onPlayFireworks()
+                    },
                     onHoldCameraWifi = onHoldCameraWifi,
                     connectionType = cameraConnectionType,
                     cameraConnected = cameraConnected,
                     isStaConnection = cameraIsStaMode,
                     renew = false
+                )
+            }
+            if (showRenewInfo) {
+                RenewDialog(
+                    onDismiss = { showRenewInfo = false },
+                    onCelebrate = {
+                        onLicenseUpdated()
+                        onPlayFireworks()
+                    },
+                    onHoldCameraWifi = onHoldCameraWifi,
                 )
             }
             Spacer(Modifier.height(14.dp))

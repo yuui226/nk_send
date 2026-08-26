@@ -49,6 +49,13 @@ object Motion {
         visibilityThreshold = IntOffset.VisibilityThreshold
     )
 
+    /**
+     * 照片列表 ↔ 传输队列允许在转场中立即反向。这里不能复用弹簧：弹簧被打断后会
+     * 继承上一方向的速度，连续切换时可能先冲向旧目标。定时插值始终从当前偏移平滑
+     * 转向新目标，前景整页与底层 1/3 视差仍使用同一规格，因而不会错位。
+     */
+    val queuePageSlide: TweenSpec<IntOffset> = tween(320, easing = FastOutSlowInEasing)
+
     /** NavHost 默认缩放淡入转场（连接页 ↔ "Z传"页）与滑动转场的配套淡变时长。 */
     const val NAV_ENTER_MS = 420
     const val NAV_EXIT_MS = 280

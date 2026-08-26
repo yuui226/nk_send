@@ -372,6 +372,7 @@ fun FileListScreen(
     onQueueFlightsCancelled: (Int) -> Unit,
     onQueueFlightCaught: () -> Unit,
     onPreviewVisibilityChanged: (Boolean) -> Unit,
+    backHandlerEnabled: Boolean,
     onNavigateToRemote: () -> Unit
 ) {
     val state by cameraViewModel.state.collectAsStateWithLifecycle()
@@ -541,7 +542,7 @@ fun FileListScreen(
 
     // 文件列表是连接成功后的主页面：返回不回到连接页，而是"再按一次退出应用"。
     var lastBackTime by remember { mutableStateOf(0L) }
-    BackHandler {
+    BackHandler(enabled = backHandlerEnabled) {
         val now = System.currentTimeMillis()
         if (now - lastBackTime < 2000L) {
             context.findActivity()?.finish()

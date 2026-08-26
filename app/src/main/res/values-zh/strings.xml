@@ -465,7 +465,7 @@
     <string name="purchase_qr_expired">支付已超时</string>
     <string name="purchase_qr_refresh">重新发起支付</string>
     <string name="renewal_needed">高级版授权已过期，请连接网络后重开 App 自动续期。</string>
-    <!-- 订阅到期（连接页续费按钮/弹窗 + 首页提示条） -->
+    <!-- 订阅到期（设置页续费入口/弹窗 + 连接页临期标签） -->
     <string name="sub_expires_on">%1$s 到期</string>
     <string name="renew_action">续费</string>
     <string name="renew_or_upgrade">续费或升级</string>
@@ -474,7 +474,7 @@
         <item quantity="other">剩 %1$d 天到期</item>
     </plurals>
     <plurals name="sub_expiring_soon">
-        <item quantity="other">高级版还有 %1$d 天到期</item>
+        <item quantity="other">高级版剩余 %1$d 天</item>
     </plurals>
     <string name="purchase_renewed">续费成功 · 有效期延长至 %1$s</string>
     <string name="purchase_opening_alipay">正在打开支付宝…</string>

@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -21,8 +22,11 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.updateTransition
 import com.ztransfer.ui.theme.Motion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -30,6 +34,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,11 +65,16 @@ import com.ztransfer.protocol.CameraEndpointOverride
 import com.ztransfer.update.AppUpdateHost
 import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.CameraState
+import com.ztransfer.viewmodel.PhotoDateRange
+import com.ztransfer.viewmodel.TransferState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.WirelessMode
 import com.ztransfer.viewmodel.isTransferredOriginal
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -185,6 +196,123 @@ sealed class Screen(val route: String) {
 internal fun shouldPreferHighThroughputTransfers(route: String?): Boolean =
     route == Screen.Files.route || route == Screen.Transfer.route
 
+/**
+ * 照片列表与传输队列属于同一个高频工作区，不通过 NavHost 反复入栈。两态内容动画
+ * 天然只有一个当前目标；用户连续反向操作时从现有进度转向，不会累积导航条目。
+ */
+@Composable
+private fun FilesQueueWorkspace(
+    queueVisible: Boolean,
+    filesContent: @Composable () -> Unit,
+    queueContent: @Composable () -> Unit,
+    queueTopContent: @Composable () -> Unit,
+) {
+    val stateHolder = rememberSaveableStateHolder()
+    val transition = updateTransition(
+        targetState = queueVisible,
+        label = "filesQueueTransition",
+    )
+    val topControlsProgress = transition.animateFloat(
+        transitionSpec = {
+            if (targetState) {
+                tween(
+                    durationMillis = 120,
+                    delayMillis = 160,
+                    easing = FastOutSlowInEasing,
+                )
+            } else {
+                tween(durationMillis = 80, easing = FastOutSlowInEasing)
+            }
+        },
+        label = "queueTopControls",
+    ) { showingQueue ->
+        if (showingQueue) 1f else 0f
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        transition.AnimatedContent(
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = {
+                if (targetState) {
+                    val enterQueue = slideInHorizontally(Motion.queuePageSlide) { it } +
+                        fadeIn(
+                            tween(220, easing = FastOutSlowInEasing),
+                            initialAlpha = 0.72f,
+                        )
+                    val exitFiles = slideOutHorizontally(Motion.queuePageSlide) { -it / 3 } +
+                        fadeOut(
+                            tween(Motion.PAGE_FADE_MS),
+                            targetAlpha = 0.5f,
+                        )
+                    (enterQueue togetherWith exitFiles).apply { targetContentZIndex = 1f }
+                } else {
+                    val enterFiles = slideInHorizontally(Motion.queuePageSlide) { -it / 3 } +
+                        fadeIn(
+                            tween(Motion.PAGE_FADE_MS),
+                            initialAlpha = 0.5f,
+                        )
+                    val exitQueue = slideOutHorizontally(Motion.queuePageSlide) { it } +
+                        fadeOut(
+                            tween(140, easing = FastOutSlowInEasing),
+                            targetAlpha = 0.72f,
+                        )
+                    (enterFiles togetherWith exitQueue).apply { targetContentZIndex = 0f }
+                }
+            },
+            contentKey = { it },
+        ) { showingQueue ->
+            val stateKey = if (showingQueue) "transferQueue" else "cameraFiles"
+            stateHolder.SaveableStateProvider(stateKey) {
+                if (showingQueue) queueContent() else filesContent()
+            }
+        }
+
+        // 顶栏不参与横向位移，避免返回/信号按钮从右侧固定胶囊下方穿过。它与页面
+        // 共用同一 Transition：进入过半后快速显现，任意时刻反向都会从当前进度收回。
+        if (transition.currentState || transition.targetState) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        val progress = topControlsProgress.value
+                        alpha = progress
+                        val scale = 0.92f + progress * 0.08f
+                        scaleX = scale
+                        scaleY = scale
+                        transformOrigin = TransformOrigin(0f, 0f)
+                    },
+            ) {
+                queueTopContent()
+            }
+        }
+    }
+}
+
+private data class MainCameraUiState(
+    val isConnectedToCamera: Boolean,
+    val connectionType: CameraConnectionType?,
+    val wirelessMode: WirelessMode,
+)
+
+private fun CameraState.toMainCameraUiState(): MainCameraUiState = MainCameraUiState(
+    isConnectedToCamera = isConnectedToCamera,
+    connectionType = connectionType,
+    wirelessMode = wirelessMode,
+)
+
+private data class MainTransferUiState(
+    val isTransferring: Boolean,
+    val keepScreenOn: Boolean,
+    val filterDateRange: PhotoDateRange?,
+)
+
+private fun TransferState.toMainTransferUiState(): MainTransferUiState = MainTransferUiState(
+    isTransferring = isTransferring,
+    keepScreenOn = keepScreenOn,
+    filterDateRange = filterDateRange,
+)
+
 internal fun shouldShowFirstLaunchNotificationHint(
     sdkInt: Int,
     firstLaunch: Boolean,
@@ -222,13 +350,16 @@ private fun SharedQueueControls(
     heldCount: Int,
     catchNonce: Long,
     filePreviewVisible: Boolean,
-    navigationEnabled: Boolean,
     onBoundsChanged: (Rect) -> Unit,
     onNavigateToTransfer: () -> Unit,
     onControlAction: () -> Unit,
 ) {
     val transferState by transferViewModel.state.collectAsState()
-    val cameraState by cameraViewModel.state.collectAsState()
+    val cameraConnected by remember(cameraViewModel) {
+        cameraViewModel.state
+            .map { it.isConnectedToCamera }
+            .distinctUntilChanged()
+    }.collectAsState(initial = cameraViewModel.state.value.isConnectedToCamera)
     val colors = AppTheme.colors
     val haptics = rememberHaptics(transferState.hapticsEnabled)
     val waitingCount = remember(transferState.tasks) {
@@ -329,7 +460,7 @@ private fun SharedQueueControls(
                     QueueExecutionButton(
                         control = retainedExecutionControl,
                         pauseRequested = transferState.pauseAfterCurrent,
-                        startEnabled = cameraState.isConnectedToCamera || !waitingNeedsCamera,
+                        startEnabled = cameraConnected || !waitingNeedsCamera,
                         onStart = {
                             onControlAction()
                             haptics.tick()
@@ -360,7 +491,7 @@ private fun SharedQueueControls(
                         heldCount = heldCount,
                         haptics = haptics,
                         onClick = {
-                            if (route == Screen.Files.route && navigationEnabled) {
+                            if (route == Screen.Files.route) {
                                 onNavigateToTransfer()
                             }
                         },
@@ -406,21 +537,22 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 布尔值保持 true，不会产生一次 false 的瞬态；每个文件进入协议层前再冻结策略，
     // 因此已经开始的文件也不会中途换道。
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
-    val visibleEntries by navController.visibleEntries.collectAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
-    val pageTransitionInProgress = remember(visibleEntries) {
-        visibleEntries.count { entry ->
-            when (entry.destination.route) {
-                Screen.Home.route,
-                Screen.Files.route,
-                Screen.Transfer.route,
-                Screen.Remote.route -> true
-                else -> false
-            }
-        } > 1
+    var queuePageVisible by rememberSaveable { mutableStateOf(false) }
+    val activeWorkspaceRoute = if (
+        currentRoute == Screen.Files.route && queuePageVisible
+    ) {
+        Screen.Transfer.route
+    } else {
+        currentRoute
+    }
+    LaunchedEffect(currentRoute) {
+        if (currentRoute != null && currentRoute != Screen.Files.route) {
+            queuePageVisible = false
+        }
     }
     val preferHighThroughputTransfers = shouldPreferHighThroughputTransfers(
-        currentRoute
+        activeWorkspaceRoute
     )
     DisposableEffect(preferHighThroughputTransfers) {
         transferViewModel.setPreferHighThroughputTransfers(preferHighThroughputTransfers)
@@ -431,8 +563,20 @@ fun MainScreen(transferViewModel: TransferViewModel) {
         }
     }
 
-    val cameraState by cameraViewModel.state.collectAsState()
-    val transferState by transferViewModel.state.collectAsState()
+    val cameraState by remember(cameraViewModel) {
+        cameraViewModel.state
+            .map(CameraState::toMainCameraUiState)
+            .distinctUntilChanged()
+    }.collectAsState(
+        initial = cameraViewModel.state.value.toMainCameraUiState()
+    )
+    val transferState by remember(transferViewModel) {
+        transferViewModel.state
+            .map(TransferState::toMainTransferUiState)
+            .distinctUntilChanged()
+    }.collectAsState(
+        initial = transferViewModel.state.value.toMainTransferUiState()
+    )
     // 两页共用的顶部队列控件及其入队反馈。状态放在 NavHost 外，切换照片页/传输页时
     // 胶囊保持同一实例；文件页的飞行动画继续用根坐标落点和押扣计数。
     var queueTargetBounds by remember { mutableStateOf<Rect?>(null) }
@@ -440,12 +584,6 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     var queueCatchNonce by remember { mutableLongStateOf(0L) }
     var filePreviewVisible by remember { mutableStateOf(false) }
     var queueControlActionNonce by remember { mutableLongStateOf(0L) }
-    // 共同控件在页面退场期间仍可见；锁住双向导航请求，避免快速连点打断弹簧转场。
-    var pageNavigationRequested by remember { mutableStateOf(false) }
-    val pageNavigationEnabled = !pageTransitionInProgress && !pageNavigationRequested
-    LaunchedEffect(currentRoute, pageTransitionInProgress) {
-        if (!pageTransitionInProgress) pageNavigationRequested = false
-    }
 
     // 只把真实运行中的队列喂给相机 VM。待传模式下的 WAITING 只是静止清单，不能让
     // 相机缩略图/大图通道误以为传输繁忙，否则“先选完再开始”的价值会被抵消。
@@ -535,25 +673,48 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                                 fadeIn(tween(Motion.PAGE_FADE_MS), initialAlpha = 0.5f)
                     }
                 ) {
-                    FileListScreen(
-                        cameraViewModel = cameraViewModel,
-                        transferViewModel = transferViewModel,
-                        queueTargetBounds = queueTargetBounds,
-                        onQueueFlightStarted = { count ->
-                            queueHeldCount += count
+                    FilesQueueWorkspace(
+                        queueVisible = queuePageVisible,
+                        filesContent = {
+                            FileListScreen(
+                                cameraViewModel = cameraViewModel,
+                                transferViewModel = transferViewModel,
+                                queueTargetBounds = queueTargetBounds,
+                                onQueueFlightStarted = { count ->
+                                    queueHeldCount += count
+                                },
+                                onQueueFlightFinished = { count ->
+                                    queueHeldCount = (queueHeldCount - count).coerceAtLeast(0)
+                                    queueCatchNonce++
+                                },
+                                onQueueFlightsCancelled = { count ->
+                                    queueHeldCount = (queueHeldCount - count).coerceAtLeast(0)
+                                },
+                                onQueueFlightCaught = { queueCatchNonce++ },
+                                onPreviewVisibilityChanged = { filePreviewVisible = it },
+                                backHandlerEnabled = !queuePageVisible,
+                                onNavigateToRemote = {
+                                    navController.navigate(Screen.Remote.route) {
+                                        launchSingleTop = true
+                                    }
+                                },
+                            )
                         },
-                        onQueueFlightFinished = { count ->
-                            queueHeldCount = (queueHeldCount - count).coerceAtLeast(0)
-                            queueCatchNonce++
+                        queueContent = {
+                            TransferScreen(
+                                transferViewModel = transferViewModel,
+                                cameraViewModel = cameraViewModel,
+                                queueControlActionNonce = queueControlActionNonce,
+                                backHandlerEnabled = queuePageVisible,
+                                onNavigateBack = { queuePageVisible = false },
+                            )
                         },
-                        onQueueFlightsCancelled = { count ->
-                            queueHeldCount = (queueHeldCount - count).coerceAtLeast(0)
+                        queueTopContent = {
+                            TransferTopControls(
+                                cameraViewModel = cameraViewModel,
+                                onNavigateBack = { queuePageVisible = false },
+                            )
                         },
-                        onQueueFlightCaught = { queueCatchNonce++ },
-                        onPreviewVisibilityChanged = { filePreviewVisible = it },
-                        onNavigateToRemote = {
-                            navController.navigate(Screen.Remote.route) { launchSingleTop = true }
-                        }
                     )
                 }
                 composable(
@@ -568,53 +729,19 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                         onNavigateBack = { navController.popBackStack() }
                     )
                 }
-                composable(
-                    Screen.Transfer.route,
-                    // 队列页作为上层卡片：前进时整页从右滑入盖住"Z传"页，
-                    // 返回（含系统返回键）时向右滑出、露出底层视差归位的"Z传"页。
-                    enterTransition = { slideInHorizontally(Motion.pageSlide) { it } },
-                    popExitTransition = { slideOutHorizontally(Motion.pageSlide) { it } }
-                ) {
-                    TransferScreen(
-                        transferViewModel = transferViewModel,
-                        cameraViewModel = cameraViewModel,
-                        queueControlActionNonce = queueControlActionNonce,
-                        navigationEnabled = pageNavigationEnabled,
-                        onNavigateBack = {
-                            if (
-                                currentRoute == Screen.Transfer.route &&
-                                !pageTransitionInProgress &&
-                                !pageNavigationRequested
-                            ) {
-                                pageNavigationRequested = true
-                                if (!navController.popBackStack()) {
-                                    pageNavigationRequested = false
-                                }
-                            }
-                        }
-                    )
-                }
             }
         }
-        if (currentRoute == Screen.Files.route || currentRoute == Screen.Transfer.route) {
+        if (currentRoute == Screen.Files.route) {
             SharedQueueControls(
-                route = currentRoute,
+                route = activeWorkspaceRoute ?: Screen.Files.route,
                 transferViewModel = transferViewModel,
                 cameraViewModel = cameraViewModel,
                 heldCount = queueHeldCount,
                 catchNonce = queueCatchNonce,
                 filePreviewVisible = filePreviewVisible,
-                navigationEnabled = pageNavigationEnabled,
                 onBoundsChanged = { queueTargetBounds = it },
                 onNavigateToTransfer = {
-                    if (
-                        currentRoute == Screen.Files.route &&
-                        !pageTransitionInProgress &&
-                        !pageNavigationRequested
-                    ) {
-                        pageNavigationRequested = true
-                        navController.navigate(Screen.Transfer.route) { launchSingleTop = true }
-                    }
+                    queuePageVisible = true
                 },
                 onControlAction = { queueControlActionNonce++ },
             )

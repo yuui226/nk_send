@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -18,18 +19,21 @@ import com.ztransfer.ui.theme.AppTheme
 @Composable
 internal fun DebugSimulatorButton(onClick: () -> Unit) {
     val colors = AppTheme.colors
-    GlassButton(
-        onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-        modifier = Modifier.height(36.dp),
-    ) {
-        Icon(
-            imageVector = Icons.Default.PhotoLibrary,
-            contentDescription = "打开模拟照片",
-            tint = colors.accentBlue,
-            modifier = Modifier.size(18.dp),
-        )
+    Row {
+        Spacer(Modifier.width(8.dp))
+        GlassButton(
+            onClick = onClick,
+            shape = RoundedCornerShape(18.dp),
+            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            modifier = Modifier.height(36.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.PhotoLibrary,
+                contentDescription = "打开模拟照片",
+                tint = colors.accentBlue,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(Modifier.width(8.dp))
     }
-    Spacer(Modifier.width(8.dp))
 }

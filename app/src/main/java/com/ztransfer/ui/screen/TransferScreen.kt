@@ -72,6 +72,7 @@ import com.ztransfer.R
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterPreset
+import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
@@ -79,11 +80,14 @@ import com.ztransfer.ui.util.formatDuration
 import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.isTransferredOriginal
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 private const val TRANSFER_CARD_WAVE_CYCLE_MS = 2_600
@@ -96,20 +100,82 @@ private enum class TransferCardPillTone { SIZE, SPEED, EFFECT, TRANSFER_DURATION
 
 private enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
 
+private data class TransferCameraUiState(
+    val isConnectedToCamera: Boolean,
+    val connectionType: CameraConnectionType?,
+    val isStaConnection: Boolean,
+    val wifiRssi: Int?,
+)
+
+private fun CameraState.toTransferCameraUiState(): TransferCameraUiState = TransferCameraUiState(
+    isConnectedToCamera = isConnectedToCamera,
+    connectionType = connectionType,
+    isStaConnection = isStaConnection,
+    wifiRssi = wifiRssi,
+)
+
+/** 队列页固定顶栏；由工作区宿主在页面转场过半后显现，不参与正文横向位移。 */
+@Composable
+fun TransferTopControls(
+    cameraViewModel: CameraViewModel,
+    onNavigateBack: () -> Unit,
+) {
+    val cameraState by remember(cameraViewModel) {
+        cameraViewModel.state
+            .map(CameraState::toTransferCameraUiState)
+            .distinctUntilChanged()
+    }.collectAsState(initial = cameraViewModel.state.value.toTransferCameraUiState())
+    val colors = AppTheme.colors
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        GlassButton(
+            onClick = onNavigateBack,
+            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
+            enforceMinimumTouchTarget = false,
+            modifier = Modifier.height(36.dp),
+        ) {
+            Icon(
+                Icons.Default.ArrowBack,
+                contentDescription = stringResource(R.string.cd_back),
+                tint = colors.onBackground,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+        SignalPill(
+            rssi = cameraState.wifiRssi,
+            connected = cameraState.isConnectedToCamera,
+            connectionType = cameraState.connectionType,
+            staMode = cameraState.isStaConnection,
+            onStaDisconnectedClick = cameraViewModel::retryStaConnection,
+        )
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TransferScreen(
     transferViewModel: TransferViewModel,
     cameraViewModel: CameraViewModel,
     queueControlActionNonce: Long,
-    navigationEnabled: Boolean,
+    backHandlerEnabled: Boolean,
     onNavigateBack: () -> Unit
 ) {
-    // 系统返回与顶栏返回共用同一门禁；转场期间的重复请求直接忽略。
-    BackHandler { if (navigationEnabled) onNavigateBack() }
+    BackHandler(enabled = backHandlerEnabled, onBack = onNavigateBack)
     val transferState by transferViewModel.state.collectAsState()
     // 响应式连接状态：断开/重连即时反映到重试按钮的可用性（getCamera() 不是快照状态，不能作 gating）。
-    val cameraState by cameraViewModel.state.collectAsState()
+    val connected by remember(cameraViewModel) {
+        cameraViewModel.state
+            .map { it.isConnectedToCamera }
+            .distinctUntilChanged()
+    }.collectAsState(initial = cameraViewModel.state.value.isConnectedToCamera)
     val colors = AppTheme.colors
     // 清空/重试二次确认的展开状态（提到这层，便于全屏遮罩接管"点击外部关闭"）。
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -150,7 +216,6 @@ fun TransferScreen(
     val hasClearable = transferState.tasks.any {
         it.status != TransferStatus.TRANSFERING && !it.isGeneratingFrame
     }
-    val connected = cameraState.isConnectedToCamera
     // 共用顶部控制按钮仍沿用本页原行为：操作时收起已展开的清空/重试确认卡。
     LaunchedEffect(queueControlActionNonce) {
         if (queueControlActionNonce > 0L) {
@@ -404,7 +469,7 @@ fun TransferScreen(
                                     )
                                     TransferRetryButton(
                                         visible = task.status == TransferStatus.FAILED,
-                                        enabled = cameraState.isConnectedToCamera || isTransferredOriginal(
+                                        enabled = connected || isTransferredOriginal(
                                             task.file,
                                             transferState.existingExportIndex,
                                             task.destinationFolderName,
@@ -473,44 +538,6 @@ fun TransferScreen(
                         )
                     )
             )
-        }
-
-        // ---------- 悬浮顶部控件（毛玻璃，浮在内容上，与 "Z传" 页同款）----------
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 左：返回（毛玻璃按钮，仅返回图标）。顶栏按钮统一 36dp 高。
-            GlassButton(
-                onClick = onNavigateBack,
-                enabled = navigationEnabled,
-                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
-                enforceMinimumTouchTarget = false,
-                modifier = Modifier.height(36.dp),
-            ) {
-                Icon(
-                    Icons.Default.ArrowBack,
-                    contentDescription = stringResource(R.string.cd_back),
-                    tint = colors.onBackground,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            // 返回键右侧："Z传"页同款信号按钮（常驻）——传输中最关心信号强弱，断开也一眼可见。
-            Spacer(modifier = Modifier.width(8.dp))
-            SignalPill(
-                rssi = cameraState.wifiRssi,
-                connected = cameraState.isConnectedToCamera,
-                connectionType = cameraState.connectionType,
-                staMode = cameraState.isStaConnection,
-                onStaDisconnectedClick = cameraViewModel::retryStaConnection,
-            )
-
-            // 右侧队列控件由 NavHost 外的照片页/传输页共同宿主持有。
-            Spacer(modifier = Modifier.weight(1f))
         }
 
         // ---------- 右下角悬浮控件：只保留清空与重试，并继续沿用二次确认 ----------
