@@ -134,7 +134,7 @@
     <string name="cd_start_transfers">開始傳輸</string>
     <string name="cd_pause_after_current">傳完目前任務後暫停</string>
     <string name="cd_pause_after_current_scheduled">將在目前任務完成後暫停</string>
-    <string name="pause_after_current_hint">不會中斷目前任務，傳完後暫停</string>
+    <string name="pause_after_current_hint">傳輸完目前任務後將暫停</string>
     <string name="change_directory">變更目錄</string>
     <string name="choose_directory">選擇目錄</string>
     <string name="columns">每行數量</string>

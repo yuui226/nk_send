@@ -18,7 +18,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalMinimumInteractiveComponentEnforcement
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.currentCompositeKeyHash
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -874,7 +877,10 @@ internal fun materialBadgeContentColor(
  *
  * [materialContentColor]：钛合金主题中为凹刻填色，相机按键主题中作为键帽丝印色。
  * 适合品牌标志等需要成为视觉焦点的内容；未指定时使用各材质的默认印记。
+ * [enforceMinimumTouchTarget]：实体材质默认遵循 Material 的 48dp 最小触点；少量已有
+ * 独立尺寸与外围布局保护的紧凑控件可关闭，毛玻璃分支的尺寸不受该开关影响。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GlassButton(
     onClick: () -> Unit,
@@ -891,6 +897,7 @@ fun GlassButton(
     textureSeed: Int? = null,
     materialContentColor: Color? = null,
     activeOutline: Boolean = false,
+    enforceMinimumTouchTarget: Boolean = true,
     content: @Composable RowScope.() -> Unit
 ) {
     val colors = AppTheme.colors
@@ -1046,68 +1053,79 @@ fun GlassButton(
             )
         }
     } else {
-        Surface(
-            onClick = onClick,
-            enabled = enabled,
-            shape = shape,
-            color = containerColor,
-            border = activeOutlineBorder,
-            shadowElevation = elevation,
-            interactionSource = interactionSource,
-            modifier = transformedModifier
-        ) {
-            Row(
-                modifier = Modifier
-                    .buttonMaterialBase(
-                        shape = shape,
-                        texture = appliedSkinTexture,
-                        highlightTop = highlightTop,
-                        highlightBottom = highlightBottom
-                    )
-                    .titaniumRoundedFinish(
-                        enabled = isTitaniumButton,
-                        shape = shape,
-                        dark = dark,
-                        panel = panel,
-                        pressProgress = pressLight
-                    )
-                    .woodSculptedFinish(
-                        enabled = isWoodButton,
-                        shape = shape,
-                        dark = dark,
-                        panel = panel,
-                        pressProgress = pressLight
-                    )
-                    .cameraControlCapFinish(
-                        enabled = isCameraControlCap,
-                        shape = shape,
-                        dark = dark,
-                        activeColor = resolvedActiveColor,
-                        activeProgress = activeProgress,
-                        pressProgress = pressLight,
-                    )
-                    .padding(contentPadding)
-                    .titaniumStampedContent(
-                        enabled = isTitaniumButton,
-                        dark = dark,
-                        pressProgress = pressLight,
-                        stampColor = materialContentColor,
-                    )
-                    .cameraPrintedContent(
-                        enabled = isCameraControlCap,
-                        activeColor = resolvedActiveColor,
-                        activeProgress = activeProgress,
-                        printColor = materialContentColor,
+        val materialButton: @Composable () -> Unit = {
+            Surface(
+                onClick = onClick,
+                enabled = enabled,
+                shape = shape,
+                color = containerColor,
+                border = activeOutlineBorder,
+                shadowElevation = elevation,
+                interactionSource = interactionSource,
+                modifier = transformedModifier,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .buttonMaterialBase(
+                            shape = shape,
+                            texture = appliedSkinTexture,
+                            highlightTop = highlightTop,
+                            highlightBottom = highlightBottom,
+                        )
+                        .titaniumRoundedFinish(
+                            enabled = isTitaniumButton,
+                            shape = shape,
+                            dark = dark,
+                            panel = panel,
+                            pressProgress = pressLight,
+                        )
+                        .woodSculptedFinish(
+                            enabled = isWoodButton,
+                            shape = shape,
+                            dark = dark,
+                            panel = panel,
+                            pressProgress = pressLight,
+                        )
+                        .cameraControlCapFinish(
+                            enabled = isCameraControlCap,
+                            shape = shape,
+                            dark = dark,
+                            activeColor = resolvedActiveColor,
+                            activeProgress = activeProgress,
+                            pressProgress = pressLight,
+                        )
+                        .padding(contentPadding)
+                        .titaniumStampedContent(
+                            enabled = isTitaniumButton,
+                            dark = dark,
+                            pressProgress = pressLight,
+                            stampColor = materialContentColor,
+                        )
+                        .cameraPrintedContent(
+                            enabled = isCameraControlCap,
+                            activeColor = resolvedActiveColor,
+                            activeProgress = activeProgress,
+                            printColor = materialContentColor,
+                        ),
+                    verticalAlignment = Alignment.CenterVertically,
+                    // Surface 会把固定尺寸按钮的 Row 撑满；显式居中，避免钛合金/木纹主题
+                    // 沿用 Row 默认的 Start 排列，把单图标推到按钮左侧。
+                    horizontalArrangement = Arrangement.spacedBy(
+                        6.dp,
+                        Alignment.CenterHorizontally,
                     ),
-                verticalAlignment = Alignment.CenterVertically,
-                // Surface 会把固定尺寸按钮的 Row 撑满；显式居中，避免钛合金/木纹主题
-                // 沿用 Row 默认的 Start 排列，把单图标推到按钮左侧。
-                horizontalArrangement = Arrangement.spacedBy(
-                    6.dp,
-                    Alignment.CenterHorizontally,
-                ),
-                content = content
-            )
+                    content = content
+                )
+            }
+        }
+        if (enforceMinimumTouchTarget) {
+            materialButton()
+        } else {
+            CompositionLocalProvider(
+                LocalMinimumInteractiveComponentEnforcement provides false,
+            ) {
+                materialButton()
+            }
         }
     }
 }

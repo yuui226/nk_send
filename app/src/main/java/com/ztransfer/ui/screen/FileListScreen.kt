@@ -17,7 +17,6 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -56,6 +55,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -79,7 +79,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -92,6 +91,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -256,13 +256,26 @@ internal fun queuePillDisplayRemaining(actualRemaining: Int, heldCount: Int): In
     return afterFlightHold.takeIf { it > 0 } ?: actual
 }
 
+internal enum class QueueExecutionControl { START, PAUSE }
+
+internal fun queueExecutionControl(
+    isTransferring: Boolean,
+    waitingCount: Int,
+): QueueExecutionControl? = when {
+    isTransferring -> QueueExecutionControl.PAUSE
+    waitingCount > 0 -> QueueExecutionControl.START
+    else -> null
+}
+
 @Composable
 private fun AnimatedQueuePillCount(
     count: Int,
     color: Color,
     label: String,
+    modifier: Modifier = Modifier,
 ) {
     AnimatedContent(
+        modifier = modifier,
         targetState = count,
         transitionSpec = {
             val dir = if (targetState < initialState) 1 else -1
@@ -287,7 +300,7 @@ private fun AnimatedQueuePillCount(
 private const val QUEUE_ENTRY_BUTTON_TEXTURE_SEED = 0x2A71E001
 private const val REMOTE_BUSY_VISUAL_DELAY_MS = 180L
 private val THUMBNAIL_THEME_BORDER_WIDTH = 0.75.dp
-private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 48.dp
+private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 40.dp
 
 // 缩略图后台填充没有任何窗口/视口参数：未传输=从新到旧全量填充；传输中=完全停止。
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
@@ -353,7 +366,12 @@ fun groupFilesByDate(files: List<NikonCamera.FileInfo>): List<FileGroup> {
 fun FileListScreen(
     cameraViewModel: CameraViewModel,
     transferViewModel: TransferViewModel,
-    onNavigateToTransfer: () -> Unit,
+    queueTargetBounds: Rect?,
+    onQueueFlightStarted: (Int) -> Unit,
+    onQueueFlightFinished: (Int) -> Unit,
+    onQueueFlightsCancelled: (Int) -> Unit,
+    onQueueFlightCaught: () -> Unit,
+    onPreviewVisibilityChanged: (Boolean) -> Unit,
     onNavigateToRemote: () -> Unit
 ) {
     val state by cameraViewModel.state.collectAsStateWithLifecycle()
@@ -366,26 +384,21 @@ fun FileListScreen(
     var zAnchor by remember { mutableStateOf<Rect?>(null) }
     // 高级版烟花彩蛋：设置面板里的"高级版"徽标点击时在本页放烟花（与连接页共用实现）。
     val fireworks = rememberFireworksState()
-    // "整组吸入"动画：飞行中的卡片摞（可并发多摞）、队列胶囊容器区域（飞行终点）、
-    // 胶囊"接住"弹跳（每摞到达 nonce+1，胶囊放大回弹一次）。
+    // "整组吸入"动画：飞行中的卡片摞可并发多摞；终点、押扣和胶囊接住回弹
+    // 由照片页与传输页共同的顶部队列控件持有，切页不会重建胶囊。
     val queueFlights = remember { mutableStateListOf<QueueFlight>() }
     var nextFlightId by remember { mutableStateOf(0L) }
-    // 在途文件数(显示层押扣):飞行中的摞承载的文件先不计入胶囊数字,落袋才释放——
-    // 数字在包裹到达那一刻跳上去,符合"队列收到了"的直觉;实际传输在点击瞬间已开始。
-    var heldFiles by remember { mutableStateOf(0) }
-    var queueArea by remember { mutableStateOf<Rect?>(null) }
+    val latestQueueFlightsCancelled by rememberUpdatedState(onQueueFlightsCancelled)
+    DisposableEffect(queueFlights) {
+        onDispose {
+            val abandonedCount = queueFlights.sumOf(QueueFlight::count)
+            if (abandonedCount > 0) latestQueueFlightsCancelled(abandonedCount)
+        }
+    }
     // 每个格子在根坐标系的精确 bounds(格子本就为长按预览挂了 onGloballyPositioned,
     // 顺手写进注册表,零额外监听)。普通 HashMap 而非快照状态:只在点击瞬间读取,
     // 滚动期间的高频写入不触发任何重组；格子离开组合时主动删除，容量只随组合项数量增长。
     val cellBoundsRegistry = remember { HashMap<Int, Rect>() }
-    var pillCatchNonce by remember { mutableStateOf(0) }
-    val pillCatchScale = remember { Animatable(1f) }
-    LaunchedEffect(pillCatchNonce) {
-        if (pillCatchNonce > 0) {
-            pillCatchScale.animateTo(1.18f, tween(110, easing = FastOutSlowInEasing))
-            pillCatchScale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
-        }
-    }
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
     var showFilter by remember { mutableStateOf(false) }
     var filterAnchor by remember { mutableStateOf<Rect?>(null) }
@@ -744,10 +757,9 @@ fun FileListScreen(
         groups, burstIdByHandle, transferState.collapseBurstPhotos, expandedBurstIds
     ) { Any() }
     val currentPreviewSourceIdentity by rememberUpdatedState(previewSourceIdentity)
-    val transfersBusy = transferState.tasks.any {
-        it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
-    }
-    // 队列限制即时生效；视觉压暗稍后确认，过滤“本地文件已存在→瞬时完成”产生的单帧闪烁。
+    // 只有实际传输会占用相机通道；暂停后的 WAITING 队列不影响监看入口。
+    val transfersBusy = transferState.isTransferring
+    // 队列限制即时生效；视觉压暗稍后确认，过滤瞬时传输产生的单帧闪烁。
     var transfersBusyVisual by remember { mutableStateOf(false) }
     LaunchedEffect(transfersBusy) {
         if (transfersBusy) {
@@ -762,6 +774,14 @@ fun FileListScreen(
 
     // 长按预览：全屏翻页 + 从被长按格子的位置放大展开。
     var previewIndex by remember { mutableStateOf<Int?>(null) }
+    val latestPreviewVisibilityChanged by rememberUpdatedState(onPreviewVisibilityChanged)
+    val updatePreviewIndex: (Int?) -> Unit = { nextIndex ->
+        previewIndex = nextIndex
+        latestPreviewVisibilityChanged(nextIndex != null)
+    }
+    DisposableEffect(Unit) {
+        onDispose { latestPreviewVisibilityChanged(false) }
+    }
     var previewAnchor by remember { mutableStateOf<Rect?>(null) }
     var previewSourceAtOpen by remember { mutableStateOf<Any?>(null) }
     var previewBuildJob by remember { mutableStateOf<Job?>(null) }
@@ -805,7 +825,7 @@ fun FileListScreen(
             }
             if (idx >= 0 && currentPreviewSourceIdentity === sourceAtOpen) {
                 previewItems = snapshot
-                previewIndex = idx
+                updatePreviewIndex(idx)
                 previewAnchor = rect
                 previewSourceAtOpen = sourceAtOpen
             }
@@ -829,7 +849,7 @@ fun FileListScreen(
                 }
                 if (idx >= 0 && currentPreviewSourceIdentity === sourceAtOpen) {
                     previewItems = snapshot
-                    previewIndex = idx
+                    updatePreviewIndex(idx)
                     previewAnchor = rect
                     previewSourceAtOpen = sourceAtOpen
                 }
@@ -856,7 +876,7 @@ fun FileListScreen(
         enqueueSingleFile@{ file, animateFromList ->
             if (transferState.transferDirUri == null) {
                 // 预览层盖在设置面板之上，先关掉预览再弹设置，否则用户看不见。
-                previewIndex = null
+                updatePreviewIndex(null)
                 previewItems = emptyList()
                 previewSourceAtOpen = null
                 requestTransferDirectory()
@@ -879,7 +899,7 @@ fun FileListScreen(
                             packs = emptyList(), count = 1,
                             topThumb = cameraViewModel.cachedThumbnail(file.handle)
                         )
-                        heldFiles += 1
+                        onQueueFlightStarted(1)
                     }
                 }
             }
@@ -896,7 +916,7 @@ fun FileListScreen(
             val remaining = files
             if (remaining.isEmpty()) return@onTransferBurstPreview
             if (transferState.transferDirUri == null) {
-                previewIndex = null
+                updatePreviewIndex(null)
                 previewItems = emptyList()
                 previewSourceAtOpen = null
                 requestTransferDirectory()
@@ -1153,7 +1173,7 @@ fun FileListScreen(
                             // 未缓存则为 null,摞顶回退为纯色+图标)。
                             topThumb = cameraViewModel.cachedThumbnail(remaining.first().handle)
                         )
-                        heldFiles += remaining.size
+                        onQueueFlightStarted(remaining.size)
                     }
                 }
             }
@@ -1446,10 +1466,7 @@ fun FileListScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-                // 预览入队时只把真实队列胶囊抬到黑幕之上，残影才能确实落进胶囊并让
-                // 既有接收回弹可见；其余顶栏按钮在下方条件块中隐藏，不干扰沉浸预览。
-                .zIndex(if (previewIndex != null) 2f else 0f),
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (previewIndex == null) {
@@ -1462,8 +1479,9 @@ fun FileListScreen(
                 },
                 shape = RoundedCornerShape(22.dp),
                 // 顶栏按钮统一 36dp 高（与队列胶囊等一致）；标志 20dp + 上下 8dp 正好填满。
-                // 水平 padding 与旁边信号按钮同值，宽度刚好包住标志。
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                // 水平留白略收紧，保留品牌标志的完整呼吸空间。
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                enforceMinimumTouchTarget = false,
                 // 钛合金主题使用品牌黄填充钢印；其余主题仍保留 ZMark 原本的前景色。
                 materialContentColor = colors.accentYellow,
                 modifier = Modifier
@@ -1530,7 +1548,8 @@ fun FileListScreen(
                     }
                 },
                 shape = RoundedCornerShape(22.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                enforceMinimumTouchTarget = false,
                 active = filterActive,
                 activeColor = filterButtonColors.activeMaterial,
                 activeOutline = true,
@@ -1538,8 +1557,8 @@ fun FileListScreen(
                 materialContentColor = filterMarkColor,
                 modifier = Modifier
                     .height(36.dp)
-                    // 实体主题的 Material Surface 会自动补足 48dp 触控宽度；提前给出同样的
-                    // 测量约束，避免不足部分居中留白，让四种主题的可见边缘都严格相隔 8dp。
+                    // 图标按钮统一采用 40dp 紧凑宽度；实体主题也提前给出同一测量基线，
+                    // 避免不同材质的可见边缘发生偏移。
                     .widthIn(min = TOP_BAR_COMPACT_BUTTON_MIN_WIDTH)
                     .onGloballyPositioned { filterAnchor = it.boundsInRoot() }
             ) {
@@ -1553,43 +1572,9 @@ fun FileListScreen(
             }
             }
 
-            // 右：传输胶囊（悬浮）。用"占满剩余宽度 + 靠右对齐"的 Box 承载，
-            // 保证胶囊宽度变化时右边缘固定、只向左伸缩，不会向右溢出屏幕。
-            // 容器同时是"入队吸入"动画的落点锚（右缘与胶囊右缘钉死重合）。
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .onGloballyPositioned {
-                        // 分离/复用瞬间的回调会报出零矩形(boundsInRoot 对未附着节点
-                        // 返回 Rect.Zero),存下它会让残影飞向屏幕左上角外——只收有效样本。
-                        if (it.isAttached) {
-                            val b = it.boundsInRoot()
-                            if (b.width > 0f && b.height > 0f) queueArea = b
-                        }
-                    },
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                // 胶囊常驻:队列为空时收成图标态——明确"这里有个队列",也让首次入队的
-                // 吸入动画始终有可见落点(曾随 tasks 隐藏,首飞落在空气里)。
-                // 读数为 0(押扣在途/全部完成)同样是图标态,不闪不藏。
-                // 卡片摞到达时胶囊"接住"弹跳。原点锚在右缘:向左生长,
-                // 不会把贴屏幕右缘的胶囊顶出屏幕。
-                Box(
-                    modifier = Modifier.graphicsLayer {
-                        transformOrigin = TransformOrigin(1f, 0.5f)
-                        scaleX = pillCatchScale.value
-                        scaleY = pillCatchScale.value
-                    }
-                ) {
-                    QueuePill(
-                        transferState = transferState,
-                        activeProgressFlow = transferViewModel.activeTransferProgress,
-                        heldCount = heldFiles,
-                        haptics = haptics,
-                        onClick = onNavigateToTransfer
-                    )
-                }
-            }
+            // 右侧队列控件由 NavHost 外的共同宿主持有；这里仅保留弹性占位，
+            // 左侧按钮仍按原布局排布，页面切换时右侧控件不会随页面进出场。
+            Spacer(modifier = Modifier.weight(1f))
         }
 
         // ---------- "整组吸入"动画层：一摞卡片残影沿弧线飞向队列胶囊，到达即触发胶囊弹跳 ----------
@@ -1597,11 +1582,10 @@ fun FileListScreen(
             key(flight.id) {
                 QueueFlightGhost(
                     flight = flight,
-                    target = queueArea,
+                    target = queueTargetBounds,
                     onDone = {
                         queueFlights.remove(flight)
-                        heldFiles -= flight.count   // 落袋:释放押扣,胶囊数字此刻跳上去
-                        pillCatchNonce++
+                        onQueueFlightFinished(flight.count)
                     }
                 )
             }
@@ -1693,8 +1677,8 @@ fun FileListScreen(
                         )
                     },
                     activeProgressFlow = transferViewModel.activeTransferProgress,
-                    queueTargetBounds = queueArea,
-                    onQueueFlightCaught = { pillCatchNonce++ },
+                    queueTargetBounds = queueTargetBounds,
+                    onQueueFlightCaught = onQueueFlightCaught,
                     onTransfer = onTransferFromPreview,
                     onTransferBurst = onTransferBurstPreview,
                     onBurstExpandedChange = { id, expanded ->
@@ -1706,7 +1690,7 @@ fun FileListScreen(
                         transferViewModel::setPreviewHistogramEnabled,
                     prepareDismissTarget = preparePreviewDismissTarget,
                     onDismiss = { returnFile ->
-                        previewIndex = null
+                        updatePreviewIndex(null)
                         previewItems = emptyList()
                         previewSourceAtOpen = null
                         returnFile?.let { file ->
@@ -1808,6 +1792,127 @@ internal fun summarizeQueuePillTasks(tasks: List<TransferTask>): QueuePillTaskSu
         hasActive = activeDownloadTaskId != null || generationRemaining > 0,
         hasCancelled = hasCancelled,
     )
+}
+
+/** 与状态胶囊同材质的顶部队列操作按钮，不跟随可选按钮皮肤。 */
+@Composable
+internal fun QueueExecutionButton(
+    control: QueueExecutionControl,
+    pauseRequested: Boolean,
+    startEnabled: Boolean,
+    onStart: () -> Unit,
+    onPause: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val accent by animateColorAsState(
+        targetValue = if (control == QueueExecutionControl.START) {
+            colors.accentBlue
+        } else {
+            colors.accentYellow
+        },
+        animationSpec = tween(180),
+        label = "queueExecutionAccent",
+    )
+    val activeProgress by animateFloatAsState(
+        targetValue = if (
+            control == QueueExecutionControl.PAUSE && pauseRequested
+        ) 1f else 0f,
+        animationSpec = tween(180),
+        label = "queueExecutionActive",
+    )
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        targetValue = if (pressed &&
+            (control == QueueExecutionControl.PAUSE || startEnabled)
+        ) {
+            0.92f
+        } else {
+            1f
+        },
+        animationSpec = if (pressed) tween(80) else Motion.bouncy(),
+        label = "queueExecutionPress",
+    )
+    val enabled = control == QueueExecutionControl.PAUSE || startEnabled
+    Surface(
+        onClick = if (control == QueueExecutionControl.START) onStart else onPause,
+        enabled = enabled,
+        shape = CircleShape,
+        color = colors.glassSurface,
+        shadowElevation = 4.dp,
+        interactionSource = interactionSource,
+        modifier = modifier
+            .size(32.dp)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+                alpha = if (enabled) 1f else 0.45f
+            },
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
+                    )
+                )
+                .background(accent.copy(alpha = 0.16f * activeProgress))
+                .border(
+                    width = 1.dp,
+                    brush = Brush.verticalGradient(
+                        listOf(
+                            lerp(
+                                colors.glassBorderTop,
+                                accent.copy(alpha = 0.90f),
+                                activeProgress,
+                            ),
+                            lerp(
+                                colors.glassBorderBottom,
+                                accent.copy(alpha = 0.52f),
+                                activeProgress,
+                            ),
+                        )
+                    ),
+                    shape = CircleShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            AnimatedContent(
+                targetState = control,
+                transitionSpec = {
+                    (fadeIn(tween(150, delayMillis = 35)) +
+                        scaleIn(initialScale = 0.72f, animationSpec = tween(175, delayMillis = 25)))
+                        .togetherWith(
+                            fadeOut(tween(100)) +
+                                scaleOut(targetScale = 0.72f, animationSpec = tween(120))
+                        )
+                },
+                contentAlignment = Alignment.Center,
+                label = "queueExecutionIcon",
+            ) { current ->
+                Icon(
+                    imageVector = if (current == QueueExecutionControl.START) {
+                        Icons.Rounded.PlayArrow
+                    } else {
+                        TransferQueuePauseIcon
+                    },
+                    contentDescription = stringResource(
+                        when {
+                            current == QueueExecutionControl.START -> R.string.cd_start_transfers
+                            pauseRequested -> R.string.cd_pause_after_current_scheduled
+                            else -> R.string.cd_pause_after_current
+                        }
+                    ),
+                    tint = accent,
+                    modifier = Modifier.size(
+                        if (current == QueueExecutionControl.START) 21.dp else 18.dp
+                    ),
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -1917,7 +2022,7 @@ fun QueuePill(
     var contentWidthPx by remember { mutableStateOf(0) }
     var activeQueueMaxWidthPx by remember { mutableStateOf(0) }
     var measuredWidthKey by remember { mutableStateOf<QueuePillWidthKey?>(null) }
-    val collapsedWidthPx = with(density) { 46.dp.toPx() } // 22dp 图标 + 左右各 12dp
+    val collapsedWidthPx = with(density) { 40.dp.toPx() } // 22dp 图标 + 左右各 9dp
     val widthAnim = remember { Animatable(0f) }
     var firstMeasure by remember { mutableStateOf(true) }
     val stableContentWidthPx = if (
@@ -1946,7 +2051,8 @@ fun QueuePill(
         GlassButton(
             onClick = onClick,
             shape = RoundedCornerShape(22.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
+            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
+            enforceMinimumTouchTarget = false,
             textureSeed = QUEUE_ENTRY_BUTTON_TEXTURE_SEED,
             modifier = Modifier
                 .height(36.dp)
@@ -2064,29 +2170,18 @@ fun QueuePill(
                                     style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
                                     color = colors.statusConnected,
                                     fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 18.dp)
+                                    modifier = Modifier.padding(horizontal = 16.dp)
                                 )
                             PillMode.PAUSED ->
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 18.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = TransferQueuePauseIcon,
-                                        contentDescription = null,
-                                        tint = colors.accentYellow,
-                                        modifier = Modifier.size(15.dp),
-                                    )
-                                    AnimatedQueuePillCount(
-                                        count = remaining,
-                                        color = colors.onBackground,
-                                        label = "pausedCount",
-                                    )
-                                }
+                                AnimatedQueuePillCount(
+                                    count = remaining,
+                                    color = colors.onBackground,
+                                    label = "pausedCount",
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
                             PillMode.GENERATING ->
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 18.dp),
+                                    modifier = Modifier.padding(horizontal = 16.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
@@ -2104,7 +2199,7 @@ fun QueuePill(
                                 }
                             PillMode.COUNTING ->
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 18.dp),
+                                    modifier = Modifier.padding(horizontal = 16.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
@@ -2336,11 +2431,12 @@ fun SignalPill(
             } catch (_: Exception) {}
         },
         shape = RoundedCornerShape(22.dp),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 9.dp),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 9.dp),
+        enforceMinimumTouchTarget = false,
         // 顶栏按钮统一 36dp 高；信号条内容 15dp，在按钮内垂直居中。
         modifier = Modifier
             .height(36.dp)
-            // 收起状态至少与筛选按钮使用同一宽度基线；展开的 dBm 文本仍可自然增宽。
+            // 收起状态与筛选按钮共用 40dp 宽度基线；展开的 dBm 文本仍可自然增宽。
             .widthIn(min = TOP_BAR_COMPACT_BUTTON_MIN_WIDTH)
             .graphicsLayer {
                 val s = pulse.value * (breath?.value ?: 1f)
@@ -2550,15 +2646,17 @@ private fun GroupHeader(
             enabled = group.files.isNotEmpty(),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier
+                .width(40.dp)
                 .height(28.dp)
                 .onGloballyPositioned {
-                    // 只收有效样本(零矩形防护,见 queueArea 处)。
+                    // 只收有效样本，避免分离/复用瞬间的零矩形污染动画起点。
                     if (it.isAttached) {
                         val b = it.boundsInRoot()
                         if (b.width > 0f && b.height > 0f) plusBounds = b
                     }
                 },
-            contentPadding = PaddingValues(horizontal = 12.dp)
+            contentPadding = PaddingValues(horizontal = 10.dp),
+            enforceMinimumTouchTarget = false,
         ) {
             Icon(
                 Icons.Default.Add,
@@ -3314,7 +3412,7 @@ private fun ThumbnailCell(
             )
             .onGloballyPositioned {
                 // 同一份 bounds 双用:长按预览的放大起点 + 打包动画的灵魂起点。
-                // 只收有效样本:分离/复用瞬间的零矩形会让动画从屏幕外冒出(见 queueArea 处)。
+                // 只收有效样本：分离/复用瞬间的零矩形会让动画从屏幕外冒出。
                 if (it.isAttached) {
                     val b = it.boundsInRoot()
                     if (b.width > 0f && b.height > 0f) {

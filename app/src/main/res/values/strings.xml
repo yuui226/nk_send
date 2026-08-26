@@ -134,7 +134,7 @@
     <string name="cd_start_transfers">Start transfers</string>
     <string name="cd_pause_after_current">Pause after the current item</string>
     <string name="cd_pause_after_current_scheduled">Will pause after the current item</string>
-    <string name="pause_after_current_hint">The current item will finish before the queue pauses</string>
+    <string name="pause_after_current_hint">Transfers will pause after the current item finishes</string>
     <string name="change_directory">Change folder</string>
     <string name="choose_directory">Choose folder</string>
     <string name="columns">Items per row</string>

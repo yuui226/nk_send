@@ -134,7 +134,7 @@
     <string name="cd_start_transfers">开始传输</string>
     <string name="cd_pause_after_current">传完当前任务后暂停</string>
     <string name="cd_pause_after_current_scheduled">将在当前任务完成后暂停</string>
-    <string name="pause_after_current_hint">不会中断当前任务，传完后暂停</string>
+    <string name="pause_after_current_hint">传输完当前任务后将暂停</string>
     <string name="change_directory">更改目录</string>
     <string name="choose_directory">选择目录</string>
     <string name="columns">每行数量</string>
