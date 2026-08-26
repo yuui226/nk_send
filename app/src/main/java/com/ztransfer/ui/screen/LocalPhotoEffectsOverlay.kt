@@ -98,7 +98,6 @@ fun LocalPhotoEffectsPage(
     var saving by remember { mutableStateOf(false) }
     var watermarkImageImporting by remember { mutableStateOf(false) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
-    var photoEffectsInfoViewed by remember { mutableStateOf(false) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
 
     var decorationEnabled by remember { mutableStateOf(initialSettings.decorationEnabled) }
@@ -307,11 +306,11 @@ fun LocalPhotoEffectsPage(
                 Spacer(Modifier.width(8.dp))
                 TipLightbulbButton(
                     onClick = {
-                        photoEffectsInfoViewed = true
+                        viewModel.markLocalPhotoEffectsHelpViewed()
                         showPhotoEffectsInfo = true
                     },
                     contentDescription = stringResource(R.string.photo_effects_info_title),
-                    attention = !photoEffectsInfoViewed,
+                    attention = !state.localPhotoEffectsHelpViewed,
                     modifier = Modifier
                         .size(38.dp)
                         .onGloballyPositioned {

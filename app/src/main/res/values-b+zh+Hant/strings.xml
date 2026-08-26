@@ -124,11 +124,13 @@
     <string name="dir_not_set">未設定</string>
     <string name="dir_please_set">請設定傳輸目錄</string>
     <string name="transfer_directory_required_hint">請先設定傳輸目錄</string>
+    <string name="settings_help_title">設定說明</string>
     <string name="auto_transfer_new_media">即時傳輸</string>
-    <string name="auto_transfer_new_media_summary">連線期間新增的照片和影片會自動加入傳輸清單；「選完再傳」關閉時立即傳輸，監看遙控始終優先</string>
+    <string name="auto_transfer_new_media_summary">連線期間新增的照片和影片會自動加入傳輸清單。</string>
     <string name="defer_transfer_start">選完再傳</string>
-    <string name="defer_transfer_start_summary">開啟後，選擇照片時不會立即傳輸；選完後到傳輸清單點擊開始</string>
+    <string name="defer_transfer_start_summary">加入傳輸佇列後不會立即開始傳輸，方便繼續預覽挑選照片。</string>
     <string name="organize_transfers_by_date">按天儲存</string>
+    <string name="organize_transfers_by_date_summary">依拍攝日期分資料夾儲存；關閉後直接儲存到傳輸目錄。</string>
     <string name="cd_start_transfers">開始傳輸</string>
     <string name="cd_pause_after_current">傳完目前任務後暫停</string>
     <string name="cd_pause_after_current_scheduled">將在目前任務完成後暫停</string>
@@ -137,6 +139,7 @@
     <string name="choose_directory">選擇目錄</string>
     <string name="columns">每行數量</string>
     <string name="collapse_burst_photos">連拍成組</string>
+    <string name="collapse_burst_photos_summary">連拍會以合集狀態顯示，防止洗版。</string>
     <string name="photo_interaction">照片列表操作</string>
     <string name="tap_transfer_hold_preview">點擊：傳輸\n長按：預覽</string>
     <string name="tap_preview_hold_transfer">點擊：預覽\n長按：傳輸</string>

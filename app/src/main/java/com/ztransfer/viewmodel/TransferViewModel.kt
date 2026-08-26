@@ -387,6 +387,12 @@ data class TransferState(
     // 屏幕常亮（默认开启）：应用在前台时不熄屏——熄屏后系统会冻结进程/让 Wi-Fi 打盹，
     // 相机连接容易断；代价是手机一直亮屏。
     val keepScreenOn: Boolean = true,
+    // 每个说明入口分别记录是否真正点击过；仅清除应用数据或卸载后恢复未读引导。
+    val mainSettingsHelpViewed: Boolean = false,
+    val photoEffectsHelpViewed: Boolean = false,
+    val apConnectionHelpViewed: Boolean = false,
+    val staConnectionHelpViewed: Boolean = false,
+    val localPhotoEffectsHelpViewed: Boolean = false,
     // 连接期间确认新增的照片和视频自动入队；默认关闭以保持旧版行为。
     val autoTransferNewMedia: Boolean = false,
     // 待传模式：空闲时入队只保留 WAITING，由传输页的开始按钮显式放行；默认关闭。
@@ -794,6 +800,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         // 分块大小引用协议层常量，保证断点续传偏移与分块下载粒度的严格一致。
         val RESUME_CHUNK_SIZE: Long get() = NikonCamera.CHUNK_SIZE
         const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_play_count"
+        const val KEY_MAIN_SETTINGS_HELP_VIEWED = "main_settings_help_viewed"
+        const val KEY_PHOTO_EFFECTS_HELP_VIEWED = "photo_effects_help_viewed"
+        const val KEY_AP_CONNECTION_HELP_VIEWED = "ap_connection_help_viewed"
+        const val KEY_STA_CONNECTION_HELP_VIEWED = "sta_connection_help_viewed"
+        const val KEY_LOCAL_PHOTO_EFFECTS_HELP_VIEWED = "local_photo_effects_help_viewed"
     }
 
     /** 半成品文件信息：用于断点续传。[token] = 文件内容身份（大小+拍摄时间），
@@ -1020,6 +1031,26 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 tapToPreview = prefs.getBoolean("tap_to_preview", false),
                 hapticsEnabled = prefs.getBoolean("haptics_enabled", true),
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
+                mainSettingsHelpViewed = prefs.getBoolean(
+                    KEY_MAIN_SETTINGS_HELP_VIEWED,
+                    false,
+                ),
+                photoEffectsHelpViewed = prefs.getBoolean(
+                    KEY_PHOTO_EFFECTS_HELP_VIEWED,
+                    false,
+                ),
+                apConnectionHelpViewed = prefs.getBoolean(
+                    KEY_AP_CONNECTION_HELP_VIEWED,
+                    false,
+                ),
+                staConnectionHelpViewed = prefs.getBoolean(
+                    KEY_STA_CONNECTION_HELP_VIEWED,
+                    false,
+                ),
+                localPhotoEffectsHelpViewed = prefs.getBoolean(
+                    KEY_LOCAL_PHOTO_EFFECTS_HELP_VIEWED,
+                    false,
+                ),
                 autoTransferNewMedia = prefs.getBoolean("auto_transfer_new_media", false),
                 deferTransferStart = prefs.getBoolean("defer_transfer_start", false),
                 organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", true),
@@ -1150,6 +1181,36 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setKeepScreenOn(enabled: Boolean) {
         prefs.edit().putBoolean("keep_screen_on", enabled).apply()
         _state.update { it.copy(keepScreenOn = enabled) }
+    }
+
+    fun markMainSettingsHelpViewed() {
+        if (_state.value.mainSettingsHelpViewed) return
+        prefs.edit().putBoolean(KEY_MAIN_SETTINGS_HELP_VIEWED, true).apply()
+        _state.update { it.copy(mainSettingsHelpViewed = true) }
+    }
+
+    fun markPhotoEffectsHelpViewed() {
+        if (_state.value.photoEffectsHelpViewed) return
+        prefs.edit().putBoolean(KEY_PHOTO_EFFECTS_HELP_VIEWED, true).apply()
+        _state.update { it.copy(photoEffectsHelpViewed = true) }
+    }
+
+    fun markApConnectionHelpViewed() {
+        if (_state.value.apConnectionHelpViewed) return
+        prefs.edit().putBoolean(KEY_AP_CONNECTION_HELP_VIEWED, true).apply()
+        _state.update { it.copy(apConnectionHelpViewed = true) }
+    }
+
+    fun markStaConnectionHelpViewed() {
+        if (_state.value.staConnectionHelpViewed) return
+        prefs.edit().putBoolean(KEY_STA_CONNECTION_HELP_VIEWED, true).apply()
+        _state.update { it.copy(staConnectionHelpViewed = true) }
+    }
+
+    fun markLocalPhotoEffectsHelpViewed() {
+        if (_state.value.localPhotoEffectsHelpViewed) return
+        prefs.edit().putBoolean(KEY_LOCAL_PHOTO_EFFECTS_HELP_VIEWED, true).apply()
+        _state.update { it.copy(localPhotoEffectsHelpViewed = true) }
     }
 
     fun setAutoTransferNewMedia(enabled: Boolean) {

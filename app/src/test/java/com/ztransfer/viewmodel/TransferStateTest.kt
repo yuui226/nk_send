@@ -26,6 +26,17 @@ class TransferStateTest {
     }
 
     @Test
+    fun helpIntroductionsAreIndependentlyUnseenByDefault() {
+        val state = TransferState()
+
+        assertEquals(false, state.mainSettingsHelpViewed)
+        assertEquals(false, state.photoEffectsHelpViewed)
+        assertEquals(false, state.apConnectionHelpViewed)
+        assertEquals(false, state.staConnectionHelpViewed)
+        assertEquals(false, state.localPhotoEffectsHelpViewed)
+    }
+
+    @Test
     fun enqueueStartsOnlyWhenTheExecutionGateAllowsIt() {
         assertEquals(
             true,

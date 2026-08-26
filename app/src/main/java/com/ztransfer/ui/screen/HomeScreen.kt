@@ -356,9 +356,11 @@ fun HomeScreen(
                                 ) {
                                     TipLightbulbButton(
                                         onClick = {
+                                            transferViewModel.markApConnectionHelpViewed()
                                             tipsPopupAnchor = liveTipsButtonBounds.value
                                         },
                                         contentDescription = stringResource(R.string.tip_title),
+                                        attention = !transferState.apConnectionHelpViewed,
                                         modifier = Modifier
                                             .size(36.dp)
                                             .onGloballyPositioned {
@@ -397,9 +399,11 @@ fun HomeScreen(
                                 ) {
                                     TipLightbulbButton(
                                         onClick = {
+                                            transferViewModel.markStaConnectionHelpViewed()
                                             tipsPopupAnchor = liveTipsButtonBounds.value
                                         },
                                         contentDescription = stringResource(R.string.tip_sta_title),
+                                        attention = !transferState.staConnectionHelpViewed,
                                         modifier = Modifier
                                             .size(34.dp)
                                             .onGloballyPositioned {

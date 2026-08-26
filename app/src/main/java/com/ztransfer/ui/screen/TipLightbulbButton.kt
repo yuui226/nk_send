@@ -6,9 +6,14 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lightbulb
@@ -50,9 +55,9 @@ internal fun TipLightbulbButton(
         val transition = rememberInfiniteTransition(label = "tipLightbulbAttention")
         val scale by transition.animateFloat(
             initialValue = 1f,
-            targetValue = 1.055f,
+            targetValue = 1.09f,
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1_100, easing = FastOutSlowInEasing),
+                animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "tipLightbulbScale",
@@ -82,6 +87,17 @@ internal fun TipLightbulbButton(
                 tint = iconColor,
                 modifier = Modifier.fillMaxSize(0.45f),
             )
+            if (attention) {
+                // 一次性未读引导：红点补足单靠缩放不易察觉的问题；点击后由持久化状态移除。
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 2.dp, end = 2.dp)
+                        .size(7.dp)
+                        .background(Color(0xFFFF4D3D), CircleShape)
+                        .border(1.dp, colors.background.copy(alpha = 0.9f), CircleShape),
+                )
+            }
         }
     }
 }

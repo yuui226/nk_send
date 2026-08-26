@@ -99,7 +99,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
@@ -284,13 +283,10 @@ fun SettingsOverlay(
     // 页脚"我要换机"打开的对话框（取激活码 + 换机后果告知）。
     var showSwitchDevice by remember { mutableStateOf(false) }
     var settingsPage by remember { mutableStateOf(SettingsPage.MAIN) }
+    var showMainSettingsInfo by remember { mutableStateOf(false) }
+    var mainSettingsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
-    var photoEffectsInfoViewed by remember { mutableStateOf(false) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
-    var showAutoTransferInfo by remember { mutableStateOf(false) }
-    var autoTransferInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
-    var showDeferredTransferInfo by remember { mutableStateOf(false) }
-    var deferredTransferInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var expandedEffectsPreview by remember {
         mutableStateOf<ExpandedEffectsPreview?>(null)
     }
@@ -349,9 +345,9 @@ fun SettingsOverlay(
     val mainSettingsScroll = rememberScrollState()
     val photoEffectsEditorScroll = rememberScrollState()
     LaunchedEffect(settingsPage) {
+        showMainSettingsInfo = false
         showPhotoEffectsInfo = false
         if (settingsPage == SettingsPage.EFFECTS) {
-            photoEffectsInfoViewed = false
             photoEffectsEditorScroll.scrollTo(0)
         }
     }
@@ -454,26 +450,18 @@ fun SettingsOverlay(
             .fillMaxWidth(),
         animateScale = false,
         overlayContent = {
+            if (showMainSettingsInfo) {
+                MainSettingsInfoBubble(
+                    anchorBounds = mainSettingsInfoAnchorBounds,
+                    onDismiss = { showMainSettingsInfo = false },
+                )
+            }
             if (showPhotoEffectsInfo) {
                 PhotoEffectsInfoBubble(
                     anchorBounds = photoEffectsInfoAnchorBounds,
                     onDismiss = { showPhotoEffectsInfo = false },
                     description = stringResource(R.string.photo_effects_info_description),
                     gestureHint = stringResource(R.string.photo_effects_gesture_hint),
-                )
-            }
-            if (showAutoTransferInfo) {
-                SettingsInfoBubble(
-                    anchorBounds = autoTransferInfoAnchorBounds,
-                    onDismiss = { showAutoTransferInfo = false },
-                    text = stringResource(R.string.auto_transfer_new_media_summary),
-                )
-            }
-            if (showDeferredTransferInfo) {
-                SettingsInfoBubble(
-                    anchorBounds = deferredTransferInfoAnchorBounds,
-                    onDismiss = { showDeferredTransferInfo = false },
-                    text = stringResource(R.string.defer_transfer_start_summary),
                 )
             }
             // 底部玻璃提示（与列表页提示条同款视觉）：文案由触发方传入。
@@ -590,6 +578,22 @@ fun SettingsOverlay(
                     fontWeight = FontWeight.Bold,
                     color = colors.onBackground
                 )
+                if (page == SettingsPage.MAIN) {
+                    Spacer(Modifier.width(8.dp))
+                    TipLightbulbButton(
+                        onClick = {
+                            viewModel.markMainSettingsHelpViewed()
+                            showMainSettingsInfo = true
+                        },
+                        contentDescription = stringResource(R.string.settings_help_title),
+                        attention = !state.mainSettingsHelpViewed,
+                        modifier = Modifier
+                            .size(30.dp)
+                            .onGloballyPositioned {
+                                mainSettingsInfoAnchorBounds = it.boundsInRoot()
+                            },
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 if (page == SettingsPage.MAIN) {
                     if (showProBadge) {
@@ -614,11 +618,11 @@ fun SettingsOverlay(
                 } else {
                     TipLightbulbButton(
                         onClick = {
-                            photoEffectsInfoViewed = true
+                            viewModel.markPhotoEffectsHelpViewed()
                             showPhotoEffectsInfo = true
                         },
                         contentDescription = stringResource(R.string.photo_effects_info_title),
-                        attention = !photoEffectsInfoViewed,
+                        attention = !state.photoEffectsHelpViewed,
                         modifier = Modifier
                             .size(28.dp)
                             .onGloballyPositioned {
@@ -917,58 +921,22 @@ fun SettingsOverlay(
                         enabled = state.transferDirUri != null,
                         modifier = Modifier.weight(1f),
                     )
-                    Box(modifier = Modifier.weight(1f)) {
-                        BooleanSettingsWheel(
-                            label = stringResource(R.string.auto_transfer_new_media),
-                            checked = state.autoTransferNewMedia,
-                            onCheckedChange = viewModel::setAutoTransferNewMedia,
-                            hapticsEnabled = state.hapticsEnabled,
-                            enabled = state.transferDirUri != null,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        TipLightbulbButton(
-                            onClick = {
-                                showDeferredTransferInfo = false
-                                showAutoTransferInfo = true
-                            },
-                            contentDescription = stringResource(R.string.auto_transfer_new_media_summary),
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                // 波轮自身覆盖整行手势区域；显式抬高灯泡并给足命中尺寸，
-                                // 避免点击被下面的拖动/切换手势截走。
-                                .zIndex(1f)
-                                .size(30.dp)
-                                .onGloballyPositioned {
-                                    autoTransferInfoAnchorBounds = it.boundsInRoot()
-                                },
-                        )
-                    }
-                    Box(modifier = Modifier.weight(1f)) {
-                        BooleanSettingsWheel(
-                            label = stringResource(R.string.defer_transfer_start),
-                            checked = state.deferTransferStart,
-                            onCheckedChange = viewModel::setDeferTransferStart,
-                            hapticsEnabled = state.hapticsEnabled,
-                            enabled = state.transferDirUri != null,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        TipLightbulbButton(
-                            onClick = {
-                                showAutoTransferInfo = false
-                                showDeferredTransferInfo = true
-                            },
-                            contentDescription = stringResource(
-                                R.string.defer_transfer_start_summary
-                            ),
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .zIndex(1f)
-                                .size(30.dp)
-                                .onGloballyPositioned {
-                                    deferredTransferInfoAnchorBounds = it.boundsInRoot()
-                                },
-                        )
-                    }
+                    BooleanSettingsWheel(
+                        label = stringResource(R.string.auto_transfer_new_media),
+                        checked = state.autoTransferNewMedia,
+                        onCheckedChange = viewModel::setAutoTransferNewMedia,
+                        hapticsEnabled = state.hapticsEnabled,
+                        enabled = state.transferDirUri != null,
+                        modifier = Modifier.weight(1f),
+                    )
+                    BooleanSettingsWheel(
+                        label = stringResource(R.string.defer_transfer_start),
+                        checked = state.deferTransferStart,
+                        onCheckedChange = viewModel::setDeferTransferStart,
+                        hapticsEnabled = state.hapticsEnabled,
+                        enabled = state.transferDirUri != null,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
 
@@ -1433,33 +1401,67 @@ internal fun PhotoEffectsInfoBubble(
 }
 
 @Composable
-private fun SettingsInfoBubble(
+private fun MainSettingsInfoBubble(
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
-    text: String,
 ) {
     val colors = AppTheme.colors
     val density = LocalDensity.current
     val panelTop = anchorBounds?.let {
         with(density) { it.bottom.toDp() } + 8.dp
     } ?: 64.dp
+    val items = listOf(
+        stringResource(R.string.organize_transfers_by_date) to
+            stringResource(R.string.organize_transfers_by_date_summary),
+        stringResource(R.string.auto_transfer_new_media) to
+            stringResource(R.string.auto_transfer_new_media_summary),
+        stringResource(R.string.defer_transfer_start) to
+            stringResource(R.string.defer_transfer_start_summary),
+        stringResource(R.string.collapse_burst_photos) to
+            stringResource(R.string.collapse_burst_photos_summary),
+    )
     AnchorPopup(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
         panelModifier = Modifier
             .padding(start = 18.dp, end = 18.dp, top = panelTop)
-            .widthIn(max = 320.dp)
-            .width(IntrinsicSize.Max),
-        panelAlignment = Alignment.TopEnd,
+            .widthIn(min = 280.dp, max = 360.dp),
+        panelAlignment = Alignment.TopStart,
         shape = RoundedCornerShape(16.dp),
         dim = false,
     ) { _ ->
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.onSurfaceVariant,
-        )
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(
+                text = stringResource(R.string.settings_help_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = colors.onBackground,
+            )
+            Spacer(Modifier.height(10.dp))
+            items.forEachIndexed { index, (label, description) ->
+                if (index > 0) {
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 10.dp)
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(colors.glassPanelBorder.copy(alpha = 0.7f)),
+                    )
+                }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onBackground,
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 

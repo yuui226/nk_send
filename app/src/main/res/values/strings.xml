@@ -124,11 +124,13 @@
     <string name="dir_not_set">Not set</string>
     <string name="dir_please_set">Set a transfer folder</string>
     <string name="transfer_directory_required_hint">Please set a transfer folder first</string>
+    <string name="settings_help_title">Settings guide</string>
     <string name="auto_transfer_new_media">Real-time transfer</string>
-    <string name="auto_transfer_new_media_summary">Photos and videos added while connected appear in the transfer list automatically. They transfer immediately unless “Transfer after selecting” is enabled; remote live view still keeps priority.</string>
+    <string name="auto_transfer_new_media_summary">Photos and videos added while connected appear in the transfer list automatically.</string>
     <string name="defer_transfer_start">Transfer after selecting</string>
-    <string name="defer_transfer_start_summary">When enabled, selecting files does not start a transfer. When finished, open the transfer list and tap Start.</string>
+    <string name="defer_transfer_start_summary">Items added to the transfer queue do not start transferring immediately, so you can keep previewing and selecting photos.</string>
     <string name="organize_transfers_by_date">Save by day</string>
+    <string name="organize_transfers_by_date_summary">Save files in folders by capture date. When off, save them directly in the transfer folder.</string>
     <string name="cd_start_transfers">Start transfers</string>
     <string name="cd_pause_after_current">Pause after the current item</string>
     <string name="cd_pause_after_current_scheduled">Will pause after the current item</string>
@@ -137,6 +139,7 @@
     <string name="choose_directory">Choose folder</string>
     <string name="columns">Items per row</string>
     <string name="collapse_burst_photos">Group bursts</string>
+    <string name="collapse_burst_photos_summary">Burst photos appear as a collection so they do not flood the list.</string>
     <string name="photo_interaction">Photo list actions</string>
     <string name="tap_transfer_hold_preview">Tap: transfer\nHold: preview</string>
     <string name="tap_preview_hold_transfer">Tap: preview\nHold: transfer</string>
