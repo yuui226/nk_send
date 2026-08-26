@@ -1333,17 +1333,13 @@ private const val WIFI_SETTINGS_BUTTON_TEXTURE_SEED = 0x1457A102
 /** 布局热路径专用的非观察容器；更新坐标不触发 Compose 重组。 */
 private class LayoutBoundsHolder(var value: Rect? = null)
 
-/**
- * 连接页「小技巧」气泡：从 tips 按钮变形弹出的毛玻璃内容框（复用全局 [AnchorPopup]）。
- * 介绍把「Wi-Fi 连接」加进相机 i 菜单以省去层层翻菜单，并给出设置路径；内容全部走多语言资源。
- */
+/** 连接页 AP/STA 指引气泡；复用全局 [AnchorPopup]，内容全部走多语言资源。 */
 @Composable
 private fun TipsBubble(
     anchorBounds: Rect?,
     wirelessMode: WirelessMode,
     onDismiss: () -> Unit,
 ) {
-    val colors = AppTheme.colors
     val density = LocalDensity.current
     // 按钮位于卡片底部内边距中，留 24dp 才能让气泡完整落在卡片之外。
     val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 24.dp } ?: 156.dp
@@ -1357,58 +1353,30 @@ private fun TipsBubble(
         shape = RoundedCornerShape(18.dp),
         dim = false,
     ) { _ ->
-        Column(modifier = Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Lightbulb, contentDescription = null, tint = colors.accentOrange, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-            Text(
-                stringResource(
-                    if (wirelessMode == WirelessMode.AP) R.string.tip_title
-                    else R.string.tip_sta_title,
+        TipBubbleContent(
+            title = stringResource(
+                if (wirelessMode == WirelessMode.AP) R.string.tip_title
+                else R.string.tip_sta_title,
+            ),
+            items = listOf(
+                TipBubbleItem(
+                    label = stringResource(
+                        if (wirelessMode == WirelessMode.AP) R.string.tip_ap_mode
+                        else R.string.tip_sta_mode,
+                    ),
+                    text = stringResource(
+                        if (wirelessMode == WirelessMode.AP) R.string.tip_body
+                        else R.string.tip_sta_body,
+                    ),
                 ),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = colors.onBackground
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                stringResource(
-                    if (wirelessMode == WirelessMode.AP) R.string.tip_ap_mode
-                    else R.string.tip_sta_mode,
-                ),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Medium,
-                color = colors.accentBlue,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                stringResource(
-                    if (wirelessMode == WirelessMode.AP) R.string.tip_body
-                    else R.string.tip_sta_body,
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-            // 设置路径：内嵌浅底卡片承载，箭头分隔的菜单路径，蓝色加重以便照着相机菜单一步步走。
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colors.onBackground.copy(alpha = 0.05f))
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-            ) {
-                Text(
-                    stringResource(
+                TipBubbleItem(
+                    text = stringResource(
                         if (wirelessMode == WirelessMode.AP) R.string.tip_path
                         else R.string.tip_sta_steps,
                     ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = colors.accentBlue
-                )
-            }
-        }
+                    emphasized = true,
+                ),
+            ),
+        )
     }
 }

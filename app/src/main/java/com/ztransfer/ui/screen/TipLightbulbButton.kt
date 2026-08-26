@@ -9,23 +9,33 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
@@ -112,4 +122,72 @@ internal fun tipLightbulbIconColor(
     SkinPreset.TITANIUM -> if (dark) Color(0xFFE4ECEF) else Color(0xFF344149)
     SkinPreset.WOOD -> if (dark) Color(0xFFF1D6A7) else Color(0xFF472A18)
     SkinPreset.CAMERA_CONTROLS -> Color(0xFFD5D8DA)
+}
+
+/** One consistently styled row inside a lightbulb help bubble. */
+internal data class TipBubbleItem(
+    val text: String,
+    val label: String? = null,
+    val emphasized: Boolean = false,
+)
+
+/** Shared STA-style content hierarchy for every lightbulb help bubble. */
+@Composable
+internal fun TipBubbleContent(
+    title: String,
+    items: List<TipBubbleItem>,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    Column(modifier = modifier.padding(18.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Lightbulb,
+                contentDescription = null,
+                tint = colors.accentOrange,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = colors.onBackground,
+            )
+        }
+        items.forEachIndexed { index, item ->
+            Spacer(Modifier.height(if (index == 0) 10.dp else 12.dp))
+            item.label?.takeIf { it.isNotBlank() }?.let { label ->
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.accentBlue,
+                )
+                Spacer(Modifier.height(5.dp))
+            }
+            if (item.emphasized) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.onBackground.copy(alpha = 0.05f))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        text = item.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.accentBlue,
+                    )
+                }
+            } else {
+                Text(
+                    text = item.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
