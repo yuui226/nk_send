@@ -18,6 +18,83 @@ import org.junit.Test
 
 class TransferStateTest {
     @Test
+    fun deferredTransferAndPauseAreOptInByDefault() {
+        val state = TransferState()
+
+        assertEquals(false, state.deferTransferStart)
+        assertEquals(false, state.pauseAfterCurrent)
+    }
+
+    @Test
+    fun enqueueStartsOnlyWhenTheExecutionGateAllowsIt() {
+        assertEquals(
+            true,
+            shouldRunQueueAfterEnqueue(
+                deferTransferStart = false,
+                isTransferring = false,
+                pauseAfterCurrent = false,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldRunQueueAfterEnqueue(
+                deferTransferStart = true,
+                isTransferring = false,
+                pauseAfterCurrent = false,
+            ),
+        )
+        assertEquals(
+            true,
+            shouldRunQueueAfterEnqueue(
+                deferTransferStart = true,
+                isTransferring = true,
+                pauseAfterCurrent = false,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldRunQueueAfterEnqueue(
+                deferTransferStart = false,
+                isTransferring = true,
+                pauseAfterCurrent = true,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldRunQueueAfterEnqueue(
+                deferTransferStart = false,
+                isTransferring = false,
+                pauseAfterCurrent = true,
+            ),
+        )
+    }
+
+    @Test
+    fun pauseIsObservedOnlyBetweenCompleteQueueTasks() {
+        assertEquals(
+            true,
+            shouldPauseBeforeNextTransfer(
+                pauseAfterCurrent = true,
+                isRecheckingCurrentTask = false,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldPauseBeforeNextTransfer(
+                pauseAfterCurrent = true,
+                isRecheckingCurrentTask = true,
+            ),
+        )
+        assertEquals(
+            false,
+            shouldPauseBeforeNextTransfer(
+                pauseAfterCurrent = false,
+                isRecheckingCurrentTask = false,
+            ),
+        )
+    }
+
+    @Test
     fun frameGenerationTimingUsesUserVisibleMonotonicInterval() {
         val started = TransferTask(file(1)).startFrameGeneration(nowElapsedMs = 1_000L)
 

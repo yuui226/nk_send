@@ -79,6 +79,44 @@ class ExistingFileNameIndexTest {
     }
 
     @Test
+    fun exportedOriginalIndexResolvesTheMatchingLocalUriWithoutCrossingDestinations() {
+        val original = file("DSC_0001.JPG", 100L)
+        val index = ExportedOriginalIndex()
+
+        assertTrue(
+            index.add(
+                fileName = "DSC_0001 (2).JPG",
+                size = 100L,
+                destinationFolderName = "ZT2026-08-26",
+            )
+        )
+        assertNull(index.localUriString(original, "ZT2026-08-26"))
+        assertTrue(
+            index.add(
+                fileName = "DSC_0001 (2).JPG",
+                size = 100L,
+                destinationFolderName = "ZT2026-08-26",
+                uriString = "content://exports/DSC_0001_2.JPG",
+            )
+        )
+        assertFalse(
+            index.add(
+                fileName = "DSC_0001 (2).JPG",
+                size = 100L,
+                destinationFolderName = "ZT2026-08-26",
+                uriString = "content://exports/DSC_0001_2.JPG",
+            )
+        )
+
+        assertEquals(
+            "content://exports/DSC_0001_2.JPG",
+            index.localUriString(original, "ZT2026-08-26"),
+        )
+        assertNull(index.localUriString(original))
+        assertNull(index.localUriString(original.copy(size = 99L), "ZT2026-08-26"))
+    }
+
+    @Test
     fun datedLookupOnlyMatchesTheCaptureDateDestination() {
         val original = file("DSC_0001.JPG", 100L).copy(captureDate = "20260817T120000")
         val index = ExportedOriginalIndex().apply {

@@ -47,7 +47,6 @@ import com.ztransfer.protocol.CameraEndpointOverride
 import com.ztransfer.update.AppUpdateHost
 import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.viewmodel.CameraViewModel
-import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.WirelessMode
 import kotlinx.coroutines.delay
@@ -203,11 +202,10 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     val cameraState by cameraViewModel.state.collectAsState()
     val transferState by transferViewModel.state.collectAsState()
 
-    // 把"是否有任务在传输/等待"喂给相机 VM——它是后台缩略图填充的唯一开关。
+    // 只把真实运行中的队列喂给相机 VM。待传模式下的 WAITING 只是静止清单，不能让
+    // 相机缩略图/大图通道误以为传输繁忙，否则“先选完再开始”的价值会被抵消。
     // 桥接放在 MainScreen（所有页面共同的宿主）：填充与页面无关，停在队列页也照常推进。
-    val transfersBusy = transferState.tasks.any {
-        it.status == TransferStatus.WAITING || it.status == TransferStatus.TRANSFERING
-    }
+    val transfersBusy = transferState.isTransferring
     LaunchedEffect(transfersBusy) {
         cameraViewModel.setTransfersBusy(transfersBusy)
     }

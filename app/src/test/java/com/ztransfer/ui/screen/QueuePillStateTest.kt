@@ -44,6 +44,38 @@ class QueuePillStateTest {
     }
 
     @Test
+    fun idleWaitingQueueUsesTheCompactPausedPill() {
+        assertEquals(
+            PillMode.PAUSED,
+            queuePillMode(
+                downloadRemaining = 8,
+                generationRemaining = 0,
+                paused = true,
+            ),
+        )
+        assertNotEquals(
+            queuePillWidthKey(PillMode.PAUSED, speedText = null, count = 9),
+            queuePillWidthKey(PillMode.PAUSED, speedText = null, count = 10),
+        )
+    }
+
+    @Test
+    fun transferPageControlDependsOnRuntimeNotDeferredPreference() {
+        assertEquals(
+            QueueExecutionControl.PAUSE,
+            queueExecutionControl(isTransferring = true, waitingCount = 0),
+        )
+        assertEquals(
+            QueueExecutionControl.START,
+            queueExecutionControl(isTransferring = false, waitingCount = 3),
+        )
+        assertEquals(
+            null,
+            queueExecutionControl(isTransferring = false, waitingCount = 0),
+        )
+    }
+
+    @Test
     fun flightHoldCannotMakeANonEmptyQueueLookEmpty() {
         assertEquals(24, queuePillDisplayRemaining(actualRemaining = 24, heldCount = 24))
         assertEquals(18, queuePillDisplayRemaining(actualRemaining = 18, heldCount = 24))

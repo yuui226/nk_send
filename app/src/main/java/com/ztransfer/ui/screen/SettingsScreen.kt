@@ -99,6 +99,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
@@ -288,6 +289,8 @@ fun SettingsOverlay(
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var showAutoTransferInfo by remember { mutableStateOf(false) }
     var autoTransferInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
+    var showDeferredTransferInfo by remember { mutableStateOf(false) }
+    var deferredTransferInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var expandedEffectsPreview by remember {
         mutableStateOf<ExpandedEffectsPreview?>(null)
     }
@@ -464,6 +467,13 @@ fun SettingsOverlay(
                     anchorBounds = autoTransferInfoAnchorBounds,
                     onDismiss = { showAutoTransferInfo = false },
                     text = stringResource(R.string.auto_transfer_new_media_summary),
+                )
+            }
+            if (showDeferredTransferInfo) {
+                SettingsInfoBubble(
+                    anchorBounds = deferredTransferInfoAnchorBounds,
+                    onDismiss = { showDeferredTransferInfo = false },
+                    text = stringResource(R.string.defer_transfer_start_summary),
                 )
             }
             // 底部玻璃提示（与列表页提示条同款视觉）：文案由触发方传入。
@@ -917,14 +927,45 @@ fun SettingsOverlay(
                             modifier = Modifier.fillMaxWidth(),
                         )
                         TipLightbulbButton(
-                            onClick = { showAutoTransferInfo = true },
+                            onClick = {
+                                showDeferredTransferInfo = false
+                                showAutoTransferInfo = true
+                            },
                             contentDescription = stringResource(R.string.auto_transfer_new_media_summary),
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
-                                .padding(3.dp)
-                                .size(22.dp)
+                                // 波轮自身覆盖整行手势区域；显式抬高灯泡并给足命中尺寸，
+                                // 避免点击被下面的拖动/切换手势截走。
+                                .zIndex(1f)
+                                .size(30.dp)
                                 .onGloballyPositioned {
                                     autoTransferInfoAnchorBounds = it.boundsInRoot()
+                                },
+                        )
+                    }
+                    Box(modifier = Modifier.weight(1f)) {
+                        BooleanSettingsWheel(
+                            label = stringResource(R.string.defer_transfer_start),
+                            checked = state.deferTransferStart,
+                            onCheckedChange = viewModel::setDeferTransferStart,
+                            hapticsEnabled = state.hapticsEnabled,
+                            enabled = state.transferDirUri != null,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        TipLightbulbButton(
+                            onClick = {
+                                showAutoTransferInfo = false
+                                showDeferredTransferInfo = true
+                            },
+                            contentDescription = stringResource(
+                                R.string.defer_transfer_start_summary
+                            ),
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .zIndex(1f)
+                                .size(30.dp)
+                                .onGloballyPositioned {
+                                    deferredTransferInfoAnchorBounds = it.boundsInRoot()
                                 },
                         )
                     }
@@ -1154,6 +1195,9 @@ fun SettingsOverlay(
                             onValueCommitted = { viewModel.setThemeMode(it.first) },
                             onDetent = haptics::tick,
                             label = stringResource(R.string.light_dark_mode),
+                            wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
+                            optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
+                            optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
                             modifier = Modifier.width(wheelWidth),
                         )
                         ReleaseCommitWheel(
@@ -1169,6 +1213,9 @@ fun SettingsOverlay(
                             },
                             onDetent = haptics::tick,
                             label = stringResource(R.string.language),
+                            wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
+                            optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
+                            optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
                             modifier = Modifier.width(wheelWidth),
                         )
                         ReleaseCommitWheel(
@@ -1178,6 +1225,9 @@ fun SettingsOverlay(
                             onValueCommitted = { viewModel.setSkinPreset(it.first) },
                             onDetent = haptics::tick,
                             label = stringResource(R.string.button_style),
+                            wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
+                            optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
+                            optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
                             modifier = Modifier.width(wheelWidth),
                         )
                     }
@@ -1195,6 +1245,7 @@ fun SettingsOverlay(
                         onCheckedChange = viewModel::setHapticsEnabled,
                         hapticsEnabled = state.hapticsEnabled,
                         isHapticsPreference = true,
+                        compact = true,
                         modifier = Modifier.weight(1f),
                     )
                     BooleanSettingsWheel(
@@ -1202,6 +1253,7 @@ fun SettingsOverlay(
                         checked = state.keepScreenOn,
                         onCheckedChange = viewModel::setKeepScreenOn,
                         hapticsEnabled = state.hapticsEnabled,
+                        compact = true,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -3273,6 +3325,7 @@ private fun BooleanSettingsWheel(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     isHapticsPreference: Boolean = false,
+    compact: Boolean = false,
 ) {
     val colors = AppTheme.colors
     val wheelHaptics = rememberHaptics(hapticsEnabled || isHapticsPreference)
@@ -3287,7 +3340,13 @@ private fun BooleanSettingsWheel(
         label = label,
         accentColor = if (checked) colors.accentBlue else colors.statusWaiting,
         emphasized = checked,
-        wheelHeight = BOOLEAN_SETTINGS_WHEEL_HEIGHT,
+        wheelHeight = if (compact) {
+            COMPACT_SETTINGS_WHEEL_HEIGHT
+        } else {
+            BOOLEAN_SETTINGS_WHEEL_HEIGHT
+        },
+        optionRowHeight = if (compact) COMPACT_SETTINGS_WHEEL_ROW_HEIGHT else 18.dp,
+        optionFontSize = if (compact) COMPACT_SETTINGS_WHEEL_FONT_SIZE else 14.sp,
         modifier = modifier,
         enabled = enabled,
     )
@@ -3295,6 +3354,9 @@ private fun BooleanSettingsWheel(
 
 private val BOOLEAN_SETTINGS_OPTIONS = listOf(false, true)
 private val BOOLEAN_SETTINGS_WHEEL_HEIGHT = 50.dp
+private val COMPACT_SETTINGS_WHEEL_HEIGHT = 42.dp
+private val COMPACT_SETTINGS_WHEEL_ROW_HEIGHT = 16.dp
+private val COMPACT_SETTINGS_WHEEL_FONT_SIZE = 13.sp
 private val PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)
 
 /**

@@ -13,6 +13,7 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
@@ -151,6 +152,7 @@ internal fun objectHandleQueryStorageId(storageId: Int, isStaConnection: Boolean
     if (isStaConnection && storageId and 0xFFFF == 0) -1 else storageId
 
 private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
+internal val NIKON_RAW_EXTENSIONS = setOf(".nef", ".nrw", ".tif", ".tiff")
 private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
 
 /** 未知 PTP 对象(.bin 等)仍显示在列表，但不会被“照片/视频自动传输”误收。 */
@@ -3567,13 +3569,36 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val cam = camera ?: return null
         // 读取用会话级 handle（当下有效）；缓存键用稳定身份。
         // NEF/TIFF 等 RAW 格式的 MakerNote 可能位于较高偏移处，用更大 header 确保覆盖。
-        val maxSize = if (ext in RAW_EXTENSIONS) 2048 * 1024 else 128 * 1024
+        val maxSize = if (ext in NIKON_RAW_EXTENSIONS) 2048 * 1024 else 128 * 1024
         val bytes = cam.readExifHeader(file.handle, maxSize) ?: run {
             exifCache[key] = null
             return null
         }
         return parseExif(bytes)?.also { exifCache[key] = it }
             ?: run { exifCache[key] = null; null }
+    }
+
+    /** Reads EXIF from an already-transferred local original without touching the camera session. */
+    suspend fun loadLocalExif(file: NikonCamera.FileInfo, sourceUri: Uri): PhotoExif? {
+        val key = exifKey(file)
+        if (key in exifCache) return exifCache[key]
+        if (file.extension !in EXIF_SUPPORTED_EXTENSIONS) {
+            exifCache[key] = null
+            return null
+        }
+        val parsed = withContext(Dispatchers.IO) {
+            try {
+                getApplication<Application>().contentResolver
+                    .openFileDescriptor(sourceUri, "r")
+                    ?.use { descriptor ->
+                        parseExifImpl(ExifInterface(descriptor.fileDescriptor))
+                    }
+            } catch (_: Exception) {
+                null
+            }
+        }
+        exifCache[key] = parsed
+        return parsed
     }
 
     /**
@@ -3789,8 +3814,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val VIDEO_EXTENSIONS = EFFECT_PREVIEW_VIDEO_EXTENSIONS
         // EXIF 解析支持的图片扩展名——视频/音频等格式不会有 EXIF 头。
         val EXIF_SUPPORTED_EXTENSIONS = setOf(".jpg", ".jpeg", ".nef", ".tif", ".tiff", ".nrw")
-        // RAW 格式需要更大的 header（2MB）以确保 MakerNote 等嵌套 IFD 被完整覆盖。
-        val RAW_EXTENSIONS = setOf(".nef", ".nrw", ".tif", ".tiff")
     }
 
     private data class Quint<A, B, C, D, E>(

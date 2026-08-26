@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ztransfer.ui.theme.AppTheme
@@ -71,6 +72,9 @@ internal fun wheelPositionAfterDrag(
 internal fun wheelReleaseIndex(position: Float, lastIndex: Int): Int =
     position.roundToInt().coerceIn(0, lastIndex.coerceAtLeast(0))
 
+/** 三档以内点按即可遍历；更多档位才接管纵向手势，避免设置页滚动时误改短选项。 */
+internal fun wheelDragEnabled(optionCount: Int): Boolean = optionCount > 3
+
 /**
  * 设置页专用的紧凑拨轮。
  *
@@ -91,6 +95,7 @@ internal fun <T> ReleaseCommitWheel(
     enabled: Boolean = true,
     wheelHeight: Dp = 50.dp,
     optionRowHeight: Dp = SETTINGS_WHEEL_ROW_HEIGHT,
+    optionFontSize: TextUnit = 14.sp,
     optionMaxLines: Int = 1,
     showDragHint: Boolean = true,
     accentColor: Color? = null,
@@ -185,7 +190,7 @@ internal fun <T> ReleaseCommitWheel(
                 }
             }
             .pointerInput(options.size, rowPx, enabled) {
-                if (!enabled || options.size <= 1) return@pointerInput
+                if (!enabled || !wheelDragEnabled(options.size)) return@pointerInput
                 var accumulatedDy = 0f
                 try {
                     detectVerticalDragGestures(
@@ -306,8 +311,10 @@ internal fun <T> ReleaseCommitWheel(
                         Text(
                             text = optionLabel(options[index]),
                             style = textStyle,
-                            fontSize = 14.sp,
-                            lineHeight = if (optionMaxLines > 1) 15.sp else 16.sp,
+                            fontSize = optionFontSize,
+                            lineHeight = (
+                                optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                            ).sp,
                             fontWeight = textWeight,
                             color = colors.onBackground.copy(alpha = itemAlpha),
                             maxLines = optionMaxLines,
@@ -318,8 +325,10 @@ internal fun <T> ReleaseCommitWheel(
                     Text(
                         text = optionLabel(options[index]),
                         style = textStyle,
-                        fontSize = 14.sp,
-                        lineHeight = if (optionMaxLines > 1) 15.sp else 16.sp,
+                        fontSize = optionFontSize,
+                        lineHeight = (
+                            optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                        ).sp,
                         fontWeight = textWeight,
                         color = if (emphasized && distance < 0.5f) {
                             resolvedAccent.copy(alpha = itemAlpha)
@@ -335,7 +344,7 @@ internal fun <T> ReleaseCommitWheel(
             }
         }
 
-        if (showDragHint) {
+        if (showDragHint && wheelDragEnabled(options.size)) {
             // 纯视觉拖动提示：不安装任何手势或点击处理，事件仍完整交给外层波轮。
             Text(
                 text = "↕",

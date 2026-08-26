@@ -1,9 +1,18 @@
 package com.ztransfer.ui.screen
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReleaseCommitWheelTest {
+    @Test
+    fun draggingIsReservedForWheelsWithMoreThanThreeOptions() {
+        assertFalse(wheelDragEnabled(2))
+        assertFalse(wheelDragEnabled(3))
+        assertTrue(wheelDragEnabled(4))
+    }
+
     @Test
     fun draggingOnlyCalculatesPreviewPositionWithinBounds() {
         assertEquals(3f, wheelPositionAfterDrag(2, -18f, 18f, 4))

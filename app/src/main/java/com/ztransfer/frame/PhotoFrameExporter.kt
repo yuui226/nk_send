@@ -34,10 +34,14 @@ import com.ztransfer.R
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.protocol.NefPreviewReference
+import com.ztransfer.protocol.largestEmbeddedJpegRange
+import com.ztransfer.protocol.parseNefHeaderMetadata
 import com.ztransfer.util.applyExifOrientation
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.InputStream
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
@@ -59,6 +63,7 @@ internal const val PHOTO_FRAME_REGION_TARGET_PIXELS = 4 * 1024 * 1024
 private val PHOTO_FRAME_SESSION_PREFIX =
     "$PHOTO_FRAME_PART_PREFIX${UUID.randomUUID().toString().take(8)}_"
 private const val PLAQUE_BAND_TO_WIDTH = 0.12f
+private const val LOCAL_RAW_PREVIEW_INDEX_BYTES = 16 * 1024 * 1024
 private const val BRAND_FRAME_SIDE_TO_PHOTO_WIDTH = 0.032f
 private const val BRAND_INSET_BOTTOM_TO_PHOTO_WIDTH = 0.032f
 private const val BRAND_GALLERY_BOTTOM_TO_PHOTO_WIDTH = 0.16f
@@ -862,6 +867,136 @@ object PhotoFrameExporter {
         maxEdge: Int = 1_920,
     ): Bitmap? = decodeBounded(resolver, sourceUri, maxEdge)
 
+    /** Full-resolution local original preserving camera pixel orientation for manual rotation. */
+    internal fun decodeOriginalPreview(
+        resolver: ContentResolver,
+        sourceUri: Uri,
+    ): Bitmap? = decodeBitmap(
+        resolver = resolver,
+        uri = sourceUri,
+        maxEdge = null,
+        mutable = false,
+        honorExifOrientation = false,
+    )
+
+    /** Extracts and decodes the largest usable JPEG preview already embedded in a local RAW file. */
+    internal fun decodeRawEmbeddedPreview(
+        resolver: ContentResolver,
+        sourceUri: Uri,
+    ): Bitmap? {
+        val prefix = readRawPreviewIndexPrefix(resolver, sourceUri) ?: return null
+        val references = buildList {
+            addAll(parseNefHeaderMetadata(prefix).previews)
+            largestEmbeddedJpegRange(prefix)?.let(::add)
+        }.distinct()
+
+        var bestBytes: ByteArray? = null
+        var bestPixels = -1L
+        references.forEach { reference ->
+            val bytes = rawPreviewBytes(resolver, sourceUri, prefix, reference)
+                ?: return@forEach
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@forEach
+            val pixels = bounds.outWidth.toLong() * bounds.outHeight.toLong()
+            if (pixels > bestPixels) {
+                bestPixels = pixels
+                bestBytes = bytes
+            }
+        }
+        val encoded = bestBytes ?: return null
+        return BitmapFactory.decodeByteArray(
+            encoded,
+            0,
+            encoded.size,
+            BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            },
+        )
+    }
+
+    private fun readRawPreviewIndexPrefix(
+        resolver: ContentResolver,
+        sourceUri: Uri,
+    ): ByteArray? = resolver.openInputStream(sourceUri)?.use { input ->
+        val prefix = ByteArray(LOCAL_RAW_PREVIEW_INDEX_BYTES)
+        var loaded = 0
+        while (loaded < prefix.size) {
+            val count = input.read(prefix, loaded, prefix.size - loaded)
+            if (count < 0) break
+            if (count > 0) {
+                loaded += count
+            } else {
+                val value = input.read()
+                if (value < 0) break
+                prefix[loaded++] = value.toByte()
+            }
+        }
+        when (loaded) {
+            0 -> null
+            prefix.size -> prefix
+            else -> prefix.copyOf(loaded)
+        }
+    }
+
+    private fun rawPreviewBytes(
+        resolver: ContentResolver,
+        sourceUri: Uri,
+        prefix: ByteArray,
+        reference: NefPreviewReference,
+    ): ByteArray? {
+        val end = reference.offset + reference.length
+        val bytes = if (reference.offset >= 0L && end <= prefix.size.toLong()) {
+            prefix.copyOfRange(reference.offset.toInt(), end.toInt())
+        } else {
+            resolver.openInputStream(sourceUri)?.use { input ->
+                if (!input.skipFully(reference.offset)) return@use null
+                val result = ByteArray(reference.length)
+                var loaded = 0
+                while (loaded < result.size) {
+                    val count = input.read(result, loaded, result.size - loaded)
+                    if (count < 0) return@use null
+                    if (count > 0) {
+                        loaded += count
+                    } else {
+                        val value = input.read()
+                        if (value < 0) return@use null
+                        result[loaded++] = value.toByte()
+                    }
+                }
+                result
+            } ?: return null
+        }
+        return bytes.takeIf {
+            it.size >= 4 &&
+                it[0] == 0xFF.toByte() && it[1] == 0xD8.toByte() &&
+                it[it.lastIndex - 1] == 0xFF.toByte() && it[it.lastIndex] == 0xD9.toByte()
+        }
+    }
+
+    private fun InputStream.skipFully(byteCount: Long): Boolean {
+        if (byteCount < 0L) return false
+        var remaining = byteCount
+        val discard = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (remaining > 0L) {
+            val skipped = skip(remaining)
+            if (skipped > 0L) {
+                remaining -= skipped
+                continue
+            }
+            val count = read(discard, 0, minOf(discard.size.toLong(), remaining).toInt())
+            if (count < 0) return false
+            if (count > 0) {
+                remaining -= count
+            } else if (read() < 0) {
+                return false
+            } else {
+                remaining--
+            }
+        }
+        return true
+    }
+
     internal fun readPreviewMetadata(
         resolver: ContentResolver,
         sourceUri: Uri,
@@ -1123,21 +1258,34 @@ object PhotoFrameExporter {
         resolver: ContentResolver,
         uri: Uri,
         maxEdge: Int,
-    ): Bitmap? = decodeBitmap(resolver, uri, maxEdge = maxEdge, mutable = false)
+    ): Bitmap? = decodeBitmap(
+        resolver = resolver,
+        uri = uri,
+        maxEdge = maxEdge,
+        mutable = false,
+        honorExifOrientation = true,
+    )
 
     private fun decodeOriginal(
         resolver: ContentResolver,
         uri: Uri,
-    ): Bitmap? = decodeBitmap(resolver, uri, maxEdge = null, mutable = true)
+    ): Bitmap? = decodeBitmap(
+        resolver = resolver,
+        uri = uri,
+        maxEdge = null,
+        mutable = true,
+        honorExifOrientation = true,
+    )
 
     private fun decodeBitmap(
         resolver: ContentResolver,
         uri: Uri,
         maxEdge: Int?,
         mutable: Boolean,
+        honorExifOrientation: Boolean,
     ): Bitmap? {
         require(maxEdge == null || maxEdge > 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && honorExifOrientation) {
             try {
                 return ImageDecoder.decodeBitmap(
                     ImageDecoder.createSource(resolver, uri),
@@ -1187,14 +1335,18 @@ object PhotoFrameExporter {
                 },
             )
         } ?: return null
-        val orientation = runCatching {
-            resolver.openFileDescriptor(uri, "r")?.use {
-                ExifInterface(it.fileDescriptor).getAttributeInt(
-                    ExifInterface.TAG_ORIENTATION,
-                    ExifInterface.ORIENTATION_NORMAL,
-                )
-            } ?: ExifInterface.ORIENTATION_NORMAL
-        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val orientation = if (honorExifOrientation) {
+            runCatching {
+                resolver.openFileDescriptor(uri, "r")?.use {
+                    ExifInterface(it.fileDescriptor).getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL,
+                    )
+                } ?: ExifInterface.ORIENTATION_NORMAL
+            }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        } else {
+            ExifInterface.ORIENTATION_NORMAL
+        }
         var oriented: Bitmap? = null
         return try {
             oriented = applyExifOrientation(decoded, orientation)

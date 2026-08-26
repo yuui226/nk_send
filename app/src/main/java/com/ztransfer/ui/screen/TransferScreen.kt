@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
@@ -17,9 +18,12 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -65,6 +69,7 @@ import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
@@ -96,6 +101,17 @@ private enum class TransferCardPillTone { SIZE, SPEED, EFFECT, TRANSFER_DURATION
 
 private enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
 
+internal enum class QueueExecutionControl { START, PAUSE }
+
+internal fun queueExecutionControl(
+    isTransferring: Boolean,
+    waitingCount: Int,
+): QueueExecutionControl? = when {
+    isTransferring -> QueueExecutionControl.PAUSE
+    waitingCount > 0 -> QueueExecutionControl.START
+    else -> null
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TransferScreen(
@@ -116,6 +132,15 @@ fun TransferScreen(
     val clearScope = rememberCoroutineScope()
     // 触感反馈（与"Z传"页同一开关）；本页胶囊负责传输全部完成时的成功震动。
     val haptics = rememberHaptics(transferState.hapticsEnabled)
+    val pauseAfterCurrentHint = stringResource(R.string.pause_after_current_hint)
+    var pauseHintVisible by remember { mutableStateOf(false) }
+    var pauseHintNonce by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(pauseHintNonce) {
+        if (pauseHintNonce > 0L && pauseHintVisible) {
+            delay(2_200)
+            pauseHintVisible = false
+        }
+    }
     // 队列清空后再加入任务时从顶部开始，避免沿用上一批任务的滚动位置与遮罩状态。
     val listState = key(transferState.tasks.isEmpty()) { rememberLazyListState() }
     val listAtTop by remember {
@@ -148,19 +173,43 @@ fun TransferScreen(
     val hasClearable = transferState.tasks.any {
         it.status != TransferStatus.TRANSFERING && !it.isGeneratingFrame
     }
+    val waitingCount = transferState.tasks.count { it.status == TransferStatus.WAITING }
+    val executionControl = queueExecutionControl(
+        isTransferring = transferState.isTransferring,
+        waitingCount = waitingCount,
+    )
+    val waitingNeedsCamera = transferState.tasks.any {
+        it.status == TransferStatus.WAITING &&
+            !isTransferredOriginal(
+                it.file,
+                transferState.existingExportIndex,
+                it.destinationFolderName,
+            )
+    }
+    // AnimatedVisibility keeps its content during exit. Retain the last real control so hiding a
+    // finished pause button cannot briefly swap in a play icon while it fades out.
+    var retainedExecutionControl by remember {
+        mutableStateOf(executionControl ?: QueueExecutionControl.START)
+    }
+    LaunchedEffect(executionControl) {
+        executionControl?.let { retainedExecutionControl = it }
+    }
 
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     // 内容 edge-to-edge（与 "Z传" 页一致，无顶部黑条）：顶部让出状态栏 + 悬浮控件；
-    // 底部让出导航栏 + 右下角悬浮按钮（清空/重试，可能同时叠放两颗）的高度。
-    val fabCount = (if (hasClearable) 1 else 0) + (if (hasRetryable) 1 else 0)
+    // 底部让出导航栏 + 右下角悬浮按钮（重试、开始/暂停、清空）的实际叠放高度。
+    val fabCount = (if (hasClearable) 1 else 0) +
+        (if (hasRetryable) 1 else 0) +
+        (if (executionControl != null) 1 else 0)
     val listPadding = PaddingValues(
         start = 12.dp,
         end = 12.dp,
         top = topInset + 58.dp,
-        bottom = bottomInset + when (fabCount) {
-            2 -> 168.dp
-            1 -> 96.dp
+        bottom = bottomInset + when {
+            fabCount >= 3 -> 240.dp
+            fabCount == 2 -> 168.dp
+            fabCount == 1 -> 96.dp
             else -> 12.dp
         }
     )
@@ -511,8 +560,8 @@ fun TransferScreen(
             }
         }
 
-        // ---------- 右下角悬浮控件（毛玻璃）+ 二次确认：清空队列（扫帚，常驻于有可清卡片时），
-        // 有可重试任务且空闲时在其上方叠放"重试全部" ----------
+        // ---------- 右下角悬浮控件（毛玻璃）：从下到上依次为清空、开始/暂停、重试；
+        // 清空与重试沿用二次确认，开始/暂停直接响应 ----------
         val confirmOpen = (hasClearable && showClearConfirm) ||
                 (hasRetryable && showRetryConfirm)
         // 全屏遮罩：确认卡展开时接管"点击外部任意处关闭"，淡入淡出，位于卡片之下、内容之上。
@@ -576,6 +625,39 @@ fun TransferScreen(
                 )
             }
             AnimatedVisibility(
+                visible = executionControl != null,
+                enter = fadeIn(tween(180)) + scaleIn(
+                    initialScale = 0.72f,
+                    animationSpec = Motion.bouncy(),
+                ),
+                exit = fadeOut(tween(140)) + scaleOut(
+                    targetScale = 0.72f,
+                    animationSpec = tween(160),
+                ),
+            ) {
+                QueueExecutionFab(
+                    control = retainedExecutionControl,
+                    pauseRequested = transferState.pauseAfterCurrent,
+                    startEnabled = connected || !waitingNeedsCamera,
+                    onStart = {
+                        showRetryConfirm = false
+                        showClearConfirm = false
+                        haptics.tick()
+                        transferViewModel.startPendingTransfers(cameraViewModel::getCamera)
+                    },
+                    onPause = {
+                        if (transferState.isTransferring && !transferState.pauseAfterCurrent) {
+                            showRetryConfirm = false
+                            showClearConfirm = false
+                            haptics.tick()
+                            transferViewModel.requestPauseAfterCurrent()
+                            pauseHintVisible = true
+                            pauseHintNonce++
+                        }
+                    },
+                )
+            }
+            AnimatedVisibility(
                 visible = hasClearable,
                 enter = fadeIn() + scaleIn(initialScale = 0.6f),
                 exit = fadeOut() + scaleOut(targetScale = 0.6f)
@@ -624,6 +706,98 @@ fun TransferScreen(
                     onDismiss = { showClearConfirm = false }
                 )
             }
+        }
+
+        // 暂停不会打断 PTP 对象传输；点击后用底部轻提示明确这一点，避免用户误以为失效。
+        AnimatedVisibility(
+            visible = pauseHintVisible,
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 28.dp),
+        ) {
+            Surface(
+                modifier = Modifier.widthIn(max = 340.dp),
+                shape = RoundedCornerShape(22.dp),
+                color = colors.glassSurfaceHeavy,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, colors.glassPanelBorder),
+            ) {
+                Text(
+                    text = pauseAfterCurrentHint,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.onBackground,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QueueExecutionFab(
+    control: QueueExecutionControl,
+    pauseRequested: Boolean,
+    startEnabled: Boolean,
+    onStart: () -> Unit,
+    onPause: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val accent by animateColorAsState(
+        targetValue = if (control == QueueExecutionControl.START) {
+            colors.accentBlue
+        } else {
+            colors.accentYellow
+        },
+        animationSpec = tween(180),
+        label = "queueControlAccent",
+    )
+    GlassButton(
+        onClick = if (control == QueueExecutionControl.START) onStart else onPause,
+        enabled = control == QueueExecutionControl.PAUSE || startEnabled,
+        shape = CircleShape,
+        contentPadding = PaddingValues(15.dp),
+        // 与相邻 FAB 固定为同一 58dp 外径；图标切换时按钮轮廓不会跟着缩放 2dp。
+        modifier = Modifier.size(58.dp),
+        active = control == QueueExecutionControl.START || pauseRequested,
+        activeColor = accent,
+        activeOutline = true,
+        materialContentColor = accent,
+    ) {
+        AnimatedContent(
+            targetState = control,
+            transitionSpec = {
+                (fadeIn(tween(170, delayMillis = 45)) +
+                    scaleIn(initialScale = 0.72f, animationSpec = tween(190, delayMillis = 35)))
+                    .togetherWith(
+                        fadeOut(tween(110)) +
+                            scaleOut(targetScale = 0.72f, animationSpec = tween(130))
+                    )
+            },
+            contentAlignment = Alignment.Center,
+            label = "queueControlIcon",
+        ) { current ->
+            Icon(
+                imageVector = if (current == QueueExecutionControl.START) {
+                    Icons.Default.PlayArrow
+                } else {
+                    TransferQueuePauseIcon
+                },
+                contentDescription = stringResource(
+                    when {
+                        current == QueueExecutionControl.START -> R.string.cd_start_transfers
+                        pauseRequested -> R.string.cd_pause_after_current_scheduled
+                        else -> R.string.cd_pause_after_current
+                    }
+                ),
+                tint = accent,
+                modifier = Modifier.size(
+                    if (current == QueueExecutionControl.START) 28.dp else 26.dp
+                ),
+            )
         }
     }
 }

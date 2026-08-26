@@ -133,6 +133,7 @@ import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.latestCaptureLocalDate
 import com.ztransfer.viewmodel.storageIdsBySlot
+import com.ztransfer.viewmodel.transferredOriginalUri
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -202,12 +203,17 @@ internal fun exportedHandlesForUntransferredFilter(
 }
 
 /** 展开后的队列胶囊内容；入口图标由主题按钮独立绘制。 */
-internal enum class PillMode { DONE, GENERATING, COUNTING }
+internal enum class PillMode { DONE, PAUSED, GENERATING, COUNTING }
+
+/** Right-bottom queue control and the compact paused pill deliberately share one vector. */
+internal val TransferQueuePauseIcon = Icons.Default.Pause
 
 internal fun queuePillMode(
     downloadRemaining: Int,
     generationRemaining: Int,
+    paused: Boolean = false,
 ): PillMode = when {
+    paused && downloadRemaining > 0 -> PillMode.PAUSED
     downloadRemaining > 0 -> PillMode.COUNTING
     generationRemaining > 0 -> PillMode.GENERATING
     else -> PillMode.DONE
@@ -229,7 +235,7 @@ internal fun queuePillWidthKey(
     speedText: String?,
     count: Int,
 ): QueuePillWidthKey {
-    if (mode != PillMode.COUNTING) {
+    if (mode != PillMode.COUNTING && mode != PillMode.PAUSED) {
         return QueuePillWidthKey(mode, speedUnit = null, speedIntegerDigits = 0, countDigits = 0)
     }
     val numericPart = speedText?.substringBefore(' ')
@@ -1678,6 +1684,13 @@ fun FileListScreen(
                             ?.takeIf { it.file.handle == file.handle }
                     },
                     isTransferred = hasLocalOriginal,
+                    localOriginalUriFor = { file ->
+                        transferredOriginalUri(
+                            file = file,
+                            existingExportIndex = transferState.existingExportIndex,
+                            organizeTransfersByDate = transferState.organizeTransfersByDate,
+                        )
+                    },
                     activeProgressFlow = transferViewModel.activeTransferProgress,
                     queueTargetBounds = queueArea,
                     onQueueFlightCaught = { pillCatchNonce++ },
@@ -1828,15 +1841,17 @@ fun QueuePill(
     val activeSpeedText = activeSpeed
         .takeIf { transferring && it > 0L }
         ?.let(::formatSpeed)
-    val mode = queuePillMode(downloadRemaining, generationRemaining)
+    val paused = !transferring && downloadRemaining > 0
+    val mode = queuePillMode(downloadRemaining, generationRemaining, paused = paused)
     val widthKey = queuePillWidthKey(mode, activeSpeedText, remaining)
     val hasActive = taskSummary.hasActive
     // 数字延迟显现：刚入队的任务可能马上被"已存在"跳过（remaining 1→0 一闪而过），
     // 那种情况只播 done→图标转场、不闪数字。真正开始下载(TRANSFERING)立即显示数字；
     // 纯等待超过宽限期（说明确实在排队，如目录扫描慢）也显示。
     var countingVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(remaining > 0, hasActive) {
+    LaunchedEffect(remaining > 0, hasActive, paused) {
         countingVisible = when {
+            paused -> true
             hasActive -> true
             remaining > 0 -> { delay(350); true }
             else -> false
@@ -1871,7 +1886,9 @@ fun QueuePill(
         prevAllDone = allDone
     }
     // 收起为图标：全部完成（且 done 标签已过），或数字尚未获准显示（防"已存在跳过"闪 1）。
-    val collapsedToIcon = (allDone && !showDoneLabel) || (!allDone && !countingVisible)
+    val collapsedToIcon = mode != PillMode.PAUSED && (
+        (allDone && !showDoneLabel) || (!allDone && !countingVisible)
+    )
 
     // 进度条 = 当前单文件进度（复用传输页语义）。保留最近的进度归属，让最后一张
     // 完成后仍能从当前位置顺滑补满，而不是因“当前任务”瞬间消失而重建动画。
@@ -2046,6 +2063,24 @@ fun QueuePill(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 18.dp)
                                 )
+                            PillMode.PAUSED ->
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 18.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = TransferQueuePauseIcon,
+                                        contentDescription = null,
+                                        tint = colors.accentYellow,
+                                        modifier = Modifier.size(15.dp),
+                                    )
+                                    AnimatedQueuePillCount(
+                                        count = remaining,
+                                        color = colors.onBackground,
+                                        label = "pausedCount",
+                                    )
+                                }
                             PillMode.GENERATING ->
                                 Row(
                                     modifier = Modifier.padding(horizontal = 18.dp),

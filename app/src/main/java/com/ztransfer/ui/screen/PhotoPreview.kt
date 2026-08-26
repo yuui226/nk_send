@@ -1,5 +1,6 @@
 package com.ztransfer.ui.screen
 
+import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
@@ -62,6 +63,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -70,6 +72,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -85,6 +88,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -95,12 +99,14 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
+import com.ztransfer.frame.PhotoFrameExporter
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.NIKON_RAW_EXTENSIONS
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.TransferTask
@@ -253,9 +259,9 @@ internal fun allowPreviewRemoteThumbnailFallback(
 /**
  * 全屏预览层：普通页显示缓存缩略图的**未裁切**（Fit）完整画面；折叠连拍在分页中
  * 保持为一个合集页，只有用户主动展开才把成员插入其后。
- * 传输中只抢占当前 FHD + EXIF；邻页等真正翻到时再升级为当前页。
+ * 传输中仍可预读相邻本地原图；只有相机 FHD + EXIF 继续限制为当前页优先。
  * 整体从被长按格子 [anchorRect] 的位置缩放展开，关闭时反向缩回（从哪来回哪去）。
- * 不下载原图（缩略图低清但瞬开、不抢传输通道）。
+ * 已传输原图优先从本地解码；本地不存在或无法解码时才向相机请求 FHD。
  * 本层在深浅两种主题下都保持黑底沉浸式（照片查看器惯例，黑底最衬照片），
  * 因此内部直接用深色常量而非主题 token——这是有意的，不参与深浅切换。
  */
@@ -276,6 +282,8 @@ internal fun PhotoPreviewOverlay(
     // 复用列表的任务索引与完成判定，预览不维护第二套传输状态。
     queueTaskFor: (NikonCamera.FileInfo) -> TransferTask? = { null },
     isTransferred: (NikonCamera.FileInfo) -> Boolean = { false },
+    // 与完成对号复用同一导出索引；三种连接模式都先走本地 URI，再回退相机 FHD。
+    localOriginalUriFor: (NikonCamera.FileInfo) -> Uri? = { null },
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     // 根坐标中的真实队列胶囊承载区；预览残影使用它计算与列表一致的弧线落点。
     queueTargetBounds: Rect? = null,
@@ -301,6 +309,7 @@ internal fun PhotoPreviewOverlay(
     val currentFile = (currentItem as? PhotoPreviewItem.Photo)?.file
     val currentHandle = currentFile?.handle
     val previewScope = rememberCoroutineScope()
+    val contentResolver = LocalContext.current.contentResolver
     val cameraState by cameraViewModel.state.collectAsState()
     val currentTransfersBusy by rememberUpdatedState(transfersBusy)
     var previousTransfersBusy by remember { mutableStateOf(transfersBusy) }
@@ -312,6 +321,7 @@ internal fun PhotoPreviewOverlay(
     val latestCurrentFile by rememberUpdatedState(currentFile)
     val latestPrepareDismissTarget by rememberUpdatedState(prepareDismissTarget)
     val latestOnDismiss by rememberUpdatedState(onDismiss)
+    val latestLocalOriginalUriFor by rememberUpdatedState(localOriginalUriFor)
     // 高清图/EXIF 到位会触发大位图纹理上传与预览子树更新，因此稍延后启动。
     // 这个功能门绝不能依赖 progress.animateTo 返回：某些设备动画帧时钟停滞时，
     // 等动画完成会让 FHD、EXIF 和远程缩略图全部永久不启动。
@@ -344,10 +354,16 @@ internal fun PhotoPreviewOverlay(
     }
     BackHandler(enabled = !closing) { startClose() }
 
-    // ---- FHD 预览：优先级加载 + 即时淘汰 + RGB_565 解码 ----
+    // ---- 高清预览：当前本地原图保持完整分辨率；相机回退仍使用 FHD ----
     // 状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放）。
-    val fhdBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
-    val fhdLoading = remember { mutableStateMapOf<Int, Boolean>() }
+    val highResolutionBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
+    val highResolutionLoading = remember { mutableStateMapOf<Int, Boolean>() }
+    // 仅记录由本地原图生成的高清位图来源。传输在预览期间完成时，可据此把已缓存的
+    // 相机 FHD 替换成本地原图；同一 URI 已加载后则不重复解码。
+    val localPreviewUris = remember { mutableStateMapOf<Int, Uri>() }
+    // 本地原图或 RAW 内嵌预览仍可能因损坏、权限或格式异常解码失败；按 URI 记住失败结果，
+    // 本次预览不反复读盘，但仍会正常回退到相机 FHD。
+    val localDecodeFailures = remember { mutableStateMapOf<Int, Uri>() }
     // 只有当前照片的 FHD 确认不可用、且当前 EXIF 已经读取完毕后，才允许向相机请求
     // 一张缩略图兜底。这样占位图不会跑到 FHD / EXIF 前面争抢相机通道。
     val fhdUnavailable = remember { mutableStateMapOf<Int, Boolean>() }
@@ -435,7 +451,7 @@ internal fun PhotoPreviewOverlay(
         queueFlightTarget = currentQueueTargetBounds
         // FHD 已经在屏幕上时直接复用；否则复用打开预览所用的缓存缩略图。
         // 先挂载 alpha=0 的影子并预留两帧，再开始飞行，避免首次绘制纹理闪现。
-        queueFlightBitmap = fhdBitmaps[file.handle]
+        queueFlightBitmap = highResolutionBitmaps[file.handle]
             ?: cameraViewModel.cachedThumbnail(file.handle)
 
         // 动画表示“已执行入队动作”；最终成功/失败继续由现有队列任务体现。
@@ -640,39 +656,84 @@ internal fun PhotoPreviewOverlay(
         onDispose { cameraViewModel.setFhdActive(false) }
     }
 
-    // 加载单页 FHD；返回 true 表示"本次确实取到并解码成功"（用于当前页到位的触感反馈）。
-    suspend fun loadFhdPage(page: Int, awaitExisting: Boolean = false): Boolean {
+    // 加载单页高清图：普通照片读取本地完整原图，RAW 从本地文件提取最大内嵌 JPEG；
+    // 视频继续使用既有封面分支。当前页与相邻预加载页共用同一规则。
+    // 返回 true 表示本次确实取到并解码成功（用于当前页到位的触感反馈）。
+    suspend fun loadHighResolutionPage(
+        page: Int,
+        awaitExisting: Boolean = false,
+        allowCameraRequest: Boolean,
+    ): Boolean {
         val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
             ?: return false
         val h = file.handle
+        val localUri = latestLocalOriginalUriFor(file)
         // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
         if (file.extension in VIDEO_EXTENSIONS) {
             fhdUnavailable[h] = true
             return false
         }
-        if (h in fhdBitmaps) {
-            fhdUnavailable.remove(h)
-            return false
+        if (h in highResolutionBitmaps) {
+            val cachedLocalUri = localPreviewUris[h]
+            if (cachedLocalUri != null && cachedLocalUri != localUri) {
+                highResolutionBitmaps.remove(h)
+                displayedBitmaps.remove(h)
+                localPreviewUris.remove(h)
+            } else if (localUri == null || cachedLocalUri == localUri) {
+                fhdUnavailable.remove(h)
+                return false
+            }
         }
-        if (fhdLoading.containsKey(h)) {
+        if (highResolutionLoading.containsKey(h)) {
             if (!awaitExisting) return false
             // 当前页可能正由上一页的预取任务加载。等待它完成；若它因翻页被取消，
             // loading 会在 finally 中释放，随后由当前页重新发起，绝不漏载。
-            while (fhdLoading.containsKey(h) && h !in fhdBitmaps) delay(16)
-            if (h in fhdBitmaps) return false
+            while (highResolutionLoading.containsKey(h) && h !in highResolutionBitmaps) delay(16)
+            if (h in highResolutionBitmaps) return false
         }
         fhdUnavailable.remove(h)
-        fhdLoading[h] = true
+        highResolutionLoading[h] = true
         try {
+            if (localUri != null && localDecodeFailures[h] != localUri) {
+                val localPreview = try {
+                    withContext(Dispatchers.IO) {
+                        val sourceUri = localUri
+                        val bitmap = if (file.extension in NIKON_RAW_EXTENSIONS) {
+                            PhotoFrameExporter.decodeRawEmbeddedPreview(contentResolver, sourceUri)
+                        } else {
+                            PhotoFrameExporter.decodeOriginalPreview(contentResolver, sourceUri)
+                        }
+                        bitmap?.asImageBitmap()
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+                if (localPreview != null) {
+                    highResolutionBitmaps[h] = localPreview
+                    localPreviewUris[h] = localUri
+                    fhdUnavailable.remove(h)
+                    localDecodeFailures.remove(h)
+                    return true
+                }
+                localDecodeFailures[h] = localUri
+            }
+            // 相机 FHD 已经存在且本地原图不可解码时，继续复用现有位图，不重复请求相机。
+            if (h in highResolutionBitmaps) return false
+            // 本地预览不依赖相机连接。没有本地可用图时等待连接状态变化后再回退，
+            // 不能把“当前离线”永久记成 FHD 不可用。
+            if (!allowCameraRequest) return false
             val res = cameraViewModel.loadFhdPreview(file) ?: run {
                 fhdUnavailable[h] = true
                 return false
             }
-            fhdBitmaps[h] = res
+            highResolutionBitmaps[h] = res
+            localPreviewUris.remove(h)
             fhdUnavailable.remove(h)
             return true
         } finally {
-            fhdLoading.remove(h)
+            highResolutionLoading.remove(h)
         }
     }
 
@@ -685,7 +746,12 @@ internal fun PhotoPreviewOverlay(
         exifFinished.remove(h)
         exifLoading[h] = true
         try {
-            exifData[h] = cameraViewModel.loadExif(file)
+            val localUri = latestLocalOriginalUriFor(file)
+            exifData[h] = if (localUri != null) {
+                cameraViewModel.loadLocalExif(file, localUri)
+            } else {
+                cameraViewModel.loadExif(file)
+            }
             exifFinished[h] = true
         } finally {
             exifLoading.remove(h)
@@ -700,34 +766,71 @@ internal fun PhotoPreviewOverlay(
         val keepH = keep.mapNotNull { page ->
             (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file?.handle
         }.toSet()
-        fhdBitmaps.keys.filter { it !in keepH }.forEach { fhdBitmaps.remove(it) }
+        highResolutionBitmaps.keys
+            .filter { it !in keepH }
+            .forEach { highResolutionBitmaps.remove(it) }
+        localPreviewUris.keys.filter { it !in keepH }.forEach { localPreviewUris.remove(it) }
         displayedBitmaps.keys.filter { it !in keepH }.forEach { displayedBitmaps.remove(it) }
         fhdUnavailable.keys.filter { it !in keepH }.forEach { fhdUnavailable.remove(it) }
+        localDecodeFailures.keys.filter { it !in keepH }.forEach { localDecodeFailures.remove(it) }
         exifData.keys.filter { it !in keepH }.forEach { exifData.remove(it) }
         exifFinished.keys.filter { it !in keepH }.forEach { exifFinished.remove(it) }
     }
 
-    // 当前页拥有最高优先级。连接状态纳入 key：停留在预览页断线后原地重连，
-    // 即使页码没变也会重新请求 FHD，而不是一直停留在缩略图。
+    val currentLocalOriginalUri = currentFile?.let(localOriginalUriFor)
+
+    // 当前页拥有最高优先级。本地 URI 与连接状态都纳入 key：已完成传输时立即切换本地原图；
+    // 本地不可用且断线后原地重连时，再重新请求相机 FHD。
     // 当前页与邻页由同一协程严格串行，避免首次失败时两个 effect 重复请求并触发熔断。
     LaunchedEffect(
         previewItems,
         pagerState.currentPage,
         currentHandle,
+        currentLocalOriginalUri,
         cameraState.isConnectedToCamera,
         deferredLoadsEnabled
     ) {
-        if (!deferredLoadsEnabled || !cameraState.isConnectedToCamera) return@LaunchedEffect
+        if (!deferredLoadsEnabled) return@LaunchedEffect
         val cp = pagerState.currentPage
-        cameraViewModel.withInteractivePreviewPriority {
-            if (loadFhdPage(cp, awaitExisting = true)) haptics.tick()
+        val loadedCurrent = loadHighResolutionPage(
+            page = cp,
+            awaitExisting = true,
+            allowCameraRequest = false,
+        )
+        if (loadedCurrent) haptics.tick()
+        val resolvedLocally = currentHandle?.let { handle ->
+            localPreviewUris[handle] == currentLocalOriginalUri
+        } == true
+        if (resolvedLocally) {
+            // 图片和 EXIF 都直接读取本地文件，不进入相机交互优先窗口。
             loadExifPage(cp)
-        }
-        if (!currentTransfersBusy) {
-            if (cp > 0) loadFhdPage(cp - 1)
-            if (cp < previewItems.lastIndex && !currentTransfersBusy) {
-                loadFhdPage(cp + 1)
+        } else if (cameraState.isConnectedToCamera) {
+            cameraViewModel.withInteractivePreviewPriority {
+                if (
+                    loadHighResolutionPage(
+                        page = cp,
+                        awaitExisting = true,
+                        allowCameraRequest = true,
+                    )
+                ) {
+                    haptics.tick()
+                }
+                loadExifPage(cp)
             }
+        }
+        val allowNeighborCameraRequest = !currentTransfersBusy &&
+            cameraState.isConnectedToCamera
+        if (cp > 0) {
+            loadHighResolutionPage(
+                page = cp - 1,
+                allowCameraRequest = allowNeighborCameraRequest,
+            )
+        }
+        if (cp < previewItems.lastIndex) {
+            loadHighResolutionPage(
+                page = cp + 1,
+                allowCameraRequest = allowNeighborCameraRequest,
+            )
         }
     }
 
@@ -736,15 +839,22 @@ internal fun PhotoPreviewOverlay(
     LaunchedEffect(transfersBusy) {
         val shouldResumePrefetch = previousTransfersBusy && !transfersBusy
         previousTransfersBusy = transfersBusy
-        if (!shouldResumePrefetch || !deferredLoadsEnabled ||
-            !cameraState.isConnectedToCamera
-        ) {
+        if (!shouldResumePrefetch || !deferredLoadsEnabled) {
             return@LaunchedEffect
         }
         val cp = pagerState.currentPage
-        if (cp > 0) loadFhdPage(cp - 1)
-        if (cp < previewItems.lastIndex && !currentTransfersBusy) {
-            loadFhdPage(cp + 1)
+        val allowNeighborCameraRequest = cameraState.isConnectedToCamera
+        if (cp > 0) {
+            loadHighResolutionPage(
+                page = cp - 1,
+                allowCameraRequest = allowNeighborCameraRequest,
+            )
+        }
+        if (cp < previewItems.lastIndex) {
+            loadHighResolutionPage(
+                page = cp + 1,
+                allowCameraRequest = allowNeighborCameraRequest,
+            )
         }
     }
 
@@ -887,8 +997,8 @@ internal fun PhotoPreviewOverlay(
                     PreviewPage(
                         file = file,
                         cameraViewModel = cameraViewModel,
-                        fhdBitmap = fhdBitmaps[file.handle],
-                        isLoadingFhd = fhdLoading.containsKey(file.handle),
+                        fhdBitmap = highResolutionBitmaps[file.handle],
+                        isLoadingFhd = highResolutionLoading.containsKey(file.handle),
                         allowRemoteThumbnailFallback = allowPreviewRemoteThumbnailFallback(
                             isCurrent = page == pagerState.currentPage,
                             fhdUnavailable = fhdUnavailable[file.handle] == true,
@@ -1164,7 +1274,9 @@ internal fun PhotoPreviewOverlay(
 
         // 顶部极细进度条：当前页正在取 FHD 高清版时显示（"正在加载高清"的低调提示，
         // 取代旧的突兀底部小转圈）。随展开动画淡入，取到即消失。
-        val curLoadingFhd = currentFile?.let { fhdLoading.containsKey(it.handle) } == true
+        val curLoadingFhd = currentFile?.let {
+            highResolutionLoading.containsKey(it.handle)
+        } == true
         if (curLoadingFhd) {
             LinearProgressIndicator(
                 color = AccentBlue.copy(alpha = 0.9f),
@@ -1659,7 +1771,7 @@ private fun TransferQueueButton(
     }
 }
 
-// 手势缩放参数（参考主流相册）：捏合上限 4x，双击在 1x 与 2.5x 间切换。
+// 普通预览至少允许 4x；本地原图会按实际像素动态提高上限，确保能够查看到 1:1 细节。
 private const val MAX_ZOOM = 4f
 private const val DOUBLE_TAP_ZOOM = 2.5f
 
@@ -1876,6 +1988,30 @@ private fun ZoomablePreviewViewport(
         baseImageW = 0f
         baseImageH = 0f
     }
+    val targetRotationRadians = Math.toRadians(rotationDegrees.toDouble())
+    val targetAbsCos = abs(cos(targetRotationRadians)).toFloat()
+    val targetAbsSin = abs(sin(targetRotationRadians)).toFloat()
+    val targetBoundsWidth = baseImageW * targetAbsCos + baseImageH * targetAbsSin
+    val targetBoundsHeight = baseImageW * targetAbsSin + baseImageH * targetAbsCos
+    val targetRotationFit = if (
+        targetBoundsWidth > 0f && targetBoundsHeight > 0f && viewportW > 0f && viewportH > 0f
+    ) {
+        min(viewportW / targetBoundsWidth, viewportH / targetBoundsHeight)
+    } else {
+        1f
+    }
+    val targetBreathingRoom = if ((rawAspect ?: 0f) > 1f) {
+        1f - 0.08f * targetAbsSin
+    } else {
+        1f
+    }
+    val oneToOneZoom = imageSize?.takeIf {
+        it.width > 0 && it.height > 0 && baseImageW > 0f && baseImageH > 0f
+    }?.let {
+        max(it.width / baseImageW, it.height / baseImageH) /
+            (targetRotationFit * targetBreathingRoom).coerceAtLeast(0.01f)
+    } ?: 1f
+    val maximumZoom = max(MAX_ZOOM, oneToOneZoom)
 
     fun clampOffset(
         targetScale: Float,
@@ -1898,7 +2034,7 @@ private fun ZoomablePreviewViewport(
             .fillMaxSize()
             .onSizeChanged { viewportSize = it }
             // 单指且处于 1x 时不消费，让列表分页器接管；单图预览的根层会统一阻断穿透。
-            .pointerInput(imageAspect, zoomEnabled) {
+            .pointerInput(imageAspect, zoomEnabled, maximumZoom) {
                 val aspect = imageAspect
                 if (!zoomEnabled || aspect == null) return@pointerInput
                 val containerWidth = size.width.toFloat()
@@ -1924,7 +2060,7 @@ private fun ZoomablePreviewViewport(
                             val zoomChange = event.calculateZoom()
                             val panChange = event.calculatePan()
                             if (zoomChange != 1f || panChange != Offset.Zero) {
-                                val newScale = (scale * zoomChange).coerceIn(1f, MAX_ZOOM)
+                                val newScale = (scale * zoomChange).coerceIn(1f, maximumZoom)
                                 val centroid = event.calculateCentroid(useCurrent = true)
                                 val centerDelta = Offset(
                                     centroid.x - containerWidth / 2f,

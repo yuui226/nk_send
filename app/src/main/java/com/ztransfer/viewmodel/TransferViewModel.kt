@@ -68,6 +68,7 @@ import com.ztransfer.service.TransferService
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.ThemeMode
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -205,26 +206,46 @@ internal fun TransferTask.finishFrameGeneration(nowElapsedMs: Long): TransferTas
  * 都复制整个索引。
  */
 class ExportedOriginalIndex internal constructor() {
-    private val sizesByDestination =
-        ConcurrentHashMap<String, ConcurrentHashMap<String, MutableSet<Long>>>()
+    private val filesByDestination =
+        ConcurrentHashMap<String, ConcurrentHashMap<String, ConcurrentHashMap<Long, String>>>()
 
     internal fun add(
         fileName: String,
         size: Long,
         destinationFolderName: String? = null,
-    ): Boolean =
-        sizesByDestination
-            .computeIfAbsent(exportDestinationKey(destinationFolderName)) { ConcurrentHashMap() }
-            .computeIfAbsent(directoryLookupKey(fileName)) { ConcurrentHashMap.newKeySet() }
-            .add(size)
+        uriString: String? = null,
+    ): Boolean {
+        val destinationKey = exportDestinationKey(destinationFolderName)
+        val fileKey = directoryLookupKey(fileName)
+        val filesBySize = filesByDestination
+            .computeIfAbsent(destinationKey) { ConcurrentHashMap() }
+            .computeIfAbsent(fileKey) { ConcurrentHashMap() }
+        if (uriString == null) return filesBySize.putIfAbsent(size, NO_LOCAL_URI) == null
+
+        var changed = false
+        filesBySize.compute(size) { _, existingUri ->
+            if (existingUri != uriString) changed = true
+            uriString
+        }
+        return changed
+    }
 
     internal fun addAll(
-        entries: Sequence<Pair<String, Long>>,
+        entries: Sequence<IndexedExistingFile<Uri>>,
         destinationFolderName: String? = null,
     ): Boolean {
         var changed = false
-        entries.forEach { (fileName, size) ->
-            if (add(fileName, size, destinationFolderName)) changed = true
+        entries.forEach { entry ->
+            if (
+                add(
+                    fileName = entry.displayName,
+                    size = entry.size,
+                    destinationFolderName = destinationFolderName,
+                    uriString = entry.value.toString(),
+                )
+            ) {
+                changed = true
+            }
         }
         return changed
     }
@@ -233,10 +254,28 @@ class ExportedOriginalIndex internal constructor() {
         file: NikonCamera.FileInfo,
         destinationFolderName: String? = null,
     ): Boolean {
-        val sizes = sizesByDestination[exportDestinationKey(destinationFolderName)]
+        val filesBySize = filesByDestination[exportDestinationKey(destinationFolderName)]
             ?.get(directoryLookupKey(file.fileName))
             ?: return false
-        return file.size == PtpConstants.SIZE_UNKNOWN || sizes.any { it < 0L || it == file.size }
+        return file.size == PtpConstants.SIZE_UNKNOWN ||
+            filesBySize.keys.any { it < 0L || it == file.size }
+    }
+
+    internal fun localUriString(
+        file: NikonCamera.FileInfo,
+        destinationFolderName: String? = null,
+    ): String? {
+        val filesBySize = filesByDestination[exportDestinationKey(destinationFolderName)]
+            ?.get(directoryLookupKey(file.fileName))
+            ?: return null
+        return if (file.size == PtpConstants.SIZE_UNKNOWN) {
+            filesBySize.values.firstOrNull { it.isNotEmpty() }
+        } else {
+            filesBySize[file.size]?.takeIf { it.isNotEmpty() }
+                ?: filesBySize.entries.firstOrNull {
+                    it.key < 0L && it.value.isNotEmpty()
+                }?.value
+        }
     }
 
     private fun exportDestinationKey(destinationFolderName: String?): String =
@@ -244,6 +283,7 @@ class ExportedOriginalIndex internal constructor() {
 
     private companion object {
         const val ROOT_EXPORT_DESTINATION = "\u0000root"
+        const val NO_LOCAL_URI = ""
     }
 }
 
@@ -329,6 +369,8 @@ data class TransferState(
     /** 仅在任务增删或替换时递增；纯状态变化不会让照片页重建 handle -> 列表下标索引。 */
     val taskStructureRevision: Long = 0L,
     val isTransferring: Boolean = false,
+    /** True after the user asks the running queue to stop at the next task boundary. */
+    val pauseAfterCurrent: Boolean = false,
     val transferDirUri: String? = null,
     /** 根层及各日期目录内的完整文件索引，用于按当前保存方式标记已传照片。 */
     val existingExportIndex: ExportedOriginalIndex = ExportedOriginalIndex(),
@@ -347,6 +389,8 @@ data class TransferState(
     val keepScreenOn: Boolean = true,
     // 连接期间确认新增的照片和视频自动入队；默认关闭以保持旧版行为。
     val autoTransferNewMedia: Boolean = false,
+    // 待传模式：空闲时入队只保留 WAITING，由传输页的开始按钮显式放行；默认关闭。
+    val deferTransferStart: Boolean = false,
     // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中；默认开启。
     val organizeTransfersByDate: Boolean = true,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
@@ -397,6 +441,22 @@ data class TransferState(
     // 切换后由设置面板触发 Activity.recreate() 生效。
     val appLanguage: String = AppLocale.SYSTEM
 )
+
+/**
+ * A running queue may keep accepting work unless a pause boundary has been requested. When idle,
+ * the persisted deferred-start preference controls whether the first queued item starts itself.
+ */
+internal fun shouldRunQueueAfterEnqueue(
+    deferTransferStart: Boolean,
+    isTransferring: Boolean,
+    pauseAfterCurrent: Boolean,
+): Boolean = !pauseAfterCurrent && (isTransferring || !deferTransferStart)
+
+/** A local existing-file recheck is still part of the claimed task, not the next queue item. */
+internal fun shouldPauseBeforeNextTransfer(
+    pauseAfterCurrent: Boolean,
+    isRecheckingCurrentTask: Boolean,
+): Boolean = pauseAfterCurrent && !isRecheckingCurrentTask
 
 /**
  * Publishes a task list whose identity, order, or size changed and invalidates UI indexes derived
@@ -580,6 +640,19 @@ internal fun isTransferredOriginal(
     ),
 )
 
+/** Returns the already-indexed local original for preview, using the exact same destination rule. */
+internal fun transferredOriginalUri(
+    file: NikonCamera.FileInfo,
+    existingExportIndex: ExportedOriginalIndex,
+    organizeTransfersByDate: Boolean,
+): Uri? = existingExportIndex.localUriString(
+    file = file,
+    destinationFolderName = transferDestinationFolderName(
+        captureDate = file.captureDate,
+        organizeTransfersByDate = organizeTransfersByDate,
+    ),
+)?.let(Uri::parse)
+
 /** 已入队任务使用入队时锁定的目标目录，不受之后的“按天保存”开关变化影响。 */
 internal fun isTransferredOriginal(
     file: NikonCamera.FileInfo,
@@ -747,13 +820,19 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             .find(file.fileName, file.size)
             ?.let { LocalOriginal(it.displayName, it.size, it.value) }
 
-        fun exportedOriginalEntries(): Sequence<Pair<String, Long>> = files.entries()
+        fun exportedOriginalEntries(): Sequence<IndexedExistingFile<Uri>> = files.entries()
                 .asSequence()
                 .filterNot {
                     isPhotoFrameOutputName(it.displayName) ||
                         it.displayName.equals(PHOTO_FRAME_OUTPUT_DIRECTORY, ignoreCase = true)
                 }
-                .map { exportedOriginalBaseName(it.displayName) to it.size }
+                .map {
+                    IndexedExistingFile(
+                        displayName = exportedOriginalBaseName(it.displayName),
+                        size = it.size,
+                        value = it.value,
+                    )
+                }
 
         fun addPart(originalName: String, part: PartInfo) = synchronized(lock) {
             partsByOriginalName[originalName] = part
@@ -942,6 +1021,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 hapticsEnabled = prefs.getBoolean("haptics_enabled", true),
                 keepScreenOn = prefs.getBoolean("keep_screen_on", true),
                 autoTransferNewMedia = prefs.getBoolean("auto_transfer_new_media", false),
+                deferTransferStart = prefs.getBoolean("defer_transfer_start", false),
                 organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", true),
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
@@ -1075,6 +1155,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun setAutoTransferNewMedia(enabled: Boolean) {
         prefs.edit().putBoolean("auto_transfer_new_media", enabled).apply()
         _state.update { it.copy(autoTransferNewMedia = enabled) }
+    }
+
+    fun setDeferTransferStart(enabled: Boolean) {
+        prefs.edit().putBoolean("defer_transfer_start", enabled).apply()
+        _state.update { it.copy(deferTransferStart = enabled) }
     }
 
     fun setOrganizeTransfersByDate(enabled: Boolean) {
@@ -1599,11 +1684,21 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         destinationFolderName: String?,
         name: String,
         size: Long,
+        localUri: Uri,
     ) {
         val snapshot = _state.value
         // 目录选择器在传输期间仍可能被打开；旧目录任务完成后绝不能污染新目录索引。
         if (snapshot.transferDirUri != uri.toString()) return
-        if (!snapshot.existingExportIndex.add(name, size, destinationFolderName)) return
+        if (
+            !snapshot.existingExportIndex.add(
+                fileName = name,
+                size = size,
+                destinationFolderName = destinationFolderName,
+                uriString = localUri.toString(),
+            )
+        ) {
+            return
+        }
         _state.update { state ->
             if (
                 state.transferDirUri == uri.toString() &&
@@ -1637,8 +1732,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             state.withTaskStructure(state.tasks + newTasks)
         }
         pendingTransferQueue.addAll(newTasks)
-        prewarmPhotoFilterFor(newTasks)
-        processQueue(dirUri, cameraProvider)
+        val queueState = _state.value
+        if (
+            shouldRunQueueAfterEnqueue(
+                deferTransferStart = queueState.deferTransferStart,
+                isTransferring = queueState.isTransferring,
+                pauseAfterCurrent = queueState.pauseAfterCurrent,
+            )
+        ) {
+            prewarmPhotoFilterFor(newTasks)
+            processQueue(dirUri, cameraProvider)
+        }
     }
 
     /** 自动入口不改变手动重复导出的语义，只避免同一次新增事件与现有任务撞车。 */
@@ -1662,6 +1766,25 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         tasks.firstNotNullOfOrNull { it.photoFilterRequested }?.let(::prewarmPhotoFilter)
     }
 
+    /** Starts every existing WAITING task. This explicit action also releases a manual pause. */
+    fun startPendingTransfers(cameraProvider: () -> NikonCamera?) {
+        val snapshot = _state.value
+        if (snapshot.isTransferring) return
+        val dirUri = snapshot.transferDirUri ?: return
+        val waiting = snapshot.tasks.filter { it.status == TransferStatus.WAITING }
+        if (waiting.isEmpty()) return
+        _state.update { it.copy(pauseAfterCurrent = false) }
+        prewarmPhotoFilterFor(waiting)
+        processQueue(dirUri, cameraProvider)
+    }
+
+    /** The active task is never interrupted; the scheduler observes this before claiming the next. */
+    fun requestPauseAfterCurrent() {
+        _state.update { state ->
+            if (state.isTransferring) state.copy(pauseAfterCurrent = true) else state
+        }
+    }
+
     /**
      * 用户确认传输时便开始建立精确 RGB 映射表，让这项一次性计算与首张照片下载并行。
      * 第一张进入生成流程时只需等待尚未完成的尾段，之后同滤镜、同强度全部直接复用。
@@ -1681,11 +1804,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun processQueue(dirUri: String, cameraProvider: () -> NikonCamera?) {
+        // 手动暂停是队列总闸门：除“开始”会先显式解除外，重试等任何旁路都不能偷偷恢复队列。
+        if (_state.value.pauseAfterCurrent) return
         if (transferJob?.isActive == true) return
-        transferJob = viewModelScope.launch {
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
                 val self = coroutineContext[Job]
-                _state.update { it.copy(isTransferring = true) }
                 var serviceStarted = false
+                var stoppedAfterCurrent = false
 
                 try {
                     val uri = Uri.parse(dirUri)
@@ -1731,6 +1856,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 val rootDirectoryIndex = getDirectoryIndex(uri, deleteParts = false)
                 var taskToRecheck: TransferTask? = null
                 while (true) {
+                    // Pause is deliberately checked only at task boundaries. The current PTP
+                    // object always finishes normally; no Cancel packet or socket teardown is sent.
+                    if (
+                        shouldPauseBeforeNextTransfer(
+                            pauseAfterCurrent = _state.value.pauseAfterCurrent,
+                            isRecheckingCurrentTask = taskToRecheck != null,
+                        )
+                    ) {
+                        stoppedAfterCurrent = true
+                        break
+                    }
                     // 待传队列与历史展示列表分离，取下一项为 O(1)，不会随着已完成历史增长
                     // 反复从列表头扫描。同一 handle 的不同装饰任务仍由 taskId 独立标识。
                     val task = taskToRecheck?.also { taskToRecheck = null }
@@ -1758,6 +1894,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             destinationFolderName = task.destinationFolderName,
                             name = localOriginal.displayName,
                             size = localOriginal.size,
+                            localUri = localOriginal.uri,
                         )
                         val preset = task.framePreset
                         val filter = task.photoFilterRequested
@@ -1927,6 +2064,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     destinationFolderName = task.destinationFolderName,
                                     name = savedName,
                                     size = partSize,
+                                    localUri = renamed,
                                 )
                                 if (pendingTransferQueue.consumeWithdrawal(taskId)) continue
                                 // 回到循环顶部，统一走“原片存在 → 检查边框”的同一条路径。
@@ -2103,6 +2241,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         destinationFolderName = task.destinationFolderName,
                                         name = savedName,
                                         size = stats.bytes,
+                                        localUri = renamedUri,
                                     )
                                     val framePreset = task.framePreset
                                     val photoFilter = task.photoFilterRequested
@@ -2254,14 +2393,28 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     // 仅当本协程仍是当前传输 job 时才收尾，避免误停新队列的前台服务/误清传输
                     // 状态（旧队列收尾期间新队列可能已启动并接管 transferJob）。
                     if (transferJob === self) {
-                        pendingTransferQueue.clear()
+                        if (!stoppedAfterCurrent) pendingTransferQueue.clear()
                         _activeTransferProgress.value = null
                         lastValidTransferSpeed = 0L
-                        _state.update { it.copy(isTransferring = false) }
+                        _state.update { state ->
+                            state.copy(
+                                isTransferring = false,
+                                pauseAfterCurrent = if (stoppedAfterCurrent) {
+                                    true
+                                } else {
+                                    false
+                                },
+                            )
+                        }
                         stopTransferServiceIfIdle()
                     }
                 }
         }
+        transferJob = job
+        // Publish the running state before starting the lazy coroutine. Auto-start enqueue and the
+        // deferred pill therefore cannot expose a one-frame false paused state.
+        _state.update { it.copy(isTransferring = true, pauseAfterCurrent = false) }
+        job.start()
     }
 
     /**
@@ -2839,9 +2992,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val appliedAttempts = attemptsByOldTaskId.values.filter {
             it.taskId in appliedTaskIds
         }
-        pendingTransferQueue.addAll(appliedAttempts)
-        prewarmPhotoFilterFor(appliedAttempts)
-        processQueue(dirUri, cameraProvider)
+        if (appliedAttempts.isNotEmpty()) {
+            pendingTransferQueue.addAll(appliedAttempts)
+            if (!_state.value.pauseAfterCurrent) {
+                prewarmPhotoFilterFor(appliedAttempts)
+                processQueue(dirUri, cameraProvider)
+            }
+        }
     }
 
     /** 同 [retryFailed]：只重置指定任务，绝不影响同一照片的其它边框任务。 */
@@ -2870,9 +3027,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
         if (_state.value.tasks.any { it.taskId == attempt.taskId }) {
             pendingTransferQueue.addAll(listOf(attempt))
-            prewarmPhotoFilterFor(listOf(attempt))
+            if (!_state.value.pauseAfterCurrent) {
+                prewarmPhotoFilterFor(listOf(attempt))
+                processQueue(dirUri, cameraProvider)
+            }
         }
-        processQueue(dirUri, cameraProvider)
     }
 
     override fun onCleared() {
