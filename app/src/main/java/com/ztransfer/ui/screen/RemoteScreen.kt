@@ -2400,7 +2400,7 @@ private fun RemoteContent(
                             connected = connected,
                             connectionType = camState.connectionType,
                             staMode = camState.isStaConnection,
-                            onStaDisconnectedClick = cameraViewModel::cancelStaDiscovery,
+                            onStaDisconnectedClick = cameraViewModel::retryStaConnection,
                         )
                         BatteryPill(percent = rcBatteryPercentage(batteryParam))
                     }
@@ -2981,7 +2981,7 @@ private fun RemoteContent(
                                 connected = connected,
                                 connectionType = camState.connectionType,
                                 staMode = camState.isStaConnection,
-                                onStaDisconnectedClick = cameraViewModel::cancelStaDiscovery,
+                                onStaDisconnectedClick = cameraViewModel::retryStaConnection,
                             )
                             BatteryPill(percent = rcBatteryPercentage(batteryParam))
                         }

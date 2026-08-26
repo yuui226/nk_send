@@ -107,6 +107,7 @@ import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.NIKON_RAW_EXTENSIONS
+import com.ztransfer.viewmodel.TIFF_EXTENSIONS
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.TransferTask
@@ -126,6 +127,14 @@ private const val PREVIEW_QUEUE_GHOST_PREROLL_MS = 32L
 private const val PREVIEW_QUEUE_ANIMATION_TIMEOUT_MS = 1_000L
 
 internal enum class PreviewQueueDragDirection { UNDECIDED, UPWARD, REJECTED }
+
+internal enum class LocalOriginalPreviewRoute { DIRECT_BITMAP, RAW_EMBEDDED_JPEG, CAMERA_FHD }
+
+internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewRoute = when {
+    extension in NIKON_RAW_EXTENSIONS -> LocalOriginalPreviewRoute.RAW_EMBEDDED_JPEG
+    extension in TIFF_EXTENSIONS -> LocalOriginalPreviewRoute.CAMERA_FHD
+    else -> LocalOriginalPreviewRoute.DIRECT_BITMAP
+}
 
 /**
  * 默认缩放下只接管意图明确的上滑。横向或向下移动尽早放行，避免与翻页竞争；
@@ -656,8 +665,8 @@ internal fun PhotoPreviewOverlay(
         onDispose { cameraViewModel.setFhdActive(false) }
     }
 
-    // 加载单页高清图：普通照片读取本地完整原图，RAW 从本地文件提取最大内嵌 JPEG；
-    // 视频继续使用既有封面分支。当前页与相邻预加载页共用同一规则。
+    // 加载单页高清图：普通照片读取本地完整原图，NEF/NRW 提取最大内嵌 JPEG，
+    // TIFF 直接请求相机 FHD；视频继续使用既有封面分支。当前页与邻页共用同一规则。
     // 返回 true 表示本次确实取到并解码成功（用于当前页到位的触感反馈）。
     suspend fun loadHighResolutionPage(
         page: Int,
@@ -668,6 +677,7 @@ internal fun PhotoPreviewOverlay(
             ?: return false
         val h = file.handle
         val localUri = latestLocalOriginalUriFor(file)
+        val localPreviewRoute = localOriginalPreviewRoute(file.extension)
         // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
         if (file.extension in VIDEO_EXTENSIONS) {
             fhdUnavailable[h] = true
@@ -694,14 +704,19 @@ internal fun PhotoPreviewOverlay(
         fhdUnavailable.remove(h)
         highResolutionLoading[h] = true
         try {
-            if (localUri != null && localDecodeFailures[h] != localUri) {
+            if (localUri != null &&
+                localPreviewRoute != LocalOriginalPreviewRoute.CAMERA_FHD &&
+                localDecodeFailures[h] != localUri
+            ) {
                 val localPreview = try {
                     withContext(Dispatchers.IO) {
                         val sourceUri = localUri
-                        val bitmap = if (file.extension in NIKON_RAW_EXTENSIONS) {
-                            PhotoFrameExporter.decodeRawEmbeddedPreview(contentResolver, sourceUri)
-                        } else {
-                            PhotoFrameExporter.decodeOriginalPreview(contentResolver, sourceUri)
+                        val bitmap = when (localPreviewRoute) {
+                            LocalOriginalPreviewRoute.RAW_EMBEDDED_JPEG ->
+                                PhotoFrameExporter.decodeRawEmbeddedPreview(contentResolver, sourceUri)
+                            LocalOriginalPreviewRoute.DIRECT_BITMAP ->
+                                PhotoFrameExporter.decodeOriginalPreview(contentResolver, sourceUri)
+                            LocalOriginalPreviewRoute.CAMERA_FHD -> null
                         }
                         bitmap?.asImageBitmap()
                     }

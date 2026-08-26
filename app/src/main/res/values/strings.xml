@@ -13,7 +13,7 @@
     <string name="sta_camera_refused_repair">Camera refused the connection. Pair the camera again.</string>
     <string name="sta_camera_refused_retrying">Camera is not ready yet. Keep it powered on; reconnection will retry automatically.</string>
     <string name="sta_signal_connected">STA camera connected</string>
-    <string name="sta_signal_disconnected_hotspot">STA camera disconnected. Open hotspot settings.</string>
+    <string name="sta_signal_disconnected_reconnect">STA camera disconnected. Tap to reconnect.</string>
     <string name="usb_step_power">Keep the camera powered on</string>
     <string name="usb_step_cable">Connect the camera and phone with a USB-C to USB-C cable</string>
     <string name="connection_failed_short">Connection failed</string>

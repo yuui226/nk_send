@@ -152,7 +152,9 @@ internal fun objectHandleQueryStorageId(storageId: Int, isStaConnection: Boolean
     if (isStaConnection && storageId and 0xFFFF == 0) -1 else storageId
 
 private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
-internal val NIKON_RAW_EXTENSIONS = setOf(".nef", ".nrw", ".tif", ".tiff")
+internal val NIKON_RAW_EXTENSIONS = setOf(".nef", ".nrw")
+internal val TIFF_EXTENSIONS = setOf(".tif", ".tiff")
+private val LARGE_EXIF_HEADER_EXTENSIONS = NIKON_RAW_EXTENSIONS + TIFF_EXTENSIONS
 private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
 
 /** 未知 PTP 对象(.bin 等)仍显示在列表，但不会被“照片/视频自动传输”误收。 */
@@ -942,7 +944,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (wasAttached && !wasActive) {
             // The cable can be removed while OpenSession is still running. Cancel that owner
-            // before wireless discovery resumes so its stale result cannot overwrite AP/STA state.
+            // so its stale result cannot overwrite the disconnected USB state.
             usbConnectJob?.cancel()
             usbConnectJob = null
         }
@@ -953,16 +955,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             it.copy(
                 isConnecting = false,
                 usbConnectionError = null,
-                connectionType = if (it.connectionType == CameraConnectionType.USB) {
-                    null
-                } else {
-                    it.connectionType
-                },
             )
         }
         if (!wasActive) {
-            // Also covers a cable removed while USB OpenSession is still in flight.
-            resumeSelectedWirelessDiscovery()
+            // USB only borrowed the connection page while permission/OpenSession was pending.
+            // Release that selection; AP may resume its watcher, while STA remains click-to-scan.
+            _state.update {
+                it.copy(
+                    connectionType = if (it.connectionType == CameraConnectionType.USB) {
+                        null
+                    } else {
+                        it.connectionType
+                    },
+                )
+            }
+            resumeApDiscovery()
             return
         }
 
@@ -976,11 +983,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             it.copy(
                 isConnectedToCamera = false,
                 isConnecting = false,
-                connectionType = null,
+                connectionType = CameraConnectionType.USB,
             )
         }
         cleanupScope.launch { cam?.close() }
-        resumeSelectedWirelessDiscovery()
     }
 
     private suspend fun reconnectSelectedTransport() {
@@ -1362,18 +1368,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun resumeSelectedWirelessDiscovery() {
+    private fun resumeApDiscovery() {
         if (connectionDiscoveryPaused || purchaseHold || _state.value.isConnectedToCamera ||
-            _state.value.connectionType == CameraConnectionType.USB
+            _state.value.connectionType == CameraConnectionType.USB ||
+            _state.value.wirelessMode != WirelessMode.AP
         ) return
-        when (_state.value.wirelessMode) {
-            WirelessMode.AP -> {
-                registerNetworkCallback()
-                startConnectionWatcher()
-                onWifiChanged()
-            }
-            WirelessMode.STA -> startStaDiscovery(reconnect = true)
-        }
+        registerNetworkCallback()
+        startConnectionWatcher()
+        onWifiChanged()
     }
 
     private fun closePendingWirelessCamera(candidate: NikonCamera) {
@@ -1567,7 +1569,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
         persistWirelessMode(WirelessMode.AP)
         if (current.wirelessMode == WirelessMode.AP) {
-            resumeSelectedWirelessDiscovery()
+            resumeApDiscovery()
             return
         }
 
@@ -1585,7 +1587,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 wifiConnectionStatus = WifiConnectionStatus.IDLE,
             )
         }
-        resumeSelectedWirelessDiscovery()
+        resumeApDiscovery()
     }
 
     /** Selects STA/LAN without starting a scan; used before sending the user to hotspot settings. */
@@ -1661,6 +1663,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         staReconnectJob?.cancel()
         staReconnectJob = null
         startStaDiscovery(reconnect = false)
+    }
+
+    /** Retries a disconnected STA session now without duplicating an active discovery. */
+    fun retryStaConnection() {
+        val current = _state.value
+        if (connectionDiscoveryPaused || purchaseHold ||
+            current.isConnectedToCamera ||
+            current.connectionType != CameraConnectionType.WIFI ||
+            current.wirelessMode != WirelessMode.STA ||
+            !current.isStaConnection ||
+            staDiscoveryJob?.isActive == true
+        ) return
+
+        staReconnectJob?.cancel()
+        staReconnectJob = null
+        staReconnectAttempt = 0
+        startStaDiscovery(reconnect = true)
     }
 
     private fun startStaDiscovery(reconnect: Boolean) {
@@ -3561,8 +3580,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         val cam = camera ?: return null
         // 读取用会话级 handle（当下有效）；缓存键用稳定身份。
-        // NEF/TIFF 等 RAW 格式的 MakerNote 可能位于较高偏移处，用更大 header 确保覆盖。
-        val maxSize = if (ext in NIKON_RAW_EXTENSIONS) 2048 * 1024 else 128 * 1024
+        // NEF/NRW 与 TIFF 的嵌套 IFD 可能位于较高偏移处，用更大 header 确保覆盖。
+        val maxSize = if (ext in LARGE_EXIF_HEADER_EXTENSIONS) 2048 * 1024 else 128 * 1024
         val bytes = cam.readExifHeader(file.handle, maxSize) ?: run {
             exifCache[key] = null
             return null

@@ -1482,7 +1482,7 @@ fun FileListScreen(
                 pulseTrigger = signalPulse,
                 connectionType = state.connectionType,
                 staMode = state.isStaConnection,
-                onStaDisconnectedClick = cameraViewModel::cancelStaDiscovery,
+                onStaDisconnectedClick = cameraViewModel::retryStaConnection,
             )
 
             // 信号按钮右侧：类型筛选按钮。信号条展开/收起的宽度动画是逐帧真实布局，
@@ -2306,8 +2306,8 @@ fun SignalPill(
             pulse.animateTo(1f, Motion.bouncy())
         }
     }
-    // 断开呼吸：整个按钮持续轻微放大缩小，把"该重连相机了"顶到眼前（点击即跳
-    // Wi-Fi 设置）。仅断开时组合 infinite transition，在线零开销；值在 graphicsLayer
+    // 断开呼吸：整个按钮持续轻微放大缩小，把“该重连相机了”顶到眼前。仅断开时
+    // 组合 infinite transition，在线零开销；值在 graphicsLayer
     // 里读，每帧只更新图层不重组。与 pulse 强调相乘叠加，互不打架。
     val breath = if (!online) {
         rememberInfiniteTransition(label = "signalBreath").animateFloat(
@@ -2324,7 +2324,6 @@ fun SignalPill(
                 expanded = false
                 if (!connected) {
                     onStaDisconnectedClick()
-                    openHotspotSettings(context)
                 }
             } else if (online) expanded = !expanded
             // 断开态：断连图标即"去连 Wi-Fi"的入口，跳系统 Wi-Fi 设置（与连接页
@@ -2458,7 +2457,7 @@ private fun StaSignalIcon(
 ) {
     val description = stringResource(
         if (connected) R.string.sta_signal_connected
-        else R.string.sta_signal_disconnected_hotspot,
+        else R.string.sta_signal_disconnected_reconnect,
     )
     Canvas(
         modifier = modifier.semantics { contentDescription = description },
