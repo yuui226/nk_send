@@ -2127,10 +2127,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
 
-        // 经 AppLocale.wrap：协议层错误文案（会显示在失败卡片上）与应用内语言一致。
-        // 提到循环外：语言变更必经 Activity.recreate()，重试循环存续期间不可能变，
-        // 不必每轮重试都重建配置上下文。
-        val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
         // purchaseHold 也随轮检查:重试循环可能在购买挂起前就已在跑,得让它当轮退出。
         var failedAttempts = 0
         while (!connectionDiscoveryPaused && !purchaseHold &&
@@ -2141,6 +2137,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 linkSaysCameraWifi || checkNikonWifi()) &&
             !_state.value.isConnectedToCamera
         ) {
+            // 语言可在不重建 Activity 的情况下切换；每轮创建相机协议上下文，确保新产生的
+            // 错误文案使用当前语言。连接重试频率很低，这个配置包装不在性能热路径上。
+            val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
             val cam = NikonCamera(localizedContext)
             apConnectingCamera = cam
             var connected = false

@@ -82,8 +82,7 @@ fun AnchorPopup(
             animationState.closing = true
             animationScope.launch {
                 progress.animateTo(0f, Motion.overlayCollapse)
-                // 收起期间调用方状态仍可能更新（例如语言选择标记“动画后重建”），始终执行
-                // 最新回调，避免捕获关闭开始前的旧闭包。
+                // 收起期间调用方状态仍可能更新，始终执行最新回调，避免捕获关闭开始前的旧闭包。
                 currentOnDismiss()
             }
         }

@@ -29,6 +29,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -55,7 +57,8 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 结果不阻断使用 */ }
 
-    // 应用内语言：设置里切换后 recreate()，这里重新包装基座 Context 使其生效。
+    // 冷启动时包装基座 Context；运行中切换由 Compose 根节点替换本地化 Context，
+    // 不重建 Activity，因此当前导航、照片列表和滚动位置都不会抖动。
     override fun attachBaseContext(newBase: android.content.Context) {
         super.attachBaseContext(AppLocale.wrap(newBase))
     }
@@ -79,28 +82,45 @@ class MainActivity : ComponentActivity() {
             // 在主题之上先取出来，切换即全局重排配色。
             val transferViewModel: TransferViewModel = viewModel()
             val transferState by transferViewModel.state.collectAsState()
-            ZTransferTheme(themeMode = transferState.themeMode, skinPreset = transferState.skinPreset) {
-                Box(Modifier.fillMaxSize()) {
-                    MainScreen(transferViewModel)
-                    var hintVisible by remember { mutableStateOf(showFirstLaunchNotificationHint) }
-                    LaunchedEffect(showFirstLaunchNotificationHint) {
-                        if (!showFirstLaunchNotificationHint) return@LaunchedEffect
-                        // 先让居中气泡绘制一帧，再呼出系统权限框。
-                        withFrameNanos { }
-                        requestNotificationPermissionIfNeeded()
-                        delay(FIRST_LAUNCH_HINT_DURATION_MS)
-                        hintVisible = false
-                    }
-                    AnimatedVisibility(
-                        visible = hintVisible,
-                        enter = fadeIn(tween(200)) +
-                            scaleIn(initialScale = 0.96f, animationSpec = tween(200)),
-                        exit = fadeOut(tween(260)),
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(horizontal = 24.dp)
-                    ) {
-                        FirstLaunchNotificationHint()
+            val baseContext = LocalContext.current
+            val baseConfiguration = LocalConfiguration.current
+            // Configuration 可能由宿主原位更新；用内容指纹作键，横竖屏、窗口尺寸等变化时
+            // 也会重建对应的本地化 Resources，而不是错误复用旧配置。
+            val baseConfigurationHash = baseConfiguration.hashCode()
+            val localeContext = remember(
+                baseContext,
+                baseConfigurationHash,
+                transferState.appLanguage,
+            ) {
+                AppLocale.forComposition(baseContext, transferState.appLanguage)
+            }
+            CompositionLocalProvider(
+                LocalContext provides localeContext.context,
+                LocalConfiguration provides localeContext.configuration,
+            ) {
+                ZTransferTheme(themeMode = transferState.themeMode, skinPreset = transferState.skinPreset) {
+                    Box(Modifier.fillMaxSize()) {
+                        MainScreen(transferViewModel)
+                        var hintVisible by remember { mutableStateOf(showFirstLaunchNotificationHint) }
+                        LaunchedEffect(showFirstLaunchNotificationHint) {
+                            if (!showFirstLaunchNotificationHint) return@LaunchedEffect
+                            // 先让居中气泡绘制一帧，再呼出系统权限框。
+                            withFrameNanos { }
+                            requestNotificationPermissionIfNeeded()
+                            delay(FIRST_LAUNCH_HINT_DURATION_MS)
+                            hintVisible = false
+                        }
+                        AnimatedVisibility(
+                            visible = hintVisible,
+                            enter = fadeIn(tween(200)) +
+                                scaleIn(initialScale = 0.96f, animationSpec = tween(200)),
+                            exit = fadeOut(tween(260)),
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(horizontal = 24.dp)
+                        ) {
+                            FirstLaunchNotificationHint()
+                        }
                     }
                 }
             }

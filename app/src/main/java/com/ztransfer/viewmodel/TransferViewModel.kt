@@ -418,6 +418,8 @@ data class TransferState(
     val filterDateRange: PhotoDateRange? = null,
     // 预览大图的全局逆时针旋转方向（0..3 个 90°）。跨照片、跨会话持久化。
     val previewRotationQuarterTurns: Int = 0,
+    // 照片预览直方图的可见状态。跨照片、跨预览会话与 App 重启持久化。
+    val previewHistogramEnabled: Boolean = false,
     // 开启后：受支持的原图落盘成功，再派生一张保留原片细节的边框/水印效果图。
     val photoFrameEnabled: Boolean = false,
     // 总开关开启时，边框与水印可以独立组合；false 允许只在原照片上叠水印。
@@ -444,7 +446,6 @@ data class TransferState(
     val photoFilterIntensityPercent: Int = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
     val transferPhotoFilterIntensities: Map<String, Int> = emptyMap(),
     // 应用内语言：BCP-47 标签（"en"/"zh-Hans"/"zh-Hant"）或 AppLocale.SYSTEM（跟随系统）。
-    // 切换后由设置面板触发 Activity.recreate() 生效。
     val appLanguage: String = AppLocale.SYSTEM
 )
 
@@ -1070,6 +1071,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 previewRotationQuarterTurns = Math.floorMod(
                     prefs.getInt("preview_rotation_quarter_turns", 0), 4
                 ),
+                previewHistogramEnabled = prefs.getBoolean(
+                    "preview_histogram_enabled",
+                    false,
+                ),
                 photoFrameEnabled = prefs.getBoolean("photo_frame_enabled", false),
                 photoFrameBorderEnabled = prefs.getBoolean("photo_frame_border_enabled", true),
                 photoFramePreset = runCatching {
@@ -1233,6 +1238,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val normalized = Math.floorMod(turns, 4)
         prefs.edit().putInt("preview_rotation_quarter_turns", normalized).apply()
         _state.update { it.copy(previewRotationQuarterTurns = normalized) }
+    }
+
+    /** 保存照片预览直方图开关；退出预览或重启 App 后继续沿用。 */
+    fun setPreviewHistogramEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("preview_histogram_enabled", enabled).apply()
+        _state.update { it.copy(previewHistogramEnabled = enabled) }
     }
 
     fun setPhotoFrameEnabled(enabled: Boolean) {
@@ -1462,7 +1473,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    /** 应用内语言；写入后需 Activity.recreate() 才对界面生效（attachBaseContext 重读偏好）。 */
+    /** 应用内语言；写入状态后由 Compose 根节点原位替换本地化资源。 */
     fun setAppLanguage(tag: String) {
         prefs.edit().putString(AppLocale.PREF_KEY, tag).apply()
         _state.update { it.copy(appLanguage = tag) }

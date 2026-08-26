@@ -332,7 +332,7 @@ internal fun Modifier.collapseHeight(progress: () -> Float): Modifier =
         }
     }
 
-/** 从 Compose 的 Context 逐层向上找到宿主 Activity（返回键退出应用、切语言后 recreate 共用）。 */
+/** 从 Compose 的 Context 逐层向上找到宿主 Activity（用于返回键退出应用等窗口操作）。 */
 internal fun Context.findActivity(): Activity? {
     var ctx: Context? = this
     while (ctx is ContextWrapper) {
@@ -1677,6 +1677,7 @@ fun FileListScreen(
                     hapticsEnabled = transferState.hapticsEnabled,
                     transfersBusy = transfersBusy,
                     initialRotationQuarterTurns = transferState.previewRotationQuarterTurns,
+                    histogramVisible = transferState.previewHistogramEnabled,
                     burstHandles = burstHandles,
                     queueTaskFor = { file ->
                         queuedIndexByHandle[file.handle]
@@ -1701,6 +1702,8 @@ fun FileListScreen(
                         else expandedBurstCollections.remove(id)
                     },
                     onRotationChanged = transferViewModel::setPreviewRotationQuarterTurns,
+                    onHistogramVisibleChanged =
+                        transferViewModel::setPreviewHistogramEnabled,
                     prepareDismissTarget = preparePreviewDismissTarget,
                     onDismiss = { returnFile ->
                         previewIndex = null

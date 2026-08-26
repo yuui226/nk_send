@@ -1,7 +1,10 @@
 package com.ztransfer
 
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.res.AssetManager
 import android.content.res.Configuration
+import android.content.res.Resources
 import java.util.Locale
 
 /**
@@ -25,4 +28,36 @@ object AppLocale {
         config.setLocale(locale)
         return base.createConfigurationContext(config)
     }
+
+    /**
+     * Compose-only localized context. Unlike [createConfigurationContext], this wrapper keeps the
+     * Activity in the base-context chain, so callers that need window/orientation access continue
+     * to resolve it while resource reads use the selected language.
+     */
+    internal fun forComposition(base: Context, tag: String): CompositionLocaleContext {
+        val config = Configuration(base.resources.configuration)
+        if (tag == SYSTEM) {
+            config.setLocales(base.applicationContext.resources.configuration.locales)
+        } else {
+            config.setLocale(Locale.forLanguageTag(tag))
+        }
+        val localizedResources = base.createConfigurationContext(config).resources
+        return CompositionLocaleContext(
+            context = LocalizedResourceContext(base, localizedResources),
+            configuration = Configuration(localizedResources.configuration),
+        )
+    }
+}
+
+internal data class CompositionLocaleContext(
+    val context: Context,
+    val configuration: Configuration,
+)
+
+private class LocalizedResourceContext(
+    base: Context,
+    private val localizedResources: Resources,
+) : ContextWrapper(base) {
+    override fun getResources(): Resources = localizedResources
+    override fun getAssets(): AssetManager = localizedResources.assets
 }

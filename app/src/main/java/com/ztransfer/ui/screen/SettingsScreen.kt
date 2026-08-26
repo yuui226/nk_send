@@ -211,8 +211,6 @@ fun SettingsOverlay(
     val colors = AppTheme.colors
     val isPro by LicenseManager.isPro.collectAsState()
     val haptics = rememberHaptics(state.hapticsEnabled)
-    val context = LocalContext.current
-    val activity = context.findActivity()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val effectPreviewMetadata = remember(
@@ -226,9 +224,6 @@ fun SettingsOverlay(
             exif = effectPreviewExif,
         )
     }
-    // 当前语言依赖 attachBaseContext，在 Activity 重建后才会全局生效。拨轮提交后走弹窗
-    // 自己的 close 动画；此标记让动画完成回调知道随后需要重建，而不是当场硬切页面。
-    var recreateAfterDismiss by remember { mutableStateOf(false) }
     // 弹窗打开后锁定入口位置。按钮风格切换会让外部 GlassButton 更换实现并重新测量；
     // 若继续跟踪实时 anchor，面板会在用户眼前上下跳动，关闭动画的归宿也会漂移。
     val openingAnchorBounds = remember { anchorBounds }
@@ -439,10 +434,7 @@ fun SettingsOverlay(
         anchorBounds = openingAnchorBounds,
         onDismiss = {
             if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
-            // AnchorPopup 只会在收起动画 animateTo(0f) 完成后调用这里，因此语言切换不会
-            // 再硬切掉弹窗；关闭按钮、返回键和点遮罩三条路径都共用这一时序。
             onDismiss()
-            if (recreateAfterDismiss) activity?.recreate()
         },
         panelModifier = Modifier
             .padding(start = 12.dp, end = 12.dp, top = panelTop)
@@ -1173,7 +1165,6 @@ fun SettingsOverlay(
                         onValueCommitted = { language ->
                             if (language.first != state.appLanguage) {
                                 viewModel.setAppLanguage(language.first)
-                                recreateAfterDismiss = true
                                 close()
                             }
                         },
