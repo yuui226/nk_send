@@ -28,6 +28,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.OutputStream
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.ByteBuffer
@@ -273,6 +274,12 @@ internal fun transferredBytesThisAttempt(downloaded: Long, resumeOffset: Long): 
 
 internal class PairingCompletedException : Exception("Nikon pairing completed; reconnect required")
 
+internal class UnexpectedStaResponderException(actualResponderGuid: String?) :
+    Exception("Unexpected Nikon STA responder: $actualResponderGuid")
+
+internal const val PTPIP_IDENTITY_PREFERENCES = "ptpip_identity"
+internal const val STA_PAIRING_MARKER_PREFIX = "sta_paired_"
+
 internal fun isStaPairingOnlyOperationSet(operations: Set<Int>): Boolean = operations == setOf(
     PtpConstants.GET_DEVICE_INFO,
     PtpConstants.OPEN_SESSION,
@@ -280,6 +287,21 @@ internal fun isStaPairingOnlyOperationSet(operations: Set<Int>): Boolean = opera
     PtpConstants.NK_PAIRING_QUERY,
     PtpConstants.NK_PAIRING_RESULT,
 )
+
+internal fun shouldForceStaProfilePairing(
+    storageResponse: Int,
+    forceProfilePairing: Boolean,
+    allowPairing: Boolean,
+    knownCameraProfile: Boolean,
+    protocolPairingMarkerExists: Boolean,
+): Boolean = storageResponse == PtpConstants.RESPONSE_OK &&
+    forceProfilePairing && allowPairing &&
+    !knownCameraProfile && !protocolPairingMarkerExists
+
+internal fun isExpectedStaResponder(
+    expectedResponderGuid: String?,
+    actualResponderGuid: String?,
+): Boolean = expectedResponderGuid == null || expectedResponderGuid == actualResponderGuid
 
 private fun cameraBaseFileName(value: String): String? {
     val baseName = value.substringAfterLast('/').substringAfterLast('\\').trim()
@@ -1290,6 +1312,9 @@ class NikonCamera(private val context: Context) {
         private set
     @Volatile private var responderGuid: String? = null
     @Volatile private var usbDeviceSerial: String? = null
+    /** Stable PTP/IP body identity returned by InitCommandAck; available before DeviceInfo. */
+    internal val staResponderGuid: String?
+        get() = responderGuid
     /**
      * 跨连接稳定的机身身份，用于隔离缩略图磁盘缓存。有效的 PTP DeviceInfo 序列号
      * 可统一同一机身的 Wi-Fi/USB 缓存；缺失或为占位值时再用当前链路的物理标识兜底。
@@ -1500,7 +1525,10 @@ class NikonCamera(private val context: Context) {
      */
     internal suspend fun connectSta(
         ip: String,
+        localAddress: InetAddress? = null,
         identity: StaInitiatorIdentity = StaInitiatorIdentity.PAIRED_COMPUTER,
+        expectedResponderGuid: String? = null,
+        knownPairedResponderGuids: Set<String> = emptySet(),
         allowPairing: Boolean = true,
         exploreAlbumAccess: Boolean = false,
         forceProfilePairing: Boolean = false,
@@ -1533,7 +1561,12 @@ class NikonCamera(private val context: Context) {
             staDiagnosticLines.clear()
             staDiagnosticLines += "identity=${identity.name}"
             if (FileOrderProbe.enabled) FileOrderProbe.beginConnection("PTP/IP STA")
-            fun newSocket(): Socket = Socket()
+            fun newSocket(): Socket = Socket().apply {
+                // Discovery has already proved this interface can reach the candidate. Preserve
+                // that route for the real handshake instead of letting Android choose another
+                // private/VPN/cellular interface between the port probe and InitCommand.
+                if (localAddress != null) bind(InetSocketAddress(localAddress, 0))
+            }
 
             cmdSocket = newSocket().apply {
                 tcpNoDelay = true
@@ -1562,6 +1595,11 @@ class NikonCamera(private val context: Context) {
             if (payload.size >= 20) {
                 responderGuid = payload.copyOfRange(4, 20)
                     .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+            }
+            if (!isExpectedStaResponder(expectedResponderGuid, responderGuid)) {
+                staDiagnosticLines +=
+                    "responder=UNEXPECTED expected=$expectedResponderGuid actual=$responderGuid"
+                throw UnexpectedStaResponderException(responderGuid)
             }
 
             evtSocket = newSocket().apply {
@@ -1607,6 +1645,8 @@ class NikonCamera(private val context: Context) {
                 allowPairing = allowPairing,
                 exploreAlbumAccess = exploreAlbumAccess,
                 forceProfilePairing = forceProfilePairing,
+                knownCameraProfile = responderGuid
+                    ?.let(knownPairedResponderGuids::contains) == true,
             )
             cmdSocket?.soTimeout = SO_TIMEOUT_MS
             evtSocket?.soTimeout = SO_TIMEOUT_MS
@@ -3986,6 +4026,7 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean,
         exploreAlbumAccess: Boolean,
         forceProfilePairing: Boolean,
+        knownCameraProfile: Boolean,
     ) {
         sendCmd(NIKON_COMPATIBILITY_INIT)
         val (compatibilityResponse, _) = recvRespWithPayload()
@@ -4002,8 +4043,13 @@ class NikonCamera(private val context: Context) {
         val initialStorageIds = parseUInt32Array(storageData)
         staDiagnosticLines +=
             "GetStorageIDs=${hexResponse(storageResponse)} ids=${formatStorageIds(initialStorageIds)}"
-        if (storageResponse == PtpConstants.RESPONSE_OK &&
-            forceProfilePairing && allowPairing && !hasCompletedStaPairing()
+        if (shouldForceStaProfilePairing(
+                storageResponse = storageResponse,
+                forceProfilePairing = forceProfilePairing,
+                allowPairing = allowPairing,
+                knownCameraProfile = knownCameraProfile,
+                protocolPairingMarkerExists = hasCompletedStaPairing(),
+            )
         ) {
             // Z30 exposes full storage temporarily while the computer profile wizard is still
             // waiting for host pairing. Finish that one-time pairing first; otherwise the camera
@@ -4236,7 +4282,7 @@ class NikonCamera(private val context: Context) {
 
     private fun persistentInitiatorId(preferenceKey: String = "initiator_id"): ByteArray {
         val preferences = context.applicationContext.getSharedPreferences(
-            "ptpip_identity",
+            PTPIP_IDENTITY_PREFERENCES,
             Context.MODE_PRIVATE,
         )
         var id = preferences.getString(preferenceKey, null)
@@ -4250,15 +4296,20 @@ class NikonCamera(private val context: Context) {
     }
 
     private fun hasCompletedStaPairing(): Boolean = responderGuid?.let { cameraGuid ->
-        context.applicationContext.getSharedPreferences("ptpip_identity", Context.MODE_PRIVATE)
-            .getBoolean("sta_paired_$cameraGuid", false)
+        context.applicationContext.getSharedPreferences(
+            PTPIP_IDENTITY_PREFERENCES,
+            Context.MODE_PRIVATE,
+        ).getBoolean("$STA_PAIRING_MARKER_PREFIX$cameraGuid", false)
     } ?: false
 
     private fun markStaPairingCompleted() {
         val cameraGuid = responderGuid ?: return
-        context.applicationContext.getSharedPreferences("ptpip_identity", Context.MODE_PRIVATE)
+        context.applicationContext.getSharedPreferences(
+            PTPIP_IDENTITY_PREFERENCES,
+            Context.MODE_PRIVATE,
+        )
             .edit()
-            .putBoolean("sta_paired_$cameraGuid", true)
+            .putBoolean("$STA_PAIRING_MARKER_PREFIX$cameraGuid", true)
             .commit()
     }
 

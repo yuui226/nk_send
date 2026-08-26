@@ -37,4 +37,39 @@ class StaPairingStateTest {
     fun successfulResponseWithStorageIsAlbumAccess() {
         assertTrue(hasUsableStaAlbumStorage(PtpConstants.RESPONSE_OK, listOf(0x00010001)))
     }
+
+    @Test
+    fun knownCameraProfileIsNeverForcedBackThroughPairing() {
+        assertFalse(
+            shouldForceStaProfilePairing(
+                storageResponse = PtpConstants.RESPONSE_OK,
+                forceProfilePairing = true,
+                allowPairing = true,
+                knownCameraProfile = true,
+                protocolPairingMarkerExists = false,
+            ),
+        )
+    }
+
+    @Test
+    fun newCameraStillCompletesProfilePairing() {
+        assertTrue(
+            shouldForceStaProfilePairing(
+                storageResponse = PtpConstants.RESPONSE_OK,
+                forceProfilePairing = true,
+                allowPairing = true,
+                knownCameraProfile = false,
+                protocolPairingMarkerExists = false,
+            ),
+        )
+    }
+
+    @Test
+    fun responderGuidCheckDefersWrongOrMissingDhcpCandidate() {
+        val expected = "11111111111111111111111111111111"
+        assertTrue(isExpectedStaResponder(expected, expected))
+        assertTrue(isExpectedStaResponder(null, "22222222222222222222222222222222"))
+        assertFalse(isExpectedStaResponder(expected, null))
+        assertFalse(isExpectedStaResponder(expected, "22222222222222222222222222222222"))
+    }
 }

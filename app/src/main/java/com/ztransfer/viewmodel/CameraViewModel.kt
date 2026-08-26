@@ -34,9 +34,12 @@ import com.ztransfer.protocol.CameraRefusedException
 import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
+import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
 import com.ztransfer.protocol.PtpConstants
+import com.ztransfer.protocol.PtpIpCandidate
 import com.ztransfer.protocol.PtpIpDiscovery
 import com.ztransfer.protocol.StaInitiatorIdentity
+import com.ztransfer.protocol.UnexpectedStaResponderException
 import com.ztransfer.protocol.UsbPtpConnection
 import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.service.CameraSessionService
@@ -44,6 +47,7 @@ import com.ztransfer.util.applyExifOrientation
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.net.ConnectException
+import java.net.InetAddress
 import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CoroutineScope
@@ -97,6 +101,12 @@ enum class StaConnectionStatus {
 enum class WirelessMode {
     AP,
     STA,
+}
+
+private enum class StaCandidateConnectionResult {
+    CONNECTED,
+    REJECTED,
+    UNEXPECTED_CAMERA,
 }
 
 internal fun restoredWirelessMode(value: String?): WirelessMode =
@@ -410,6 +420,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val connectionPreferences = application.getSharedPreferences(
         CONNECTION_PREFERENCES,
         Context.MODE_PRIVATE,
+    )
+    private val staProfileStore = StaCameraProfileStore(
+        preferences = connectionPreferences,
+        pairingPreferences = application.getSharedPreferences(
+            PTPIP_IDENTITY_PREFERENCES,
+            Context.MODE_PRIVATE,
+        ),
     )
     private val _state = MutableStateFlow(
         CameraState(
@@ -1624,37 +1641,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             .apply()
     }
 
-    /**
-     * The explicit flag is the current format. The other two checks migrate builds that only saved
-     * the last successful IP, or completed pairing just before Nikon restarted its PTP/IP service.
-     */
-    private fun hasReusableStaProfile(): Boolean {
-        if (connectionPreferences.getBoolean(STA_REUSABLE_PROFILE, false)) return true
-        val hasLastCamera = !connectionPreferences.getString(STA_LAST_CAMERA_IP, null).isNullOrBlank()
-        val hasProtocolPairingMarker = getApplication<Application>()
-            .getSharedPreferences(PTPIP_IDENTITY_PREFERENCES, Context.MODE_PRIVATE)
-            .all
-            .any { (key, value) ->
-                key.startsWith(STA_PAIRED_MARKER_PREFIX) && value == true
-            }
-        val reusable = hasLastCamera || hasProtocolPairingMarker
-        if (reusable) {
-            connectionPreferences.edit().putBoolean(STA_REUSABLE_PROFILE, true).apply()
-        }
-        return reusable
-    }
+    private fun hasReusableStaProfile(): Boolean = staProfileStore.hasAnyReusableProfile()
 
-    private fun rememberReusableStaProfile(
+    private fun rememberStaCameraProfile(
+        camera: NikonCamera,
         ip: String,
         identity: StaInitiatorIdentity = StaInitiatorIdentity.PAIRED_COMPUTER,
     ) {
-        // commit() makes the one-time pairing durable before the camera tears down and restarts the
-        // service; losing the process in that window must not send the next launch back to pairing.
-        connectionPreferences.edit()
-            .putBoolean(STA_REUSABLE_PROFILE, true)
-            .putString(STA_LAST_CAMERA_IP, ip)
-            .putString(STA_LAST_INITIATOR_IDENTITY, identity.name)
-            .commit()
+        staProfileStore.rememberConnection(
+            responderGuid = camera.staResponderGuid,
+            ip = ip,
+            identity = identity,
+        )
     }
 
     /** Starts the explicit STA/LAN camera search shown by the Wi-Fi card's STA tab. */
@@ -1721,7 +1719,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (generation != staDiscoveryGeneration ||
                     _state.value.wirelessMode != WirelessMode.STA
                 ) return@launch
-                val lastIp = connectionPreferences.getString(STA_LAST_CAMERA_IP, null)
+                val lastIp = staProfileStore.lastUsedIp()
+                val expectedResponderGuid = staProfileStore.mostRecentlyUsedResponderGuid()
+                var deferredCandidate: PtpIpCandidate? = null
                 val found = ptpIpDiscovery.discover(
                     lastIp = lastIp,
                     onProgress = { ip ->
@@ -1734,10 +1734,43 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             }
                         }
                     },
-                    tryCandidate = { ip -> tryConnectStaCandidate(ip, generation) },
+                    tryCandidate = { candidate ->
+                        when (
+                            tryConnectStaCandidate(
+                                ip = candidate.ip,
+                                localAddress = candidate.localAddress,
+                                expectedResponderGuid = expectedResponderGuid,
+                                generation = generation,
+                            )
+                        ) {
+                            StaCandidateConnectionResult.CONNECTED -> true
+                            StaCandidateConnectionResult.UNEXPECTED_CAMERA -> {
+                                if (deferredCandidate == null) deferredCandidate = candidate
+                                false
+                            }
+                            StaCandidateConnectionResult.REJECTED -> false
+                        }
+                    },
                 )
                 if (generation != staDiscoveryGeneration) return@launch
-                if (found == null && !_state.value.isConnectedToCamera) {
+                val deferredConnected = if (
+                    found == null &&
+                    deferredCandidate != null &&
+                    !_state.value.isConnectedToCamera &&
+                    _state.value.connectionType != CameraConnectionType.USB &&
+                    _state.value.wirelessMode == WirelessMode.STA
+                ) {
+                    val candidate = checkNotNull(deferredCandidate)
+                    tryConnectStaCandidate(
+                        ip = candidate.ip,
+                        localAddress = candidate.localAddress,
+                        expectedResponderGuid = null,
+                        generation = generation,
+                    ) == StaCandidateConnectionResult.CONNECTED
+                } else {
+                    false
+                }
+                if (found == null && !deferredConnected && !_state.value.isConnectedToCamera) {
                     val localized = com.ztransfer.AppLocale.wrap(getApplication())
                     _state.update {
                         it.copy(
@@ -1814,12 +1847,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun tryConnectStaCandidate(ip: String, generation: Long): Boolean {
+    private suspend fun tryConnectStaCandidate(
+        ip: String,
+        localAddress: InetAddress?,
+        expectedResponderGuid: String?,
+        generation: Long,
+    ): StaCandidateConnectionResult {
         if (generation != staDiscoveryGeneration || purchaseHold ||
             _state.value.connectionType == CameraConnectionType.USB ||
             _state.value.wirelessMode != WirelessMode.STA ||
             _state.value.isConnectedToCamera
-        ) return false
+        ) return StaCandidateConnectionResult.REJECTED
 
         _state.update {
             it.copy(
@@ -1829,21 +1867,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
-        val preferredIdentity = restoredStaInitiatorIdentity(
-            connectionPreferences.getString(STA_LAST_INITIATOR_IDENTITY, null),
-        )
+        val preferredIdentity = staProfileStore.preferredIdentityFor(ip)
+        val knownPairedResponderGuids = staProfileStore.pairedResponderGuids()
+        var candidateKnown = staProfileStore.isKnownCandidate(ip)
         var pairedReachedStorageProbe = false
         var pairingReconnectUsed = false
         var readinessRetryUsed = false
         while (true) {
             if (generation != staDiscoveryGeneration || purchaseHold ||
                 _state.value.wirelessMode != WirelessMode.STA
-            ) return false
+            ) return StaCandidateConnectionResult.REJECTED
             val candidateCamera = NikonCamera(localizedContext)
             staConnectingCamera = candidateCamera
             val result = candidateCamera.connectSta(
                 ip = ip,
+                localAddress = localAddress,
                 identity = preferredIdentity,
+                expectedResponderGuid = expectedResponderGuid,
+                knownPairedResponderGuids = knownPairedResponderGuids,
                 allowPairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
@@ -1854,7 +1895,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 || _state.value.isConnectedToCamera
             ) {
                 candidateCamera.close()
-                return false
+                return StaCandidateConnectionResult.REJECTED
             }
             val route = when {
                 preferredIdentity == StaInitiatorIdentity.ALBUM_EXPLORER && readinessRetryUsed ->
@@ -1866,12 +1907,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             recordStaDiagnostic(ip, route, candidateCamera)
             pairedReachedStorageProbe = pairedReachedStorageProbe ||
                 candidateCamera.staStorageProbeReached
+            candidateCamera.staResponderGuid?.let { responderGuid ->
+                candidateKnown = staProfileStore.isKnownCandidate(
+                    ip = ip,
+                    responderGuid = responderGuid,
+                )
+            }
             if (result.isSuccess) {
                 activateStaCamera(candidateCamera, ip, preferredIdentity)
-                return true
+                return StaCandidateConnectionResult.CONNECTED
             }
             val error = result.exceptionOrNull()
-            staLastFailureMessage = staFailureMessage(localizedContext, error)
+            if (error is UnexpectedStaResponderException) {
+                staConnectingCamera = null
+                candidateCamera.close()
+                return StaCandidateConnectionResult.UNEXPECTED_CAMERA
+            }
+            staLastFailureMessage = staFailureMessage(localizedContext, error, candidateKnown)
             staConnectingCamera = null
             candidateCamera.close()
             when {
@@ -1879,7 +1931,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     // A first-time pairing changes the camera service; the verified trace becomes
                     // ready again roughly 6.6 seconds later.
                     pairingReconnectUsed = true
-                    rememberReusableStaProfile(ip, StaInitiatorIdentity.PAIRED_COMPUTER)
+                    rememberStaCameraProfile(
+                        candidateCamera,
+                        ip,
+                        StaInitiatorIdentity.PAIRED_COMPUTER,
+                    )
                     staLastFailureMessage = null
                     delay(STA_PAIRING_RECONNECT_DELAY_MS)
                 }
@@ -1895,67 +1951,98 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // Try the other known initiator identity after the preferred one fails. Older builds did
-        // not persist which identity actually opened the post-pairing album session, so a migrated
-        // reusable profile must be allowed to recover even when the preferred identity is rejected
-        // during InitCommand and never reaches the storage probe.
+        // Try the one bounded compatibility identity after the preferred route fails. A known
+        // camera may have moved to a new DHCP address, so its GUID cannot be recovered when the
+        // first identity is rejected during InitCommand; the stored profiles tell us whether the
+        // alternate route is still in use, without generating or scanning identities.
         val alternateIdentity = when (preferredIdentity) {
             StaInitiatorIdentity.PAIRED_COMPUTER -> StaInitiatorIdentity.ALBUM_EXPLORER
             StaInitiatorIdentity.ALBUM_EXPLORER -> StaInitiatorIdentity.PAIRED_COMPUTER
         }
-        if ((pairedReachedStorageProbe || hasReusableStaProfile()) &&
+        val alternateMayBelongToMovedCamera =
+            staProfileStore.hasReusableProfileUsing(alternateIdentity)
+        if ((pairedReachedStorageProbe || candidateKnown || alternateMayBelongToMovedCamera) &&
             generation == staDiscoveryGeneration &&
             _state.value.wirelessMode == WirelessMode.STA
         ) {
             delay(STA_EXPLORER_RECONNECT_DELAY_MS)
-            val albumCamera = NikonCamera(localizedContext)
-            staConnectingCamera = albumCamera
-            val albumResult = albumCamera.connectSta(
+            val alternateCamera = NikonCamera(localizedContext)
+            staConnectingCamera = alternateCamera
+            val alternateResult = alternateCamera.connectSta(
                 ip = ip,
+                localAddress = localAddress,
                 identity = alternateIdentity,
+                expectedResponderGuid = expectedResponderGuid,
+                knownPairedResponderGuids = knownPairedResponderGuids,
                 allowPairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
             )
-            recordStaDiagnostic(ip, "alternate-${alternateIdentity.name.lowercase()}", albumCamera)
+            recordStaDiagnostic(
+                ip,
+                "alternate-${alternateIdentity.name.lowercase()}",
+                alternateCamera,
+            )
+            alternateCamera.staResponderGuid?.let { responderGuid ->
+                candidateKnown = staProfileStore.isKnownCandidate(
+                    ip = ip,
+                    responderGuid = responderGuid,
+                )
+            }
             if (generation != staDiscoveryGeneration || purchaseHold ||
                 _state.value.connectionType == CameraConnectionType.USB ||
                 _state.value.wirelessMode != WirelessMode.STA ||
                 _state.value.isConnectedToCamera
             ) {
-                albumCamera.close()
-                return false
+                alternateCamera.close()
+                return StaCandidateConnectionResult.REJECTED
             }
-            if (albumResult.isSuccess) {
-                activateStaCamera(albumCamera, ip, alternateIdentity)
-                return true
+            if (alternateResult.isSuccess) {
+                activateStaCamera(alternateCamera, ip, alternateIdentity)
+                return StaCandidateConnectionResult.CONNECTED
             }
-            if (albumResult.exceptionOrNull() is PairingCompletedException) {
-                rememberReusableStaProfile(ip, StaInitiatorIdentity.PAIRED_COMPUTER)
+            if (alternateResult.exceptionOrNull() is UnexpectedStaResponderException) {
+                staConnectingCamera = null
+                alternateCamera.close()
+                return StaCandidateConnectionResult.UNEXPECTED_CAMERA
+            }
+            if (alternateResult.exceptionOrNull() is PairingCompletedException) {
+                rememberStaCameraProfile(
+                    alternateCamera,
+                    ip,
+                    StaInitiatorIdentity.PAIRED_COMPUTER,
+                )
                 staLastFailureMessage = null
             }
-            // The paired-computer route is authoritative. Z30 may intentionally reject the
-            // secondary album identity, so that expected compatibility-probe result must not hide
-            // the actual paired-route failure shown to the user.
-            if (staLastFailureMessage == null) {
+            // The paired-computer route is authoritative. Preserve its failure when the secondary
+            // album identity is intentionally rejected; replace an album-first failure when this
+            // authoritative paired route was the alternate attempt.
+            if (alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER ||
+                staLastFailureMessage == null
+            ) {
                 staLastFailureMessage = staFailureMessage(
                     localizedContext,
-                    albumResult.exceptionOrNull(),
+                    alternateResult.exceptionOrNull(),
+                    candidateKnown,
                 )
             }
             staConnectingCamera = null
-            albumCamera.close()
+            alternateCamera.close()
         }
 
         // A monitor-only PTP profile is not a successful photo-browser connection. Activating it
         // used to play the connected transition and then publish a completed empty album. Leave
         // discovery in the failed/retry path instead; a later attempt can still obtain the full
         // paired album session once the camera service is ready.
-        return false
+        return StaCandidateConnectionResult.REJECTED
     }
 
-    private fun staFailureMessage(context: Context, error: Throwable?): String? = when (error) {
-        is CameraRefusedException -> if (hasReusableStaProfile()) {
+    private fun staFailureMessage(
+        context: Context,
+        error: Throwable?,
+        candidateKnown: Boolean,
+    ): String? = when (error) {
+        is CameraRefusedException -> if (candidateKnown) {
             context.getString(com.ztransfer.R.string.sta_camera_refused_retrying)
         } else {
             context.getString(com.ztransfer.R.string.sta_camera_refused_repair)
@@ -1988,7 +2075,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         staReconnectAttempt = 0
         camera = candidateCamera
         acquireSessionWifiLock()
-        rememberReusableStaProfile(ip, identity)
+        rememberStaCameraProfile(candidateCamera, ip, identity)
         _state.update {
             it.copy(
                 isConnectedToCamera = true,
@@ -3805,11 +3892,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val STA_RECONNECT_DELAYS_MS = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L)
         private const val CONNECTION_PREFERENCES = "sta_connection"
         private const val WIRELESS_MODE_PREFERENCE = "wireless_mode"
-        private const val STA_REUSABLE_PROFILE = "sta_reusable_profile"
-        private const val STA_LAST_INITIATOR_IDENTITY = "sta_last_initiator_identity"
-        private const val PTPIP_IDENTITY_PREFERENCES = "ptpip_identity"
-        private const val STA_PAIRED_MARKER_PREFIX = "sta_paired_"
-        const val STA_LAST_CAMERA_IP = "last_sta_camera_ip"
         internal const val FILE_THUMBNAIL_PIPELINE_BATCH_SIZE = 12
         const val EFFECT_PREVIEW_SOURCE_EDGE = 1_920
         const val MAX_FHD_PREVIEW_EDGE = 1_920
