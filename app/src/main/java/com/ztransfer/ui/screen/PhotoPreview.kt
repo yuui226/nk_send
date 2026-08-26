@@ -136,6 +136,11 @@ internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewR
     else -> LocalOriginalPreviewRoute.DIRECT_BITMAP
 }
 
+internal fun <T> isLocalPreviewResolved(
+    localSource: T?,
+    cachedLocalSource: T?,
+): Boolean = localSource != null && cachedLocalSource == localSource
+
 /**
  * 默认缩放下只接管意图明确的上滑。横向或向下移动尽早放行，避免与翻页竞争；
  * 斜向尚未形成稳定方向时继续观察，不在触摸斜率的临界点突然抢手势。
@@ -814,7 +819,10 @@ internal fun PhotoPreviewOverlay(
         )
         if (loadedCurrent) haptics.tick()
         val resolvedLocally = currentHandle?.let { handle ->
-            localPreviewUris[handle] == currentLocalOriginalUri
+            isLocalPreviewResolved(
+                localSource = currentLocalOriginalUri,
+                cachedLocalSource = localPreviewUris[handle],
+            )
         } == true
         if (resolvedLocally) {
             // 图片和 EXIF 都直接读取本地文件，不进入相机交互优先窗口。
