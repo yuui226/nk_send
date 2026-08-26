@@ -1150,55 +1150,52 @@ fun SettingsOverlay(
             }
             val selectedSkin = skinChoices.first { it.first == state.skinPreset }
             SettingsCard {
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val wheelWidth = (maxWidth - 16.dp) / 3f
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        ReleaseCommitWheel(
-                            options = themeChoices,
-                            selected = selectedTheme,
-                            optionLabel = { it.second },
-                            onValueCommitted = { viewModel.setThemeMode(it.first) },
-                            onDetent = haptics::tick,
-                            label = stringResource(R.string.light_dark_mode),
-                            wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
-                            optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
-                            optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
-                            modifier = Modifier.width(wheelWidth),
-                        )
-                        ReleaseCommitWheel(
-                            options = languages,
-                            selected = selectedLanguage,
-                            optionLabel = { it.second },
-                            onValueCommitted = { language ->
-                                if (language.first != state.appLanguage) {
-                                    viewModel.setAppLanguage(language.first)
-                                    recreateAfterDismiss = true
-                                    close()
-                                }
-                            },
-                            onDetent = haptics::tick,
-                            label = stringResource(R.string.language),
-                            wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
-                            optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
-                            optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
-                            modifier = Modifier.width(wheelWidth),
-                        )
-                        ReleaseCommitWheel(
-                            options = skinChoices,
-                            selected = selectedSkin,
-                            optionLabel = { it.second },
-                            onValueCommitted = { viewModel.setSkinPreset(it.first) },
-                            onDetent = haptics::tick,
-                            label = stringResource(R.string.button_style),
-                            wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
-                            optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
-                            optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
-                            modifier = Modifier.width(wheelWidth),
-                        )
-                    }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    ReleaseCommitWheel(
+                        options = themeChoices,
+                        selected = selectedTheme,
+                        optionLabel = { it.second },
+                        onValueCommitted = { viewModel.setThemeMode(it.first) },
+                        onDetent = haptics::tick,
+                        label = stringResource(R.string.light_dark_mode),
+                        wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
+                        optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
+                        optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
+                        modifier = Modifier.weight(APPEARANCE_COMPACT_WHEEL_WEIGHT),
+                    )
+                    ReleaseCommitWheel(
+                        options = languages,
+                        selected = selectedLanguage,
+                        optionLabel = { it.second },
+                        onValueCommitted = { language ->
+                            if (language.first != state.appLanguage) {
+                                viewModel.setAppLanguage(language.first)
+                                recreateAfterDismiss = true
+                                close()
+                            }
+                        },
+                        onDetent = haptics::tick,
+                        label = stringResource(R.string.language),
+                        wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
+                        optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
+                        optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
+                        modifier = Modifier.weight(APPEARANCE_COMPACT_WHEEL_WEIGHT),
+                    )
+                    ReleaseCommitWheel(
+                        options = skinChoices,
+                        selected = selectedSkin,
+                        optionLabel = { it.second },
+                        onValueCommitted = { viewModel.setSkinPreset(it.first) },
+                        onDetent = haptics::tick,
+                        label = stringResource(R.string.button_style),
+                        wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
+                        optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
+                        optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
+                        modifier = Modifier.weight(BUTTON_STYLE_WHEEL_WEIGHT),
+                    )
                 }
 
                 CardDivider()
@@ -3320,6 +3317,8 @@ private val BOOLEAN_SETTINGS_WHEEL_HEIGHT = 50.dp
 private val COMPACT_SETTINGS_WHEEL_HEIGHT = 42.dp
 private val COMPACT_SETTINGS_WHEEL_ROW_HEIGHT = 16.dp
 private val COMPACT_SETTINGS_WHEEL_FONT_SIZE = 13.sp
+private const val APPEARANCE_COMPACT_WHEEL_WEIGHT = 3f
+private const val BUTTON_STYLE_WHEEL_WEIGHT = 4f
 private val PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)
 
 /**

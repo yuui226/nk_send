@@ -144,13 +144,13 @@
     <string name="tap_transfer_hold_preview">点击：传输\n长按：预览</string>
     <string name="tap_preview_hold_transfer">点击：预览\n长按：传输</string>
     <string name="appearance">外观</string>
-    <string name="light_dark_mode">明暗模式</string>
+    <string name="light_dark_mode">明暗</string>
     <string name="button_style">按钮风格</string>
-    <string name="theme_system">跟随系统</string>
+    <string name="theme_system">自动</string>
     <string name="theme_dark">深色</string>
     <string name="theme_light">浅色</string>
     <string name="language">语言</string>
-    <string name="language_system">跟随系统</string>
+    <string name="language_system">自动</string>
     <string name="skin_frosted_glass">毛玻璃</string>
     <string name="skin_titanium">钛合金</string>
     <string name="skin_wood">木纹</string>

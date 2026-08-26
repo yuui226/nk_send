@@ -146,11 +146,11 @@
     <string name="appearance">Appearance</string>
     <string name="light_dark_mode">Light &amp; dark</string>
     <string name="button_style">Button style</string>
-    <string name="theme_system">System</string>
+    <string name="theme_system">Auto</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_light">Light</string>
     <string name="language">Language</string>
-    <string name="language_system">System</string>
+    <string name="language_system">Auto</string>
     <string name="skin_frosted_glass">Frosted Glass</string>
     <string name="skin_titanium">Titanium</string>
     <string name="skin_wood">Wood</string>
