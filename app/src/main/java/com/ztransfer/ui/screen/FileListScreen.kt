@@ -91,7 +91,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -1859,25 +1858,7 @@ internal fun QueueExecutionButton(
                         listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
                     )
                 )
-                .background(accent.copy(alpha = 0.16f * activeProgress))
-                .border(
-                    width = 1.dp,
-                    brush = Brush.verticalGradient(
-                        listOf(
-                            lerp(
-                                colors.glassBorderTop,
-                                accent.copy(alpha = 0.90f),
-                                activeProgress,
-                            ),
-                            lerp(
-                                colors.glassBorderBottom,
-                                accent.copy(alpha = 0.52f),
-                                activeProgress,
-                            ),
-                        )
-                    ),
-                    shape = CircleShape,
-                ),
+                .background(accent.copy(alpha = 0.16f * activeProgress)),
             contentAlignment = Alignment.Center,
         ) {
             AnimatedContent(

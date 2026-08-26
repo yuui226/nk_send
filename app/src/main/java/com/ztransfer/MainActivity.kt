@@ -216,8 +216,8 @@ private fun FilesQueueWorkspace(
         transitionSpec = {
             if (targetState) {
                 tween(
-                    durationMillis = 120,
-                    delayMillis = 160,
+                    durationMillis = 140,
+                    delayMillis = Motion.QUEUE_PAGE_SLIDE_MS,
                     easing = FastOutSlowInEasing,
                 )
             } else {
@@ -267,20 +267,15 @@ private fun FilesQueueWorkspace(
             }
         }
 
-        // 顶栏不参与横向位移，避免返回/信号按钮从右侧固定胶囊下方穿过。它与页面
-        // 共用同一 Transition：进入过半后快速显现，任意时刻反向都会从当前进度收回。
+        // 顶栏不参与横向位移或缩放。等正文横向转场彻底完成后才在原位淡入，避免
+        // 返回/信号按钮与仍在滑出的照片页重叠；返回时则立即淡出。
         if (transition.currentState || transition.targetState) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .fillMaxWidth()
                     .graphicsLayer {
-                        val progress = topControlsProgress.value
-                        alpha = progress
-                        val scale = 0.92f + progress * 0.08f
-                        scaleX = scale
-                        scaleY = scale
-                        transformOrigin = TransformOrigin(0f, 0f)
+                        alpha = topControlsProgress.value
                     },
             ) {
                 queueTopContent()
