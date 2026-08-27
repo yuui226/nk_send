@@ -1703,6 +1703,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             responderGuid = camera.staResponderGuid,
             ip = ip,
             identity = identity,
+            deviceModel = camera.deviceModel,
         )
     }
 
@@ -1724,6 +1725,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun pairedStaCameraCount(): Int = staProfileStore.pairedCameraCount()
+
+    fun pairedStaCameraModels(): List<String> = staProfileStore.pairedCameraModels()
 
     /** Retries a disconnected STA session now without duplicating an active discovery. */
     fun retryStaConnection() {

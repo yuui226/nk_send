@@ -755,6 +755,7 @@ fun HomeScreen(
         if (showStaResetDialog) {
             ResetStaPairingDialog(
                 pairedCameraCount = viewModel.pairedStaCameraCount(),
+                pairedCameraModels = viewModel.pairedStaCameraModels(),
                 onConfirm = {
                     showStaResetDialog = false
                     viewModel.resetStaPairing()
@@ -1463,10 +1464,15 @@ private fun ConnectionSuccessOverlay(
 @Composable
 private fun ResetStaPairingDialog(
     pairedCameraCount: Int,
+    pairedCameraModels: List<String>,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = AppTheme.colors
+    val pairedCameraSummary = buildList {
+        add(stringResource(R.string.sta_paired_camera_count, pairedCameraCount))
+        addAll(pairedCameraModels)
+    }.joinToString(" · ")
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(20.dp),
@@ -1498,10 +1504,7 @@ private fun ResetStaPairingDialog(
                     )
                     Spacer(Modifier.width(7.dp))
                     Text(
-                        text = stringResource(
-                            R.string.sta_paired_camera_count,
-                            pairedCameraCount,
-                        ),
+                        text = pairedCameraSummary,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.onBackground,

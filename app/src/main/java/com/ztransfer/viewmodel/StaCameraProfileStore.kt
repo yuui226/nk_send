@@ -14,6 +14,7 @@ internal data class StaCameraProfile(
     val preferredIdentity: StaInitiatorIdentity,
     val pairingConfirmed: Boolean,
     val lastSeenAtMs: Long,
+    val deviceModel: String? = null,
 )
 
 internal class StaCameraProfileStore(
@@ -49,6 +50,9 @@ internal class StaCameraProfileStore(
                 pairingMarkerExists(guid),
             ),
             lastSeenAtMs = preferences.getLong(profileKey(guid, FIELD_LAST_SEEN), 0L),
+            deviceModel = preferences.getString(profileKey(guid, FIELD_DEVICE_MODEL), null)
+                ?.trim()
+                ?.takeIf(String::isNotEmpty),
         )
     }
 
@@ -69,6 +73,13 @@ internal class StaCameraProfileStore(
         val legacySingleCamera = preferences.getBoolean(KEY_REUSABLE_PROFILE, false)
         return if (bodyCount == 0 && legacySingleCamera) 1 else bodyCount
     }
+
+    fun pairedCameraModels(): List<String> = allProfiles()
+        .asSequence()
+        .filter(StaCameraProfile::pairingConfirmed)
+        .sortedByDescending(StaCameraProfile::lastSeenAtMs)
+        .mapNotNull(StaCameraProfile::deviceModel)
+        .toList()
 
     fun mostRecentlyUsedResponderGuid(): String? {
         normalizeResponderGuid(preferences.getString(KEY_LAST_RESPONDER_GUID, null))
@@ -106,8 +117,10 @@ internal class StaCameraProfileStore(
         responderGuid: String?,
         ip: String,
         identity: StaInitiatorIdentity,
+        deviceModel: String? = null,
     ) {
         val guid = normalizeResponderGuid(responderGuid)
+        val normalizedModel = deviceModel?.trim()?.takeIf(String::isNotEmpty)
         val editor = preferences.edit()
             .putBoolean(KEY_REUSABLE_PROFILE, true)
             .putString(KEY_LAST_CAMERA_IP, ip)
@@ -121,6 +134,9 @@ internal class StaCameraProfileStore(
                 .putString(profileKey(guid, FIELD_IDENTITY), identity.name)
                 .putBoolean(profileKey(guid, FIELD_PAIRED), true)
                 .putLong(profileKey(guid, FIELD_LAST_SEEN), nowMs())
+            if (normalizedModel != null) {
+                editor.putString(profileKey(guid, FIELD_DEVICE_MODEL), normalizedModel)
+            }
         } else {
             editor.remove(KEY_LAST_RESPONDER_GUID)
         }
@@ -233,6 +249,7 @@ internal class StaCameraProfileStore(
         const val FIELD_IDENTITY = "identity"
         const val FIELD_PAIRED = "paired"
         const val FIELD_LAST_SEEN = "last_seen"
+        const val FIELD_DEVICE_MODEL = "device_model"
     }
 }
 
