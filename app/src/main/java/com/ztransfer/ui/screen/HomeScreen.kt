@@ -1385,8 +1385,15 @@ private fun TipsBubble(
     onDismiss: () -> Unit,
 ) {
     val density = LocalDensity.current
-    // 按钮位于卡片底部内边距中，留 24dp 才能让气泡完整落在卡片之外。
-    val panelTop = anchorBounds?.let { with(density) { it.bottom.toDp() } + 24.dp } ?: 156.dp
+    // AP 保持贴近按钮；STA 内容更长，单独上移为完整内容预留空间。
+    val anchoredPanelTop = anchorBounds?.let {
+        with(density) { it.bottom.toDp() } + 24.dp
+    } ?: 156.dp
+    val panelTop = if (wirelessMode == WirelessMode.STA) {
+        (anchoredPanelTop - 144.dp).coerceAtLeast(20.dp)
+    } else {
+        anchoredPanelTop
+    }
     AnchorPopup(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
@@ -1402,25 +1409,34 @@ private fun TipsBubble(
                 if (wirelessMode == WirelessMode.AP) R.string.tip_title
                 else R.string.tip_sta_title,
             ),
-            items = listOf(
-                TipBubbleItem(
-                    label = stringResource(
-                        if (wirelessMode == WirelessMode.AP) R.string.tip_ap_mode
-                        else R.string.tip_sta_mode,
+            items = if (wirelessMode == WirelessMode.AP) {
+                listOf(
+                    TipBubbleItem(
+                        label = stringResource(R.string.tip_ap_mode),
+                        text = stringResource(R.string.tip_body),
                     ),
-                    text = stringResource(
-                        if (wirelessMode == WirelessMode.AP) R.string.tip_body
-                        else R.string.tip_sta_body,
+                    TipBubbleItem(
+                        text = stringResource(R.string.tip_path),
+                        emphasized = true,
                     ),
-                ),
-                TipBubbleItem(
-                    text = stringResource(
-                        if (wirelessMode == WirelessMode.AP) R.string.tip_path
-                        else R.string.tip_sta_steps,
+                )
+            } else {
+                listOf(
+                    TipBubbleItem(
+                        label = stringResource(R.string.tip_sta_first_connection),
+                        text = stringResource(R.string.tip_sta_steps),
+                        emphasized = true,
                     ),
-                    emphasized = true,
-                ),
-            ),
+                    TipBubbleItem(
+                        label = stringResource(R.string.tip_sta_quick_start),
+                        text = stringResource(R.string.tip_body),
+                    ),
+                    TipBubbleItem(
+                        text = stringResource(R.string.tip_path),
+                        emphasized = true,
+                    ),
+                )
+            },
         )
     }
 }

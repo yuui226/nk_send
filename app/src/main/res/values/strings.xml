@@ -49,9 +49,9 @@
     <string name="tip_body">Add “Wi-Fi connection” to the camera\'s i menu, then press i to turn it on quickly.</string>
     <string name="tip_path">MENU → Custom Settings Menu → Controls → Customize i menu → pick a slot → Wi-Fi connection</string>
     <string name="tip_sta_title">STA connection</string>
-    <string name="tip_sta_mode">Connect the camera and phone to the same Wi-Fi</string>
-    <string name="tip_sta_body">First connection:</string>
-    <string name="tip_sta_steps">1. Enable the phone hotspot or connect the phone to Wi-Fi\n2. EXPEED 6 (e.g. Z30): Setup Menu → Connect to computer → Network settings → Create profile → Search for Wi-Fi network\n3. EXPEED 7 (e.g. Z6III): Network Menu → Connect to computer → Network settings → Create profile → Search for Wi-Fi network\n4. On the camera, select the same Wi-Fi as the phone and enter its password; choose “Obtain automatically” for IP, then press OK when configuration is complete\n5. Once the camera enters the pairing screen, tap “Connect Camera” in the app</string>
+    <string name="tip_sta_first_connection">First connection</string>
+    <string name="tip_sta_quick_start">Quick access next time</string>
+    <string name="tip_sta_steps">1. Enable your phone hotspot\n2. On the camera: Setup Menu/Network Menu → Connect to computer → Network settings → Create profile → Search for Wi-Fi network\n3. Select the phone hotspot and enter its password; choose “Obtain automatically” for IP\n4. When the IP address configuration is complete, press OK to open the pairing screen\n5. Tap “Connect Camera” in the app</string>
 
     <!-- File list -->
     <string name="loading_file_list">Loading file list…</string>
