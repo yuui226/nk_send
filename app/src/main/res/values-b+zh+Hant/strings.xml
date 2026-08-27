@@ -58,7 +58,7 @@
     <string name="tip_sta_title">STA 連線</string>
     <string name="tip_sta_first_connection">首次連線</string>
     <string name="tip_sta_quick_start">後續快速開啟</string>
-    <string name="tip_sta_steps">1. 手機開啟熱點\n2. 相機：設定選單/網路選單 → 連接至電腦 → 網路設定 → 建立設定檔 → 搜尋 Wi-Fi 網路\n3. 選擇手機熱點並輸入密碼，IP 選擇「自動獲得」\n4. IP 位址設定完成後，按 OK 進入「正在配對」畫面\n5. 在 App 中點擊「連接相機」</string>
+    <string name="tip_sta_steps">1. 手機開啟熱點（熱點名稱使用英文；5 GHz 更快，相機找不到則改用 2.4 GHz）\n2. 相機：設定選單/網路選單 → 連接至電腦 → 網路設定 → 建立設定檔 → 搜尋 Wi-Fi 網路\n3. 選擇手機熱點並輸入密碼，IP 選擇「自動獲得」\n4. IP 位址設定完成後，按 OK 進入「正在配對」畫面\n5. 在 App 中點擊「連接相機」</string>
 
     <!-- 檔案清單 -->
     <string name="loading_file_list">正在取得檔案清單…</string>

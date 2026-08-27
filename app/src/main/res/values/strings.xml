@@ -58,7 +58,7 @@
     <string name="tip_sta_title">STA connection</string>
     <string name="tip_sta_first_connection">First connection</string>
     <string name="tip_sta_quick_start">Quick access next time</string>
-    <string name="tip_sta_steps">1. Enable your phone hotspot\n2. On the camera: Setup Menu/Network Menu → Connect to computer → Network settings → Create profile → Search for Wi-Fi network\n3. Select the phone hotspot and enter its password; choose “Obtain automatically” for IP\n4. When the IP address configuration is complete, press OK to open the pairing screen\n5. Tap “Connect Camera” in the app</string>
+    <string name="tip_sta_steps">1. Enable the phone hotspot (use an English name; prefer 5 GHz for speed, or use 2.4 GHz if the camera cannot find it)\n2. On the camera: Setup Menu/Network Menu → Connect to computer → Network settings → Create profile → Search for Wi-Fi network\n3. Select the phone hotspot and enter its password; choose “Obtain automatically” for IP\n4. When the IP address configuration is complete, press OK to open the pairing screen\n5. Tap “Connect Camera” in the app</string>
 
     <!-- File list -->
     <string name="loading_file_list">Loading file list…</string>
