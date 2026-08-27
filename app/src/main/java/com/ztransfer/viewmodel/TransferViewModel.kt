@@ -1821,10 +1821,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun addNewMediaToQueue(
         files: List<NikonCamera.FileInfo>,
         cameraProvider: () -> NikonCamera?,
-    ) {
+    ): List<NikonCamera.FileInfo> {
         val snapshot = _state.value
-        if (!snapshot.autoTransferNewMedia || snapshot.transferDirUri == null) return
-        if (cameraProvider() == null) return
+        if (!snapshot.autoTransferNewMedia || snapshot.transferDirUri == null) return emptyList()
+        if (cameraProvider() == null) return emptyList()
         val queued = snapshot.tasks.asSequence()
             .mapTo(HashSet()) { it.file.autoTransferIdentity() }
         val candidates = files.asSequence()
@@ -1832,6 +1832,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             .filterNot { it.autoTransferIdentity() in queued }
             .toList()
         if (candidates.isNotEmpty()) addToQueue(candidates, cameraProvider)
+        return candidates
     }
 
     private fun prewarmPhotoFilterFor(tasks: Collection<TransferTask>) {

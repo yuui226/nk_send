@@ -305,9 +305,9 @@ internal fun PhotoPreviewOverlay(
     queueTargetBounds: Rect? = null,
     onQueueFlightCaught: () -> Unit = {},
     // 把当前预览文件加入传输队列（父层只负责目录/连接校验与入队；动画留在本层）。
-    onTransfer: (NikonCamera.FileInfo) -> Unit = {},
-    // 合集页整组入队；预览没有列表格子锚点，因此只执行入队，不播放错误起点的飞行动画。
-    onTransferBurst: (List<NikonCamera.FileInfo>) -> Unit = {},
+    onTransfer: (NikonCamera.FileInfo) -> Boolean = { false },
+    // 合集页整组入队；动画在本层复用当前合集叠片，不借用被遮住的列表坐标。
+    onTransferBurst: (List<NikonCamera.FileInfo>) -> Boolean = { false },
     // 预览内主动展开/收起合集时同步底层列表，关闭预览后两处状态一致。
     onBurstExpandedChange: (String, Boolean) -> Unit = { _, _ -> },
     // 每次旋转后回传归一化方向，父层写入全局偏好。
@@ -400,6 +400,7 @@ internal fun PhotoPreviewOverlay(
     val queueSwipeTriggerPx = with(density) { PREVIEW_QUEUE_SWIPE_TRIGGER_DP.dp.toPx() }
     val queueThrowApexPx = with(density) { 132.dp.toPx() }
     val currentOnTransfer by rememberUpdatedState(onTransfer)
+    val currentOnTransferBurst by rememberUpdatedState(onTransferBurst)
     val currentQueueTargetBounds by rememberUpdatedState(queueTargetBounds)
     val currentOnQueueFlightCaught by rememberUpdatedState(onQueueFlightCaught)
     val histogramSource = currentHandle?.let(displayedBitmaps::get)
@@ -427,6 +428,9 @@ internal fun PhotoPreviewOverlay(
     var queueOffsetY by remember { mutableFloatStateOf(0f) }
     var queueFlightProgress by remember { mutableFloatStateOf(0f) }
     var queueFlightBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var queueFlightBurstFiles by remember {
+        mutableStateOf<List<NikonCamera.FileInfo>?>(null)
+    }
     var queueFlightRotation by remember { mutableFloatStateOf(0f) }
     var queueFlightTarget by remember { mutableStateOf<Rect?>(null) }
     var queueMotionJob by remember { mutableStateOf<Job?>(null) }
@@ -457,21 +461,25 @@ internal fun PhotoPreviewOverlay(
         }
     }
 
-    fun enqueueFromPreview(file: NikonCamera.FileInfo) {
+    fun startPreviewQueueFlight(
+        bitmap: ImageBitmap?,
+        rotation: Float,
+        burstFiles: List<NikonCamera.FileInfo>? = null,
+        enqueue: () -> Boolean,
+    ) {
         if (queueAnimating || closing) return
+        // 父层先完成目录/连接校验并确认真实入队；被拒绝时不抬图、不放残影、
+        // 不触发胶囊接收，避免视觉反馈与实际队列相矛盾。
+        if (!enqueue()) return
         queueMotionJob?.cancel()
         queueGestureActive = false
         queueAnimating = true
         queueFlightProgress = 0f
-        queueFlightRotation = rotationDegrees
+        queueFlightRotation = rotation
         queueFlightTarget = currentQueueTargetBounds
-        // FHD 已经在屏幕上时直接复用；否则复用打开预览所用的缓存缩略图。
-        // 先挂载 alpha=0 的影子并预留两帧，再开始飞行，避免首次绘制纹理闪现。
-        queueFlightBitmap = highResolutionBitmaps[file.handle]
-            ?: cameraViewModel.cachedThumbnail(file.handle)
+        queueFlightBitmap = bitmap
+        queueFlightBurstFiles = burstFiles
 
-        // 动画表示“已执行入队动作”；最终成功/失败继续由现有队列任务体现。
-        currentOnTransfer(file)
         queueMotionJob = previewScope.launch {
             try {
                 // 极少数设备的 Compose 帧钟可能暂停；超时只兜底复位视觉状态，
@@ -493,7 +501,9 @@ internal fun PhotoPreviewOverlay(
                             ) { queueOffsetY = value }
                         }
                         launch {
-                            if (queueFlightBitmap != null && queueFlightTarget != null) {
+                            if ((queueFlightBitmap != null || queueFlightBurstFiles != null) &&
+                                queueFlightTarget != null
+                            ) {
                                 delay(PREVIEW_QUEUE_GHOST_PREROLL_MS)
                                 Animatable(0f).animateTo(
                                     targetValue = 1f,
@@ -512,6 +522,7 @@ internal fun PhotoPreviewOverlay(
                 queueOffsetY = 0f
                 queueFlightProgress = 0f
                 queueFlightBitmap = null
+                queueFlightBurstFiles = null
                 queueFlightTarget = null
                 queueAnimating = false
                 queueMotionJob = null
@@ -519,12 +530,34 @@ internal fun PhotoPreviewOverlay(
         }
     }
 
-    LaunchedEffect(currentHandle) {
+    fun enqueueFromPreview(file: NikonCamera.FileInfo) {
+        // FHD 已经在屏幕上时直接复用；否则复用打开预览所用的缓存缩略图。
+        // 先挂载 alpha=0 的影子并预留两帧，再开始飞行，避免首次绘制纹理闪现。
+        val bitmap = highResolutionBitmaps[file.handle]
+            ?: cameraViewModel.cachedThumbnail(file.handle)
+        startPreviewQueueFlight(bitmap, rotationDegrees) {
+            currentOnTransfer(file)
+        }
+    }
+
+    fun enqueueBurstFromPreview(collection: PhotoPreviewItem.BurstCollection) {
+        if (collection.files.isEmpty()) return
+        startPreviewQueueFlight(
+            bitmap = null,
+            rotation = 0f,
+            burstFiles = collection.files,
+        ) {
+            currentOnTransferBurst(collection.files)
+        }
+    }
+
+    LaunchedEffect(currentItem?.key) {
         // 翻页时绝不把上一张尚未结束的拖动/影子带到新页。
         queueMotionJob?.cancel()
         queueOffsetY = 0f
         queueFlightProgress = 0f
         queueFlightBitmap = null
+        queueFlightBurstFiles = null
         queueFlightTarget = null
         queueGestureActive = false
         queueAnimating = false
@@ -1110,18 +1143,16 @@ internal fun PhotoPreviewOverlay(
                         val ey = if (rootBounds != null && targetBounds != null) {
                             targetBounds.center.y - rootBounds.top
                         } else sy
-                        val dx = abs(ex - sx)
-                        val lift = (0.35f * dx + 36.dp.toPx()).coerceAtMost(90.dp.toPx())
-                        val cy = max(
-                            min(sy, ey) - lift,
-                            (4f * 12.dp.toPx() - sy - ey) / 2f,
+                        val flightCenter = queueFlightBezierPoint(
+                            progress = p,
+                            start = Offset(sx, sy),
+                            end = Offset(ex, ey),
+                            liftBasePx = 36.dp.toPx(),
+                            maxLiftPx = 90.dp.toPx(),
+                            minApexYPx = 12.dp.toPx(),
+                            maxBowPx = 52.dp.toPx(),
+                            bowFadeDistancePx = 160.dp.toPx(),
                         )
-                        val bow = 52.dp.toPx() *
-                            (1f - (dx / 160.dp.toPx()).coerceAtMost(1f))
-                        val cx = (sx + ex) / 2f - bow
-                        val mt = 1f - p
-                        val centerX = mt * mt * sx + 2f * mt * p * cx + p * p * ex
-                        val centerY = mt * mt * sy + 2f * mt * p * cy + p * p * ey
 
                         val appear = (p / 0.12f).coerceAtMost(1f)
                         // 起飞时仍能认出当前照片，抵达时收拢到胶囊内部的小卡片尺度。
@@ -1134,14 +1165,24 @@ internal fun PhotoPreviewOverlay(
                         transformOrigin = TransformOrigin.Center
                         scaleX = flightScale
                         scaleY = flightScale
-                        translationX = centerX - sx
-                        translationY = centerY - sy
+                        translationX = flightCenter.x - sx
+                        translationY = flightCenter.y - sy
                         rotationZ = queueFlightRotation + 2.2f * arc
                         // 和列表一致，只在最后 6% 贴着胶囊消失；接收回弹紧随其后。
                         alpha = appear *
                             (if (p > 0.94f) (1f - p) / 0.06f else 1f) *
                             0.82f * progress.value
                     },
+            )
+        }
+        queueFlightBurstFiles?.let { files ->
+            PreviewBurstQueueFlightGhost(
+                files = files,
+                cameraViewModel = cameraViewModel,
+                flightProgress = { queueFlightProgress },
+                targetBounds = queueFlightTarget,
+                overlayBounds = overlayBounds,
+                overlayAlpha = { progress.value },
             )
         }
 
@@ -1437,7 +1478,7 @@ internal fun PhotoPreviewOverlay(
                 ) {
                     TransferQueueButton(
                         onClick = {
-                            if (!burstTransitionBusy) onTransferBurst(item.files)
+                            if (!burstTransitionBusy) enqueueBurstFromPreview(item)
                         },
                         buttonSize = 48.dp
                     )
@@ -1593,60 +1634,146 @@ private fun BurstCollectionPreviewPage(
         contentAlignment = Alignment.Center
     ) {
         val stackSize = minOf(maxWidth * 0.72f, maxHeight * 0.46f, 360.dp)
-        Box(modifier = Modifier.size(stackSize)) {
-            val stackFiles = collection.files.take(3).reversed()
-            val stackInset = stackSize * 0.07f + 6.dp
-            val stackSpreadPx = with(LocalDensity.current) { 6.dp.toPx() }
-            stackFiles.forEachIndexed { index, file ->
-                val last = stackFiles.lastIndex
-                val rotation = when (stackFiles.size) {
-                    1 -> 0f
-                    2 -> if (index == 0) -5f else 3f
-                    else -> when (index) {
-                        0 -> -6f
-                        1 -> 5f
-                        else -> 0f
-                    }
-                }
-                val x = when {
-                    index == last -> 0.dp
-                    index % 2 == 0 -> (-12).dp
-                    else -> 12.dp
-                }
-                val spreadDirection = when {
-                    index == last -> 0f
-                    index % 2 == 0 -> -1f
-                    else -> 1f
-                }
-                BurstStackPhoto(
-                    file = file,
-                    cameraViewModel = cameraViewModel,
-                    transfersBusy = false,
-                    loadEnabled = loadEnabled,
-                    showPlaceholderIcon = index == last,
-                    modifier = Modifier
-                        .fillMaxSize(0.86f)
-                        .align(Alignment.Center)
-                        .offset(x = x, y = if (index == last) 2.dp else 5.dp)
-                        .graphicsLayer {
-                            val motion = stackMotionProgress().coerceIn(0f, 1f)
-                            rotationZ = rotation
-                            translationX = spreadDirection * stackSpreadPx * motion
-                            val motionScale = 1f + 0.012f * motion
-                            scaleX = motionScale
-                            scaleY = motionScale
-                        }
-                )
-            }
+        BurstCollectionStack(
+            files = collection.files,
+            cameraViewModel = cameraViewModel,
+            loadEnabled = loadEnabled,
+            stackSize = stackSize,
+            stackMotionProgress = stackMotionProgress,
+            modifier = Modifier.size(stackSize),
+        )
+    }
+}
 
-            BurstCollectionBadge(
-                count = collection.files.size,
-                iconSize = 16.dp,
+/**
+ * 合集预览与入队残影共用的叠片本体。残影只读已有缩略图缓存，绝不为了短动画新增相机请求。
+ */
+@Composable
+private fun BurstCollectionStack(
+    files: List<NikonCamera.FileInfo>,
+    cameraViewModel: CameraViewModel,
+    loadEnabled: Boolean,
+    stackSize: Dp,
+    stackMotionProgress: () -> Float = { 0f },
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier) {
+        val stackFiles = files.take(3).reversed()
+        val stackInset = stackSize * 0.07f + 6.dp
+        val stackSpreadPx = with(LocalDensity.current) { 6.dp.toPx() }
+        stackFiles.forEachIndexed { index, file ->
+            val last = stackFiles.lastIndex
+            val rotation = when (stackFiles.size) {
+                1 -> 0f
+                2 -> if (index == 0) -5f else 3f
+                else -> when (index) {
+                    0 -> -6f
+                    1 -> 5f
+                    else -> 0f
+                }
+            }
+            val x = when {
+                index == last -> 0.dp
+                index % 2 == 0 -> (-12).dp
+                else -> 12.dp
+            }
+            val spreadDirection = when {
+                index == last -> 0f
+                index % 2 == 0 -> -1f
+                else -> 1f
+            }
+            BurstStackPhoto(
+                file = file,
+                cameraViewModel = cameraViewModel,
+                transfersBusy = false,
+                loadEnabled = loadEnabled,
+                showPlaceholderIcon = index == last,
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .offset(x = stackInset, y = stackInset)
+                    .fillMaxSize(0.86f)
+                    .align(Alignment.Center)
+                    .offset(x = x, y = if (index == last) 2.dp else 5.dp)
+                    .graphicsLayer {
+                        val motion = stackMotionProgress().coerceIn(0f, 1f)
+                        rotationZ = rotation
+                        translationX = spreadDirection * stackSpreadPx * motion
+                        val motionScale = 1f + 0.012f * motion
+                        scaleX = motionScale
+                        scaleY = motionScale
+                    }
             )
         }
+
+        BurstCollectionBadge(
+            count = files.size,
+            iconSize = 16.dp,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .offset(x = stackInset, y = stackInset)
+        )
+    }
+}
+
+/** 当前合集叠片沿单张预览完全相同的弧线收进队列胶囊。 */
+@Composable
+private fun PreviewBurstQueueFlightGhost(
+    files: List<NikonCamera.FileInfo>,
+    cameraViewModel: CameraViewModel,
+    flightProgress: () -> Float,
+    targetBounds: Rect?,
+    overlayBounds: Rect?,
+    overlayAlpha: () -> Float,
+) {
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        val stackSize = minOf(maxWidth * 0.72f, maxHeight * 0.46f, 360.dp)
+        val viewportWidth = constraints.maxWidth.toFloat()
+        val viewportHeight = constraints.maxHeight.toFloat()
+        BurstCollectionStack(
+            files = files,
+            cameraViewModel = cameraViewModel,
+            // 影子必须只复用页面已经拿到的缓存，不能为 560ms 的反馈另启网络读取。
+            loadEnabled = false,
+            stackSize = stackSize,
+            modifier = Modifier
+                .size(stackSize)
+                .graphicsLayer {
+                    val p = flightProgress().coerceIn(0f, 1f)
+                    val sx = viewportWidth / 2f
+                    val sy = viewportHeight / 2f
+                    val ex = if (overlayBounds != null && targetBounds != null) {
+                        targetBounds.right - overlayBounds.left - 28.dp.toPx()
+                    } else sx
+                    val ey = if (overlayBounds != null && targetBounds != null) {
+                        targetBounds.center.y - overlayBounds.top
+                    } else sy
+                    val flightCenter = queueFlightBezierPoint(
+                        progress = p,
+                        start = Offset(sx, sy),
+                        end = Offset(ex, ey),
+                        liftBasePx = 36.dp.toPx(),
+                        maxLiftPx = 90.dp.toPx(),
+                        minApexYPx = 12.dp.toPx(),
+                        maxBowPx = 52.dp.toPx(),
+                        bowFadeDistancePx = 160.dp.toPx(),
+                    )
+                    val appear = (p / 0.12f).coerceAtMost(1f)
+                    val startScale = 0.82f
+                    val endScale = 18.dp.toPx() / size.maxDimension.coerceAtLeast(1f)
+                    val flightScale = startScale + (endScale - startScale) * p
+
+                    transformOrigin = TransformOrigin.Center
+                    scaleX = flightScale
+                    scaleY = flightScale
+                    translationX = flightCenter.x - sx
+                    translationY = flightCenter.y - sy
+                    rotationZ = 2.2f * sin(Math.PI * p).toFloat()
+                    alpha = appear *
+                        (if (p > 0.94f) (1f - p) / 0.06f else 1f) *
+                        0.86f * overlayAlpha()
+                },
+        )
     }
 }
 

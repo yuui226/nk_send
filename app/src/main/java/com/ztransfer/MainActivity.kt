@@ -50,7 +50,10 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -62,6 +65,7 @@ import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
+import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.update.AppUpdateHost
 import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.viewmodel.CameraViewModel
@@ -73,8 +77,10 @@ import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.WirelessMode
 import com.ztransfer.viewmodel.isTransferredOriginal
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
@@ -203,6 +209,7 @@ internal fun shouldPreferHighThroughputTransfers(route: String?): Boolean =
 @Composable
 private fun FilesQueueWorkspace(
     queueVisible: Boolean,
+    onFilesSettledChanged: (Boolean) -> Unit,
     filesContent: @Composable () -> Unit,
     queueContent: @Composable () -> Unit,
     queueTopContent: @Composable () -> Unit,
@@ -212,6 +219,16 @@ private fun FilesQueueWorkspace(
         targetState = queueVisible,
         label = "filesQueueTransition",
     )
+    val currentOnFilesSettledChanged by rememberUpdatedState(onFilesSettledChanged)
+    LaunchedEffect(transition) {
+        snapshotFlow {
+            !transition.isRunning &&
+                !transition.currentState &&
+                !transition.targetState
+        }
+            .distinctUntilChanged()
+            .collect { settled -> currentOnFilesSettledChanged(settled) }
+    }
     val topControlsProgress = transition.animateFloat(
         transitionSpec = {
             if (targetState) {
@@ -282,6 +299,30 @@ private fun FilesQueueWorkspace(
             }
         }
     }
+}
+
+/** Navigation Compose 会在目的地转场真正结束后才把当前条目推进到 RESUMED。 */
+@Composable
+private fun rememberBackStackEntryResumed(entry: NavBackStackEntry?): Boolean {
+    var resumed by remember(entry) {
+        mutableStateOf(entry?.lifecycle?.currentState == Lifecycle.State.RESUMED)
+    }
+    DisposableEffect(entry) {
+        val lifecycle = entry?.lifecycle
+        if (lifecycle == null) {
+            resumed = false
+            onDispose { }
+        } else {
+            fun update() {
+                resumed = lifecycle.currentState == Lifecycle.State.RESUMED
+            }
+            val observer = LifecycleEventObserver { _, _ -> update() }
+            lifecycle.addObserver(observer)
+            update()
+            onDispose { lifecycle.removeObserver(observer) }
+        }
+    }
+    return resumed
 }
 
 private data class MainCameraUiState(
@@ -533,6 +574,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 因此已经开始的文件也不会中途换道。
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStackEntry?.destination?.route
+    val currentDestinationResumed = rememberBackStackEntryResumed(currentBackStackEntry)
     var queuePageVisible by rememberSaveable { mutableStateOf(false) }
     val activeWorkspaceRoute = if (
         currentRoute == Screen.Files.route && queuePageVisible
@@ -579,6 +621,56 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     var queueCatchNonce by remember { mutableLongStateOf(0L) }
     var filePreviewVisible by remember { mutableStateOf(false) }
     var queueControlActionNonce by remember { mutableLongStateOf(0L) }
+    val autoQueueFlightRequests = remember { mutableStateListOf<AutoQueueFlightRequest>() }
+    // 照片页不可见期间只在可变 Map 中 O(1) 累积；恢复可见时才一次性生成动画快照。
+    // 不能每来一批都复制此前的 List，监看页长时间间隔拍摄会退化成 O(n²)。
+    val pendingAutoQueueFiles = remember {
+        LinkedHashMap<NikonCamera, LinkedHashMap<Int, NikonCamera.FileInfo>>()
+    }
+    var nextAutoQueueFlightId by remember { mutableLongStateOf(0L) }
+    var filesWorkspaceSettled by remember { mutableStateOf(false) }
+    val autoQueueFlightSurfaceReady = currentRoute == Screen.Files.route &&
+        currentDestinationResumed && filesWorkspaceSettled &&
+        !queuePageVisible && !filePreviewVisible
+    val latestAutoQueueFlightSurfaceReady by rememberUpdatedState(
+        autoQueueFlightSurfaceReady
+    )
+
+    fun publishAutoQueueFlight(
+        camera: NikonCamera,
+        files: List<NikonCamera.FileInfo>,
+    ) {
+        if (files.isEmpty()) return
+        autoQueueFlightRequests += AutoQueueFlightRequest(
+            id = nextAutoQueueFlightId++,
+            camera = camera,
+            files = files,
+        )
+    }
+
+    // 页面被预览/队列遮住时，把尚未起飞的快照也收回 Map；这样临界两帧内刚发布的
+    // 请求会和遮挡期间的新照片继续合并，回来仍然只飞一摞。
+    // 返回照片页或关闭预览后只快照一次；同一批文件随后由 FileListScreen 精确消费。
+    LaunchedEffect(autoQueueFlightSurfaceReady) {
+        if (!autoQueueFlightSurfaceReady) {
+            autoQueueFlightRequests.forEach { request ->
+                val pending = pendingAutoQueueFiles.getOrPut(
+                    request.camera,
+                    ::LinkedHashMap,
+                )
+                request.files.forEach { pending[it.handle] = it }
+            }
+            autoQueueFlightRequests.clear()
+            return@LaunchedEffect
+        }
+        if (pendingAutoQueueFiles.isNotEmpty()) {
+            val batches = pendingAutoQueueFiles.map { (camera, files) ->
+                camera to files.values.toList()
+            }
+            pendingAutoQueueFiles.clear()
+            batches.forEach { (camera, files) -> publishAutoQueueFlight(camera, files) }
+        }
+    }
 
     // 只把真实运行中的队列喂给相机 VM。待传模式下的 WAITING 只是静止清单，不能让
     // 相机缩略图/大图通道误以为传输繁忙，否则“先选完再开始”的价值会被抵消。
@@ -593,11 +685,43 @@ fun MainScreen(transferViewModel: TransferViewModel) {
         cameraViewModel.setThumbnailPriorityRange(transferState.filterDateRange)
     }
 
-    // 相机新增事件由共同宿主承接，与当前停留页面无关；开关关闭时传输 VM 静默忽略。
+    // 相机新增事件由共同宿主承接，与当前停留页面无关；只有真正被自动入口接纳的文件
+    // 才生成视觉事件。短时间连续到达会合成一摞；照片页不可见时继续合并，回来只播一次，
+    // 不让监看连拍在返回后逐张刷动画。
     LaunchedEffect(cameraViewModel, transferViewModel) {
+        val stagedFiles = LinkedHashMap<NikonCamera, LinkedHashMap<Int, NikonCamera.FileInfo>>()
+        var flushJob: Job? = null
         cameraViewModel.newMediaFiles.collect { event ->
             if (cameraViewModel.getCamera() === event.camera) {
-                transferViewModel.addNewMediaToQueue(event.files, cameraViewModel::getCamera)
+                val accepted = transferViewModel.addNewMediaToQueue(
+                    event.files,
+                    cameraViewModel::getCamera,
+                )
+                if (accepted.isNotEmpty()) {
+                    val cameraFiles = stagedFiles.getOrPut(event.camera, ::LinkedHashMap)
+                    accepted.forEach { cameraFiles[it.handle] = it }
+                    flushJob?.cancel()
+                    flushJob = launch {
+                        delay(AUTO_QUEUE_FLIGHT_COALESCE_MS)
+                        val batches = stagedFiles.map { (camera, files) ->
+                            camera to files.values.toList()
+                        }
+                        stagedFiles.clear()
+                        if (batches.isEmpty()) return@launch
+
+                        batches.forEach { (camera, batch) ->
+                            if (latestAutoQueueFlightSurfaceReady) {
+                                publishAutoQueueFlight(camera, batch)
+                            } else {
+                                val pending = pendingAutoQueueFiles.getOrPut(
+                                    camera,
+                                    ::LinkedHashMap,
+                                )
+                                batch.forEach { pending[it.handle] = it }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -670,6 +794,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                 ) {
                     FilesQueueWorkspace(
                         queueVisible = queuePageVisible,
+                        onFilesSettledChanged = { filesWorkspaceSettled = it },
                         filesContent = {
                             FileListScreen(
                                 cameraViewModel = cameraViewModel,
@@ -686,6 +811,14 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                                     queueHeldCount = (queueHeldCount - count).coerceAtLeast(0)
                                 },
                                 onQueueFlightCaught = { queueCatchNonce++ },
+                                autoQueueFlightRequest = autoQueueFlightRequests.firstOrNull()
+                                    .takeIf { autoQueueFlightSurfaceReady },
+                                onAutoQueueFlightConsumed = { requestId ->
+                                    val index = autoQueueFlightRequests.indexOfFirst {
+                                        it.id == requestId
+                                    }
+                                    if (index >= 0) autoQueueFlightRequests.removeAt(index)
+                                },
                                 onPreviewVisibilityChanged = { filePreviewVisible = it },
                                 backHandlerEnabled = !queuePageVisible,
                                 onNavigateToRemote = {
@@ -747,3 +880,5 @@ fun MainScreen(transferViewModel: TransferViewModel) {
         )
     }
 }
+
+private const val AUTO_QUEUE_FLIGHT_COALESCE_MS = 220L

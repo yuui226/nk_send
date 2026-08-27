@@ -157,6 +157,31 @@ data class FileGroup(
     val files: List<NikonCamera.FileInfo>
 )
 
+/** 已由自动传输入口接纳、等待照片页播放一次入队反馈的文件批次。 */
+data class AutoQueueFlightRequest(
+    val id: Long,
+    val camera: NikonCamera,
+    val files: List<NikonCamera.FileInfo>,
+)
+
+internal fun burstCollectionGridKey(id: String): String = "burst_collection_$id"
+
+/** 只从当前真实可见的普通格位或折叠合集格位选择自动入队动画起点。 */
+internal fun resolveAutoQueueFlightSource(
+    files: List<NikonCamera.FileInfo>,
+    visibleKeys: Set<Any>,
+    cellBoundsByHandle: Map<Int, Rect>,
+    burstBoundsById: Map<String, Rect>,
+    burstIdByHandle: Map<Int, String>,
+): Rect? = files.firstNotNullOfOrNull { file ->
+    cellBoundsByHandle[file.handle]?.takeIf { file.handle in visibleKeys }
+        ?: burstIdByHandle[file.handle]?.let { burstId ->
+            burstBoundsById[burstId]?.takeIf {
+                burstCollectionGridKey(burstId) in visibleKeys
+            }
+        }
+}
+
 /** 照片页正文只观察会改变其内容或交互的相机状态，避免 RSSI 等顶栏更新重组网格。 */
 internal data class FileListCameraUiState(
     val isConnectedToCamera: Boolean,
@@ -269,7 +294,7 @@ internal sealed interface ThumbnailGridItem {
         val id: String,
         val files: List<NikonCamera.FileInfo>
     ) : ThumbnailGridItem {
-        override val key: Any = "burst_collection_$id"
+        override val key: Any = burstCollectionGridKey(id)
     }
 }
 
@@ -467,6 +492,8 @@ fun FileListScreen(
     onQueueFlightFinished: (Int) -> Unit,
     onQueueFlightsCancelled: (Int) -> Unit,
     onQueueFlightCaught: () -> Unit,
+    autoQueueFlightRequest: AutoQueueFlightRequest? = null,
+    onAutoQueueFlightConsumed: (Long) -> Unit = {},
     onPreviewVisibilityChanged: (Boolean) -> Unit,
     backHandlerEnabled: Boolean,
     onNavigateToRemote: () -> Unit
@@ -497,10 +524,16 @@ fun FileListScreen(
     // 由照片页与传输页共同的顶部队列控件持有，切页不会重建胶囊。
     val queueFlights = remember { mutableStateListOf<QueueFlight>() }
     var nextFlightId by remember { mutableStateOf(0L) }
+    // 根坐标每次布局直接写普通容器；只有首次可用时发布一次状态，避免页面滑动转场期间
+    // boundsInRoot 的位置变化反复重组整张照片页。
+    val pageBoundsRef = remember { arrayOfNulls<Rect>(1) }
+    var pageLayoutReady by remember { mutableStateOf(false) }
     val latestQueueFlightsCancelled by rememberUpdatedState(onQueueFlightsCancelled)
     DisposableEffect(queueFlights) {
         onDispose {
-            val abandonedCount = queueFlights.sumOf(QueueFlight::count)
+            val abandonedCount = queueFlights.sumOf { flight ->
+                if (flight.holdsQueueCount) flight.count else 0
+            }
             if (abandonedCount > 0) latestQueueFlightsCancelled(abandonedCount)
         }
     }
@@ -508,6 +541,9 @@ fun FileListScreen(
     // 顺手写进注册表,零额外监听)。普通 HashMap 而非快照状态:只在点击瞬间读取,
     // 滚动期间的高频写入不触发任何重组；格子离开组合时主动删除，容量只随组合项数量增长。
     val cellBoundsRegistry = remember { HashMap<Int, Rect>() }
+    // 折叠连拍是虚拟格位，没有单个 handle 的 ThumbnailCell；单独按稳定 burst id 记录，
+    // 自动传输才能在合集确实可见时从合集本身起飞，而不是误用“屏外新增”的顶部起点。
+    val burstBoundsRegistry = remember { HashMap<String, Rect>() }
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
     var showFilter by remember { mutableStateOf(false) }
     var filterAnchor by remember { mutableStateOf<Rect?>(null) }
@@ -901,6 +937,57 @@ fun FileListScreen(
     // 突然指向下一张，末尾项还会直接让 overlay 消失。快照保证当次浏览稳定，
     // 关闭后底下列表已是最新筛选结果。
     var previewItems by remember { mutableStateOf<List<PhotoPreviewItem>>(emptyList()) }
+
+    // 自动传输已经在共同宿主完成真实入队，这里只补视觉反馈：若新文件正在视口内，
+    // 从它的真实格位起飞；否则从列表顶部边缘凝聚出来。绝不擅自滚回顶部，也不押扣
+    // 已经实时变化的队列数字。预览或队列页挡在上层时请求留在宿主，等照片页可见再消费。
+    LaunchedEffect(
+        autoQueueFlightRequest?.id,
+        previewIndex,
+        queueTargetBounds,
+        pageLayoutReady,
+    ) {
+        val request = autoQueueFlightRequest ?: return@LaunchedEffect
+        if (cameraViewModel.getCamera() !== request.camera) {
+            // 切换相机后旧批次仍留在真实队列，但不能伪装成从新相机的照片列表飞出。
+            onAutoQueueFlightConsumed(request.id)
+            return@LaunchedEffect
+        }
+        if (previewIndex != null || queueTargetBounds == null || !pageLayoutReady) {
+            return@LaunchedEffect
+        }
+        // CameraViewModel 先发布文件列表再发新增事件；再让出两帧，给新格位完成测量。
+        withFrameNanos { }
+        withFrameNanos { }
+        val visibleKeys = gridState.layoutInfo.visibleItemsInfo
+            .mapTo(HashSet()) { it.key }
+        val visibleSource = resolveAutoQueueFlightSource(
+            files = request.files,
+            visibleKeys = visibleKeys,
+            cellBoundsByHandle = cellBoundsRegistry,
+            burstBoundsById = burstBoundsRegistry,
+            burstIdByHandle = burstIdByHandle,
+        )
+        val root = pageBoundsRef[0] ?: return@LaunchedEffect
+        val originSize = with(previewDensity) { 44.dp.toPx() }
+        val topEdgeSource = Rect(
+            left = root.center.x - originSize / 2f,
+            top = root.top + with(previewDensity) { (topInset + 62.dp).toPx() },
+            right = root.center.x + originSize / 2f,
+            bottom = root.top + with(previewDensity) { (topInset + 62.dp).toPx() } + originSize,
+        )
+        queueFlights += QueueFlight(
+            id = nextFlightId++,
+            from = visibleSource ?: topEdgeSource,
+            packs = emptyList(),
+            count = request.files.size,
+            topThumb = request.files.firstNotNullOfOrNull { file ->
+                cameraViewModel.cachedThumbnail(file.handle)
+            },
+            holdsQueueCount = false,
+        )
+        onAutoQueueFlightConsumed(request.id)
+    }
     val buildPreviewSnapshot: (Set<String>) -> List<PhotoPreviewItem> = { expandedIds ->
         groups.flatMap { group ->
             buildThumbnailGridItems(
@@ -981,7 +1068,7 @@ fun FileListScreen(
     }
     // 单文件入队共用同一套前置检查与任务创建；只有动画按操作来源分流：列表继续
     // QueueFlight，预览页由自己的上滑投递动画反馈，不能隔着遮罩再飞一次底层格子。
-    val enqueueSingleFile: (NikonCamera.FileInfo, Boolean) -> Unit =
+    val enqueueSingleFile: (NikonCamera.FileInfo, Boolean) -> Boolean =
         enqueueSingleFile@{ file, animateFromList ->
             if (transferState.transferDirUri == null) {
                 // 预览层盖在设置面板之上，先关掉预览再弹设置，否则用户看不见。
@@ -989,11 +1076,12 @@ fun FileListScreen(
                 previewItems = emptyList()
                 previewSourceAtOpen = null
                 requestTransferDirectory()
-                return@enqueueSingleFile
+                return@enqueueSingleFile false
             }
             if (!state.isConnectedToCamera && !hasLocalOriginal(file)) {
                 signalPulse++
                 showHint(notConnectedHint)
+                false
             } else {
                 haptics.tick()
                 transferViewModel.addToQueue(listOf(file), cameraViewModel::getCamera)
@@ -1011,34 +1099,36 @@ fun FileListScreen(
                         onQueueFlightStarted(1)
                     }
                 }
+                true
             }
         }
     val onTapFile: (NikonCamera.FileInfo) -> Unit = { file ->
         enqueueSingleFile(file, true)
     }
-    val onTransferFromPreview: (NikonCamera.FileInfo) -> Unit = { file ->
+    val onTransferFromPreview: (NikonCamera.FileInfo) -> Boolean = { file ->
         enqueueSingleFile(file, false)
     }
 
-    val onTransferBurstPreview: (List<NikonCamera.FileInfo>) -> Unit =
+    val onTransferBurstPreview: (List<NikonCamera.FileInfo>) -> Boolean =
         onTransferBurstPreview@{ files ->
             val remaining = files
-            if (remaining.isEmpty()) return@onTransferBurstPreview
+            if (remaining.isEmpty()) return@onTransferBurstPreview false
             if (transferState.transferDirUri == null) {
                 updatePreviewIndex(null)
                 previewItems = emptyList()
                 previewSourceAtOpen = null
                 requestTransferDirectory()
-                return@onTransferBurstPreview
+                return@onTransferBurstPreview false
             }
             if (!state.isConnectedToCamera && remaining.any { !hasLocalOriginal(it) }) {
                 signalPulse++
                 showHint(notConnectedHint)
-                return@onTransferBurstPreview
+                return@onTransferBurstPreview false
             }
-            // 全屏合集没有可信的列表坐标，不伪造飞行动画起点；整组只震一次、直接入队。
+            // 整组只震一次；返回 true 后由预览层复用当前合集叠片播放入队动画。
             haptics.tick()
             transferViewModel.addToQueue(remaining, cameraViewModel::getCamera)
+            true
         }
 
     // 关闭预览前把当前照片放回视野。很远时先在全黑预览层后无感预定位到相邻几行，
@@ -1122,7 +1212,15 @@ fun FileListScreen(
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
     // 与 Scaffold 共用全局背景刷（浅色纯色/深色微渐变）。
     // 遥控页入口是左下角圆钮（曾试过横滑手势进入，误触率高已去掉）。
-    Box(modifier = Modifier.fillMaxSize().background(rememberAppBackgroundBrush())) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(rememberAppBackgroundBrush())
+            .onGloballyPositioned {
+                pageBoundsRef[0] = it.boundsInRoot()
+                if (!pageLayoutReady) pageLayoutReady = true
+            }
+    ) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
         if (state.isLoadingFiles && state.files.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1345,6 +1443,7 @@ fun FileListScreen(
                 onPreviewBurst = onPreviewBurst,
                 tapToPreview = transferState.tapToPreview,
                 cellBoundsRegistry = cellBoundsRegistry,
+                burstBoundsRegistry = burstBoundsRegistry,
                 burstHandles = burstHandles,
                 burstIdByHandle = burstIdByHandle,
                 collapseBurstPhotos = transferState.collapseBurstPhotos,
@@ -1690,7 +1789,11 @@ fun FileListScreen(
                     target = queueTargetBounds,
                     onDone = {
                         queueFlights.remove(flight)
-                        onQueueFlightFinished(flight.count)
+                        if (flight.holdsQueueCount) {
+                            onQueueFlightFinished(flight.count)
+                        } else {
+                            onQueueFlightCaught()
+                        }
                     }
                 )
             }
@@ -2840,6 +2943,7 @@ private fun ThumbnailGrid(
     onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit,
     tapToPreview: Boolean,
     cellBoundsRegistry: MutableMap<Int, Rect>,
+    burstBoundsRegistry: MutableMap<String, Rect>,
     burstHandles: Set<Int>,
     burstIdByHandle: Map<Int, String>,
     collapseBurstPhotos: Boolean,
@@ -3100,6 +3204,7 @@ private fun ThumbnailGrid(
                             is ThumbnailGridItem.BurstCollection -> {
                                 val expanded = expandedBursts[item.id] == true
                                 BurstCollectionCell(
+                                    collectionId = item.id,
                                     files = item.files,
                                     expanded = expanded,
                                     transfersBusy = transfersBusy,
@@ -3109,6 +3214,10 @@ private fun ThumbnailGrid(
                                     onToggle = { toggleBurstCollection(item.id) },
                                     onPreviewFirst = { rect ->
                                         onPreviewBurst(item.id, item.files, rect)
+                                    },
+                                    onBoundsChanged = { bounds ->
+                                        if (bounds == null) burstBoundsRegistry.remove(item.id)
+                                        else burstBoundsRegistry[item.id] = bounds
                                     },
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -3174,6 +3283,7 @@ private fun ThumbnailGrid(
 
 @Composable
 private fun BurstCollectionCell(
+    collectionId: String,
     files: List<NikonCamera.FileInfo>,
     expanded: Boolean,
     transfersBusy: Boolean,
@@ -3182,13 +3292,22 @@ private fun BurstCollectionCell(
     onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
     onToggle: () -> Unit,
     onPreviewFirst: (Rect) -> Unit,
+    onBoundsChanged: (Rect?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
     val a11y = stringResource(R.string.burst_collection_a11y, files.size)
-    var plusBounds by remember { mutableStateOf<Rect?>(null) }
-    var collectionBounds by remember { mutableStateOf<Rect?>(null) }
+    // 两个坐标都只在点击/长按瞬间读取，使用普通容器避免列表滚动时的全局坐标变化
+    // 触发合集卡重组。合集 registry 同样是普通 Map，更新本身不使网格重组。
+    val plusBoundsRef = remember { arrayOfNulls<Rect>(1) }
+    val collectionBoundsRef = remember { arrayOfNulls<Rect>(1) }
     val latestOnPreviewFirst by rememberUpdatedState(onPreviewFirst)
+    val latestOnBoundsChanged by rememberUpdatedState(onBoundsChanged)
+    DisposableEffect(collectionId) {
+        // LazyGrid 可复用同 contentType 的组合槽；以真实 id 为 key，复用到下一合集前
+        // 先精确清掉旧 id 的坐标，避免普通 HashMap 留下不可见的历史项。
+        onDispose { onBoundsChanged(null) }
+    }
     val chevronRotation by animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(240, easing = FastOutSlowInEasing),
@@ -3200,7 +3319,10 @@ private fun BurstCollectionCell(
             .onGloballyPositioned {
                 if (it.isAttached) {
                     val bounds = it.boundsInRoot()
-                    if (bounds.width > 0f && bounds.height > 0f) collectionBounds = bounds
+                    if (bounds.width > 0f && bounds.height > 0f) {
+                        collectionBoundsRef[0] = bounds
+                        latestOnBoundsChanged(bounds)
+                    }
                 }
             }
             .semantics { contentDescription = a11y }
@@ -3281,7 +3403,7 @@ private fun BurstCollectionCell(
                         onLongPress = {
                             // 长按只建立“合集 + 成员”的预览快照并直达第一张；底层列表不在
                             // 预览出现前重排，从而不会短暂闪出展开成员或箭头旋转。
-                            collectionBounds?.let(latestOnPreviewFirst)
+                            collectionBoundsRef[0]?.let(latestOnPreviewFirst)
                         }
                     )
                 }
@@ -3298,7 +3420,7 @@ private fun BurstCollectionCell(
         // 用户指定的位置：左下整组入队，右下展开/收起。按钮直接复用全局 GlassButton；
         // 只有在 4 列极窄格子下按比例缩小，避免两颗触点互相覆盖。
         GlassButton(
-            onClick = { onTransferGroup(files, plusBounds) },
+            onClick = { onTransferGroup(files, plusBoundsRef[0]) },
             enabled = files.isNotEmpty(),
             shape = CircleShape,
             contentPadding = PaddingValues(0.dp),
@@ -3311,7 +3433,9 @@ private fun BurstCollectionCell(
                 .onGloballyPositioned {
                     if (it.isAttached) {
                         val bounds = it.boundsInRoot()
-                        if (bounds.width > 0f && bounds.height > 0f) plusBounds = bounds
+                        if (bounds.width > 0f && bounds.height > 0f) {
+                            plusBoundsRef[0] = bounds
+                        }
                     }
                 }
         ) {
@@ -4538,7 +4662,8 @@ private data class QueueFlight(
     val from: Rect,
     val packs: List<PackSoul>,
     val count: Int,
-    val topThumb: ImageBitmap?
+    val topThumb: ImageBitmap?,
+    val holdsQueueCount: Boolean = true,
 )
 
 // 打包幕最多放飞的缩略图残影数(超出按均匀间隔抽样,视觉密度足够又不糊成一团)。
@@ -4556,6 +4681,35 @@ internal val ProtectBadgeColor = Color(0xFFFFC107)
 // "吸入"节奏:前段缓(残影凝聚成形、离巢慢),后段陡(加速俯冲进胶囊)——
 // 到达时带着冲量,与胶囊的"接住"弹跳在动量上衔接。
 internal val QueueFlightEasing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.35f)
+
+/** 列表、单张预览与合集预览共用的入队弧线；只接收像素参数，不持有任何 Compose 状态。 */
+internal fun queueFlightBezierPoint(
+    progress: Float,
+    start: Offset,
+    end: Offset,
+    liftBasePx: Float,
+    maxLiftPx: Float,
+    minApexYPx: Float,
+    maxBowPx: Float,
+    bowFadeDistancePx: Float,
+): Offset {
+    val t = progress.coerceIn(0f, 1f)
+    val dx = abs(end.x - start.x)
+    val lift = (0.35f * dx + liftBasePx).coerceAtMost(maxLiftPx)
+    val controlY = maxOf(
+        minOf(start.y, end.y) - lift,
+        (4f * minApexYPx - start.y - end.y) / 2f,
+    )
+    val bow = maxBowPx * (1f - (dx / bowFadeDistancePx).coerceAtMost(1f))
+    val controlX = (start.x + end.x) / 2f - bow
+    val remaining = 1f - t
+    return Offset(
+        x = remaining * remaining * start.x +
+            2f * remaining * t * controlX + t * t * end.x,
+        y = remaining * remaining * start.y +
+            2f * remaining * t * controlY + t * t * end.y,
+    )
+}
 
 /**
  * "打包 → 吸入"两幕连播:
@@ -4656,17 +4810,19 @@ private fun QueueFlightGhost(flight: QueueFlight, target: Rect?, onDone: () -> U
                 // 落点：胶囊容器右缘向内 28dp、垂直居中（即常驻胶囊身上）。
                 val ex = (target?.right ?: sx) - 28.dp.toPx()
                 val ey = target?.center?.y ?: sy
-                val dx = abs(ex - sx)
-                // 弧高随行程自适应(短程小弧、长程大弧,上限 90dp);
-                // 控制点下界钳制峰值 y ≥ 12dp:峰值 = (sy + 2·cy + ey)/4,不飞出屏幕顶。
-                val lift = (0.35f * dx + 36.dp.toPx()).coerceAtMost(90.dp.toPx())
-                val cy = maxOf(minOf(sy, ey) - lift, (4f * 12.dp.toPx() - sy - ey) / 2f)
-                // 水平行程 < 160dp 时控制点向左偏(行程越小偏得越多,至多 52dp)。
-                val bow = 52.dp.toPx() * (1f - (dx / 160.dp.toPx()).coerceAtMost(1f))
-                val cx = (sx + ex) / 2f - bow
-                val mt = 1f - t
-                translationX = mt * mt * sx + 2f * mt * t * cx + t * t * ex - size.width / 2f
-                translationY = mt * mt * sy + 2f * mt * t * cy + t * t * ey - size.height / 2f
+                // 弧高随行程自适应；短横程额外向左弯，且峰值不会飞出状态栏。
+                val point = queueFlightBezierPoint(
+                    progress = t,
+                    start = Offset(sx, sy),
+                    end = Offset(ex, ey),
+                    liftBasePx = 36.dp.toPx(),
+                    maxLiftPx = 90.dp.toPx(),
+                    minApexYPx = 12.dp.toPx(),
+                    maxBowPx = 52.dp.toPx(),
+                    bowFadeDistancePx = 160.dp.toPx(),
+                )
+                translationX = point.x - size.width / 2f
+                translationY = point.y - size.height / 2f
                 // 出场"凝聚"微弹(0.7→1,占前 12% 行程,配合缓起的 easing 约有 200ms 成形感),
                 // 随后一路收拢缩小。淡出窗口必须极窄(最后 6% 行程):它按路径参数走,
                 // 长路径(从屏幕下方点单张)上稍宽的窗口就意味着残影在离胶囊几百像素的
