@@ -112,7 +112,7 @@ private enum class StaCandidateConnectionResult {
 }
 
 internal fun restoredWirelessMode(value: String?): WirelessMode =
-    runCatching { WirelessMode.valueOf(value.orEmpty()) }.getOrDefault(WirelessMode.AP)
+    runCatching { WirelessMode.valueOf(value.orEmpty()) }.getOrDefault(WirelessMode.STA)
 
 internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStatus = when (error) {
     is CameraRefusedException -> WifiConnectionStatus.REFUSED
@@ -396,7 +396,7 @@ data class CameraState(
     val isConnecting: Boolean = false,
     val connectionType: CameraConnectionType? = null,
     /** Persisted user choice for wireless discovery; unknown/legacy preferences fall back to AP. */
-    val wirelessMode: WirelessMode = WirelessMode.AP,
+    val wirelessMode: WirelessMode = WirelessMode.STA,
     /** True when the active/most recent Wi-Fi session was reached through STA discovery. */
     val isStaConnection: Boolean = false,
     val staConnectionStatus: StaConnectionStatus = StaConnectionStatus.IDLE,

@@ -13,11 +13,11 @@ import org.junit.Test
 
 class StaConnectionIsolationTest {
     @Test
-    fun staStateIsCompletelyInactiveByDefault() {
+    fun staConnectionRemainsInactiveWhenStaIsTheDefaultMode() {
         val state = CameraState()
 
         assertFalse(state.isStaConnection)
-        assertTrue(state.wirelessMode == WirelessMode.AP)
+        assertTrue(state.wirelessMode == WirelessMode.STA)
         assertTrue(state.staConnectionStatus == StaConnectionStatus.IDLE)
         assertTrue(state.staDiscoveryProgress == null)
         assertTrue(state.staConnectionError == null)
@@ -128,9 +128,9 @@ class StaConnectionIsolationTest {
     }
 
     @Test
-    fun savedWirelessModeIsRestoredAndUnknownValuesFallBackToAp() {
-        assertEquals(WirelessMode.AP, restoredWirelessMode(null))
-        assertEquals(WirelessMode.AP, restoredWirelessMode("unknown"))
+    fun savedWirelessModeIsRestoredAndUnknownValuesFallBackToSta() {
+        assertEquals(WirelessMode.STA, restoredWirelessMode(null))
+        assertEquals(WirelessMode.STA, restoredWirelessMode("unknown"))
         assertEquals(WirelessMode.AP, restoredWirelessMode("AP"))
         assertEquals(WirelessMode.STA, restoredWirelessMode("STA"))
     }

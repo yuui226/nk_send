@@ -4,7 +4,7 @@
     <string name="connection_wifi">Wi-Fi</string>
     <string name="connection_wifi_hotspot">相机热点</string>
     <string name="sta_step_phone_hotspot">相机连接到手机发起的热点</string>
-    <string name="sta_step_connect_camera">点击连接相机</string>
+    <string name="sta_step_connect_camera">点击 连接相机</string>
     <string name="sta_connect_action">连接相机</string>
     <string name="sta_hotspot_settings_short">热点设置</string>
     <string name="sta_reset_pairing">重置</string>

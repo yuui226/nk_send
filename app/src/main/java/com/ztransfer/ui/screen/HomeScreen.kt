@@ -868,8 +868,8 @@ private fun WifiModeTabs(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         listOf(
-            WirelessMode.AP to onSelectAp,
             WirelessMode.STA to onSelectSta,
+            WirelessMode.AP to onSelectAp,
         ).forEach { (mode, onClick) ->
             val selected = selectedMode == mode
             Box(
