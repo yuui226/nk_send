@@ -67,6 +67,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -273,6 +274,33 @@ fun HomeScreen(
         state.staConnectionStatus == StaConnectionStatus.CONNECTING ->
             StaConnectButtonState.CONNECTING
         else -> StaConnectButtonState.IDLE
+    }
+    val staConnectButtonLabels = StaConnectButtonState.entries.map { buttonState ->
+        stringResource(buttonState.labelRes)
+    }
+    val staConnectButtonTextStyle = MaterialTheme.typography.labelLarge.copy(
+        fontWeight = FontWeight.SemiBold,
+    )
+    val staConnectButtonTextMeasurer = rememberTextMeasurer(
+        cacheSize = StaConnectButtonState.entries.size,
+    )
+    val density = LocalDensity.current
+    val staConnectButtonLabelWidth = remember(
+        staConnectButtonLabels,
+        staConnectButtonTextStyle,
+        staConnectButtonTextMeasurer,
+        density,
+    ) {
+        with(density) {
+            staConnectButtonLabels.maxOf { label ->
+                staConnectButtonTextMeasurer.measure(
+                    text = label,
+                    style = staConnectButtonTextStyle,
+                    softWrap = false,
+                    maxLines = 1,
+                ).size.width
+            }.toDp() + 1.dp
+        }
     }
     val staFeedback = if (
         state.wirelessMode == WirelessMode.STA &&
@@ -584,35 +612,28 @@ fun HomeScreen(
                                             }
                                         }
                                         AnimatedContent(
-                                            targetState = staConnectButtonState.labelRes,
+                                            targetState = staConnectButtonState,
                                             transitionSpec = {
-                                                (
-                                                    fadeIn(
-                                                        tween(
-                                                            durationMillis = 180,
-                                                            easing = FastOutSlowInEasing,
-                                                        ),
-                                                    ) + slideInVertically(
-                                                        animationSpec = tween(
-                                                            durationMillis = 180,
-                                                            easing = FastOutSlowInEasing,
-                                                        ),
-                                                        initialOffsetY = { it / 3 },
-                                                    )
-                                                ) togetherWith (
-                                                    fadeOut(tween(110)) + slideOutVertically(
-                                                        animationSpec = tween(140),
-                                                        targetOffsetY = { -it / 3 },
-                                                    )
+                                                fadeIn(
+                                                    tween(
+                                                        durationMillis = 130,
+                                                        delayMillis = 35,
+                                                        easing = FastOutSlowInEasing,
+                                                    ),
+                                                ) togetherWith fadeOut(
+                                                    tween(
+                                                        durationMillis = 85,
+                                                        easing = FastOutSlowInEasing,
+                                                    ),
                                                 )
                                             },
                                             contentAlignment = Alignment.Center,
                                             label = "staConnectButtonText",
-                                        ) { labelRes ->
+                                            modifier = Modifier.width(staConnectButtonLabelWidth),
+                                        ) { buttonState ->
                                             Text(
-                                                text = stringResource(labelRes),
-                                                style = MaterialTheme.typography.labelLarge,
-                                                fontWeight = FontWeight.SemiBold,
+                                                text = staConnectButtonLabels[buttonState.ordinal],
+                                                style = staConnectButtonTextStyle,
                                                 color = staConnectTextColor,
                                                 maxLines = 1,
                                             )
