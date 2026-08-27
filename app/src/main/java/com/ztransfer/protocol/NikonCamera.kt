@@ -1592,7 +1592,7 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean = true,
         exploreAlbumAccess: Boolean = false,
         forceProfilePairing: Boolean = false,
-        onKnownCameraIdentified: (() -> Unit)? = null,
+        onConnectingStarted: (() -> Unit)? = null,
         onPairingStarted: (() -> Unit)? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -1665,7 +1665,6 @@ class NikonCamera(private val context: Context) {
             }
             val knownCameraProfile = responderGuid
                 ?.let(knownPairedResponderGuids::contains) == true
-            if (knownCameraProfile) onKnownCameraIdentified?.invoke()
 
             evtSocket = newSocket().apply {
                 soTimeout = STA_HANDSHAKE_TIMEOUT_MS
@@ -1711,6 +1710,7 @@ class NikonCamera(private val context: Context) {
                 exploreAlbumAccess = exploreAlbumAccess,
                 forceProfilePairing = forceProfilePairing,
                 knownCameraProfile = knownCameraProfile,
+                onConnectingStarted = onConnectingStarted,
                 onPairingStarted = onPairingStarted,
             )
             cmdSocket?.soTimeout = SO_TIMEOUT_MS
@@ -4150,6 +4150,7 @@ class NikonCamera(private val context: Context) {
         exploreAlbumAccess: Boolean,
         forceProfilePairing: Boolean,
         knownCameraProfile: Boolean,
+        onConnectingStarted: (() -> Unit)?,
         onPairingStarted: (() -> Unit)?,
     ) {
         sendCmd(NIKON_COMPATIBILITY_INIT)
@@ -4191,6 +4192,7 @@ class NikonCamera(private val context: Context) {
         if (hasUsableStaAlbumStorage(storageResponse, initialStorageIds) &&
             !exploreAlbumAccess
         ) {
+            onConnectingStarted?.invoke()
             prefetchedStorageIds = initialStorageIds
             staAlbumAccessValidated = true
             staDiagnosticLines += "result=FULL_ALBUM_BASELINE"
@@ -4215,6 +4217,9 @@ class NikonCamera(private val context: Context) {
             markStaPairingCompleted()
             throw PairingCompletedException()
         }
+        // Only now has the camera proved that this session does not require pairing. Publishing
+        // CONNECTING earlier makes a stale app-side profile flash CONNECTING before PAIRING.
+        onConnectingStarted?.invoke()
 
         // Some paired/newer Nikon bodies expose application-mode switching. Probe it only on the
         // explicit STA compatibility path; AP and the normal successful STA album path never execute

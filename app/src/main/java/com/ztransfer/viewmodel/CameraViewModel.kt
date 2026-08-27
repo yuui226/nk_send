@@ -1953,7 +1953,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 allowPairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                onKnownCameraIdentified = {
+                onConnectingStarted = {
                     publishStaConnectingStarted(generation, ip)
                 },
                 onPairingStarted = { publishStaPairingStarted(generation, ip) },
@@ -2046,7 +2046,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 allowPairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                onKnownCameraIdentified = {
+                onConnectingStarted = {
                     publishStaConnectingStarted(generation, ip)
                 },
                 onPairingStarted = { publishStaPairingStarted(generation, ip) },
