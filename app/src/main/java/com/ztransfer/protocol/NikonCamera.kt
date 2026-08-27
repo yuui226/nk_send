@@ -487,7 +487,7 @@ internal fun staDirectCaptureDate(exifDate: String?): String? {
  * original-file prefix is intentionally truncated. Feeding this envelope to ExifInterface avoids
  * making it parse an incomplete image scan.
  */
-internal fun jpegExifEnvelope(header: ByteArray): ByteArray? {
+private fun jpegExifSegmentRange(header: ByteArray): IntRange? {
     if (header.size < 10 || header[0] != 0xFF.toByte() || header[1] != 0xD8.toByte()) return null
     var offset = 2
     while (offset + 4 <= header.size) {
@@ -514,19 +514,34 @@ internal fun jpegExifEnvelope(header: ByteArray): ByteArray? {
             header[payloadOffset + 4] == 0.toByte() &&
             header[payloadOffset + 5] == 0.toByte()
         if (isExif) {
-            val segmentBytes = segmentEnd - markerStart
-            return ByteArray(2 + segmentBytes + 2).also { envelope ->
-                envelope[0] = 0xFF.toByte()
-                envelope[1] = 0xD8.toByte()
-                header.copyInto(envelope, destinationOffset = 2, startIndex = markerStart, endIndex = segmentEnd)
-                envelope[envelope.lastIndex - 1] = 0xFF.toByte()
-                envelope[envelope.lastIndex] = 0xD9.toByte()
-            }
+            return markerStart until segmentEnd
         }
         offset = segmentEnd
     }
     return null
 }
+
+internal fun jpegExifEnvelope(header: ByteArray): ByteArray? {
+    val segment = jpegExifSegmentRange(header) ?: return null
+    val segmentBytes = segment.last - segment.first + 1
+    return ByteArray(2 + segmentBytes + 2).also { envelope ->
+        envelope[0] = 0xFF.toByte()
+        envelope[1] = 0xD8.toByte()
+        header.copyInto(
+            envelope,
+            destinationOffset = 2,
+            startIndex = segment.first,
+            endIndex = segment.last + 1,
+        )
+        envelope[envelope.lastIndex - 1] = 0xFF.toByte()
+        envelope[envelope.lastIndex] = 0xD9.toByte()
+    }
+}
+
+internal fun needsStaDirectJpegHeaderExpansion(
+    prefix: ByteArray,
+    maximumHeaderBytes: Int,
+): Boolean = prefix.size < maximumHeaderBytes && jpegExifSegmentRange(prefix) == null
 
 /** Bounded JPEG marker audit used to decide whether an independent MPF preview really exists. */
 internal fun jpegContainerDiagnostics(bytes: ByteArray): String {
@@ -1017,6 +1032,29 @@ internal fun staDirectVideoCaptureDate(bytes: ByteArray): String? {
 
 internal data class NefPreviewReference(val offset: Long, val length: Int)
 
+internal data class StaDirectRawThumbnailProbePlan(
+    val initialBytes: Int,
+    val maximumBytes: Int,
+)
+
+internal fun staDirectRawThumbnailProbePlan(
+    availableBytes: Long,
+    previousThumbnailBytes: Int,
+): StaDirectRawThumbnailProbePlan? {
+    if (availableBytes <= 0L) return null
+    val previous = previousThumbnailBytes.coerceAtLeast(0).toLong()
+    val maximum = minOf(
+        availableBytes,
+        maxOf(192L * 1024, previous + 64L * 1024),
+        Int.MAX_VALUE.toLong(),
+    ).toInt()
+    val initial = minOf(
+        maximum.toLong(),
+        maxOf(128L * 1024, previous + 16L * 1024),
+    ).toInt()
+    return StaDirectRawThumbnailProbePlan(initial, maximum)
+}
+
 /** Returns the exact range of the largest complete JPEG embedded in a bounded RAW prefix. */
 internal fun largestEmbeddedJpegRange(
     bytes: ByteArray,
@@ -1378,16 +1416,16 @@ class NikonCamera(private val context: Context) {
         private const val NIKON_CHANGE_APPLICATION_MODE = 0x9435
         private const val STA_SAMPLE_BYTES = 64 * 1024
         internal const val STA_DIRECT_CATALOG_HEADER_BYTES = 128 * 1024
+        internal const val STA_DIRECT_JPEG_THUMBNAIL_PREFIX_BYTES = 68 * 1024
         private const val STA_DIRECT_VIDEO_TAIL_BYTES = 256 * 1024
         private const val STA_DIRECT_VIDEO_THUMBNAIL_PREFIX_BYTES = 8 * 1024 * 1024
         private const val STA_DIRECT_RECENT_PREFIX_BYTES = 512 * 1024
         private const val STA_DIRECT_RECENT_PREFIX_COUNT = 4
         private const val STA_DIRECT_THUMBNAIL_CACHE_BYTES = 4 * 1024 * 1024
-        private const val STA_DIRECT_RAW_THUMBNAIL_HINT_MIN_BYTES = 192 * 1024
-        private const val STA_DIRECT_RAW_THUMBNAIL_HINT_MARGIN_BYTES = 64 * 1024
         private const val STA_DIRECT_RAW_FHD_MIN_BYTES = 512 * 1024
         private const val STA_DIRECT_RAW_FHD_MIN_LONG_EDGE = 1_600
         private val STA_DIRECT_RAW_PROBE_PREFIX_BYTES = intArrayOf(
+            240 * 1024,
             256 * 1024,
             512 * 1024,
             1024 * 1024,
@@ -2793,21 +2831,33 @@ class NikonCamera(private val context: Context) {
         handle: Int,
         preferredFileNumberAnchor: NikonFileNumberAnchor? = null,
         allowSessionFileNumberAnchor: Boolean = true,
+        requireJpegPreviewIndex: Boolean = false,
     ): StaDirectObjectHeader {
         val protocolFileName = readStaDirectOriginalFileNameInternal(handle)
         val size = staDirectFiles[handle]?.size?.takeIf { it > 0L }
             ?: getObjectSizeInternal(handle)
             ?: return StaDirectObjectHeader(null, null, false)
-        sendCmd(
-            PtpConstants.NK_GET_PARTIAL_OBJECT_EX,
-            handle,
-            0,
-            0,
-            STA_DIRECT_CATALOG_HEADER_BYTES,
-            0,
-        )
-        val (response, header) = recvRespWithPayload()
-        if (response != PtpConstants.RESPONSE_OK || header == null || header.isEmpty()) {
+        val maximumHeaderBytes = minOf(size, STA_DIRECT_CATALOG_HEADER_BYTES.toLong()).toInt()
+        val useShortJpegPrefix = !requireJpegPreviewIndex &&
+            staDirectExtensionFromHandle(handle) == ".jpg" &&
+            maximumHeaderBytes > STA_DIRECT_JPEG_THUMBNAIL_PREFIX_BYTES
+        val initialRequestBytes = if (useShortJpegPrefix) {
+            STA_DIRECT_JPEG_THUMBNAIL_PREFIX_BYTES
+        } else {
+            maximumHeaderBytes
+        }
+        val initialHeader = readStaDirectPrefixInternal(handle, initialRequestBytes)
+            ?: return StaDirectObjectHeader(null, null, false)
+        rememberStaDirectPrefix(handle, initialHeader)
+        val header = if (useShortJpegPrefix &&
+            needsStaDirectJpegHeaderExpansion(initialHeader, maximumHeaderBytes)
+        ) {
+            readStaDirectPrefixInternal(handle, maximumHeaderBytes)
+                ?: return StaDirectObjectHeader(null, null, false)
+        } else {
+            initialHeader
+        }
+        if (header.isEmpty()) {
             return StaDirectObjectHeader(null, null, false)
         }
         rememberStaDirectPrefix(handle, header)
@@ -2891,8 +2941,7 @@ class NikonCamera(private val context: Context) {
                 val exifResult = parseStaDirectExif(envelope ?: header, isRaw = false)
                 captureDate = exifResult.captureDate ?: captureDate
                 thumbnail = exifResult.thumbnail
-                staDirectMetadataDiagnostics.putIfAbsent(
-                    "jpeg",
+                val diagnostic =
                     ("direct JPEG handle=0x%08X header=%dB envelope=%dB container=%s mpf=%s " +
                         "fileInfo=%s date=%s thumbnail=%dB error=%s").format(
                         handle,
@@ -2912,8 +2961,13 @@ class NikonCamera(private val context: Context) {
                         captureDate ?: "<none>",
                         thumbnail?.size ?: 0,
                         exifResult.error ?: "<none>",
-                    ),
-                )
+                    )
+                if (requireJpegPreviewIndex) {
+                    // Replace the earlier short-prefix report once preview opens and completes MPF.
+                    staDirectMetadataDiagnostics["jpeg"] = diagnostic
+                } else {
+                    staDirectMetadataDiagnostics.putIfAbsent("jpeg", diagnostic)
+                }
             }
             ".nef" -> {
                 val rawMetadata = parseNefHeaderMetadata(header)
@@ -2998,6 +3052,17 @@ class NikonCamera(private val context: Context) {
         )
     }
 
+    /** Reuses a retained session prefix and asks the camera only for the still-missing suffix. */
+    private fun readStaDirectPrefixInternal(handle: Int, targetBytes: Int): ByteArray? {
+        if (targetBytes <= 0) return null
+        val retained = staDirectRecentHeaders[handle]
+        if (retained != null && retained.size >= targetBytes) return retained
+        val offset = retained?.size ?: 0
+        val missing = targetBytes - offset
+        val chunk = readStaDirectPartialInternal(handle, offset.toLong(), missing) ?: return null
+        return if (retained == null) chunk else retained + chunk
+    }
+
     private data class StaDirectExifResult(
         val captureDate: String?,
         val thumbnail: ByteArray?,
@@ -3056,7 +3121,10 @@ class NikonCamera(private val context: Context) {
     /** Must be called while [ioMutex] is held; reads only an MPF-indexed secondary JPEG. */
     private fun readStaDirectJpegMpfPreviewInternal(handle: Int): ByteArray? {
         if (staDirectJpegMpfPreviews[handle].isNullOrEmpty()) {
-            cacheStaDirectObjectHeader(handle, readStaDirectObjectHeaderInternal(handle))
+            cacheStaDirectObjectHeader(
+                handle,
+                readStaDirectObjectHeaderInternal(handle, requireJpegPreviewIndex = true),
+            )
         }
         val references = staDirectJpegMpfPreviews[handle].orEmpty()
         if (references.isEmpty()) {
@@ -3150,20 +3218,34 @@ class NikonCamera(private val context: Context) {
         // size variation; a missing SOI/EOI simply falls through to the proven prefix parser.
         staDirectRawThumbnailHint?.let { hint ->
             val available = file.size - hint.offset
-            if (hint.offset >= 0L && available > 0L) {
-                val target = minOf(
-                    available,
-                    maxOf(
-                        STA_DIRECT_RAW_THUMBNAIL_HINT_MIN_BYTES,
-                        hint.length + STA_DIRECT_RAW_THUMBNAIL_HINT_MARGIN_BYTES,
-                    ).toLong(),
-                ).toInt()
-                val chunk = readStaDirectPartialInternal(
+            val plan = if (hint.offset >= 0L) {
+                staDirectRawThumbnailProbePlan(available, hint.length)
+            } else {
+                null
+            }
+            if (plan != null) {
+                var chunk = readStaDirectPartialInternal(
                     handle = file.handle,
                     offset = hint.offset,
-                    maxSize = target,
+                    maxSize = plan.initialBytes,
                 )
-                val localReference = chunk?.let { bytes -> largestEmbeddedJpegRange(bytes) }
+                val probeSteps = ArrayList<Int>(2)
+                if (chunk != null) probeSteps += chunk.size
+                var localReference = chunk?.let(::largestEmbeddedJpegRange)
+                if (chunk != null && localReference == null &&
+                    chunk.size < plan.maximumBytes
+                ) {
+                    val tail = readStaDirectPartialInternal(
+                        handle = file.handle,
+                        offset = hint.offset + chunk.size,
+                        maxSize = plan.maximumBytes - chunk.size,
+                    )
+                    if (tail != null) {
+                        chunk += tail
+                        probeSteps += chunk.size
+                        localReference = largestEmbeddedJpegRange(chunk)
+                    }
+                }
                 if (chunk != null && localReference != null) {
                     val result = chunk.copyOfRange(
                         localReference.offset.toInt(),
@@ -3178,11 +3260,11 @@ class NikonCamera(private val context: Context) {
                     if (PhotoGenerationProbe.enabled) {
                         PhotoGenerationProbe.note(
                             "STA-THUMB",
-                            ("RAW handle=0x%08X source=hint probeBytes=%d range=%d+%d " +
+                            ("RAW handle=0x%08X source=hint probeSteps=%s range=%d+%d " +
                                 "thumbnail=%dB").format(
-                                    file.handle,
-                                    chunk.size,
-                                    absoluteReference.offset,
+                                file.handle,
+                                probeSteps.joinToString(","),
+                                absoluteReference.offset,
                                     absoluteReference.length,
                                     result.size,
                                 ),

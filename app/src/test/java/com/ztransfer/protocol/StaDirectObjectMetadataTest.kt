@@ -42,6 +42,11 @@ class StaDirectObjectMetadataTest {
         assertEquals(0xFF.toByte(), envelope[envelope.lastIndex - 1])
         assertEquals(0xD9.toByte(), envelope[envelope.lastIndex])
         assertNull(jpegExifEnvelope(source.copyOf(source.size - 5)))
+        assertEquals(false, needsStaDirectJpegHeaderExpansion(source, source.size + 64))
+        assertEquals(
+            true,
+            needsStaDirectJpegHeaderExpansion(source.copyOf(source.size - 5), source.size + 64),
+        )
     }
 
     @Test
@@ -107,6 +112,32 @@ class StaDirectObjectMetadataTest {
 
         assertEquals(large.toList(), largestEmbeddedJpeg(raw)?.toList())
         assertNull(largestEmbeddedJpeg(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 2)))
+    }
+
+    @Test
+    fun rawThumbnailHintStartsSmallAndRetainsTheProvenFallbackBudget() {
+        assertEquals(
+            StaDirectRawThumbnailProbePlan(initialBytes = 149_498, maximumBytes = 198_650),
+            staDirectRawThumbnailProbePlan(
+                availableBytes = 25_000_000L,
+                previousThumbnailBytes = 133_114,
+            ),
+        )
+        assertEquals(
+            StaDirectRawThumbnailProbePlan(initialBytes = 131_072, maximumBytes = 196_608),
+            staDirectRawThumbnailProbePlan(
+                availableBytes = 25_000_000L,
+                previousThumbnailBytes = 113_828,
+            ),
+        )
+        assertEquals(
+            StaDirectRawThumbnailProbePlan(initialBytes = 100_000, maximumBytes = 100_000),
+            staDirectRawThumbnailProbePlan(
+                availableBytes = 100_000L,
+                previousThumbnailBytes = 133_114,
+            ),
+        )
+        assertNull(staDirectRawThumbnailProbePlan(0L, 133_114))
     }
 
     @Test
