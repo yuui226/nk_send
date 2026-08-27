@@ -252,12 +252,14 @@ fun HomeScreen(
             body = null,
             accent = colors.accentBlue,
             busy = true,
+            multiline = true,
         )
         state.staConnectionStatus == StaConnectionStatus.CONNECTING -> ConnectionCardFeedback(
             title = stringResource(R.string.sta_status_connecting),
             body = null,
             accent = colors.accentBlue,
             busy = true,
+            multiline = true,
         )
         state.staConnectionStatus == StaConnectionStatus.FAILED -> ConnectionCardFeedback(
             title = stringResource(R.string.sta_camera_not_found_short),
@@ -386,6 +388,7 @@ fun HomeScreen(
                         } else {
                             staFeedback
                         },
+                        feedbackFollowsModeSelector = state.wirelessMode == WirelessMode.STA,
                         footer = {
                             if (state.wirelessMode == WirelessMode.AP) {
                                 Row(
@@ -758,6 +761,7 @@ private fun ConnectionMethodCard(
     error: String? = null,
     goldBurst: Boolean = false,
     feedback: ConnectionCardFeedback? = null,
+    feedbackFollowsModeSelector: Boolean = false,
     footer: (@Composable () -> Unit)? = null
 ) {
     val colors = AppTheme.colors
@@ -908,7 +912,12 @@ private fun ConnectionMethodCard(
                     Spacer(Modifier.height(if (modeSelector == null) 20.dp else 10.dp))
                     modeSelector?.let {
                         it()
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(
+                            Modifier.height(
+                                if (feedbackFollowsModeSelector && feedback != null) 4.dp
+                                else 12.dp,
+                            ),
+                        )
                     }
                     steps.forEachIndexed { index, text ->
                         ConnectionStep(index + 1, text, accent)
@@ -960,7 +969,9 @@ private fun ConnectionMethodCard(
                     ) { animatedFeedback ->
                         if (animatedFeedback != null) {
                             Column {
-                                Spacer(Modifier.height(12.dp))
+                                if (!feedbackFollowsModeSelector) {
+                                    Spacer(Modifier.height(12.dp))
+                                }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -986,23 +997,15 @@ private fun ConnectionMethodCard(
                                             fontWeight = FontWeight.Bold,
                                             color = animatedFeedback.accent,
                                             maxLines = if (animatedFeedback.multiline) 2 else 1,
-                                            overflow = if (animatedFeedback.multiline) {
-                                                TextOverflow.Clip
-                                            } else {
-                                                TextOverflow.Ellipsis
-                                            },
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                         animatedFeedback.body?.let { body ->
                                             Text(
                                                 text = body,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = colors.onSurfaceVariant,
-                                                maxLines = if (animatedFeedback.multiline) 4 else 1,
-                                                overflow = if (animatedFeedback.multiline) {
-                                                    TextOverflow.Clip
-                                                } else {
-                                                    TextOverflow.Ellipsis
-                                                },
+                                                maxLines = if (animatedFeedback.multiline) 3 else 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
                                     }

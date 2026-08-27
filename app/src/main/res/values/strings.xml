@@ -6,8 +6,8 @@
     <string name="sta_card_description">Connect through a phone hotspot or Wi-Fi router</string>
     <string name="sta_connect_action">Connect camera</string>
     <string name="sta_hotspot_settings_short">Hotspot</string>
-    <string name="sta_status_searching">Searching for a PTP/IP camera…</string>
-    <string name="sta_status_connecting">Connecting to camera…</string>
+    <string name="sta_status_searching">Searching for camera</string>
+    <string name="sta_status_connecting">Connecting to camera</string>
     <string name="sta_camera_not_found_short">Camera not found</string>
     <string name="sta_camera_not_found">No compatible camera found. Check the camera network profile and connection.</string>
     <string name="sta_camera_refused_repair">Camera refused the connection. Pair the camera again.</string>
