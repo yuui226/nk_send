@@ -76,7 +76,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -1383,7 +1385,7 @@ internal fun PhotoPreviewOverlay(
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = 12.dp)
                         .heightIn(min = 44.dp)
                         .padding(vertical = 24.dp)
                         .graphicsLayer {
@@ -1850,6 +1852,8 @@ private fun ExifMetadataBar(
         exif.focalLength,
     )
     if (parts.isEmpty()) return
+    val text = parts.joinToString("\u2009·\u2009")
+    val textMeasurer = rememberTextMeasurer(cacheSize = 4)
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = colors.glassSurfaceHeavy,
@@ -1857,13 +1861,38 @@ private fun ExifMetadataBar(
         border = BorderStroke(1.dp, colors.glassPanelBorder),
         modifier = modifier
     ) {
-        Text(
-            text = parts.joinToString("  ·  "),
-            style = MaterialTheme.typography.labelLarge,
-            color = colors.onBackground,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-        )
+        BoxWithConstraints {
+            val horizontalPadding = 14.dp
+            val availableWidthPx = with(LocalDensity.current) {
+                (maxWidth - horizontalPadding * 2).coerceAtLeast(0.dp).roundToPx()
+            }
+            val baseStyle = MaterialTheme.typography.labelLarge
+            val textStyle = remember(text, availableWidthPx, baseStyle) {
+                listOf(
+                    baseStyle,
+                    baseStyle.copy(fontSize = 13.sp, lineHeight = 18.sp),
+                    baseStyle.copy(fontSize = 12.sp, lineHeight = 17.sp),
+                    baseStyle.copy(fontSize = 11.sp, lineHeight = 16.sp),
+                ).firstOrNull { candidate ->
+                    textMeasurer.measure(
+                        text = AnnotatedString(text),
+                        style = candidate,
+                        maxLines = 1,
+                        softWrap = false,
+                    ).size.width <= availableWidthPx
+                } ?: baseStyle.copy(fontSize = 11.sp, lineHeight = 16.sp)
+            }
+            Text(
+                text = text,
+                style = textStyle,
+                color = colors.onBackground,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 10.dp),
+            )
+        }
     }
 }
 
