@@ -2496,7 +2496,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         lastHandleCatalogCheckAtMs = now
                         val synced = syncCameraHandleCatalog(cam)
                         if (catalogRequested && !synced) {
-                            log { "HANDLE_CATALOG event sync unavailable; keeping timed fallback" }
+                            // Keep event-driven deletion responsive after a transient DeviceBusy or
+                            // incomplete response. Do not wake immediately: the normal two-second
+                            // loop is the retry backoff and still yields to every foreground task.
+                            if (camera === cam) handleCatalogRequestedCamera = cam
+                            log { "HANDLE_CATALOG event sync unavailable; retry queued" }
                         }
                         if (camera !== cam || !_state.value.isConnectedToCamera) break
                     }
@@ -2542,11 +2546,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val storageIds = handleCatalogStorageIds
         if (storageIds.isEmpty()) return knownHandles.isEmpty()
         val currentHandles = LinkedHashSet<Int>()
-        for (storageId in storageIds) {
-            val queryStorageId = objectHandleQueryStorageId(
-                storageId = storageId,
-                isStaConnection = cam.staAlbumAccessValidated,
-            )
+        val queryStorageIds = storageIds.asSequence()
+            .map { storageId ->
+                objectHandleQueryStorageId(
+                    storageId = storageId,
+                    isStaConnection = cam.staAlbumAccessValidated,
+                )
+            }
+            .distinct()
+        for (queryStorageId in queryStorageIds) {
             val result = cam.getObjectHandlesWithStatus(queryStorageId)
             if (!result.successful) return false
             currentHandles += result.handles
@@ -2712,8 +2720,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             break
                         }
                         if (info != null) {
-                            pendingNewObjectHandles.remove(handle)
-                            publishNewCameraObject(cam, handle, info)
+                            // ObjectRemoved may have arrived while metadata was in flight. In that
+                            // case requestHandleCatalogSync already withdrew this pending entry;
+                            // never publish the late result back into the visible album.
+                            if (pendingNewObjectHandles.remove(handle) != null) {
+                                publishNewCameraObject(cam, handle, info)
+                            }
                             continue
                         }
 
@@ -3202,11 +3214,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     } else {
                         rawBatch
                     }
-                    batch.forEach { file -> indexedCameraFiles[file.handle] = file }
-                    activeSnapshot.markProcessed(batch.map { it.handle })
-                    if (FileOrderProbe.enabled && dynamicDualCardSchedule) {
-                        FileOrderProbe.appendScheduledHandles(batch.map { it.handle })
-                    }
                     val publishedSizeBeforeBatch = publishedFiles.size
                     val additions = ArrayList<NikonCamera.FileInfo>(batch.size)
                     val replacements = HashMap<Int, NikonCamera.FileInfo>()
@@ -3237,9 +3244,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     publishedFiles = publishedFiles.withBatch(replacements, additions)
                     val snapshot: List<NikonCamera.FileInfo> = publishedFiles
-                    // onBatch 回调运行在 IO 线程，用 update 原子读改写避免与主线程写入竞争。
-                    if (fileLoadGeneration == generation && camera === cam) {
-                        _state.update { it.copy(files = snapshot, isLoadingFiles = loaded < total) }
+                    // onBatch may run on the protocol IO dispatcher. Validate and publish on Main
+                    // as one non-suspending section: otherwise a replacement connection could
+                    // slip between the stale-session check and these session-global writes.
+                    val accepted = withContext(Dispatchers.Main.immediate) {
+                        if (fileLoadGeneration != generation || camera !== cam) {
+                            false
+                        } else {
+                            // A cancelled batch is not resumable until its rows are actually
+                            // published. Keep the snapshot marker in this same accepted section.
+                            activeSnapshot.markProcessed(batch.map { it.handle })
+                            batch.forEach { file -> indexedCameraFiles[file.handle] = file }
+                            _state.update {
+                                it.copy(files = snapshot, isLoadingFiles = loaded < total)
+                            }
+                            true
+                        }
+                    }
+                    if (accepted) {
+                        if (FileOrderProbe.enabled && dynamicDualCardSchedule) {
+                            FileOrderProbe.appendScheduledHandles(batch.map { it.handle })
+                        }
                         if (PhotoGenerationProbe.enabled && cam.staDirectObjectReadValidated) {
                             cam.staDirectMetadataDiagnosticReports.forEach { diagnostic ->
                                 if (reportedStaMetadataCamera === cam &&

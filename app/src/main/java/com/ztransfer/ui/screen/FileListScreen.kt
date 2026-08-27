@@ -450,6 +450,9 @@ private data class CollapsingGroup(val date: String, val keep: Int)
 private const val BURST_REFLOW_DURATION_MS = 300
 private const val BURST_MEMBER_ENTER_DURATION_MS = 180
 private const val BURST_MEMBER_EXIT_DURATION_MS = 150
+private const val CAMERA_REMOVAL_REFLOW_DURATION_MS = 280
+private const val CAMERA_REMOVAL_ENTER_DURATION_MS = 180
+private const val CAMERA_REMOVAL_EXIT_DURATION_MS = 160
 
 /**
  * 手风琴收合：按 [progress]（1→0）缩减条目报告给布局的高度（内容顶部对齐、超出裁掉），
@@ -483,6 +486,36 @@ fun groupFilesByDate(files: List<NikonCamera.FileInfo>): List<FileGroup> {
     }.sortedByDescending { it.date }
 }
 
+private data class PublishedCameraFileIdentity(
+    val fileName: String,
+    val size: Long,
+    val captureDate: String?,
+)
+
+private fun NikonCamera.FileInfo.publishedIdentity() = PublishedCameraFileIdentity(
+    fileName = fileName,
+    size = size,
+    captureDate = captureDate,
+)
+
+/** Dates whose logical camera photos disappeared in the latest authoritative update. */
+internal fun publishedCameraRemovalDates(
+    previous: List<NikonCamera.FileInfo>,
+    current: List<NikonCamera.FileInfo>,
+): Set<String> {
+    if (previous.isEmpty()) return emptySet()
+    val currentHandles = current.asSequence().mapTo(HashSet(current.size)) { it.handle }
+    val missingHandles = previous.filter { it.handle !in currentHandles }
+    if (missingHandles.isEmpty()) return emptySet()
+    // A dual-card backup can keep the same logical photo under its surviving alias handle. That is
+    // a session identity switch, not a visible deletion, and must not arm a grid exit animation.
+    val currentIdentities = current.asSequence()
+        .mapTo(HashSet(current.size)) { it.publishedIdentity() }
+    return missingHandles.asSequence()
+        .filter { it.publishedIdentity() !in currentIdentities }
+        .mapTo(LinkedHashSet()) { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
+}
+
 @Composable
 fun FileListScreen(
     cameraViewModel: CameraViewModel,
@@ -512,6 +545,54 @@ fun FileListScreen(
     }.collectAsStateWithLifecycle(
         initialValue = transferViewModel.state.value.toFileListTransferUiState(),
     )
+    // CameraState publishes authoritative removals immediately. The grid keeps its previous model
+    // for one frame only, so every existing animateItem node can arm before the new derived date /
+    // burst structure is submitted. No bitmap is copied and additions remain immediate.
+    var presentedCameraFiles by remember { mutableStateOf(state.files) }
+    var cameraRemovalReflowActive by remember { mutableStateOf(false) }
+    var cameraRemovalAffectedDates by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val cameraRemovalScope = rememberCoroutineScope()
+    val cameraRemovalEndJob = remember { arrayOfNulls<Job>(1) }
+    LaunchedEffect(
+        state.files,
+        state.isConnectedToCamera,
+        state.isLoadingFiles,
+        state.hasCompletedFileScan,
+    ) {
+        val target = state.files
+        val canAnimateRemoval = state.isConnectedToCamera &&
+            state.hasCompletedFileScan && !state.isLoadingFiles
+        val removedDates = if (canAnimateRemoval) {
+            publishedCameraRemovalDates(presentedCameraFiles, target)
+        } else {
+            emptySet()
+        }
+        if (removedDates.isNotEmpty()) {
+            cameraRemovalAffectedDates = cameraRemovalAffectedDates + removedDates
+            cameraRemovalReflowActive = true
+            // A newer removal owns the animation window immediately. Cancel the previous end timer
+            // before yielding a frame so it cannot clear the flags between arming and submission.
+            cameraRemovalEndJob[0]?.cancel()
+            cameraRemovalEndJob[0] = null
+            // The old keys must observe the exit/placement specs before the model drops them.
+            withFrameNanos { }
+            presentedCameraFiles = target
+            cameraRemovalEndJob[0] = cameraRemovalScope.launch {
+                delay((CAMERA_REMOVAL_REFLOW_DURATION_MS + 48).toLong())
+                cameraRemovalReflowActive = false
+                cameraRemovalAffectedDates = emptySet()
+                cameraRemovalEndJob[0] = null
+            }
+        } else {
+            presentedCameraFiles = target
+            if (!canAnimateRemoval) {
+                cameraRemovalEndJob[0]?.cancel()
+                cameraRemovalEndJob[0] = null
+                cameraRemovalReflowActive = false
+                cameraRemovalAffectedDates = emptySet()
+            }
+        }
+    }
     val colors = AppTheme.colors
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
@@ -552,7 +633,9 @@ fun FileListScreen(
     // 网格滚动状态提升到页面层供回顶按钮使用，但不能跨“列表被连接流程清空”保留。
     // 用空/非空作为状态槽身份：新连接的第一批照片会自然拿到全新的 0 位置状态；
     // 普通重组、继续分批加载以及离开子页面再返回都仍复用当前状态。
-    val gridState = key(state.files.isEmpty()) { rememberLazyGridState() }
+    val gridState = key(presentedCameraFiles.isEmpty() && !cameraRemovalReflowActive) {
+        rememberLazyGridState()
+    }
     val scrollScope = rememberCoroutineScope()
     val previewDensity = LocalDensity.current
     // 提升到页面层：关闭预览前需要用同一份折叠状态定位照片所在的真实 LazyGrid 下标。
@@ -766,15 +849,17 @@ fun FileListScreen(
         }
     }
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
-    val availableExts = remember(state.files) {
-        state.files.map { it.extension }.distinct().sorted()
+    val availableExts = remember(presentedCameraFiles) {
+        presentedCameraFiles.map { it.extension }.distinct().sorted()
     }
-    val latestKnownDate = remember(state.files) {
-        latestCaptureLocalDate(state.files.asSequence().map { it.captureDate })
+    val latestKnownDate = remember(presentedCameraFiles) {
+        latestCaptureLocalDate(presentedCameraFiles.asSequence().map { it.captureDate })
     }
     // 连拍检测基于原始列表，只在文件列表变化时重算。角标、筛选和合集都共享这一份
     // 结果，避免三个功能对“哪些照片属于连拍”产生分歧。
-    val burstGroups = remember(state.files) { computeBurstGroups(state.files) }
+    val burstGroups = remember(presentedCameraFiles) {
+        computeBurstGroups(presentedCameraFiles)
+    }
     val burstHandles = remember(burstGroups) {
         burstGroups.flatMapTo(HashSet()) { group -> group.files.map { it.handle } }
     }
@@ -788,13 +873,13 @@ fun FileListScreen(
     // 已传对号与“未传输”筛选必须共用这一个判定，避免界面同时出现
     // “带对号却仍在未传输列表”的自相矛盾。
     val exportedHandlesForFilter: Set<Int> = remember(
-        state.files,
+        presentedCameraFiles,
         transferState.existingExportRevision,
         transferState.organizeTransfersByDate,
         filterUntransferred,
     ) {
         exportedHandlesForUntransferredFilter(
-            files = state.files,
+            files = presentedCameraFiles,
             index = transferState.existingExportIndex,
             organizeTransfersByDate = transferState.organizeTransfersByDate,
             enabled = filterUntransferred,
@@ -864,11 +949,11 @@ fun FileListScreen(
     }
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
     val groups = remember(
-        state.files, filterExts, filterProtected, filterBurst, filterUntransferred,
+        presentedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
-        val files = state.files.asSequence()
+        val files = presentedCameraFiles.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
@@ -881,21 +966,47 @@ fun FileListScreen(
             .toList()
         groupFilesByDate(files)
     }
+    LaunchedEffect(presentedCameraFiles) {
+        // Filters temporarily hide complete date groups; that must not erase the user's collapsed
+        // choices. Only camera rows actually disappearing make a remembered date stale.
+        val validDates = presentedCameraFiles
+            .mapTo(HashSet()) { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
+        collapsedDates.keys
+            .filterNot { it in validDates }
+            .forEach(collapsedDates::remove)
+    }
     // 列表与预览共享同一份“合集是否展开”状态。预览页主动展开后，关闭预览仍能看到
     // 底层列表已展开；反之亦然。合集关闭设置时，模型退化为原来的纯照片序列。
     val expandedBurstCollections = remember { mutableStateMapOf<String, Boolean>() }
-    LaunchedEffect(transferState.collapseBurstPhotos, burstGroups) {
-        if (!transferState.collapseBurstPhotos) {
-            expandedBurstCollections.clear()
+    // Only burst-id reconciliation reads this history; a plain holder avoids a redundant
+    // recomposition after recording the latest groups.
+    val previousBurstGroups = remember { arrayOf(burstGroups) }
+    val requestedExpandedBurstIds = expandedBurstCollections.keys.toSet()
+    val expandedBurstIds = remember(
+        transferState.collapseBurstPhotos,
+        burstGroups,
+        requestedExpandedBurstIds,
+    ) {
+        if (transferState.collapseBurstPhotos) {
+            reconciledExpandedBurstIds(
+                previousGroups = previousBurstGroups[0],
+                currentGroups = burstGroups,
+                expandedIds = requestedExpandedBurstIds,
+            )
         } else {
-            val validIds = burstGroups.mapTo(HashSet()) { it.id }
-            expandedBurstCollections.keys
-                .filterNot { it in validIds }
-                .forEach(expandedBurstCollections::remove)
+            emptySet()
         }
     }
+    LaunchedEffect(transferState.collapseBurstPhotos, burstGroups, expandedBurstIds) {
+        expandedBurstCollections.keys
+            .filterNot { it in expandedBurstIds }
+            .forEach(expandedBurstCollections::remove)
+        expandedBurstIds
+            .filterNot { expandedBurstCollections[it] == true }
+            .forEach { id -> expandedBurstCollections[id] = true }
+        previousBurstGroups[0] = burstGroups
+    }
     // 该状态表只保存 true，收起时直接 remove；无需再构造 filterValues 视图。
-    val expandedBurstIds = expandedBurstCollections.keys.toSet()
     // 只用一个轻量身份对象追踪“底层展示模型是否还是打开预览时那一版”；真正的预览
     // 分页列表仅在长按发生时构建，避免每次连拍展开都为尚未打开的预览额外扫描全表。
     val previewSourceIdentity = remember(
@@ -1222,7 +1333,7 @@ fun FileListScreen(
             }
     ) {
         // ---------- 内容（铺满，延伸到系统栏后面）----------
-        if (state.isLoadingFiles && state.files.isEmpty()) {
+        if (state.isLoadingFiles && presentedCameraFiles.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator(color = colors.accentBlue)
@@ -1232,7 +1343,8 @@ fun FileListScreen(
             }
         }
 
-        if (!state.isLoadingFiles && state.files.isEmpty() &&
+        if (!state.isLoadingFiles && presentedCameraFiles.isEmpty() &&
+            !cameraRemovalReflowActive &&
             (state.hasCompletedFileScan || !state.isConnectedToCamera)
         ) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1332,7 +1444,7 @@ fun FileListScreen(
             }
         }
 
-        if (state.files.isNotEmpty()) {
+        if (presentedCameraFiles.isNotEmpty() || cameraRemovalReflowActive) {
             // 分组批量传输。gating 用响应式的 isConnectedToCamera；
             // 队列内部经 provider 现取当前相机实例，中途重连后续传任务自动用新连接。
             // 单文件入队见外层 enqueueSingleFile；这里仅处理日期整组。
@@ -1386,7 +1498,9 @@ fun FileListScreen(
             }
 
             // 筛选后无匹配：给出指认原因的空态（原始列表非空，只是被筛掉了）。
-            if (filterActive && groups.isEmpty() && state.hasCompletedFileScan) {
+            if (filterActive && groups.isEmpty() && state.hasCompletedFileScan &&
+                !cameraRemovalReflowActive
+            ) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         // 空态缓慢呼吸（与其余空态同参数）。
@@ -1454,6 +1568,8 @@ fun FileListScreen(
                 filterRevealWindow = filterRevealWindow,
                 exitingExportHandles = exitingExportHandles.keys,
                 exportReflowActive = exportReflowActive,
+                cameraRemovalReflowActive = cameraRemovalReflowActive,
+                cameraRemovalAffectedDates = cameraRemovalAffectedDates,
                 returnFocusHandle = previewReturnHandle,
                 returnFocusNonce = previewReturnNonce,
                 onExportExitFinished = { handle ->
@@ -2844,11 +2960,23 @@ private fun GroupHeader(
                     .rotate(chevron)
             )
             // 仅数字（去掉"张"），tnum 等宽，界面更简约
-            Text(
-                text = "${group.files.size}",
-                style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum"),
-                color = colors.onSurfaceVariant
-            )
+            AnimatedContent(
+                targetState = group.files.size,
+                transitionSpec = {
+                    (slideInVertically { it / 2 } + fadeIn(tween(140)))
+                        .togetherWith(slideOutVertically { -it / 2 } + fadeOut(tween(100)))
+                        .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() }))
+                },
+                label = "dateGroupCount",
+            ) { count ->
+                Text(
+                    text = "$count",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFeatureSettings = "tnum",
+                    ),
+                    color = colors.onSurfaceVariant,
+                )
+            }
         }
         Spacer(modifier = Modifier.weight(1f))
         // 整组传输始终允许再次加入；任务执行时分别检查原片和边框是否已经存在。
@@ -2921,6 +3049,35 @@ internal fun buildThumbnailGridItems(
     return result
 }
 
+/** Keeps an expanded burst expanded when camera-side deletion changes its derived collection id. */
+internal fun reconciledExpandedBurstIds(
+    previousGroups: List<BurstPhotoGroup>,
+    currentGroups: List<BurstPhotoGroup>,
+    expandedIds: Set<String>,
+): Set<String> {
+    if (expandedIds.isEmpty() || currentGroups.isEmpty()) return emptySet()
+    val currentIds = currentGroups.mapTo(HashSet(currentGroups.size)) { it.id }
+    val reconciled = expandedIds
+        .filterTo(LinkedHashSet()) { it in currentIds }
+    if (previousGroups == currentGroups) return reconciled
+    val previouslyExpandedGroups = previousGroups.filter { it.id in expandedIds }
+    if (previouslyExpandedGroups.isEmpty()) return reconciled
+
+    val successorIdsByFile = HashMap<PublishedCameraFileIdentity, MutableSet<String>>()
+    currentGroups.forEach { group ->
+        group.files.forEach { file ->
+            successorIdsByFile
+                .getOrPut(file.publishedIdentity()) { LinkedHashSet(1) }
+                .add(group.id)
+        }
+    }
+    previouslyExpandedGroups.asSequence()
+        .flatMap { it.files.asSequence() }
+        .mapNotNull { successorIdsByFile[it.publishedIdentity()] }
+        .forEach(reconciled::addAll)
+    return reconciled
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ThumbnailGrid(
@@ -2958,6 +3115,8 @@ private fun ThumbnailGrid(
     filterRevealWindow: Boolean = false,
     exitingExportHandles: Set<Int> = emptySet(),
     exportReflowActive: Boolean = false,
+    cameraRemovalReflowActive: Boolean = false,
+    cameraRemovalAffectedDates: Set<String> = emptySet(),
     returnFocusHandle: Int? = null,
     returnFocusNonce: Int = 0,
     onExportExitFinished: (Int) -> Unit = {}
@@ -3039,7 +3198,7 @@ private fun ThumbnailGrid(
     }
 
     val toggleBurstCollection: (String) -> Unit = { burstId ->
-        if (!burstAnimationBusy && collapsing == null) {
+        if (!burstAnimationBusy && collapsing == null && !cameraRemovalReflowActive) {
             burstAnimationBusy = true
             burstAnimationJob = burstScope.launch {
                 try {
@@ -3084,6 +3243,10 @@ private fun ThumbnailGrid(
             val collapsed = collapsedDates[group.date] == true
             val collapsingThis = collapsing?.date == group.date
             val groupItems = itemsByDate[group.date].orEmpty()
+            // Camera-side deletion only animates the date group that actually changed. Other date
+            // groups must not acquire per-cell placement work merely because an earlier group shrank.
+            val cameraRemovalAffectsGroup = cameraRemovalReflowActive &&
+                group.date in cameraRemovalAffectedDates
             // 所有既有格位——照片、合集、日期标题——严格共享同一个 placementSpec。
             // 空闲时传 null，但 animateItem 节点始终存在，不会因临时挂载 modifier 错帧。
             val placementSpec = when {
@@ -3091,6 +3254,10 @@ private fun ThumbnailGrid(
                 burstReflowActive -> tween<IntOffset>(
                     durationMillis = BURST_REFLOW_DURATION_MS,
                     easing = FastOutSlowInEasing
+                )
+                cameraRemovalAffectsGroup -> tween<IntOffset>(
+                    durationMillis = CAMERA_REMOVAL_REFLOW_DURATION_MS,
+                    easing = FastOutSlowInEasing,
                 )
                 exportReflowActive -> tween<IntOffset>(
                     durationMillis = 280,
@@ -3106,9 +3273,17 @@ private fun ThumbnailGrid(
             ) {
                 Column(
                     modifier = Modifier.animateItem(
-                        fadeInSpec = null,
+                        fadeInSpec = if (cameraRemovalAffectsGroup) {
+                            tween(CAMERA_REMOVAL_ENTER_DURATION_MS, easing = FastOutSlowInEasing)
+                        } else {
+                            null
+                        },
                         placementSpec = placementSpec,
-                        fadeOutSpec = null
+                        fadeOutSpec = if (cameraRemovalAffectsGroup) {
+                            tween(CAMERA_REMOVAL_EXIT_DURATION_MS, easing = FastOutSlowInEasing)
+                        } else {
+                            null
+                        },
                     )
                 ) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -3119,7 +3294,9 @@ private fun ThumbnailGrid(
                         onToggleCollapse = {
                             // 日期与连拍都在改变同一网格布局，任一收合进行中都忽略再次点击，
                             // 防止两套高度动画同帧竞争。
-                            if (collapsing == null && !burstAnimationBusy) {
+                            if (collapsing == null && !burstAnimationBusy &&
+                                !cameraRemovalReflowActive
+                            ) {
                                 if (collapsed) {
                                     // 展开：瞬时重排 + 该组格子级联入场。
                                     recentlyExpanded = group.date
@@ -3177,6 +3354,11 @@ private fun ThumbnailGrid(
                                         BURST_MEMBER_ENTER_DURATION_MS,
                                         easing = FastOutSlowInEasing
                                     )
+                                } else if (cameraRemovalAffectsGroup) {
+                                    tween(
+                                        CAMERA_REMOVAL_ENTER_DURATION_MS,
+                                        easing = FastOutSlowInEasing,
+                                    )
                                 } else {
                                     null
                                 },
@@ -3185,6 +3367,11 @@ private fun ThumbnailGrid(
                                     tween(
                                         BURST_MEMBER_EXIT_DURATION_MS,
                                         easing = FastOutSlowInEasing
+                                    )
+                                } else if (cameraRemovalAffectsGroup) {
+                                    tween(
+                                        CAMERA_REMOVAL_EXIT_DURATION_MS,
+                                        easing = FastOutSlowInEasing,
                                     )
                                 } else {
                                     null
@@ -3252,6 +3439,7 @@ private fun ThumbnailGrid(
                                     tapToPreview = tapToPreview,
                                     cellBoundsRegistry = cellBoundsRegistry,
                                     inBurst = file.handle in burstHandles,
+                                    animateBurstBadgeRemoval = cameraRemovalAffectsGroup,
                                     inExpandedBurstCollection =
                                         collapseBurstPhotos &&
                                             item.burstId != null &&
@@ -3343,37 +3531,52 @@ private fun BurstCollectionCell(
         } else {
             Color.Transparent
         }
-        val stackFiles = files.take(3).reversed()
-
-        stackFiles.forEachIndexed { index, file ->
-            val last = stackFiles.lastIndex
-            val rotation = when (stackFiles.size) {
-                1 -> 0f
-                2 -> if (index == 0) -5f else 3f
-                else -> when (index) {
-                    0 -> -6f
-                    1 -> 5f
-                    else -> 0f
+        AnimatedContent(
+            targetState = files,
+            // Only these three members are rendered in the stack. A deletion outside them should
+            // update the count without recomposing an identical old/new photo stack.
+            contentKey = { current -> current.take(3).map { it.publishedIdentity() } },
+            transitionSpec = {
+                fadeIn(tween(CAMERA_REMOVAL_ENTER_DURATION_MS)) togetherWith
+                    fadeOut(tween(CAMERA_REMOVAL_EXIT_DURATION_MS))
+            },
+            contentAlignment = Alignment.Center,
+            label = "burstCollectionFiles",
+            modifier = Modifier.fillMaxSize(),
+        ) { animatedFiles ->
+            Box(modifier = Modifier.fillMaxSize()) {
+                val stackFiles = animatedFiles.take(3).reversed()
+                stackFiles.forEachIndexed { index, file ->
+                    val last = stackFiles.lastIndex
+                    val rotation = when (stackFiles.size) {
+                        1 -> 0f
+                        2 -> if (index == 0) -5f else 3f
+                        else -> when (index) {
+                            0 -> -6f
+                            1 -> 5f
+                            else -> 0f
+                        }
+                    }
+                    val x = when {
+                        index == last -> 0.dp
+                        index % 2 == 0 -> (-4).dp
+                        else -> 4.dp
+                    }
+                    val y = if (index == last) 1.dp else 2.dp
+                    BurstStackPhoto(
+                        file = file,
+                        cameraViewModel = cameraViewModel,
+                        transfersBusy = transfersBusy,
+                        allowRemoteThumbnail = allowRemoteThumbnails,
+                        showPlaceholderIcon = index == last,
+                        modifier = Modifier
+                            .fillMaxSize(0.86f)
+                            .align(Alignment.Center)
+                            .offset(x = x, y = y)
+                            .graphicsLayer { rotationZ = rotation }
+                    )
                 }
             }
-            val x = when {
-                index == last -> 0.dp
-                index % 2 == 0 -> (-4).dp
-                else -> 4.dp
-            }
-            val y = if (index == last) 1.dp else 2.dp
-            BurstStackPhoto(
-                file = file,
-                cameraViewModel = cameraViewModel,
-                transfersBusy = transfersBusy,
-                allowRemoteThumbnail = allowRemoteThumbnails,
-                showPlaceholderIcon = index == last,
-                modifier = Modifier
-                    .fillMaxSize(0.86f)
-                    .align(Alignment.Center)
-                    .offset(x = x, y = y)
-                    .graphicsLayer { rotationZ = rotation }
-            )
         }
 
         // 顶层轻暗角保证角标和底部按钮压在任何照片上都清晰，同时不把照片整体压灰。
@@ -3551,6 +3754,7 @@ private fun ThumbnailCell(
     cellBoundsRegistry: MutableMap<Int, Rect>,
     modifier: Modifier = Modifier,
     inBurst: Boolean = false,
+    animateBurstBadgeRemoval: Boolean = false,
     inExpandedBurstCollection: Boolean = false,
     reveal: Boolean = false,
     revealDelayMs: Long = 0L,
@@ -3716,17 +3920,31 @@ private fun ThumbnailCell(
         // 青绿是连拍的专属色(蓝/紫/橙已被类型占用,绿是传输状态色)。
         // 叠帧图标 + 三条渐短的速度线("嗖"地扫过的拖尾),不用文字也一眼读出
         // "这一串是按住快门快速扫出来的"。算法见 computeBurstGroups。
-        if (inBurst) {
-            Surface(
-                shape = RoundedCornerShape(bottomStart = 6.dp),
-                color = BurstBadgeColor.copy(alpha = 0.85f),
-                modifier = Modifier.align(Alignment.TopEnd)
+        // 普通照片不常驻一套 AnimatedVisibility；只有连拍成员和本次受影响组保留，
+        // 既能让展开后的幸存照片平滑退掉连拍角标，也不给全列表增加空动画节点。
+        if (inBurst || animateBurstBadgeRemoval) {
+            AnimatedVisibility(
+                visible = inBurst,
+                enter = fadeIn(tween(CAMERA_REMOVAL_ENTER_DURATION_MS)) + scaleIn(
+                    animationSpec = tween(CAMERA_REMOVAL_ENTER_DURATION_MS),
+                    initialScale = 0.82f,
+                ),
+                exit = fadeOut(tween(CAMERA_REMOVAL_EXIT_DURATION_MS)) + scaleOut(
+                    animationSpec = tween(CAMERA_REMOVAL_EXIT_DURATION_MS),
+                    targetScale = 0.82f,
+                ),
+                modifier = Modifier.align(Alignment.TopEnd),
             ) {
-                // 叠帧图标 + 三条渐短速度线；与筛选面板的连拍胶囊共用 BurstGlyph，保证一致。
-                BurstGlyph(
-                    tint = colors.onAccent,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                )
+                Surface(
+                    shape = RoundedCornerShape(bottomStart = 6.dp),
+                    color = BurstBadgeColor.copy(alpha = 0.85f),
+                ) {
+                    // 叠帧图标 + 三条渐短速度线；与筛选面板的连拍胶囊共用 BurstGlyph，保证一致。
+                    BurstGlyph(
+                        tint = colors.onAccent,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
 
@@ -4572,15 +4790,25 @@ internal fun BurstCollectionBadge(
             horizontalArrangement = Arrangement.spacedBy(iconSize * 0.31f)
         ) {
             BurstGlyph(tint = colors.onAccent, iconSize = iconSize)
-            Text(
-                text = stringResource(R.string.burst_collection_count, count),
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = (iconSize.value * 0.69f).sp,
-                    fontFeatureSettings = "tnum"
-                ),
-                fontWeight = FontWeight.SemiBold,
-                color = colors.onAccent
-            )
+            AnimatedContent(
+                targetState = count,
+                transitionSpec = {
+                    (slideInVertically { it / 2 } + fadeIn(tween(140)))
+                        .togetherWith(slideOutVertically { -it / 2 } + fadeOut(tween(100)))
+                        .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() }))
+                },
+                label = "burstCollectionCount",
+            ) { animatedCount ->
+                Text(
+                    text = stringResource(R.string.burst_collection_count, animatedCount),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = (iconSize.value * 0.69f).sp,
+                        fontFeatureSettings = "tnum"
+                    ),
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onAccent
+                )
+            }
         }
     }
 }

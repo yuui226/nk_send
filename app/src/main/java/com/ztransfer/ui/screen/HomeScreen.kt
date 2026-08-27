@@ -555,7 +555,7 @@ fun HomeScreen(
                                         .height(42.dp),
                                 ) {
                                     Box(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier.weight(1f),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         androidx.compose.animation.AnimatedVisibility(
@@ -622,7 +622,7 @@ fun HomeScreen(
                                             },
                                             contentAlignment = Alignment.Center,
                                             label = "staConnectButtonText",
-                                            modifier = Modifier.width(staConnectButtonLabelWidth),
+                                            modifier = Modifier.fillMaxWidth(),
                                         ) { buttonState ->
                                             Text(
                                                 text = staConnectButtonLabels[buttonState.ordinal],
