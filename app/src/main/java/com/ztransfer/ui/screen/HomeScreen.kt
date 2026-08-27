@@ -5,8 +5,12 @@ import android.os.SystemClock
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -258,31 +262,29 @@ fun HomeScreen(
         WifiConnectionStatus.IDLE -> null
     }
     val staBusy = state.staConnectionStatus == StaConnectionStatus.DISCOVERING ||
+        state.staConnectionStatus == StaConnectionStatus.PAIRING ||
         state.staConnectionStatus == StaConnectionStatus.CONNECTING
-    val staFeedback = if (state.wirelessMode != WirelessMode.STA) null else when {
-        state.isStaConnection -> null
-        state.staConnectionStatus == StaConnectionStatus.DISCOVERING -> ConnectionCardFeedback(
-            title = stringResource(R.string.sta_status_searching),
-            body = null,
-            accent = colors.accentBlue,
-            busy = true,
-            multiline = true,
-        )
-        state.staConnectionStatus == StaConnectionStatus.CONNECTING -> ConnectionCardFeedback(
-            title = stringResource(R.string.sta_status_connecting),
-            body = null,
-            accent = colors.accentBlue,
-            busy = true,
-            multiline = true,
-        )
-        state.staConnectionStatus == StaConnectionStatus.FAILED -> ConnectionCardFeedback(
+    val staConnectButtonState = when {
+        state.isConnectedToCamera && state.isStaConnection -> StaConnectButtonState.CONNECTED
+        state.staConnectionStatus == StaConnectionStatus.DISCOVERING ->
+            StaConnectButtonState.SEARCHING
+        state.staConnectionStatus == StaConnectionStatus.PAIRING ->
+            StaConnectButtonState.PAIRING
+        state.staConnectionStatus == StaConnectionStatus.CONNECTING ->
+            StaConnectButtonState.CONNECTING
+        else -> StaConnectButtonState.IDLE
+    }
+    val staFeedback = if (
+        state.wirelessMode == WirelessMode.STA &&
+        state.staConnectionStatus == StaConnectionStatus.FAILED
+    ) {
+        ConnectionCardFeedback(
             title = stringResource(R.string.sta_camera_not_found_short),
             body = state.staConnectionError ?: stringResource(R.string.sta_camera_not_found),
             accent = colors.statusError,
             multiline = true,
         )
-        else -> null
-    }
+    } else null
     // 识别传输方式后立即停止提示动画；具体动画在卡片图层内运行，避免每帧重组整个页面。
     val connectionAttentionActive = selectedConnection == null
     val soonDays = if (isPro) {
@@ -527,15 +529,95 @@ fun HomeScreen(
                                         .fillMaxWidth()
                                         .height(42.dp),
                                 ) {
-                                    Text(
-                                        // Keep a stable action label while the existing click
-                                        // behaviour continues to follow the STA connection state.
-                                        text = stringResource(R.string.sta_connect_action),
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = staConnectTextColor,
-                                        maxLines = 1,
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center,
+                                    ) {
+                                        AnimatedVisibility(
+                                            visible = staConnectButtonState.icon !=
+                                                StaConnectButtonIcon.NONE,
+                                            enter = fadeIn(tween(140)) + expandHorizontally(
+                                                animationSpec = tween(170),
+                                                expandFrom = Alignment.Start,
+                                            ),
+                                            exit = fadeOut(tween(100)) + shrinkHorizontally(
+                                                animationSpec = tween(140),
+                                                shrinkTowards = Alignment.Start,
+                                            ),
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                AnimatedContent(
+                                                    targetState = staConnectButtonState.icon,
+                                                    transitionSpec = {
+                                                        (
+                                                            fadeIn(tween(160)) + scaleIn(
+                                                                animationSpec = tween(180),
+                                                                initialScale = 0.72f,
+                                                            )
+                                                        ) togetherWith (
+                                                            fadeOut(tween(100)) + scaleOut(
+                                                                animationSpec = tween(120),
+                                                                targetScale = 0.82f,
+                                                            )
+                                                        )
+                                                    },
+                                                    contentAlignment = Alignment.Center,
+                                                    label = "staConnectButtonIcon",
+                                                ) { icon ->
+                                                    when (icon) {
+                                                        StaConnectButtonIcon.BUSY ->
+                                                            CircularProgressIndicator(
+                                                                modifier = Modifier.size(17.dp),
+                                                                color = staConnectTextColor,
+                                                                strokeWidth = 1.8.dp,
+                                                            )
+                                                        StaConnectButtonIcon.CONNECTED -> Icon(
+                                                            imageVector = Icons.Default.CheckCircle,
+                                                            contentDescription = null,
+                                                            tint = staConnectTextColor,
+                                                            modifier = Modifier.size(18.dp),
+                                                        )
+                                                        StaConnectButtonIcon.NONE -> Unit
+                                                    }
+                                                }
+                                                Spacer(Modifier.width(7.dp))
+                                            }
+                                        }
+                                        AnimatedContent(
+                                            targetState = staConnectButtonState.labelRes,
+                                            transitionSpec = {
+                                                (
+                                                    fadeIn(
+                                                        tween(
+                                                            durationMillis = 180,
+                                                            easing = FastOutSlowInEasing,
+                                                        ),
+                                                    ) + slideInVertically(
+                                                        animationSpec = tween(
+                                                            durationMillis = 180,
+                                                            easing = FastOutSlowInEasing,
+                                                        ),
+                                                        initialOffsetY = { it / 3 },
+                                                    )
+                                                ) togetherWith (
+                                                    fadeOut(tween(110)) + slideOutVertically(
+                                                        animationSpec = tween(140),
+                                                        targetOffsetY = { -it / 3 },
+                                                    )
+                                                )
+                                            },
+                                            contentAlignment = Alignment.Center,
+                                            label = "staConnectButtonText",
+                                        ) { labelRes ->
+                                            Text(
+                                                text = stringResource(labelRes),
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = staConnectTextColor,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -728,6 +810,19 @@ private data class ConnectionCardFeedback(
     val busy: Boolean = false,
     val multiline: Boolean = false,
 )
+
+private enum class StaConnectButtonState(
+    val labelRes: Int,
+    val icon: StaConnectButtonIcon = StaConnectButtonIcon.NONE,
+) {
+    IDLE(R.string.sta_connect_action),
+    SEARCHING(R.string.sta_status_searching, StaConnectButtonIcon.BUSY),
+    PAIRING(R.string.sta_status_pairing, StaConnectButtonIcon.BUSY),
+    CONNECTING(R.string.sta_status_connecting, StaConnectButtonIcon.BUSY),
+    CONNECTED(R.string.sta_status_connected, StaConnectButtonIcon.CONNECTED),
+}
+
+private enum class StaConnectButtonIcon { NONE, BUSY, CONNECTED }
 
 @Composable
 private fun WifiModeTabs(
@@ -1016,13 +1111,15 @@ private fun ConnectionMethodCard(
                         label = "connectionCardFeedback"
                     ) { animatedFeedback ->
                         if (animatedFeedback != null) {
-                            Column {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.Start,
+                            ) {
                                 if (!feedbackFollowsModeSelector) {
                                     Spacer(Modifier.height(12.dp))
                                 }
                                 Row(
                                     modifier = Modifier
-                                        .fillMaxWidth()
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(
                                             animatedFeedback.accent.copy(alpha = 0.10f)
@@ -1038,7 +1135,7 @@ private fun ConnectionMethodCard(
                                         )
                                         Spacer(Modifier.width(7.dp))
                                     }
-                                    Column(modifier = Modifier.weight(1f)) {
+                                    Column {
                                         Text(
                                             text = animatedFeedback.title,
                                             style = MaterialTheme.typography.labelSmall,

@@ -1532,6 +1532,7 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean = true,
         exploreAlbumAccess: Boolean = false,
         forceProfilePairing: Boolean = false,
+        onPairingStarted: (() -> Unit)? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             staAlbumAccessValidated = false
@@ -1647,6 +1648,7 @@ class NikonCamera(private val context: Context) {
                 forceProfilePairing = forceProfilePairing,
                 knownCameraProfile = responderGuid
                     ?.let(knownPairedResponderGuids::contains) == true,
+                onPairingStarted = onPairingStarted,
             )
             cmdSocket?.soTimeout = SO_TIMEOUT_MS
             evtSocket?.soTimeout = SO_TIMEOUT_MS
@@ -4027,6 +4029,7 @@ class NikonCamera(private val context: Context) {
         exploreAlbumAccess: Boolean,
         forceProfilePairing: Boolean,
         knownCameraProfile: Boolean,
+        onPairingStarted: (() -> Unit)?,
     ) {
         sendCmd(NIKON_COMPATIBILITY_INIT)
         val (compatibilityResponse, _) = recvRespWithPayload()
@@ -4056,6 +4059,7 @@ class NikonCamera(private val context: Context) {
             // never saves/completes the reusable profile and this apparent album success only
             // tests the pre-pairing loophole again.
             staDiagnosticLines += "state=FORCED_PROFILE_PAIRING"
+            onPairingStarted?.invoke()
             completeInitialPairing()
             markStaPairingCompleted()
             throw PairingCompletedException()
@@ -4085,6 +4089,7 @@ class NikonCamera(private val context: Context) {
             "GetDeviceInfo=${hexResponse(deviceInfoResponse)} operations=${operations.size}"
         if (isStaPairingOnlyOperationSet(operations) && allowPairing) {
             staDiagnosticLines += "state=PAIRING_REQUIRED"
+            onPairingStarted?.invoke()
             completeInitialPairing()
             markStaPairingCompleted()
             throw PairingCompletedException()
