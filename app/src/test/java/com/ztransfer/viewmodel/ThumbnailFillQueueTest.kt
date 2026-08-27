@@ -128,6 +128,18 @@ class ThumbnailFillQueueTest {
         assertEquals(1, queue.poll()?.handle)
     }
 
+    @Test
+    fun `removed camera handles leave every thumbnail queue state`() {
+        val queue = ThumbnailFillQueue()
+        queue.seed(listOf(file(3), file(2), file(1)), null)
+        queue.markSettled(4)
+
+        queue.removeHandles(setOf(2, 4))
+        queue.enqueueNew(file(4))
+
+        assertEquals(listOf(4, 3, 1), queue.drainHandles())
+    }
+
     private fun ThumbnailFillQueue.drainHandles(): List<Int> = buildList {
         while (true) add(poll()?.handle ?: break)
     }

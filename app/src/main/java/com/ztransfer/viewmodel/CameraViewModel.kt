@@ -182,15 +182,19 @@ internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCa
 private fun NikonCamera.FileInfo.logicalIdentity(): String =
     "$fileName|$size|$captureDate"
 
-/** null 表示 handle 集合发生删除/重置，本轮只能重建基线；非 null 是确认新增的 handles。 */
-internal fun addedHandlesOrNull(
+internal data class CameraHandleDelta(
+    val added: Set<Int>,
+    val removed: Set<Int>,
+)
+
+/** 两个完整且成功的 GetObjectHandles 快照之间的权威差量。 */
+internal fun cameraHandleDelta(
     knownHandles: Set<Int>,
     currentHandles: Set<Int>,
-): Set<Int>? = if (currentHandles.containsAll(knownHandles)) {
-    currentHandles - knownHandles
-} else {
-    null
-}
+): CameraHandleDelta = CameraHandleDelta(
+    added = currentHandles - knownHandles,
+    removed = knownHandles - currentHandles,
+)
 
 /** 双卡备份文件仍只显示一份，但保留它在两张卡上的完整归属。 */
 internal fun mergeStorageMembership(
@@ -199,6 +203,35 @@ internal fun mergeStorageMembership(
 ): NikonCamera.FileInfo {
     if (duplicate.storageIds.all { it in existing.storageIds }) return existing
     return existing.copy(storageIds = existing.storageIds + duplicate.storageIds)
+}
+
+/**
+ * Rebuilds only already-published rows after a handle catalog shrinks. Raw aliases are retained for
+ * the camera session so deleting one half of a dual-card backup switches to the surviving handle
+ * instead of removing the logical photo. Display order is preserved.
+ */
+internal fun reconcilePublishedCameraFiles(
+    publishedFiles: List<NikonCamera.FileInfo>,
+    currentHandles: Set<Int>,
+    indexedFilesByHandle: Map<Int, NikonCamera.FileInfo>,
+): List<NikonCamera.FileInfo> {
+    val aliasesByIdentity = LinkedHashMap<String, MutableList<NikonCamera.FileInfo>>()
+    indexedFilesByHandle.forEach { (handle, file) ->
+        if (handle in currentHandles) {
+            aliasesByIdentity.getOrPut(file.logicalIdentity()) { ArrayList(1) } += file
+        }
+    }
+    return publishedFiles.mapNotNull { published ->
+        val aliases = aliasesByIdentity[published.logicalIdentity()]
+        if (aliases.isNullOrEmpty()) {
+            published.takeIf { it.handle in currentHandles }
+        } else {
+            val primary = aliases.firstOrNull { it.handle == published.handle } ?: aliases.first()
+            aliases.asSequence()
+                .filterNot { it.handle == primary.handle }
+                .fold(primary, ::mergeStorageMembership)
+        }
+    }
 }
 
 /**
@@ -455,6 +488,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var pendingNewObjectCamera: NikonCamera? = null
     private val pendingNewObjectHandles = LinkedHashMap<Int, PendingNewCameraObject>()
     private val pendingNewObjectWake = Channel<Unit>(Channel.CONFLATED)
+    private val handleCatalogWake = Channel<Unit>(Channel.CONFLATED)
+    private var handleCatalogRequestedCamera: NikonCamera? = null
+    private var handleCatalogStorageCamera: NikonCamera? = null
+    private var handleCatalogStorageIds: List<Int> = emptyList()
+    private var lastHandleCatalogCheckAtMs = 0L
     private var fileLoadJob: Job? = null
     // 首次连接的整卡 ObjectInfo 枚举可能跨越数秒。进入监看时取消并记住尚未完成，
     // 退出后从已发布的文件继续，避免 GetObjectInfo 与 Live View 取帧争抢 ioMutex。
@@ -468,6 +506,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 更新；绑定 NikonCamera 实例，断线重连后旧 handle 不参与任何比较。
     private var knownHandlesCamera: NikonCamera? = null
     private val knownHandles = HashSet<Int>()
+    // Contains every successfully decoded raw handle, including the hidden second copy in backup
+    // mode. It is session-bound and lets a deletion switch aliases without re-reading metadata.
+    private val indexedCameraFiles = LinkedHashMap<Int, NikonCamera.FileInfo>()
     private var usbPermissionJob: Job? = null
     private var usbConnectJob: Job? = null
     private var staDiscoveryJob: Job? = null
@@ -2418,8 +2459,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     /**
      * PTP/IP 独立事件通道负责低延迟通知，周期命令轮询继续作为 USB、旧机型及丢包兜底。
-     * 两条来源都只把 ObjectAdded 放入同一个去重队列，不在事件读取现场执行元数据命令。
-     * 命令轮询仍为传输、监看、FHD 和初始列表扫描让路，不改变原有前台优先级。
+     * 两条来源都只登记 ObjectAdded/ObjectRemoved，不在事件读取现场执行元数据命令。
+     * 删除事件与 10 秒低频兜底共用轻量 handle 目录核对；所有命令仍为前台任务让路。
      */
     private fun startEventPolling() {
         eventPollJob?.cancel()
@@ -2428,31 +2469,130 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val socketEvents = if (cam.staAlbumAccessValidated) {
                 launch {
                     cam.ptpIpEvents.collect { event ->
-                        if (event.first == Lab.EVT_OBJECT_ADDED) {
-                            enqueueNewCameraObject(cam, event.second.toInt())
-                        }
+                        handleCameraObjectEvent(cam, event)
                     }
                 }
             } else null
             try {
                 while (isActive && camera === cam) {
-                    delay(EVENT_POLL_INTERVAL_MS)
+                    withTimeoutOrNull(EVENT_POLL_INTERVAL_MS) {
+                        handleCatalogWake.receive()
+                    }
                     if (!_state.value.isConnectedToCamera || camera !== cam) break
                     if (_state.value.isLoadingFiles) continue
-                    if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value) {
+                    if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value ||
+                        effectPreviewActiveFlow.value
+                    ) {
                         continue
                     }
-                    val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
-                    for (event in events) {
-                        if (event.first == Lab.EVT_OBJECT_ADDED) {
-                            enqueueNewCameraObject(cam, event.second.toInt())
+                    val now = SystemClock.elapsedRealtime()
+                    val catalogRequested = handleCatalogRequestedCamera === cam
+                    val catalogDue = now - lastHandleCatalogCheckAtMs >=
+                        HANDLE_CATALOG_SYNC_INTERVAL_MS
+                    if (_state.value.hasCompletedFileScan && (catalogRequested || catalogDue)) {
+                        // Consume this request before suspension. A second event arriving during the
+                        // query writes a fresh request and therefore cannot be accidentally cleared.
+                        if (catalogRequested) handleCatalogRequestedCamera = null
+                        lastHandleCatalogCheckAtMs = now
+                        val synced = syncCameraHandleCatalog(cam)
+                        if (catalogRequested && !synced) {
+                            log { "HANDLE_CATALOG event sync unavailable; keeping timed fallback" }
                         }
+                        if (camera !== cam || !_state.value.isConnectedToCamera) break
                     }
+                    val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
+                    events.forEach { event -> handleCameraObjectEvent(cam, event) }
                 }
             } finally {
                 socketEvents?.cancel()
             }
         }
+    }
+
+    private fun handleCameraObjectEvent(cam: NikonCamera, event: Pair<Int, Long>) {
+        when (event.first) {
+            Lab.EVT_OBJECT_ADDED -> enqueueNewCameraObject(cam, event.second.toInt())
+            Lab.EVT_OBJECT_REMOVED -> requestHandleCatalogSync(cam, event.second.toInt())
+        }
+    }
+
+    private fun requestHandleCatalogSync(cam: NikonCamera, removedHandle: Int) {
+        if (camera !== cam) return
+        // A photo may be deleted immediately after its add event, before metadata resolution has
+        // published it into the authoritative baseline. Drop that pending work at once.
+        pendingNewObjectHandles.remove(removedHandle)
+        // PTP/IP Event and Nikon GetEventEx may report the same deletion. Once the first catalog
+        // sync removed this handle from the baseline, the duplicate must not trigger another query.
+        if (removedHandle != 0 && removedHandle != -1 && knownHandlesCamera === cam &&
+            removedHandle !in knownHandles
+        ) {
+            return
+        }
+        // A paused FHD scan snapshot contains the pre-deletion handle set and must not be resumed.
+        fileScanHandleSnapshot = null
+        handleCatalogRequestedCamera = cam
+        handleCatalogWake.trySend(Unit)
+    }
+
+    /** Reads only GetObjectHandles payloads; no ObjectInfo, thumbnail, EXIF or image data. */
+    private suspend fun syncCameraHandleCatalog(cam: NikonCamera): Boolean {
+        if (camera !== cam || knownHandlesCamera !== cam || handleCatalogStorageCamera !== cam) {
+            return false
+        }
+        val storageIds = handleCatalogStorageIds
+        if (storageIds.isEmpty()) return knownHandles.isEmpty()
+        val currentHandles = LinkedHashSet<Int>()
+        for (storageId in storageIds) {
+            val queryStorageId = objectHandleQueryStorageId(
+                storageId = storageId,
+                isStaConnection = cam.staAlbumAccessValidated,
+            )
+            val result = cam.getObjectHandlesWithStatus(queryStorageId)
+            if (!result.successful) return false
+            currentHandles += result.handles
+        }
+        if (camera !== cam || knownHandlesCamera !== cam) return false
+        applyIdleHandleCatalog(cam, currentHandles)
+        return true
+    }
+
+    private fun applyIdleHandleCatalog(cam: NikonCamera, currentHandles: Set<Int>) {
+        if (camera !== cam || knownHandlesCamera !== cam) return
+        val delta = cameraHandleDelta(knownHandles, currentHandles)
+        if (delta.removed.isNotEmpty()) {
+            removeMissingCameraHandles(delta.removed, currentHandles)
+            knownHandles.removeAll(delta.removed)
+            log {
+                "HANDLE_CATALOG removed=${delta.removed.size} visible=${_state.value.files.size}"
+            }
+        }
+        // Do not add unresolved handles to knownHandles yet: the resolver owns that transition.
+        // This also lets a temporarily incomplete object retry on the next low-frequency catalog.
+        delta.added.forEach { handle -> enqueueNewCameraObject(cam, handle) }
+    }
+
+    private fun removeMissingCameraHandles(
+        removedHandles: Set<Int>,
+        currentHandles: Set<Int>,
+    ): List<NikonCamera.FileInfo> {
+        removedHandles.forEach { handle ->
+            indexedCameraFiles.remove(handle)
+            thumbnailCache.remove(handle)
+            noThumbHandles.remove(handle)
+            inflightThumbs.remove(handle)?.deferred?.cancel()
+            inflightPrefetches.remove(handle)?.cancel()
+            pendingNewObjectHandles.remove(handle)
+        }
+        thumbnailFillQueue.removeHandles(removedHandles)
+        val reconciled = reconcilePublishedCameraFiles(
+            publishedFiles = _state.value.files,
+            currentHandles = currentHandles,
+            indexedFilesByHandle = indexedCameraFiles,
+        )
+        _state.update { current ->
+            if (reconciled == current.files) current else current.copy(files = reconciled)
+        }
+        return reconciled
     }
 
     /**
@@ -2645,6 +2785,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ) {
         if (camera !== cam) return
         val hasKnownBaseline = knownHandlesCamera === cam
+        indexedCameraFiles[handle] = info
         val previousState = _state.getAndUpdate { state ->
             val duplicateIndex = state.files.indexOfFirst {
                 it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
@@ -2712,6 +2853,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (!preserveExisting) {
             knownHandlesCamera = null
             knownHandles.clear()
+            indexedCameraFiles.clear()
+            handleCatalogStorageCamera = null
+            handleCatalogStorageIds = emptyList()
+            handleCatalogRequestedCamera = null
+            lastHandleCatalogCheckAtMs = 0L
             thumbnailCache.evictAll()   // 新会话/新列表，旧缩略图作废
             noThumbHandles.clear()      // handle 跨会话可能复用，负缓存一并作废
             effectPreviewAttemptKey = null
@@ -2751,9 +2897,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             var staScanRequiresReconnect = false
             try {
-                val existingFiles =
+                var existingFiles =
                     if (preserveExisting && camera === cam) _state.value.files else emptyList()
-                val existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
+                var existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
                 var newHandlesToReport: Set<Int> = emptySet()
                 val scanDiscoveredMedia = ArrayList<NikonCamera.FileInfo>()
                 val reusableSnapshot = resumeSnapshot?.takeIf { it.belongsTo(cam) }
@@ -2816,9 +2962,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (storageIds.isEmpty()) {
                         fileScanHandleSnapshot = null
                         fileLoadPending = false
+                        if (knownHandlesCamera === cam && knownHandles.isNotEmpty()) {
+                            existingFiles = removeMissingCameraHandles(
+                                removedHandles = HashSet(knownHandles),
+                                currentHandles = emptySet(),
+                            )
+                        }
                         knownHandlesCamera = cam
                         knownHandles.clear()
-                        _state.update { it.copy(isLoadingFiles = false, hasCompletedFileScan = true) }
+                        handleCatalogStorageCamera = cam
+                        handleCatalogStorageIds = emptyList()
+                        lastHandleCatalogCheckAtMs = SystemClock.elapsedRealtime()
+                        _state.update {
+                            it.copy(
+                                files = existingFiles,
+                                isLoadingFiles = false,
+                                hasCompletedFileScan = true,
+                            )
+                        }
                         if (FileOrderProbe.enabled) {
                             FileOrderProbe.finishScan("complete: no usable storage")
                         }
@@ -2913,18 +3074,31 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (handleQueriesSucceeded) {
                         val currentHandles = rawHandlesByStorage
                             .flatMapTo(HashSet()) { it.second.asIterable() }
-                        if (detectNewHandles && knownHandlesCamera === cam) {
-                            val addedHandles = addedHandlesOrNull(knownHandles, currentHandles)
-                            if (addedHandles == null) {
-                                log { "FILE_SCAN handle baseline reset: known handles disappeared" }
-                            } else {
-                                newHandlesToReport = addedHandles
-                            }
+                        val hadKnownBaseline = knownHandlesCamera === cam
+                        val delta = if (hadKnownBaseline) {
+                            cameraHandleDelta(knownHandles, currentHandles)
+                        } else {
+                            CameraHandleDelta(emptySet(), emptySet())
+                        }
+                        if (detectNewHandles && hadKnownBaseline) {
+                            newHandlesToReport = delta.added
+                        }
+                        if (delta.removed.isNotEmpty()) {
+                            existingFiles = removeMissingCameraHandles(
+                                removedHandles = delta.removed,
+                                currentHandles = currentHandles,
+                            )
+                            existingHandles = existingFiles.asSequence()
+                                .mapTo(HashSet()) { it.handle }
+                            log { "FILE_SCAN removed handles=${delta.removed.size}" }
                         }
                         // 无论本轮是否允许报告差量，成功取得的完整列表都是下一轮基准。
                         knownHandlesCamera = cam
                         knownHandles.clear()
                         knownHandles.addAll(currentHandles)
+                        handleCatalogStorageCamera = cam
+                        handleCatalogStorageIds = storageIds
+                        lastHandleCatalogCheckAtMs = SystemClock.elapsedRealtime()
                     }
                     val handleOrders = newestFirstHandleOrders(rawHandlesByStorage)
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
@@ -3028,6 +3202,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     } else {
                         rawBatch
                     }
+                    batch.forEach { file -> indexedCameraFiles[file.handle] = file }
                     activeSnapshot.markProcessed(batch.map { it.handle })
                     if (FileOrderProbe.enabled && dynamicDualCardSchedule) {
                         FileOrderProbe.appendScheduledHandles(batch.map { it.handle })
@@ -4069,6 +4244,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val KEEPALIVE_INTERVAL_MS = 10_000L
         // STA 正常走事件通道；2 秒轮询只承担丢包、旧机型和 USB/AP 的原有兜底职责。
         private const val EVENT_POLL_INTERVAL_MS = 2_000L
+        private const val HANDLE_CATALOG_SYNC_INTERVAL_MS = 10_000L
         private const val NEW_OBJECT_COALESCE_MS = 90L
         private const val NEW_OBJECT_RESOLVE_BATCH_SIZE = 16
         private const val NEW_OBJECT_RESOLVE_MAX_ATTEMPTS = 5

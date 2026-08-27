@@ -54,6 +54,8 @@ class RemoteProbeTest {
         )
 
         assertEquals(0x4002 to 0x291961F6L, parsePtpIpEvent(payload))
+        payload[0] = 0x03
+        assertEquals(Lab.EVT_OBJECT_REMOVED to 0x291961F6L, parsePtpIpEvent(payload))
         assertNull(parsePtpIpEvent(payload.copyOf(5)))
     }
 

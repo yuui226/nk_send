@@ -51,6 +51,18 @@ internal class ThumbnailFillQueue {
         }
     }
 
+    /** Drops camera objects that an authoritative handle catalog confirmed no longer exist. */
+    fun removeHandles(handles: Set<Int>) {
+        if (handles.isEmpty()) return
+        priority.removeAll { it.handle in handles }
+        regular.removeAll { it.handle in handles }
+        pendingHandles.removeAll(handles)
+        handles.forEach {
+            failed.remove(it)
+            settledHandles.remove(it)
+        }
+    }
+
     /** Seeds only work not already completed by the 12-item scan pipeline. */
     fun seed(files: List<NikonCamera.FileInfo>, priorityRange: PhotoDateRange?) {
         if (seededRevision == revision) return

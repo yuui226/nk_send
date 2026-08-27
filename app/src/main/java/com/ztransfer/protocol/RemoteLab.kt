@@ -51,6 +51,7 @@ object Lab {
 
     // ---- 事件码 ----
     const val EVT_OBJECT_ADDED = 0x4002
+    const val EVT_OBJECT_REMOVED = 0x4003
     const val EVT_DEVICE_PROP_CHANGED = 0x4006
     const val EVT_CAPTURE_COMPLETE = 0x400D
     const val EVT_OBJECT_ADDED_SDRAM = 0xC101

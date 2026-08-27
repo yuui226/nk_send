@@ -12,37 +12,75 @@ import org.junit.Test
 
 class NewMediaTransferPolicyTest {
     @Test
-    fun `handle delta returns only objects added to the connection baseline`() {
+    fun `handle delta reports additions and removals independently`() {
         assertEquals(
-            setOf(12),
-            addedHandlesOrNull(
+            CameraHandleDelta(added = setOf(12), removed = emptySet()),
+            cameraHandleDelta(
                 knownHandles = setOf(10, 11),
                 currentHandles = setOf(10, 11, 12),
             ),
         )
         assertEquals(
-            emptySet<Int>(),
-            addedHandlesOrNull(
+            CameraHandleDelta(added = setOf(12), removed = setOf(11)),
+            cameraHandleDelta(
                 knownHandles = setOf(10, 11),
-                currentHandles = setOf(10, 11),
+                currentHandles = setOf(10, 12),
             ),
         )
     }
 
     @Test
-    fun `empty card baseline accepts additions but disappearing handles force reset`() {
+    fun `empty card handle delta remains well defined`() {
         assertEquals(
-            setOf(1),
-            addedHandlesOrNull(
+            CameraHandleDelta(added = setOf(1), removed = emptySet()),
+            cameraHandleDelta(
                 knownHandles = emptySet(),
                 currentHandles = setOf(1),
             ),
         )
-        assertNull(
-            addedHandlesOrNull(
-                knownHandles = setOf(10, 11),
-                currentHandles = setOf(10, 12),
+        assertEquals(
+            CameraHandleDelta(added = emptySet(), removed = setOf(1)),
+            cameraHandleDelta(
+                knownHandles = setOf(1),
+                currentHandles = emptySet(),
             ),
+        )
+    }
+
+    @Test
+    fun `catalog reconciliation switches a deleted backup primary to its surviving alias`() {
+        val card1 = NikonCamera.FileInfo(
+            handle = 10,
+            size = 42L,
+            fileName = "DSC_0010.JPG",
+            captureDate = "20260827T120000",
+            storageIds = setOf(0x00010001),
+        )
+        val card2 = card1.copy(handle = 20, storageIds = setOf(0x00020001))
+        val published = mergeStorageMembership(card1, card2)
+
+        assertEquals(
+            listOf(card2),
+            reconcilePublishedCameraFiles(
+                publishedFiles = listOf(published),
+                currentHandles = setOf(20),
+                indexedFilesByHandle = mapOf(20 to card2),
+            ),
+        )
+        assertEquals(
+            listOf(card1),
+            reconcilePublishedCameraFiles(
+                publishedFiles = listOf(published),
+                currentHandles = setOf(10),
+                indexedFilesByHandle = mapOf(10 to card1),
+            ),
+        )
+        assertTrue(
+            reconcilePublishedCameraFiles(
+                publishedFiles = listOf(published),
+                currentHandles = emptySet(),
+                indexedFilesByHandle = emptyMap(),
+            ).isEmpty(),
         )
     }
 
