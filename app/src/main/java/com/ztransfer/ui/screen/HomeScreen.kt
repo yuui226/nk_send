@@ -11,9 +11,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -37,6 +35,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -170,39 +169,55 @@ fun HomeScreen(
     }
     val connected = state.isConnectedToCamera
     val usbError = state.usbConnectionError
-    // 会话真正就绪后再触发卡片内成功动画；动画完成时主动通知 MainScreen 跳转。
+    // 起飞与成功光效共用一条约 120fps 的单调时钟。照片扫描仍在连接建立后立即并行
+    // 启动，但动画不再同时运行 60fps Animatable 和另一条 16ms Canvas 更新循环。
     var celebrate by remember { mutableStateOf(false) }
+    val celebrationElapsedMs = remember { mutableLongStateOf(0L) }
+    val selectionSceneProgress = remember(celebrationElapsedMs) {
+        { connectionHeroProgress(celebrationElapsedMs.longValue) }
+    }
+    val successEffectProgress = remember(celebrationElapsedMs) {
+        { connectionSuccessProgress(celebrationElapsedMs.longValue) }
+    }
+    val currentOnCelebrationFinished by rememberUpdatedState(onConnectionCelebrationFinished)
     LaunchedEffect(connected) {
-        if (connected) {
-            delay(CONNECT_CELEBRATE_DELAY_MS)
-            celebrate = true
-        } else {
+        if (!connected) {
             celebrate = false
+            celebrationElapsedMs.longValue = 0L
+            return@LaunchedEffect
         }
+
+        celebrate = false
+        celebrationElapsedMs.longValue = 0L
+        val startedAtMs = SystemClock.uptimeMillis()
+        var nextFrameAtMs = startedAtMs
+        var successVisualStarted = false
+        while (isActive) {
+            val nowMs = SystemClock.uptimeMillis()
+            val elapsedMs = (nowMs - startedAtMs)
+                .coerceAtMost(CONNECTION_CELEBRATION_TOTAL_MS)
+            celebrationElapsedMs.longValue = elapsedMs
+            if (!successVisualStarted && elapsedMs >= CONNECT_CELEBRATE_DELAY_MS) {
+                successVisualStarted = true
+                celebrate = true
+            }
+            if (elapsedMs >= CONNECTION_CELEBRATION_TOTAL_MS) break
+
+            nextFrameAtMs += CONNECTION_CELEBRATION_FRAME_MS
+            if (nextFrameAtMs <= nowMs) {
+                val skippedFrames =
+                    (nowMs - nextFrameAtMs) / CONNECTION_CELEBRATION_FRAME_MS + 1L
+                nextFrameAtMs += skippedFrames * CONNECTION_CELEBRATION_FRAME_MS
+            }
+            delay((nextFrameAtMs - SystemClock.uptimeMillis()).coerceAtLeast(1L))
+        }
+        if (isActive) currentOnCelebrationFinished()
     }
     // 用户不需要点卡片作出强选择：App 观察真实链路，先识别到哪种传输就点亮哪张卡片。
     val selectedConnection = homeSelectedConnection(
         connected = connected,
         connectionType = state.connectionType
     )
-    val selectionScene = remember { Animatable(0f) }
-    // 进度只允许在 graphicsLayer 中读取；稳定 lambda 避免 620ms 起飞期间重组整页。
-    val selectionSceneProgress = remember(selectionScene) { { selectionScene.value } }
-    LaunchedEffect(selectedConnection) {
-        if (selectedConnection == null) {
-            selectionScene.animateTo(
-                targetValue = 0f,
-                animationSpec = tween(380, easing = FastOutSlowInEasing)
-            )
-        } else {
-            selectionScene.snapTo(0f)
-            selectionScene.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(620, easing = LinearEasing)
-            )
-        }
-    }
-
     // 快速成功/失败不显示中间态，避免连接页在启动时闪一下“正在识别”。
     var showWifiProbing by remember { mutableStateOf(false) }
     LaunchedEffect(state.wifiConnectionStatus, state.connectionType) {
@@ -353,11 +368,11 @@ fun HomeScreen(
                         attentionActive = connectionAttentionActive,
                         attentionPhaseOffset = 0f,
                         selectionSceneProgress = selectionSceneProgress,
+                        successEffectProgress = successEffectProgress,
                         error = usbError?.takeIf {
                             selectedConnection == CameraConnectionType.USB
                         },
                         goldBurst = isPro,
-                        onSuccessAnimationFinished = onConnectionCelebrationFinished,
                     )
 
                     ConnectionMethodCard(
@@ -407,8 +422,8 @@ fun HomeScreen(
                         attentionActive = connectionAttentionActive,
                         attentionPhaseOffset = 0.5f,
                         selectionSceneProgress = selectionSceneProgress,
+                        successEffectProgress = successEffectProgress,
                         goldBurst = isPro,
-                        onSuccessAnimationFinished = onConnectionCelebrationFinished,
                         feedback = if (state.wirelessMode == WirelessMode.AP) {
                             wifiFeedback
                         } else {
@@ -925,7 +940,7 @@ private fun ConnectionMethodCard(
     attentionActive: Boolean,
     attentionPhaseOffset: Float,
     selectionSceneProgress: () -> Float,
-    onSuccessAnimationFinished: () -> Unit,
+    successEffectProgress: () -> Float,
     error: String? = null,
     goldBurst: Boolean = false,
     feedback: ConnectionCardFeedback? = null,
@@ -1264,7 +1279,7 @@ private fun ConnectionMethodCard(
             ConnectionSuccessOverlay(
                 success = success,
                 goldBurst = goldBurst,
-                onFinished = onSuccessAnimationFinished,
+                progress = successEffectProgress,
                 modifier = Modifier
                     .align(Alignment.Center)
                     .requiredSize(220.dp)
@@ -1377,39 +1392,15 @@ private fun ConnectionStep(index: Int, text: String, accent: Color) {
 private fun ConnectionSuccessOverlay(
     success: Boolean,
     goldBurst: Boolean,
-    onFinished: () -> Unit,
+    progress: () -> Float,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
-    val progress = remember { mutableFloatStateOf(0f) }
-    val readProgress = remember(progress) { { progress.floatValue } }
-    val currentOnFinished by rememberUpdatedState(onFinished)
-    LaunchedEffect(success) {
-        if (success) {
-            progress.floatValue = 0f
-            val startedAt = SystemClock.uptimeMillis()
-            while (isActive) {
-                val elapsed = SystemClock.uptimeMillis() - startedAt
-                val linearProgress =
-                    (elapsed.toFloat() / CONNECTION_SUCCESS_DURATION_MS).coerceIn(0f, 1f)
-                progress.floatValue = FastOutSlowInEasing.transform(linearProgress)
-                if (linearProgress >= 1f) break
-                delay(CONNECTION_SUCCESS_FRAME_MS)
-            }
-            if (isActive) currentOnFinished()
-        } else {
-            progress.floatValue = 0f
-        }
-    }
     if (!success) return
 
-    Canvas(
-        modifier = modifier
-            .graphicsLayer {
-                alpha = (readProgress() * 5f).coerceAtMost(1f)
-            }
-    ) {
-        val p = readProgress()
+    Canvas(modifier = modifier) {
+        val p = progress()
+        val reveal = (p * 5f).coerceAtMost(1f)
         if (goldBurst) {
             drawPremiumSuccessEffect(p)
         }
@@ -1419,7 +1410,7 @@ private fun ConnectionSuccessOverlay(
             val ringScale = 0.72f + ringProgress * 1.72f
             drawCircle(
                 color = colors.statusConnected.copy(
-                    alpha = (1f - ringProgress) * 0.62f,
+                    alpha = (1f - ringProgress) * 0.62f * reveal,
                 ),
                 radius = (41.dp.toPx() - 0.75.dp.toPx()) * ringScale,
                 style = Stroke(width = 1.5.dp.toPx() * ringScale),
@@ -1450,11 +1441,11 @@ private fun ConnectionSuccessOverlay(
         val coreScale = 0.82f + kotlin.math.sin(p * Math.PI.toFloat()) * 0.22f
         val coreAlpha = (1f - p).coerceAtLeast(0.16f)
         drawCircle(
-            color = colors.statusConnected.copy(alpha = 0.08f * coreAlpha),
+            color = colors.statusConnected.copy(alpha = 0.08f * coreAlpha * reveal),
             radius = 39.dp.toPx() * coreScale,
         )
         drawCircle(
-            color = colors.statusConnected.copy(alpha = 0.70f * coreAlpha),
+            color = colors.statusConnected.copy(alpha = 0.70f * coreAlpha * reveal),
             radius = (39.dp.toPx() - 0.75.dp.toPx()) * coreScale,
             style = Stroke(width = 1.5.dp.toPx() * coreScale),
         )
@@ -1619,12 +1610,25 @@ private fun DrawScope.drawPremiumSuccessEffect(progress: Float) {
     }
 }
 
-// 连接成功后的入场节奏：先保持当前卡片 [CONNECT_CELEBRATE_DELAY_MS]，再播放卡片内
-// 成功动画；动画协程完成后直接通知 MainScreen 跳转，不再用另一套固定时钟猜结束时刻。
+internal fun connectionHeroProgress(elapsedMs: Long): Float =
+    (elapsedMs.toFloat() / CONNECTION_HERO_DURATION_MS).coerceIn(0f, 1f)
+
+internal fun connectionSuccessProgress(elapsedMs: Long): Float {
+    val linearProgress = (
+        (elapsedMs - CONNECT_CELEBRATE_DELAY_MS).toFloat() / CONNECTION_SUCCESS_DURATION_MS
+        ).coerceIn(0f, 1f)
+    return FastOutSlowInEasing.transform(linearProgress)
+}
+
+// 连接成功后的入场节奏：同一条约 120fps 时钟先驱动图标起飞，随后在图标中心播放
+// 成功光效；完成后直接通知 MainScreen 跳转。相册扫描不等待这条时间线。
 const val CONNECT_CELEBRATE_DELAY_MS = 500L
 private const val CONNECTION_ATTENTION_FRAME_MS = 32L
+private const val CONNECTION_HERO_DURATION_MS = 620L
 private const val CONNECTION_SUCCESS_DURATION_MS = 760L
-private const val CONNECTION_SUCCESS_FRAME_MS = 16L
+private const val CONNECTION_CELEBRATION_TOTAL_MS =
+    CONNECT_CELEBRATE_DELAY_MS + CONNECTION_SUCCESS_DURATION_MS
+private const val CONNECTION_CELEBRATION_FRAME_MS = 8L
 private const val WIFI_SETTINGS_BUTTON_TEXTURE_SEED = 0x1457A102
 
 /** 布局热路径专用的非观察容器；更新坐标不触发 Compose 重组。 */

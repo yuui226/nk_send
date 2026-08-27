@@ -5,6 +5,7 @@
     <string name="connection_wifi_hotspot">相機熱點</string>
     <string name="sta_step_phone_hotspot">相機連接到手機開啟的熱點</string>
     <string name="sta_step_connect_camera">點擊 連接相機</string>
+    <string name="sta_reconnect_attempting">正在嘗試重新連線</string>
     <string name="sta_connect_action">連接相機</string>
     <string name="sta_hotspot_settings_short">熱點設定</string>
     <string name="sta_reset_pairing">重設</string>

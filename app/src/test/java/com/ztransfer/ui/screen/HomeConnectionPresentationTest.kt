@@ -12,6 +12,18 @@ import org.junit.Test
 
 class HomeConnectionPresentationTest {
     @Test
+    fun connectionCelebrationUsesOneContinuousTimeline() {
+        assertEquals(0f, connectionHeroProgress(-1L), 0f)
+        assertEquals(0.5f, connectionHeroProgress(310L), 0.001f)
+        assertEquals(1f, connectionHeroProgress(620L), 0f)
+        assertEquals(1f, connectionHeroProgress(10_000L), 0f)
+
+        assertEquals(0f, connectionSuccessProgress(499L), 0f)
+        assertEquals(0f, connectionSuccessProgress(500L), 0f)
+        assertEquals(1f, connectionSuccessProgress(1_260L), 0f)
+    }
+
+    @Test
     fun albumScanChangesDoNotInvalidateConnectionPresentation() {
         val initial = CameraState().toHomeConnectionUiState()
         val scanning = CameraState(

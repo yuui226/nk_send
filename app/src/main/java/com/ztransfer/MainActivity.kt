@@ -374,6 +374,27 @@ private fun FirstLaunchNotificationHint() {
     }
 }
 
+/** Shared bottom glass bubble for lightweight, non-blocking action feedback. */
+@Composable
+private fun BottomGlassHint(text: String, modifier: Modifier = Modifier) {
+    val colors = AppTheme.colors
+    Surface(
+        modifier = modifier.widthIn(max = 340.dp),
+        shape = RoundedCornerShape(22.dp),
+        color = colors.glassSurfaceHeavy,
+        shadowElevation = 6.dp,
+        border = BorderStroke(1.dp, colors.glassPanelBorder),
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.onBackground,
+        )
+    }
+}
+
 /**
  * 照片列表与传输页共用同一个顶部队列控件实例。它位于 NavHost 之外，因此两页横向
  * 切换时不会随页面退场、重建并重播胶囊动画；只有点击语义随当前页面变化。
@@ -396,7 +417,6 @@ private fun SharedQueueControls(
             .map { it.isConnectedToCamera }
             .distinctUntilChanged()
     }.collectAsState(initial = cameraViewModel.state.value.isConnectedToCamera)
-    val colors = AppTheme.colors
     val haptics = rememberHaptics(transferState.hapticsEnabled)
     val waitingCount = remember(transferState.tasks) {
         transferState.tasks.count { it.status == TransferStatus.WAITING }
@@ -545,21 +565,7 @@ private fun SharedQueueControls(
                 .navigationBarsPadding()
                 .padding(bottom = 28.dp),
         ) {
-            Surface(
-                modifier = Modifier.widthIn(max = 340.dp),
-                shape = RoundedCornerShape(22.dp),
-                color = colors.glassSurfaceHeavy,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, colors.glassPanelBorder),
-            ) {
-                Text(
-                    text = stringResource(R.string.pause_after_current_hint),
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = colors.onBackground,
-                )
-            }
+            BottomGlassHint(text = stringResource(R.string.pause_after_current_hint))
         }
     }
 }
@@ -568,6 +574,20 @@ private fun SharedQueueControls(
 fun MainScreen(transferViewModel: TransferViewModel) {
     val navController = rememberNavController()
     val cameraViewModel: CameraViewModel = viewModel()
+    var staReconnectHintVisible by remember { mutableStateOf(false) }
+    var staReconnectHintNonce by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(cameraViewModel) {
+        cameraViewModel.staReconnectRequests.collect {
+            staReconnectHintVisible = true
+            staReconnectHintNonce++
+        }
+    }
+    LaunchedEffect(staReconnectHintNonce) {
+        if (staReconnectHintNonce > 0L && staReconnectHintVisible) {
+            delay(1_800L)
+            staReconnectHintVisible = false
+        }
+    }
 
     // 照片列表（含其上的大图预览）和传输页都优先保证无线传输吞吐。两页之间切换时
     // 布尔值保持 true，不会产生一次 false 的瞬态；每个文件进入协议层前再冻结策略，
@@ -873,6 +893,17 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                 },
                 onControlAction = { queueControlActionNonce++ },
             )
+        }
+        AnimatedVisibility(
+            visible = staReconnectHintVisible,
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 28.dp),
+        ) {
+            BottomGlassHint(text = stringResource(R.string.sta_reconnect_attempting))
         }
         AppUpdateHost(
             cameraUsesWifi = cameraState.connectionType == CameraConnectionType.WIFI &&

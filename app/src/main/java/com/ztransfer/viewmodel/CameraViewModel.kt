@@ -476,6 +476,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     )
     /** 本次连接建立可靠基线之后，明确确认由相机新增的照片或视频。 */
     val newMediaFiles: SharedFlow<NewCameraMedia> = _newMediaFiles.asSharedFlow()
+    private val _staReconnectRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    /** User feedback event for the shared STA signal button; automatic retries do not emit it. */
+    val staReconnectRequests: SharedFlow<Unit> = _staReconnectRequests.asSharedFlow()
 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
@@ -1735,9 +1738,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             current.isConnectedToCamera ||
             current.connectionType != CameraConnectionType.WIFI ||
             current.wirelessMode != WirelessMode.STA ||
-            !current.isStaConnection ||
-            staDiscoveryJob?.isActive == true
+            !current.isStaConnection
         ) return
+
+        // The shared signal button exists on the files, queue and monitor pages. A retry may
+        // already be active; still acknowledge the tap, but never start a duplicate discovery.
+        _staReconnectRequests.tryEmit(Unit)
+        if (staDiscoveryJob?.isActive == true) return
 
         staReconnectJob?.cancel()
         staReconnectJob = null

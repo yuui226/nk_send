@@ -5,6 +5,7 @@
     <string name="connection_wifi_hotspot">Camera hotspot</string>
     <string name="sta_step_phone_hotspot">Connect the camera to the phone’s personal hotspot</string>
     <string name="sta_step_connect_camera">Connect button</string>
+    <string name="sta_reconnect_attempting">Trying to reconnect</string>
     <string name="sta_connect_action">Connect</string>
     <string name="sta_hotspot_settings_short">Hotspot</string>
     <string name="sta_reset_pairing">Reset</string>
