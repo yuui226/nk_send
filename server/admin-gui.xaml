@@ -1,0 +1,401 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ZTransfer 管理中心" Width="1180" Height="760"
+        MinWidth="1040" MinHeight="680" WindowStartupLocation="CenterScreen"
+        Background="#F4F6FA" FontFamily="Microsoft YaHei UI" FontSize="13"
+        TextOptions.TextFormattingMode="Display" UseLayoutRounding="True">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PrimaryBrush" Color="#2563EB"/>
+        <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#1D4ED8"/>
+        <SolidColorBrush x:Key="TextBrush" Color="#172033"/>
+        <SolidColorBrush x:Key="MutedBrush" Color="#667085"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#E2E8F0"/>
+        <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF"/>
+
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+        </Style>
+        <Style x:Key="CardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource CardBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="20"/>
+        </Style>
+        <Style x:Key="PrimaryButton" TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="18,9"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Root" Property="Background" Value="{StaticResource PrimaryHoverBrush}"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Root" Property="Opacity" Value="0.45"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+            <Setter Property="Foreground" Value="#344054"/>
+            <Setter Property="Background" Value="#F8FAFC"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Root" Property="Background" Value="#EEF2F7"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Root" Property="Opacity" Value="0.45"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="Foreground" Value="#B42318"/>
+            <Setter Property="Background" Value="#FFF5F4"/>
+            <Setter Property="BorderBrush" Value="#FED7D3"/>
+        </Style>
+        <Style x:Key="NavButton" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="#B8C2D8"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="16,12"/>
+            <Setter Property="Margin" Value="0,3"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Root" Background="{TemplateBinding Background}" CornerRadius="9" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Root" Property="Background" Value="#18243C"/></Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Root" Property="Background" Value="#233657"/>
+                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="Background" Value="White"/>
+        </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="#EDF0F5"/>
+            <Setter Property="RowHeight" Value="48"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="CanUserDeleteRows" Value="False"/>
+            <Setter Property="CanUserReorderColumns" Value="False"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="SelectionMode" Value="Single"/>
+            <Setter Property="SelectionUnit" Value="FullRow"/>
+        </Style>
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#F8FAFC"/>
+            <Setter Property="Foreground" Value="#667085"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="10,11"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="BorderBrush" Value="#E7EBF1"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid x:Name="RootGrid">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="214"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="#0E172A">
+            <Grid Margin="18,24,18,18">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="34"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <StackPanel Orientation="Horizontal">
+                    <Border Width="38" Height="38" CornerRadius="11" Background="#2563EB">
+                        <TextBlock Text="Z" Foreground="White" FontWeight="Bold" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="ZTransfer" Foreground="White" FontWeight="SemiBold" FontSize="16"/>
+                        <TextBlock Text="管理中心" Foreground="#8290AA" FontSize="11"/>
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Row="2">
+                    <RadioButton x:Name="NavOverview" Style="{StaticResource NavButton}" IsChecked="True" Content="  ◉   总览"/>
+                    <RadioButton x:Name="NavCodes" Style="{StaticResource NavButton}" Content="  ▦   激活码"/>
+                    <RadioButton x:Name="NavPricing" Style="{StaticResource NavButton}" Content="  ¥   定价"/>
+                    <RadioButton x:Name="NavUpdates" Style="{StaticResource NavButton}" Content="  ↑   版本更新"/>
+                    <RadioButton x:Name="NavSettings" Style="{StaticResource NavButton}" Content="  ⚙   设置"/>
+                </StackPanel>
+                <Border Grid.Row="3" Background="#172238" CornerRadius="10" Padding="12">
+                    <StackPanel>
+                        <TextBlock Text="服务器" Foreground="#8290AA" FontSize="11"/>
+                        <TextBlock x:Name="SidebarServer" Text="--" Foreground="#D7DEEA" Margin="0,5,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="78"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="34"/>
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" Background="#F4F6FA" Padding="28,17,28,10">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="PageTitle" Text="总览" FontSize="23" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="PageSubtitle" Text="授权与版本状态一目了然" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="12,7" Margin="0,0,10,0">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse x:Name="ServerDot" Width="8" Height="8" Fill="#98A2B3" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="ServerStatus" Text="尚未检测" Foreground="{StaticResource MutedBrush}"/>
+                            </StackPanel>
+                        </Border>
+                        <Button x:Name="RefreshButton" Style="{StaticResource SecondaryButton}" Content="刷新"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1" Margin="28,8,28,14">
+                <Grid x:Name="PageOverview">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <UniformGrid Rows="1" Columns="4">
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,12,0"><StackPanel><TextBlock Text="激活码总数" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="MetricCodes" Text="--" FontSize="28" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,12,0"><StackPanel><TextBlock Text="在用设备" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="MetricDevices" Text="--" FontSize="28" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,12,0"><StackPanel><TextBlock Text="已吊销" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="MetricRevoked" Text="--" FontSize="28" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
+                        <Border Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="付款未绑定" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="MetricUnbound" Text="--" FontSize="28" FontWeight="SemiBold" Margin="0,8,0,0"/></StackPanel></Border>
+                    </UniformGrid>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="7*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="4*"/></Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Style="{StaticResource CardStyle}">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <StackPanel><TextBlock Text="最近生成" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="最新的激活码与使用状态" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,14"/></StackPanel>
+                                <DataGrid Grid.Row="1" x:Name="RecentCodesGrid" AutoGenerateColumns="False" RowHeight="58">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="激活码" Binding="{Binding Code}" Width="80"/>
+                                        <DataGridTextColumn Header="状态" Binding="{Binding StatusText}" Width="64"/>
+                                        <DataGridTextColumn Header="有效期" Binding="{Binding ExpiryText}" Width="120"/>
+                                        <DataGridTemplateColumn Header="备注" Width="240">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Note}" ToolTip="{Binding Note}" TextWrapping="Wrap" Margin="10,6" VerticalAlignment="Center"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </Border>
+                        <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="快捷操作" FontSize="16" FontWeight="SemiBold"/>
+                                <TextBlock Text="常用管理入口" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,18"/>
+                                <Button x:Name="QuickNewCode" Style="{StaticResource PrimaryButton}" Content="生成激活码" Margin="0,0,0,10"/>
+                                <Button x:Name="QuickPublish" Style="{StaticResource SecondaryButton}" Content="发布新版本" Margin="0,0,0,10"/>
+                                <Button x:Name="QuickTest" Style="{StaticResource SecondaryButton}" Content="检测服务器"/>
+                                <Border x:Name="PaidAlert" Background="#FFF7ED" BorderBrush="#FED7AA" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,18,0,0" Visibility="Collapsed">
+                                    <StackPanel>
+                                        <TextBlock x:Name="PaidAlertText" Foreground="#9A3412" TextWrapping="Wrap"/>
+                                        <Button x:Name="PaidAlertButton" Style="{StaticResource SecondaryButton}" Content="查看订单明细" Margin="0,10,0,0" HorizontalAlignment="Left"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <Grid x:Name="PageCodes" Visibility="Collapsed">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="12"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="150"/><ColumnDefinition Width="12"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBox x:Name="CodeSearch" Grid.Column="0" ToolTip="搜索激活码、备注或设备型号"/>
+                        <ComboBox x:Name="CodeStatusFilter" Grid.Column="1" SelectedIndex="0">
+                            <ComboBoxItem Content="全部状态" Tag="all"/><ComboBoxItem Content="正常" Tag="active"/><ComboBoxItem Content="已吊销" Tag="revoked"/><ComboBoxItem Content="已过期" Tag="expired"/>
+                        </ComboBox>
+                        <Button x:Name="NewCodeButton" Grid.Column="3" Style="{StaticResource PrimaryButton}" Content="＋ 生成激活码"/>
+                    </Grid>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="310"/></Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource CardStyle}" Padding="0">
+                            <DataGrid x:Name="CodesGrid" AutoGenerateColumns="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="激活码" Binding="{Binding Code}" Width="90"/>
+                                    <DataGridTextColumn Header="状态" Binding="{Binding StatusText}" Width="70"/>
+                                    <DataGridTextColumn Header="有效期" Binding="{Binding ExpiryText}" Width="135"/>
+                                    <DataGridTextColumn Header="设备" Binding="{Binding DeviceModel}" Width="120"/>
+                                    <DataGridTextColumn Header="备注" Binding="{Binding Note}" Width="145"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                        <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="详细信息" FontSize="16" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="DetailHint" Text="选择一条激活码查看" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,18"/>
+                                <StackPanel x:Name="CodeDetailPanel" Visibility="Collapsed">
+                                    <TextBlock Text="激活码" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="DetailCode" FontSize="22" FontWeight="SemiBold" Margin="0,4,0,15"/>
+                                    <TextBlock Text="状态 / 有效期" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="DetailStatus" Margin="0,4,0,15" TextWrapping="Wrap"/>
+                                    <TextBlock Text="绑定设备" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="DetailDevice" Margin="0,4,0,15" TextWrapping="Wrap"/>
+                                    <TextBlock Text="备注" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="DetailNote" Margin="0,4,0,18" TextWrapping="Wrap"/>
+                                    <Button x:Name="UnbindButton" Style="{StaticResource SecondaryButton}" Content="解绑当前设备" Margin="0,0,0,8"/>
+                                    <Button x:Name="ExpiryButton" Style="{StaticResource SecondaryButton}" Content="修改有效期" Margin="0,0,0,8"/>
+                                    <Button x:Name="RevokeButton" Style="{StaticResource DangerButton}" Content="吊销激活码"/>
+                                    <Button x:Name="UnrevokeButton" Style="{StaticResource SecondaryButton}" Content="解除吊销" Visibility="Collapsed"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <Grid x:Name="PagePricing" Visibility="Collapsed">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="16"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <TextBlock Text="修改后立即对新订单生效，已经生成的付款二维码仍使用下单时价格。" Foreground="{StaticResource MutedBrush}"/>
+                    <UniformGrid Grid.Row="2" Rows="1" Columns="2">
+                        <Border Style="{StaticResource CardStyle}" Margin="0,0,8,0">
+                            <StackPanel>
+                                <TextBlock Text="年费会员" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="AnnualState" Text="读取中" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,22"/>
+                                <TextBlock Text="售价（元）" Foreground="{StaticResource MutedBrush}"/><TextBox x:Name="AnnualPrice" Margin="0,6,0,14"/>
+                                <TextBlock Text="划线原价（元，0 表示不显示）" Foreground="{StaticResource MutedBrush}"/><TextBox x:Name="AnnualOriginal" Margin="0,6,0,20"/>
+                                <Button x:Name="SaveAnnual" Style="{StaticResource PrimaryButton}" Content="保存年费定价" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource CardStyle}" Margin="8,0,0,0">
+                            <StackPanel>
+                                <TextBlock Text="永久会员" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="LifetimeState" Text="读取中" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,22"/>
+                                <TextBlock Text="售价（元）" Foreground="{StaticResource MutedBrush}"/><TextBox x:Name="LifetimePrice" Margin="0,6,0,14"/>
+                                <TextBlock Text="划线原价（元，0 表示不显示）" Foreground="{StaticResource MutedBrush}"/><TextBox x:Name="LifetimeOriginal" Margin="0,6,0,20"/>
+                                <Button x:Name="SaveLifetime" Style="{StaticResource PrimaryButton}" Content="保存永久定价" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+                </Grid>
+
+                <Grid x:Name="PageUpdates" Visibility="Collapsed">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="14"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <Border Style="{StaticResource CardStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="当前发布" Foreground="{StaticResource MutedBrush}"/>
+                                <TextBlock x:Name="ReleaseTitle" Text="尚未读取" FontSize="20" FontWeight="SemiBold" Margin="0,5,0,7"/>
+                                <TextBlock x:Name="ReleaseDetails" Text="--" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button x:Name="ValidateUpdate" Style="{StaticResource SecondaryButton}" Content="验证下载" Margin="0,0,8,0"/>
+                                <Button x:Name="ChangePolicy" Style="{StaticResource SecondaryButton}" Content="软 / 硬更新"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="320"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel>
+                                <TextBlock Text="发布操作" FontSize="16" FontWeight="SemiBold"/>
+                                <TextBlock Text="发布前会验证包名、版本、正式签名和下载内容。" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,18"/>
+                                <Button x:Name="StageApk" Style="{StaticResource SecondaryButton}" Content="仅上传测试包" Margin="0,0,0,9"/>
+                                <Button x:Name="PublishApk" Style="{StaticResource PrimaryButton}" Content="正式发布新版本" Margin="0,0,0,9"/>
+                                <Button x:Name="ConfigureOss" Style="{StaticResource SecondaryButton}" Content="配置 / 测试 OSS"/>
+                                <Border Background="#F8FAFC" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="11" Margin="0,18,0,0">
+                                    <StackPanel><TextBlock Text="OSS 状态" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="OssState" Text="--" Margin="0,4,0,0" TextWrapping="Wrap"/></StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="2" Style="{StaticResource CardStyle}" Padding="0">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="50"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                <Grid Margin="16,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="170"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="更新统计" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <ComboBox x:Name="StatsScope" Grid.Column="1" SelectedIndex="0" VerticalAlignment="Center">
+                                        <ComboBoxItem Content="最近 3 个目标版本" Tag="recent"/><ComboBoxItem Content="全部目标版本" Tag="all"/>
+                                    </ComboBox>
+                                </Grid>
+                                <DataGrid Grid.Row="1" x:Name="StatsGrid" AutoGenerateColumns="False">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="目标版本" Binding="{Binding Target}" Width="120"/>
+                                        <DataGridTextColumn Header="用户版本" Binding="{Binding Source}" Width="125"/>
+                                        <DataGridTextColumn Header="检查" Binding="{Binding Checks}" Width="55"/>
+                                        <DataGridTextColumn Header="安装" Binding="{Binding Installs}" Width="55"/>
+                                        <DataGridTextColumn Header="最近检查" Binding="{Binding LastCheck}" Width="140"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <Grid x:Name="PageSettings" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock Text="服务器连接" FontSize="17" FontWeight="SemiBold"/>
+                            <TextBlock Text="管理请求使用固定证书指纹验证服务器身份。" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,22" TextWrapping="Wrap"/>
+                            <TextBlock Text="服务器地址" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="SettingsServer" Margin="0,5,0,18" TextWrapping="Wrap"/>
+                            <TextBlock Text="管理员令牌" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="TokenState" Margin="0,5,0,12"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="SetToken" Style="{StaticResource SecondaryButton}" Content="更换令牌" Margin="0,0,8,0"/>
+                                <Button x:Name="TestServerButton" Style="{StaticResource PrimaryButton}" Content="检测连接"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Column="2" Style="{StaticResource CardStyle}">
+                        <StackPanel>
+                            <TextBlock Text="工具与凭证" FontSize="17" FontWeight="SemiBold"/>
+                            <TextBlock Text="OSS 密钥由 Windows 当前账号加密，仅保存在本机。" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,22" TextWrapping="Wrap"/>
+                            <TextBlock Text="OSS 上传" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="SettingsOssState" Margin="0,5,0,14" TextWrapping="Wrap"/>
+                            <Button x:Name="SettingsConfigureOss" Style="{StaticResource SecondaryButton}" Content="配置 / 重新测试 OSS" HorizontalAlignment="Left" Margin="0,0,0,22"/>
+                            <TextBlock Text="命令行版本" Foreground="{StaticResource MutedBrush}"/><TextBlock Text="原有《激活码管理.bat》保持不变，仍可随时使用。" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Grid>
+
+            <Border Grid.Row="2" Background="#E9EDF4" Padding="28,0">
+                <Grid>
+                    <TextBlock x:Name="FooterStatus" Text="就绪" Foreground="#667085" VerticalAlignment="Center"/>
+                    <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <ProgressBar x:Name="BusyBar" Width="72" Height="3" IsIndeterminate="True" Visibility="Collapsed" Margin="0,0,10,0" Foreground="#2563EB"/>
+                        <TextBlock x:Name="BusyText" Text="" Foreground="#2563EB" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

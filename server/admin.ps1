@@ -18,7 +18,8 @@ param(
     [string]$Cmd,
     [string]$A1,
     [string]$A2,
-    [string]$A3
+    [string]$A3,
+    [switch]$LibraryMode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -83,6 +84,14 @@ function Call($method, $path, $bodyObj) {
         "-k", "--pinnedpubkey", $ServerPin,
         "-sS", "-X", $method
     )
+    # 图形管理器可设置有限等待时间，避免服务器离线时窗口长期等待；
+    # 命令行模式不设置这两个变量，因此保持原有行为。
+    if ($script:AdminCurlConnectTimeoutSeconds) {
+        $curlArgs += @("--connect-timeout", [string]$script:AdminCurlConnectTimeoutSeconds)
+    }
+    if ($script:AdminCurlMaxTimeSeconds) {
+        $curlArgs += @("--max-time", [string]$script:AdminCurlMaxTimeSeconds)
+    }
     if ($isAdmin) {
         $curlArgs += @("-H", "X-Admin-Token: $script:Token")
     }
@@ -1341,6 +1350,10 @@ function Test-Server {
 # ---------------------------------------------------------------- 入口
 
 $script:Token = Get-SavedToken
+
+# 新版图形管理器复用这里已经过验证的请求、APK 校验和 OSS 发布能力。
+# 以库模式加载时只定义函数与读取已有凭证，不进入命令行菜单，也不会弹出令牌输入。
+if ($LibraryMode) { return }
 
 if ($Cmd) {
     # 命令行模式(兼容旧用法)
