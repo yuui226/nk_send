@@ -79,6 +79,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -447,6 +448,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var keepaliveJob: Job? = null
     private var watcherJob: Job? = null
     private var eventPollJob: Job? = null
+    private data class PendingNewCameraObject(
+        var attempts: Int = 0,
+        var nextAttemptAtMs: Long,
+    )
+    private var pendingNewObjectCamera: NikonCamera? = null
+    private val pendingNewObjectHandles = LinkedHashMap<Int, PendingNewCameraObject>()
+    private val pendingNewObjectWake = Channel<Unit>(Channel.CONFLATED)
     private var fileLoadJob: Job? = null
     // 首次连接的整卡 ObjectInfo 枚举可能跨越数秒。进入监看时取消并记住尚未完成，
     // 退出后从已发布的文件继续，避免 GetObjectInfo 与 Live View 取帧争抢 ioMutex。
@@ -1157,6 +1165,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         startThumbnailFill()
         startEffectPreviewPrefetch()
+        startNewObjectResolver()
         // STA 的首次检测只由“连接相机”按钮对应的 discoverStaCamera() 触发。
     }
 
@@ -2408,117 +2417,258 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * 事件轮询(照片列表实时新增):连接空闲时每 [EVENT_POLL_INTERVAL_MS] 拉一次相机
-     * 事件,收到 ObjectAdded(机身快门产生的新照片)即经 [onCameraObjectAdded] 插入
-     * 列表顶部——用户在照片列表页(或回到列表)就能看到新拍的照片,无需整表刷新。
-     * 通道纪律(与缩略图填充同哲学,绝不打扰前台交互):
-     * - 传输中完全停:不碰传输热路径;事件在相机侧排队,传完下一轮一次性补上;
-     * - 遥控页打开时完全停:GetEvent 取走即消费,监看页的事件循环是彼时唯一消费者
-     *   (拍摄确认依赖 ObjectAdded,被这里抢走会破坏快门流程);文件变化退出监看后补差;
-     * - FHD 预览/初始列表加载期间同样让路。
-     * 不支持 0x90C7 的机型 rcPollEvents 恒返回空列表,循环退化为偶发一条被拒绝的
-     * 小命令,无副作用。掉线后 camera 置空,循环自然退出;重连时重启。
+     * PTP/IP 独立事件通道负责低延迟通知，周期命令轮询继续作为 USB、旧机型及丢包兜底。
+     * 两条来源都只把 ObjectAdded 放入同一个去重队列，不在事件读取现场执行元数据命令。
+     * 命令轮询仍为传输、监看、FHD 和初始列表扫描让路，不改变原有前台优先级。
      */
     private fun startEventPolling() {
         eventPollJob?.cancel()
+        val cam = camera ?: return
         eventPollJob = viewModelScope.launch {
-            while (isActive) {
-                delay(EVENT_POLL_INTERVAL_MS)
-                val cam = camera ?: break
-                if (!_state.value.isConnectedToCamera) break
-                if (_state.value.isLoadingFiles) continue
-                if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value) continue
-                val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
-                for (e in events) {
-                    if (e.first == Lab.EVT_OBJECT_ADDED) onCameraObjectAdded(e.second.toInt())
+            val socketEvents = if (cam.staAlbumAccessValidated) {
+                launch {
+                    cam.ptpIpEvents.collect { event ->
+                        if (event.first == Lab.EVT_OBJECT_ADDED) {
+                            enqueueNewCameraObject(cam, event.second.toInt())
+                        }
+                    }
                 }
+            } else null
+            try {
+                while (isActive && camera === cam) {
+                    delay(EVENT_POLL_INTERVAL_MS)
+                    if (!_state.value.isConnectedToCamera || camera !== cam) break
+                    if (_state.value.isLoadingFiles) continue
+                    if (transfersBusyFlow.value || remoteActiveFlow.value || fhdActiveFlow.value) {
+                        continue
+                    }
+                    val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
+                    for (event in events) {
+                        if (event.first == Lab.EVT_OBJECT_ADDED) {
+                            enqueueNewCameraObject(cam, event.second.toInt())
+                        }
+                    }
+                }
+            } finally {
+                socketEvents?.cancel()
             }
         }
     }
 
     /**
-     * 非监看状态的相机新增对象：取该 handle 的对象信息并插到列表顶部。
-     * handle 降序 ≈ 拍摄从新到旧,新对象 handle 最大,前插即保持既有顺序;日期分组、
-     * 类型筛选都由 UI 层从 files 派生,新照片自动归入当天分组。与 loadFiles 同键
-     * 去重(双卡备份模式同一张照片两个 handle,只显示一份)。
-     * 监看页即使为拍摄确认调用本方法也立即返回；退出监看统一做 handle 差量。
+     * 所有实时新增来源的唯一入口。初始扫描/监看/FHD 期间只记住 handle，恢复空闲后
+     * 再解析；因此不会丢事件，也不会与正在发布的完整列表互相覆盖。
      */
     fun onCameraObjectAdded(handle: Int) {
         val cam = camera ?: return
-        if (remoteActiveFlow.value || _state.value.isLoadingFiles) return
+        enqueueNewCameraObject(cam, handle)
+    }
+
+    private fun enqueueNewCameraObject(cam: NikonCamera, handle: Int) {
+        if (camera !== cam || handle == 0 || handle == -1) return
         val hasKnownBaseline = knownHandlesCamera === cam
         if (hasKnownBaseline && handle in knownHandles) return
         if (_state.value.files.any { it.handle == handle }) return
+        if (pendingNewObjectCamera !== cam) {
+            pendingNewObjectHandles.clear()
+            pendingNewObjectCamera = cam
+        }
+        pendingNewObjectHandles.putIfAbsent(
+            handle,
+            PendingNewCameraObject(
+                nextAttemptAtMs = SystemClock.elapsedRealtime() + NEW_OBJECT_COALESCE_MS,
+            ),
+        )
+        pendingNewObjectWake.trySend(Unit)
+    }
+
+    private fun startNewObjectResolver() {
+        // 页面级独占任务结束、或完整扫描建立基线后，唤醒此前只记录未读取的 handle。
         viewModelScope.launch {
-            val info = runCatching {
-                var got: NikonCamera.FileInfo? = null
-                if (cam.staDirectObjectReadValidated) {
-                    val currentStorageIds = _state.value.storageIds
-                    val memberships = resolveStaDirectStorageMembership(
-                        cam = cam,
-                        handle = handle,
-                        storageIds = currentStorageIds,
-                    )
-                    val onBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
-                        { batch, _, _ ->
-                            got = batch.firstOrNull()?.let { file ->
-                                if (memberships.isEmpty()) file
-                                else file.copy(storageIds = memberships)
-                            }
+            combine(
+                remoteActiveFlow,
+                fhdActiveFlow,
+                state.map { it.isLoadingFiles || !it.isConnectedToCamera }.distinctUntilChanged(),
+            ) { remote, fhd, unavailable -> remote || fhd || unavailable }
+                .distinctUntilChanged()
+                .collect { pendingNewObjectWake.trySend(Unit) }
+        }
+
+        viewModelScope.launch {
+            while (isActive) {
+                pendingNewObjectWake.receive()
+                while (isActive) {
+                    val cam = pendingNewObjectCamera
+                    if (cam == null || camera !== cam) {
+                        pendingNewObjectHandles.clear()
+                        pendingNewObjectCamera = null
+                        break
+                    }
+
+                    val visibleHandles = _state.value.files.asSequence()
+                        .mapTo(HashSet()) { it.handle }
+                    val hasKnownBaseline = knownHandlesCamera === cam
+                    pendingNewObjectHandles.keys.removeAll { handle ->
+                        handle in visibleHandles || (hasKnownBaseline && handle in knownHandles)
+                    }
+                    if (pendingNewObjectHandles.isEmpty()) {
+                        pendingNewObjectCamera = null
+                        break
+                    }
+                    if (remoteActiveFlow.value || fhdActiveFlow.value ||
+                        _state.value.isLoadingFiles || !_state.value.isConnectedToCamera
+                    ) {
+                        break
+                    }
+
+                    val now = SystemClock.elapsedRealtime()
+                    val ready = pendingNewObjectHandles.entries
+                        .asSequence()
+                        .filter { it.value.nextAttemptAtMs <= now }
+                        .take(NEW_OBJECT_RESOLVE_BATCH_SIZE)
+                        .map { it.key to it.value.attempts }
+                        .toList()
+                    if (ready.isEmpty()) {
+                        val waitMs = pendingNewObjectHandles.values
+                            .minOf { it.nextAttemptAtMs }
+                            .minus(now)
+                            .coerceAtLeast(1L)
+                        withTimeoutOrNull(waitMs) { pendingNewObjectWake.receive() }
+                        continue
+                    }
+
+                    // GetObjectsMetaData 是紧凑索引。连拍的首批 handle 共用一次刷新；
+                    // 不支持或暂时失败时，单文件解析仍自动回退到已有的 128 KiB 头读取。
+                    if (cam.staDirectObjectReadValidated && ready.any { it.second == 0 }) {
+                        try {
+                            cam.refreshStaDirectObjectsMetadata(_state.value.storageIds)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // 单文件解析仍有成熟的头部读取回退，交给下方有界重试处理。
                         }
-                    val storageId = memberships.singleOrNull()
-                    if (storageId != null) {
-                        cam.streamStaDirectMergedFileInfo(
-                            newestFirstHandlesByStorage = listOf(storageId to listOf(handle)),
-                            storageIds = currentStorageIds,
-                            batchSize = 1,
-                            onBatch = onBatch,
-                        )
-                    } else {
-                        cam.streamStaDirectFileInfo(
-                            handles = listOf(handle),
-                            storageIds = currentStorageIds,
-                            batchSize = 1,
-                            onBatch = onBatch,
-                        )
                     }
-                } else {
-                    cam.streamFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
-                        got = batch.firstOrNull()
+
+                    for ((handle, _) in ready) {
+                        if (camera !== cam || remoteActiveFlow.value || fhdActiveFlow.value ||
+                            _state.value.isLoadingFiles
+                        ) {
+                            break
+                        }
+                        if ((knownHandlesCamera === cam && handle in knownHandles) ||
+                            _state.value.files.any { it.handle == handle }
+                        ) {
+                            pendingNewObjectHandles.remove(handle)
+                            continue
+                        }
+
+                        val info = resolveNewCameraObject(cam, handle)
+                        if (camera !== cam) break
+                        // 完整扫描可能在协议请求等待期间启动；让它先建立权威快照，避免
+                        // 此处刚插入的新对象随后又被扫描中的旧批次覆盖。
+                        if (remoteActiveFlow.value || fhdActiveFlow.value ||
+                            _state.value.isLoadingFiles
+                        ) {
+                            break
+                        }
+                        if (info != null) {
+                            pendingNewObjectHandles.remove(handle)
+                            publishNewCameraObject(cam, handle, info)
+                            continue
+                        }
+
+                        val pending = pendingNewObjectHandles[handle] ?: continue
+                        pending.attempts++
+                        if (pending.attempts >= NEW_OBJECT_RESOLVE_MAX_ATTEMPTS) {
+                            pendingNewObjectHandles.remove(handle)
+                            log { "NEW_OBJECT give up handle=0x%08X".format(handle) }
+                        } else {
+                            pending.nextAttemptAtMs = SystemClock.elapsedRealtime() +
+                                NEW_OBJECT_RESOLVE_BACKOFF_MS[pending.attempts - 1]
+                        }
                     }
-                }
-                got
-            }.getOrNull() ?: return@launch
-            if (camera !== cam) return@launch
-            val previousState = _state.getAndUpdate { s ->
-                val duplicateIndex = s.files.indexOfFirst {
-                    it.handle == handle ||
-                        it.logicalIdentity() == info.logicalIdentity()
-                }
-                if (duplicateIndex < 0) {
-                    s.copy(files = listOf(info) + s.files)
-                } else {
-                    val existing = s.files[duplicateIndex]
-                    val merged = mergeStorageMembership(existing, info)
-                    if (merged === existing) s else s.copy(
-                        files = s.files.toMutableList().apply { this[duplicateIndex] = merged }
-                    )
                 }
             }
-            val added = previousState.files.none {
+        }
+    }
+
+    private suspend fun resolveNewCameraObject(
+        cam: NikonCamera,
+        handle: Int,
+    ): NikonCamera.FileInfo? = try {
+        var result: NikonCamera.FileInfo? = null
+        if (cam.staDirectObjectReadValidated) {
+            val currentStorageIds = _state.value.storageIds
+            val memberships = resolveStaDirectStorageMembership(
+                cam = cam,
+                handle = handle,
+                storageIds = currentStorageIds,
+            )
+            val onBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
+                { batch, _, _ ->
+                    result = batch.firstOrNull()?.let { file ->
+                        if (memberships.isEmpty()) file else file.copy(storageIds = memberships)
+                    }
+                }
+            val storageId = memberships.singleOrNull()
+            if (storageId != null) {
+                cam.streamStaDirectMergedFileInfo(
+                    newestFirstHandlesByStorage = listOf(storageId to listOf(handle)),
+                    storageIds = currentStorageIds,
+                    batchSize = 1,
+                    onBatch = onBatch,
+                )
+            } else {
+                cam.streamStaDirectFileInfo(
+                    handles = listOf(handle),
+                    storageIds = currentStorageIds,
+                    batchSize = 1,
+                    onBatch = onBatch,
+                )
+            }
+        } else {
+            cam.streamFileInfo(listOf(handle), batchSize = 1) { batch, _, _ ->
+                result = batch.firstOrNull()
+            }
+        }
+        result
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
+    }
+
+    private suspend fun publishNewCameraObject(
+        cam: NikonCamera,
+        handle: Int,
+        info: NikonCamera.FileInfo,
+    ) {
+        if (camera !== cam) return
+        val hasKnownBaseline = knownHandlesCamera === cam
+        val previousState = _state.getAndUpdate { state ->
+            val duplicateIndex = state.files.indexOfFirst {
                 it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
             }
-            if (knownHandlesCamera === cam) knownHandles += handle
-            if (added) {
-                // GetObjectHandles 基线尚未建立时不自动传输，避免把连接前旧对象误判新增。
-                if (hasKnownBaseline && knownHandlesCamera === cam) {
-                    if (isAutoTransferMedia(info)) {
-                        _newMediaFiles.emit(NewCameraMedia(cam, listOf(info)))
-                    }
-                    thumbnailFillQueue.enqueueNew(info)
-                    thumbnailFillWake.trySend(Unit)
-                }
+            if (duplicateIndex < 0) {
+                state.copy(files = listOf(info) + state.files)
+            } else {
+                val existing = state.files[duplicateIndex]
+                val merged = mergeStorageMembership(existing, info)
+                if (merged === existing) state else state.copy(
+                    files = state.files.toMutableList().apply { this[duplicateIndex] = merged },
+                )
             }
+        }
+        val added = previousState.files.none {
+            it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
+        }
+        if (knownHandlesCamera === cam) knownHandles += handle
+        if (added && hasKnownBaseline && knownHandlesCamera === cam) {
+            if (isAutoTransferMedia(info)) {
+                _newMediaFiles.emit(NewCameraMedia(cam, listOf(info)))
+            }
+            thumbnailFillQueue.enqueueNew(info)
+            thumbnailFillWake.trySend(Unit)
         }
     }
 
@@ -3917,9 +4067,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val USB_PERMISSION_POLL_MS = 100L
         const val USB_CONNECT_MAX_ATTEMPTS = 3
         const val KEEPALIVE_INTERVAL_MS = 10_000L
-        // 事件轮询间隔:机身快门新照片出现在列表的最大延迟。单条小命令,
-        // 相对 10s 心跳的通道占用可忽略;再快意义不大(拍完掏出手机也要几秒)。
-        const val EVENT_POLL_INTERVAL_MS = 2_000L
+        // STA 正常走事件通道；2 秒轮询只承担丢包、旧机型和 USB/AP 的原有兜底职责。
+        private const val EVENT_POLL_INTERVAL_MS = 2_000L
+        private const val NEW_OBJECT_COALESCE_MS = 90L
+        private const val NEW_OBJECT_RESOLVE_BATCH_SIZE = 16
+        private const val NEW_OBJECT_RESOLVE_MAX_ATTEMPTS = 5
+        private val NEW_OBJECT_RESOLVE_BACKOFF_MS = longArrayOf(180L, 360L, 720L, 1_400L)
         // 连接失败重试间隔：相机刚开热点时 PTP 服务可能晚于 Wi-Fi 就绪，快节奏重试
         // 让"差一步"的场景少等一秒；连续失败后降频，避免普通路由器恰好使用同网关时
         // 每秒空连。看护轮询只读本地 DHCP，保持 1 秒用于及时发现真正的网络切换。

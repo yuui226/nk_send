@@ -508,11 +508,40 @@ private fun parsePropDesc(prop: Int, d: ByteArray): String {
         "cur=$curTxt def=$defTxt $form"
 }
 
-/** 解析 Nikon GetEvent(0x90C7) 载荷：u16 count + count×{u16 code, u32 param}。 */
-private fun parseEvents(d: ByteArray): List<Pair<Int, Long>> {
+/** 解析 Nikon GetEvent(0x90C7)：u16 count + count×{u16 code, u32 param}。 */
+internal fun parseNikonEvents(d: ByteArray): List<Pair<Int, Long>> {
+    require(d.size >= 2) { "missing Nikon event count" }
     val c = Cur(d)
     val n = c.u16()
+    require(n <= (d.size - 2) / 6) { "truncated Nikon event payload" }
     return (0 until n).map { c.u16() to c.u32() }
+}
+
+/**
+ * 解析 Nikon GetEventEx(0x941C)：u16 count + u16 reserved，随后每项为
+ * u16 code + u16 parameterCount + parameterCount×u32。只向现有调用方暴露首参数。
+ */
+internal fun parseNikonExtendedEvents(d: ByteArray): List<Pair<Int, Long>> {
+    require(d.size >= 2) { "missing Nikon extended event count" }
+    val count = Cur(d).u16()
+    if (count == 0) return emptyList()
+    require(d.size >= 4 && count <= (d.size - 4) / 4) {
+        "truncated Nikon extended event payload"
+    }
+    val cursor = Cur(d).apply { p = 4 }
+    return buildList(count) {
+        repeat(count) {
+            require(cursor.p + 4 <= d.size) { "missing Nikon extended event header" }
+            val code = cursor.u16()
+            val parameterCount = cursor.u16()
+            require(parameterCount in 0..5 && cursor.p + parameterCount * 4 <= d.size) {
+                "invalid Nikon extended event parameter count"
+            }
+            val firstParameter = if (parameterCount > 0) cursor.u32() else 0L
+            repeat((parameterCount - 1).coerceAtLeast(0)) { cursor.u32() }
+            add(code to firstParameter)
+        }
+    }
 }
 
 /** 在数据里找 JPEG SOI（FF D8 FF）偏移；找不到返回 -1。 */
@@ -1202,9 +1231,21 @@ suspend fun NikonCamera.rcFocusAt(
 }
 
 suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
-    val (rc, d) = labCommand(Lab.NK_GET_EVENT)
-    if (rc != Lab.OK || d == null) return emptyList()
-    return runCatching { parseEvents(d) }.getOrDefault(emptyList())
+    // STA 初始化已经实际验证过 GetEventEx；只在该会话使用新格式。AP/USB 继续保持
+    // 原来的 GetEvent 路径，避免把一台相机的能力假设扩散到其它连接模式。
+    if (staAlbumAccessValidated) {
+        val (extendedResponse, extendedData) = labCommand(Lab.NK_GET_EVENT_EX)
+        if (extendedResponse == Lab.OK) {
+            return extendedData?.let { data ->
+                runCatching { parseNikonExtendedEvents(data) }.getOrDefault(emptyList())
+            }.orEmpty()
+        }
+        if (extendedResponse != PtpConstants.OPERATION_NOT_SUPPORTED) return emptyList()
+    }
+
+    val (response, data) = labCommand(Lab.NK_GET_EVENT)
+    if (response != Lab.OK || data == null) return emptyList()
+    return runCatching { parseNikonEvents(data) }.getOrDefault(emptyList())
 }
 
 /** 发单条命令，DEVICE_BUSY 时退避重试（200ms × 5）。拍摄/录像触发类命令共用。 */
@@ -2204,7 +2245,7 @@ suspend fun NikonCamera.runLabProbe(
     if (Lab.NK_GET_EVENT in ops) {
         val (rc, d) = labCommand(Lab.NK_GET_EVENT)
         if (rc == Lab.OK && d != null) {
-            val evts = runCatching { parseEvents(d) }.getOrDefault(emptyList())
+            val evts = runCatching { parseNikonEvents(d) }.getOrDefault(emptyList())
             log("GetEvent(0x90C7): ${evts.size} pending" +
                     if (evts.isEmpty()) "" else " " + evts.joinToString(" ") { (c, p) -> "${hex4(c)}(${hex8(p)})" })
         } else log("GetEvent(0x90C7) resp=${hex4(rc)}")
@@ -2345,7 +2386,7 @@ suspend fun NikonCamera.runLabProbe(
                     if (Lab.NK_GET_EVENT in allAdvertisedOps) {
                         val (eventRc, eventData) = labCommand(Lab.NK_GET_EVENT)
                         val events = if (eventRc == Lab.OK && eventData != null) {
-                            runCatching { parseEvents(eventData) }.getOrDefault(emptyList())
+                            runCatching { parseNikonEvents(eventData) }.getOrDefault(emptyList())
                         } else {
                             emptyList()
                         }

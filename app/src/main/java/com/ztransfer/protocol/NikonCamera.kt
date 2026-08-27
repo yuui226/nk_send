@@ -18,8 +18,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -310,6 +313,23 @@ private fun cameraBaseFileName(value: String): String? {
             name.length <= 255 &&
             name.none { it.code < 0x20 || it == ':' }
     }
+}
+
+/** PTP/IP Event payload: u16 code + u32 transactionId + optional u32 parameters. */
+internal fun parsePtpIpEvent(payload: ByteArray?): Pair<Int, Long>? {
+    if (payload == null || payload.size < 6) return null
+    val code = (payload[0].toInt() and 0xFF) or
+        ((payload[1].toInt() and 0xFF) shl 8)
+    val firstParameter = if (payload.size >= 10) {
+        var value = 0L
+        repeat(4) { index ->
+            value = value or ((payload[6 + index].toLong() and 0xFF) shl (index * 8))
+        }
+        value
+    } else {
+        0L
+    }
+    return code to firstParameter
 }
 
 /** Decodes a standalone PTP string and rejects truncated or unsafe filename values. */
@@ -1204,6 +1224,8 @@ class NikonCamera(private val context: Context) {
     private val cmdReader = PacketReader(context)
     private val evtReader = PacketReader(context)
     private var evtThread: Thread? = null
+    private val ptpIpEventChannel = Channel<Pair<Int, Long>>(capacity = 64)
+    internal val ptpIpEvents: Flow<Pair<Int, Long>> = ptpIpEventChannel.receiveAsFlow()
     private val staDiagnosticLines = ArrayList<String>()
     internal val staDiagnosticReport: String
         get() = staDiagnosticLines.joinToString("\n")
@@ -1844,9 +1866,14 @@ class NikonCamera(private val context: Context) {
                 val output = socket.getOutputStream()
                 while (true) {
                     val packet = evtReader.readPacket(input)
-                    // 部分机型在事件通道发 PING 保活，必须在本通道应答。
-                    if (packet.type == PtpConstants.PING) {
-                        sendPong(output)
+                    when (packet.type) {
+                        // 部分机型在事件通道发 PING 保活，必须在本通道应答。
+                        PtpConstants.PING -> sendPong(output)
+                        // 不在事件线程执行任何相机命令；只投递轻量事件，命令通道仍由
+                        // CameraViewModel 按前台优先级统一调度。缓冲满时命令轮询仍会兜底。
+                        PtpConstants.EVENT -> if (staAlbumAccessValidated) {
+                            parsePtpIpEvent(packet.payload)?.let(ptpIpEventChannel::trySend)
+                        }
                     }
                 }
             } catch (_: Exception) {
@@ -2507,8 +2534,11 @@ class NikonCamera(private val context: Context) {
     }
 
     /** Must be called while [ioMutex] is held. One tiny index replaces one 128 KiB date probe/item. */
-    private fun loadStaDirectObjectsMetadataInternal(storageIds: List<Int>) {
-        if (staDirectObjectsMetadataAttempted) return
+    private fun loadStaDirectObjectsMetadataInternal(
+        storageIds: List<Int>,
+        forceRefresh: Boolean = false,
+    ) {
+        if (staDirectObjectsMetadataAttempted && !forceRefresh) return
         staDirectObjectsMetadataAttempted = true
         val advertised = cachedDeviceInfo?.operations
             ?.contains(PtpConstants.NK_GET_OBJECTS_METADATA) == true
@@ -2527,9 +2557,7 @@ class NikonCamera(private val context: Context) {
             val (response, data) = recvRespWithPayload()
             val dates = if (response == PtpConstants.RESPONSE_OK) {
                 parseNikonObjectsMetadataCaptureDates(data)
-            } else {
-                emptyMap()
-            }
+            } else emptyMap()
             staDirectCaptureDates.putAll(dates)
             reports += "0x%08X:%s/%dB/%d".format(
                 storageId,
@@ -2538,12 +2566,19 @@ class NikonCamera(private val context: Context) {
                 dates.size,
             )
         }
-        staDirectMetadataDiagnostics.putIfAbsent(
-            "objects-metadata",
+        staDirectMetadataDiagnostics["objects-metadata"] =
             "direct GetObjectsMetaData advertised=true queries=[${reports.joinToString(",")}] " +
-                "mapped=${staDirectCaptureDates.size}",
-        )
+            "mapped=${staDirectCaptureDates.size}"
     }
+
+    /** Refreshes only the compact STA catalog index; unsupported bodies keep the header fallback. */
+    internal suspend fun refreshStaDirectObjectsMetadata(storageIds: List<Int>) =
+        withContext(Dispatchers.IO) {
+            if (!staDirectObjectReadValidated) return@withContext
+            ioMutex.withLock {
+                loadStaDirectObjectsMetadataInternal(storageIds, forceRefresh = true)
+            }
+        }
 
     /**
      * One real JPEG/NEF MakerNote anchors Nikon's monotonically increasing file number. This is the
@@ -3984,6 +4019,7 @@ class NikonCamera(private val context: Context) {
         try { evtSocket?.close() } catch (_: Exception) {}
         evtThread?.interrupt()
         evtThread = null
+        ptpIpEventChannel.close()
     }
 
     /**

@@ -12,7 +12,7 @@ object PtpConstants {
     const val INIT_FAIL = 5
     const val CMD_REQUEST = 6
     const val CMD_RESPONSE = 7
-    // 8 = Event 包（事件通道上收到后直接忽略，无需常量）
+    const val EVENT = 8
     const val START_DATA_PACKET = 9
     const val DATA_PACKET = 10
     const val CANCEL = 11          // Cancel 包：请求对端中止指定事务的数据阶段
@@ -56,7 +56,6 @@ object PtpConstants {
     const val NK_PAIRING_QUERY = 0x952B
     const val NK_PAIRING_RESULT = 0x935A
 
-    const val EVENT = 8
     const val EVENT_DEVICE_INFO_CHANGED = 0x4008
 
     // 响应码

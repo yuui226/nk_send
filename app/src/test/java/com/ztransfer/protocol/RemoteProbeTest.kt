@@ -2,10 +2,61 @@ package com.ztransfer.protocol
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteProbeTest {
+    @Test
+    fun parsesLegacyAndExtendedNikonEventsIntoTheSameShape() {
+        val legacy = byteArrayOf(
+            0x01, 0x00,
+            0x02, 0x40,
+            0xF6.toByte(), 0x61, 0x19, 0x29,
+        )
+        val extended = byteArrayOf(
+            0x02, 0x00, 0x00, 0x00,
+            0x02, 0x40, 0x02, 0x00,
+            0xF6.toByte(), 0x61, 0x19, 0x29,
+            0x01, 0x00, 0x01, 0x00,
+            0x0D, 0x40, 0x00, 0x00,
+        )
+
+        assertEquals(listOf(0x4002 to 0x291961F6L), parseNikonEvents(legacy))
+        assertEquals(
+            listOf(0x4002 to 0x291961F6L, 0x400D to 0L),
+            parseNikonExtendedEvents(extended),
+        )
+    }
+
+    @Test
+    fun rejectsTruncatedOrOversizedNikonExtendedEvents() {
+        val truncated = byteArrayOf(
+            0x01, 0x00, 0x00, 0x00,
+            0x02, 0x40, 0x01, 0x00,
+        )
+        val tooManyParameters = byteArrayOf(
+            0x01, 0x00, 0x00, 0x00,
+            0x02, 0x40, 0x06, 0x00,
+            *ByteArray(24),
+        )
+
+        assertTrue(runCatching { parseNikonExtendedEvents(truncated) }.isFailure)
+        assertTrue(runCatching { parseNikonExtendedEvents(tooManyParameters) }.isFailure)
+    }
+
+    @Test
+    fun parsesPtpIpObjectAddedEventPayload() {
+        val payload = byteArrayOf(
+            0x02, 0x40,
+            0x34, 0x12, 0x00, 0x00,
+            0xF6.toByte(), 0x61, 0x19, 0x29,
+        )
+
+        assertEquals(0x4002 to 0x291961F6L, parsePtpIpEvent(payload))
+        assertNull(parsePtpIpEvent(payload.copyOf(5)))
+    }
+
     @Test
     fun codeReportIsSortedDeduplicatedAndNeverTruncated() {
         val codes = (0x9400..0x9421).toList().reversed() + listOf(0x941E, 0x9400)
