@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.graphics.Bitmap
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -121,10 +122,13 @@ import com.ztransfer.ui.util.Haptics
 import com.ztransfer.ui.util.formatSpeed
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.ActiveTransferProgress
+import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.ExportedOriginalIndex
+import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.PhotoFilterCriteria
 import com.ztransfer.viewmodel.PhotoDateRange
+import com.ztransfer.viewmodel.TransferState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
@@ -139,7 +143,9 @@ import kotlin.math.sin
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -150,6 +156,97 @@ data class FileGroup(
     val date: String,
     val files: List<NikonCamera.FileInfo>
 )
+
+/** 照片页正文只观察会改变其内容或交互的相机状态，避免 RSSI 等顶栏更新重组网格。 */
+internal data class FileListCameraUiState(
+    val isConnectedToCamera: Boolean,
+    val connectionType: CameraConnectionType?,
+    val isStaConnection: Boolean,
+    val files: List<NikonCamera.FileInfo>,
+    val storageIds: List<Int>,
+    val isLoadingFiles: Boolean,
+    val hasCompletedFileScan: Boolean,
+    val effectPreviewBitmap: Bitmap?,
+    val cameraManufacturer: String?,
+    val cameraModel: String?,
+    val effectPreviewExif: PhotoExif?,
+)
+
+internal fun CameraState.toFileListCameraUiState(): FileListCameraUiState =
+    FileListCameraUiState(
+        isConnectedToCamera = isConnectedToCamera,
+        connectionType = connectionType,
+        isStaConnection = isStaConnection,
+        files = files,
+        storageIds = storageIds,
+        isLoadingFiles = isLoadingFiles,
+        hasCompletedFileScan = hasCompletedFileScan,
+        effectPreviewBitmap = effectPreviewBitmap,
+        cameraManufacturer = cameraManufacturer,
+        cameraModel = cameraModel,
+        effectPreviewExif = effectPreviewExif,
+    )
+
+/** 与网格和预览直接相关的传输状态；高频下载进度仍走独立的 activeProgress 流。 */
+internal data class FileListTransferUiState(
+    val tasks: List<TransferTask>,
+    val taskStructureRevision: Long,
+    val isTransferring: Boolean,
+    val transferDirUri: String?,
+    val existingExportIndex: ExportedOriginalIndex,
+    val existingExportRevision: Long,
+    val thumbnailColumns: Int,
+    val collapseBurstPhotos: Boolean,
+    val tapToPreview: Boolean,
+    val hapticsEnabled: Boolean,
+    val organizeTransfersByDate: Boolean,
+    val filterExtensions: Set<String>?,
+    val filterProtectedOnly: Boolean,
+    val filterBurstOnly: Boolean,
+    val filterUntransferredOnly: Boolean,
+    val filterStorageSlot: Int?,
+    val filterDateRange: PhotoDateRange?,
+    val previewRotationQuarterTurns: Int,
+    val previewHistogramEnabled: Boolean,
+)
+
+internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState =
+    FileListTransferUiState(
+        tasks = tasks,
+        taskStructureRevision = taskStructureRevision,
+        isTransferring = isTransferring,
+        transferDirUri = transferDirUri,
+        existingExportIndex = existingExportIndex,
+        existingExportRevision = existingExportRevision,
+        thumbnailColumns = thumbnailColumns,
+        collapseBurstPhotos = collapseBurstPhotos,
+        tapToPreview = tapToPreview,
+        hapticsEnabled = hapticsEnabled,
+        organizeTransfersByDate = organizeTransfersByDate,
+        filterExtensions = filterExtensions,
+        filterProtectedOnly = filterProtectedOnly,
+        filterBurstOnly = filterBurstOnly,
+        filterUntransferredOnly = filterUntransferredOnly,
+        filterStorageSlot = filterStorageSlot,
+        filterDateRange = filterDateRange,
+        previewRotationQuarterTurns = previewRotationQuarterTurns,
+        previewHistogramEnabled = previewHistogramEnabled,
+    )
+
+internal data class FileListSignalUiState(
+    val rssi: Int?,
+    val connected: Boolean,
+    val connectionType: CameraConnectionType?,
+    val staMode: Boolean,
+)
+
+internal fun CameraState.toFileListSignalUiState(): FileListSignalUiState =
+    FileListSignalUiState(
+        rssi = wifiRssi,
+        connected = isConnectedToCamera,
+        connectionType = connectionType,
+        staMode = isStaConnection,
+    )
 
 /** 一段真实连拍。它只描述检测结果；是否折成虚拟卡位由列表设置决定。 */
 internal data class BurstPhotoGroup(
@@ -374,8 +471,20 @@ fun FileListScreen(
     backHandlerEnabled: Boolean,
     onNavigateToRemote: () -> Unit
 ) {
-    val state by cameraViewModel.state.collectAsStateWithLifecycle()
-    val transferState by transferViewModel.state.collectAsStateWithLifecycle()
+    val state by remember(cameraViewModel) {
+        cameraViewModel.state
+            .map(CameraState::toFileListCameraUiState)
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(
+        initialValue = cameraViewModel.state.value.toFileListCameraUiState(),
+    )
+    val transferState by remember(transferViewModel) {
+        transferViewModel.state
+            .map(TransferState::toFileListTransferUiState)
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(
+        initialValue = transferViewModel.state.value.toFileListTransferUiState(),
+    )
     val colors = AppTheme.colors
     // 设置以轻量面板呈现（点击左上角 "Z传" 打开），不再跳转独立页面。
     var showSettings by remember { mutableStateOf(false) }
@@ -1494,13 +1603,9 @@ fun FileListScreen(
             // 双 Z 标边上的信号按钮（常驻）：在线显示信号条（点击展开 dBm），断开显示
             // 红色断连图标；断开时点缩略图会放大强调它并弹提示（signalPulse 驱动）。
             Spacer(modifier = Modifier.width(8.dp))
-            SignalPill(
-                rssi = state.wifiRssi,
-                connected = state.isConnectedToCamera,
+            FileListSignalPill(
+                cameraViewModel = cameraViewModel,
                 pulseTrigger = signalPulse,
-                connectionType = state.connectionType,
-                staMode = state.isStaConnection,
-                onStaDisconnectedClick = cameraViewModel::retryStaConnection,
             )
 
             // 信号按钮右侧：类型筛选按钮。信号条展开/收起的宽度动画是逐帧真实布局，
@@ -2326,6 +2431,29 @@ internal fun signalBarPalette(
     }
     val unlitBase = if (dark) Color(0xFFFFE4B5) else Color(0xFF321D10)
     return SignalBarPalette(lit = lit, unlit = unlitBase.copy(alpha = 0.34f))
+}
+
+/** RSSI 的周期更新只在这个小范围内重组，不再使照片页正文和网格失效。 */
+@Composable
+private fun FileListSignalPill(
+    cameraViewModel: CameraViewModel,
+    pulseTrigger: Int,
+) {
+    val state by remember(cameraViewModel) {
+        cameraViewModel.state
+            .map(CameraState::toFileListSignalUiState)
+            .distinctUntilChanged()
+    }.collectAsStateWithLifecycle(
+        initialValue = cameraViewModel.state.value.toFileListSignalUiState(),
+    )
+    SignalPill(
+        rssi = state.rssi,
+        connected = state.connected,
+        pulseTrigger = pulseTrigger,
+        connectionType = state.connectionType,
+        staMode = state.staMode,
+        onStaDisconnectedClick = cameraViewModel::retryStaConnection,
+    )
 }
 
 /**
@@ -3345,8 +3473,6 @@ private fun ThumbnailCell(
             thumbnail = cameraViewModel.loadThumbnail(file, allowRemoteThumbnail)
         }
     }
-    // 记录本格子在根坐标系中的位置，供长按预览"从格子位置放大"用。
-    var cellBounds by remember { mutableStateOf<Rect?>(null) }
     DisposableEffect(file.handle, cellBoundsRegistry) {
         onDispose {
             cellBoundsRegistry.remove(file.handle)
@@ -3398,7 +3524,6 @@ private fun ThumbnailCell(
                 if (it.isAttached) {
                     val b = it.boundsInRoot()
                     if (b.width > 0f && b.height > 0f) {
-                        cellBounds = b
                         cellBoundsRegistry[file.handle] = b
                     }
                 }
@@ -3407,12 +3532,13 @@ private fun ThumbnailCell(
             .combinedClickable(
                 enabled = !exiting,
                 onClick = {
-                    if (tapToPreview) cellBounds?.let { onPreview(file, it) }
-                    else onTapFile(file)
+                    if (tapToPreview) {
+                        cellBoundsRegistry[file.handle]?.let { onPreview(file, it) }
+                    } else onTapFile(file)
                 },
                 onLongClick = {
                     if (tapToPreview) onTapFile(file)
-                    else cellBounds?.let { onPreview(file, it) }
+                    else cellBoundsRegistry[file.handle]?.let { onPreview(file, it) }
                 }
             )
     ) {
