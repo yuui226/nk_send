@@ -3,9 +3,14 @@
     <string name="connection_usb">USB</string>
     <string name="connection_wifi">Wi-Fi</string>
     <string name="connection_wifi_hotspot">相机热点</string>
-    <string name="sta_card_description">通过手机热点或路由器连接相机</string>
+    <string name="sta_step_phone_hotspot">相机连接到手机发起的个人热点</string>
+    <string name="sta_step_connect_camera">点击连接相机按钮</string>
     <string name="sta_connect_action">连接相机</string>
     <string name="sta_hotspot_settings_short">热点设置</string>
+    <string name="sta_reset_pairing">重置</string>
+    <string name="sta_reset_pairing_title">重置 STA 配对？</string>
+    <string name="sta_paired_camera_count">已配对 %1$d 台相机</string>
+    <string name="sta_reset_pairing_message">将忘记此 App 已配对的所有相机，之后需要在相机中重新创建“连接到计算机”配置并重新配对。</string>
     <string name="sta_status_searching">正在搜索相机</string>
     <string name="sta_status_connecting">正在连接相机</string>
     <string name="sta_camera_not_found_short">未找到相机</string>
@@ -15,7 +20,7 @@
     <string name="sta_signal_connected">STA 相机已连接</string>
     <string name="sta_signal_disconnected_reconnect">STA 相机已断开，点击重新连接。</string>
     <string name="usb_step_power">相机电源开启</string>
-    <string name="usb_step_cable">使用 C to C 数据线连接相机与手机</string>
+    <string name="usb_step_cable">使用 USB 数据线连接相机与手机</string>
     <string name="connection_failed_short">连接失败</string>
     <string name="auto_iso">自动 ISO</string>
     <string name="app_name">Z传</string>

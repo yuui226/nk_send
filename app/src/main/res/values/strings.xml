@@ -3,9 +3,14 @@
     <string name="connection_usb">USB</string>
     <string name="connection_wifi">Wi-Fi</string>
     <string name="connection_wifi_hotspot">Camera hotspot</string>
-    <string name="sta_card_description">Connect through a phone hotspot or Wi-Fi router</string>
-    <string name="sta_connect_action">Connect camera</string>
+    <string name="sta_step_phone_hotspot">Connect the camera to the phone’s personal hotspot</string>
+    <string name="sta_step_connect_camera">Connect button</string>
+    <string name="sta_connect_action">Connect</string>
     <string name="sta_hotspot_settings_short">Hotspot</string>
+    <string name="sta_reset_pairing">Reset</string>
+    <string name="sta_reset_pairing_title">Reset STA pairing?</string>
+    <string name="sta_paired_camera_count">Paired cameras: %1$d</string>
+    <string name="sta_reset_pairing_message">This app will forget all paired cameras. Recreate the “Connect to computer” profile on each camera, then pair again.</string>
     <string name="sta_status_searching">Searching for camera</string>
     <string name="sta_status_connecting">Connecting to camera</string>
     <string name="sta_camera_not_found_short">Camera not found</string>
@@ -15,7 +20,7 @@
     <string name="sta_signal_connected">STA camera connected</string>
     <string name="sta_signal_disconnected_reconnect">STA camera disconnected. Tap to reconnect.</string>
     <string name="usb_step_power">Keep the camera powered on</string>
-    <string name="usb_step_cable">Connect the camera and phone with a USB-C to USB-C cable</string>
+    <string name="usb_step_cable">Connect the camera and phone with a USB cable</string>
     <string name="connection_failed_short">Connection failed</string>
     <string name="auto_iso">Auto ISO</string>
     <string name="app_name">ZTransfer</string>

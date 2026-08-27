@@ -117,12 +117,7 @@ internal fun tipLightbulbIconColor(
     skin: SkinPreset,
     dark: Boolean,
     defaultColor: Color,
-): Color = when (skin) {
-    SkinPreset.FROSTED_GLASS -> defaultColor
-    SkinPreset.TITANIUM -> if (dark) Color(0xFFE4ECEF) else Color(0xFF344149)
-    SkinPreset.WOOD -> if (dark) Color(0xFFF1D6A7) else Color(0xFF472A18)
-    SkinPreset.CAMERA_CONTROLS -> Color(0xFFD5D8DA)
-}
+): Color = materialButtonForegroundColor(skin, dark, defaultColor)
 
 /** One consistently styled row inside a lightbulb help bubble. */
 internal data class TipBubbleItem(

@@ -56,6 +56,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
@@ -145,14 +147,26 @@ fun HomeScreen(
     // 给弹窗，避免每帧坐标变化触发整个连接页重组，也避免展开途中锚点继续漂移。
     val liveTipsButtonBounds = remember { LayoutBoundsHolder() }
     var tipsPopupAnchor by remember { mutableStateOf<Rect?>(null) }
+    var showStaResetDialog by remember { mutableStateOf(false) }
 
     val colors = AppTheme.colors
     val buttonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val darkTheme = colors.background.luminance() < 0.5f
     val wifiSettingsTextColor = wifiSettingsButtonTextColor(
         skin = buttonSkin,
-        dark = colors.background.luminance() < 0.5f,
+        dark = darkTheme,
         defaultColor = colors.accentBlue,
     )
+    val staConnectTextColor = materialButtonForegroundColor(
+        skin = buttonSkin,
+        dark = darkTheme,
+        defaultColor = colors.onBackground,
+    )
+    val staResetIconColor = if (buttonSkin == SkinPreset.WOOD) {
+        colors.onBackground
+    } else {
+        colors.accentOrange
+    }
     val connected = state.isConnectedToCamera
     val usbError = state.usbConnectionError
     // 会话真正就绪后再触发卡片内成功动画；动画完成时主动通知 MainScreen 跳转。
@@ -292,8 +306,12 @@ fun HomeScreen(
         ) {
             val compact = maxHeight < 690.dp
             // 提示只占用卡片内部留白，不改变卡片外形，避免识别结果出现时整页跳动。
-            // 272dp 足以容纳提示态内容，也比原 292dp 的空闲态更紧凑。
-            val cardHeight = 272.dp
+            // 英文步骤换行更多，单独为其保留额外高度；中文与繁中保持紧凑卡片。
+            val cardHeight = if (LocalConfiguration.current.locales[0].language == "en") {
+                324.dp
+            } else {
+                296.dp
+            }
             val horizontalPadding = if (maxWidth < 360.dp) 14.dp else 20.dp
             val cardSpacing = 12.dp
 
@@ -356,7 +374,10 @@ fun HomeScreen(
                                 stringResource(R.string.step_phone_wifi),
                             )
                             WirelessMode.STA -> if (staFeedback == null) {
-                                listOf(stringResource(R.string.sta_card_description))
+                                listOf(
+                                    stringResource(R.string.sta_step_phone_hotspot),
+                                    stringResource(R.string.sta_step_connect_camera),
+                                )
                             } else {
                                 emptyList()
                             }
@@ -436,7 +457,7 @@ fun HomeScreen(
                             } else {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     TipLightbulbButton(
@@ -453,27 +474,43 @@ fun HomeScreen(
                                             },
                                     )
                                     GlassButton(
+                                        onClick = { showStaResetDialog = true },
+                                        enabled = !connected,
+                                        shape = RoundedCornerShape(11.dp),
+                                        contentPadding = PaddingValues(8.dp),
+                                        modifier = Modifier.size(34.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.LinkOff,
+                                            contentDescription = stringResource(
+                                                R.string.sta_reset_pairing,
+                                            ),
+                                            tint = staResetIconColor,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                    GlassButton(
                                         onClick = {
                                             viewModel.cancelStaDiscovery()
                                             openHotspotSettings(context)
                                         },
                                         enabled = !connected,
                                         shape = RoundedCornerShape(11.dp),
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                                        contentPadding = PaddingValues(8.dp),
                                         modifier = Modifier
-                                            .weight(1f)
-                                            .height(34.dp),
+                                            .size(34.dp),
                                     ) {
-                                        Text(
-                                            text = stringResource(R.string.sta_hotspot_settings_short),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = colors.onSurfaceVariant,
-                                            maxLines = 1,
+                                        Icon(
+                                            imageVector = Icons.Default.Settings,
+                                            contentDescription = stringResource(
+                                                R.string.sta_hotspot_settings_short,
+                                            ),
+                                            tint = colors.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp),
                                         )
                                     }
                                 }
-                                Spacer(Modifier.height(7.dp))
+                                Spacer(Modifier.height(8.dp))
                                 GlassButton(
                                     onClick = {
                                         if (staBusy) {
@@ -483,20 +520,20 @@ fun HomeScreen(
                                         }
                                     },
                                     enabled = !connected,
-                                    shape = RoundedCornerShape(11.dp),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                     textureSeed = WIFI_SETTINGS_BUTTON_TEXTURE_SEED,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(34.dp),
+                                        .height(42.dp),
                                 ) {
                                     Text(
                                         // Keep a stable action label while the existing click
                                         // behaviour continues to follow the STA connection state.
                                         text = stringResource(R.string.sta_connect_action),
-                                        style = MaterialTheme.typography.labelSmall,
+                                        style = MaterialTheme.typography.labelLarge,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = colors.accentBlue,
+                                        color = staConnectTextColor,
                                         maxLines = 1,
                                     )
                                 }
@@ -606,6 +643,17 @@ fun HomeScreen(
                 anchorBounds = frozenAnchor,
                 wirelessMode = state.wirelessMode,
                 onDismiss = { tipsPopupAnchor = null },
+            )
+        }
+
+        if (showStaResetDialog) {
+            ResetStaPairingDialog(
+                pairedCameraCount = viewModel.pairedStaCameraCount(),
+                onConfirm = {
+                    showStaResetDialog = false
+                    viewModel.resetStaPairing()
+                },
+                onDismiss = { showStaResetDialog = false },
             )
         }
 
@@ -1288,6 +1336,84 @@ private fun ConnectionSuccessOverlay(
             radius = (39.dp.toPx() - 0.75.dp.toPx()) * coreScale,
             style = Stroke(width = 1.5.dp.toPx() * coreScale),
         )
+    }
+}
+
+@Composable
+private fun ResetStaPairingDialog(
+    pairedCameraCount: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = colors.glassSurfaceHeavy,
+            border = BorderStroke(1.dp, colors.glassPanelBorder),
+            tonalElevation = 6.dp,
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = stringResource(R.string.sta_reset_pairing_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onBackground,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.accentBlue.copy(alpha = 0.10f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PhotoCamera,
+                        contentDescription = null,
+                        tint = colors.accentBlue,
+                        modifier = Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        text = stringResource(
+                            R.string.sta_paired_camera_count,
+                            pairedCameraCount,
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onBackground,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.sta_reset_pairing_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(18.dp))
+                Row(
+                    modifier = Modifier.align(Alignment.End),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(
+                            text = stringResource(R.string.cancel),
+                            color = colors.onSurfaceVariant,
+                        )
+                    }
+                    Button(
+                        onClick = onConfirm,
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.statusError),
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text(stringResource(R.string.sta_reset_pairing))
+                    }
+                }
+            }
+        }
     }
 }
 

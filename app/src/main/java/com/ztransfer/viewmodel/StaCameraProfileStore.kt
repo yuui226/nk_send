@@ -64,6 +64,12 @@ internal class StaCameraProfileStore(
         .map(StaCameraProfile::responderGuid)
         .toSet()
 
+    fun pairedCameraCount(): Int {
+        val bodyCount = pairedResponderGuids().size
+        val legacySingleCamera = preferences.getBoolean(KEY_REUSABLE_PROFILE, false)
+        return if (bodyCount == 0 && legacySingleCamera) 1 else bodyCount
+    }
+
     fun mostRecentlyUsedResponderGuid(): String? {
         normalizeResponderGuid(preferences.getString(KEY_LAST_RESPONDER_GUID, null))
             ?.takeIf { profileForGuid(it)?.pairingConfirmed == true }
@@ -119,6 +125,28 @@ internal class StaCameraProfileStore(
             editor.remove(KEY_LAST_RESPONDER_GUID)
         }
         editor.commit()
+    }
+
+    /**
+     * Forgets every camera bound to this installation and rotates the shared PTP/IP initiator on
+     * the next pairing. The wireless-mode preference is intentionally retained.
+     */
+    @Synchronized
+    fun resetPairing() {
+        val connectionEditor = preferences.edit()
+            .remove(KEY_REUSABLE_PROFILE)
+            .remove(KEY_LAST_CAMERA_IP)
+            .remove(KEY_LAST_RESPONDER_GUID)
+            .remove(KEY_LEGACY_LAST_IDENTITY)
+            .remove(KEY_PROFILE_GUIDS)
+            .putBoolean(KEY_PROFILE_MIGRATION_COMPLETE, true)
+        preferences.all.keys
+            .filter { it.startsWith(PROFILE_PREFIX) }
+            .forEach(connectionEditor::remove)
+        connectionEditor.commit()
+
+        // ptpip_identity is dedicated to the two initiator IDs and per-camera pairing markers.
+        pairingPreferences.edit().clear().commit()
     }
 
     private fun allProfiles(): List<StaCameraProfile> {

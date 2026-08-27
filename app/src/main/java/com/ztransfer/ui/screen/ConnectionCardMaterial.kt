@@ -42,6 +42,18 @@ internal fun wifiSettingsButtonTextColor(
     defaultColor
 }
 
+/** High-contrast foreground shared by content printed on the four button materials. */
+internal fun materialButtonForegroundColor(
+    skin: SkinPreset,
+    dark: Boolean,
+    defaultColor: Color,
+): Color = when (skin) {
+    SkinPreset.FROSTED_GLASS -> defaultColor
+    SkinPreset.TITANIUM -> if (dark) Color(0xFFE4ECEF) else Color(0xFF344149)
+    SkinPreset.WOOD -> if (dark) Color(0xFFF1D6A7) else Color(0xFF472A18)
+    SkinPreset.CAMERA_CONTROLS -> Color(0xFFD5D8DA)
+}
+
 internal fun connectionCardFramePalette(
     skin: SkinPreset,
     dark: Boolean,

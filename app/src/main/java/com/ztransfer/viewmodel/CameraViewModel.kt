@@ -1663,6 +1663,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         startStaDiscovery(reconnect = false)
     }
 
+    /** Clears this installation's shared STA identity so every camera can be paired from scratch. */
+    fun resetStaPairing() {
+        if (_state.value.isConnectedToCamera) return
+        cancelStaDiscoveryInternal()
+        staReconnectAttempt = 0
+        staLastFailureMessage = null
+        staProfileStore.resetPairing()
+    }
+
+    fun pairedStaCameraCount(): Int = staProfileStore.pairedCameraCount()
+
     /** Retries a disconnected STA session now without duplicating an active discovery. */
     fun retryStaConnection() {
         val current = _state.value

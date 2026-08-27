@@ -3,9 +3,14 @@
     <string name="connection_usb">USB</string>
     <string name="connection_wifi">Wi-Fi</string>
     <string name="connection_wifi_hotspot">相機熱點</string>
-    <string name="sta_card_description">透過手機熱點或路由器連接相機</string>
+    <string name="sta_step_phone_hotspot">相機連接到手機開啟的個人熱點</string>
+    <string name="sta_step_connect_camera">點擊連接相機按鈕</string>
     <string name="sta_connect_action">連接相機</string>
     <string name="sta_hotspot_settings_short">熱點設定</string>
+    <string name="sta_reset_pairing">重設</string>
+    <string name="sta_reset_pairing_title">重設 STA 配對？</string>
+    <string name="sta_paired_camera_count">已配對 %1$d 台相機</string>
+    <string name="sta_reset_pairing_message">將忘記此 App 已配對的所有相機，之後需要在相機中重新建立「連接至電腦」設定檔並重新配對。</string>
     <string name="sta_status_searching">正在搜尋相機</string>
     <string name="sta_status_connecting">正在連線相機</string>
     <string name="sta_camera_not_found_short">找不到相機</string>
@@ -15,7 +20,7 @@
     <string name="sta_signal_connected">STA 相機已連線</string>
     <string name="sta_signal_disconnected_reconnect">STA 相機已斷線，點擊重新連線。</string>
     <string name="usb_step_power">相機電源開啟</string>
-    <string name="usb_step_cable">使用 C to C 資料線連接相機與手機</string>
+    <string name="usb_step_cable">使用 USB 資料線連接相機與手機</string>
     <string name="connection_failed_short">連接失敗</string>
     <string name="auto_iso">自動 ISO</string>
     <string name="app_name">Z傳</string>
