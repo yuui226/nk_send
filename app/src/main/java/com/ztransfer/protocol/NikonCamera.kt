@@ -1592,6 +1592,7 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean = true,
         exploreAlbumAccess: Boolean = false,
         forceProfilePairing: Boolean = false,
+        onKnownCameraIdentified: (() -> Unit)? = null,
         onPairingStarted: (() -> Unit)? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -1662,6 +1663,9 @@ class NikonCamera(private val context: Context) {
                     "responder=UNEXPECTED expected=$expectedResponderGuid actual=$responderGuid"
                 throw UnexpectedStaResponderException(responderGuid)
             }
+            val knownCameraProfile = responderGuid
+                ?.let(knownPairedResponderGuids::contains) == true
+            if (knownCameraProfile) onKnownCameraIdentified?.invoke()
 
             evtSocket = newSocket().apply {
                 soTimeout = STA_HANDSHAKE_TIMEOUT_MS
@@ -1706,8 +1710,7 @@ class NikonCamera(private val context: Context) {
                 allowPairing = allowPairing,
                 exploreAlbumAccess = exploreAlbumAccess,
                 forceProfilePairing = forceProfilePairing,
-                knownCameraProfile = responderGuid
-                    ?.let(knownPairedResponderGuids::contains) == true,
+                knownCameraProfile = knownCameraProfile,
                 onPairingStarted = onPairingStarted,
             )
             cmdSocket?.soTimeout = SO_TIMEOUT_MS

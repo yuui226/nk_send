@@ -1924,13 +1924,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _state.value.isConnectedToCamera
         ) return StaCandidateConnectionResult.REJECTED
 
-        _state.update {
-            it.copy(
-                isConnecting = true,
-                staConnectionStatus = StaConnectionStatus.CONNECTING,
-                staDiscoveryProgress = ip,
-            )
-        }
         val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
         val preferredIdentity = staProfileStore.preferredIdentityFor(ip)
         val knownPairedResponderGuids = staProfileStore.pairedResponderGuids()
@@ -1960,6 +1953,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 allowPairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
+                onKnownCameraIdentified = {
+                    publishStaConnectingStarted(generation, ip)
+                },
                 onPairingStarted = { publishStaPairingStarted(generation, ip) },
             )
             if (generation != staDiscoveryGeneration || purchaseHold ||
@@ -2050,6 +2046,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 allowPairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
+                onKnownCameraIdentified = {
+                    publishStaConnectingStarted(generation, ip)
+                },
                 onPairingStarted = { publishStaPairingStarted(generation, ip) },
             )
             recordStaDiagnostic(
@@ -2109,6 +2108,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // discovery in the failed/retry path instead; a later attempt can still obtain the full
         // paired album session once the camera service is ready.
         return StaCandidateConnectionResult.REJECTED
+    }
+
+    private fun publishStaConnectingStarted(generation: Long, ip: String) {
+        _state.update { current ->
+            if (generation != staDiscoveryGeneration ||
+                purchaseHold ||
+                current.wirelessMode != WirelessMode.STA ||
+                current.connectionType == CameraConnectionType.USB ||
+                current.isConnectedToCamera ||
+                current.staConnectionStatus == StaConnectionStatus.PAIRING
+            ) {
+                current
+            } else {
+                current.copy(
+                    isConnecting = true,
+                    staConnectionStatus = StaConnectionStatus.CONNECTING,
+                    staDiscoveryProgress = ip,
+                    staConnectionError = null,
+                )
+            }
+        }
     }
 
     private fun publishStaPairingStarted(generation: Long, ip: String) {
