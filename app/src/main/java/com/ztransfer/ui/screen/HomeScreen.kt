@@ -4,13 +4,10 @@ import android.content.Intent
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -557,58 +554,54 @@ fun HomeScreen(
                                         .fillMaxWidth()
                                         .height(42.dp),
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Center,
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.Center,
                                     ) {
-                                        AnimatedVisibility(
+                                        androidx.compose.animation.AnimatedVisibility(
                                             visible = staConnectButtonState.icon !=
                                                 StaConnectButtonIcon.NONE,
-                                            enter = fadeIn(tween(140)) + expandHorizontally(
-                                                animationSpec = tween(170),
-                                                expandFrom = Alignment.Start,
-                                            ),
-                                            exit = fadeOut(tween(100)) + shrinkHorizontally(
-                                                animationSpec = tween(140),
-                                                shrinkTowards = Alignment.Start,
-                                            ),
+                                            enter = fadeIn(tween(140)),
+                                            exit = fadeOut(tween(100)),
+                                            modifier = Modifier
+                                                .align(Alignment.Center)
+                                                .offset(
+                                                    x = -(staConnectButtonLabelWidth / 2 + 16.dp),
+                                                ),
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                AnimatedContent(
-                                                    targetState = staConnectButtonState.icon,
-                                                    transitionSpec = {
-                                                        (
-                                                            fadeIn(tween(160)) + scaleIn(
-                                                                animationSpec = tween(180),
-                                                                initialScale = 0.72f,
-                                                            )
-                                                        ) togetherWith (
-                                                            fadeOut(tween(100)) + scaleOut(
-                                                                animationSpec = tween(120),
-                                                                targetScale = 0.82f,
-                                                            )
+                                            AnimatedContent(
+                                                targetState = staConnectButtonState.icon,
+                                                transitionSpec = {
+                                                    (
+                                                        fadeIn(tween(160)) + scaleIn(
+                                                            animationSpec = tween(180),
+                                                            initialScale = 0.72f,
                                                         )
-                                                    },
-                                                    contentAlignment = Alignment.Center,
-                                                    label = "staConnectButtonIcon",
-                                                ) { icon ->
-                                                    when (icon) {
-                                                        StaConnectButtonIcon.BUSY ->
-                                                            CircularProgressIndicator(
-                                                                modifier = Modifier.size(17.dp),
-                                                                color = staConnectTextColor,
-                                                                strokeWidth = 1.8.dp,
-                                                            )
-                                                        StaConnectButtonIcon.CONNECTED -> Icon(
-                                                            imageVector = Icons.Default.CheckCircle,
-                                                            contentDescription = null,
-                                                            tint = staConnectTextColor,
-                                                            modifier = Modifier.size(18.dp),
+                                                    ) togetherWith (
+                                                        fadeOut(tween(100)) + scaleOut(
+                                                            animationSpec = tween(120),
+                                                            targetScale = 0.82f,
                                                         )
-                                                        StaConnectButtonIcon.NONE -> Unit
-                                                    }
+                                                    )
+                                                },
+                                                contentAlignment = Alignment.Center,
+                                                label = "staConnectButtonIcon",
+                                            ) { icon ->
+                                                when (icon) {
+                                                    StaConnectButtonIcon.BUSY ->
+                                                        CircularProgressIndicator(
+                                                            modifier = Modifier.size(17.dp),
+                                                            color = staConnectTextColor,
+                                                            strokeWidth = 1.8.dp,
+                                                        )
+                                                    StaConnectButtonIcon.CONNECTED -> Icon(
+                                                        imageVector = Icons.Default.CheckCircle,
+                                                        contentDescription = null,
+                                                        tint = staConnectTextColor,
+                                                        modifier = Modifier.size(18.dp),
+                                                    )
+                                                    StaConnectButtonIcon.NONE -> Unit
                                                 }
-                                                Spacer(Modifier.width(7.dp))
                                             }
                                         }
                                         AnimatedContent(
