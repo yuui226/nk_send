@@ -64,7 +64,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -278,27 +277,6 @@ fun HomeScreen(
     val staConnectButtonTextStyle = MaterialTheme.typography.labelLarge.copy(
         fontWeight = FontWeight.SemiBold,
     )
-    val staConnectButtonTextMeasurer = rememberTextMeasurer(
-        cacheSize = StaConnectButtonState.entries.size,
-    )
-    val density = LocalDensity.current
-    val staConnectButtonLabelWidth = remember(
-        staConnectButtonLabels,
-        staConnectButtonTextStyle,
-        staConnectButtonTextMeasurer,
-        density,
-    ) {
-        with(density) {
-            staConnectButtonLabels.maxOf { label ->
-                staConnectButtonTextMeasurer.measure(
-                    text = label,
-                    style = staConnectButtonTextStyle,
-                    softWrap = false,
-                    maxLines = 1,
-                ).size.width
-            }.toDp() + 1.dp
-        }
-    }
     val staFeedback = if (
         state.wirelessMode == WirelessMode.STA &&
         state.staConnectionStatus == StaConnectionStatus.FAILED
@@ -548,26 +526,28 @@ fun HomeScreen(
                                     },
                                     enabled = !connected,
                                     shape = RoundedCornerShape(14.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                    // The button owns its full content plane: the status glyph and
+                                    // centered label are independent overlays and never push each
+                                    // other sideways as their animated states change.
+                                    contentPadding = PaddingValues(0.dp),
                                     textureSeed = WIFI_SETTINGS_BUTTON_TEXTURE_SEED,
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(42.dp),
                                 ) {
                                     Box(
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        androidx.compose.animation.AnimatedVisibility(
-                                            visible = staConnectButtonState.icon !=
-                                                StaConnectButtonIcon.NONE,
-                                            enter = fadeIn(tween(140)),
-                                            exit = fadeOut(tween(100)),
+                                        // Fixed left slot. NONE keeps the slot geometry while
+                                        // drawing nothing; BUSY and CONNECTED therefore occupy the
+                                        // exact same position without disturbing the centered text.
+                                        Box(
                                             modifier = Modifier
-                                                .align(Alignment.Center)
-                                                .offset(
-                                                    x = -(staConnectButtonLabelWidth / 2 + 16.dp),
-                                                ),
+                                                .align(Alignment.CenterStart)
+                                                .padding(start = 8.dp)
+                                                .size(18.dp),
+                                            contentAlignment = Alignment.Center,
                                         ) {
                                             AnimatedContent(
                                                 targetState = staConnectButtonState.icon,
@@ -586,13 +566,14 @@ fun HomeScreen(
                                                 },
                                                 contentAlignment = Alignment.Center,
                                                 label = "staConnectButtonIcon",
+                                                modifier = Modifier.fillMaxSize(),
                                             ) { icon ->
                                                 when (icon) {
                                                     StaConnectButtonIcon.BUSY ->
                                                         CircularProgressIndicator(
-                                                            modifier = Modifier.size(17.dp),
+                                                            modifier = Modifier.size(16.dp),
                                                             color = staConnectTextColor,
-                                                            strokeWidth = 1.8.dp,
+                                                            strokeWidth = 1.7.dp,
                                                         )
                                                     StaConnectButtonIcon.CONNECTED -> Icon(
                                                         imageVector = Icons.Default.CheckCircle,
@@ -607,28 +588,57 @@ fun HomeScreen(
                                         AnimatedContent(
                                             targetState = staConnectButtonState,
                                             transitionSpec = {
-                                                fadeIn(
-                                                    tween(
-                                                        durationMillis = 130,
-                                                        delayMillis = 35,
-                                                        easing = FastOutSlowInEasing,
-                                                    ),
-                                                ) togetherWith fadeOut(
-                                                    tween(
-                                                        durationMillis = 85,
-                                                        easing = FastOutSlowInEasing,
-                                                    ),
+                                                // Connection progresses down the enum, so the old
+                                                // label rolls out above and the next detent rises
+                                                // from below. Cancellation/failure reverses the
+                                                // motion back to the idle action.
+                                                val direction = if (
+                                                    targetState.ordinal >= initialState.ordinal
+                                                ) {
+                                                    1
+                                                } else {
+                                                    -1
+                                                }
+                                                (
+                                                    slideInVertically(
+                                                        animationSpec = tween(
+                                                            durationMillis = 220,
+                                                            easing = FastOutSlowInEasing,
+                                                        ),
+                                                        initialOffsetY = { height ->
+                                                            height * direction
+                                                        },
+                                                    ) + fadeIn(
+                                                        tween(
+                                                            durationMillis = 150,
+                                                            delayMillis = 35,
+                                                        ),
+                                                    )
+                                                ) togetherWith (
+                                                    slideOutVertically(
+                                                        animationSpec = tween(
+                                                            durationMillis = 190,
+                                                            easing = FastOutSlowInEasing,
+                                                        ),
+                                                        targetOffsetY = { height ->
+                                                            -height * direction
+                                                        },
+                                                    ) + fadeOut(tween(120))
                                                 )
                                             },
                                             contentAlignment = Alignment.Center,
                                             label = "staConnectButtonText",
-                                            modifier = Modifier.fillMaxWidth(),
+                                            modifier = Modifier
+                                                .align(Alignment.Center)
+                                                .fillMaxWidth(),
                                         ) { buttonState ->
                                             Text(
                                                 text = staConnectButtonLabels[buttonState.ordinal],
                                                 style = staConnectButtonTextStyle,
                                                 color = staConnectTextColor,
                                                 maxLines = 1,
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier.fillMaxWidth(),
                                             )
                                         }
                                     }

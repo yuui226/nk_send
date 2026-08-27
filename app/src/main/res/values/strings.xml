@@ -11,9 +11,9 @@
     <string name="sta_reset_pairing_title">Reset STA pairing?</string>
     <string name="sta_paired_camera_count">Paired cameras: %1$d</string>
     <string name="sta_reset_pairing_message">This app will forget all paired cameras. Recreate the “Connect to computer” profile on each camera, then pair again.</string>
-    <string name="sta_status_searching">Looking for camera</string>
-    <string name="sta_status_pairing">Pairing camera</string>
-    <string name="sta_status_connecting">Connecting to camera</string>
+    <string name="sta_status_searching">Searching</string>
+    <string name="sta_status_pairing">Pairing</string>
+    <string name="sta_status_connecting">Connecting</string>
     <string name="sta_status_connected">Connected</string>
     <string name="sta_camera_not_found_short">Camera not found</string>
     <string name="sta_camera_not_found">No compatible camera found. Check the camera network profile and connection.</string>
