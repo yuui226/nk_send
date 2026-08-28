@@ -56,14 +56,13 @@
     <string name="tip_ap_mode">PS：本模式对应相机中的 Wi-Fi AP 模式</string>
     <string name="tip_body">可将「Wi-Fi 连接」加入相机的 i 菜单，之后按 i 键即可快速开启。</string>
     <string name="tip_path">菜单 → 自定义设定菜单 → 控制 → 自定义 i 菜单 → 选个顺手的格子 → Wi-Fi 连接</string>
-    <string name="tip_sta_title">STA 连接</string>
+    <string name="tip_sta_title">STA 连接指引</string>
     <string name="tip_sta_first_connection">首次连接</string>
-    <string name="tip_sta_quick_start">后续快速开启</string>
-    <string name="tip_sta_step_hotspot">1. 手机：开启热点（英文名称，推荐 5 GHz）</string>
-    <string name="tip_sta_network_alternative">，或连接现有 Wi-Fi</string>
+    <string name="tip_sta_quick_start">从 i 菜单开启「Wi-Fi 连接」</string>
+    <string name="tip_sta_step_hotspot">1. 手机：开英文名热点（推荐 5 GHz</string>
+    <string name="tip_sta_network_alternative">）或连现有 Wi-Fi</string>
     <string name="tip_sta_hotspot_help">5 GHz 热点的信道由手机自动选择，可能选到相机不支持的信道。可到干扰较少的地方重开热点，或改用 2.4 GHz。仅切换频段无需重新配对，可放心修改。</string>
-    <string name="tip_sta_steps_after_hotspot">2. 相机：设定菜单/网络菜单 → 连接到计算机 → 网络设定 → 创建配置文件 → 搜索 Wi-Fi 网络\n3. 相机选择同一网络并输入密码，IP 选择“自动获得”\n4. IP 地址配置完成后，按 OK 进入“正在配对”界面\n5. 在 App 中点击“连接相机”</string>
-    <string name="tip_sta_quick_body">相机会保存网络配置。以后准备好同一网络，从 i 菜单开启「Wi-Fi 连接」即可。</string>
+    <string name="tip_sta_steps_after_hotspot">2. 相机：设定菜单/网络菜单 → 连接到计算机 → 网络设定 → 创建配置文件 → 搜索 Wi-Fi 网络\n3. 相机选择同一网络并输入密码，IP 选择“自动获得”，等待配置完成\n4. 按 OK 进入“正在配对”界面\n5. 在 App 中点击“连接相机”</string>
 
     <!-- 文件列表 -->
     <string name="loading_file_list">正在获取文件列表…</string>

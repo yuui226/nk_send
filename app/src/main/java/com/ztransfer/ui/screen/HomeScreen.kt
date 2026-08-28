@@ -1904,6 +1904,7 @@ private fun TipsBubble(
     wirelessMode: WirelessMode,
     onDismiss: () -> Unit,
 ) {
+    val colors = AppTheme.colors
     val density = LocalDensity.current
     // AP 保持贴近按钮；STA 内容更长，单独上移为完整内容预留空间。
     val anchoredPanelTop = anchorBounds?.let {
@@ -1933,6 +1934,7 @@ private fun TipsBubble(
         listOf(
             TipBubbleItem(
                 label = stringResource(R.string.tip_sta_first_connection),
+                labelColor = colors.accentOrange,
                 text = stringResource(R.string.tip_sta_step_hotspot),
                 emphasized = true,
                 questionExplanation = stringResource(R.string.tip_sta_hotspot_help),
@@ -1941,7 +1943,8 @@ private fun TipsBubble(
             ),
             TipBubbleItem(
                 label = stringResource(R.string.tip_sta_quick_start),
-                text = stringResource(R.string.tip_sta_quick_body),
+                labelColor = colors.accentOrange,
+                text = "",
             ),
             TipBubbleItem(
                 text = stringResource(R.string.tip_path),

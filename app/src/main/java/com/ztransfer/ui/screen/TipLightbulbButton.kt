@@ -139,6 +139,7 @@ internal fun tipLightbulbIconColor(
 internal data class TipBubbleItem(
     val text: String,
     val label: String? = null,
+    val labelColor: Color? = null,
     val emphasized: Boolean = false,
     val questionExplanation: String? = null,
     val questionSuffix: String? = null,
@@ -159,7 +160,9 @@ private fun TipBubbleItemText(
     val textWithQuestion = buildAnnotatedString {
         append(item.text)
         if (hasQuestion) {
-            append(" ")
+            // Keep the help button attached to the preceding phrase. A regular space lets the
+            // inline placeholder wrap onto a line by itself, which looks like a detached control.
+            append('\u00A0')
             appendInlineContent("tip_question", "?")
             append(item.questionSuffix.orEmpty())
         }
@@ -179,8 +182,8 @@ private fun TipBubbleItemText(
                         .padding(1.dp)
                         .clip(CircleShape)
                         .background(
-                            colors.accentBlue.copy(
-                                alpha = if (explanationVisible) 0.22f else 0.12f,
+                            colors.accentYellow.copy(
+                                alpha = if (explanationVisible) 1f else 0.82f,
                             )
                         )
                         .clickable(
@@ -193,7 +196,7 @@ private fun TipBubbleItemText(
                         text = "?",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = colors.accentBlue,
+                        color = colors.onAccent,
                     )
                 }
             }
@@ -262,15 +265,17 @@ internal fun TipBubbleContent(
         }
         items.forEachIndexed { index, item ->
             Spacer(Modifier.height(if (index == 0) 10.dp else 12.dp))
+            val hasText = item.text.isNotBlank()
             item.label?.takeIf { it.isNotBlank() }?.let { label ->
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
-                    color = colors.accentBlue,
+                    color = item.labelColor ?: colors.accentBlue,
                 )
-                Spacer(Modifier.height(5.dp))
+                if (hasText) Spacer(Modifier.height(5.dp))
             }
+            if (!hasText) return@forEachIndexed
             if (item.emphasized) {
                 Box(
                     modifier = Modifier

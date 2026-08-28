@@ -56,14 +56,13 @@
     <string name="tip_ap_mode">PS：本模式對應相機中的 Wi-Fi AP 模式</string>
     <string name="tip_body">可將「Wi-Fi 連線」加入相機的 i 選單，之後按 i 鍵即可快速開啟。</string>
     <string name="tip_path">選單 → 自訂設定選單 → 控制 → 自訂 i 選單 → 選個順手的格子 → Wi-Fi 連線</string>
-    <string name="tip_sta_title">STA 連線</string>
+    <string name="tip_sta_title">STA 連線指引</string>
     <string name="tip_sta_first_connection">首次連線</string>
-    <string name="tip_sta_quick_start">後續快速開啟</string>
-    <string name="tip_sta_step_hotspot">1. 手機：開啟熱點（英文名稱，建議 5 GHz）</string>
-    <string name="tip_sta_network_alternative">，或連接現有 Wi-Fi</string>
+    <string name="tip_sta_quick_start">從 i 選單開啟「Wi-Fi 連線」</string>
+    <string name="tip_sta_step_hotspot">1. 手機：開英文名熱點（建議 5 GHz</string>
+    <string name="tip_sta_network_alternative">）或連現有 Wi-Fi</string>
     <string name="tip_sta_hotspot_help">5 GHz 熱點的頻道由手機自動選擇，可能選到相機不支援的頻道。可到干擾較少的地方重開熱點，或改用 2.4 GHz。僅切換頻段無需重新配對，可放心修改。</string>
-    <string name="tip_sta_steps_after_hotspot">2. 相機：設定選單/網路選單 → 連接至電腦 → 網路設定 → 建立設定檔 → 搜尋 Wi-Fi 網路\n3. 相機選擇同一網路並輸入密碼，IP 選擇「自動獲得」\n4. IP 位址設定完成後，按 OK 進入「正在配對」畫面\n5. 在 App 中點擊「連接相機」</string>
-    <string name="tip_sta_quick_body">相機會儲存網路設定。之後準備好同一網路，從 i 選單開啟「Wi-Fi 連線」即可。</string>
+    <string name="tip_sta_steps_after_hotspot">2. 相機：設定選單/網路選單 → 連接至電腦 → 網路設定 → 建立設定檔 → 搜尋 Wi-Fi 網路\n3. 相機選擇同一網路並輸入密碼，IP 選擇「自動獲得」，等待設定完成\n4. 按 OK 進入「正在配對」畫面\n5. 在 App 中點擊「連接相機」</string>
 
     <!-- 檔案清單 -->
     <string name="loading_file_list">正在取得檔案清單…</string>
