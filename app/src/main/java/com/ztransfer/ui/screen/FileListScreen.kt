@@ -2159,30 +2159,45 @@ internal fun QueueExecutionButton(
         label = "queueExecutionPress",
     )
     val enabled = control == QueueExecutionControl.PAUSE || startEnabled
-    Surface(
-        onClick = if (control == QueueExecutionControl.START) onStart else onPause,
-        enabled = enabled,
-        shape = CircleShape,
-        color = colors.glassSurface,
-        shadowElevation = 4.dp,
-        interactionSource = interactionSource,
-        modifier = modifier
-            .size(32.dp)
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-                alpha = if (enabled) 1f else 0.45f
-            },
+    val visualAlpha = if (enabled) 1f else 0.45f
+    // 与通用毛玻璃按钮一致，不让半透明 Surface、投影和缩放共用矩形 RenderNode。
+    // 部分 GPU 会把那层缓存边界显成浅色方框；固定外层尺寸、只改变圆形内容尺寸，
+    // 禁用态透明度直接落到绘制颜色上，深色/浅色及按压态都不会生成矩形边框。
+    Box(
+        modifier = modifier.size(32.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .size((32f * pressScale).dp)
+                .clip(CircleShape)
                 .background(
-                    Brush.verticalGradient(
-                        listOf(colors.glassHighlightTop, colors.glassHighlightBottom)
+                    colors.glassSurface.copy(
+                        alpha = colors.glassSurface.alpha * visualAlpha,
                     )
                 )
-                .background(accent.copy(alpha = 0.16f * activeProgress)),
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            colors.glassHighlightTop.copy(
+                                alpha = colors.glassHighlightTop.alpha * visualAlpha,
+                            ),
+                            colors.glassHighlightBottom.copy(
+                                alpha = colors.glassHighlightBottom.alpha * visualAlpha,
+                            ),
+                        )
+                    )
+                )
+                .background(
+                    accent.copy(alpha = 0.16f * activeProgress * visualAlpha)
+                )
+                .clickable(
+                    enabled = enabled,
+                    role = Role.Button,
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = if (control == QueueExecutionControl.START) onStart else onPause,
+                ),
             contentAlignment = Alignment.Center,
         ) {
             AnimatedContent(
@@ -2211,7 +2226,7 @@ internal fun QueueExecutionButton(
                             else -> R.string.cd_pause_after_current
                         }
                     ),
-                    tint = accent,
+                    tint = accent.copy(alpha = accent.alpha * visualAlpha),
                     modifier = Modifier.size(
                         if (current == QueueExecutionControl.START) 21.dp else 18.dp
                     ),
