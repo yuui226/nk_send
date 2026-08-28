@@ -1,5 +1,10 @@
 package com.ztransfer.ui.screen
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -8,6 +13,9 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,14 +36,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
@@ -124,7 +140,101 @@ internal data class TipBubbleItem(
     val text: String,
     val label: String? = null,
     val emphasized: Boolean = false,
+    val questionExplanation: String? = null,
+    val questionSuffix: String? = null,
+    val trailingText: String? = null,
 )
+
+@Composable
+private fun TipBubbleItemText(
+    item: TipBubbleItem,
+    textColor: Color,
+    fontWeight: FontWeight?,
+) {
+    val colors = AppTheme.colors
+    val hasQuestion = !item.questionExplanation.isNullOrBlank()
+    var explanationVisible by rememberSaveable(item.questionExplanation) {
+        mutableStateOf(false)
+    }
+    val textWithQuestion = buildAnnotatedString {
+        append(item.text)
+        if (hasQuestion) {
+            append(" ")
+            appendInlineContent("tip_question", "?")
+            append(item.questionSuffix.orEmpty())
+        }
+    }
+    val inlineQuestion = if (hasQuestion) {
+        mapOf(
+            "tip_question" to InlineTextContent(
+                placeholder = Placeholder(
+                    width = 1.45.em,
+                    height = 1.45.em,
+                    placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
+                )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(1.dp)
+                        .clip(CircleShape)
+                        .background(
+                            colors.accentBlue.copy(
+                                alpha = if (explanationVisible) 0.22f else 0.12f,
+                            )
+                        )
+                        .clickable(
+                            role = Role.Button,
+                            onClick = { explanationVisible = !explanationVisible },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "?",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.accentBlue,
+                    )
+                }
+            }
+        )
+    } else {
+        emptyMap()
+    }
+
+    Column {
+        Text(
+            text = textWithQuestion,
+            inlineContent = inlineQuestion,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = fontWeight,
+            color = textColor,
+        )
+
+        AnimatedVisibility(
+            visible = hasQuestion && explanationVisible,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            Text(
+                text = item.questionExplanation.orEmpty(),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+
+        item.trailingText?.takeIf { it.isNotBlank() }?.let { trailingText ->
+            Text(
+                text = trailingText,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = fontWeight,
+                color = textColor,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
+}
 
 /** Shared STA-style content hierarchy for every lightbulb help bubble. */
 @Composable
@@ -169,18 +279,17 @@ internal fun TipBubbleContent(
                         .background(colors.onBackground.copy(alpha = 0.05f))
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
-                    Text(
-                        text = item.text,
-                        style = MaterialTheme.typography.bodyMedium,
+                    TipBubbleItemText(
+                        item = item,
+                        textColor = colors.accentBlue,
                         fontWeight = FontWeight.Medium,
-                        color = colors.accentBlue,
                     )
                 }
             } else {
-                Text(
-                    text = item.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.onSurfaceVariant,
+                TipBubbleItemText(
+                    item = item,
+                    textColor = colors.onSurfaceVariant,
+                    fontWeight = null,
                 )
             }
         }

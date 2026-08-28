@@ -1747,12 +1747,15 @@ private fun TipsBubble(
                 listOf(
                     TipBubbleItem(
                         label = stringResource(R.string.tip_sta_first_connection),
-                        text = stringResource(R.string.tip_sta_steps),
+                        text = stringResource(R.string.tip_sta_step_hotspot),
                         emphasized = true,
+                        questionExplanation = stringResource(R.string.tip_sta_hotspot_help),
+                        questionSuffix = stringResource(R.string.tip_sta_network_alternative),
+                        trailingText = stringResource(R.string.tip_sta_steps_after_hotspot),
                     ),
                     TipBubbleItem(
                         label = stringResource(R.string.tip_sta_quick_start),
-                        text = stringResource(R.string.tip_body),
+                        text = stringResource(R.string.tip_sta_quick_body),
                     ),
                     TipBubbleItem(
                         text = stringResource(R.string.tip_path),

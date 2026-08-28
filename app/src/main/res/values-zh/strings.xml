@@ -59,7 +59,11 @@
     <string name="tip_sta_title">STA 连接</string>
     <string name="tip_sta_first_connection">首次连接</string>
     <string name="tip_sta_quick_start">后续快速开启</string>
-    <string name="tip_sta_steps">1. 手机开启热点（热点名用英文；5 GHz 更快，相机搜不到则改用 2.4 GHz）\n2. 相机：设定菜单/网络菜单 → 连接到计算机 → 网络设定 → 创建配置文件 → 搜索 Wi-Fi 网络\n3. 选择手机热点并输入密码，IP 选择“自动获得”\n4. IP 地址配置完成后，按 OK 进入“正在配对”界面\n5. 在 App 中点击“连接相机”</string>
+    <string name="tip_sta_step_hotspot">1. 手机：开启热点（英文名称，推荐 5 GHz）</string>
+    <string name="tip_sta_network_alternative">，或连接现有 Wi-Fi</string>
+    <string name="tip_sta_hotspot_help">5 GHz 热点的信道由手机自动选择，可能选到相机不支持的信道。可到干扰较少的地方重开热点，或改用 2.4 GHz。仅切换频段无需重新配对，可放心修改。</string>
+    <string name="tip_sta_steps_after_hotspot">2. 相机：设定菜单/网络菜单 → 连接到计算机 → 网络设定 → 创建配置文件 → 搜索 Wi-Fi 网络\n3. 相机选择同一网络并输入密码，IP 选择“自动获得”\n4. IP 地址配置完成后，按 OK 进入“正在配对”界面\n5. 在 App 中点击“连接相机”</string>
+    <string name="tip_sta_quick_body">相机会保存网络配置。以后准备好同一网络，从 i 菜单开启「Wi-Fi 连接」即可。</string>
 
     <!-- 文件列表 -->
     <string name="loading_file_list">正在获取文件列表…</string>
