@@ -24,6 +24,30 @@ class HomeConnectionPresentationTest {
     }
 
     @Test
+    fun freeConnectionPulsesAreStaggeredAndDisappearCompletely() {
+        assertEquals(0f, freeConnectionPulseVisibility(-1f), 0f)
+        assertEquals(0f, freeConnectionPulseVisibility(0f), 0f)
+        assertTrue(freeConnectionPulseVisibility(0.10f) > 0f)
+        assertTrue(freeConnectionPulseVisibility(0.50f) > 0f)
+        assertEquals(0f, freeConnectionPulseVisibility(1f), 0f)
+        assertEquals(0f, freeConnectionPulseVisibility(2f), 0f)
+
+        assertTrue(freeConnectionPulseProgress(0.10f, 0) > 0f)
+        assertEquals(0f, freeConnectionPulseProgress(0.10f, 1), 0f)
+        assertTrue(freeConnectionPulseProgress(0.20f, 1) > 0f)
+        assertEquals(
+            0f,
+            freeConnectionPulseVisibility(freeConnectionPulseProgress(1f, 0)),
+            0f,
+        )
+        assertEquals(
+            0f,
+            freeConnectionPulseVisibility(freeConnectionPulseProgress(1f, 1)),
+            0f,
+        )
+    }
+
+    @Test
     fun albumScanChangesDoNotInvalidateConnectionPresentation() {
         val initial = CameraState().toHomeConnectionUiState()
         val scanning = CameraState(

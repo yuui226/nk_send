@@ -134,6 +134,10 @@ fun HomeScreen(
     val context = LocalContext.current
     // 连接成功时高级版专属的金色粒子彩蛋依赖它；购买入口已经统一移入设置面板。
     val isPro by LicenseManager.isPro.collectAsState()
+    // Debug 模拟入口长按时只覆盖本次连接动画，不改变真实许可证状态。
+    // Release 源集不显示该入口，因此此值在正式版始终为 false。
+    var debugPremiumAnimationRequested by remember { mutableStateOf(false) }
+    val playPremiumConnectionCelebration = isPro || debugPremiumAnimationRequested
     // 当前设备的通行证过期且续签联不上网 → 顶部提示连网续期(连上重开自动续签)。
     val renewalNeeded by LicenseManager.renewalNeeded.collectAsState()
     // 右上角临期提示打开续费弹窗（剩余天数 + 续费价，再进付款）。
@@ -211,7 +215,10 @@ fun HomeScreen(
             }
             delay((nextFrameAtMs - SystemClock.uptimeMillis()).coerceAtLeast(1L))
         }
-        if (isActive) currentOnCelebrationFinished()
+        if (isActive) {
+            currentOnCelebrationFinished()
+            debugPremiumAnimationRequested = false
+        }
     }
     // 用户不需要点卡片作出强选择：App 观察真实链路，先识别到哪种传输就点亮哪张卡片。
     val selectedConnection = homeSelectedConnection(
@@ -372,7 +379,7 @@ fun HomeScreen(
                         error = usbError?.takeIf {
                             selectedConnection == CameraConnectionType.USB
                         },
-                        goldBurst = isPro,
+                        goldBurst = playPremiumConnectionCelebration,
                     )
 
                     ConnectionMethodCard(
@@ -423,7 +430,7 @@ fun HomeScreen(
                         attentionPhaseOffset = 0.5f,
                         selectionSceneProgress = selectionSceneProgress,
                         successEffectProgress = successEffectProgress,
-                        goldBurst = isPro,
+                        goldBurst = playPremiumConnectionCelebration,
                         feedback = if (state.wirelessMode == WirelessMode.AP) {
                             wifiFeedback
                         } else {
@@ -721,7 +728,16 @@ fun HomeScreen(
                 // 双 Z 标（原"Z传"文本，换成自绘的尼康 Z 系列标志更简洁）。
                 ZMark(modifier = Modifier.height(20.dp))
             }
-            DebugSimulatorButton(onClick = viewModel::connectDebugSimulator)
+            DebugSimulatorButton(
+                onClick = {
+                    debugPremiumAnimationRequested = false
+                    viewModel.connectDebugSimulator()
+                },
+                onLongClick = {
+                    debugPremiumAnimationRequested = true
+                    viewModel.connectDebugSimulator()
+                },
+            )
             Spacer(modifier = Modifier.weight(1f))
             renewalNotice?.let { (noticeText, renewable) ->
                 RenewalNoticeTag(
@@ -1283,6 +1299,8 @@ private fun ConnectionMethodCard(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .requiredSize(220.dp)
+                    // 免费版双脉冲压到飞行图标后方；高级版保持原有前景光效层级。
+                    .zIndex(if (goldBurst) 1f else -1f)
             )
         }
     }
@@ -1400,10 +1418,17 @@ private fun ConnectionSuccessOverlay(
 
     Canvas(modifier = modifier) {
         val p = progress()
-        val reveal = (p * 5f).coerceAtMost(1f)
-        if (goldBurst) {
-            drawPremiumSuccessEffect(p)
+        if (!goldBurst) {
+            drawFreeSuccessPulses(
+                progress = p,
+                color = colors.statusConnected,
+            )
+            return@Canvas
         }
+
+        // 高级版成功效果保持原有绘制与节奏；免费版已在上方走独立的双脉冲分支。
+        val reveal = (p * 5f).coerceAtMost(1f)
+        drawPremiumSuccessEffect(p)
 
         repeat(2) { index ->
             val ringProgress = ((p - index * 0.14f) / 0.72f).coerceIn(0f, 1f)
@@ -1417,24 +1442,22 @@ private fun ConnectionSuccessOverlay(
             )
         }
 
-        if (goldBurst) {
-            repeat(10) { index ->
-                val angle = (index * 36f + if (index % 2 == 0) 7f else -5f) *
-                    (Math.PI.toFloat() / 180f)
-                val distance = (48 + (index % 3) * 11).dp.toPx() * p
-                drawCircle(
-                    color = (if (index % 2 == 0) {
-                        Color(0xFFFFE082)
-                    } else {
-                        Color(0xFFF0A93B)
-                    }).copy(alpha = (p * 5f).coerceAtMost(1f) * (1f - p)),
-                    radius = (if (index % 3 == 0) 3.dp else 2.dp).toPx(),
-                    center = Offset(
-                        center.x + cos(angle) * distance,
-                        center.y + sin(angle) * distance,
-                    ),
-                )
-            }
+        repeat(10) { index ->
+            val angle = (index * 36f + if (index % 2 == 0) 7f else -5f) *
+                (Math.PI.toFloat() / 180f)
+            val distance = (48 + (index % 3) * 11).dp.toPx() * p
+            drawCircle(
+                color = (if (index % 2 == 0) {
+                    Color(0xFFFFE082)
+                } else {
+                    Color(0xFFF0A93B)
+                }).copy(alpha = (p * 5f).coerceAtMost(1f) * (1f - p)),
+                radius = (if (index % 3 == 0) 3.dp else 2.dp).toPx(),
+                center = Offset(
+                    center.x + cos(angle) * distance,
+                    center.y + sin(angle) * distance,
+                ),
+            )
         }
 
         // 不再绘制另一枚“成功图标”；只给原模式图标增加一圈确认脉冲。
@@ -1450,6 +1473,49 @@ private fun ConnectionSuccessOverlay(
             style = Stroke(width = 1.5.dp.toPx() * coreScale),
         )
     }
+}
+
+/** 免费版成功反馈：从模式图标外缘依次发出两圈波纹，各自扩散后彻底消失。 */
+private fun DrawScope.drawFreeSuccessPulses(progress: Float, color: Color) {
+    val p = progress.coerceIn(0f, 1f)
+    val startRadius = 42.dp.toPx()
+    val endRadius = 102.dp.toPx()
+
+    repeat(2) { index ->
+        val ringProgress = freeConnectionPulseProgress(p, index)
+        val visibility = freeConnectionPulseVisibility(ringProgress)
+        if (visibility <= 0f) return@repeat
+
+        val radius = startRadius + (endRadius - startRadius) * ringProgress
+        val strength = if (index == 0) 1f else 0.84f
+        // 每圈都由同半径的柔光与细环组成；柔光不单独移动，因此视觉上仍是两圈脉冲。
+        drawCircle(
+            color = color.copy(alpha = 0.12f * visibility * strength),
+            radius = radius,
+            style = Stroke(width = (5.2f - 2.2f * ringProgress).dp.toPx()),
+        )
+        drawCircle(
+            color = color.copy(alpha = 0.68f * visibility * strength),
+            radius = radius,
+            style = Stroke(width = (1.9f - 0.8f * ringProgress).dp.toPx()),
+        )
+    }
+}
+
+private const val FREE_CONNECTION_PULSE_STAGGER = 0.14f
+private const val FREE_CONNECTION_PULSE_SPAN = 0.82f
+
+internal fun freeConnectionPulseProgress(progress: Float, index: Int): Float =
+    (
+        (progress.coerceIn(0f, 1f) - index.coerceIn(0, 1) * FREE_CONNECTION_PULSE_STAGGER) /
+            FREE_CONNECTION_PULSE_SPAN
+        ).coerceIn(0f, 1f)
+
+internal fun freeConnectionPulseVisibility(progress: Float): Float {
+    val p = progress.coerceIn(0f, 1f)
+    if (p <= 0f || p >= 1f) return 0f
+    val appear = (p / 0.10f).coerceIn(0f, 1f)
+    return appear * (1f - p)
 }
 
 @Composable
