@@ -10,7 +10,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -986,7 +988,7 @@ private fun ConnectionMethodCard(
     goldBurst: Boolean = false,
     feedback: ConnectionCardFeedback? = null,
     feedbackFollowsModeSelector: Boolean = false,
-    footer: (@Composable () -> Unit)? = null
+    footer: (@Composable ColumnScope.() -> Unit)? = null
 ) {
     val colors = AppTheme.colors
     val shape = remember { RoundedCornerShape(24.dp) }
@@ -1162,14 +1164,22 @@ private fun ConnectionMethodCard(
                                 transitionSpec = {
                                     fadeIn(
                                         tween(
-                                            durationMillis = 180,
-                                            easing = FastOutSlowInEasing,
+                                            durationMillis = 220,
+                                            delayMillis = 50,
+                                            easing = LinearOutSlowInEasing,
                                         ),
-                                    ) togetherWith fadeOut(tween(120))
+                                    ) togetherWith fadeOut(
+                                        tween(
+                                            durationMillis = 130,
+                                            easing = FastOutLinearInEasing,
+                                        ),
+                                    )
                                 },
                                 contentAlignment = Alignment.TopStart,
                                 label = "staConnectionCardStatus",
-                                modifier = Modifier.fillMaxWidth(),
+                                // Fill the reserved slot so AnimatedContent never animates its
+                                // own measured height while the two text layouts cross-fade.
+                                modifier = Modifier.fillMaxSize(),
                             ) { animatedFeedback ->
                                 if (animatedFeedback == null) {
                                     Column(modifier = Modifier.fillMaxWidth()) {
@@ -1188,13 +1198,12 @@ private fun ConnectionMethodCard(
                                 }
                             }
                         }
-                        Box(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .onSizeChanged { footerHeightPx = it.height },
-                        ) {
-                            footer()
-                        }
+                            content = footer,
+                        )
                     } else {
                         steps.forEachIndexed { index, text ->
                             ConnectionStep(index + 1, text, accent)
@@ -1279,13 +1288,12 @@ private fun ConnectionMethodCard(
 
                         Spacer(Modifier.weight(1f))
                         if (footer != null) {
-                            Box(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .onSizeChanged { footerHeightPx = it.height },
-                            ) {
-                                footer()
-                            }
+                                content = footer,
+                            )
                         }
                     }
                 }
