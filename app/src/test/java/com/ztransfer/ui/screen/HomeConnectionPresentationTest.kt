@@ -12,6 +12,16 @@ import org.junit.Test
 
 class HomeConnectionPresentationTest {
     @Test
+    fun staConnectButtonBreathingIsSmoothAndPeriodic() {
+        assertEquals(0f, staButtonBreathProgress(-1L), 0.001f)
+        assertEquals(0f, staButtonBreathProgress(0L), 0.001f)
+        assertEquals(0.5f, staButtonBreathProgress(450L), 0.001f)
+        assertEquals(1f, staButtonBreathProgress(900L), 0.001f)
+        assertEquals(0.5f, staButtonBreathProgress(1_350L), 0.001f)
+        assertEquals(0f, staButtonBreathProgress(1_800L), 0.001f)
+    }
+
+    @Test
     fun connectionCelebrationUsesOneContinuousTimeline() {
         assertEquals(0f, connectionHeroProgress(-1L), 0f)
         assertEquals(0.5f, connectionHeroProgress(310L), 0.001f)

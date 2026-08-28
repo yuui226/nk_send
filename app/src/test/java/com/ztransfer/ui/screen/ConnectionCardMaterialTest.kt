@@ -11,6 +11,56 @@ import org.junit.Test
 class ConnectionCardMaterialTest {
 
     @Test
+    fun staConnectButtonUsesAControlledPaletteForEveryMaterial() {
+        SkinPreset.entries.forEach { skin ->
+            listOf(false, true).forEach { dark ->
+                val colors = skinAppColors(skin, dark)
+                val palette = staConnectButtonPalette(
+                    skin = skin,
+                    dark = dark,
+                    defaultConnecting = colors.accentBlue,
+                    defaultConnected = colors.statusConnected,
+                )
+
+                assertTrue("$skin dark=$dark distinct states", palette.connecting != palette.connected)
+                assertTrue(
+                    "$skin dark=$dark success stays green",
+                    palette.connected.green > palette.connected.red,
+                )
+                assertTrue(
+                    "$skin dark=$dark fill range",
+                    palette.restFillAlpha in 0f..palette.peakFillAlpha &&
+                        palette.peakFillAlpha <= 0.12f,
+                )
+                assertTrue(
+                    "$skin dark=$dark edge range",
+                    palette.restEdgeAlpha in 0f..palette.peakEdgeAlpha &&
+                        palette.peakEdgeAlpha <= 0.42f,
+                )
+                assertTrue(
+                    "$skin dark=$dark stroke range",
+                    palette.restEdgeWidthDp in 0.70f..palette.peakEdgeWidthDp &&
+                        palette.peakEdgeWidthDp <= 1.20f,
+                )
+
+                if (skin == SkinPreset.FROSTED_GLASS) {
+                    assertTrue(palette.connecting == colors.accentBlue)
+                    assertTrue(palette.connected == colors.statusConnected)
+                } else {
+                    assertTrue(
+                        "$skin gets a material connecting color",
+                        palette.connecting != colors.accentBlue,
+                    )
+                    assertTrue(
+                        "$skin gets a material success color",
+                        palette.connected != colors.statusConnected,
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
     fun solidMaterialBadgeIconsKeepNonTextContrastInBothColorModes() {
         val solidSkins = listOf(
             SkinPreset.TITANIUM,

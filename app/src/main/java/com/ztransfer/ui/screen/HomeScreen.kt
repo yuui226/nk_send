@@ -4,10 +4,9 @@ import android.content.Intent
 import android.os.SystemClock
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -23,6 +22,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +36,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +45,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -54,6 +59,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -65,6 +71,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
@@ -283,8 +290,46 @@ fun HomeScreen(
     val staBusy = state.staConnectionStatus == StaConnectionStatus.DISCOVERING ||
         state.staConnectionStatus == StaConnectionStatus.PAIRING ||
         state.staConnectionStatus == StaConnectionStatus.CONNECTING
+    val staConnected = state.isConnectedToCamera && state.isStaConnection
+    val staConnectButtonHighlighted = staBusy || staConnected
+    val staConnectButtonBreath = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(staConnectButtonHighlighted) {
+        if (!staConnectButtonHighlighted) {
+            staConnectButtonBreath.floatValue = 0f
+            return@LaunchedEffect
+        }
+        val startedAt = SystemClock.uptimeMillis()
+        while (isActive) {
+            staConnectButtonBreath.floatValue = staButtonBreathProgress(
+                SystemClock.uptimeMillis() - startedAt,
+            )
+            delay(STA_BUTTON_BREATH_FRAME_MS)
+        }
+    }
+    val staButtonPalette = remember(
+        buttonSkin,
+        darkTheme,
+        colors.accentBlue,
+        colors.statusConnected,
+    ) {
+        staConnectButtonPalette(
+            skin = buttonSkin,
+            dark = darkTheme,
+            defaultConnecting = colors.accentBlue,
+            defaultConnected = colors.statusConnected,
+        )
+    }
+    val staConnectButtonAccent by animateColorAsState(
+        targetValue = if (staConnected) {
+            staButtonPalette.connected
+        } else {
+            staButtonPalette.connecting
+        },
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        label = "staConnectButtonAccent",
+    )
     val staConnectButtonState = when {
-        state.isConnectedToCamera && state.isStaConnection -> StaConnectButtonState.CONNECTED
+        staConnected -> StaConnectButtonState.CONNECTED
         state.staConnectionStatus == StaConnectionStatus.DISCOVERING ->
             StaConnectButtonState.SEARCHING
         state.staConnectionStatus == StaConnectionStatus.PAIRING ->
@@ -400,14 +445,10 @@ fun HomeScreen(
                                 stringResource(R.string.step_camera_wifi),
                                 stringResource(R.string.step_phone_wifi),
                             )
-                            WirelessMode.STA -> if (staFeedback == null) {
-                                listOf(
-                                    stringResource(R.string.sta_step_phone_hotspot),
-                                    stringResource(R.string.sta_step_connect_camera),
-                                )
-                            } else {
-                                emptyList()
-                            }
+                            WirelessMode.STA -> listOf(
+                                stringResource(R.string.sta_step_phone_hotspot),
+                                stringResource(R.string.sta_step_connect_camera),
+                            )
                         },
                         modeSelector = {
                             WifiModeTabs(
@@ -547,10 +588,8 @@ fun HomeScreen(
                                         }
                                     },
                                     enabled = !connected,
+                                    disabledAlpha = if (staConnected) 1f else 0.45f,
                                     shape = RoundedCornerShape(14.dp),
-                                    // The button owns its full content plane: the status glyph and
-                                    // centered label are independent overlays and never push each
-                                    // other sideways as their animated states change.
                                     contentPadding = PaddingValues(0.dp),
                                     textureSeed = WIFI_SETTINGS_BUTTON_TEXTURE_SEED,
                                     modifier = Modifier
@@ -558,55 +597,46 @@ fun HomeScreen(
                                         .height(42.dp),
                                 ) {
                                     Box(
-                                        modifier = Modifier.fillMaxSize(),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .drawBehind {
+                                                if (staConnectButtonHighlighted) {
+                                                    // Read the clock-backed state in the drawing
+                                                    // phase so breathing redraws only this button,
+                                                    // rather than recomposing the connection page.
+                                                    val breath = staConnectButtonBreath.floatValue
+                                                    val radius = 14.dp.toPx()
+                                                    val fillAlpha = with(staButtonPalette) {
+                                                        restFillAlpha +
+                                                            (peakFillAlpha - restFillAlpha) * breath
+                                                    }
+                                                    val edgeAlpha = with(staButtonPalette) {
+                                                        restEdgeAlpha +
+                                                            (peakEdgeAlpha - restEdgeAlpha) * breath
+                                                    }
+                                                    val edgeWidth = with(staButtonPalette) {
+                                                        restEdgeWidthDp +
+                                                            (peakEdgeWidthDp - restEdgeWidthDp) * breath
+                                                    }
+                                                    drawRoundRect(
+                                                        color = staConnectButtonAccent.copy(
+                                                            alpha = fillAlpha,
+                                                        ),
+                                                        cornerRadius = CornerRadius(radius, radius),
+                                                    )
+                                                    drawRoundRect(
+                                                        color = staConnectButtonAccent.copy(
+                                                            alpha = edgeAlpha,
+                                                        ),
+                                                        cornerRadius = CornerRadius(radius, radius),
+                                                        style = Stroke(
+                                                            width = edgeWidth.dp.toPx(),
+                                                        ),
+                                                    )
+                                                }
+                                            },
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        // Fixed left slot. NONE keeps the slot geometry while
-                                        // drawing nothing; BUSY and CONNECTED therefore occupy the
-                                        // exact same position without disturbing the centered text.
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.CenterStart)
-                                                .padding(start = 8.dp)
-                                                .size(18.dp),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            AnimatedContent(
-                                                targetState = staConnectButtonState.icon,
-                                                transitionSpec = {
-                                                    (
-                                                        fadeIn(tween(160)) + scaleIn(
-                                                            animationSpec = tween(180),
-                                                            initialScale = 0.72f,
-                                                        )
-                                                    ) togetherWith (
-                                                        fadeOut(tween(100)) + scaleOut(
-                                                            animationSpec = tween(120),
-                                                            targetScale = 0.82f,
-                                                        )
-                                                    )
-                                                },
-                                                contentAlignment = Alignment.Center,
-                                                label = "staConnectButtonIcon",
-                                                modifier = Modifier.fillMaxSize(),
-                                            ) { icon ->
-                                                when (icon) {
-                                                    StaConnectButtonIcon.BUSY ->
-                                                        CircularProgressIndicator(
-                                                            modifier = Modifier.size(16.dp),
-                                                            color = staConnectTextColor,
-                                                            strokeWidth = 1.7.dp,
-                                                        )
-                                                    StaConnectButtonIcon.CONNECTED -> Icon(
-                                                        imageVector = Icons.Default.CheckCircle,
-                                                        contentDescription = null,
-                                                        tint = staConnectTextColor,
-                                                        modifier = Modifier.size(18.dp),
-                                                    )
-                                                    StaConnectButtonIcon.NONE -> Unit
-                                                }
-                                            }
-                                        }
                                         AnimatedContent(
                                             targetState = staConnectButtonState,
                                             transitionSpec = {
@@ -867,18 +897,13 @@ private data class ConnectionCardFeedback(
     val multiline: Boolean = false,
 )
 
-private enum class StaConnectButtonState(
-    val labelRes: Int,
-    val icon: StaConnectButtonIcon = StaConnectButtonIcon.NONE,
-) {
+private enum class StaConnectButtonState(val labelRes: Int) {
     IDLE(R.string.sta_connect_action),
-    SEARCHING(R.string.sta_status_searching, StaConnectButtonIcon.BUSY),
-    PAIRING(R.string.sta_status_pairing, StaConnectButtonIcon.BUSY),
-    CONNECTING(R.string.sta_status_connecting, StaConnectButtonIcon.BUSY),
-    CONNECTED(R.string.sta_status_connected, StaConnectButtonIcon.CONNECTED),
+    SEARCHING(R.string.sta_status_searching),
+    PAIRING(R.string.sta_status_pairing),
+    CONNECTING(R.string.sta_status_connecting),
+    CONNECTED(R.string.sta_status_connected),
 }
-
-private enum class StaConnectButtonIcon { NONE, BUSY, CONNECTED }
 
 @Composable
 private fun WifiModeTabs(
@@ -989,6 +1014,7 @@ private fun ConnectionMethodCard(
     var iconCenterInRoot by remember { mutableStateOf<Offset?>(null) }
     var cardPressed by remember { mutableStateOf(false) }
     var pressDirection by remember { mutableStateOf(0f) }
+    var footerHeightPx by remember { mutableIntStateOf(0) }
     val pressDeformation by animateFloatAsState(
         targetValue = if (cardPressed && !success) 1f else 0f,
         animationSpec = if (cardPressed && !success) {
@@ -1068,10 +1094,14 @@ private fun ConnectionMethodCard(
                 Box(
                     modifier = Modifier
                         .matchParentSize()
-                        .pointerInput(success) {
+                        .pointerInput(success, footerHeightPx) {
                             if (success) return@pointerInput
                             awaitEachGesture {
                                 val down = awaitFirstDown()
+                                val footerTop = size.height - footerHeightPx - 16.dp.toPx()
+                                if (footerHeightPx > 0 && down.position.y >= footerTop) {
+                                    return@awaitEachGesture
+                                }
                                 pressDirection = if (size.width == 0) 0f else {
                                     ((down.position.x / size.width) * 2f - 1f)
                                         .coerceIn(-1f, 1f)
@@ -1118,131 +1148,145 @@ private fun ConnectionMethodCard(
                             ),
                         )
                     }
-                    steps.forEachIndexed { index, text ->
-                        ConnectionStep(index + 1, text, accent)
-                        if (index != steps.lastIndex) Spacer(Modifier.height(13.dp))
-                    }
-
-                    AnimatedContent(
-                        targetState = feedback,
-                        transitionSpec = {
-                            when {
-                                initialState == null && targetState != null ->
-                                    (
-                                        fadeIn(
-                                            animationSpec = tween(
-                                                durationMillis = 220,
-                                                delayMillis = 35,
-                                                easing = FastOutSlowInEasing
-                                            )
-                                        ) + slideInVertically(
-                                            animationSpec = tween(
-                                                durationMillis = 260,
-                                                easing = FastOutSlowInEasing
-                                            ),
-                                            initialOffsetY = { it / 4 }
-                                        )
-                                    ) togetherWith fadeOut(tween(90))
-
-                                initialState != null && targetState == null ->
-                                    fadeIn(tween(90)) togetherWith (
-                                        fadeOut(tween(150)) + slideOutVertically(
-                                            animationSpec = tween(
-                                                durationMillis = 180,
-                                                easing = FastOutSlowInEasing
-                                            ),
-                                            targetOffsetY = { it / 8 }
-                                        )
-                                    )
-
-                                else ->
+                    if (feedbackFollowsModeSelector && footer != null) {
+                        // STA 的步骤与失败提示共用固定的弹性内容槽。状态切换只在槽内淡变，
+                        // 不再改变 footer 的测量位置，也不会把下方三个小按钮向上托起。
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .clipToBounds(),
+                        ) {
+                            AnimatedContent(
+                                targetState = feedback,
+                                transitionSpec = {
                                     fadeIn(
                                         tween(
                                             durationMillis = 180,
-                                            easing = FastOutSlowInEasing
-                                        )
+                                            easing = FastOutSlowInEasing,
+                                        ),
                                     ) togetherWith fadeOut(tween(120))
-                            }
-                        },
-                        label = "connectionCardFeedback"
-                    ) { animatedFeedback ->
-                        if (animatedFeedback != null) {
-                            Column(
+                                },
+                                contentAlignment = Alignment.TopStart,
+                                label = "staConnectionCardStatus",
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.Start,
-                            ) {
-                                if (!feedbackFollowsModeSelector) {
-                                    Spacer(Modifier.height(12.dp))
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            animatedFeedback.accent.copy(alpha = 0.10f)
-                                        )
-                                        .padding(horizontal = 9.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    if (animatedFeedback.busy) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(14.dp),
-                                            color = animatedFeedback.accent,
-                                            strokeWidth = 1.5.dp
-                                        )
-                                        Spacer(Modifier.width(7.dp))
-                                    }
-                                    Column {
-                                        Text(
-                                            text = animatedFeedback.title,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = animatedFeedback.accent,
-                                            maxLines = if (animatedFeedback.multiline) 2 else 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        animatedFeedback.body?.let { body ->
-                                            Text(
-                                                text = body,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = colors.onSurfaceVariant,
-                                                maxLines = if (animatedFeedback.multiline) 3 else 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
+                            ) { animatedFeedback ->
+                                if (animatedFeedback == null) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        steps.forEachIndexed { index, text ->
+                                            ConnectionStep(index + 1, text, accent)
+                                            if (index != steps.lastIndex) {
+                                                Spacer(Modifier.height(13.dp))
+                                            }
                                         }
                                     }
+                                } else {
+                                    ConnectionCardFeedbackContent(
+                                        feedback = animatedFeedback,
+                                        verticalPadding = 5.dp,
+                                    )
                                 }
                             }
                         }
-                    }
-
-                    if (error != null) {
-                        Spacer(Modifier.height(12.dp))
-                        Column(
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(colors.statusError.copy(alpha = 0.10f))
-                                .padding(horizontal = 9.dp, vertical = 7.dp)
+                                .onSizeChanged { footerHeightPx = it.height },
                         ) {
-                            Text(
-                                text = stringResource(R.string.connection_failed_short),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.statusError
-                            )
-                            Text(
-                                text = error,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            footer()
                         }
-                    }
+                    } else {
+                        steps.forEachIndexed { index, text ->
+                            ConnectionStep(index + 1, text, accent)
+                            if (index != steps.lastIndex) Spacer(Modifier.height(13.dp))
+                        }
 
-                    Spacer(Modifier.weight(1f))
-                    if (footer != null) {
-                        footer()
+                        AnimatedContent(
+                            targetState = feedback,
+                            transitionSpec = {
+                                when {
+                                    initialState == null && targetState != null ->
+                                        (
+                                            fadeIn(
+                                                animationSpec = tween(
+                                                    durationMillis = 220,
+                                                    delayMillis = 35,
+                                                    easing = FastOutSlowInEasing
+                                                )
+                                            ) + slideInVertically(
+                                                animationSpec = tween(
+                                                    durationMillis = 260,
+                                                    easing = FastOutSlowInEasing
+                                                ),
+                                                initialOffsetY = { it / 4 }
+                                            )
+                                        ) togetherWith fadeOut(tween(90))
+
+                                    initialState != null && targetState == null ->
+                                        fadeIn(tween(90)) togetherWith (
+                                            fadeOut(tween(150)) + slideOutVertically(
+                                                animationSpec = tween(
+                                                    durationMillis = 180,
+                                                    easing = FastOutSlowInEasing
+                                                ),
+                                                targetOffsetY = { it / 8 }
+                                            )
+                                        )
+
+                                    else ->
+                                        fadeIn(
+                                            tween(
+                                                durationMillis = 180,
+                                                easing = FastOutSlowInEasing
+                                            )
+                                        ) togetherWith fadeOut(tween(120))
+                                }
+                            },
+                            label = "connectionCardFeedback"
+                        ) { animatedFeedback ->
+                            if (animatedFeedback != null) {
+                                ConnectionCardFeedbackContent(
+                                    feedback = animatedFeedback,
+                                    topSpacing = 12.dp,
+                                )
+                            }
+                        }
+
+                        if (error != null) {
+                            Spacer(Modifier.height(12.dp))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(colors.statusError.copy(alpha = 0.10f))
+                                    .padding(horizontal = 9.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.connection_failed_short),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.statusError
+                                )
+                                Text(
+                                    text = error,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.weight(1f))
+                        if (footer != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onSizeChanged { footerHeightPx = it.height },
+                            ) {
+                                footer()
+                            }
+                        }
                     }
                 }
 
@@ -1302,6 +1346,61 @@ private fun ConnectionMethodCard(
                     // 免费版双脉冲压到飞行图标后方；高级版保持原有前景光效层级。
                     .zIndex(if (goldBurst) 1f else -1f)
             )
+        }
+    }
+}
+
+@Composable
+private fun ConnectionCardFeedbackContent(
+    feedback: ConnectionCardFeedback,
+    topSpacing: Dp = 0.dp,
+    verticalPadding: Dp = 7.dp,
+) {
+    val colors = AppTheme.colors
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.Start,
+    ) {
+        if (topSpacing > 0.dp) {
+            Spacer(Modifier.height(topSpacing))
+        }
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(feedback.accent.copy(alpha = 0.10f))
+                .padding(
+                    horizontal = 9.dp,
+                    vertical = verticalPadding,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (feedback.busy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    color = feedback.accent,
+                    strokeWidth = 1.5.dp,
+                )
+                Spacer(Modifier.width(7.dp))
+            }
+            Column {
+                Text(
+                    text = feedback.title,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = feedback.accent,
+                    maxLines = if (feedback.multiline) 2 else 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                feedback.body?.let { body ->
+                    Text(
+                        text = body,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = if (feedback.multiline) 3 else 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
@@ -1504,6 +1603,16 @@ private fun DrawScope.drawFreeSuccessPulses(progress: Float, color: Color) {
 
 private const val FREE_CONNECTION_PULSE_STAGGER = 0.14f
 private const val FREE_CONNECTION_PULSE_SPAN = 0.82f
+
+private const val STA_BUTTON_BREATH_DURATION_MS = 1_800L
+private const val STA_BUTTON_BREATH_FRAME_MS = 32L
+
+internal fun staButtonBreathProgress(elapsedMs: Long): Float {
+    val phase = (
+        elapsedMs.coerceAtLeast(0L) % STA_BUTTON_BREATH_DURATION_MS
+    ).toFloat() / STA_BUTTON_BREATH_DURATION_MS
+    return 0.5f - 0.5f * cos(phase * 2f * Math.PI.toFloat())
+}
 
 internal fun freeConnectionPulseProgress(progress: Float, index: Int): Float =
     (
@@ -1717,6 +1826,41 @@ private fun TipsBubble(
     } else {
         anchoredPanelTop
     }
+    val title = stringResource(
+        if (wirelessMode == WirelessMode.AP) R.string.tip_title
+        else R.string.tip_sta_title,
+    )
+    val items = if (wirelessMode == WirelessMode.AP) {
+        listOf(
+            TipBubbleItem(
+                label = stringResource(R.string.tip_ap_mode),
+                text = stringResource(R.string.tip_body),
+            ),
+            TipBubbleItem(
+                text = stringResource(R.string.tip_path),
+                emphasized = true,
+            ),
+        )
+    } else {
+        listOf(
+            TipBubbleItem(
+                label = stringResource(R.string.tip_sta_first_connection),
+                text = stringResource(R.string.tip_sta_step_hotspot),
+                emphasized = true,
+                questionExplanation = stringResource(R.string.tip_sta_hotspot_help),
+                questionSuffix = stringResource(R.string.tip_sta_network_alternative),
+                trailingText = stringResource(R.string.tip_sta_steps_after_hotspot),
+            ),
+            TipBubbleItem(
+                label = stringResource(R.string.tip_sta_quick_start),
+                text = stringResource(R.string.tip_sta_quick_body),
+            ),
+            TipBubbleItem(
+                text = stringResource(R.string.tip_path),
+                emphasized = true,
+            ),
+        )
+    }
     AnchorPopup(
         anchorBounds = anchorBounds,
         onDismiss = onDismiss,
@@ -1727,42 +1871,18 @@ private fun TipsBubble(
         shape = RoundedCornerShape(18.dp),
         dim = false,
     ) { _ ->
-        TipBubbleContent(
-            title = stringResource(
-                if (wirelessMode == WirelessMode.AP) R.string.tip_title
-                else R.string.tip_sta_title,
-            ),
-            items = if (wirelessMode == WirelessMode.AP) {
-                listOf(
-                    TipBubbleItem(
-                        label = stringResource(R.string.tip_ap_mode),
-                        text = stringResource(R.string.tip_body),
-                    ),
-                    TipBubbleItem(
-                        text = stringResource(R.string.tip_path),
-                        emphasized = true,
-                    ),
+        if (wirelessMode == WirelessMode.STA) {
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                TipBubbleContent(
+                    title = title,
+                    items = items,
+                    modifier = Modifier
+                        .heightIn(max = maxHeight)
+                        .verticalScroll(rememberScrollState()),
                 )
-            } else {
-                listOf(
-                    TipBubbleItem(
-                        label = stringResource(R.string.tip_sta_first_connection),
-                        text = stringResource(R.string.tip_sta_step_hotspot),
-                        emphasized = true,
-                        questionExplanation = stringResource(R.string.tip_sta_hotspot_help),
-                        questionSuffix = stringResource(R.string.tip_sta_network_alternative),
-                        trailingText = stringResource(R.string.tip_sta_steps_after_hotspot),
-                    ),
-                    TipBubbleItem(
-                        label = stringResource(R.string.tip_sta_quick_start),
-                        text = stringResource(R.string.tip_sta_quick_body),
-                    ),
-                    TipBubbleItem(
-                        text = stringResource(R.string.tip_path),
-                        emphasized = true,
-                    ),
-                )
-            },
-        )
+            }
+        } else {
+            TipBubbleContent(title = title, items = items)
+        }
     }
 }

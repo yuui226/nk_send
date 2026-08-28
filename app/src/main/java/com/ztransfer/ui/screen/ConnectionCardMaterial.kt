@@ -54,6 +54,112 @@ internal fun materialButtonForegroundColor(
     SkinPreset.CAMERA_CONTROLS -> Color(0xFFD5D8DA)
 }
 
+/**
+ * STA 连接按钮的状态光。实体材质不直接套用页面语义色：金属使用低饱和冷色，木纹使用
+ * 蜂蜜琥珀与柔和苔绿，相机键帽则模拟克制的琥珀/绿色状态灯。透明度也按表面明度单独收敛，
+ * 保持呼吸可见但不把材质本身染成一整块高饱和颜色。
+ */
+internal data class StaConnectButtonPalette(
+    val connecting: Color,
+    val connected: Color,
+    val restFillAlpha: Float,
+    val peakFillAlpha: Float,
+    val restEdgeAlpha: Float,
+    val peakEdgeAlpha: Float,
+    val restEdgeWidthDp: Float,
+    val peakEdgeWidthDp: Float,
+)
+
+internal fun staConnectButtonPalette(
+    skin: SkinPreset,
+    dark: Boolean,
+    defaultConnecting: Color,
+    defaultConnected: Color,
+): StaConnectButtonPalette = when (skin) {
+    SkinPreset.FROSTED_GLASS -> if (dark) {
+        StaConnectButtonPalette(
+            connecting = defaultConnecting,
+            connected = defaultConnected,
+            restFillAlpha = 0.050f,
+            peakFillAlpha = 0.120f,
+            restEdgeAlpha = 0.180f,
+            peakEdgeAlpha = 0.340f,
+            restEdgeWidthDp = 0.75f,
+            peakEdgeWidthDp = 1.20f,
+        )
+    } else {
+        StaConnectButtonPalette(
+            connecting = defaultConnecting,
+            connected = defaultConnected,
+            restFillAlpha = 0.035f,
+            peakFillAlpha = 0.085f,
+            restEdgeAlpha = 0.180f,
+            peakEdgeAlpha = 0.320f,
+            restEdgeWidthDp = 0.75f,
+            peakEdgeWidthDp = 1.15f,
+        )
+    }
+
+    SkinPreset.TITANIUM -> if (dark) {
+        StaConnectButtonPalette(
+            connecting = Color(0xFF62B4D5),
+            connected = Color(0xFF65B88A),
+            restFillAlpha = 0.045f,
+            peakFillAlpha = 0.095f,
+            restEdgeAlpha = 0.200f,
+            peakEdgeAlpha = 0.380f,
+            restEdgeWidthDp = 0.70f,
+            peakEdgeWidthDp = 1.10f,
+        )
+    } else {
+        StaConnectButtonPalette(
+            connecting = Color(0xFF236F8F),
+            connected = Color(0xFF2D7257),
+            restFillAlpha = 0.030f,
+            peakFillAlpha = 0.075f,
+            restEdgeAlpha = 0.200f,
+            peakEdgeAlpha = 0.360f,
+            restEdgeWidthDp = 0.70f,
+            peakEdgeWidthDp = 1.05f,
+        )
+    }
+
+    SkinPreset.WOOD -> if (dark) {
+        StaConnectButtonPalette(
+            connecting = Color(0xFFD9A45D),
+            connected = Color(0xFF6EB58A),
+            restFillAlpha = 0.035f,
+            peakFillAlpha = 0.075f,
+            restEdgeAlpha = 0.200f,
+            peakEdgeAlpha = 0.360f,
+            restEdgeWidthDp = 0.80f,
+            peakEdgeWidthDp = 1.10f,
+        )
+    } else {
+        StaConnectButtonPalette(
+            connecting = Color(0xFF7A481D),
+            connected = Color(0xFF276144),
+            restFillAlpha = 0.025f,
+            peakFillAlpha = 0.060f,
+            restEdgeAlpha = 0.200f,
+            peakEdgeAlpha = 0.340f,
+            restEdgeWidthDp = 0.80f,
+            peakEdgeWidthDp = 1.10f,
+        )
+    }
+
+    SkinPreset.CAMERA_CONTROLS -> StaConnectButtonPalette(
+        connecting = Color(0xFFFFB23F),
+        connected = Color(0xFF4DD477),
+        restFillAlpha = 0.035f,
+        peakFillAlpha = 0.080f,
+        restEdgeAlpha = 0.220f,
+        peakEdgeAlpha = 0.420f,
+        restEdgeWidthDp = 0.70f,
+        peakEdgeWidthDp = 0.95f,
+    )
+}
+
 internal fun connectionCardFramePalette(
     skin: SkinPreset,
     dark: Boolean,

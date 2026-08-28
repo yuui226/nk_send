@@ -871,6 +871,8 @@ internal fun materialBadgeContentColor(
  * [active]：持续选中态。保留毛玻璃基底和按压手感，叠加强调色淡层；实体材质稍抬高投影，
  * 供筛选等“离开页面后仍持续生效”的状态使用；不画强调色轮廓圈。
  * [activeColor] 可让有明确语义色的按钮复用同一套激活动画，不另造组件。
+ * [disabledAlpha]：禁用态的视觉透明度。默认保持既有的压淡效果；状态型按钮可设为 1，
+ * 在拦截点击的同时保留其状态高亮。
  *
  * [showSheen]：控制实体材质的顶部高光；毛玻璃没有方位高光，此参数只降低其边缘和颗粒
  * 定义度。紧凑按钮可关闭它，避免小面积圆角表面看起来像一圈白框。
@@ -886,6 +888,7 @@ fun GlassButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    disabledAlpha: Float = 0.45f,
     shape: Shape = RoundedCornerShape(20.dp),
     contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
     panel: Boolean = false,
@@ -995,7 +998,9 @@ fun GlassButton(
         }
     // 静止时不创建矩形 RenderNode。毛玻璃是半透明的，部分 GPU 会把合成层边界
     // 显成方框；只有按压动画或禁用态确实需要变换时才临时创建图层。
-    val transformedModifier = if (pressScale == 1f && enabled) {
+    val resolvedDisabledAlpha = disabledAlpha.coerceIn(0f, 1f)
+    val needsDisabledLayer = !enabled && resolvedDisabledAlpha < 0.999f
+    val transformedModifier = if (pressScale == 1f && !needsDisabledLayer) {
         modifier
     } else {
         modifier.graphicsLayer {
@@ -1008,7 +1013,7 @@ fun GlassButton(
             }
             // 禁用态整体压淡：M3 Surface 的 enabled 只拦点击不改视觉，
             // 不加这行会出现"看起来可点、点了没反应"的假活按钮。
-            alpha = if (enabled) 1f else 0.45f
+            alpha = if (enabled) 1f else resolvedDisabledAlpha
         }
     }
 
