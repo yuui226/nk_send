@@ -80,23 +80,23 @@ internal fun staConnectButtonPalette(
         StaConnectButtonPalette(
             connecting = defaultConnecting,
             connected = defaultConnected,
-            restFillAlpha = 0.050f,
-            peakFillAlpha = 0.120f,
-            restEdgeAlpha = 0.180f,
-            peakEdgeAlpha = 0.340f,
+            restFillAlpha = 0.065f,
+            peakFillAlpha = 0.200f,
+            restEdgeAlpha = 0.240f,
+            peakEdgeAlpha = 0.560f,
             restEdgeWidthDp = 0.75f,
-            peakEdgeWidthDp = 1.20f,
+            peakEdgeWidthDp = 1.45f,
         )
     } else {
         StaConnectButtonPalette(
             connecting = defaultConnecting,
             connected = defaultConnected,
-            restFillAlpha = 0.035f,
-            peakFillAlpha = 0.085f,
-            restEdgeAlpha = 0.180f,
-            peakEdgeAlpha = 0.320f,
+            restFillAlpha = 0.050f,
+            peakFillAlpha = 0.160f,
+            restEdgeAlpha = 0.220f,
+            peakEdgeAlpha = 0.500f,
             restEdgeWidthDp = 0.75f,
-            peakEdgeWidthDp = 1.15f,
+            peakEdgeWidthDp = 1.35f,
         )
     }
 
@@ -104,23 +104,23 @@ internal fun staConnectButtonPalette(
         StaConnectButtonPalette(
             connecting = Color(0xFF62B4D5),
             connected = Color(0xFF65B88A),
-            restFillAlpha = 0.045f,
-            peakFillAlpha = 0.095f,
-            restEdgeAlpha = 0.200f,
-            peakEdgeAlpha = 0.380f,
+            restFillAlpha = 0.055f,
+            peakFillAlpha = 0.160f,
+            restEdgeAlpha = 0.240f,
+            peakEdgeAlpha = 0.580f,
             restEdgeWidthDp = 0.70f,
-            peakEdgeWidthDp = 1.10f,
+            peakEdgeWidthDp = 1.30f,
         )
     } else {
         StaConnectButtonPalette(
             connecting = Color(0xFF236F8F),
             connected = Color(0xFF2D7257),
-            restFillAlpha = 0.030f,
-            peakFillAlpha = 0.075f,
-            restEdgeAlpha = 0.200f,
-            peakEdgeAlpha = 0.360f,
+            restFillAlpha = 0.040f,
+            peakFillAlpha = 0.130f,
+            restEdgeAlpha = 0.240f,
+            peakEdgeAlpha = 0.550f,
             restEdgeWidthDp = 0.70f,
-            peakEdgeWidthDp = 1.05f,
+            peakEdgeWidthDp = 1.25f,
         )
     }
 
@@ -128,35 +128,35 @@ internal fun staConnectButtonPalette(
         StaConnectButtonPalette(
             connecting = Color(0xFFD9A45D),
             connected = Color(0xFF6EB58A),
-            restFillAlpha = 0.035f,
-            peakFillAlpha = 0.075f,
-            restEdgeAlpha = 0.200f,
-            peakEdgeAlpha = 0.360f,
+            restFillAlpha = 0.045f,
+            peakFillAlpha = 0.140f,
+            restEdgeAlpha = 0.240f,
+            peakEdgeAlpha = 0.560f,
             restEdgeWidthDp = 0.80f,
-            peakEdgeWidthDp = 1.10f,
+            peakEdgeWidthDp = 1.35f,
         )
     } else {
         StaConnectButtonPalette(
             connecting = Color(0xFF7A481D),
             connected = Color(0xFF276144),
-            restFillAlpha = 0.025f,
-            peakFillAlpha = 0.060f,
-            restEdgeAlpha = 0.200f,
-            peakEdgeAlpha = 0.340f,
+            restFillAlpha = 0.035f,
+            peakFillAlpha = 0.110f,
+            restEdgeAlpha = 0.220f,
+            peakEdgeAlpha = 0.500f,
             restEdgeWidthDp = 0.80f,
-            peakEdgeWidthDp = 1.10f,
+            peakEdgeWidthDp = 1.30f,
         )
     }
 
     SkinPreset.CAMERA_CONTROLS -> StaConnectButtonPalette(
         connecting = Color(0xFFFFB23F),
         connected = Color(0xFF4DD477),
-        restFillAlpha = 0.035f,
-        peakFillAlpha = 0.080f,
-        restEdgeAlpha = 0.220f,
-        peakEdgeAlpha = 0.420f,
+        restFillAlpha = 0.040f,
+        peakFillAlpha = 0.140f,
+        restEdgeAlpha = 0.260f,
+        peakEdgeAlpha = 0.650f,
         restEdgeWidthDp = 0.70f,
-        peakEdgeWidthDp = 0.95f,
+        peakEdgeWidthDp = 1.15f,
     )
 }
 

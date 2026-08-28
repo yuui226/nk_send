@@ -81,6 +81,7 @@ import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.ui.theme.*
+import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.CameraViewModel
 import com.ztransfer.viewmodel.StaConnectionStatus
@@ -118,6 +119,38 @@ internal fun CameraState.toHomeConnectionUiState(): HomeConnectionUiState =
         wifiConnectionStatus = wifiConnectionStatus,
     )
 
+internal enum class ConnectionHapticOutcome {
+    NONE,
+    USB_SUCCESS,
+    AP_SUCCESS,
+    STA_SUCCESS,
+    USB_FAILURE,
+    AP_FAILURE,
+    STA_FAILURE;
+
+    val isFailure: Boolean
+        get() = this == USB_FAILURE || this == AP_FAILURE || this == STA_FAILURE
+}
+
+/**
+ * 把同一轮连接中可能变化多次的详细状态折叠为一个结果事件，避免重组或错误细分切换时重复震动。
+ */
+internal fun HomeConnectionUiState.connectionHapticOutcome(): ConnectionHapticOutcome = when {
+    isConnectedToCamera && connectionType == CameraConnectionType.USB ->
+        ConnectionHapticOutcome.USB_SUCCESS
+    isConnectedToCamera && connectionType == CameraConnectionType.WIFI && isStaConnection ->
+        ConnectionHapticOutcome.STA_SUCCESS
+    isConnectedToCamera && connectionType == CameraConnectionType.WIFI ->
+        ConnectionHapticOutcome.AP_SUCCESS
+    connectionType == CameraConnectionType.USB && usbConnectionError != null ->
+        ConnectionHapticOutcome.USB_FAILURE
+    wirelessMode == WirelessMode.STA && staConnectionStatus == StaConnectionStatus.FAILED ->
+        ConnectionHapticOutcome.STA_FAILURE
+    wirelessMode == WirelessMode.AP && connectionType != CameraConnectionType.USB &&
+        wifiConnectionStatus in AP_FAILURE_STATUSES -> ConnectionHapticOutcome.AP_FAILURE
+    else -> ConnectionHapticOutcome.NONE
+}
+
 internal fun shouldShowSubscriptionExpiryNotice(isPro: Boolean, daysLeft: Int): Boolean =
     isPro && daysLeft in 0..SUB_ALERT_DAYS
 
@@ -140,6 +173,8 @@ fun HomeScreen(
             .distinctUntilChanged()
     }.collectAsState(initial = viewModel.state.value.toHomeConnectionUiState())
     val transferState by transferViewModel.state.collectAsState()
+    val haptics = rememberHaptics(transferState.hapticsEnabled)
+    val currentHaptics by rememberUpdatedState(haptics)
     val context = LocalContext.current
     // 连接成功时高级版专属的金色粒子彩蛋依赖它；购买入口已经统一移入设置面板。
     val isPro by LicenseManager.isPro.collectAsState()
@@ -182,6 +217,17 @@ fun HomeScreen(
     }
     val connected = state.isConnectedToCamera
     val usbError = state.usbConnectionError
+    val connectionHapticOutcome = state.connectionHapticOutcome()
+    var previousHapticOutcome by remember { mutableStateOf(connectionHapticOutcome) }
+    LaunchedEffect(connectionHapticOutcome) {
+        if (
+            connectionHapticOutcome != previousHapticOutcome &&
+            connectionHapticOutcome.isFailure
+        ) {
+            currentHaptics.failure()
+        }
+        previousHapticOutcome = connectionHapticOutcome
+    }
     // 起飞与成功光效共用一条约 120fps 的单调时钟。照片扫描仍在连接建立后立即并行
     // 启动，但动画不再同时运行 60fps Animatable 和另一条 16ms Canvas 更新循环。
     var celebrate by remember { mutableStateOf(false) }
@@ -213,6 +259,7 @@ fun HomeScreen(
             if (!successVisualStarted && elapsedMs >= CONNECT_CELEBRATE_DELAY_MS) {
                 successVisualStarted = true
                 celebrate = true
+                currentHaptics.success()
             }
             if (elapsedMs >= CONNECTION_CELEBRATION_TOTAL_MS) break
 
@@ -300,12 +347,20 @@ fun HomeScreen(
             staConnectButtonBreath.floatValue = 0f
             return@LaunchedEffect
         }
-        val startedAt = SystemClock.uptimeMillis()
+        val startedAtMs = SystemClock.uptimeMillis()
+        var nextFrameAtMs = startedAtMs
         while (isActive) {
+            val nowMs = SystemClock.uptimeMillis()
             staConnectButtonBreath.floatValue = staButtonBreathProgress(
-                SystemClock.uptimeMillis() - startedAt,
+                nowMs - startedAtMs,
             )
-            delay(STA_BUTTON_BREATH_FRAME_MS)
+            nextFrameAtMs += STA_BUTTON_BREATH_FRAME_MS
+            if (nextFrameAtMs <= nowMs) {
+                val skippedFrames =
+                    (nowMs - nextFrameAtMs) / STA_BUTTON_BREATH_FRAME_MS + 1L
+                nextFrameAtMs += skippedFrames * STA_BUTTON_BREATH_FRAME_MS
+            }
+            delay((nextFrameAtMs - SystemClock.uptimeMillis()).coerceAtLeast(1L))
         }
     }
     val staButtonPalette = remember(
@@ -620,11 +675,23 @@ fun HomeScreen(
                                                         restEdgeWidthDp +
                                                             (peakEdgeWidthDp - restEdgeWidthDp) * breath
                                                     }
+                                                    val glowAlpha = edgeAlpha *
+                                                        (0.16f + breath * 0.12f)
+                                                    val glowWidth = 4.5f + breath * 3f
                                                     drawRoundRect(
                                                         color = staConnectButtonAccent.copy(
                                                             alpha = fillAlpha,
                                                         ),
                                                         cornerRadius = CornerRadius(radius, radius),
+                                                    )
+                                                    drawRoundRect(
+                                                        color = staConnectButtonAccent.copy(
+                                                            alpha = glowAlpha,
+                                                        ),
+                                                        cornerRadius = CornerRadius(radius, radius),
+                                                        style = Stroke(
+                                                            width = glowWidth.dp.toPx(),
+                                                        ),
                                                     )
                                                     drawRoundRect(
                                                         color = staConnectButtonAccent.copy(
@@ -995,22 +1062,30 @@ private fun ConnectionMethodCard(
     val badgeShape = remember { RoundedCornerShape(13.dp) }
     val view = LocalView.current
     // 这是连接页最基本的状态提示，不再依赖 Compose 的动画帧时钟。若某些 Android 16
-    // 设备上该时钟停滞，InfiniteTransition 会始终留在首帧。用单调系统时间
-    // 以 30fps 左右更新，只在未选定连接方式的短暂页面存活期运行。
+    // 设备上该时钟停滞，InfiniteTransition 会始终留在首帧。用单调系统时间按约 120fps
+    // 的固定时间表更新，只在未选定连接方式的短暂页面存活期运行。
     var attentionPhase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(attentionActive, attentionPhaseOffset) {
         if (!attentionActive) {
             attentionPhase = 0f
             return@LaunchedEffect
         }
-        val startedAt = SystemClock.uptimeMillis()
+        val startedAtMs = SystemClock.uptimeMillis()
+        var nextFrameAtMs = startedAtMs
         while (isActive) {
-            val elapsed = SystemClock.uptimeMillis() - startedAt
+            val nowMs = SystemClock.uptimeMillis()
+            val elapsed = nowMs - startedAtMs
             attentionPhase = (
                 (elapsed % CONNECTION_ATTENTION_MS).toFloat() / CONNECTION_ATTENTION_MS +
                     attentionPhaseOffset
                 ).mod(1f)
-            delay(CONNECTION_ATTENTION_FRAME_MS)
+            nextFrameAtMs += CONNECTION_ATTENTION_FRAME_MS
+            if (nextFrameAtMs <= nowMs) {
+                val skippedFrames =
+                    (nowMs - nextFrameAtMs) / CONNECTION_ATTENTION_FRAME_MS + 1L
+                nextFrameAtMs += skippedFrames * CONNECTION_ATTENTION_FRAME_MS
+            }
+            delay((nextFrameAtMs - SystemClock.uptimeMillis()).coerceAtLeast(1L))
         }
     }
     var iconCenterInRoot by remember { mutableStateOf<Offset?>(null) }
@@ -1613,7 +1688,7 @@ private const val FREE_CONNECTION_PULSE_STAGGER = 0.14f
 private const val FREE_CONNECTION_PULSE_SPAN = 0.82f
 
 private const val STA_BUTTON_BREATH_DURATION_MS = 1_800L
-private const val STA_BUTTON_BREATH_FRAME_MS = 32L
+private const val STA_BUTTON_BREATH_FRAME_MS = 8L
 
 internal fun staButtonBreathProgress(elapsedMs: Long): Float {
     val phase = (
@@ -1806,7 +1881,12 @@ internal fun connectionSuccessProgress(elapsedMs: Long): Float {
 // 连接成功后的入场节奏：同一条约 120fps 时钟先驱动图标起飞，随后在图标中心播放
 // 成功光效；完成后直接通知 MainScreen 跳转。相册扫描不等待这条时间线。
 const val CONNECT_CELEBRATE_DELAY_MS = 500L
-private const val CONNECTION_ATTENTION_FRAME_MS = 32L
+private val AP_FAILURE_STATUSES = setOf(
+    WifiConnectionStatus.NOT_FOUND,
+    WifiConnectionStatus.REFUSED,
+    WifiConnectionStatus.FAILED,
+)
+private const val CONNECTION_ATTENTION_FRAME_MS = 8L
 private const val CONNECTION_HERO_DURATION_MS = 620L
 private const val CONNECTION_SUCCESS_DURATION_MS = 760L
 private const val CONNECTION_CELEBRATION_TOTAL_MS =

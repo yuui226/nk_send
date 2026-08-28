@@ -30,17 +30,17 @@ class ConnectionCardMaterialTest {
                 assertTrue(
                     "$skin dark=$dark fill range",
                     palette.restFillAlpha in 0f..palette.peakFillAlpha &&
-                        palette.peakFillAlpha <= 0.12f,
+                        palette.peakFillAlpha <= 0.20f,
                 )
                 assertTrue(
                     "$skin dark=$dark edge range",
                     palette.restEdgeAlpha in 0f..palette.peakEdgeAlpha &&
-                        palette.peakEdgeAlpha <= 0.42f,
+                        palette.peakEdgeAlpha <= 0.65f,
                 )
                 assertTrue(
                     "$skin dark=$dark stroke range",
                     palette.restEdgeWidthDp in 0.70f..palette.peakEdgeWidthDp &&
-                        palette.peakEdgeWidthDp <= 1.20f,
+                        palette.peakEdgeWidthDp <= 1.45f,
                 )
 
                 if (skin == SkinPreset.FROSTED_GLASS) {

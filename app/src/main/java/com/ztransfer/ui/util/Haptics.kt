@@ -24,13 +24,28 @@ class Haptics(private val view: View, private val enabled: Boolean) {
         if (enabled) view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
     }
 
-    /** 全部传输完成（确实传了东西，纯"已存在跳过"不震）：成功确认震。 */
+    /** 成功确认：用于连接建立、有效传输完成等明确完成事件。 */
     fun success() {
         if (!enabled) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
         } else {
             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        }
+    }
+
+    /** 操作失败：新系统使用拒绝触感，旧系统以两次轻 tick 与成功确认明确区分。 */
+    fun failure() {
+        if (!enabled) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+        } else {
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            view.postDelayed({
+                if (view.isAttachedToWindow) {
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                }
+            }, FAILURE_SECOND_TICK_DELAY_MS)
         }
     }
 }
@@ -40,3 +55,5 @@ fun rememberHaptics(enabled: Boolean): Haptics {
     val view = LocalView.current
     return remember(view, enabled) { Haptics(view, enabled) }
 }
+
+private const val FAILURE_SECOND_TICK_DELAY_MS = 65L

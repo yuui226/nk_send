@@ -4,6 +4,7 @@ import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.StaConnectionStatus
 import com.ztransfer.viewmodel.WirelessMode
+import com.ztransfer.viewmodel.WifiConnectionStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -11,6 +12,89 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeConnectionPresentationTest {
+    @Test
+    fun allThreeConnectionTypesHaveDistinctSuccessOutcomes() {
+        assertEquals(
+            ConnectionHapticOutcome.USB_SUCCESS,
+            CameraState(
+                isConnectedToCamera = true,
+                connectionType = CameraConnectionType.USB,
+            ).toHomeConnectionUiState().connectionHapticOutcome(),
+        )
+        assertEquals(
+            ConnectionHapticOutcome.AP_SUCCESS,
+            CameraState(
+                isConnectedToCamera = true,
+                connectionType = CameraConnectionType.WIFI,
+                wirelessMode = WirelessMode.AP,
+            ).toHomeConnectionUiState().connectionHapticOutcome(),
+        )
+        assertEquals(
+            ConnectionHapticOutcome.STA_SUCCESS,
+            CameraState(
+                isConnectedToCamera = true,
+                connectionType = CameraConnectionType.WIFI,
+                wirelessMode = WirelessMode.STA,
+                isStaConnection = true,
+            ).toHomeConnectionUiState().connectionHapticOutcome(),
+        )
+    }
+
+    @Test
+    fun allThreeConnectionTypesHaveFailureOutcomes() {
+        val usbFailure = CameraState(
+            connectionType = CameraConnectionType.USB,
+            usbConnectionError = "USB failed",
+        ).toHomeConnectionUiState().connectionHapticOutcome()
+        val staFailure = CameraState(
+            wirelessMode = WirelessMode.STA,
+            staConnectionStatus = StaConnectionStatus.FAILED,
+            staConnectionError = "STA failed",
+        ).toHomeConnectionUiState().connectionHapticOutcome()
+
+        assertEquals(ConnectionHapticOutcome.USB_FAILURE, usbFailure)
+        assertEquals(ConnectionHapticOutcome.STA_FAILURE, staFailure)
+        assertTrue(usbFailure.isFailure)
+        assertTrue(staFailure.isFailure)
+
+        listOf(
+            WifiConnectionStatus.NOT_FOUND,
+            WifiConnectionStatus.REFUSED,
+            WifiConnectionStatus.FAILED,
+        ).forEach { status ->
+            val outcome = CameraState(
+                wirelessMode = WirelessMode.AP,
+                wifiConnectionStatus = status,
+            ).toHomeConnectionUiState().connectionHapticOutcome()
+            assertEquals(ConnectionHapticOutcome.AP_FAILURE, outcome)
+            assertTrue(outcome.isFailure)
+        }
+    }
+
+    @Test
+    fun transientConnectionStatesDoNotProduceResultHaptics() {
+        listOf(
+            CameraState(),
+            CameraState(
+                wirelessMode = WirelessMode.AP,
+                wifiConnectionStatus = WifiConnectionStatus.PROBING,
+            ),
+            CameraState(
+                wirelessMode = WirelessMode.AP,
+                wifiConnectionStatus = WifiConnectionStatus.RECONNECTING,
+            ),
+            CameraState(
+                wirelessMode = WirelessMode.STA,
+                staConnectionStatus = StaConnectionStatus.DISCOVERING,
+            ),
+        ).forEach { state ->
+            assertEquals(
+                ConnectionHapticOutcome.NONE,
+                state.toHomeConnectionUiState().connectionHapticOutcome(),
+            )
+        }
+    }
+
     @Test
     fun staConnectButtonBreathingIsSmoothAndPeriodic() {
         assertEquals(0f, staButtonBreathProgress(-1L), 0.001f)
