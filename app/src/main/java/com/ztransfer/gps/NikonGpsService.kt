@@ -236,6 +236,14 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             if (networkEnabled && locationManager.getProvider(LocationManager.NETWORK_PROVIDER) != null) {
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 15_000L, 3f, locationListener, Looper.getMainLooper())
             }
+            // Reuse a recent system fix immediately instead of waiting for the next provider
+            // callback. This closes the small window where the user can shoot before the first
+            // GPS payload reaches the camera.
+            val cached = listOfNotNull(
+                if (gpsEnabled) runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull() else null,
+                if (networkEnabled) runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull() else null,
+            ).maxByOrNull { it.time }
+            cached?.let(locationListener::onLocationChanged)
         }.onFailure { updateState(GpsStatus.ERROR, message = "无法获取定位") }
     }
 

@@ -571,8 +571,9 @@ object PhotoFrameExporter {
     // 派生图是原片的高品质版本，不允许静默缩成分享图。JPEG 仍必须重新编码，但使用
     // Android 编码器的最高质量档，照片主体的像素尺寸由原图完整保留。
     private const val COPY_BUFFER_BYTES = 256 * 1024
-    // Preserve photographic/capture metadata but intentionally do not copy GPS location or the
-    // source orientation (the pixels have already been normalized during decode).
+    // Preserve photographic/capture metadata, including the GPS written by the camera. The
+    // source orientation is intentionally not copied because the pixels are normalized during
+    // decode.
     private val COPIED_EXIF_TAGS = arrayOf(
         ExifInterface.TAG_MAKE,
         ExifInterface.TAG_MODEL,
@@ -593,6 +594,20 @@ object PhotoFrameExporter {
         ExifInterface.TAG_FLASH,
         ExifInterface.TAG_WHITE_BALANCE,
         ExifInterface.TAG_COLOR_SPACE,
+        ExifInterface.TAG_GPS_VERSION_ID,
+        ExifInterface.TAG_GPS_LATITUDE_REF,
+        ExifInterface.TAG_GPS_LATITUDE,
+        ExifInterface.TAG_GPS_LONGITUDE_REF,
+        ExifInterface.TAG_GPS_LONGITUDE,
+        ExifInterface.TAG_GPS_ALTITUDE_REF,
+        ExifInterface.TAG_GPS_ALTITUDE,
+        ExifInterface.TAG_GPS_TIMESTAMP,
+        ExifInterface.TAG_GPS_DATESTAMP,
+        ExifInterface.TAG_GPS_PROCESSING_METHOD,
+        ExifInterface.TAG_GPS_SPEED_REF,
+        ExifInterface.TAG_GPS_SPEED,
+        ExifInterface.TAG_GPS_TRACK_REF,
+        ExifInterface.TAG_GPS_TRACK,
     )
     private val EMPTY_METADATA =
         PhotoFrameMetadata(null, null, null, null, null, null)
