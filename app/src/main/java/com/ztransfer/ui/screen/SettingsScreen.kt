@@ -1013,36 +1013,79 @@ fun SettingsOverlay(
             Spacer(Modifier.height(8.dp))
 
             // ---------- 尼康 GPS：只保留一个无感总开关；配对、定位和重连全部后台完成 ----------
-            val gpsSummary = when (gpsState.status) {
-                GpsStatus.OFF -> stringResource(R.string.gps_off)
-                GpsStatus.STARTING, GpsStatus.CONNECTING -> stringResource(R.string.gps_connecting)
-                GpsStatus.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
-                GpsStatus.WAITING_FIX -> stringResource(R.string.gps_waiting_location)
-                GpsStatus.READY -> stringResource(R.string.gps_ready)
-                GpsStatus.ERROR -> gpsState.message ?: stringResource(R.string.gps_unavailable)
-            }
+            val gpsBusy = gpsState.enabled && gpsState.status in setOf(
+                GpsStatus.STARTING,
+                GpsStatus.CONNECTING,
+                GpsStatus.NEEDS_CAMERA,
+                GpsStatus.WAITING_FIX,
+            )
+            val gpsBreathTransition = rememberInfiniteTransition(label = "gpsStatusBreath")
+            val gpsBreath by gpsBreathTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(1800, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "gpsStatusBreathProgress",
+            )
+            val gpsStatusAccent by animateColorAsState(
+                targetValue = when {
+                    gpsState.status == GpsStatus.READY -> colors.statusConnected
+                    gpsState.status == GpsStatus.ERROR -> colors.statusError
+                    gpsState.enabled -> colors.accentBlue
+                    else -> colors.onSurfaceVariant
+                },
+                animationSpec = tween(320, easing = FastOutSlowInEasing),
+                label = "gpsStatusAccent",
+            )
             SettingsCard(
-                borderColor = if (gpsState.enabled) colors.accentBlue.copy(alpha = 0.62f)
+                borderColor = if (gpsState.enabled) gpsStatusAccent.copy(alpha = 0.62f)
                 else colors.glassPanelBorder,
                 pressAccentColor = colors.accentBlue,
+                attentionColor = if (gpsBusy) gpsStatusAccent else null,
+                attentionProgress = if (gpsBusy) gpsBreath else 0f,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Default.LocationOn,
                         contentDescription = null,
-                        tint = if (gpsState.enabled) colors.statusConnected else colors.onSurfaceVariant,
+                        tint = gpsStatusAccent,
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         SectionLabel(stringResource(R.string.gps_auto_write))
-                        Text(
-                            text = gpsSummary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        AnimatedContent(
+                            targetState = gpsState.status,
+                            transitionSpec = {
+                                val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                                (slideInVertically(
+                                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                    initialOffsetY = { height -> height * direction },
+                                ) + fadeIn(tween(150, delayMillis = 35))) togetherWith
+                                    (slideOutVertically(
+                                        animationSpec = tween(190, easing = FastOutSlowInEasing),
+                                        targetOffsetY = { height -> -height * direction },
+                                    ) + fadeOut(tween(120)))
+                            },
+                            label = "gpsStatusText",
+                        ) { status ->
+                            Text(
+                                text = when (status) {
+                                    GpsStatus.OFF -> stringResource(R.string.gps_off)
+                                    GpsStatus.STARTING, GpsStatus.CONNECTING -> stringResource(R.string.gps_connecting)
+                                    GpsStatus.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
+                                    GpsStatus.WAITING_FIX -> stringResource(R.string.gps_waiting_location)
+                                    GpsStatus.READY -> stringResource(R.string.gps_ready)
+                                    GpsStatus.ERROR -> gpsState.message ?: stringResource(R.string.gps_unavailable)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = colors.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                     Switch(
                         checked = gpsState.enabled,
