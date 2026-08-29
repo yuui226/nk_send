@@ -131,7 +131,9 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         updateState(GpsStatus.CONNECTING, message = "正在重连")
         reconnectJob?.cancel()
         reconnectJob = serviceScope.launch {
-            delay(2_000)
+            // The Classic bond callback already confirms the camera; a short settle time is
+            // enough before scanning the camera's fresh random BLE address.
+            delay(800)
             if (isActive && enabled) startBle()
         }
     }

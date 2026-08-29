@@ -66,6 +66,7 @@ internal class NikonGpsBleClient(
     private var writeInFlight = false
     private var classicReceiver: BroadcastReceiver? = null
     private var classicTimeout: Job? = null
+    private var classicPollJob: Job? = null
     private var classicBondReady = false
     private var suppressDisconnect = false
 
@@ -103,6 +104,8 @@ internal class NikonGpsBleClient(
         gatt?.close()
         classicTimeout?.cancel()
         classicTimeout = null
+        classicPollJob?.cancel()
+        classicPollJob = null
         classicReceiver?.let { runCatching { context.unregisterReceiver(it) } }
         classicReceiver = null
         classicBondReady = false
@@ -366,6 +369,7 @@ internal class NikonGpsBleClient(
             return
         }
         classicTimeout?.cancel()
+        classicPollJob?.cancel()
         classicReceiver?.let { runCatching { context.unregisterReceiver(it) } }
         val targetName = bleName?.takeIf { it.isNotBlank() } ?: "Nikon"
         val receiver = object : BroadcastReceiver() {
@@ -444,6 +448,26 @@ internal class NikonGpsBleClient(
             return
         }
         runCatching { adapter.startDiscovery() }.onFailure { listener.onError("请确认蓝牙配对") }
+        classicPollJob = scope.launch {
+            repeat(30) {
+                delay(1_000L)
+                if (classicReceiver !== receiver) return@launch
+                val bonded = runCatching {
+                    adapter.bondedDevices.firstOrNull { candidate ->
+                        namesMatch(candidate.name, targetName) ||
+                            candidate.name?.contains("Nikon", ignoreCase = true) == true
+                    }
+                }.getOrNull()
+                if (bonded != null) {
+                    classicBondReady = true
+                    GpsDiagnostics.record("Classic bond observed by polling name=${bonded.name ?: "?"}")
+                    if (idQueued) {
+                        finishClassicPairing()
+                        return@launch
+                    }
+                }
+            }
+        }
         classicTimeout = scope.launch {
             delay(30_000)
             if (classicReceiver === receiver) {
@@ -456,9 +480,12 @@ internal class NikonGpsBleClient(
     private fun finishClassicPairing() {
         classicTimeout?.cancel()
         classicTimeout = null
+        classicPollJob?.cancel()
+        classicPollJob = null
         classicReceiver?.let { runCatching { context.unregisterReceiver(it) } }
         classicReceiver = null
         classicBondReady = false
+        GpsDiagnostics.record("Classic pairing complete; reconnecting BLE")
         listener.onDisconnected()
     }
 
