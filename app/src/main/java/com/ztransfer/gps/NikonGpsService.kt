@@ -150,7 +150,9 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onError(message: String) {
         GpsDiagnostics.record("error=$message")
-        if (message.contains("pairing rejected", ignoreCase = true)) {
+        if (message.contains("pairing rejected", ignoreCase = true) ||
+            message.contains("identity expired", ignoreCase = true)
+        ) {
             // The camera may have forgotten its side of the bond. Drop the cached identity so
             // the next attempt starts a clean pairing handshake instead of retrying stale data.
             preferences.edit().remove(KEY_DEVICE_ID).remove(KEY_NONCE).apply()
@@ -160,7 +162,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         val userMessage = when {
             message.contains("permission", ignoreCase = true) -> "需要蓝牙权限"
             message.contains("not found", ignoreCase = true) ||
-                message.contains("pairing rejected", ignoreCase = true) -> "请在相机上打开蓝牙配对"
+                message.contains("pairing rejected", ignoreCase = true) ||
+                message.contains("identity expired", ignoreCase = true) -> "请在相机上打开蓝牙配对"
             message.contains("Bluetooth unavailable", ignoreCase = true) -> "请打开手机蓝牙"
             message.contains("scan failed", ignoreCase = true) -> "请打开手机蓝牙"
             else -> message
