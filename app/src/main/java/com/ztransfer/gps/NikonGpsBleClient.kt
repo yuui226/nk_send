@@ -66,6 +66,7 @@ internal class NikonGpsBleClient(
     private var writeInFlight = false
     private var classicReceiver: BroadcastReceiver? = null
     private var classicTimeout: Job? = null
+    private var classicBondReady = false
     private var suppressDisconnect = false
 
     fun start(
@@ -103,6 +104,7 @@ internal class NikonGpsBleClient(
         classicTimeout = null
         classicReceiver?.let { runCatching { context.unregisterReceiver(it) } }
         classicReceiver = null
+        classicBondReady = false
         suppressDisconnect = false
         gatt = null
         device = null
@@ -261,6 +263,7 @@ internal class NikonGpsBleClient(
                         listener.onNeedsPairing()
                         startClassicPairing(device?.name)
                         closeGattForPairing()
+                        if (classicBondReady) finishClassicPairing()
                     } else {
                         ready = true
                         listener.onReady(device?.name ?: "Nikon", device ?: return)
@@ -277,6 +280,11 @@ internal class NikonGpsBleClient(
         if (descriptor == null) {
             val packet = NikonGpsPairingProtocol().newStage1(savedDeviceId, savedNonce)
             stage1 = packet
+            if (savedDeviceId == null && classicReceiver == null) {
+                // Start discovery before the BLE handshake completes. Nikon cameras often only
+                // expose their Classic endpoint briefly while Smart Device pairing is active.
+                startClassicPairing(device?.name)
+            }
             writeCharacteristic(g, pairChar ?: return, packet.encode())
             return
         }
@@ -342,6 +350,7 @@ internal class NikonGpsBleClient(
     }
 
     private fun startClassicPairing(bleName: String?) {
+        if (classicReceiver != null) return
         val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)?.adapter
         if (adapter == null || !adapter.isEnabled) {
             listener.onError("Bluetooth unavailable")
@@ -380,7 +389,8 @@ internal class NikonGpsBleClient(
                         if (!matches) return
                         runCatching { adapter.cancelDiscovery() }
                         if (found.bondState == BluetoothDevice.BOND_BONDED) {
-                            finishClassicPairing()
+                            classicBondReady = true
+                            if (idQueued) finishClassicPairing()
                         } else if (found.bondState == BluetoothDevice.BOND_NONE) {
                             val started = runCatching { found.createBond() }.getOrDefault(false)
                             if (!started) {
@@ -394,12 +404,16 @@ internal class NikonGpsBleClient(
                         } else {
                             @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         }
-                        if (found?.bondState == BluetoothDevice.BOND_BONDED) finishClassicPairing()
+                        if (found?.bondState == BluetoothDevice.BOND_BONDED) {
+                            classicBondReady = true
+                            if (idQueued) finishClassicPairing()
+                        }
                     }
                 }
             }
         }
         classicReceiver = receiver
+        classicBondReady = false
         runCatching {
             val filter = IntentFilter().apply {
                 addAction(BluetoothDevice.ACTION_FOUND)
@@ -433,6 +447,7 @@ internal class NikonGpsBleClient(
         classicTimeout = null
         classicReceiver?.let { runCatching { context.unregisterReceiver(it) } }
         classicReceiver = null
+        classicBondReady = false
         listener.onDisconnected()
     }
 
