@@ -89,8 +89,9 @@ internal class NikonGpsPairingProtocol(
                 .putInt(words[i + 1] xor right)
                 .array()
             val out = cipher.doFinal(input)
-            left = ByteBuffer.wrap(out).order(ByteOrder.BIG_ENDIAN).int
-            right = ByteBuffer.wrap(out).order(ByteOrder.BIG_ENDIAN).int
+            val result = ByteBuffer.wrap(out).order(ByteOrder.BIG_ENDIAN)
+            left = result.int
+            right = result.int
         }
         return left to right
     }
