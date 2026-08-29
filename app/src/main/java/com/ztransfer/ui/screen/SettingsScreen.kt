@@ -67,13 +67,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
@@ -1014,109 +1017,21 @@ fun SettingsOverlay(
             Spacer(Modifier.height(8.dp))
 
             // ---------- 尼康 GPS：只保留一个无感总开关；配对、定位和重连全部后台完成 ----------
-            val gpsBusy = gpsState.enabled && gpsState.status in setOf(
-                GpsStatus.STARTING,
-                GpsStatus.CONNECTING,
-                GpsStatus.NEEDS_CAMERA,
-                GpsStatus.WAITING_FIX,
-            )
-            // 与“连接相机”按钮共用同一时钟和呼吸曲线，状态卡只在忙态刷新。
-            val gpsBreath = remember { mutableFloatStateOf(0f) }
-            LaunchedEffect(gpsBusy) {
-                if (!gpsBusy) {
-                    gpsBreath.floatValue = 0f
-                    return@LaunchedEffect
-                }
-                val startedAtMs = SystemClock.uptimeMillis()
-                var nextFrameAtMs = startedAtMs
-                while (isActive) {
-                    val nowMs = SystemClock.uptimeMillis()
-                    gpsBreath.floatValue = staButtonBreathProgress(nowMs - startedAtMs)
-                    nextFrameAtMs += 8L
-                    if (nextFrameAtMs <= nowMs) {
-                        val skippedFrames = (nowMs - nextFrameAtMs) / 8L + 1L
-                        nextFrameAtMs += skippedFrames * 8L
-                    }
-                    delay((nextFrameAtMs - SystemClock.uptimeMillis()).coerceAtLeast(1L))
-                }
-            }
-            val gpsButtonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
-            val gpsButtonDark = colors.background.luminance() < 0.5f
-            val gpsButtonPalette = remember(
-                gpsButtonSkin,
-                gpsButtonDark,
-                colors.accentBlue,
-                colors.statusConnected,
-            ) {
-                staConnectButtonPalette(
-                    skin = gpsButtonSkin,
-                    dark = gpsButtonDark,
-                    defaultConnecting = colors.accentBlue,
-                    defaultConnected = colors.statusConnected,
-                )
-            }
-            val gpsStatusAccent by animateColorAsState(
-                targetValue = when {
-                    gpsState.status == GpsStatus.READY -> gpsButtonPalette.connected
-                    gpsState.status == GpsStatus.ERROR -> colors.statusError
-                    gpsState.enabled -> gpsButtonPalette.connecting
-                    else -> colors.onSurfaceVariant
-                },
-                animationSpec = tween(320, easing = FastOutSlowInEasing),
-                label = "gpsStatusAccent",
-            )
             SettingsCard(
-                borderColor = if (gpsState.enabled) gpsStatusAccent.copy(alpha = 0.62f)
-                else colors.glassPanelBorder,
+                borderColor = colors.glassPanelBorder,
                 pressAccentColor = colors.accentBlue,
-                attentionColor = if (gpsBusy) gpsStatusAccent else null,
-                attentionProgress = if (gpsBusy) gpsBreath.floatValue else 0f,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = gpsStatusAccent,
-                        modifier = Modifier.size(18.dp),
+                    SectionLabel(
+                        stringResource(R.string.gps_auto_write),
+                        modifier = Modifier.weight(1f),
                     )
-                    Spacer(Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        SectionLabel(stringResource(R.string.gps_auto_write))
-                        AnimatedContent(
-                            targetState = gpsState.status,
-                            transitionSpec = {
-                                val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                                (slideInVertically(
-                                    animationSpec = tween(220, easing = FastOutSlowInEasing),
-                                    initialOffsetY = { height -> height * direction },
-                                ) + fadeIn(tween(150, delayMillis = 35))) togetherWith
-                                    (slideOutVertically(
-                                        animationSpec = tween(190, easing = FastOutSlowInEasing),
-                                        targetOffsetY = { height -> -height * direction },
-                                    ) + fadeOut(tween(120)))
-                            },
-                            label = "gpsStatusText",
-                        ) { status ->
-                            Text(
-                                text = when (status) {
-                                    GpsStatus.OFF -> stringResource(R.string.gps_off)
-                                    GpsStatus.STARTING, GpsStatus.CONNECTING -> stringResource(R.string.gps_connecting)
-                                    GpsStatus.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
-                                    GpsStatus.WAITING_FIX -> stringResource(R.string.gps_waiting_location)
-                                    GpsStatus.READY -> stringResource(R.string.gps_ready)
-                                    GpsStatus.ERROR -> gpsState.message ?: stringResource(R.string.gps_unavailable)
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    Switch(
-                        checked = gpsState.enabled,
-                        onCheckedChange = { checked ->
-                            if (checked) requestGpsEnable() else gpsViewModel.setEnabled(false)
+                    GpsStatusButton(
+                        status = gpsState.status,
+                        enabled = gpsState.enabled,
+                        onClick = {
+                            if (gpsState.enabled) gpsViewModel.setEnabled(false)
+                            else requestGpsEnable()
                         },
                     )
                 }
@@ -3501,6 +3416,143 @@ private val COMPACT_SETTINGS_WHEEL_FONT_SIZE = 13.sp
 private const val APPEARANCE_COMPACT_WHEEL_WEIGHT = 3f
 private const val BUTTON_STYLE_WHEEL_WEIGHT = 4f
 private val PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)
+
+private enum class GpsStatusButtonState {
+    OFF,
+    CONNECTING,
+    PAIRING,
+    LOCATING,
+    CONNECTED,
+    ERROR,
+}
+
+@Composable
+private fun GpsStatusButton(
+    status: GpsStatus,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val skin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+    val dark = colors.background.luminance() < 0.5f
+    val palette = remember(skin, dark, colors.accentBlue, colors.statusConnected) {
+        staConnectButtonPalette(
+            skin = skin,
+            dark = dark,
+            defaultConnecting = colors.accentBlue,
+            defaultConnected = colors.statusConnected,
+        )
+    }
+    val buttonState = if (!enabled) GpsStatusButtonState.OFF else when (status) {
+        GpsStatus.OFF -> GpsStatusButtonState.OFF
+        GpsStatus.STARTING, GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
+        GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.PAIRING
+        GpsStatus.WAITING_FIX -> GpsStatusButtonState.LOCATING
+        GpsStatus.READY -> GpsStatusButtonState.CONNECTED
+        GpsStatus.ERROR -> GpsStatusButtonState.ERROR
+    }
+    val highlighted = buttonState != GpsStatusButtonState.OFF &&
+        buttonState != GpsStatusButtonState.ERROR
+    val breath = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(highlighted) {
+        if (!highlighted) {
+            breath.floatValue = 0f
+            return@LaunchedEffect
+        }
+        val startedAtMs = SystemClock.uptimeMillis()
+        var nextFrameAtMs = startedAtMs
+        while (isActive) {
+            val nowMs = SystemClock.uptimeMillis()
+            breath.floatValue = staButtonBreathProgress(nowMs - startedAtMs)
+            nextFrameAtMs += 8L
+            if (nextFrameAtMs <= nowMs) {
+                val skippedFrames = (nowMs - nextFrameAtMs) / 8L + 1L
+                nextFrameAtMs += skippedFrames * 8L
+            }
+            delay((nextFrameAtMs - SystemClock.uptimeMillis()).coerceAtLeast(1L))
+        }
+    }
+    val accent by animateColorAsState(
+        targetValue = when (buttonState) {
+            GpsStatusButtonState.CONNECTED -> palette.connected
+            GpsStatusButtonState.ERROR -> colors.statusError
+            GpsStatusButtonState.OFF -> colors.onSurfaceVariant
+            else -> palette.connecting
+        },
+        animationSpec = tween(320, easing = FastOutSlowInEasing),
+        label = "gpsStatusButtonAccent",
+    )
+    val foreground = materialButtonForegroundColor(skin, dark, accent)
+    GlassButton(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier
+            .width(116.dp)
+            .height(42.dp)
+            .drawBehind {
+                if (highlighted) {
+                    val progress = breath.floatValue
+                    val radius = 14.dp.toPx()
+                    val fillAlpha = palette.restFillAlpha +
+                        (palette.peakFillAlpha - palette.restFillAlpha) * progress
+                    val edgeAlpha = palette.restEdgeAlpha +
+                        (palette.peakEdgeAlpha - palette.restEdgeAlpha) * progress
+                    val edgeWidth = palette.restEdgeWidthDp +
+                        (palette.peakEdgeWidthDp - palette.restEdgeWidthDp) * progress
+                    drawRoundRect(
+                        color = accent.copy(alpha = fillAlpha),
+                        cornerRadius = CornerRadius(radius, radius),
+                    )
+                    drawRoundRect(
+                        color = accent.copy(alpha = edgeAlpha * (0.16f + progress * 0.12f)),
+                        cornerRadius = CornerRadius(radius, radius),
+                        style = Stroke(width = (4.5f + progress * 3f).dp.toPx()),
+                    )
+                    drawRoundRect(
+                        color = accent.copy(alpha = edgeAlpha),
+                        cornerRadius = CornerRadius(radius, radius),
+                        style = Stroke(width = edgeWidth.dp.toPx()),
+                    )
+                }
+            },
+    ) {
+        AnimatedContent(
+            targetState = buttonState,
+            transitionSpec = {
+                val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                (slideInVertically(
+                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                    initialOffsetY = { height -> height * direction },
+                ) + fadeIn(tween(150, delayMillis = 35))) togetherWith
+                    (slideOutVertically(
+                        animationSpec = tween(190, easing = FastOutSlowInEasing),
+                        targetOffsetY = { height -> -height * direction },
+                    ) + fadeOut(tween(120)))
+            },
+            label = "gpsStatusButtonText",
+        ) { state ->
+            val label = when (state) {
+                GpsStatusButtonState.OFF -> stringResource(R.string.gps_off)
+                GpsStatusButtonState.CONNECTING -> stringResource(R.string.gps_connecting)
+                GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_need_camera)
+                GpsStatusButtonState.LOCATING -> stringResource(R.string.gps_waiting_location)
+                GpsStatusButtonState.CONNECTED -> stringResource(R.string.gps_ready)
+                GpsStatusButtonState.ERROR -> stringResource(R.string.gps_unavailable)
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = foreground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
 
 /**
  * 设置分区卡片：面板内的一块玻璃子容器——极淡的内嵌底色 + 细描边圆角，

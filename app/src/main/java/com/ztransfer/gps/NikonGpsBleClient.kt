@@ -136,7 +136,7 @@ internal class NikonGpsBleClient(
                 scanCallback = null
                 scanTimeout?.cancel()
                 device = result.device
-                listener.onConnecting(result.device.name)
+                listener.onConnecting(result.device.name ?: record.deviceName)
                 connect(result.device)
             }
 
@@ -353,6 +353,20 @@ internal class NikonGpsBleClient(
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 when (intent.action) {
+                    BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
+                        // Classic discovery commonly ends before Nikon becomes visible. Keep
+                        // cycling discovery during the short pairing window instead of failing
+                        // after the first scan pass.
+                        val currentReceiver = this
+                        if (classicReceiver === currentReceiver) {
+                            scope.launch {
+                                delay(700L)
+                                if (classicReceiver === currentReceiver && !adapter.isDiscovering) {
+                                    runCatching { adapter.startDiscovery() }
+                                }
+                            }
+                        }
+                    }
                     BluetoothDevice.ACTION_FOUND -> {
                         val found = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
@@ -368,7 +382,10 @@ internal class NikonGpsBleClient(
                         if (found.bondState == BluetoothDevice.BOND_BONDED) {
                             finishClassicPairing()
                         } else if (found.bondState == BluetoothDevice.BOND_NONE) {
-                            runCatching { found.createBond() }
+                            val started = runCatching { found.createBond() }.getOrDefault(false)
+                            if (!started) {
+                                listener.onError("请确认蓝牙配对")
+                            }
                         }
                     }
                     BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
@@ -386,7 +403,9 @@ internal class NikonGpsBleClient(
         runCatching {
             val filter = IntentFilter().apply {
                 addAction(BluetoothDevice.ACTION_FOUND)
+                addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
                 addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+                addAction(BluetoothDevice.ACTION_PAIRING_REQUEST)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
