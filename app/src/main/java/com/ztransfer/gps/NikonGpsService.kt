@@ -103,6 +103,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         updateState(GpsStatus.CONNECTING, name ?: "Nikon")
     }
 
+    override fun onBleAddress(address: String) {
+        preferences.edit().putString(KEY_BLE_ADDRESS, address).apply()
+        GpsDiagnostics.record("BLE address saved=$address")
+    }
+
     override fun onPairing() {
         GpsDiagnostics.record("BLE pairing handshake")
         updateState(GpsStatus.PAIRING)
@@ -207,7 +212,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             .takeUnless { it == Long.MIN_VALUE }
         val savedNonce = preferences.getLong(KEY_NONCE, Long.MIN_VALUE)
             .takeUnless { it == Long.MIN_VALUE }
-        bleClient.start(savedDeviceId = savedId, savedNonce = savedNonce)
+        val savedBleAddress = preferences.getString(KEY_BLE_ADDRESS, null)
+        bleClient.start(savedDeviceId = savedId, savedNonce = savedNonce, savedBleAddress = savedBleAddress)
     }
 
     private fun startLocationUpdates() {
@@ -314,6 +320,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         private const val PREFERENCES = "nikon_gps"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_NONCE = "nonce"
+        private const val KEY_BLE_ADDRESS = "ble_address"
         private const val KEY_ENABLED = "enabled"
 
         fun setEnabled(context: Context, enabled: Boolean) {

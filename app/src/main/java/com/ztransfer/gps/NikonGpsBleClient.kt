@@ -35,6 +35,7 @@ internal class NikonGpsBleClient(
 ) {
     interface Listener {
         fun onConnecting(name: String?)
+        fun onBleAddress(address: String)
         fun onPairing()
         fun onReady(name: String, device: BluetoothDevice)
         fun onGeoWritten(success: Boolean)
@@ -72,17 +73,21 @@ internal class NikonGpsBleClient(
     private var pendingRebondAddress: String? = null
     private var pairingTimeout: Job? = null
     private var pairingNotified = false
+    private var directConnectJob: Job? = null
     private var suppressDisconnect = false
 
     fun start(
         controllerName: String = "ZTransfer",
         savedDeviceId: Long? = null,
         savedNonce: Long? = null,
+        savedBleAddress: String? = null,
     ) {
         GpsDiagnostics.record("start savedIdentity=${savedDeviceId != null}")
         this.controllerName = controllerName
         this.savedDeviceId = savedDeviceId
         this.savedNonce = savedNonce
+        directConnectJob?.cancel()
+        directConnectJob = null
         if (gatt != null || scanCallback != null) return
         stage1 = null
         stage3Sent = false
@@ -99,12 +104,34 @@ internal class NikonGpsBleClient(
             listener.onError("Bluetooth unavailable")
             return
         }
+        if (savedBleAddress != null) {
+            val direct = runCatching { manager?.adapter?.getRemoteDevice(savedBleAddress) }.getOrNull()
+            if (direct != null) {
+                GpsDiagnostics.record("BLE direct connect address=$savedBleAddress")
+                connect(direct)
+                directConnectJob = scope.launch {
+                    delay(DIRECT_CONNECT_TIMEOUT_MS)
+                    if (gatt != null && scanCallback == null && !ready) {
+                        GpsDiagnostics.record("BLE direct connect timeout; fallback scan")
+                        directConnectJob = null
+                        suppressDisconnect = true
+                        gatt?.disconnect()
+                        gatt?.close()
+                        gatt = null
+                        beginScan()
+                    }
+                }
+                return
+            }
+        }
         beginScan()
     }
 
     fun stop() {
         scanTimeout?.cancel()
         scanTimeout = null
+        directConnectJob?.cancel()
+        directConnectJob = null
         scanCallback?.let { callback -> runCatching { scanner?.stopScan(callback) } }
         scanCallback = null
         gatt?.disconnect()
@@ -152,6 +179,7 @@ internal class NikonGpsBleClient(
                 scanCallback = null
                 scanTimeout?.cancel()
                 device = result.device
+                listener.onBleAddress(result.device.address)
                 GpsDiagnostics.record("BLE found name=${result.device.name ?: record.deviceName ?: "?"}")
                 listener.onConnecting(result.device.name ?: record.deviceName)
                 connect(result.device)
@@ -205,6 +233,8 @@ internal class NikonGpsBleClient(
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             GpsDiagnostics.record("GATT state=$newState status=$status")
             if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                directConnectJob?.cancel()
+                directConnectJob = null
                 g.requestMtu(517)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 if (gatt === g) {
@@ -218,6 +248,12 @@ internal class NikonGpsBleClient(
                     ready = false
                 }
                 runCatching { g.close() }
+                if (directConnectJob != null && !ready) {
+                    directConnectJob?.cancel()
+                    directConnectJob = null
+                    beginScan()
+                    return
+                }
                 if (suppressDisconnect) {
                     suppressDisconnect = false
                     return
@@ -603,6 +639,7 @@ internal class NikonGpsBleClient(
 
     companion object {
         private const val SCAN_TIMEOUT_MS = 15_000L
+        private const val DIRECT_CONNECT_TIMEOUT_MS = 4_500L
         val SERVICE_UUID = UUID.fromString("0000de00-3dd4-4255-8d62-6dc7b9bd5561")
         val PAIR_UUID = UUID.fromString("00002000-3dd4-4255-8d62-6dc7b9bd5561")
         val NOT1_UUID = UUID.fromString("00002008-3dd4-4255-8d62-6dc7b9bd5561")
