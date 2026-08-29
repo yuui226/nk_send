@@ -153,6 +153,7 @@ import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.gps.GpsStatus
+import com.ztransfer.gps.GpsDiagnostics
 import com.ztransfer.gps.GpsViewModel
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
@@ -1017,6 +1018,7 @@ fun SettingsOverlay(
             Spacer(Modifier.height(8.dp))
 
             // ---------- 尼康 GPS：只保留一个无感总开关；配对、定位和重连全部后台完成 ----------
+            val gpsCopiedHint = stringResource(R.string.code_copied)
             SettingsCard(
                 borderColor = colors.glassPanelBorder,
                 pressAccentColor = colors.accentBlue,
@@ -1026,12 +1028,36 @@ fun SettingsOverlay(
                         stringResource(R.string.gps_auto_write),
                         modifier = Modifier.weight(1f),
                     )
+                    if (gpsState.status == GpsStatus.ERROR) {
+                        GlassButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
+                                showFooterHint(gpsCopiedHint)
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.size(42.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = stringResource(R.string.lab_copy_log),
+                                tint = colors.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                    }
                     GpsStatusButton(
                         status = gpsState.status,
                         enabled = gpsState.enabled,
                         onClick = {
-                            if (gpsState.enabled) gpsViewModel.setEnabled(false)
-                            else requestGpsEnable()
+                            if (!gpsState.enabled) {
+                                requestGpsEnable()
+                            } else if (gpsState.status == GpsStatus.ERROR) {
+                                gpsViewModel.retry()
+                            } else {
+                                gpsViewModel.setEnabled(false)
+                            }
                         },
                     )
                 }
@@ -3538,7 +3564,7 @@ private fun GpsStatusButton(
                 GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_need_camera)
                 GpsStatusButtonState.LOCATING -> stringResource(R.string.gps_waiting_location)
                 GpsStatusButtonState.CONNECTED -> stringResource(R.string.gps_ready)
-                GpsStatusButtonState.ERROR -> stringResource(R.string.gps_unavailable)
+                GpsStatusButtonState.ERROR -> stringResource(R.string.gps_retry)
             }
             Text(
                 text = label,

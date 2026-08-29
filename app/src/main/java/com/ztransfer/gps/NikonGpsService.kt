@@ -99,15 +99,18 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     override fun onConnecting(name: String?) {
+        GpsDiagnostics.record("connecting name=${name ?: "?"}")
         updateState(GpsStatus.CONNECTING, name ?: "Nikon")
     }
 
     override fun onReady(name: String, device: android.bluetooth.BluetoothDevice) {
+        GpsDiagnostics.record("GPS ready camera=$name")
         updateState(GpsStatus.WAITING_FIX, name)
         startLocationUpdates()
     }
 
     override fun onGeoWritten(success: Boolean) {
+        GpsDiagnostics.record("GEO write success=$success")
         if (success) {
             NikonGpsRuntime.state.update { it.copy(status = GpsStatus.READY, message = null) }
         } else {
@@ -134,14 +137,18 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     override fun onNeedsPairing() {
+        GpsDiagnostics.record("awaiting Classic pairing")
         updateState(GpsStatus.CONNECTING, message = "请确认蓝牙配对")
     }
 
     override fun onError(message: String) {
+        GpsDiagnostics.record("error=$message")
         if (!enabled) return
         val userMessage = when {
             message.contains("permission", ignoreCase = true) -> "需要蓝牙权限"
             message.contains("not found", ignoreCase = true) -> "请在相机上打开蓝牙配对"
+            message.contains("Bluetooth unavailable", ignoreCase = true) -> "请打开手机蓝牙"
+            message.contains("scan failed", ignoreCase = true) -> "请打开手机蓝牙"
             else -> message
         }
         val needsCamera = userMessage.contains("配对") ||
@@ -156,6 +163,9 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         if (enabled && !isPermissionError) {
             reconnectJob?.cancel()
             reconnectJob = serviceScope.launch {
+                // A failed GATT setup can leave a non-null connection object on some Android
+                // stacks; clear it before retrying so start() cannot be short-circuited.
+                bleClient.stop()
                 delay(5_000)
                 if (isActive && enabled) startBle()
             }

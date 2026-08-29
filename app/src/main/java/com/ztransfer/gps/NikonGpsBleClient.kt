@@ -74,6 +74,7 @@ internal class NikonGpsBleClient(
         savedDeviceId: Long? = null,
         savedNonce: Long? = null,
     ) {
+        GpsDiagnostics.record("start savedIdentity=${savedDeviceId != null}")
         this.controllerName = controllerName
         this.savedDeviceId = savedDeviceId
         this.savedNonce = savedNonce
@@ -138,12 +139,14 @@ internal class NikonGpsBleClient(
                 scanCallback = null
                 scanTimeout?.cancel()
                 device = result.device
+                GpsDiagnostics.record("BLE found name=${result.device.name ?: record.deviceName ?: "?"}")
                 listener.onConnecting(result.device.name ?: record.deviceName)
                 connect(result.device)
             }
 
             override fun onScanFailed(errorCode: Int) {
                 scanCallback = null
+                GpsDiagnostics.record("BLE scan failed code=$errorCode")
                 listener.onError("Bluetooth scan failed: $errorCode")
             }
         }
@@ -172,6 +175,7 @@ internal class NikonGpsBleClient(
     }
 
     private fun connect(target: BluetoothDevice) {
+        GpsDiagnostics.record("BLE connect address=${target.address}")
         try {
             gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 target.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
@@ -186,6 +190,7 @@ internal class NikonGpsBleClient(
 
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            GpsDiagnostics.record("GATT state=$newState status=$status")
             if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
                 g.requestMtu(517)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -215,6 +220,7 @@ internal class NikonGpsBleClient(
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            GpsDiagnostics.record("GATT services status=$status")
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 listener.onError("Camera service unavailable")
                 return
@@ -316,12 +322,15 @@ internal class NikonGpsBleClient(
         if (packet.stage == 2 && !stage3Sent) {
             val response = NikonGpsPairingProtocol().stage3For(first, packet)
             if (response == null) {
+                GpsDiagnostics.record("pairing stage2 salt rejected")
                 listener.onError("Camera pairing rejected")
                 return
             }
             stage3Sent = true
+            GpsDiagnostics.record("pairing stage3 sent")
             writeCharacteristic(gatt ?: return, pairChar ?: return, response.encode())
         } else if (packet.stage == 4) {
+            GpsDiagnostics.record("pairing stage4 received")
             scope.launch {
                 delay(1_500)
                 queueControllerIdIfNeeded()
@@ -387,12 +396,14 @@ internal class NikonGpsBleClient(
                             namesMatch(foundName, targetName) ||
                             foundName?.contains("Nikon", ignoreCase = true) == true
                         if (!matches) return
+                        GpsDiagnostics.record("Classic found name=${foundName ?: "?"} bonded=${found.bondState == BluetoothDevice.BOND_BONDED}")
                         runCatching { adapter.cancelDiscovery() }
                         if (found.bondState == BluetoothDevice.BOND_BONDED) {
                             classicBondReady = true
                             if (idQueued) finishClassicPairing()
                         } else if (found.bondState == BluetoothDevice.BOND_NONE) {
                             val started = runCatching { found.createBond() }.getOrDefault(false)
+                            GpsDiagnostics.record("Classic createBond=$started")
                             if (!started) {
                                 listener.onError("请确认蓝牙配对")
                             }
