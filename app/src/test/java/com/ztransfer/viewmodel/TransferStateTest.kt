@@ -23,6 +23,7 @@ class TransferStateTest {
 
         assertEquals(false, state.deferTransferStart)
         assertEquals(false, state.pauseAfterCurrent)
+        assertEquals(false, state.organizeTransfersByDate)
     }
 
     @Test
@@ -225,6 +226,19 @@ class TransferStateTest {
         assertEquals(first, queue.takeFirst())
         assertEquals(third, queue.takeFirst())
         assertEquals(null, queue.takeFirst())
+    }
+
+    @Test
+    fun retryAllExcludesTasksThatAreAlreadyLeavingTheUi() {
+        val departing = TransferTask(file(1), status = TransferStatus.CANCELLED)
+        val failed = TransferTask(file(2), status = TransferStatus.FAILED)
+
+        val retryIds = retryableTransferTaskIds(
+            tasks = listOf(departing, failed),
+            excludedTaskIds = setOf(departing.taskId),
+        )
+
+        assertEquals(setOf(failed.taskId), retryIds)
     }
 
     @Test

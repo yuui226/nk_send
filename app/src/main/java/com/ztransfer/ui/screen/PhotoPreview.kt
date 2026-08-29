@@ -221,6 +221,29 @@ internal sealed interface PhotoPreviewItem {
     }
 }
 
+/**
+ * 固定一次全屏预览会话能够看到的本地原图来源。
+ *
+ * 传输可能在 overlay 存活期间完成，但此时不能把正在淡入、缩放或绘制的相机 FHD
+ * 热替换成完整原图。除了可能重置手势观感，这还会让旧 FHD 与大尺寸本地位图在同一帧
+ * 参与纹理上传，造成明显的内存峰值，部分设备会直接崩溃。下次重新打开 overlay 时会
+ * 创建新快照，自然获得刚传完的原图。合集成员也必须在打开时一起冻结，否则展开合集
+ * 会绕过同一会话规则。
+ */
+internal fun <T> snapshotPreviewSessionSources(
+    items: List<PhotoPreviewItem>,
+    sourceFor: (NikonCamera.FileInfo) -> T?,
+): Map<Int, T?> = buildMap {
+    items.forEach { item ->
+        when (item) {
+            is PhotoPreviewItem.Photo -> put(item.file.handle, sourceFor(item.file))
+            is PhotoPreviewItem.BurstCollection -> item.files.forEach { file ->
+                put(file.handle, sourceFor(file))
+            }
+        }
+    }
+}
+
 internal fun isPreviewBurstExpanded(
     items: List<PhotoPreviewItem>,
     collectionPage: Int,
@@ -340,7 +363,16 @@ internal fun PhotoPreviewOverlay(
     val latestCurrentFile by rememberUpdatedState(currentFile)
     val latestPrepareDismissTarget by rememberUpdatedState(prepareDismissTarget)
     val latestOnDismiss by rememberUpdatedState(onDismiss)
-    val latestLocalOriginalUriFor by rememberUpdatedState(localOriginalUriFor)
+    // 本次 overlay 打开时已经存在的原图可以直接使用；打开后才完成的传输不热切换。
+    // remember 不带动态传输状态 key 是有意的：关闭并重新进入才创建下一份来源快照。
+    val sessionLocalOriginalUris = remember {
+        snapshotPreviewSessionSources(items, localOriginalUriFor)
+    }
+    val sessionLocalOriginalUriFor: (NikonCamera.FileInfo) -> Uri? = remember(
+        sessionLocalOriginalUris,
+    ) {
+        { file -> sessionLocalOriginalUris[file.handle] }
+    }
     // 高清图/EXIF 到位会触发大位图纹理上传与预览子树更新，因此稍延后启动。
     // 这个功能门绝不能依赖 progress.animateTo 返回：某些设备动画帧时钟停滞时，
     // 等动画完成会让 FHD、EXIF 和远程缩略图全部永久不启动。
@@ -377,8 +409,8 @@ internal fun PhotoPreviewOverlay(
     // 状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放）。
     val highResolutionBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
     val highResolutionLoading = remember { mutableStateMapOf<Int, Boolean>() }
-    // 仅记录由本地原图生成的高清位图来源。传输在预览期间完成时，可据此把已缓存的
-    // 相机 FHD 替换成本地原图；同一 URI 已加载后则不重复解码。
+    // 仅记录由本地原图生成的高清位图来源。同一会话使用打开时的来源快照，因此这里
+    // 只负责避免重复解码，不会在传输完成瞬间替换正在显示的相机 FHD。
     val localPreviewUris = remember { mutableStateMapOf<Int, Uri>() }
     // 本地原图或 RAW 内嵌预览仍可能因损坏、权限或格式异常解码失败；按 URI 记住失败结果，
     // 本次预览不反复读盘，但仍会正常回退到相机 FHD。
@@ -718,7 +750,7 @@ internal fun PhotoPreviewOverlay(
         val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
             ?: return false
         val h = file.handle
-        val localUri = latestLocalOriginalUriFor(file)
+        val localUri = sessionLocalOriginalUriFor(file)
         val localPreviewRoute = localOriginalPreviewRoute(file.extension)
         // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
         if (file.extension in VIDEO_EXTENSIONS) {
@@ -803,7 +835,7 @@ internal fun PhotoPreviewOverlay(
         exifFinished.remove(h)
         exifLoading[h] = true
         try {
-            val localUri = latestLocalOriginalUriFor(file)
+            val localUri = sessionLocalOriginalUriFor(file)
             exifData[h] = if (localUri != null) {
                 cameraViewModel.loadLocalExif(file, localUri)
             } else {
@@ -834,10 +866,11 @@ internal fun PhotoPreviewOverlay(
         exifFinished.keys.filter { it !in keepH }.forEach { exifFinished.remove(it) }
     }
 
-    val currentLocalOriginalUri = currentFile?.let(localOriginalUriFor)
+    val currentLocalOriginalUri = currentFile?.let(sessionLocalOriginalUriFor)
 
-    // 当前页拥有最高优先级。本地 URI 与连接状态都纳入 key：已完成传输时立即切换本地原图；
-    // 本地不可用且断线后原地重连时，再重新请求相机 FHD。
+    // 当前页拥有最高优先级。会话快照中的本地 URI 与连接状态纳入 key；传输在本次预览
+    // 期间完成不会改变该 URI，因而不会取消当前任务或热替换位图。关闭后重新进入时，
+    // 新 overlay 会捕获已完成传输的本地 URI。本地不可用且断线后原地重连时仍可重新请求 FHD。
     // 当前页与邻页由同一协程严格串行，避免首次失败时两个 effect 重复请求并触发熔断。
     LaunchedEffect(
         previewItems,

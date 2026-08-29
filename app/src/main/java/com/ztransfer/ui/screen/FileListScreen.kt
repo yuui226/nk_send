@@ -370,12 +370,19 @@ internal fun queuePillWidthKey(
 
 internal fun queuePillDisplayRemaining(actualRemaining: Int, heldCount: Int): Int {
     val actual = actualRemaining.coerceAtLeast(0)
-    if (actual == 0) return 0
-    val afterFlightHold = (actual - heldCount.coerceAtLeast(0)).coerceAtLeast(0)
-    // If the animation hold covers every remaining task, showing zero would falsely imply that
-    // the queue completed. Prefer the real count until the flight releases its hold.
-    return afterFlightHold.takeIf { it > 0 } ?: actual
+    // The real queue is updated as soon as a card is tapped, while heldCount represents cards
+    // that have not reached the queue pill yet. Keep displaying the number that has actually
+    // landed, including zero. Falling back to the real count at zero makes overlapping flights
+    // jump 2 -> 1 -> 2 as the first and second holds are released independently.
+    return (actual - heldCount.coerceAtLeast(0)).coerceAtLeast(0)
 }
+
+internal fun queuePillAllRemainingTasksAreInFlight(
+    actualRemaining: Int,
+    heldCount: Int,
+): Boolean = actualRemaining > 0 &&
+    heldCount > 0 &&
+    queuePillDisplayRemaining(actualRemaining, heldCount) == 0
 
 internal enum class QueueExecutionControl { START, PAUSE }
 
@@ -2258,8 +2265,8 @@ fun QueuePill(
     } else {
         generationRemaining
     }
-    // Flight animation bookkeeping may delay the displayed count, but it must never turn a
-    // real non-empty queue into the completed state and collapse the pill.
+    // Flight bookkeeping can intentionally display zero until the first card lands. Completion
+    // still follows the real task state: that temporary zero uses the icon, never the Done state.
     val allDone = downloadRemaining == 0 && generationRemaining == 0
     val transferring = transferState.isTransferring
     val activeProgress = liveProgress?.takeIf {
@@ -2314,10 +2321,16 @@ fun QueuePill(
         }
         prevAllDone = allDone
     }
-    // 收起为图标：全部完成（且 done 标签已过），或数字尚未获准显示（防"已存在跳过"闪 1）。
-    val collapsedToIcon = mode != PillMode.PAUSED && (
-        (allDone && !showDoneLabel) || (!allDone && !countingVisible)
+    // 尚无飞行卡片落袋时显示默认图标而不是数字 0；这条优先于 PAUSED，确保“选完再传”
+    // 模式也遵循相同叙事。其余情况保持原有规则：完成或尚未准许显示数字时收为图标。
+    val allRemainingTasksAreInFlight = queuePillAllRemainingTasksAreInFlight(
+        actualRemaining = downloadRemaining,
+        heldCount = heldCount,
     )
+    val collapsedToIcon = allRemainingTasksAreInFlight ||
+        (mode != PillMode.PAUSED && (
+            (allDone && !showDoneLabel) || (!allDone && !countingVisible)
+        ))
 
     // 进度条 = 当前单文件进度（复用传输页语义）。保留最近的进度归属，让最后一张
     // 完成后仍能从当前位置顺滑补满，而不是因“当前任务”瞬间消失而重建动画。

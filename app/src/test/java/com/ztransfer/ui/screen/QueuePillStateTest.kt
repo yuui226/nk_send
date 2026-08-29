@@ -4,7 +4,9 @@ import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QueuePillStateTest {
@@ -76,14 +78,37 @@ class QueuePillStateTest {
     }
 
     @Test
-    fun flightHoldCannotMakeANonEmptyQueueLookEmpty() {
-        assertEquals(24, queuePillDisplayRemaining(actualRemaining = 24, heldCount = 24))
-        assertEquals(18, queuePillDisplayRemaining(actualRemaining = 18, heldCount = 24))
+    fun flightHoldKeepsNewQueueAtZeroUntilCardsLand() {
+        assertEquals(0, queuePillDisplayRemaining(actualRemaining = 24, heldCount = 24))
+        assertEquals(0, queuePillDisplayRemaining(actualRemaining = 18, heldCount = 24))
     }
 
     @Test
     fun flightHoldStillDelaysOnlyTheNewlyAddedPartOfAnExistingQueue() {
         assertEquals(7, queuePillDisplayRemaining(actualRemaining = 27, heldCount = 20))
+    }
+
+    @Test
+    fun overlappingFlightsIncreaseCountOnlyWhenEachCardLands() {
+        // Both taps have reached the real queue, but neither animation has landed yet.
+        assertEquals(0, queuePillDisplayRemaining(actualRemaining = 2, heldCount = 2))
+        // The first animation lands while the second is still flying.
+        assertEquals(1, queuePillDisplayRemaining(actualRemaining = 2, heldCount = 1))
+        // The second animation lands last; the count progresses monotonically: 0 -> 1 -> 2.
+        assertEquals(2, queuePillDisplayRemaining(actualRemaining = 2, heldCount = 0))
+    }
+
+    @Test
+    fun allHeldTasksUseTheDefaultIconUntilTheFirstCardLands() {
+        assertTrue(
+            queuePillAllRemainingTasksAreInFlight(actualRemaining = 2, heldCount = 2)
+        )
+        assertFalse(
+            queuePillAllRemainingTasksAreInFlight(actualRemaining = 27, heldCount = 20)
+        )
+        assertFalse(
+            queuePillAllRemainingTasksAreInFlight(actualRemaining = 0, heldCount = 2)
+        )
     }
 
     @Test

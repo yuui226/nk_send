@@ -100,6 +100,28 @@ private enum class TransferCardPillTone { SIZE, SPEED, EFFECT, TRANSFER_DURATION
 
 private enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
 
+internal data class TransferQueueActionVisibility(
+    val hasRetryable: Boolean,
+    val hasClearable: Boolean,
+)
+
+internal fun transferQueueActionVisibility(
+    tasks: List<TransferTask>,
+    isTransferring: Boolean,
+    removingTaskIds: Set<Long>,
+    suppressAll: Boolean = false,
+): TransferQueueActionVisibility = TransferQueueActionVisibility(
+    hasRetryable = !suppressAll && !isTransferring && tasks.any { task ->
+        task.taskId !in removingTaskIds &&
+            (task.status == TransferStatus.FAILED || task.status == TransferStatus.CANCELLED)
+    },
+    hasClearable = !suppressAll && tasks.any { task ->
+        task.taskId !in removingTaskIds &&
+            task.status != TransferStatus.TRANSFERING &&
+            !task.isGeneratingFrame
+    },
+)
+
 private data class TransferCameraUiState(
     val isConnectedToCamera: Boolean,
     val connectionType: CameraConnectionType?,
@@ -183,6 +205,7 @@ fun TransferScreen(
     // 正在播放移除动画的任务：卡片收合完毕后才真正从队列删除。
     // 等待中的任务在标记的同时已被 withdraw（置 CANCELLED），动画期间队列不会开始传它。
     val removingTaskIds = remember { mutableStateMapOf<Long, Unit>() }
+    var clearAllInProgress by remember { mutableStateOf(false) }
     val clearScope = rememberCoroutineScope()
     // 队列清空后再加入任务时从顶部开始，避免沿用上一批任务的滚动位置与遮罩状态。
     val listState = key(transferState.tasks.isEmpty()) { rememberLazyListState() }
@@ -199,12 +222,18 @@ fun TransferScreen(
         Brush.verticalGradient(listOf(sheen, Color.Transparent))
     }
 
-    // 存在可重试任务（失败/取消）且未在传输：右下角显示"重试全部"FAB。
-    val hasRetryable = !transferState.isTransferring && transferState.tasks.any {
-        it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
-    }
+    // 正在收合退场的任务不再参与按钮状态；特别是 WAITING 被 withdraw 成 CANCELLED 后，
+    // 不能在删除前的 280ms 内让“重试全部”闪现。
+    val actionVisibility = transferQueueActionVisibility(
+        tasks = transferState.tasks,
+        isTransferring = transferState.isTransferring,
+        removingTaskIds = removingTaskIds.keys,
+        suppressAll = clearAllInProgress,
+    )
+    val hasRetryable = actionVisibility.hasRetryable
     val retryNeedsCamera = transferState.tasks.any {
-        (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED) &&
+        it.taskId !in removingTaskIds &&
+            (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED) &&
             !isTransferredOriginal(
                 it.file,
                 transferState.existingExportIndex,
@@ -213,9 +242,7 @@ fun TransferScreen(
     }
     // 清空队列只作用于"不在传输中"的任务（正在传的文件会传完，中途打断会让相机关 Wi-Fi）：
     // 有可清的卡片才显示扫帚 FAB；确认后卡片集体收合退场、FAB 随之消失。
-    val hasClearable = transferState.tasks.any {
-        it.status != TransferStatus.TRANSFERING && !it.isGeneratingFrame
-    }
+    val hasClearable = actionVisibility.hasClearable
     // 共用顶部控制按钮仍沿用本页原行为：操作时收起已展开的清空/重试确认卡。
     LaunchedEffect(queueControlActionNonce) {
         if (queueControlActionNonce > 0L) {
@@ -325,6 +352,7 @@ fun TransferScreen(
                         task.frameGenerationElapsedMs
                     }
                     val removing = removingTaskIds.containsKey(taskId)
+                    val cardActionsVisible = !removing && !clearAllInProgress
                     // 移除动画：真实高度收合 + 淡出（collapseHeight，与列表页分组收合同款），
                     // 收合完毕才从队列删除，下方卡片随布局逐帧上移，无跳变。
                     val removeProgress = remember(taskId) { Animatable(1f) }
@@ -468,12 +496,14 @@ fun TransferScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                     )
                                     TransferRetryButton(
-                                        visible = task.status == TransferStatus.FAILED,
-                                        enabled = connected || isTransferredOriginal(
-                                            task.file,
-                                            transferState.existingExportIndex,
-                                            task.destinationFolderName,
-                                        ),
+                                        visible = cardActionsVisible &&
+                                            task.status == TransferStatus.FAILED,
+                                        enabled = cardActionsVisible &&
+                                            (connected || isTransferredOriginal(
+                                                task.file,
+                                                transferState.existingExportIndex,
+                                                task.destinationFolderName,
+                                            )),
                                         onClick = {
                                             transferViewModel.retrySingleTask(
                                                 taskId,
@@ -487,9 +517,9 @@ fun TransferScreen(
                                 // 最尾：毛玻璃移除按钮——把本卡从队列移除。正在传输的
                                 // 不可移除（中途打断会让相机关 Wi-Fi），传完变可移除时淡入。
                                 AnimatedVisibility(
-                                    visible =
+                                    visible = cardActionsVisible &&
                                         task.status != TransferStatus.TRANSFERING &&
-                                            !task.isGeneratingFrame,
+                                        !task.isGeneratingFrame,
                                     // 水平展开/收起：出现消失时行内其它内容平滑让位，不硬跳。
                                     enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
                                     exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start)
@@ -502,6 +532,7 @@ fun TransferScreen(
                                                 transferViewModel.withdrawTask(taskId)
                                                 removingTaskIds[taskId] = Unit
                                             },
+                                            enabled = cardActionsVisible,
                                             shape = CircleShape,
                                             contentPadding = PaddingValues(6.dp)
                                         ) {
@@ -590,14 +621,17 @@ fun TransferScreen(
                     title = stringResource(R.string.retry_failed_title),
                     confirmText = stringResource(R.string.retry),
                     confirmColor = colors.accentBlue,
-                    enabled = connected || !retryNeedsCamera,
+                    enabled = hasRetryable && (connected || !retryNeedsCamera),
                     onToggle = {
                         showRetryConfirm = !showRetryConfirm
                         showClearConfirm = false   // 两张确认卡互斥
                     },
                     onConfirm = {
                         showRetryConfirm = false
-                        transferViewModel.retryFailed(cameraViewModel::getCamera)
+                        transferViewModel.retryFailed(
+                            cameraProvider = cameraViewModel::getCamera,
+                            excludedTaskIds = removingTaskIds.keys.toSet(),
+                        )
                     },
                     onDismiss = { showRetryConfirm = false }
                 )
@@ -621,12 +655,14 @@ fun TransferScreen(
                     subtitle = stringResource(R.string.clear_queue_subtitle),
                     confirmText = stringResource(R.string.clear),
                     confirmColor = colors.statusError,
+                    enabled = hasClearable,
                     onToggle = {
                         showClearConfirm = !showClearConfirm
                         showRetryConfirm = false   // 两张确认卡互斥
                     },
                     onConfirm = {
                         showClearConfirm = false
+                        clearAllInProgress = true
                         // 先把等待中的任务撤下（队列不会再开始它们），
                         // 再给所有非传输中卡片打移除标记——可见卡片集体播放收合动画。
                         transferViewModel.withdrawPending()
@@ -639,12 +675,16 @@ fun TransferScreen(
                         // "动画后移除"。等可见卡片收完（280ms）统一清掉所有已终结任务，
                         // 并回收无主标记——否则同 handle 之后重新入队会误播移除动画。
                         clearScope.launch {
-                            delay(320)
-                            transferViewModel.removeCleared()
-                            val alive = transferViewModel.state.value.tasks
-                                .mapTo(HashSet()) { it.taskId }
-                            removingTaskIds.keys.toList().forEach {
-                                if (it !in alive) removingTaskIds.remove(it)
+                            try {
+                                delay(320)
+                                transferViewModel.removeCleared()
+                                val alive = transferViewModel.state.value.tasks
+                                    .mapTo(HashSet()) { it.taskId }
+                                removingTaskIds.keys.toList().forEach {
+                                    if (it !in alive) removingTaskIds.remove(it)
+                                }
+                            } finally {
+                                clearAllInProgress = false
                             }
                         }
                     },

@@ -361,6 +361,16 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
     frameGenerationElapsedMs = null,
 )
 
+internal fun retryableTransferTaskIds(
+    tasks: List<TransferTask>,
+    excludedTaskIds: Set<Long>,
+): Set<Long> = tasks.asSequence()
+    .filter { task ->
+        task.taskId !in excludedTaskIds &&
+            (task.status == TransferStatus.FAILED || task.status == TransferStatus.CANCELLED)
+    }
+    .mapTo(HashSet()) { it.taskId }
+
 private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
     "$fileName|$size|$captureDate"
 
@@ -398,7 +408,7 @@ data class TransferState(
     // 待传模式：空闲时入队只保留 WAITING，由传输页的开始按钮显式放行；默认关闭。
     val deferTransferStart: Boolean = false,
     // 原图按拍摄日写入 ZTyyyy-MM-dd 子目录，派生效果图位于该目录的 ZTFrames 中；默认开启。
-    val organizeTransfersByDate: Boolean = true,
+    val organizeTransfersByDate: Boolean = false,
     // 主题模式：默认跟随系统深浅色，可在设置里固定深色/浅色。
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     // UI 皮肤预设（毛玻璃/经典等），全局配色与纹理风格。
@@ -1054,7 +1064,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 ),
                 autoTransferNewMedia = prefs.getBoolean("auto_transfer_new_media", false),
                 deferTransferStart = prefs.getBoolean("defer_transfer_start", false),
-                organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", true),
+                organizeTransfersByDate = prefs.getBoolean("organize_transfers_by_date", false),
                 themeMode = prefs.getString("theme_mode", null)
                     ?.let { m -> ThemeMode.entries.firstOrNull { e -> e.name == m } }
                     ?: ThemeMode.SYSTEM,
@@ -3034,12 +3044,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      * 重试失败/取消的任务：保留入队时锁定的边框与水印配置，只创建新的任务 ID
      * 并重置运行状态。这样用户切换设置后，重试仍然得到入队时选定的派生图。
      */
-    fun retryFailed(cameraProvider: () -> NikonCamera?) {
+    fun retryFailed(
+        cameraProvider: () -> NikonCamera?,
+        excludedTaskIds: Set<Long> = emptySet(),
+    ) {
         val snapshot = _state.value
         val dirUri = snapshot.transferDirUri ?: return
-        val retryIds = snapshot.tasks.filter {
-            it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED
-        }.mapTo(HashSet()) { it.taskId }
+        val retryIds = retryableTransferTaskIds(snapshot.tasks, excludedTaskIds)
         if (retryIds.isEmpty()) return
         val attemptsByOldTaskId = snapshot.tasks.asSequence()
             .filter { it.taskId in retryIds }
