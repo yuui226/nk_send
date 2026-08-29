@@ -19,6 +19,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.ParcelUuid
+import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -359,8 +360,9 @@ internal class NikonGpsBleClient(
                             @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         } ?: return
                         val foundName = intent.getStringExtra(BluetoothDevice.EXTRA_NAME) ?: runCatching { found.name }.getOrNull()
-                        val matches = foundName?.contains("Nikon", ignoreCase = true) == true ||
-                            foundName?.equals(targetName, ignoreCase = true) == true
+                        val matches = found.address == device?.address ||
+                            namesMatch(foundName, targetName) ||
+                            foundName?.contains("Nikon", ignoreCase = true) == true
                         if (!matches) return
                         runCatching { adapter.cancelDiscovery() }
                         if (found.bondState == BluetoothDevice.BOND_BONDED) {
@@ -382,10 +384,16 @@ internal class NikonGpsBleClient(
         }
         classicReceiver = receiver
         runCatching {
-            context.registerReceiver(receiver, IntentFilter().apply {
+            val filter = IntentFilter().apply {
                 addAction(BluetoothDevice.ACTION_FOUND)
                 addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-            })
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                @Suppress("UnspecifiedRegisterReceiverFlag")
+                context.registerReceiver(receiver, filter)
+            }
         }.onFailure {
             classicReceiver = null
             listener.onError("请确认蓝牙配对")
@@ -407,6 +415,15 @@ internal class NikonGpsBleClient(
         classicReceiver?.let { runCatching { context.unregisterReceiver(it) } }
         classicReceiver = null
         listener.onDisconnected()
+    }
+
+    private fun namesMatch(foundName: String?, targetName: String?): Boolean {
+        if (foundName.isNullOrBlank() || targetName.isNullOrBlank()) return false
+        val found = foundName.trim().lowercase(Locale.ROOT)
+        val target = targetName.trim().lowercase(Locale.ROOT)
+        val shorter = if (found.length <= target.length) found else target
+        val longer = if (found.length <= target.length) target else found
+        return found == target || (shorter.length >= 4 && longer.startsWith(shorter))
     }
 
     private fun writeCharacteristic(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, bytes: ByteArray) {

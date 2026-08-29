@@ -78,6 +78,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             stopSelf()
             return START_NOT_STICKY
         }
+        // START_STICKY may restart the service with a null intent. Respect the persisted
+        // switch instead of silently re-enabling GPS after the user turned it off.
+        if (intent?.action != ACTION_ENABLE && !preferences.getBoolean(KEY_ENABLED, false)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         enabled = true
         startForegroundCompat()
         startGpsIfPermitted()
@@ -138,8 +144,16 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             message.contains("not found", ignoreCase = true) -> "请在相机上打开蓝牙配对"
             else -> message
         }
-        updateState(if (userMessage.contains("权限")) GpsStatus.ERROR else GpsStatus.NEEDS_CAMERA, message = userMessage)
-        if (enabled && !userMessage.contains("权限")) {
+        val needsCamera = userMessage.contains("配对") ||
+            userMessage.contains("not found", ignoreCase = true)
+        val isPermissionError = userMessage.contains("权限")
+        updateState(
+            if (isPermissionError) GpsStatus.ERROR
+            else if (needsCamera) GpsStatus.NEEDS_CAMERA
+            else GpsStatus.ERROR,
+            message = userMessage,
+        )
+        if (enabled && !isPermissionError) {
             reconnectJob?.cancel()
             reconnectJob = serviceScope.launch {
                 delay(5_000)
@@ -246,6 +260,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         } catch (_: SecurityException) {
             updateState(GpsStatus.ERROR, message = "需要通知权限")
             enabled = false
+            preferences.edit().putBoolean(KEY_ENABLED, false).apply()
             stopSelf()
         }
     }
@@ -272,6 +287,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         private const val PREFERENCES = "nikon_gps"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_NONCE = "nonce"
+        private const val KEY_ENABLED = "enabled"
 
         fun setEnabled(context: Context, enabled: Boolean) {
             val intent = Intent(context, NikonGpsService::class.java).setAction(if (enabled) ACTION_ENABLE else ACTION_DISABLE)
