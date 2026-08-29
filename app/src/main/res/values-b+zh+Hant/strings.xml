@@ -549,5 +549,6 @@
     <string name="gps_waiting_location">等待定位</string>
     <string name="gps_ready">定位已更新</string>
     <string name="gps_unavailable">暫不可用</string>
+    <string name="gps_retry">重試</string>
     <string name="gps_permission_required">請允許藍牙和定位權限</string>
 </resources>

@@ -555,5 +555,6 @@
     <string name="gps_waiting_location">Waiting for location</string>
     <string name="gps_ready">Location updated</string>
     <string name="gps_unavailable">Unavailable</string>
+    <string name="gps_retry">Retry</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
 </resources>
