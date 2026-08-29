@@ -3496,6 +3496,7 @@ private enum class GpsStatusButtonState {
     OFF,
     CONNECTING,
     PAIRING,
+    NEEDS_CAMERA,
     LOCATING,
     CONNECTED,
     ERROR,
@@ -3594,7 +3595,7 @@ private fun GpsStatusButton(
         GpsStatus.OFF -> GpsStatusButtonState.OFF
         GpsStatus.STARTING, GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
         GpsStatus.PAIRING -> GpsStatusButtonState.PAIRING
-        GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.PAIRING
+        GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.NEEDS_CAMERA
         GpsStatus.WAITING_FIX -> GpsStatusButtonState.LOCATING
         GpsStatus.READY -> GpsStatusButtonState.CONNECTED
         GpsStatus.ERROR -> GpsStatusButtonState.ERROR
@@ -3683,7 +3684,8 @@ private fun GpsStatusButton(
             val label = when (state) {
                 GpsStatusButtonState.OFF -> stringResource(R.string.gps_off)
                 GpsStatusButtonState.CONNECTING -> stringResource(R.string.gps_connecting)
-                GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_need_camera)
+                GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_pairing)
+                GpsStatusButtonState.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
                 GpsStatusButtonState.LOCATING -> stringResource(R.string.gps_waiting_location)
                 GpsStatusButtonState.CONNECTED -> stringResource(R.string.gps_ready)
                 GpsStatusButtonState.ERROR -> stringResource(R.string.gps_retry)

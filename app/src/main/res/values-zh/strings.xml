@@ -549,6 +549,7 @@
     <string name="gps_auto_write">自动写入 GPS</string>
     <string name="gps_off">未开启</string>
     <string name="gps_connecting">正在连接</string>
+    <string name="gps_pairing">正在配对</string>
     <string name="gps_need_camera">请在相机上开启蓝牙配对</string>
     <string name="gps_waiting_location">等待定位</string>
     <string name="gps_ready">定位已更新</string>
