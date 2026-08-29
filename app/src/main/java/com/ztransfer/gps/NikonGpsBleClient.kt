@@ -299,7 +299,7 @@ internal class NikonGpsBleClient(
         if (descriptor == null) {
             val packet = NikonGpsPairingProtocol().newStage1(savedDeviceId, savedNonce)
             stage1 = packet
-            if (!pairingNotified) {
+            if (savedDeviceId == null && !pairingNotified) {
                 pairingNotified = true
                 listener.onPairing()
             }
@@ -343,7 +343,7 @@ internal class NikonGpsBleClient(
         val packet = GpsPairingPacket.decode(value) ?: return
         val first = stage1 ?: return
         if (packet.stage == 2 && !stage3Sent) {
-            if (!pairingNotified) {
+            if (savedDeviceId == null && !pairingNotified) {
                 pairingNotified = true
                 listener.onPairing()
             }
