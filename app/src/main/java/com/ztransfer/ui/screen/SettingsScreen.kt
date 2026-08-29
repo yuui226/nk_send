@@ -1110,6 +1110,23 @@ fun SettingsOverlay(
                         },
                     )
                 }
+                if (gpsState.enabled &&
+                    (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
+                ) {
+                    val coordinates = gpsState.latitude?.let { lat ->
+                        gpsState.longitude?.let { lon ->
+                            "%.5f, %.5f".format(java.util.Locale.US, lat, lon)
+                        }
+                    }
+                    Text(
+                        text = listOfNotNull(gpsState.placeName, coordinates).joinToString(" · "),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 4.dp, top = 6.dp, end = 4.dp),
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))

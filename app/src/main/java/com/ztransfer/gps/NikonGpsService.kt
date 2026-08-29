@@ -13,6 +13,7 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.Geocoder
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -21,6 +22,7 @@ import androidx.core.app.NotificationCompat
 import com.ztransfer.MainActivity
 import com.ztransfer.R
 import java.time.Instant
+import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,6 +48,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private var lastLocation: Location? = null
     private var lastSentLocation: Location? = null
     private var lastSentAt = 0L
+    private var lastGeocodedKey: String? = null
+    private var geocodeJob: Job? = null
     private var enabled = false
 
     private val locationListener = object : LocationListener {
@@ -60,6 +64,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                     message = null,
                 )
             }
+            requestPlaceName(location)
             maybeSend(location)
         }
     }
@@ -279,7 +284,35 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         reconnectJob = null
         stopLocationUpdates()
         if (::bleClient.isInitialized) bleClient.stop()
+        geocodeJob?.cancel()
+        geocodeJob = null
+        lastGeocodedKey = null
         NikonGpsRuntime.state.value = GpsState()
+    }
+
+    private fun requestPlaceName(location: Location) {
+        if (!Geocoder.isPresent()) return
+        val key = "%.3f,%.3f".format(Locale.US, location.latitude, location.longitude)
+        if (key == lastGeocodedKey) return
+        lastGeocodedKey = key
+        geocodeJob?.cancel()
+        geocodeJob = serviceScope.launch(Dispatchers.IO) {
+            val place = runCatching {
+                Geocoder(this@NikonGpsService, Locale.getDefault())
+                    .getFromLocation(location.latitude, location.longitude, 1)
+                    ?.firstOrNull()
+                    ?.let { address ->
+                        address.locality ?: address.subLocality ?: address.adminArea
+                    }
+            }.getOrNull()?.takeIf { it.isNotBlank() }
+            if (place != null) {
+                NikonGpsRuntime.state.update { state ->
+                    if (state.latitude == location.latitude && state.longitude == location.longitude) {
+                        state.copy(placeName = place)
+                    } else state
+                }
+            }
+        }
     }
 
     private fun updateState(status: GpsStatus, cameraName: String? = null, message: String? = null) {
