@@ -74,6 +74,7 @@ internal class NikonGpsBleClient(
     private var pairingTimeout: Job? = null
     private var pairingNotified = false
     private var directConnectJob: Job? = null
+    private var idWriteTimeout: Job? = null
     private var suppressDisconnect = false
 
     fun start(
@@ -88,6 +89,8 @@ internal class NikonGpsBleClient(
         this.savedNonce = savedNonce
         directConnectJob?.cancel()
         directConnectJob = null
+        idWriteTimeout?.cancel()
+        idWriteTimeout = null
         if (gatt != null || scanCallback != null) return
         stage1 = null
         stage3Sent = false
@@ -132,6 +135,8 @@ internal class NikonGpsBleClient(
         scanTimeout = null
         directConnectJob?.cancel()
         directConnectJob = null
+        idWriteTimeout?.cancel()
+        idWriteTimeout = null
         scanCallback?.let { callback -> runCatching { scanner?.stopScan(callback) } }
         scanCallback = null
         gatt?.disconnect()
@@ -237,6 +242,8 @@ internal class NikonGpsBleClient(
                 directConnectJob = null
                 g.requestMtu(517)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                idWriteTimeout?.cancel()
+                idWriteTimeout = null
                 if (gatt === g) {
                     gatt = null
                     pairChar = null
@@ -311,6 +318,8 @@ internal class NikonGpsBleClient(
             when (characteristic.uuid) {
                 GEO_UUID -> listener.onGeoWritten(status == BluetoothGatt.GATT_SUCCESS)
                 ID_UUID -> if (status == BluetoothGatt.GATT_SUCCESS) {
+                    idWriteTimeout?.cancel()
+                    idWriteTimeout = null
                     stage1?.let { listener.onPairedIdentity(it.device, it.nonce) }
                     if (savedDeviceId == null) {
                         // Nikon exposes a different Classic address. Discover and bond it once;
@@ -410,6 +419,23 @@ internal class NikonGpsBleClient(
         idQueued = true
         val bytes = controllerName.toByteArray(Charsets.US_ASCII).copyOf(32)
         writeCharacteristic(gatt ?: return, idChar ?: return, bytes)
+        if (savedDeviceId != null) {
+            // A few Android GATT stacks occasionally lose the ID write callback even though the
+            // camera has accepted the handshake. Do not leave the UI in Connecting forever.
+            idWriteTimeout?.cancel()
+            idWriteTimeout = scope.launch {
+                delay(3_000L)
+                if (!ready && gatt != null) {
+                    GpsDiagnostics.record("ID write callback timeout; proceeding")
+                    ready = true
+                    listener.onReady(device?.name ?: "Nikon", device ?: return@launch)
+                    pendingGeo?.also { queued ->
+                        pendingGeo = null
+                        writeCharacteristic(gatt ?: return@also, geoChar ?: return@also, queued)
+                    }
+                }
+            }
+        }
     }
 
     private fun closeGattForPairing() {
