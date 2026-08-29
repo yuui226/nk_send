@@ -1040,11 +1040,26 @@ fun SettingsOverlay(
                     delay((nextFrameAtMs - SystemClock.uptimeMillis()).coerceAtLeast(1L))
                 }
             }
+            val gpsButtonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
+            val gpsButtonDark = colors.background.luminance() < 0.5f
+            val gpsButtonPalette = remember(
+                gpsButtonSkin,
+                gpsButtonDark,
+                colors.accentBlue,
+                colors.statusConnected,
+            ) {
+                staConnectButtonPalette(
+                    skin = gpsButtonSkin,
+                    dark = gpsButtonDark,
+                    defaultConnecting = colors.accentBlue,
+                    defaultConnected = colors.statusConnected,
+                )
+            }
             val gpsStatusAccent by animateColorAsState(
                 targetValue = when {
-                    gpsState.status == GpsStatus.READY -> colors.statusConnected
+                    gpsState.status == GpsStatus.READY -> gpsButtonPalette.connected
                     gpsState.status == GpsStatus.ERROR -> colors.statusError
-                    gpsState.enabled -> colors.accentBlue
+                    gpsState.enabled -> gpsButtonPalette.connecting
                     else -> colors.onSurfaceVariant
                 },
                 animationSpec = tween(320, easing = FastOutSlowInEasing),
