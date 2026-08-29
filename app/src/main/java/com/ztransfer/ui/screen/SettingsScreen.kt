@@ -88,6 +88,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -1019,16 +1020,26 @@ fun SettingsOverlay(
                 GpsStatus.NEEDS_CAMERA,
                 GpsStatus.WAITING_FIX,
             )
-            val gpsBreathTransition = rememberInfiniteTransition(label = "gpsStatusBreath")
-            val gpsBreath by gpsBreathTransition.animateFloat(
-                initialValue = 0f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1800, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "gpsStatusBreathProgress",
-            )
+            // 与“连接相机”按钮共用同一时钟和呼吸曲线，状态卡只在忙态刷新。
+            val gpsBreath = remember { mutableFloatStateOf(0f) }
+            LaunchedEffect(gpsBusy) {
+                if (!gpsBusy) {
+                    gpsBreath.floatValue = 0f
+                    return@LaunchedEffect
+                }
+                val startedAtMs = SystemClock.uptimeMillis()
+                var nextFrameAtMs = startedAtMs
+                while (isActive) {
+                    val nowMs = SystemClock.uptimeMillis()
+                    gpsBreath.floatValue = staButtonBreathProgress(nowMs - startedAtMs)
+                    nextFrameAtMs += 8L
+                    if (nextFrameAtMs <= nowMs) {
+                        val skippedFrames = (nowMs - nextFrameAtMs) / 8L + 1L
+                        nextFrameAtMs += skippedFrames * 8L
+                    }
+                    delay((nextFrameAtMs - SystemClock.uptimeMillis()).coerceAtLeast(1L))
+                }
+            }
             val gpsStatusAccent by animateColorAsState(
                 targetValue = when {
                     gpsState.status == GpsStatus.READY -> colors.statusConnected
@@ -1044,7 +1055,7 @@ fun SettingsOverlay(
                 else colors.glassPanelBorder,
                 pressAccentColor = colors.accentBlue,
                 attentionColor = if (gpsBusy) gpsStatusAccent else null,
-                attentionProgress = if (gpsBusy) gpsBreath else 0f,
+                attentionProgress = if (gpsBusy) gpsBreath.floatValue else 0f,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
