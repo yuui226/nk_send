@@ -103,6 +103,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         updateState(GpsStatus.CONNECTING, name ?: "Nikon")
     }
 
+    override fun onPairing() {
+        GpsDiagnostics.record("BLE pairing handshake")
+        updateState(GpsStatus.PAIRING)
+    }
+
     override fun onReady(name: String, device: android.bluetooth.BluetoothDevice) {
         GpsDiagnostics.record("GPS ready camera=$name")
         updateState(GpsStatus.WAITING_FIX, name)
@@ -140,15 +145,22 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onNeedsPairing() {
         GpsDiagnostics.record("awaiting Classic pairing")
-        updateState(GpsStatus.CONNECTING, message = "请确认蓝牙配对")
+        updateState(GpsStatus.PAIRING, message = "请确认蓝牙配对")
     }
 
     override fun onError(message: String) {
         GpsDiagnostics.record("error=$message")
+        if (message.contains("pairing rejected", ignoreCase = true)) {
+            // The camera may have forgotten its side of the bond. Drop the cached identity so
+            // the next attempt starts a clean pairing handshake instead of retrying stale data.
+            preferences.edit().remove(KEY_DEVICE_ID).remove(KEY_NONCE).apply()
+            GpsDiagnostics.record("cached pairing identity cleared")
+        }
         if (!enabled) return
         val userMessage = when {
             message.contains("permission", ignoreCase = true) -> "需要蓝牙权限"
-            message.contains("not found", ignoreCase = true) -> "请在相机上打开蓝牙配对"
+            message.contains("not found", ignoreCase = true) ||
+                message.contains("pairing rejected", ignoreCase = true) -> "请在相机上打开蓝牙配对"
             message.contains("Bluetooth unavailable", ignoreCase = true) -> "请打开手机蓝牙"
             message.contains("scan failed", ignoreCase = true) -> "请打开手机蓝牙"
             else -> message

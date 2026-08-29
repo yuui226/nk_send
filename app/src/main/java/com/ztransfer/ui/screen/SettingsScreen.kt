@@ -88,6 +88,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import android.os.Build
@@ -301,6 +302,8 @@ fun SettingsOverlay(
     var settingsPage by remember { mutableStateOf(SettingsPage.MAIN) }
     var showMainSettingsInfo by remember { mutableStateOf(false) }
     var mainSettingsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
+    var showGpsResetDialog by remember { mutableStateOf(false) }
+    var showGpsInfoDialog by remember { mutableStateOf(false) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var expandedEffectsPreview by remember {
@@ -916,6 +919,33 @@ fun SettingsOverlay(
                     onHoldCameraWifi = onHoldCameraWifi,
                 )
             }
+            if (showGpsResetDialog) {
+                GpsResetPairingDialog(
+                    pairedDeviceCount = gpsViewModel.pairedDeviceCount(),
+                    onConfirm = {
+                        showGpsResetDialog = false
+                        gpsViewModel.clearPairing()
+                    },
+                    onDismiss = { showGpsResetDialog = false },
+                )
+            }
+            if (showGpsInfoDialog) {
+                Dialog(onDismissRequest = { showGpsInfoDialog = false }) {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = colors.glassSurfaceHeavy,
+                        border = BorderStroke(1.dp, colors.glassPanelBorder),
+                        tonalElevation = 6.dp,
+                    ) {
+                        TipBubbleContent(
+                            title = stringResource(R.string.gps_help_title),
+                            items = listOf(
+                                TipBubbleItem(stringResource(R.string.gps_help_message)),
+                            ),
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(14.dp))
 
             // ---------- 传输目录：标题、单行路径与更改按钮并排；未设置时保留橙色强调 ----------
@@ -1028,25 +1058,44 @@ fun SettingsOverlay(
                         stringResource(R.string.gps_auto_write),
                         modifier = Modifier.weight(1f),
                     )
-                    if (gpsState.status == GpsStatus.ERROR) {
-                        GlassButton(
-                            onClick = {
-                                clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
-                                showFooterHint(gpsCopiedHint)
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.size(42.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = stringResource(R.string.lab_copy_log),
-                                tint = colors.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
+                    TipLightbulbButton(
+                        onClick = { showGpsInfoDialog = true },
+                        contentDescription = stringResource(R.string.gps_help_title),
+                        modifier = Modifier.size(34.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    GlassButton(
+                        onClick = { showGpsResetDialog = true },
+                        enabled = gpsViewModel.pairedDeviceCount() > 0 && gpsState.status != GpsStatus.READY,
+                        shape = RoundedCornerShape(11.dp),
+                        contentPadding = PaddingValues(8.dp),
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LinkOff,
+                            contentDescription = stringResource(R.string.gps_clear_pairing),
+                            tint = colors.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
                     }
+                    Spacer(Modifier.width(8.dp))
+                    GlassButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
+                            showFooterHint(gpsCopiedHint)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(42.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = stringResource(R.string.lab_copy_log),
+                            tint = colors.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
                     GpsStatusButton(
                         status = gpsState.status,
                         enabled = gpsState.enabled,
@@ -3453,6 +3502,78 @@ private enum class GpsStatusButtonState {
 }
 
 @Composable
+private fun GpsResetPairingDialog(
+    pairedDeviceCount: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = colors.glassSurfaceHeavy,
+            border = BorderStroke(1.dp, colors.glassPanelBorder),
+            tonalElevation = 6.dp,
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = stringResource(R.string.gps_clear_pairing_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onBackground,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(colors.accentBlue.copy(alpha = 0.10f))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Bluetooth,
+                        contentDescription = null,
+                        tint = colors.accentBlue,
+                        modifier = Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        text = stringResource(R.string.gps_paired_device_count, pairedDeviceCount),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onBackground,
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.gps_clear_pairing_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(18.dp))
+                Row(
+                    modifier = Modifier.align(Alignment.End),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.cancel), color = colors.onSurfaceVariant)
+                    }
+                    Button(
+                        onClick = onConfirm,
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.statusError),
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text(stringResource(R.string.gps_clear_pairing))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun GpsStatusButton(
     status: GpsStatus,
     enabled: Boolean,
@@ -3472,6 +3593,7 @@ private fun GpsStatusButton(
     val buttonState = if (!enabled) GpsStatusButtonState.OFF else when (status) {
         GpsStatus.OFF -> GpsStatusButtonState.OFF
         GpsStatus.STARTING, GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
+        GpsStatus.PAIRING -> GpsStatusButtonState.PAIRING
         GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.PAIRING
         GpsStatus.WAITING_FIX -> GpsStatusButtonState.LOCATING
         GpsStatus.READY -> GpsStatusButtonState.CONNECTED

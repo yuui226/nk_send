@@ -6,6 +6,7 @@ enum class GpsStatus {
     STARTING,
     NEEDS_CAMERA,
     CONNECTING,
+    PAIRING,
     WAITING_FIX,
     READY,
     ERROR,

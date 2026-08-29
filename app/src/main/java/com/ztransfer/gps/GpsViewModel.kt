@@ -25,6 +25,18 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
         NikonGpsService.setEnabled(getApplication(), true)
     }
 
+    fun pairedDeviceCount(): Int = if (
+        preferences.contains(KEY_DEVICE_ID) && preferences.contains(KEY_NONCE)
+    ) 1 else 0
+
+    fun clearPairing() {
+        preferences.edit()
+            .remove(KEY_DEVICE_ID)
+            .remove(KEY_NONCE)
+            .apply()
+        if (state.value.enabled) setEnabled(false)
+    }
+
     override fun onCleared() {
         // The foreground service owns the BLE/location lifecycle and must outlive the UI.
         super.onCleared()
@@ -33,5 +45,7 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val PREFERENCES = "nikon_gps"
         const val KEY_ENABLED = "enabled"
+        const val KEY_DEVICE_ID = "device_id"
+        const val KEY_NONCE = "nonce"
     }
 }

@@ -35,6 +35,7 @@ internal class NikonGpsBleClient(
 ) {
     interface Listener {
         fun onConnecting(name: String?)
+        fun onPairing()
         fun onReady(name: String, device: BluetoothDevice)
         fun onGeoWritten(success: Boolean)
         fun onPairedIdentity(device: Long, nonce: Long)
@@ -323,6 +324,7 @@ internal class NikonGpsBleClient(
         val packet = GpsPairingPacket.decode(value) ?: return
         val first = stage1 ?: return
         if (packet.stage == 2 && !stage3Sent) {
+            listener.onPairing()
             val response = NikonGpsPairingProtocol().stage3For(first, packet)
             if (response == null) {
                 GpsDiagnostics.record("pairing stage2 salt rejected")

@@ -550,11 +550,17 @@
     <string name="cd_camera_battery">Camera battery</string>
     <string name="gps_auto_write">Auto GPS</string>
     <string name="gps_off">Off</string>
-    <string name="gps_connecting">Connecting…</string>
+    <string name="gps_connecting">Connecting</string>
     <string name="gps_need_camera">Turn on camera Bluetooth pairing</string>
     <string name="gps_waiting_location">Waiting for location</string>
     <string name="gps_ready">Location updated</string>
     <string name="gps_unavailable">Unavailable</string>
     <string name="gps_retry">Retry</string>
+    <string name="gps_clear_pairing">Clear GPS pairing</string>
+    <string name="gps_clear_pairing_title">Clear GPS pairing?</string>
+    <string name="gps_paired_device_count">Paired devices: %1$d</string>
+    <string name="gps_clear_pairing_message">The saved camera identity will be removed. Pair again next time.</string>
+    <string name="gps_help_title">GPS help</string>
+    <string name="gps_help_message">First time: open the camera’s Bluetooth pairing screen, then tap the button. Later connections are automatic.</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
 </resources>
