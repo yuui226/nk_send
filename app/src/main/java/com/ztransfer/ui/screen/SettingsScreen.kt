@@ -1,5 +1,6 @@
 package com.ztransfer.ui.screen
 
+import android.Manifest
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
@@ -9,8 +10,8 @@ import android.graphics.Shader
 import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
@@ -84,6 +85,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -99,6 +103,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
@@ -143,6 +148,8 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.gps.GpsStatus
+import com.ztransfer.gps.GpsViewModel
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
 import com.ztransfer.viewmodel.freeEditionPhotoFrameWatermark
@@ -207,6 +214,9 @@ fun SettingsOverlay(
     cameraIsStaMode: Boolean = false,
 ) {
     val state by viewModel.state.collectAsState()
+    val gpsViewModel: GpsViewModel = viewModel()
+    val gpsState by gpsViewModel.state.collectAsState()
+    val context = LocalContext.current
     // 弹窗一出现就开始准备效果演示图；ViewModel 会按照片身份去重，重复打开不重复读取。
     LaunchedEffect(Unit) { onEffectPreviewRequested() }
     val colors = AppTheme.colors
@@ -387,6 +397,38 @@ fun SettingsOverlay(
         footerHintText = text
         footerHintVisible = true
         footerHintNonce++
+    }
+    val gpsPermissionHint = stringResource(R.string.gps_permission_required)
+    val gpsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        val locationGranted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+            (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) ||
+            (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED)
+        val bluetoothGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED)
+        if (locationGranted && bluetoothGranted) {
+            gpsViewModel.setEnabled(true)
+        } else {
+            showFooterHint(gpsPermissionHint)
+        }
+    }
+    fun requestGpsEnable() {
+        val requested = buildList {
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_SCAN)
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
+        val missing = requested.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) gpsViewModel.setEnabled(true)
+        else gpsPermissionLauncher.launch(missing.toTypedArray())
     }
     LaunchedEffect(footerHintNonce) {
         if (footerHintVisible) {
@@ -964,6 +1006,49 @@ fun SettingsOverlay(
                         hapticsEnabled = state.hapticsEnabled,
                         enabled = state.transferDirUri != null,
                         modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ---------- 尼康 GPS：只保留一个无感总开关；配对、定位和重连全部后台完成 ----------
+            val gpsSummary = when (gpsState.status) {
+                GpsStatus.OFF -> stringResource(R.string.gps_off)
+                GpsStatus.STARTING, GpsStatus.CONNECTING -> stringResource(R.string.gps_connecting)
+                GpsStatus.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
+                GpsStatus.WAITING_FIX -> stringResource(R.string.gps_waiting_location)
+                GpsStatus.READY -> stringResource(R.string.gps_ready)
+                GpsStatus.ERROR -> gpsState.message ?: stringResource(R.string.gps_unavailable)
+            }
+            SettingsCard(
+                borderColor = if (gpsState.enabled) colors.accentBlue.copy(alpha = 0.62f)
+                else colors.glassPanelBorder,
+                pressAccentColor = colors.accentBlue,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = if (gpsState.enabled) colors.statusConnected else colors.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        SectionLabel(stringResource(R.string.gps_auto_write))
+                        Text(
+                            text = gpsSummary,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Switch(
+                        checked = gpsState.enabled,
+                        onCheckedChange = { checked ->
+                            if (checked) requestGpsEnable() else gpsViewModel.setEnabled(false)
+                        },
                     )
                 }
             }

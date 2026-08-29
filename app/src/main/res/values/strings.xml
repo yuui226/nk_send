@@ -548,4 +548,12 @@
     <string name="local_photo_select_failed">Choose a writable photo stored on this phone</string>
     <string name="local_photo_save_failed">Couldn’t generate the photo. The original is unchanged.</string>
     <string name="cd_camera_battery">Camera battery</string>
+    <string name="gps_auto_write">Auto GPS</string>
+    <string name="gps_off">Off</string>
+    <string name="gps_connecting">Connecting…</string>
+    <string name="gps_need_camera">Turn on camera Bluetooth pairing</string>
+    <string name="gps_waiting_location">Waiting for location</string>
+    <string name="gps_ready">Location updated</string>
+    <string name="gps_unavailable">Unavailable</string>
+    <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
 </resources>

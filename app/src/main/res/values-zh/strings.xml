@@ -546,4 +546,12 @@
     <string name="local_photo_select_failed">请选择保存在本机相册中且可写入的照片</string>
     <string name="local_photo_save_failed">生成失败，原照片未受影响</string>
     <string name="cd_camera_battery">相机电量</string>
+    <string name="gps_auto_write">自动写入 GPS</string>
+    <string name="gps_off">未开启</string>
+    <string name="gps_connecting">正在连接…</string>
+    <string name="gps_need_camera">请在相机上开启蓝牙配对</string>
+    <string name="gps_waiting_location">等待定位</string>
+    <string name="gps_ready">定位已更新</string>
+    <string name="gps_unavailable">暂不可用</string>
+    <string name="gps_permission_required">请允许蓝牙和定位权限</string>
 </resources>

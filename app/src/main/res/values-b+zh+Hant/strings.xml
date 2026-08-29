@@ -542,4 +542,12 @@
     <string name="local_photo_select_failed">請選擇儲存在本機相簿中且可寫入的照片</string>
     <string name="local_photo_save_failed">產生失敗，原照片未受影響</string>
     <string name="cd_camera_battery">相機電量</string>
+    <string name="gps_auto_write">自動寫入 GPS</string>
+    <string name="gps_off">未開啟</string>
+    <string name="gps_connecting">正在連線…</string>
+    <string name="gps_need_camera">請在相機上開啟藍牙配對</string>
+    <string name="gps_waiting_location">等待定位</string>
+    <string name="gps_ready">定位已更新</string>
+    <string name="gps_unavailable">暫不可用</string>
+    <string name="gps_permission_required">請允許藍牙和定位權限</string>
 </resources>

@@ -12,6 +12,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Nikon Smart Device GPS (Bluetooth LE + classic bonding). -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- 取景器录像的麦克风音轨；拒绝授权时自动降级为无声录像，不阻断功能 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 用户确认后交给系统安装器更新本 App；Android 8+ 首次使用还会要求允许此来源。 -->
@@ -48,6 +56,12 @@
         <service
             android:name=".service.CameraSessionService"
             android:foregroundServiceType="connectedDevice"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <service
+            android:name=".gps.NikonGpsService"
+            android:foregroundServiceType="connectedDevice|location"
             android:exported="false"
             android:stopWithTask="false" />
 
