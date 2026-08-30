@@ -567,7 +567,7 @@
     <string name="gps_paired_device_count">Paired devices: %1$d</string>
     <string name="gps_clear_pairing_message">The saved camera identity will be removed. Pair again next time.</string>
     <string name="gps_detail_description">When enabled, photos taken with the camera include location information.</string>
-    <string name="gps_step_camera">Camera turn on Bluetooth\n- First use: Connect to smart device → Pairing (Bluetooth) → Start pairing\n- Later use: turn on Bluetooth</string>
+    <string name="gps_step_camera">Camera turn on Bluetooth\n- First use: Connect to smart device → Pairing (Bluetooth) → Start pairing\n- Turn on Bluetooth</string>
     <string name="gps_step_app">App: tap Enable GPS</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
 </resources>
