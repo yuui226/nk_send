@@ -71,9 +71,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -3546,6 +3548,9 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             accentColor = statusAccent,
             emphasized = expanded || buttonState != GpsStatusButtonState.OFF,
             modifier = Modifier.fillMaxWidth(),
+            centerIcon = { tint ->
+                GpsModeIcon(tint = tint, modifier = Modifier.size(18.dp))
+            },
             onLongClick = {
                 clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
                 showHint(logCopiedHint)
@@ -3816,28 +3821,42 @@ private fun GpsStatusButton(
                 GpsStatusButtonState.AP_UNAVAILABLE -> stringResource(R.string.gps_ap_unavailable)
                 GpsStatusButtonState.ERROR -> stringResource(R.string.gps_retry)
             }
-            Row(
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = foreground,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+                textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.LocationOn,
-                    contentDescription = null,
-                    tint = foreground,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = foreground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Clip,
-                )
-            }
+            )
         }
+    }
+}
+
+/** GPS 定位标：与 USB 三叉标、Wi‑Fi 波纹同样的几何线条语言。 */
+@Composable
+private fun GpsModeIcon(
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val unit = size.minDimension
+        val stroke = unit * 0.10f
+        val center = Offset(size.width * 0.5f, size.height * 0.5f)
+        val radius = unit * 0.27f
+        drawCircle(
+            color = tint,
+            radius = radius,
+            center = center,
+            style = Stroke(width = stroke),
+        )
+        drawCircle(color = tint, radius = unit * 0.08f, center = center)
+        drawLine(tint, Offset(center.x, unit * 0.04f), Offset(center.x, center.y - radius - stroke), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(center.x, center.y + radius + stroke), Offset(center.x, size.height - unit * 0.04f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(unit * 0.04f, center.y), Offset(center.x - radius - stroke, center.y), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(center.x + radius + stroke, center.y), Offset(size.width - unit * 0.04f, center.y), stroke, StrokeCap.Round)
     }
 }
 

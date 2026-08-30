@@ -740,18 +740,14 @@ internal class NikonGpsBleClient(
             if (!ready && gatt === expectedGatt && currentDevice != null &&
                 writeInFlightUuid == ID_UUID
             ) {
-                // Some Android stacks lose the completion callback after the camera accepted ID.
-                // Release exactly that write slot; never bypass an earlier queued operation.
-                GpsDiagnostics.record("ID write callback timeout; proceeding")
+                // A missing ID callback is not proof that the camera accepted the connection.
+                // Do not bypass this gate: doing so can report success while the camera is still
+                // waiting for pairing confirmation. Let the service retry from a clean GATT.
+                GpsDiagnostics.record("ID write callback timeout; confirmation required")
                 writeInFlight = false
                 writeInFlightUuid = null
-                ready = true
-                listener.onReady(currentDevice.name ?: "Nikon", currentDevice)
-                pendingGeo?.also { queued ->
-                    pendingGeo = null
-                    writeCharacteristic(expectedGatt, geoChar ?: return@also, queued)
-                }
-                drainWrites(expectedGatt)
+                pendingGeo = null
+                listener.onError("GPS connection confirmation timeout")
             }
         }
     }

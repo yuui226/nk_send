@@ -104,6 +104,7 @@ internal fun <T> ReleaseCommitWheel(
     accentColor: Color? = null,
     emphasized: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    centerIcon: (@Composable (Color) -> Unit)? = null,
     favoriteOption: (T) -> Boolean = { false },
     favoriteIconColor: Color? = null,
 ) {
@@ -348,24 +349,48 @@ internal fun <T> ReleaseCommitWheel(
                         )
                     }
                 } else {
-                    Text(
-                        text = optionLabel(options[index]),
-                        style = textStyle,
-                        fontSize = optionFontSize,
-                        lineHeight = (
-                            optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
-                        ).sp,
-                        fontWeight = textWeight,
-                        color = if (emphasized && distance < 0.5f) {
-                            resolvedAccent.copy(alpha = itemAlpha)
-                        } else {
-                            colors.onBackground.copy(alpha = itemAlpha)
-                        },
-                        textAlign = TextAlign.Center,
-                        maxLines = optionMaxLines,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = itemModifier,
-                    )
+                    val textColor = if (emphasized && distance < 0.5f) {
+                        resolvedAccent.copy(alpha = itemAlpha)
+                    } else {
+                        colors.onBackground.copy(alpha = itemAlpha)
+                    }
+                    if (centerIcon == null) {
+                        Text(
+                            text = optionLabel(options[index]),
+                            style = textStyle,
+                            fontSize = optionFontSize,
+                            lineHeight = (
+                                optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                            ).sp,
+                            fontWeight = textWeight,
+                            color = textColor,
+                            textAlign = TextAlign.Center,
+                            maxLines = optionMaxLines,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = itemModifier,
+                        )
+                    } else {
+                        Row(
+                            modifier = itemModifier,
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            centerIcon.invoke(textColor)
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = optionLabel(options[index]),
+                                style = textStyle,
+                                fontSize = optionFontSize,
+                                lineHeight = (
+                                    optionFontSize.value + if (optionMaxLines > 1) 1f else 2f
+                                ).sp,
+                                fontWeight = textWeight,
+                                color = textColor,
+                                maxLines = optionMaxLines,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         }
