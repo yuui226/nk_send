@@ -59,6 +59,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private var pairingConfirmationPending = false
     private var apModeBlocked = false
     private var preserveReadyDuringReconnect = false
+    private var notificationStarted = false
+    private var notificationOverride: String? = null
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -144,6 +146,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onConnecting(name: String?) {
         GpsDiagnostics.record("connecting name=${name ?: "?"}")
+        notificationOverride = null
         updateState(GpsStatus.CONNECTING, name ?: "Nikon")
     }
 
@@ -154,11 +157,13 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onPairing() {
         GpsDiagnostics.record("BLE pairing handshake")
+        notificationOverride = null
         updateState(GpsStatus.PAIRING)
     }
 
     override fun onReady(name: String, device: android.bluetooth.BluetoothDevice) {
         GpsDiagnostics.record("GPS ready camera=$name")
+        notificationOverride = null
         reconnectJob?.cancel()
         reconnectJob = null
         val wasReadyBeforeReconnect = preserveReadyDuringReconnect
@@ -182,6 +187,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         geoWriteTimeoutJob = null
         geoWriteInFlight = false
         if (success) {
+            notificationOverride = "位置已更新 · ${formatNotificationTime(System.currentTimeMillis())}"
             val firstVerifiedWrite = !cameraVerified
             val confirmedFreshPairing = pairingConfirmationPending
             cameraVerified = true
@@ -221,11 +227,14 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                     it.copy(status = GpsStatus.READY, lastSentAtMs = lastSentAt, message = null)
                 }
             }
+            refreshNotification()
         } else {
             pendingSentLocation = null
             lastSentLocation = null
             lastSentAt = 0L
             updateState(GpsStatus.ERROR, message = "GPS 写入失败")
+            notificationOverride = "GPS 写入失败"
+            refreshNotification()
         }
     }
 
@@ -244,6 +253,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onDisconnected() {
         if (!enabled) return
+        notificationOverride = "连接已断开，正在重连"
+        refreshNotification()
         cameraReady = false
         stopLocationUpdates()
         // Force the first location after a reconnect to be sent again. The camera may have
@@ -314,6 +325,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         val needsCamera = userMessage.contains("配对") ||
             userMessage.contains("not found", ignoreCase = true)
         val isPermissionError = userMessage.contains("权限")
+        notificationOverride = userMessage
         updateState(
             if (isPermissionError) GpsStatus.ERROR
             else if (needsCamera) GpsStatus.NEEDS_CAMERA
@@ -471,6 +483,15 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         geocodeJob?.cancel()
         geocodeJob = null
         lastGeocodedKey = null
+        notificationOverride = null
+        if (notificationStarted) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION") stopForeground(true)
+            }
+            notificationStarted = false
+        }
         NikonGpsRuntime.state.value = GpsState()
     }
 
@@ -529,10 +550,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         NikonGpsRuntime.state.update {
             it.copy(enabled = enabled, status = status, cameraName = cameraName ?: it.cameraName, message = message)
         }
+        refreshNotification()
     }
 
     private fun startForegroundCompat() {
-        val notification = buildNotification()
+        val notification = buildNotification(NikonGpsRuntime.state.value)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
@@ -541,6 +563,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
+            notificationStarted = true
         } catch (_: SecurityException) {
             updateState(GpsStatus.ERROR, message = "需要通知权限")
             enabled = false
@@ -554,14 +577,39 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "GPS", NotificationManager.IMPORTANCE_LOW))
     }
 
-    private fun buildNotification(): Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun buildNotification(state: GpsState): Notification = NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(R.drawable.ic_stat_transfer)
         .setContentTitle("Z传 GPS")
-        .setContentText("自动写入相机位置")
+        .setContentText(notificationOverride ?: notificationText(state))
         .setOngoing(true)
         .setSilent(true)
         .setContentIntent(android.app.PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE))
         .build()
+
+    private fun refreshNotification() {
+        if (!notificationStarted) return
+        runCatching {
+            getSystemService(NotificationManager::class.java)
+                .notify(NOTIFICATION_ID, buildNotification(NikonGpsRuntime.state.value))
+        }
+    }
+
+    private fun notificationText(state: GpsState): String = when (state.status) {
+        GpsStatus.OFF -> "GPS 已关闭"
+        GpsStatus.STARTING, GpsStatus.SEARCHING -> "正在寻找相机"
+        GpsStatus.NEEDS_CAMERA -> state.message ?: "请打开相机蓝牙"
+        GpsStatus.CONNECTING -> state.message ?: "正在连接相机"
+        GpsStatus.PAIRING, GpsStatus.CAMERA_CONFIRM, GpsStatus.PAIRING_SUCCESS -> "正在连接相机"
+        GpsStatus.CONNECTED -> "已连接，等待位置更新"
+        GpsStatus.WRITING -> "正在写入相机位置"
+        GpsStatus.WAITING_FIX -> "等待定位"
+        GpsStatus.READY -> "已连接，自动写入位置"
+        GpsStatus.AP_UNAVAILABLE -> "AP 模式不可用"
+        GpsStatus.ERROR -> state.message ?: "GPS 连接失败"
+    }
+
+    private fun formatNotificationTime(timestamp: Long): String =
+        java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date(timestamp))
 
     companion object {
         private const val CHANNEL_ID = "nikon_gps"
