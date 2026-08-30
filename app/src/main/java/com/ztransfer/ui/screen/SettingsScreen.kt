@@ -3567,12 +3567,18 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         )
         AnimatedVisibility(
             visible = expanded,
-            // 只淡入淡出，内容一次性完成布局；避免连接页两张大卡片在展开过程中逐帧重测。
-            enter = fadeIn(tween(130)),
-            exit = fadeOut(tween(90)),
+            enter = fadeIn(tween(150)) + expandVertically(
+                animationSpec = tween(180, easing = FastOutSlowInEasing),
+                expandFrom = Alignment.Top,
+            ),
+            exit = fadeOut(tween(100)) + shrinkVertically(
+                animationSpec = tween(150, easing = FastOutSlowInEasing),
+                shrinkTowards = Alignment.Top,
+            ),
         ) {
             Surface(
                 modifier = Modifier
+                    .align(Alignment.Start)
                     .requiredWidth(300.dp)
                     .padding(top = 6.dp),
                 shape = RoundedCornerShape(14.dp),
