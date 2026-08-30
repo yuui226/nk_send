@@ -3535,11 +3535,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             else -> gpsViewModel.setEnabled(false)
         }
     }
-    SettingsCard(
-        modifier = modifier,
-        borderColor = colors.glassPanelBorder,
-        tintColor = statusAccent,
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
         ReleaseCommitWheel(
             options = listOf(false, true),
             selected = expanded,
@@ -3560,7 +3556,19 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             enter = fadeIn() + expandVertically(),
             exit = fadeOut() + shrinkVertically(),
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = colors.glassSurface,
+                border = BorderStroke(1.dp, colors.glassPanelBorder),
+            ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
+            ) {
                 Text(
                     text = stringResource(R.string.gps_detail_description),
                     style = MaterialTheme.typography.bodySmall,
@@ -3632,6 +3640,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     modifier = Modifier.padding(top = 8.dp),
                     onClick = ::toggleGps,
                 )
+            }
             }
         }
         hintText?.let {
@@ -3794,7 +3803,7 @@ private fun GpsStatusButton(
             label = "gpsStatusButtonText",
         ) { state ->
             val label = when (state) {
-                GpsStatusButtonState.OFF -> stringResource(R.string.gps_off)
+                GpsStatusButtonState.OFF -> stringResource(R.string.gps_enable)
                 GpsStatusButtonState.SEARCHING -> stringResource(R.string.gps_searching)
                 GpsStatusButtonState.CONNECTING -> stringResource(R.string.gps_connecting)
                 GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_pairing)
@@ -3807,16 +3816,27 @@ private fun GpsStatusButton(
                 GpsStatusButtonState.AP_UNAVAILABLE -> stringResource(R.string.gps_ap_unavailable)
                 GpsStatusButtonState.ERROR -> stringResource(R.string.gps_retry)
             }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = foreground,
-                maxLines = 1,
-                overflow = TextOverflow.Clip,
-                textAlign = TextAlign.Center,
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-            )
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.LocationOn,
+                    contentDescription = null,
+                    tint = foreground,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = foreground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip,
+                )
+            }
         }
     }
 }

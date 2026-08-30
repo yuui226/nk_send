@@ -547,7 +547,7 @@
     <string name="local_photo_save_failed">生成失败，原照片未受影响</string>
     <string name="cd_camera_battery">相机电量</string>
     <string name="gps_auto_write">GPS</string>
-    <string name="gps_off">关闭</string>
+    <string name="gps_enable">开启 GPS</string>
     <string name="gps_searching">正在寻找</string>
     <string name="gps_connecting">正在连接</string>
     <string name="gps_pairing">正在配对</string>
@@ -555,7 +555,7 @@
     <string name="gps_pairing_success">配对成功</string>
     <string name="gps_connected">连接成功</string>
     <string name="gps_writing">GPS 写入中</string>
-    <string name="gps_enabled">开启</string>
+    <string name="gps_enabled">已开启</string>
     <string name="gps_location_copied">已复制地址与坐标</string>
     <string name="gps_need_camera">打开相机配对</string>
     <string name="gps_ap_unavailable">AP 模式不可用</string>

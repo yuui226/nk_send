@@ -468,10 +468,13 @@ fun HomeScreen(
             val horizontalPadding = if (maxWidth < 360.dp) 14.dp else 20.dp
             val cardSpacing = 12.dp
             val gpsSpacing = 10.dp
-            // A collapsed wheel is 50dp plus 24dp card padding.
-            // Reserve that exact height so USB + GPS matches the Wi-Fi card.
-            val gpsCollapsedHeight = 74.dp
+            // The GPS control is a standalone wheel (no extra card frame/padding).
+            // Reserve its exact collapsed height so USB + GPS matches the Wi-Fi card.
+            val gpsCollapsedHeight = 50.dp
             val usbCardHeight = (cardHeight - gpsSpacing - gpsCollapsedHeight).coerceAtLeast(180.dp)
+            val spacerWeight = if (compact) 0.18f else 0.32f
+            val spacerRoom = (maxHeight - 56.dp - cardHeight - 62.dp).coerceAtLeast(0.dp)
+            val topSpacerHeight = spacerRoom * (spacerWeight / (spacerWeight + 1f))
 
             Column(
                 modifier = Modifier
@@ -481,7 +484,8 @@ fun HomeScreen(
             ) {
                 // 给原有顶栏留空间；确认模式后卡片退场，仅模式图标飞向屏幕上方。
                 Spacer(Modifier.height(56.dp))
-                Spacer(Modifier.weight(if (compact) 0.18f else 0.32f))
+                // Keep the cards' top edge fixed when GPS details expand downward.
+                Spacer(Modifier.height(topSpacerHeight))
 
                 Row(
                     modifier = Modifier
