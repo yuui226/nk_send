@@ -1,8 +1,12 @@
 package com.ztransfer.ui.screen
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -40,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.ztransfer.R
 import com.ztransfer.effects.FavoriteFrameWatermarkEffect
 import com.ztransfer.effects.FavoritePhotoFilter
@@ -50,6 +55,7 @@ import com.ztransfer.frame.PhotoFrameMediaStoreSource
 import com.ztransfer.frame.PhotoFrameMetadata
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkContent
+import com.ztransfer.frame.PhotoFrameMetadataSettings
 import com.ztransfer.frame.LOCAL_PHOTO_FALLBACK_RELATIVE_PATH
 import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.normalizePhotoFrameMetadataSettings
@@ -64,6 +70,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private data class LocalPhotoSelection(
+    val sourceUri: Uri,
     val destination: PhotoFrameMediaStoreSource?,
     val preview: Bitmap,
     val metadata: PhotoFrameMetadata,
@@ -104,6 +111,8 @@ fun LocalPhotoEffectsPage(
     var borderEnabled by remember { mutableStateOf(initialSettings.borderEnabled) }
     var preset by remember { mutableStateOf(initialSettings.preset) }
     var metadataSettings by remember { mutableStateOf(initialSettings.metadataSettings) }
+    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var reloadMetadataAfterMediaPermission by remember { mutableStateOf(false) }
     var watermarkDraft by remember { mutableStateOf(initialSettings.watermark) }
     var filterId by remember { mutableStateOf(initialSettings.filterId) }
     var filterEnabled by remember { mutableStateOf(initialSettings.filterEnabled) }
@@ -161,12 +170,38 @@ fun LocalPhotoEffectsPage(
         stringResource(R.string.photo_effect_favorite_image_missing)
     val savedFormat = stringResource(R.string.local_photo_saved)
 
-    val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult(),
-    ) { activityResult ->
-        val uri = activityResult.data?.data
-            ?.takeIf { activityResult.resultCode == Activity.RESULT_OK }
-            ?: return@rememberLauncherForActivityResult
+    fun hasLocationFrameField(settings: PhotoFrameMetadataSettings): Boolean =
+        settings.showAddress || settings.showCoordinates || settings.showAltitude
+
+    fun mediaLocationPermissionGranted(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_MEDIA_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED
+
+    fun mayExposeRedactedMediaLocation(uri: Uri): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            (uri.authority == MediaStore.AUTHORITY ||
+                uri.authority == "com.android.providers.media.documents")
+
+    fun reloadSelectedMetadata() {
+        val current = selection ?: return
+        sourceLoading = true
+        scope.launch {
+            val metadata = withContext(Dispatchers.IO) {
+                PhotoFrameExporter.readPreviewMetadata(
+                    resolver = context.contentResolver,
+                    sourceUri = current.sourceUri,
+                    context = context,
+                )
+            }
+            selection = current.copy(metadata = metadata)
+            sourceLoading = false
+        }
+    }
+
+    fun loadSelectedPhoto(uri: Uri) {
         sourceLoading = true
         scope.launch {
             val selectionResult = withContext(Dispatchers.IO) {
@@ -186,6 +221,7 @@ fun LocalPhotoEffectsPage(
                         sourceUri = uri,
                     ).getOrNull()
                     LocalPhotoSelection(
+                        sourceUri = uri,
                         destination = destination,
                         preview = decoded,
                         metadata = metadata,
@@ -199,6 +235,40 @@ fun LocalPhotoEffectsPage(
                 },
                 onFailure = { showHint(selectFailedText) },
             )
+        }
+    }
+
+    val mediaLocationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) {
+        val photoUri = pendingPhotoUri
+        pendingPhotoUri = null
+        if (photoUri != null) {
+            loadSelectedPhoto(photoUri)
+        }
+        if (reloadMetadataAfterMediaPermission) {
+            reloadMetadataAfterMediaPermission = false
+            reloadSelectedMetadata()
+        }
+    }
+
+    val photoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { activityResult ->
+        val uri = activityResult.data?.data
+            ?.takeIf { activityResult.resultCode == Activity.RESULT_OK }
+            ?: return@rememberLauncherForActivityResult
+        if (
+            hasLocationFrameField(
+                resolvedPhotoFrameMetadataSettings(metadataSettings, preset),
+            ) &&
+            mayExposeRedactedMediaLocation(uri) &&
+            !mediaLocationPermissionGranted()
+        ) {
+            pendingPhotoUri = uri
+            mediaLocationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+        } else {
+            loadSelectedPhoto(uri)
         }
     }
     val launchPhotoPicker = {
@@ -534,6 +604,20 @@ fun LocalPhotoEffectsPage(
                         metadataSettings - preset
                     } else {
                         metadataSettings + (preset to normalized)
+                    }
+                    val sourceUri = selection?.sourceUri
+                    if (
+                        hasLocationFrameField(normalized) &&
+                        sourceUri != null &&
+                        mayExposeRedactedMediaLocation(sourceUri) &&
+                        !mediaLocationPermissionGranted() &&
+                        pendingPhotoUri == null &&
+                        !reloadMetadataAfterMediaPermission
+                    ) {
+                        reloadMetadataAfterMediaPermission = true
+                        mediaLocationPermissionLauncher.launch(
+                            Manifest.permission.ACCESS_MEDIA_LOCATION,
+                        )
                     }
                 },
                 onWatermarkChanged = { updated ->

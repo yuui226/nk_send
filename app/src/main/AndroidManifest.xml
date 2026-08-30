@@ -19,6 +19,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Android 10+ otherwise redacts GPS/altitude from MediaStore image EXIF. -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <!-- 取景器录像的麦克风音轨；拒绝授权时自动降级为无声录像，不阻断功能 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />

@@ -1,10 +1,12 @@
 package com.ztransfer.frame
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -29,6 +31,7 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
 import androidx.core.content.res.ResourcesCompat
 import com.ztransfer.R
@@ -341,6 +344,39 @@ internal fun canCreateDerivedImageInOriginalPath(
     sdkInt: Int,
 ): Boolean = isStandardImageRelativePath(relativePath) ||
     (sdkInt >= Build.VERSION_CODES.R && hasRelatedMediaUri)
+
+/**
+ * Returns a URI that asks MediaStore for the original, non-redacted image bytes when the app has
+ * the Android 10+ media-location permission.  SAF/other providers are left untouched because
+ * their granted URI already represents the exact document the user selected.
+ */
+internal fun exifReadUri(context: Context?, uri: Uri): Uri {
+    if (context == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_MEDIA_LOCATION,
+        ) != PackageManager.PERMISSION_GRANTED
+    ) {
+        return uri
+    }
+    val mediaUri = if (uri.authority == MediaStore.AUTHORITY) {
+        uri
+    } else {
+        runCatching { MediaStore.getMediaUri(context, uri) }.getOrNull()
+            ?: resolveMediaDocumentUriForExif(uri)
+    } ?: return uri
+    return runCatching { MediaStore.setRequireOriginal(mediaUri) }.getOrDefault(mediaUri)
+}
+
+private fun resolveMediaDocumentUriForExif(uri: Uri): Uri? {
+    if (uri.authority != "com.android.providers.media.documents") return null
+    val documentId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
+        ?: return null
+    val parts = documentId.split(':', limit = 2)
+    if (parts.size != 2 || parts[0] != "image") return null
+    val mediaId = parts[1].toLongOrNull() ?: return null
+    return ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, mediaId)
+}
 
 internal data class PhotoFrameLayout(
     val canvasWidth: Int,
@@ -671,6 +707,7 @@ object PhotoFrameExporter {
                 currentCoroutineContext().ensureActive()
                 val saveStartedAtMs = generationProbeClock()
                 saveRendered(
+                    context = context,
                     resolver = resolver,
                     destination = destination,
                     sourceUri = sourceUri,
@@ -738,6 +775,7 @@ object PhotoFrameExporter {
             val saved = try {
                 currentCoroutineContext().ensureActive()
                 saveRenderedToMediaStore(
+                    context = context,
                     resolver = resolver,
                     source = source,
                     preset = preset,
@@ -1038,6 +1076,7 @@ object PhotoFrameExporter {
         sourceUri,
         context,
         requireLocation = true,
+        exifContext = context,
     )
 
     private suspend fun renderSource(
@@ -1081,6 +1120,7 @@ object PhotoFrameExporter {
                     metadataUris.first(),
                     context.takeIf { metadataSettings.showAddress },
                     requireLocation = requireLocation,
+                    exifContext = context.takeIf { requireLocation },
                 ),
             ) { current, uri ->
                 current.mergeLocationFrom(
@@ -1089,6 +1129,7 @@ object PhotoFrameExporter {
                         uri,
                         context.takeIf { metadataSettings.showAddress },
                         requireLocation = true,
+                        exifContext = context,
                     ),
                 )
             }
@@ -1319,9 +1360,11 @@ object PhotoFrameExporter {
         uri: Uri,
         context: Context? = null,
         requireLocation: Boolean = false,
+        exifContext: Context? = context,
     ): PhotoFrameMetadata {
+        val exifUri = exifReadUri(exifContext, uri)
         val descriptorResult = runCatching {
-            resolver.openFileDescriptor(uri, "r")?.use { pfd ->
+            resolver.openFileDescriptor(exifUri, "r")?.use { pfd ->
                 metadataFrom(ExifInterface(pfd.fileDescriptor), context)
             }
         }.getOrNull()
@@ -1331,7 +1374,7 @@ object PhotoFrameExporter {
 
         // 少数 DocumentsProvider 返回不可 seek 的文件描述符，但输入流仍可正常读取。
         val streamResult = runCatching {
-            resolver.openInputStream(uri)?.use { input ->
+            resolver.openInputStream(exifUri)?.use { input ->
                 BufferedInputStream(input).use { metadataFrom(ExifInterface(it), context) }
             }
         }.getOrNull()
@@ -3002,6 +3045,7 @@ object PhotoFrameExporter {
     }
 
     private fun copyRenderedExif(
+        context: Context?,
         resolver: ContentResolver,
         sourceUri: Uri,
         targetUri: Uri,
@@ -3011,8 +3055,9 @@ object PhotoFrameExporter {
         // Some picker/DocumentsProvider descriptors are readable for pixels but do not expose a
         // seekable file descriptor to ExifInterface.  Try the descriptor first (fast path), then
         // fall back to a buffered stream so the generated frame keeps the original GPS/EXIF data.
+        val exifUri = exifReadUri(context, sourceUri)
         val attributes = runCatching {
-            resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
+            resolver.openFileDescriptor(exifUri, "r")?.use { descriptor ->
                 val source = ExifInterface(descriptor.fileDescriptor)
                 COPIED_EXIF_TAGS.mapNotNull { tag ->
                     source.getAttribute(tag)?.let { value -> tag to value }
@@ -3020,7 +3065,7 @@ object PhotoFrameExporter {
             }
         }.getOrNull()?.takeIf { it.isNotEmpty() }
             ?: runCatching {
-                resolver.openInputStream(sourceUri)?.use { input ->
+                resolver.openInputStream(exifUri)?.use { input ->
                     BufferedInputStream(input).use { buffered ->
                         val source = ExifInterface(buffered)
                         COPIED_EXIF_TAGS.mapNotNull { tag ->
@@ -4989,6 +5034,7 @@ object PhotoFrameExporter {
         }
 
     private suspend fun saveRenderedToMediaStore(
+        context: Context,
         resolver: ContentResolver,
         source: PhotoFrameMediaStoreSource,
         preset: PhotoFramePreset,
@@ -5017,6 +5063,7 @@ object PhotoFrameExporter {
         if (canTryOriginal) {
             try {
                 return writeRenderedToMediaStore(
+                    context = context,
                     resolver = resolver,
                     sourceUri = source.relatedMediaUri ?: source.sourceUri,
                     collectionUri = source.collectionUri,
@@ -5052,6 +5099,7 @@ object PhotoFrameExporter {
         }
         return try {
             writeRenderedToMediaStore(
+                context = context,
                 resolver = resolver,
                 sourceUri = source.relatedMediaUri ?: source.sourceUri,
                 collectionUri = source.fallbackCollectionUri,
@@ -5070,6 +5118,7 @@ object PhotoFrameExporter {
     }
 
     private suspend fun writeRenderedToMediaStore(
+        context: Context,
         resolver: ContentResolver,
         sourceUri: Uri,
         collectionUri: Uri,
@@ -5109,6 +5158,7 @@ object PhotoFrameExporter {
             } == true
             if (!written) error("Cannot write derived photo")
             copyRenderedExif(
+                context = context,
                 resolver = resolver,
                 sourceUri = sourceUri,
                 targetUri = target,
@@ -5136,6 +5186,7 @@ object PhotoFrameExporter {
     }
 
     private suspend fun saveRendered(
+        context: Context,
         resolver: ContentResolver,
         destination: PhotoFrameDestination,
         sourceUri: Uri,
@@ -5194,6 +5245,7 @@ object PhotoFrameExporter {
             ) { "${bitmap.width}x${bitmap.height} q=$PHOTO_FRAME_JPEG_QUALITY" }
             val exifStartedAtMs = generationProbeClock()
             copyRenderedExif(
+                context = context,
                 resolver = resolver,
                 sourceUri = sourceUri,
                 targetUri = temp,

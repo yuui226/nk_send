@@ -29,6 +29,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
+import com.ztransfer.frame.exifReadUri
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
 import com.ztransfer.protocol.CameraRefusedException
@@ -4155,12 +4156,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         val parsed = withContext(Dispatchers.IO) {
             val resolver = getApplication<Application>().contentResolver
+            val exifUri = exifReadUri(getApplication(), sourceUri)
             runCatching {
-                resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
+                resolver.openFileDescriptor(exifUri, "r")?.use { descriptor ->
                     parseExifImpl(ExifInterface(descriptor.fileDescriptor))
                 }
             }.getOrNull() ?: runCatching {
-                resolver.openInputStream(sourceUri)?.use { input ->
+                resolver.openInputStream(exifUri)?.use { input ->
                     parseExifImpl(ExifInterface(java.io.BufferedInputStream(input)))
                 }
             }.getOrNull()
