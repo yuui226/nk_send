@@ -3467,7 +3467,6 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     val copiedHint = stringResource(R.string.gps_location_copied)
     val logCopiedHint = stringResource(R.string.code_copied)
     val gpsLabel = stringResource(R.string.gps_auto_write)
-    val hasPairedDevice = gpsViewModel.pairedDeviceCount() > 0
     fun showHint(text: String) { hintText = text }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -3595,10 +3594,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     Column(modifier = Modifier.padding(top = 10.dp)) {
                         GpsConnectionStep(
                             index = 1,
-                            text = stringResource(
-                                if (hasPairedDevice) R.string.gps_step_camera_follow_up
-                                else R.string.gps_step_camera,
-                            ),
+                            text = stringResource(R.string.gps_step_camera),
                         )
                         Spacer(Modifier.height(10.dp))
                         GpsConnectionStep(
