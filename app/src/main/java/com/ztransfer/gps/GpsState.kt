@@ -25,6 +25,7 @@ data class GpsState(
     val latitude: Double? = null,
     val longitude: Double? = null,
     val placeName: String? = null,
+    val altitudeMeters: Double? = null,
     val accuracyMeters: Float? = null,
     val lastSentAtMs: Long? = null,
     val message: String? = null,

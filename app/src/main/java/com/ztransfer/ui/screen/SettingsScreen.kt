@@ -3689,8 +3689,11 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         gpsState.longitude?.let { lon -> "%.5f, %.5f".format(java.util.Locale.US, lat, lon) }
                     }
                     val updatedAt = gpsState.lastSentAtMs?.let {
-                        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it))
+                        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).apply {
+                            timeZone = java.util.TimeZone.getTimeZone("Asia/Shanghai")
+                        }.format(java.util.Date(it))
                     }
+                    val locationText = gpsState.placeName ?: coordinates.orEmpty()
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -3701,14 +3704,30 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                             },
                     ) {
                         Text(
-                            text = gpsState.placeName ?: stringResource(R.string.gps_enabled),
+                            text = stringResource(R.string.gps_location_value, locationText),
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        gpsState.altitudeMeters?.let { altitude ->
+                            Text(
+                                text = stringResource(
+                                    R.string.gps_altitude_value,
+                                    altitude.roundToInt(),
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
                         updatedAt?.let {
-                            Text("更新 $it", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant.copy(alpha = 0.72f), modifier = Modifier.padding(top = 2.dp))
+                            Text(
+                                stringResource(R.string.gps_updated_at, it),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant.copy(alpha = 0.72f),
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
                         }
                     }
                 }

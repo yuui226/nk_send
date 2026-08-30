@@ -554,6 +554,9 @@
     <string name="gps_camera_confirm">相机请按 OK</string>
     <string name="gps_enabled">已连接</string>
     <string name="gps_location_copied">已复制地址与坐标</string>
+    <string name="gps_location_value">位置：%1$s</string>
+    <string name="gps_altitude_value">海拔：%1$d 米</string>
+    <string name="gps_updated_at">更新：%1$s</string>
     <string name="gps_need_camera">打开相机配对</string>
     <string name="gps_ap_unavailable">AP 模式不可用</string>
     <string name="gps_retry">重试</string>
