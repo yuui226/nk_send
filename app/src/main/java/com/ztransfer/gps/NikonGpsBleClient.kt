@@ -217,6 +217,9 @@ internal class NikonGpsBleClient(
 
     private fun connect(target: BluetoothDevice) {
         GpsDiagnostics.record("BLE connect address=${target.address}")
+        // Direct reconnects do not pass through ScanCallback, so retain the target just like a
+        // scanned device. The ID-write success path uses it to publish the verified connection.
+        device = target
         try {
             val connection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 target.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
