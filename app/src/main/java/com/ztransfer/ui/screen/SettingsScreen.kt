@@ -1056,7 +1056,16 @@ fun SettingsOverlay(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     SectionLabel(
                         stringResource(R.string.gps_auto_write),
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onLongPress = {
+                                        clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
+                                        showFooterHint(gpsCopiedHint)
+                                    },
+                                )
+                            },
                     )
                     TipLightbulbButton(
                         onClick = { showGpsInfoDialog = true },
@@ -1074,23 +1083,6 @@ fun SettingsOverlay(
                         Icon(
                             imageVector = Icons.Default.LinkOff,
                             contentDescription = stringResource(R.string.gps_clear_pairing),
-                            tint = colors.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    GlassButton(
-                        onClick = {
-                            clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
-                            showFooterHint(gpsCopiedHint)
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.size(42.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = stringResource(R.string.lab_copy_log),
                             tint = colors.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
