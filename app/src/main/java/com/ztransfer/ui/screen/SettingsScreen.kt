@@ -110,6 +110,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ztransfer.AppLocale
 import com.ztransfer.BuildConfig
@@ -3541,7 +3542,12 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             else -> gpsViewModel.setEnabled(false)
         }
     }
-    Column(modifier = modifier.fillMaxWidth()) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            // The expanded panel intentionally extends over the adjacent Wi‑Fi card.
+            .zIndex(if (expanded) 2f else 0f),
+    ) {
         ReleaseCommitWheel(
             options = listOf(false, true),
             selected = expanded,
