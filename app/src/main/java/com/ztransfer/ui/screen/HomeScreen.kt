@@ -468,10 +468,9 @@ fun HomeScreen(
             val horizontalPadding = if (maxWidth < 360.dp) 14.dp else 20.dp
             val cardSpacing = 12.dp
             val gpsSpacing = 10.dp
-            // A collapsed GPS card is a 32dp title row plus a 42dp status
-            // button and 24dp card padding.
+            // A collapsed wheel is 50dp plus 24dp card padding.
             // Reserve that exact height so USB + GPS matches the Wi-Fi card.
-            val gpsCollapsedHeight = 106.dp
+            val gpsCollapsedHeight = 74.dp
             val usbCardHeight = (cardHeight - gpsSpacing - gpsCollapsedHeight).coerceAtLeast(180.dp)
 
             Column(

@@ -3501,61 +3501,74 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             hintText = null
         }
     }
+    val buttonState = if (!gpsState.enabled) {
+        GpsStatusButtonState.OFF
+    } else {
+        when (gpsState.status) {
+            GpsStatus.OFF -> GpsStatusButtonState.OFF
+            GpsStatus.STARTING, GpsStatus.SEARCHING -> GpsStatusButtonState.SEARCHING
+            GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
+            GpsStatus.PAIRING -> GpsStatusButtonState.PAIRING
+            GpsStatus.CAMERA_CONFIRM -> GpsStatusButtonState.CAMERA_CONFIRM
+            GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.PAIRING_SUCCESS
+            GpsStatus.CONNECTED -> GpsStatusButtonState.CONNECTED
+            GpsStatus.WRITING -> GpsStatusButtonState.WRITING
+            GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.NEEDS_CAMERA
+            GpsStatus.WAITING_FIX -> GpsStatusButtonState.CONNECTED
+            GpsStatus.READY -> GpsStatusButtonState.ENABLED
+            GpsStatus.AP_UNAVAILABLE -> GpsStatusButtonState.AP_UNAVAILABLE
+            GpsStatus.ERROR -> GpsStatusButtonState.ERROR
+        }
+    }
+    val statusText = when (buttonState) {
+        GpsStatusButtonState.OFF -> stringResource(R.string.gps_off)
+        GpsStatusButtonState.SEARCHING -> stringResource(R.string.gps_searching)
+        GpsStatusButtonState.CONNECTING -> stringResource(R.string.gps_connecting)
+        GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_pairing)
+        GpsStatusButtonState.CAMERA_CONFIRM -> stringResource(R.string.gps_camera_confirm)
+        GpsStatusButtonState.PAIRING_SUCCESS -> stringResource(R.string.gps_pairing_success)
+        GpsStatusButtonState.CONNECTED -> stringResource(R.string.gps_connected)
+        GpsStatusButtonState.WRITING -> stringResource(R.string.gps_writing)
+        GpsStatusButtonState.ENABLED -> stringResource(R.string.gps_enabled)
+        GpsStatusButtonState.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
+        GpsStatusButtonState.AP_UNAVAILABLE -> stringResource(R.string.gps_ap_unavailable)
+        GpsStatusButtonState.ERROR -> stringResource(R.string.gps_retry)
+    }
+    val statusAccent = when (buttonState) {
+        GpsStatusButtonState.OFF -> colors.statusWaiting
+        GpsStatusButtonState.CONNECTED, GpsStatusButtonState.ENABLED -> colors.statusConnected
+        GpsStatusButtonState.AP_UNAVAILABLE, GpsStatusButtonState.ERROR -> colors.statusError
+        else -> colors.accentBlue
+    }
+    fun toggleGps() {
+        when {
+            !gpsState.enabled -> enableGps()
+            gpsState.status == GpsStatus.ERROR -> gpsViewModel.retry()
+            gpsState.status == GpsStatus.AP_UNAVAILABLE -> Unit
+            else -> gpsViewModel.setEnabled(false)
+        }
+    }
     SettingsCard(
         modifier = modifier,
         borderColor = colors.glassPanelBorder,
-        pressAccentColor = colors.accentBlue,
+        tintColor = statusAccent,
     ) {
-        Row(
+        ReleaseCommitWheel(
+            options = listOf(Unit),
+            selected = Unit,
+            optionLabel = { statusText },
+            onValueCommitted = {},
+            onActivated = { expanded = !expanded },
+            label = stringResource(R.string.gps_auto_write),
+            wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
+            showDragHint = false,
+            accentColor = statusAccent,
+            emphasized = expanded || buttonState != GpsStatusButtonState.OFF,
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SectionLabel(
-                    stringResource(R.string.gps_auto_write),
-                    modifier = Modifier.pointerInput(Unit) {
-                        detectTapGestures(onLongPress = {
-                            clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
-                            showHint(logCopiedHint)
-                        })
-                    },
-                )
-                Spacer(Modifier.width(4.dp))
-                TipLightbulbButton(
-                    onClick = {
-                        if (!helpViewed) {
-                            helpViewed = true
-                            gpsViewModel.markHelpViewed()
-                        }
-                        showInfo = true
-                    },
-                    contentDescription = stringResource(R.string.gps_help_title),
-                    attention = !helpViewed,
-                    modifier = Modifier.size(32.dp),
-                )
-            }
-            Spacer(Modifier.width(4.dp))
-            IconButton(
-                onClick = { expanded = !expanded },
-                modifier = Modifier.size(32.dp),
-            ) {
-                Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
-                    tint = colors.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-        }
-        GpsStatusButton(
-            status = gpsState.status,
-            enabled = gpsState.enabled,
-            fillWidth = true,
-            modifier = Modifier.padding(top = 8.dp),
-            onClick = { expanded = !expanded },
+            onLongClick = {
+                clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
+                showHint(logCopiedHint)
+            },
         )
         AnimatedVisibility(
             visible = expanded,
@@ -3593,32 +3606,31 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         }
                     }
                 }
+                GpsStatusButton(
+                    status = gpsState.status,
+                    enabled = gpsState.enabled,
+                    fillWidth = true,
+                    modifier = Modifier.padding(top = 10.dp),
+                    onClick = ::toggleGps,
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 10.dp),
+                        .padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    GlassButton(
+                    TipLightbulbButton(
                         onClick = {
-                            when {
-                                !gpsState.enabled -> enableGps()
-                                gpsState.status == GpsStatus.ERROR -> gpsViewModel.retry()
-                                gpsState.status == GpsStatus.AP_UNAVAILABLE -> Unit
-                                else -> gpsViewModel.setEnabled(false)
+                            if (!helpViewed) {
+                                helpViewed = true
+                                gpsViewModel.markHelpViewed()
                             }
+                            showInfo = true
                         },
-                        shape = RoundedCornerShape(11.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(
-                            text = if (gpsState.enabled) stringResource(R.string.gps_off) else stringResource(R.string.gps_enabled),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                        )
-                    }
+                        contentDescription = stringResource(R.string.gps_help_title),
+                        attention = !helpViewed,
+                        modifier = Modifier.size(34.dp),
+                    )
                     GlassButton(
                         onClick = { showReset = true },
                         enabled = gpsViewModel.pairedDeviceCount() > 0,

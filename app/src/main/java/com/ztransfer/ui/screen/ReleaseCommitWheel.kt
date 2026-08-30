@@ -5,6 +5,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -83,6 +85,7 @@ internal fun wheelDragEnabled(optionCount: Int): Boolean = optionCount > 3
  * 循环；单项操作型波轮可通过 [onActivated] 执行自己的点击动作。
  */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 internal fun <T> ReleaseCommitWheel(
     options: List<T>,
     selected: T,
@@ -100,6 +103,7 @@ internal fun <T> ReleaseCommitWheel(
     showDragHint: Boolean = true,
     accentColor: Color? = null,
     emphasized: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     favoriteOption: (T) -> Boolean = { false },
     favoriteIconColor: Color? = null,
 ) {
@@ -115,6 +119,7 @@ internal fun <T> ReleaseCommitWheel(
     val latestCommit by rememberUpdatedState(onValueCommitted)
     val latestDetent by rememberUpdatedState(onDetent)
     val latestActivated by rememberUpdatedState(onActivated)
+    val latestLongClick by rememberUpdatedState(onLongClick)
     val latestFavoriteOption by rememberUpdatedState(favoriteOption)
 
     var dragging by remember { mutableStateOf(false) }
@@ -236,18 +241,39 @@ internal fun <T> ReleaseCommitWheel(
                     }
                 }
             }
-            .clickable(enabled = enabled) {
-                latestActivated?.let { activate ->
-                    activate()
-                    return@clickable
-                }
-                val currentOptions = latestOptions
-                val next = (latestSelectedIndex + 1) % currentOptions.size
-                if (next != latestSelectedIndex) {
-                    latestDetent()
-                    latestCommit(currentOptions[next])
-                }
-            }
+            .then(
+                if (onLongClick != null) {
+                    Modifier.combinedClickable(
+                        enabled = enabled,
+                        onClick = {
+                            if (latestActivated != null) {
+                                latestActivated?.invoke()
+                            } else {
+                                val currentOptions = latestOptions
+                                val next = (latestSelectedIndex + 1) % currentOptions.size
+                                if (next != latestSelectedIndex) {
+                                    latestDetent()
+                                    latestCommit(currentOptions[next])
+                                }
+                            }
+                        },
+                        onLongClick = { latestLongClick?.invoke() },
+                    )
+                } else {
+                    Modifier.clickable(enabled = enabled) {
+                        latestActivated?.let { activate ->
+                            activate()
+                            return@clickable
+                        }
+                        val currentOptions = latestOptions
+                        val next = (latestSelectedIndex + 1) % currentOptions.size
+                        if (next != latestSelectedIndex) {
+                            latestDetent()
+                            latestCommit(currentOptions[next])
+                        }
+                    }
+                },
+            )
     ) {
         if (label != null) {
             ControlTileCornerBadge(
