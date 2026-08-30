@@ -794,7 +794,17 @@ fun HomeScreen(
                 }
 
                 Spacer(Modifier.height(10.dp))
-                GpsConnectionControl()
+                // GPS follows the USB card and keeps the same half-width as the
+                // connection cards; the Wi-Fi card column remains unchanged.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(cardSpacing),
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        GpsConnectionControl()
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                }
                 Spacer(Modifier.weight(1f))
 
                 // 工作台在空间关系上位于连接页下方，入口贴近屏幕底部提示下滑方向。
