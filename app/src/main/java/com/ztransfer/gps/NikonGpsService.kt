@@ -272,7 +272,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         // by the first GEO write so a connected camera without a valid location fix never
         // appears as fully enabled.
         updateState(
-            if (wasReadyBeforeReconnect) GpsStatus.READY else GpsStatus.CONNECTED,
+            if (wasReadyBeforeReconnect) GpsStatus.READY else GpsStatus.CONNECTING,
             name,
             null,
         )
@@ -596,7 +596,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             )
         }.getOrNull() ?: return
         geoWriteInFlight = true
-        updateState(GpsStatus.WRITING)
         GpsDiagnostics.record("GEO queued provider=${candidate.provider ?: "?"} accuracy=${candidate.accuracy.toInt()}m")
         bleClient.writeGeo(payload)
         geoWriteTimeoutJob?.cancel()

@@ -3380,7 +3380,6 @@ private enum class GpsStatusButtonState {
     CONNECTING,
     PAIRING,
     CAMERA_CONFIRM,
-    CONNECTED,
     ENABLED,
     NEEDS_CAMERA,
     AP_UNAVAILABLE,
@@ -3558,11 +3557,11 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
             GpsStatus.PAIRING -> GpsStatusButtonState.PAIRING
             GpsStatus.CAMERA_CONFIRM -> GpsStatusButtonState.CAMERA_CONFIRM
-            GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.CONNECTED
-            GpsStatus.CONNECTED -> GpsStatusButtonState.CONNECTED
-            GpsStatus.WRITING -> GpsStatusButtonState.CONNECTED
+            GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.ENABLED
+            GpsStatus.CONNECTED -> GpsStatusButtonState.ENABLED
+            GpsStatus.WRITING -> GpsStatusButtonState.CONNECTING
             GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.NEEDS_CAMERA
-            GpsStatus.WAITING_FIX -> GpsStatusButtonState.CONNECTED
+            GpsStatus.WAITING_FIX -> GpsStatusButtonState.CONNECTING
             GpsStatus.READY -> GpsStatusButtonState.ENABLED
             GpsStatus.AP_UNAVAILABLE -> GpsStatusButtonState.AP_UNAVAILABLE
             GpsStatus.ERROR -> GpsStatusButtonState.ERROR
@@ -3570,7 +3569,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     }
     val statusAccent = when (buttonState) {
         GpsStatusButtonState.OFF -> colors.statusWaiting
-        GpsStatusButtonState.CONNECTED, GpsStatusButtonState.ENABLED -> colors.statusConnected
+        GpsStatusButtonState.ENABLED -> colors.statusConnected
         GpsStatusButtonState.AP_UNAVAILABLE, GpsStatusButtonState.ERROR -> colors.statusError
         else -> colors.accentBlue
     }
@@ -3814,11 +3813,11 @@ private fun GpsStatusButton(
         GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
         GpsStatus.PAIRING -> GpsStatusButtonState.PAIRING
         GpsStatus.CAMERA_CONFIRM -> GpsStatusButtonState.CAMERA_CONFIRM
-        GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.CONNECTED
-        GpsStatus.CONNECTED -> GpsStatusButtonState.CONNECTED
-        GpsStatus.WRITING -> GpsStatusButtonState.CONNECTED
+        GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.ENABLED
+        GpsStatus.CONNECTED -> GpsStatusButtonState.ENABLED
+        GpsStatus.WRITING -> GpsStatusButtonState.CONNECTING
         GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.NEEDS_CAMERA
-        GpsStatus.WAITING_FIX -> GpsStatusButtonState.CONNECTED
+        GpsStatus.WAITING_FIX -> GpsStatusButtonState.CONNECTING
         GpsStatus.READY -> GpsStatusButtonState.ENABLED
         GpsStatus.AP_UNAVAILABLE -> GpsStatusButtonState.AP_UNAVAILABLE
         GpsStatus.ERROR -> GpsStatusButtonState.ERROR
@@ -3847,7 +3846,7 @@ private fun GpsStatusButton(
     }
     val accent by animateColorAsState(
         targetValue = when (buttonState) {
-            GpsStatusButtonState.CONNECTED, GpsStatusButtonState.ENABLED -> palette.connected
+            GpsStatusButtonState.ENABLED -> palette.connected
             GpsStatusButtonState.AP_UNAVAILABLE, GpsStatusButtonState.ERROR -> colors.statusError
             GpsStatusButtonState.OFF -> colors.onSurfaceVariant
             else -> palette.connecting
@@ -3919,7 +3918,6 @@ private fun GpsStatusButton(
                 GpsStatusButtonState.CONNECTING -> stringResource(R.string.gps_connecting)
                 GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_pairing)
                 GpsStatusButtonState.CAMERA_CONFIRM -> stringResource(R.string.gps_camera_confirm)
-                GpsStatusButtonState.CONNECTED -> stringResource(R.string.gps_connected)
                 GpsStatusButtonState.ENABLED -> stringResource(R.string.gps_enabled)
                 GpsStatusButtonState.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
                 GpsStatusButtonState.AP_UNAVAILABLE -> stringResource(R.string.gps_ap_unavailable)

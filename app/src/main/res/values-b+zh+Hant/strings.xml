@@ -548,7 +548,6 @@
     <string name="gps_connecting">正在連線</string>
     <string name="gps_pairing">正在配對</string>
     <string name="gps_camera_confirm">相機請按 OK</string>
-    <string name="gps_connected">連線成功</string>
     <string name="gps_enabled">已開啟</string>
     <string name="gps_location_copied">已複製地址與座標</string>
     <string name="gps_need_camera">開啟相機配對</string>
