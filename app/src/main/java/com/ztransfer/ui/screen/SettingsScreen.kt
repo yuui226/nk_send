@@ -3567,6 +3567,13 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         )
         AnimatedVisibility(
             visible = expanded,
+            modifier = if (expanded) {
+                Modifier
+                    .align(Alignment.Start)
+                    .requiredWidth(300.dp)
+            } else {
+                Modifier.fillMaxWidth()
+            },
             enter = fadeIn(tween(150)) + expandVertically(
                 animationSpec = tween(180, easing = FastOutSlowInEasing),
                 expandFrom = Alignment.Top,
@@ -3578,8 +3585,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         ) {
             Surface(
                 modifier = Modifier
-                    .align(Alignment.Start)
-                    .requiredWidth(300.dp)
+                    .fillMaxWidth()
                     .padding(top = 6.dp),
                 shape = RoundedCornerShape(14.dp),
                 color = colors.glassSurface,
