@@ -120,7 +120,10 @@ internal class NikonGpsBleClient(
                 connect(direct)
                 directConnectJob = scope.launch {
                     delay(DIRECT_CONNECT_TIMEOUT_MS)
-                    if (gatt != null && scanCallback == null && !ready) {
+                    // Once the camera has accepted stage 2 and we sent stage 3, the
+                    // handshake can legitimately outlive the short direct-connect
+                    // window. Do not tear down an active ID/GPS confirmation write.
+                    if (gatt != null && scanCallback == null && !ready && !stage3Sent) {
                         GpsDiagnostics.record("BLE direct connect timeout; fallback scan")
                         directConnectJob = null
                         closeCurrentGatt(suppressCallback = true)
