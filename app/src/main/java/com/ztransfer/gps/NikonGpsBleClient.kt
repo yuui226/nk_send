@@ -74,6 +74,10 @@ internal class NikonGpsBleClient(
     private var classicBondReady = false
     private var classicTargetAddress: String? = null
     private var pendingRebondAddress: String? = null
+    /** Address currently undergoing the one allowed createBond attempt. */
+    private var classicBondAttemptAddress: String? = null
+    /** Stale bond removed by removeBond; do not immediately recreate it. */
+    private var removedClassicAddress: String? = null
     private var pairingTimeout: Job? = null
     private var pairingNotified = false
     private var directConnectJob: Job? = null
@@ -459,6 +463,37 @@ internal class NikonGpsBleClient(
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 when (intent.action) {
+                    BluetoothDevice.ACTION_PAIRING_REQUEST -> {
+                        val pairingDevice = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        } else {
+                            @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                        } ?: return
+                        val pairingName = intent.getStringExtra(BluetoothDevice.EXTRA_NAME)
+                            ?: runCatching { pairingDevice.name }.getOrNull()
+                        if (!matchesClassicDevice(pairingDevice, pairingName, targetName)) return
+                        val pairingAddress = pairingDevice.address
+                        if (pairingAddress != classicTargetAddress &&
+                            pairingAddress != classicBondAttemptAddress
+                        ) return
+                        val variant = intent.getIntExtra(
+                            BluetoothDevice.EXTRA_PAIRING_VARIANT,
+                            -1,
+                        )
+                        GpsDiagnostics.record("Classic pairing request variant=$variant")
+                        // Nikon's Classic leg uses SSP confirmation: the camera shows the
+                        // code and the user confirms it on-camera. Confirm the phone side
+                        // silently so Android does not show a competing system dialog.
+                        if (variant == BluetoothDevice.PAIRING_VARIANT_PASSKEY_CONFIRMATION) {
+                            val confirmed = runCatching { pairingDevice.setPairingConfirmation(true) }
+                                .getOrDefault(false)
+                            GpsDiagnostics.record("Classic pairing confirmation=$confirmed")
+                            // setPairingConfirmation is privileged on many Android builds. Do
+                            // not abort the ordered request when the call failed; otherwise the
+                            // phone leaves bonding stuck instead of showing the normal prompt.
+                            if (confirmed) runCatching { abortBroadcast() }
+                        }
+                    }
                     BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
                         // Classic discovery commonly ends before Nikon becomes visible. Keep
                         // cycling discovery during the short pairing window instead of failing
@@ -488,17 +523,19 @@ internal class NikonGpsBleClient(
                             // A camera can forget its Nikon pairing record while Android keeps
                             // the old Classic bond. Treat that bond as stale in a fresh flow so
                             // Android and the camera show the pairing-code confirmation again.
-                            requestFreshClassicPairing(found)
+                            if (found.address == classicBondAttemptAddress) {
+                                classicBondReady = true
+                                if (idQueued) finishClassicPairing()
+                            } else if (classicBondAttemptAddress == null &&
+                                found.address != removedClassicAddress
+                            ) {
+                                requestFreshClassicPairing(found)
+                            }
                         } else if (found.bondState == BluetoothDevice.BOND_BONDED) {
                             classicBondReady = true
                             if (idQueued) finishClassicPairing()
                         } else if (found.bondState == BluetoothDevice.BOND_NONE) {
-                            val started = runCatching { found.createBond() }.getOrDefault(false)
-                            GpsDiagnostics.record("Classic createBond=$started")
-                            if (!started) {
-                                stopClassicPairing()
-                                listener.onError("请确认蓝牙配对")
-                            }
+                            startClassicBond(found)
                         }
                     }
                     BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
@@ -507,31 +544,32 @@ internal class NikonGpsBleClient(
                         } else {
                             @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         }
-                        val foundName = intent.getStringExtra(BluetoothDevice.EXTRA_NAME) ?:
-                            found?.let { runCatching { it.name }.getOrNull() }
-                        if (found != null &&
-                            found.address != pendingRebondAddress &&
-                            !matchesClassicDevice(found, foundName, targetName)
-                        ) return
+                        if (found == null) return
+                        val relevantAddress = found.address == pendingRebondAddress ||
+                            found.address == classicTargetAddress ||
+                            found.address == classicBondAttemptAddress
+                        if (!relevantAddress) return
                         if (found?.bondState == BluetoothDevice.BOND_NONE &&
                             found.address == pendingRebondAddress
                         ) {
+                            // The stale address was removed. Nikon may now advertise a fresh
+                            // Classic address; retrying this old one opens a misleading pairing
+                            // dialog and races discovery of the replacement address.
+                            GpsDiagnostics.record("Classic stale bond removed address=${found.address}; waiting for fresh address")
+                            removedClassicAddress = found.address
                             pendingRebondAddress = null
-                            val currentReceiver = this
-                            scope.launch {
-                                delay(350L)
-                                if (classicReceiver == currentReceiver) {
-                                    val started = runCatching { found.createBond() }.getOrDefault(false)
-                                    GpsDiagnostics.record("Classic createBond after removal=$started")
-                                    if (!started) {
-                                        stopClassicPairing()
-                                        listener.onError("请确认蓝牙配对")
-                                    }
-                                }
-                            }
+                            classicBondAttemptAddress = null
                         } else if (found?.bondState == BluetoothDevice.BOND_BONDED) {
+                            if (savedDeviceId == null && found.address != classicBondAttemptAddress) return
+                            if (found.address == pendingRebondAddress) pendingRebondAddress = null
                             classicBondReady = true
                             if (idQueued) finishClassicPairing()
+                        } else if (found?.bondState == BluetoothDevice.BOND_NONE &&
+                            found.address == classicBondAttemptAddress
+                        ) {
+                            classicBondAttemptAddress = null
+                            stopClassicPairing()
+                            listener.onError("请确认蓝牙配对")
                         }
                     }
                 }
@@ -540,6 +578,8 @@ internal class NikonGpsBleClient(
         classicReceiver = receiver
         classicBondReady = false
         classicTargetAddress = null
+        classicBondAttemptAddress = null
+        removedClassicAddress = null
         runCatching {
             val filter = IntentFilter().apply {
                 addAction(BluetoothDevice.ACTION_FOUND)
@@ -578,9 +618,23 @@ internal class NikonGpsBleClient(
                     }
                 }.getOrNull()
                 if (bonded != null && savedDeviceId == null) {
-                    classicTargetAddress = bonded.address
-                    requestFreshClassicPairing(bonded)
+                    // A bond created by our current attempt is the one we are waiting for;
+                    // never remove it as "stale" on the next polling tick.
+                    if (bonded.address == classicBondAttemptAddress) {
+                        classicBondReady = true
+                        GpsDiagnostics.record("Classic bond observed by polling name=${bonded.name ?: "?"}")
+                        if (idQueued) {
+                            finishClassicPairing()
+                            return@launch
+                        }
+                    } else if (bonded.address != removedClassicAddress &&
+                        classicBondAttemptAddress == null
+                    ) {
+                        classicTargetAddress = bonded.address
+                        requestFreshClassicPairing(bonded)
+                    }
                 } else if (bonded != null) {
+                    pendingRebondAddress = null
                     classicTargetAddress = bonded.address
                     classicBondReady = true
                     GpsDiagnostics.record("Classic bond observed by polling name=${bonded.name ?: "?"}")
@@ -619,6 +673,8 @@ internal class NikonGpsBleClient(
         classicBondReady = false
         classicTargetAddress = null
         pendingRebondAddress = null
+        classicBondAttemptAddress = null
+        removedClassicAddress = null
         val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)?.adapter
         if (wasActive && adapter?.isDiscovering == true) runCatching { adapter.cancelDiscovery() }
     }
@@ -655,6 +711,7 @@ internal class NikonGpsBleClient(
         if (pendingRebondAddress == found.address) return
         classicTargetAddress = found.address
         pendingRebondAddress = found.address
+        removedClassicAddress = found.address
         classicBondReady = false
         val removed = runCatching {
             val method = BluetoothDevice::class.java.getMethod("removeBond")
@@ -664,6 +721,20 @@ internal class NikonGpsBleClient(
         if (!removed) {
             stopClassicPairing()
             listener.onError("请在系统蓝牙中删除相机配对后重试")
+        }
+    }
+
+    /** Start at most one user-mediated Classic pairing attempt for the discovered address. */
+    private fun startClassicBond(found: BluetoothDevice) {
+        if (classicBondAttemptAddress != null || found.address == removedClassicAddress) return
+        classicTargetAddress = found.address
+        classicBondAttemptAddress = found.address
+        val started = runCatching { found.createBond() }.getOrDefault(false)
+        GpsDiagnostics.record("Classic createBond=$started address=${found.address}")
+        if (!started) {
+            classicBondAttemptAddress = null
+            stopClassicPairing()
+            listener.onError("请确认蓝牙配对")
         }
     }
 
