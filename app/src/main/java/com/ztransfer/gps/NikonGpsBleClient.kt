@@ -558,10 +558,15 @@ internal class NikonGpsBleClient(
                             GpsDiagnostics.record("Classic stale bond removed address=${found.address}; recreating once")
                             val currentReceiver = this
                             scope.launch {
-                                delay(350L)
+                                // Give Nikon time to advertise a replacement Classic address
+                                // after removing a stale bond. Same-address cameras still get a
+                                // fallback retry, but only after discovery had a chance to find
+                                // the new address; this avoids an early popup for the old one.
+                                delay(5_000L)
                                 if (classicReceiver == currentReceiver &&
                                     pendingRebondAddress == found.address &&
-                                    classicBondAttemptAddress == null
+                                    classicBondAttemptAddress == null &&
+                                    classicTargetAddress == found.address
                                 ) {
                                     startClassicBond(found)
                                 }
