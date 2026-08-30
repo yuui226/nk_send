@@ -39,7 +39,6 @@ internal class NikonGpsBleClient(
         fun onConnecting(name: String?)
         fun onBleAddress(address: String)
         fun onPairing()
-        fun onHandshakeConfirmed(name: String?)
         fun onReady(name: String, device: BluetoothDevice)
         fun onGeoWritten(success: Boolean)
         fun onPairedIdentity(device: Long, nonce: Long)
@@ -429,7 +428,6 @@ internal class NikonGpsBleClient(
             pairingTimeout?.cancel()
             pairingTimeout = null
             GpsDiagnostics.record("pairing stage4 received")
-            if (savedDeviceId != null) listener.onHandshakeConfirmed(device?.name)
             scope.launch {
                 delay(1_500)
                 queueControllerIdIfNeeded()

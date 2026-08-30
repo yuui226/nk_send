@@ -161,15 +161,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         updateState(GpsStatus.PAIRING)
     }
 
-    override fun onHandshakeConfirmed(name: String?) {
-        // A saved identity receiving stage 4 means the camera accepted the BLE
-        // handshake. Keep the UI out of the generic "connecting" state while
-        // the controller ID and first GEO write finish their confirmation.
-        GpsDiagnostics.record("BLE handshake confirmed camera=${name ?: "?"}")
-        notificationOverride = null
-        updateState(GpsStatus.CONNECTED, name, "正在确认位置写入")
-    }
-
     override fun onReady(name: String, device: android.bluetooth.BluetoothDevice) {
         GpsDiagnostics.record("GPS ready camera=$name")
         notificationOverride = null
@@ -182,19 +173,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         // An ID characteristic write only proves that Android handed the packet to GATT.
         // Keep a fresh session in "connecting" until the camera also accepts a GEO write;
         // otherwise the UI can claim success while the camera is still on its pairing screen.
-        val handshakeAlreadyConfirmed = NikonGpsRuntime.state.value.status == GpsStatus.CONNECTED
         updateState(
-            when {
-                wasReadyBeforeReconnect -> GpsStatus.READY
-                handshakeAlreadyConfirmed -> GpsStatus.CONNECTED
-                else -> GpsStatus.CONNECTING
-            },
+            if (wasReadyBeforeReconnect) GpsStatus.READY else GpsStatus.CONNECTING,
             name,
-            when {
-                wasReadyBeforeReconnect -> null
-                handshakeAlreadyConfirmed -> "正在确认位置写入"
-                else -> "正在确认连接"
-            },
+            if (wasReadyBeforeReconnect) null else "正在确认连接",
         )
         startLocationUpdates()
     }
