@@ -566,8 +566,6 @@
     <string name="gps_step_app">App</string>
     <string name="gps_step_tap_button">點擊 GPS 按鈕</string>
     <string name="gps_step_confirm">相機</string>
-    <string name="gps_step_press_ok">出現提示後按 OK</string>
-    <string name="gps_step_later">之後</string>
-    <string name="gps_step_auto_connect">自動連線並更新位置</string>
+    <string name="gps_step_press_ok">確認配對時按 OK</string>
     <string name="gps_permission_required">請允許藍牙和定位權限</string>
 </resources>

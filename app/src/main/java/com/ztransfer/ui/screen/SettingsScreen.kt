@@ -3613,10 +3613,6 @@ internal fun GpsConnectionControl() {
                             text = stringResource(R.string.gps_step_press_ok),
                             emphasized = true,
                         ),
-                        TipBubbleItem(
-                            label = stringResource(R.string.gps_step_later),
-                            text = stringResource(R.string.gps_step_auto_connect),
-                        ),
                     ),
                 )
             }

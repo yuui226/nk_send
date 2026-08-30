@@ -570,8 +570,6 @@
     <string name="gps_step_app">App</string>
     <string name="gps_step_tap_button">点击 GPS 按钮</string>
     <string name="gps_step_confirm">相机</string>
-    <string name="gps_step_press_ok">出现提示后按 OK</string>
-    <string name="gps_step_later">之后</string>
-    <string name="gps_step_auto_connect">自动连接并更新位置</string>
+    <string name="gps_step_press_ok">确认配对时按 OK</string>
     <string name="gps_permission_required">请允许蓝牙和定位权限</string>
 </resources>

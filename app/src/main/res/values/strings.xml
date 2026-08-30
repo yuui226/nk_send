@@ -572,8 +572,6 @@
     <string name="gps_step_app">App</string>
     <string name="gps_step_tap_button">Tap the GPS button</string>
     <string name="gps_step_confirm">Camera</string>
-    <string name="gps_step_press_ok">When prompted, press OK</string>
-    <string name="gps_step_later">After pairing</string>
-    <string name="gps_step_auto_connect">Connections and location updates are automatic</string>
+    <string name="gps_step_press_ok">Press OK to confirm pairing</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
 </resources>
