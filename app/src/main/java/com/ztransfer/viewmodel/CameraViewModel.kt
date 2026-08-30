@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.location.Geocoder
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.ConnectivityManager
@@ -434,6 +435,10 @@ data class PhotoExif(
     val lensModel: String? = null,
     /** Non-zero exposure compensation intent recorded by the camera, e.g. "+0.7 EV". */
     val exposureCompensation: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val altitudeMeters: Double? = null,
+    val address: String? = null,
 )
 
 internal fun formatExposureCompensation(value: Float?): String? {
@@ -1352,7 +1357,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     // Fetch EXIF only after the FHD succeeds. If a foreground task cancels this
                     // step, do not latch the attempt: the same photo can retry when IO is idle.
-                    val exif = loadExif(latest)
+                    val exif = loadExif(latest)?.let { value ->
+                        if (value.latitude != null && value.longitude != null) {
+                            value.copy(
+                                address = withContext(Dispatchers.IO) {
+                                    reverseGeocode(value.latitude, value.longitude)
+                                },
+                            )
+                        } else value
+                    }
                     effectPreviewAttemptKey = key
                     if (_state.value.isConnectedToCamera &&
                         effectPreviewKey(
@@ -4141,15 +4154,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             return null
         }
         val parsed = withContext(Dispatchers.IO) {
-            try {
-                getApplication<Application>().contentResolver
-                    .openFileDescriptor(sourceUri, "r")
-                    ?.use { descriptor ->
-                        parseExifImpl(ExifInterface(descriptor.fileDescriptor))
-                    }
-            } catch (_: Exception) {
-                null
-            }
+            val resolver = getApplication<Application>().contentResolver
+            runCatching {
+                resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
+                    parseExifImpl(ExifInterface(descriptor.fileDescriptor))
+                }
+            }.getOrNull() ?: runCatching {
+                resolver.openInputStream(sourceUri)?.use { input ->
+                    parseExifImpl(ExifInterface(java.io.BufferedInputStream(input)))
+                }
+            }.getOrNull()
         }
         exifCache[key] = parsed
         return parsed
@@ -4169,6 +4183,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             raw.toFloatOrNull()
         }
+    }
+
+    private fun reverseGeocode(latitude: Double?, longitude: Double?): String? {
+        if (latitude == null || longitude == null || !Geocoder.isPresent()) return null
+        return runCatching {
+            Geocoder(getApplication<Application>(), java.util.Locale.getDefault())
+                .getFromLocation(latitude, longitude, 1)
+                ?.firstOrNull()
+                ?.let { address ->
+                    address.getAddressLine(0)?.takeIf(String::isNotBlank)
+                        ?: address.featureName?.takeIf(String::isNotBlank)
+                        ?: address.thoroughfare?.takeIf(String::isNotBlank)
+                        ?: address.locality?.takeIf(String::isNotBlank)
+                        ?: address.adminArea?.takeIf(String::isNotBlank)
+                }
+        }.getOrNull()
     }
 
     /**
@@ -4249,6 +4279,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ).mapNotNull(exif::getAttribute)
             .firstOrNull { it.isNotBlank() }
 
+        val coordinates = exif.latLong
+        val latitude = (coordinates?.getOrNull(0)
+            ?.takeIf { it.isFinite() && it != 0.0 }
+            ?: parseGpsCoordinate(
+                exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
+                exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
+            ))?.takeIf { it.isFinite() && it in -90.0..90.0 }
+        val longitude = (coordinates?.getOrNull(1)
+            ?.takeIf { it.isFinite() && it != 0.0 }
+            ?: parseGpsCoordinate(
+                exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
+                exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),
+            ))?.takeIf { it.isFinite() && it in -180.0..180.0 }
+        val validCoordinates = latitude != null && longitude != null
+        val altitude = exif.getAltitude(Double.NaN)
+            .takeIf { it.isFinite() && it != 0.0 }
+
         return PhotoExif(
             aperture = aperture,
             shutterSpeed = shutter,
@@ -4257,7 +4304,34 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             dateTime = dateTime,
             lensModel = lensModel,
             exposureCompensation = exposureCompensation,
+            latitude = latitude.takeIf { validCoordinates },
+            longitude = longitude.takeIf { validCoordinates },
+            altitudeMeters = altitude,
         )
+    }
+
+    private fun parseGpsCoordinate(value: String?, reference: String?): Double? {
+        val parts = value
+            ?.trim()
+            ?.removePrefix("[")
+            ?.removeSuffix("]")
+            ?.split(Regex("[,;\\s]+"))
+            ?.map { it.trim().trim('"', '\'') }
+            ?.filter(String::isNotEmpty)
+            ?: return null
+        val absolute = when {
+            parts.size == 1 -> parseRational(parts[0])?.toDouble() ?: return null
+            parts.size >= 3 -> {
+                val degrees = parseRational(parts[0])?.toDouble() ?: return null
+                val minutes = parseRational(parts[1])?.toDouble() ?: return null
+                val seconds = parseRational(parts[2])?.toDouble() ?: return null
+                degrees + minutes / 60.0 + seconds / 3600.0
+            }
+            else -> return null
+        }
+        return if (reference.equals("S", ignoreCase = true) ||
+            reference.equals("W", ignoreCase = true)
+        ) -absolute else absolute
     }
 
     private fun thumbnailDiskCacheFileName(

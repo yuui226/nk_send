@@ -5,6 +5,7 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
+import android.location.Geocoder
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.BitmapRegionDecoder
@@ -38,6 +39,7 @@ import com.ztransfer.protocol.NefPreviewReference
 import com.ztransfer.protocol.largestEmbeddedJpegRange
 import com.ztransfer.protocol.parseNefHeaderMetadata
 import com.ztransfer.util.applyExifOrientation
+import java.io.ByteArrayInputStream
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
@@ -508,6 +510,10 @@ internal data class PhotoFrameMetadata(
     val focalLength: String?,
     val lensModel: String? = null,
     val dateTime: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val altitudeMeters: Double? = null,
+    val address: String? = null,
 )
 
 internal data class FrameTextVisualBounds(
@@ -613,6 +619,10 @@ object PhotoFrameExporter {
         PhotoFrameMetadata(null, null, null, null, null, null)
     private val bundledTypefaceCache = mutableMapOf<PhotoFrameWatermarkFont, Typeface>()
     private val watermarkImageCache = linkedMapOf<String, Bitmap>()
+    private val geocodeCache = object : LinkedHashMap<String, String>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>): Boolean =
+            size > 8
+    }
 
     private class RegionDecodeUnavailableException(cause: Throwable?) :
         Exception("Source provider does not support region decoding", cause)
@@ -629,6 +639,7 @@ object PhotoFrameExporter {
         metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
         filter: PhotoFilterSelection? = null,
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
+        fallbackMetadata: (suspend () -> PhotoFrameMetadata?)? = null,
     ): Result<PhotoFrameExportResult> {
         return try {
             currentCoroutineContext().ensureActive()
@@ -649,6 +660,7 @@ object PhotoFrameExporter {
                 metadataSettings = metadataSettings,
                 filter = filter,
                 probeSessionId = probeSessionId,
+                fallbackMetadata = fallbackMetadata,
             )
             recordGenerationStage(
                 probeSessionId,
@@ -712,6 +724,11 @@ object PhotoFrameExporter {
                 context = context,
                 resolver = resolver,
                 sourceUri = source.sourceUri,
+                // Picker/document providers may expose a transformed descriptor without the
+                // original EXIF block.  When available, read metadata from the canonical
+                // MediaStore URI resolved alongside the picker URI while still decoding pixels
+                // from the granted source URI.
+                metadataSourceUri = source.relatedMediaUri ?: source.sourceUri,
                 preset = preset,
                 watermark = renderedWatermark,
                 borderEnabled = borderEnabled,
@@ -1015,22 +1032,94 @@ object PhotoFrameExporter {
     internal fun readPreviewMetadata(
         resolver: ContentResolver,
         sourceUri: Uri,
-    ): PhotoFrameMetadata = readMetadata(resolver, sourceUri)
+        context: Context? = null,
+    ): PhotoFrameMetadata = readMetadata(
+        resolver,
+        sourceUri,
+        context,
+        requireLocation = true,
+    )
 
     private suspend fun renderSource(
         context: Context,
         resolver: ContentResolver,
         sourceUri: Uri,
+        metadataSourceUri: Uri = sourceUri,
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean,
         metadataSettings: PhotoFrameMetadataSettings,
         filter: PhotoFilterSelection?,
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
+        fallbackMetadata: (suspend () -> PhotoFrameMetadata?)? = null,
     ): Bitmap {
         val metadataStartedAtMs = generationProbeClock()
+        var metadataFallbackUsed = false
         val metadata = if (borderEnabled) {
-            readMetadata(resolver, sourceUri).withPresentation(metadataSettings)
+            val requireLocation = metadataSettings.showAddress ||
+                metadataSettings.showCoordinates || metadataSettings.showAltitude
+            val metadataUris = buildList {
+                add(metadataSourceUri)
+                // A downloaded original is often exposed through a DocumentsProvider URI while
+                // its MediaStore row remains the only descriptor that contains the camera GPS
+                // block. Resolving this alternate URI is cheap and only attempted when a GPS
+                // field is enabled for the frame.
+                if (requireLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    runCatching { MediaStore.getMediaUri(context, sourceUri) }
+                        .getOrNull()
+                        ?.takeIf { it != metadataSourceUri }
+                        ?.let(::add)
+                }
+                sourceUri.takeIf { it != metadataSourceUri }?.let(::add)
+            }.distinct()
+            // Providers can split EXIF between descriptor and stream (or between the picker and
+            // MediaStore URI). Merge location fields from every candidate; camera fields stay
+            // anchored to the first URI so the existing frame layout remains unchanged.
+            val merged = metadataUris.drop(1).fold(
+                readMetadata(
+                    resolver,
+                    metadataUris.first(),
+                    context.takeIf { metadataSettings.showAddress },
+                    requireLocation = requireLocation,
+                ),
+            ) { current, uri ->
+                current.mergeLocationFrom(
+                    readMetadata(
+                        resolver,
+                        uri,
+                        context.takeIf { metadataSettings.showAddress },
+                        requireLocation = true,
+                    ),
+                )
+            }
+            val enriched = if (
+                requireLocation && fallbackMetadata != null &&
+                (metadataSettings.showCoordinates && !merged.hasValidCoordinates() ||
+                    metadataSettings.showAltitude && merged.altitudeMeters == null ||
+                    metadataSettings.showAddress && merged.address.isNullOrBlank())
+            ) {
+                runCatching { fallbackMetadata.invoke() }
+                    .getOrNull()
+                    ?.let { fallback ->
+                        metadataFallbackUsed = true
+                        merged.mergeLocationFrom(fallback)
+                    }
+                    ?: merged
+            } else {
+                merged
+            }
+            val presented = enriched.withPresentation(metadataSettings)
+            PhotoGenerationProbe.note(
+                category = "FRAME-EXPORT",
+                message = "metadata " +
+                    "gps=${enriched.latitude != null && enriched.longitude != null} " +
+                    "gpsValid=${enriched.hasValidCoordinates()} " +
+                    "alt=${enriched.altitudeMeters != null} addr=${!enriched.address.isNullOrBlank()} " +
+                    "fields=${metadataSettings.showAddress}/${metadataSettings.showCoordinates}/" +
+                    metadataSettings.showAltitude +
+                    " visibleRows=${frameLocationLines(presented).size} uriCount=${metadataUris.size}",
+            )
+            presented
         } else {
             EMPTY_METADATA
         }
@@ -1038,7 +1127,18 @@ object PhotoFrameExporter {
             probeSessionId,
             "metadata_read",
             generationProbeClock() - metadataStartedAtMs,
-        ) { "enabled=$borderEnabled" }
+        ) {
+            if (!borderEnabled) {
+                "enabled=false"
+            } else {
+                "enabled=true " +
+                    "parsedGps=${metadata.latitude != null && metadata.longitude != null} " +
+                    "alt=${metadata.altitudeMeters != null} " +
+                    "addr=${!metadata.address.isNullOrBlank()} " +
+                    "visibleRows=${frameLocationLines(metadata).size} " +
+                    "cameraFallback=$metadataFallbackUsed"
+            }
+        }
         if (borderEnabled && preset != PhotoFramePreset.IMMERSIVE) {
             return renderOriginalFrameByRegions(
                 context = context,
@@ -1214,23 +1314,50 @@ object PhotoFrameExporter {
         } ?: emptySet()
     }
 
-    private fun readMetadata(resolver: ContentResolver, uri: Uri): PhotoFrameMetadata {
+    private fun readMetadata(
+        resolver: ContentResolver,
+        uri: Uri,
+        context: Context? = null,
+        requireLocation: Boolean = false,
+    ): PhotoFrameMetadata {
         val descriptorResult = runCatching {
             resolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                metadataFrom(ExifInterface(pfd.fileDescriptor))
+                metadataFrom(ExifInterface(pfd.fileDescriptor), context)
             }
         }.getOrNull()
-        if (descriptorResult != null) return descriptorResult
+        if (descriptorResult != null && !requireLocation) {
+            return descriptorResult
+        }
 
         // 少数 DocumentsProvider 返回不可 seek 的文件描述符，但输入流仍可正常读取。
-        return runCatching {
+        val streamResult = runCatching {
             resolver.openInputStream(uri)?.use { input ->
-                BufferedInputStream(input).use { metadataFrom(ExifInterface(it)) }
+                BufferedInputStream(input).use { metadataFrom(ExifInterface(it), context) }
             }
-        }.getOrNull() ?: EMPTY_METADATA
+        }.getOrNull()
+        return when {
+            descriptorResult != null && streamResult != null ->
+                descriptorResult.mergeLocationFrom(streamResult)
+            descriptorResult != null -> descriptorResult
+            streamResult != null -> streamResult
+            else -> EMPTY_METADATA
+        }
     }
 
-    private fun metadataFrom(exif: ExifInterface): PhotoFrameMetadata {
+    private fun PhotoFrameMetadata.mergeLocationFrom(fallback: PhotoFrameMetadata): PhotoFrameMetadata =
+        copy(
+            latitude = if (hasValidCoordinates()) latitude else fallback.latitude,
+            longitude = if (hasValidCoordinates()) longitude else fallback.longitude,
+            altitudeMeters = altitudeMeters ?: fallback.altitudeMeters,
+            address = address ?: fallback.address,
+        )
+
+    private fun PhotoFrameMetadata.hasValidCoordinates(): Boolean =
+        latitude != null && longitude != null &&
+            latitude.isFinite() && longitude.isFinite() &&
+            latitude != 0.0 && longitude != 0.0
+
+    private fun metadataFrom(exif: ExifInterface, context: Context? = null): PhotoFrameMetadata {
         val fNumber = exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, Double.NaN)
             .takeIf { it.isFinite() && it > 0.0 }
             ?: exif.getAttributeDouble(ExifInterface.TAG_APERTURE_VALUE, Double.NaN)
@@ -1243,6 +1370,36 @@ object PhotoFrameExporter {
                     ExifInterface.TAG_SHUTTER_SPEED_VALUE,
                     Double.NaN,
                 ).takeIf { it.isFinite() }?.let { 2.0.pow(-it) }
+        val coordinates = exif.latLong
+        // ExifInterface may expose a present-but-zero latLong pair when the GPS IFD contains
+        // malformed/placeholder values.  Do not let that suppress valid raw DMS tags.
+        val latitude = (coordinates?.getOrNull(0)
+            ?.takeIf { it.isFinite() && it != 0.0 }
+            ?: parseExifCoordinate(
+                exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
+                exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
+            ))
+            ?.takeIf { it.isFinite() && it in -90.0..90.0 }
+        val longitude = (coordinates?.getOrNull(1)
+            ?.takeIf { it.isFinite() && it != 0.0 }
+            ?: parseExifCoordinate(
+                exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
+                exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),
+            ))
+            ?.takeIf { it.isFinite() && it in -180.0..180.0 }
+        val altitude = exif.getAltitude(Double.NaN)
+            .takeIf { it.isFinite() && it != 0.0 }
+            ?: parseExifRational(exif.getAttribute(ExifInterface.TAG_GPS_ALTITUDE).orEmpty())
+                ?.takeIf { it.isFinite() && it != 0.0 }
+                ?.let { value ->
+                    if (exif.getAttributeInt(ExifInterface.TAG_GPS_ALTITUDE_REF, 0) == 1) -value
+                    else value
+                }
+        val address = if (context != null && latitude != null && longitude != null &&
+            latitude != 0.0 && longitude != 0.0
+        ) {
+            reverseGeocode(context, latitude, longitude)
+        } else null
         return PhotoFrameMetadata(
             make = exif.getAttribute(ExifInterface.TAG_MAKE),
             model = exif.getAttribute(ExifInterface.TAG_MODEL),
@@ -1266,7 +1423,73 @@ object PhotoFrameExporter {
             ).mapNotNull(exif::getAttribute)
                 .mapNotNull(::normalizeCaptureDateTime)
                 .firstOrNull(),
+            latitude = latitude,
+            longitude = longitude,
+            altitudeMeters = altitude,
+            address = address,
         )
+    }
+
+    /** Parses the same camera EXIF header used by the live preview for export fallback. */
+    internal fun metadataFromExifHeader(
+        context: Context,
+        bytes: ByteArray,
+    ): PhotoFrameMetadata = runCatching {
+        metadataFrom(ExifInterface(ByteArrayInputStream(bytes)), context)
+    }.getOrDefault(EMPTY_METADATA)
+
+    private fun parseExifCoordinate(value: String?, reference: String?): Double? {
+        val parts = value
+            ?.trim()
+            ?.removePrefix("[")
+            ?.removeSuffix("]")
+            ?.split(Regex("[,;\\s]+"))
+            ?.map { it.trim().trim('"', '\'') }
+            ?.filter(String::isNotEmpty)
+            ?: return null
+        val absolute = when {
+            parts.size == 1 -> parseExifRational(parts[0]) ?: return null
+            parts.size >= 3 -> {
+                val degrees = parseExifRational(parts[0]) ?: return null
+                val minutes = parseExifRational(parts[1]) ?: return null
+                val seconds = parseExifRational(parts[2]) ?: return null
+                degrees + minutes / 60.0 + seconds / 3600.0
+            }
+            else -> return null
+        }
+        return if (reference.equals("S", ignoreCase = true) ||
+            reference.equals("W", ignoreCase = true)
+        ) -absolute else absolute
+    }
+
+    private fun parseExifRational(value: String): Double? {
+        val pieces = value.split('/', limit = 2)
+        if (pieces.size == 1) return pieces[0].toDoubleOrNull()
+        val numerator = pieces[0].toDoubleOrNull() ?: return null
+        val denominator = pieces[1].toDoubleOrNull()?.takeIf { it != 0.0 } ?: return null
+        return numerator / denominator
+    }
+
+    private fun reverseGeocode(context: Context, latitude: Double, longitude: Double): String? {
+        if (!Geocoder.isPresent()) return null
+        val key = String.format(Locale.US, "%.4f,%.4f", latitude, longitude)
+        synchronized(geocodeCache) {
+            geocodeCache[key]?.let { return it }
+        }
+        val result = runCatching {
+            Geocoder(context, Locale.getDefault())
+                .getFromLocation(latitude, longitude, 1)
+                ?.firstOrNull()
+                ?.let { address ->
+                    address.getAddressLine(0)?.takeIf(String::isNotBlank)
+                        ?: address.featureName?.takeIf(String::isNotBlank)
+                        ?: address.thoroughfare?.takeIf(String::isNotBlank)
+                        ?: address.locality?.takeIf(String::isNotBlank)
+                        ?: address.adminArea?.takeIf(String::isNotBlank)
+                }
+        }.getOrNull()
+        result?.let { value -> synchronized(geocodeCache) { geocodeCache[key] = value } }
+        return result
     }
 
     private fun decodeBounded(
@@ -1391,13 +1614,18 @@ object PhotoFrameExporter {
         metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
         longEdge: Int,
         filter: PhotoFilterSelection? = null,
+        previewPlaceholders: Boolean = true,
     ): Bitmap {
         val input = filter?.let { PhotoFilterRenderer.render(source, it) } ?: source
         return try {
             renderFrame(
                 context = context,
                 source = input,
-                metadata = metadata.withPresentation(metadataSettings),
+                metadata = metadata.withPresentation(
+                    metadataSettings,
+                    preview = previewPlaceholders,
+                    previewLocale = context.resources.configuration.locales[0] ?: Locale.getDefault(),
+                ),
                 preset = preset,
                 watermark = watermark.forBorderMode(borderEnabled),
                 borderEnabled = borderEnabled,
@@ -1903,7 +2131,11 @@ object PhotoFrameExporter {
         val brand = normalizeCameraMake(metadata.make)
         val model = normalizeCameraModel(metadata.make, metadata.model)
         val lens = metadata.lensModel?.trim().orEmpty()
-        val details = listOf(frameDetailLine(metadata), metadata.dateTime.orEmpty())
+        val details = listOf(
+            frameDetailLine(metadata),
+            metadata.dateTime.orEmpty(),
+            frameLocationLines(metadata).joinToString("   "),
+        )
             .filter(String::isNotBlank)
             .joinToString("   ")
         val hasTitle = brand.isNotEmpty() || model.isNotEmpty()
@@ -2562,7 +2794,11 @@ object PhotoFrameExporter {
             .filter(String::isNotBlank)
             .joinToString(" ")
         val lens = metadata.lensModel?.trim().orEmpty()
-        val details = listOf(immersiveFrameDetailLine(metadata), metadata.dateTime.orEmpty())
+        val details = listOf(
+            immersiveFrameDetailLine(metadata),
+            metadata.dateTime.orEmpty(),
+            frameLocationLines(metadata).joinToString("  "),
+        )
             .filter(String::isNotBlank)
             .joinToString("  ")
         val inlineWatermark = metadataWatermark.takeIf {
@@ -2772,6 +3008,9 @@ object PhotoFrameExporter {
         width: Int,
         height: Int,
     ) {
+        // Some picker/DocumentsProvider descriptors are readable for pixels but do not expose a
+        // seekable file descriptor to ExifInterface.  Try the descriptor first (fast path), then
+        // fall back to a buffered stream so the generated frame keeps the original GPS/EXIF data.
         val attributes = runCatching {
             resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
                 val source = ExifInterface(descriptor.fileDescriptor)
@@ -2779,8 +3018,24 @@ object PhotoFrameExporter {
                     source.getAttribute(tag)?.let { value -> tag to value }
                 }
             }
-        }.getOrNull()
-        if (attributes == null) return
+        }.getOrNull()?.takeIf { it.isNotEmpty() }
+            ?: runCatching {
+                resolver.openInputStream(sourceUri)?.use { input ->
+                    BufferedInputStream(input).use { buffered ->
+                        val source = ExifInterface(buffered)
+                        COPIED_EXIF_TAGS.mapNotNull { tag ->
+                            source.getAttribute(tag)?.let { value -> tag to value }
+                        }
+                    }
+                }
+            }.getOrNull()
+        if (attributes.isNullOrEmpty()) {
+            PhotoGenerationProbe.note(
+                category = "FRAME-EXPORT",
+                message = "source EXIF empty; preserve step skipped",
+            )
+            return
+        }
 
         runCatching {
             resolver.openFileDescriptor(targetUri, "rw")?.use { descriptor ->
@@ -3501,6 +3756,7 @@ object PhotoFrameExporter {
             metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
             classicSignatureDetailLine(metadata).takeIf(String::isNotBlank)?.let(::add)
             metadata.dateTime?.takeIf(String::isNotBlank)?.let(::add)
+            addAll(frameLocationLines(metadata))
         }
         val band = RectF(
             0f,
@@ -3818,6 +4074,7 @@ object PhotoFrameExporter {
         metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
         frameDetailLine(metadata).takeIf(String::isNotBlank)?.let(::add)
         metadata.dateTime?.takeIf(String::isNotBlank)?.let(::add)
+        addAll(frameLocationLines(metadata))
     }
 
     private fun classicSignatureDetailLine(metadata: PhotoFrameMetadata): String =
@@ -3884,6 +4141,16 @@ object PhotoFrameExporter {
                 )
             }
             metadata.dateTime?.takeIf(String::isNotBlank)?.let { text ->
+                add(
+                    text to colorArchiveTextPaint(
+                        text = text,
+                        preferredSize = photo.width() * 0.0185f,
+                        maxWidth = textArea.width(),
+                        typeface = Typeface.create("sans-serif", Typeface.NORMAL),
+                    )
+                )
+            }
+            frameLocationLines(metadata).forEach { text ->
                 add(
                     text to colorArchiveTextPaint(
                         text = text,
@@ -4134,7 +4401,11 @@ object PhotoFrameExporter {
         val model = normalizeCameraModel(metadata.make, metadata.model)
         val identity = listOf(brand, model).filter(String::isNotBlank).joinToString(" ")
         val lens = metadata.lensModel?.trim().orEmpty()
-        val details = listOf(frameDetailLine(metadata), metadata.dateTime.orEmpty())
+        val details = listOf(
+            frameDetailLine(metadata),
+            metadata.dateTime.orEmpty(),
+            frameLocationLines(metadata).joinToString("   "),
+        )
             .filter(String::isNotBlank)
             .joinToString("   ")
 
@@ -4495,7 +4766,10 @@ object PhotoFrameExporter {
             ?.uppercase(Locale.ROOT)
         val model = metadata.model?.trim()?.takeIf(String::isNotEmpty)
         val lens = metadata.lensModel?.trim()?.takeIf(String::isNotEmpty)
-        val details = frameDetailLine(metadata).takeIf(String::isNotEmpty)
+        val details = listOf(
+            frameDetailLine(metadata),
+            frameLocationLines(metadata).joinToString("   "),
+        ).joinToString("   ").takeIf(String::isNotEmpty)
         val date = metadata.dateTime?.takeIf(String::isNotEmpty)
         val leftPrimary = make ?: model ?: lens
         val leftSecondary = buildList {
@@ -4744,7 +5018,7 @@ object PhotoFrameExporter {
             try {
                 return writeRenderedToMediaStore(
                     resolver = resolver,
-                    sourceUri = source.sourceUri,
+                    sourceUri = source.relatedMediaUri ?: source.sourceUri,
                     collectionUri = source.collectionUri,
                     relativePath = checkNotNull(originalPath),
                     relatedMediaUri = source.relatedMediaUri,
@@ -4779,7 +5053,7 @@ object PhotoFrameExporter {
         return try {
             writeRenderedToMediaStore(
                 resolver = resolver,
-                sourceUri = source.sourceUri,
+                sourceUri = source.relatedMediaUri ?: source.sourceUri,
                 collectionUri = source.fallbackCollectionUri,
                 relativePath = LOCAL_PHOTO_FALLBACK_RELATIVE_PATH,
                 relatedMediaUri = null,
@@ -5846,6 +6120,18 @@ internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
         metadata.iso,
     ).joinToString("   ")
 
+/** Location metadata uses dedicated rows so long addresses never squeeze camera settings. */
+internal fun frameLocationLines(metadata: PhotoFrameMetadata): List<String> = buildList {
+    metadata.address?.trim()?.takeIf(String::isNotEmpty)?.let { add(it) }
+    if (metadata.latitude != null && metadata.longitude != null &&
+        metadata.latitude != 0.0 && metadata.longitude != 0.0
+    ) {
+        add(String.format(Locale.US, "%.5f, %.5f", metadata.latitude, metadata.longitude))
+    }
+    metadata.altitudeMeters?.takeIf { it.isFinite() && it != 0.0 }
+        ?.let { add(String.format(Locale.US, "%.0fm", it)) }
+}
+
 /** Compact two-space rhythm used by the full-bleed signature preset. */
 internal fun immersiveFrameDetailLine(metadata: PhotoFrameMetadata): String =
     listOfNotNull(
@@ -5905,6 +6191,9 @@ private val PHOTO_FRAME_OUTPUT_PATTERN = Regex(
 )
 
 private const val PHOTO_FRAME_WATERMARK_RENDER_VERSION = 2
+// GPS rows were added after the original frame renderer. Include a dedicated version token so
+// an already-generated frame without those rows is never treated as the current export.
+private const val PHOTO_FRAME_LOCATION_RENDER_VERSION = 1
 private const val BRAND_FRAME_RENDER_VERSION = 4
 private const val EDITORIAL_FRAME_RENDER_VERSION = 2
 // Film-gallery typography evolves independently. Transfer-side deduplication uses this token,
@@ -6008,8 +6297,17 @@ internal fun photoFrameWatermarkFingerprint(
     } else {
         "$baseIdentity\u0000metadata=$metadataToken"
     }
+    val versionedIdentity = if (
+        metadataSettings.showAddress ||
+        metadataSettings.showCoordinates ||
+        metadataSettings.showAltitude
+    ) {
+        "$identity\u0000location-v=$PHOTO_FRAME_LOCATION_RENDER_VERSION"
+    } else {
+        identity
+    }
     return MessageDigest.getInstance("SHA-256")
-        .digest(identity.toByteArray(Charsets.UTF_8))
+        .digest(versionedIdentity.toByteArray(Charsets.UTF_8))
         .take(6)
         .joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
 }

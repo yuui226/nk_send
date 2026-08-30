@@ -22,6 +22,9 @@ data class PhotoFrameMetadataSettings(
     val showLensModel: Boolean = false,
     val datePattern: String = DEFAULT_PHOTO_FRAME_DATE_PATTERN,
     val timePattern: String = DEFAULT_PHOTO_FRAME_TIME_PATTERN,
+    val showAddress: Boolean = false,
+    val showCoordinates: Boolean = false,
+    val showAltitude: Boolean = false,
 )
 
 internal fun defaultPhotoFrameMetadataSettings(
@@ -112,8 +115,24 @@ internal fun photoFrameTimePatternExample(pattern: String): String =
 
 internal fun PhotoFrameMetadata.withPresentation(
     settings: PhotoFrameMetadataSettings,
+    preview: Boolean = false,
+    previewLocale: Locale = Locale.getDefault(),
 ): PhotoFrameMetadata {
     val normalized = normalizePhotoFrameMetadataSettings(settings)
+    val hasCoordinates = latitude != null && longitude != null &&
+        latitude != 0.0 && longitude != 0.0
+    val locationAddress = address?.trim()?.takeIf(String::isNotEmpty)
+    val addressValue = when {
+        !normalized.showAddress -> null
+        locationAddress != null -> locationAddress
+        !preview -> null
+        previewLocale.language.equals("zh", ignoreCase = true) &&
+            (previewLocale.script.equals("Hant", ignoreCase = true) ||
+                previewLocale.country.uppercase(Locale.ROOT) in setOf("TW", "HK", "MO")) ->
+            "一個非常好的地方"
+        previewLocale.language.equals("zh", ignoreCase = true) -> "一个非常好的地方"
+        else -> "A very good place"
+    }
     return copy(
         make = when {
             !normalized.showBrand -> null
@@ -132,6 +151,25 @@ internal fun PhotoFrameMetadata.withPresentation(
         focalLength = focalLength.takeIf { normalized.showFocalLength },
         lensModel = lensModel?.trim()?.takeIf(String::isNotEmpty)
             ?.takeIf { normalized.showLensModel },
+        address = addressValue,
+        latitude = when {
+            !normalized.showCoordinates -> null
+            hasCoordinates -> latitude
+            preview -> 66.6666
+            else -> null
+        },
+        longitude = when {
+            !normalized.showCoordinates -> null
+            hasCoordinates -> longitude
+            preview -> 66.6666
+            else -> null
+        },
+        altitudeMeters = when {
+            !normalized.showAltitude -> null
+            altitudeMeters?.takeIf { it.isFinite() && it != 0.0 } != null -> altitudeMeters
+            preview -> 520.0
+            else -> null
+        },
         dateTime = formatPhotoFrameCaptureDateTime(dateTime, normalized),
     )
 }
@@ -200,6 +238,9 @@ internal fun encodePhotoFrameMetadataSettings(
         value.showBrand,
         value.showModel,
         value.showLensModel,
+        value.showAddress,
+        value.showCoordinates,
+        value.showAltitude,
         value.datePattern,
         value.timePattern,
     ).joinToString(FIELD_SEPARATOR)
@@ -212,14 +253,19 @@ internal fun decodePhotoFrameMetadataSettings(
     val restored = linkedMapOf<PhotoFramePreset, PhotoFrameMetadataSettings>()
     encoded.split(ENTRY_SEPARATOR).forEach { entry ->
         val fields = entry.split(FIELD_SEPARATOR)
-        // v1 initially stored six visibility flags. Accept those entries forever and treat the
-        // later lens flag as off, matching every preset's historical appearance.
-        if (fields.size != 9 && fields.size != 10) return@forEach
+        // Older versions stored six or seven visibility flags. Accept those entries forever;
+        // GPS visibility flags were appended in the current format and default to off.
+        if (fields.size != 9 && fields.size != 10 && fields.size != 13) return@forEach
         val preset = PhotoFramePreset.entries.firstOrNull { it.name == fields[0] }
             ?: return@forEach
         if (preset in restored) return@forEach
-        val hasLensModel = fields.size == 10
-        val booleanEnd = if (hasLensModel) 8 else 7
+        val hasLensModel = fields.size >= 10
+        val hasLocation = fields.size == 13
+        val booleanEnd = when {
+            hasLocation -> 11
+            hasLensModel -> 8
+            else -> 7
+        }
         val booleans = fields.subList(1, booleanEnd).map { it.toBooleanStrictOrNull() }
         if (booleans.any { it == null }) return@forEach
         val value = normalizePhotoFrameMetadataSettings(
@@ -231,6 +277,9 @@ internal fun decodePhotoFrameMetadataSettings(
                 showBrand = checkNotNull(booleans[4]),
                 showModel = checkNotNull(booleans[5]),
                 showLensModel = if (hasLensModel) checkNotNull(booleans[6]) else false,
+                showAddress = if (hasLocation) checkNotNull(booleans[7]) else false,
+                showCoordinates = if (hasLocation) checkNotNull(booleans[8]) else false,
+                showAltitude = if (hasLocation) checkNotNull(booleans[9]) else false,
                 datePattern = fields[booleanEnd],
                 timePattern = fields[booleanEnd + 1],
             )

@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.Locale
 
 class PhotoFrameMetadataSettingsTest {
     @Test
@@ -262,5 +263,44 @@ class PhotoFrameMetadataSettingsTest {
                 metadataSettings = hiddenCustomFormats,
             ),
         )
+    }
+
+    @Test
+    fun gpsFieldsUsePreviewPlaceholdersButNeverLeakIntoExport() {
+        val settings = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
+            showAddress = true,
+            showCoordinates = true,
+            showAltitude = true,
+        )
+        val empty = PhotoFrameMetadata(null, null, null, null, null, null)
+        val preview = empty.withPresentation(settings, preview = true, previewLocale = Locale.SIMPLIFIED_CHINESE)
+        assertEquals("一个非常好的地方", preview.address)
+        assertEquals(66.6666, preview.latitude!!, 0.00001)
+        assertEquals(66.6666, preview.longitude!!, 0.00001)
+        assertEquals(520.0, preview.altitudeMeters!!, 0.0)
+
+        val exported = empty.withPresentation(settings)
+        assertNull(exported.address)
+        assertNull(exported.latitude)
+        assertNull(exported.longitude)
+        assertNull(exported.altitudeMeters)
+
+        val actual = empty.copy(
+            latitude = 31.2304,
+            longitude = 121.4737,
+            altitudeMeters = 520.0,
+            address = "上海市黄浦区",
+        ).withPresentation(settings)
+        assertEquals("上海市黄浦区", actual.address)
+        assertEquals(31.2304, actual.latitude!!, 0.00001)
+        assertEquals(121.4737, actual.longitude!!, 0.00001)
+        assertEquals(520.0, actual.altitudeMeters!!, 0.0)
+
+        assertNull(empty.copy(altitudeMeters = 0.0).withPresentation(settings).altitudeMeters)
+
+        val zeroCoordinates = actual.copy(latitude = 0.0, longitude = 0.0)
+            .withPresentation(settings)
+        assertNull(zeroCoordinates.latitude)
+        assertNull(zeroCoordinates.longitude)
     }
 }

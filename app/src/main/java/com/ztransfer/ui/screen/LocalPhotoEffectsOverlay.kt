@@ -178,6 +178,7 @@ fun LocalPhotoEffectsPage(
                     val metadata = PhotoFrameExporter.readPreviewMetadata(
                         resolver = context.contentResolver,
                         sourceUri = uri,
+                        context = context,
                     )
                     val destination = PhotoFrameExporter.prepareMediaStoreSource(
                         context = context,
@@ -404,6 +405,7 @@ fun LocalPhotoEffectsPage(
                         metadataSettings,
                         preset,
                     ),
+                    previewPlaceholders = false,
                     watermark = renderWatermark,
                     filter = selectedFilter,
                     prefetchFilters = previewFilterPrefetch,

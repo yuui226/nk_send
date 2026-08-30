@@ -100,10 +100,10 @@ class CameraEffectPreviewMetadataTest {
     }
 
     @Test
-    fun emptyPreviewHidesTheWholeFrameInformationEntry() {
+    fun emptyPreviewStillExposesMetadataSettingsForGpsFields() {
         val availability = photoFrameMetadataAvailability(null)
 
-        assertFalse(availability.hasAny)
+        assertTrue(availability.hasAny)
         assertFalse(availability.brand)
         assertFalse(availability.model)
         assertFalse(availability.date)

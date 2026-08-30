@@ -2061,6 +2061,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 TransferService.start(getApplication(), useWifi = false)
                                 serviceStarted = true
                             }
+                            val cameraForFallback = cameraProvider()
                             launchPhotoFrameExport(
                                 taskId = taskId,
                                 treeUri = uri,
@@ -2075,6 +2076,18 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 filterRequested = filter,
                                 skipIfExisting = true,
                                 failTaskOnError = true,
+                                fallbackMetadata = {
+                                    cameraForFallback?.readExifHeader(
+                                        task.file.handle,
+                                        maxSize = 256 * 1024,
+                                    )
+                                        ?.let {
+                                            PhotoFrameExporter.metadataFromExifHeader(
+                                                getApplication(),
+                                                it,
+                                            )
+                                        }
+                                },
                             )
                         }
                         continue
@@ -2384,6 +2397,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             decorationRequested = framePreset != null,
                                             filterRequested = photoFilter,
                                             skipIfExisting = true,
+                                            fallbackMetadata = {
+                                                camera.readExifHeader(task.file.handle, maxSize = 256 * 1024)
+                                                    ?.let {
+                                                        PhotoFrameExporter.metadataFromExifHeader(
+                                                            getApplication(),
+                                                            it,
+                                                        )
+                                                    }
+                                            },
                                         )
                                     }
                                 } else {
@@ -2751,6 +2773,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         filterRequested: PhotoFilterSelection? = null,
         skipIfExisting: Boolean = false,
         failTaskOnError: Boolean = false,
+        fallbackMetadata: (suspend () -> com.ztransfer.frame.PhotoFrameMetadata?)? = null,
     ) {
         val probeStartedAtMs = if (PhotoGenerationProbe.enabled) {
             android.os.SystemClock.elapsedRealtime()
@@ -2825,6 +2848,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 ) {
                     FrameExportOutcome.AlreadyExists
                 } else {
+                    PhotoGenerationProbe.note(
+                        category = "FRAME-EXPORT",
+                        message = "begin source=$sourceName " +
+                            "fields=${metadataSettings.showAddress}/" +
+                            "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
+                    )
+                    log {
+                        "DERIVATIVE_BEGIN: $sourceName source=$sourceUri " +
+                            "fields=${metadataSettings.showAddress}/" +
+                            "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}"
+                    }
                     PhotoFrameExporter.export(
                         context = getApplication(),
                         resolver = contentResolver,
@@ -2837,6 +2871,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         metadataSettings = metadataSettings,
                         filter = filterRequested,
                         probeSessionId = probeSession,
+                        fallbackMetadata = fallbackMetadata,
                     ).fold(
                         onSuccess = { FrameExportOutcome.Saved(it.displayName) },
                         onFailure = { FrameExportOutcome.Failed(it) },
@@ -2859,9 +2894,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     log { "DERIVATIVE_SAVE: $sourceName -> ${outcome.displayName}" }
                 }
                 FrameExportOutcome.AlreadyExists -> {
+                    PhotoGenerationProbe.note(
+                        category = "FRAME-EXPORT",
+                        message = "skipped existing source=$sourceName " +
+                            "fields=${metadataSettings.showAddress}/" +
+                            "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
+                    )
                     log {
                         "DERIVATIVE_SKIP existing: $sourceName " +
-                            "border=$borderEnabled preset=${preset.name}"
+                            "border=$borderEnabled preset=${preset.name} " +
+                            "fields=${metadataSettings.showAddress}/" +
+                            "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}"
                     }
                     updateTask(taskId) { task ->
                         task.copy(

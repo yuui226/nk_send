@@ -90,17 +90,11 @@ object PhotoGenerationProbe {
     }
 
     /** Shares the existing bottom Debug log with low-frequency protocol diagnostics. */
+    @Suppress("UNUSED_PARAMETER")
     fun note(category: String, message: String) {
-        if (message.isBlank()) return
-        synchronized(lock) {
-            notes += DiagnosticNote(
-                elapsedMs = SystemClock.elapsedRealtime(),
-                category = category,
-                message = message,
-            )
-            while (notes.size > MAX_NOTES) notes.removeAt(0)
-        }
-        bump()
+        // Keep the timing window focused on generation stages; protocol/export notes are noisy
+        // and are intentionally suppressed until a focused diagnostic session is requested.
+        Unit
     }
 
     fun clear() {

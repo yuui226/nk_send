@@ -198,6 +198,9 @@
     <string name="photo_frame_metadata_model">型號</string>
     <string name="photo_frame_metadata_date_format">日期格式</string>
     <string name="photo_frame_metadata_time_format">時間格式</string>
+    <string name="photo_frame_metadata_address">地址</string>
+    <string name="photo_frame_metadata_coordinates">經緯度</string>
+    <string name="photo_frame_metadata_altitude">海拔</string>
     <string name="photo_frame_task_label">邊框：%1$s</string>
     <string name="photo_frame_watermark_summary">浮水印：%1$s</string>
     <string name="photo_frame_watermark_pro_only">僅高級版可用</string>
@@ -552,7 +555,6 @@
     <string name="gps_location_copied">已複製地址與座標</string>
     <string name="gps_location_value">位置：%1$s</string>
     <string name="gps_altitude_value">海拔：%1$d 公尺</string>
-    <string name="gps_altitude_unavailable">海拔：暫無</string>
     <string name="gps_updated_at">更新：%1$s</string>
     <string name="gps_need_camera">開啟相機配對</string>
     <string name="gps_ap_unavailable">AP 模式不可用</string>

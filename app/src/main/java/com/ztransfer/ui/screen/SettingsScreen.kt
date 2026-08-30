@@ -1803,8 +1803,9 @@ internal data class PhotoFrameMetadataAvailability(
     val date: Boolean,
     val time: Boolean,
 ) {
+    /** The editor also exposes GPS fields that may be absent from the current preview. */
     val hasAny: Boolean
-        get() = focalLength || exposure || lensModel || brand || model || date || time
+        get() = true
 }
 
 /** Mirrors what the renderer can actually obtain from the current preview photo. */
@@ -2448,6 +2449,15 @@ private fun PhotoFrameMetadataInlineSettings(
             Triple(R.string.photo_frame_metadata_model, settings.showModel) {
                 settings.copy(showModel = !settings.showModel)
             }.takeIf { availability.model },
+            Triple(R.string.photo_frame_metadata_address, settings.showAddress) {
+                settings.copy(showAddress = !settings.showAddress)
+            },
+            Triple(R.string.photo_frame_metadata_coordinates, settings.showCoordinates) {
+                settings.copy(showCoordinates = !settings.showCoordinates)
+            },
+            Triple(R.string.photo_frame_metadata_altitude, settings.showAltitude) {
+                settings.copy(showAltitude = !settings.showAltitude)
+            },
         )
         choices.chunked(3).forEach { rowChoices ->
             Row(
@@ -2703,6 +2713,7 @@ internal fun PhotoEffectsRenderedPreview(
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
     metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
+    previewPlaceholders: Boolean = true,
     watermark: PhotoFrameWatermark,
     filter: PhotoFilterSelection? = null,
     prefetchFilters: List<PhotoFilterSelection> = emptyList(),
@@ -2732,6 +2743,7 @@ internal fun PhotoEffectsRenderedPreview(
         borderEnabled,
         preset,
         metadataSettings,
+        previewPlaceholders,
         watermark,
     ) {
         BoundedAccessCache<PhotoEffectsPreviewCacheKey, PhotoEffectsPreviewCache>(
@@ -2757,6 +2769,7 @@ internal fun PhotoEffectsRenderedPreview(
         borderEnabled,
         preset,
         metadataSettings,
+        previewPlaceholders,
         watermark,
     ) { PhotoEffectsPreviewCache() }
     DisposableEffect(comparisonCache) {
@@ -2815,6 +2828,7 @@ internal fun PhotoEffectsRenderedPreview(
                     metadataSettings = metadataSettings,
                     longEdge = PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
                     filter = null,
+                    previewPlaceholders = previewPlaceholders,
                 )
                 checkNotNull(output)
             } finally {
@@ -3290,6 +3304,10 @@ internal fun cameraEffectPreviewMetadata(
     focalLength = exif?.focalLength?.trim()?.takeIf(String::isNotEmpty),
     lensModel = exif?.lensModel?.trim()?.takeIf(String::isNotEmpty),
     dateTime = normalizeCaptureDateTime(exif?.dateTime),
+    latitude = exif?.latitude,
+    longitude = exif?.longitude,
+    altitudeMeters = exif?.altitudeMeters,
+    address = exif?.address,
 )
 
 private fun createPhotoFramePreviewSource(): Bitmap {
@@ -3607,14 +3625,6 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             accentColor = statusAccent,
             emphasized = expanded || buttonState != GpsStatusButtonState.OFF,
             modifier = Modifier.fillMaxWidth(),
-            centerIcon = { tint ->
-                Icon(
-                    imageVector = Icons.Default.GpsFixed,
-                    contentDescription = null,
-                    tint = tint,
-                    modifier = Modifier.size(18.dp),
-                )
-            },
             onLongClick = {
                 clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
                 showHint(logCopiedHint)
@@ -3691,7 +3701,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         gpsState.longitude?.let { lon -> "%.5f, %.5f".format(java.util.Locale.US, lat, lon) }
                     }
                     val updatedAt = gpsState.lastSentAtMs?.let {
-                        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).apply {
+                        java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).apply {
                             timeZone = java.util.TimeZone.getTimeZone("Asia/Shanghai")
                         }.format(java.util.Date(it))
                     }
@@ -3713,15 +3723,18 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Text(
-                            text = gpsState.altitudeMeters?.let { altitude ->
-                                stringResource(R.string.gps_altitude_value, altitude.roundToInt())
-                            } ?: stringResource(R.string.gps_altitude_unavailable),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = colors.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
+                        gpsState.altitudeMeters?.let { altitude ->
+                            Text(
+                                text = stringResource(
+                                    R.string.gps_altitude_value,
+                                    altitude.roundToInt(),
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
                         updatedAt?.let {
                             Text(
                                 stringResource(R.string.gps_updated_at, it),
