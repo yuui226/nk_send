@@ -3380,9 +3380,7 @@ private enum class GpsStatusButtonState {
     CONNECTING,
     PAIRING,
     CAMERA_CONFIRM,
-    PAIRING_SUCCESS,
     CONNECTED,
-    WRITING,
     ENABLED,
     NEEDS_CAMERA,
     AP_UNAVAILABLE,
@@ -3560,9 +3558,9 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
             GpsStatus.PAIRING -> GpsStatusButtonState.PAIRING
             GpsStatus.CAMERA_CONFIRM -> GpsStatusButtonState.CAMERA_CONFIRM
-            GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.PAIRING_SUCCESS
+            GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.CONNECTED
             GpsStatus.CONNECTED -> GpsStatusButtonState.CONNECTED
-            GpsStatus.WRITING -> GpsStatusButtonState.WRITING
+            GpsStatus.WRITING -> GpsStatusButtonState.CONNECTED
             GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.NEEDS_CAMERA
             GpsStatus.WAITING_FIX -> GpsStatusButtonState.CONNECTED
             GpsStatus.READY -> GpsStatusButtonState.ENABLED
@@ -3816,9 +3814,9 @@ private fun GpsStatusButton(
         GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
         GpsStatus.PAIRING -> GpsStatusButtonState.PAIRING
         GpsStatus.CAMERA_CONFIRM -> GpsStatusButtonState.CAMERA_CONFIRM
-        GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.PAIRING_SUCCESS
+        GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.CONNECTED
         GpsStatus.CONNECTED -> GpsStatusButtonState.CONNECTED
-        GpsStatus.WRITING -> GpsStatusButtonState.WRITING
+        GpsStatus.WRITING -> GpsStatusButtonState.CONNECTED
         GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.NEEDS_CAMERA
         GpsStatus.WAITING_FIX -> GpsStatusButtonState.CONNECTED
         GpsStatus.READY -> GpsStatusButtonState.ENABLED
@@ -3921,9 +3919,7 @@ private fun GpsStatusButton(
                 GpsStatusButtonState.CONNECTING -> stringResource(R.string.gps_connecting)
                 GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_pairing)
                 GpsStatusButtonState.CAMERA_CONFIRM -> stringResource(R.string.gps_camera_confirm)
-                GpsStatusButtonState.PAIRING_SUCCESS -> stringResource(R.string.gps_pairing_success)
                 GpsStatusButtonState.CONNECTED -> stringResource(R.string.gps_connected)
-                GpsStatusButtonState.WRITING -> stringResource(R.string.gps_writing)
                 GpsStatusButtonState.ENABLED -> stringResource(R.string.gps_enabled)
                 GpsStatusButtonState.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
                 GpsStatusButtonState.AP_UNAVAILABLE -> stringResource(R.string.gps_ap_unavailable)

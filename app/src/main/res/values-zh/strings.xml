@@ -552,9 +552,7 @@
     <string name="gps_connecting">正在连接</string>
     <string name="gps_pairing">正在配对</string>
     <string name="gps_camera_confirm">相机请按 OK</string>
-    <string name="gps_pairing_success">配对成功</string>
     <string name="gps_connected">连接成功</string>
-    <string name="gps_writing">GPS 写入中</string>
     <string name="gps_enabled">已开启</string>
     <string name="gps_location_copied">已复制地址与坐标</string>
     <string name="gps_need_camera">打开相机配对</string>
