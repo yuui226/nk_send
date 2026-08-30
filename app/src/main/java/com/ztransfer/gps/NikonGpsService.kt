@@ -89,7 +89,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                     longitude = location.longitude,
                     altitudeMeters = location.altitude
                         .takeIf { location.hasAltitude() && it.isFinite() }
-                        ?: 0.0,
+                        ?: it.altitudeMeters,
                     accuracyMeters = location.accuracy,
                     status = if (it.status == GpsStatus.READY ||
                         it.status == GpsStatus.WRITING ||

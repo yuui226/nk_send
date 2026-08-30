@@ -3713,18 +3713,15 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        gpsState.altitudeMeters?.let { altitude ->
-                            Text(
-                                text = stringResource(
-                                    R.string.gps_altitude_value,
-                                    altitude.roundToInt(),
-                                ),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = colors.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 2.dp),
-                            )
-                        }
+                        Text(
+                            text = gpsState.altitudeMeters?.let { altitude ->
+                                stringResource(R.string.gps_altitude_value, altitude.roundToInt())
+                            } ?: stringResource(R.string.gps_altitude_unavailable),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
                         updatedAt?.let {
                             Text(
                                 stringResource(R.string.gps_updated_at, it),

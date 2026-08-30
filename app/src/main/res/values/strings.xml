@@ -558,6 +558,7 @@
     <string name="gps_location_copied">Address and coordinates copied</string>
     <string name="gps_location_value">Location: %1$s</string>
     <string name="gps_altitude_value">Altitude: %1$d m</string>
+    <string name="gps_altitude_unavailable">Altitude: unavailable</string>
     <string name="gps_updated_at">Updated: %1$s</string>
     <string name="gps_need_camera">Camera pairing</string>
     <string name="gps_ap_unavailable">Unavailable in AP mode</string>
