@@ -71,11 +71,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -3549,7 +3547,12 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             emphasized = expanded || buttonState != GpsStatusButtonState.OFF,
             modifier = Modifier.fillMaxWidth(),
             centerIcon = { tint ->
-                GpsModeIcon(tint = tint, modifier = Modifier.size(18.dp))
+                Icon(
+                    imageVector = Icons.Default.GpsFixed,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(18.dp),
+                )
             },
             onLongClick = {
                 clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
@@ -3558,8 +3561,9 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         )
         AnimatedVisibility(
             visible = expanded,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
+            // 只淡入淡出，内容一次性完成布局；避免连接页两张大卡片在展开过程中逐帧重测。
+            enter = fadeIn(tween(130)),
+            exit = fadeOut(tween(90)),
         ) {
             Surface(
                 modifier = Modifier
@@ -3832,31 +3836,6 @@ private fun GpsStatusButton(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-    }
-}
-
-/** GPS 定位标：与 USB 三叉标、Wi‑Fi 波纹同样的几何线条语言。 */
-@Composable
-private fun GpsModeIcon(
-    tint: Color,
-    modifier: Modifier = Modifier,
-) {
-    androidx.compose.foundation.Canvas(modifier = modifier) {
-        val unit = size.minDimension
-        val stroke = unit * 0.10f
-        val center = Offset(size.width * 0.5f, size.height * 0.5f)
-        val radius = unit * 0.27f
-        drawCircle(
-            color = tint,
-            radius = radius,
-            center = center,
-            style = Stroke(width = stroke),
-        )
-        drawCircle(color = tint, radius = unit * 0.08f, center = center)
-        drawLine(tint, Offset(center.x, unit * 0.04f), Offset(center.x, center.y - radius - stroke), stroke, StrokeCap.Round)
-        drawLine(tint, Offset(center.x, center.y + radius + stroke), Offset(center.x, size.height - unit * 0.04f), stroke, StrokeCap.Round)
-        drawLine(tint, Offset(unit * 0.04f, center.y), Offset(center.x - radius - stroke, center.y), stroke, StrokeCap.Round)
-        drawLine(tint, Offset(center.x + radius + stroke, center.y), Offset(size.width - unit * 0.04f, center.y), stroke, StrokeCap.Round)
     }
 }
 
