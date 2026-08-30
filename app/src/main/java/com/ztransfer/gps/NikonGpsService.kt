@@ -61,7 +61,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                     latitude = location.latitude,
                     longitude = location.longitude,
                     accuracyMeters = location.accuracy,
-                    status = if (it.status == GpsStatus.READY || it.status == GpsStatus.ERROR) {
+                    status = if (it.status == GpsStatus.READY ||
+                        it.status == GpsStatus.WRITING ||
+                        it.status == GpsStatus.ERROR
+                    ) {
                         it.status
                     } else {
                         GpsStatus.WAITING_FIX
@@ -128,7 +131,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         GpsDiagnostics.record("GPS ready camera=$name")
         reconnectJob?.cancel()
         reconnectJob = null
-        updateState(GpsStatus.WAITING_FIX, name)
+        updateState(GpsStatus.CONNECTED, name)
         startLocationUpdates()
     }
 
@@ -159,6 +162,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             .putLong(KEY_DEVICE_ID, device)
             .putLong(KEY_NONCE, nonce)
             .apply()
+        updateState(GpsStatus.PAIRING_SUCCESS, message = "配对成功")
     }
 
     override fun onDisconnected() {
@@ -172,19 +176,24 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         geoWriteInFlight = false
         geoWriteTimeoutJob?.cancel()
         geoWriteTimeoutJob = null
-        updateState(GpsStatus.CONNECTING, message = "正在重连")
+        val pairingCompleted = NikonGpsRuntime.state.value.status == GpsStatus.PAIRING_SUCCESS
+        if (!pairingCompleted) updateState(GpsStatus.CONNECTING, message = "正在重连")
         reconnectJob?.cancel()
         reconnectJob = serviceScope.launch {
             // The Classic bond callback already confirms the camera; a short settle time is
             // enough before scanning the camera's fresh random BLE address.
-            delay(800)
+            if (pairingCompleted) {
+                delay(700)
+                if (isActive && enabled) updateState(GpsStatus.CONNECTING, message = "正在连接")
+            }
+            delay(if (pairingCompleted) 100 else 800)
             if (isActive && enabled) startBle()
         }
     }
 
     override fun onNeedsPairing() {
         GpsDiagnostics.record("awaiting Classic pairing")
-        updateState(GpsStatus.PAIRING, message = "请确认蓝牙配对")
+        updateState(GpsStatus.CAMERA_CONFIRM, message = "请在相机上按 OK")
     }
 
     override fun onError(message: String) {
@@ -254,6 +263,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         val savedId = storedId.takeIf { hasCompleteIdentity }
         val savedNonce = storedNonce.takeIf { hasCompleteIdentity }
         val savedBleAddress = preferences.getString(KEY_BLE_ADDRESS, null)
+        updateState(if (hasCompleteIdentity) GpsStatus.CONNECTING else GpsStatus.SEARCHING)
         bleClient.start(savedDeviceId = savedId, savedNonce = savedNonce, savedBleAddress = savedBleAddress)
     }
 
@@ -314,6 +324,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         }.getOrNull() ?: return
         geoWriteInFlight = true
         pendingSentLocation = Location(location)
+        updateState(GpsStatus.WRITING)
         GpsDiagnostics.record("GEO queued provider=${location.provider ?: "?"} accuracy=${location.accuracy.toInt()}m")
         bleClient.writeGeo(payload)
         geoWriteTimeoutJob?.cancel()
@@ -359,7 +370,13 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                     .getFromLocation(location.latitude, location.longitude, 1)
                     ?.firstOrNull()
                     ?.let { address ->
-                        address.locality ?: address.subLocality ?: address.adminArea
+                        address.getAddressLine(0)
+                            ?.takeIf { it.isNotBlank() }
+                            ?: address.featureName
+                            ?: address.thoroughfare
+                            ?: address.locality
+                            ?: address.subLocality
+                            ?: address.adminArea
                     }
             }.getOrNull()?.takeIf { it.isNotBlank() }
             if (place != null) {

@@ -548,17 +548,21 @@
     <string name="cd_camera_battery">相机电量</string>
     <string name="gps_auto_write">GPS</string>
     <string name="gps_off">未开启</string>
+    <string name="gps_searching">正在寻找</string>
     <string name="gps_connecting">正在连接</string>
     <string name="gps_pairing">正在配对</string>
+    <string name="gps_camera_confirm">相机请按 OK</string>
+    <string name="gps_pairing_success">配对成功</string>
+    <string name="gps_connected">连接成功</string>
+    <string name="gps_writing">GPS 写入中</string>
+    <string name="gps_enabled">已开启</string>
     <string name="gps_need_camera">打开相机配对</string>
-    <string name="gps_waiting_location">正在定位</string>
-    <string name="gps_ready">定位已更新</string>
     <string name="gps_retry">重试</string>
     <string name="gps_clear_pairing">清除 GPS 配对</string>
     <string name="gps_clear_pairing_title">清除 GPS 配对？</string>
     <string name="gps_paired_device_count">已配对 %1$d 台设备</string>
     <string name="gps_clear_pairing_message">将清除已保存的相机身份，下次使用时需要重新配对。</string>
     <string name="gps_help_title">GPS 使用提示</string>
-    <string name="gps_help_message">首次使用：相机进入蓝牙配对界面后，点击右侧按钮并确认一次。之后会自动连接。</string>
+    <string name="gps_help_message">首次使用：相机进入蓝牙配对界面后，点击右侧按钮；看到提示后在相机上按 OK。之后会自动连接。</string>
     <string name="gps_permission_required">请允许蓝牙和定位权限</string>
 </resources>

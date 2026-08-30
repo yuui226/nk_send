@@ -1110,7 +1110,7 @@ fun SettingsOverlay(
                         },
                     )
                 }
-                if (gpsState.enabled && gpsState.status == GpsStatus.READY &&
+                if (gpsState.enabled &&
                     (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
                 ) {
                     val coordinates = gpsState.latitude?.let { lat ->
@@ -1118,14 +1118,36 @@ fun SettingsOverlay(
                             "%.5f, %.5f".format(java.util.Locale.US, lat, lon)
                         }
                     }
-                    Text(
-                        text = listOfNotNull(gpsState.placeName, coordinates).joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 4.dp, top = 6.dp, end = 4.dp),
-                    )
+                    val updatedAt = gpsState.lastSentAtMs?.let {
+                        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                            .format(java.util.Date(it))
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 4.dp, top = 6.dp, end = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = listOfNotNull(gpsState.placeName, updatedAt?.let { "更新 $it" })
+                                .joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        coordinates?.let {
+                            Text(
+                                text = it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.onSurfaceVariant.copy(alpha = 0.72f),
+                                maxLines = 1,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                    }
                 }
             }
 
@@ -3511,11 +3533,15 @@ private val PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)
 
 private enum class GpsStatusButtonState {
     OFF,
+    SEARCHING,
     CONNECTING,
     PAIRING,
-    NEEDS_CAMERA,
-    LOCATING,
+    CAMERA_CONFIRM,
+    PAIRING_SUCCESS,
     CONNECTED,
+    WRITING,
+    ENABLED,
+    NEEDS_CAMERA,
     ERROR,
 }
 
@@ -3610,11 +3636,16 @@ private fun GpsStatusButton(
     }
     val buttonState = if (!enabled) GpsStatusButtonState.OFF else when (status) {
         GpsStatus.OFF -> GpsStatusButtonState.OFF
-        GpsStatus.STARTING, GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
+        GpsStatus.STARTING, GpsStatus.SEARCHING -> GpsStatusButtonState.SEARCHING
+        GpsStatus.CONNECTING -> GpsStatusButtonState.CONNECTING
         GpsStatus.PAIRING -> GpsStatusButtonState.PAIRING
+        GpsStatus.CAMERA_CONFIRM -> GpsStatusButtonState.CAMERA_CONFIRM
+        GpsStatus.PAIRING_SUCCESS -> GpsStatusButtonState.PAIRING_SUCCESS
+        GpsStatus.CONNECTED -> GpsStatusButtonState.CONNECTED
+        GpsStatus.WRITING -> GpsStatusButtonState.WRITING
         GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.NEEDS_CAMERA
-        GpsStatus.WAITING_FIX -> GpsStatusButtonState.LOCATING
-        GpsStatus.READY -> GpsStatusButtonState.CONNECTED
+        GpsStatus.WAITING_FIX -> GpsStatusButtonState.CONNECTED
+        GpsStatus.READY -> GpsStatusButtonState.ENABLED
         GpsStatus.ERROR -> GpsStatusButtonState.ERROR
     }
     val highlighted = buttonState != GpsStatusButtonState.OFF &&
@@ -3640,7 +3671,7 @@ private fun GpsStatusButton(
     }
     val accent by animateColorAsState(
         targetValue = when (buttonState) {
-            GpsStatusButtonState.CONNECTED -> palette.connected
+            GpsStatusButtonState.CONNECTED, GpsStatusButtonState.ENABLED -> palette.connected
             GpsStatusButtonState.ERROR -> colors.statusError
             GpsStatusButtonState.OFF -> colors.onSurfaceVariant
             else -> palette.connecting
@@ -3700,11 +3731,15 @@ private fun GpsStatusButton(
         ) { state ->
             val label = when (state) {
                 GpsStatusButtonState.OFF -> stringResource(R.string.gps_off)
+                GpsStatusButtonState.SEARCHING -> stringResource(R.string.gps_searching)
                 GpsStatusButtonState.CONNECTING -> stringResource(R.string.gps_connecting)
                 GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_pairing)
+                GpsStatusButtonState.CAMERA_CONFIRM -> stringResource(R.string.gps_camera_confirm)
+                GpsStatusButtonState.PAIRING_SUCCESS -> stringResource(R.string.gps_pairing_success)
+                GpsStatusButtonState.CONNECTED -> stringResource(R.string.gps_connected)
+                GpsStatusButtonState.WRITING -> stringResource(R.string.gps_writing)
+                GpsStatusButtonState.ENABLED -> stringResource(R.string.gps_enabled)
                 GpsStatusButtonState.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
-                GpsStatusButtonState.LOCATING -> stringResource(R.string.gps_waiting_location)
-                GpsStatusButtonState.CONNECTED -> stringResource(R.string.gps_ready)
                 GpsStatusButtonState.ERROR -> stringResource(R.string.gps_retry)
             }
             Text(
@@ -3713,7 +3748,7 @@ private fun GpsStatusButton(
                 fontWeight = FontWeight.SemiBold,
                 color = foreground,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                overflow = TextOverflow.Clip,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
