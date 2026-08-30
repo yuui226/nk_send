@@ -1,12 +1,15 @@
 package com.ztransfer.ui.screen
 
 import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Shader
+import android.content.Intent
 import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -3499,8 +3502,15 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     val permissionHint = stringResource(R.string.gps_permission_required)
     val copiedHint = stringResource(R.string.gps_location_copied)
     val logCopiedHint = stringResource(R.string.code_copied)
+    val bluetoothHint = stringResource(R.string.gps_bluetooth_required)
     val gpsLabel = stringResource(R.string.gps_auto_write)
     fun showHint(text: String) { hintText = text }
+    val bluetoothEnableLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
+        if (adapter?.isEnabled == true) gpsViewModel.setEnabled(true) else showHint(bluetoothHint)
+    }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { grants ->
@@ -3511,7 +3521,11 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         val bluetoothGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED)
-        if (locationGranted && bluetoothGranted) gpsViewModel.setEnabled(true) else showHint(permissionHint)
+        if (locationGranted && bluetoothGranted) {
+            val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
+            if (adapter?.isEnabled == true) gpsViewModel.setEnabled(true)
+            else bluetoothEnableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        } else showHint(permissionHint)
     }
     fun enableGps() {
         val permissions = buildList {
@@ -3525,7 +3539,11 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         val missing = permissions.filter {
             ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
         }
-        if (missing.isEmpty()) gpsViewModel.setEnabled(true)
+        if (missing.isEmpty()) {
+            val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
+            if (adapter?.isEnabled == true) gpsViewModel.setEnabled(true)
+            else bluetoothEnableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        }
         else permissionLauncher.launch(missing.toTypedArray())
     }
     LaunchedEffect(hintText) {
@@ -3569,6 +3587,8 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     fun toggleGps() {
         when {
             !gpsState.enabled -> enableGps()
+            gpsState.status == GpsStatus.ERROR && gpsState.message?.contains("蓝牙") == true ->
+                bluetoothEnableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
             gpsState.status == GpsStatus.ERROR -> gpsViewModel.retry()
             gpsState.status == GpsStatus.AP_UNAVAILABLE -> Unit
             else -> gpsViewModel.setEnabled(false)

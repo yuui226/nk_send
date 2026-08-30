@@ -570,4 +570,5 @@
     <string name="gps_step_camera">Camera turn on Bluetooth\n- First use: Connect to smart device → Pairing (Bluetooth) → Start pairing</string>
     <string name="gps_step_app">App: tap Enable GPS</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
+    <string name="gps_bluetooth_required">Turn on Bluetooth to enable GPS</string>
 </resources>
