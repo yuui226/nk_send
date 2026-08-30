@@ -19,6 +19,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -28,8 +29,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
@@ -3463,6 +3466,9 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     val colors = AppTheme.colors
     var showReset by remember { mutableStateOf(false) }
     var expanded by rememberSaveable { mutableStateOf(false) }
+    val detailVisibility = remember { MutableTransitionState(false) }
+    detailVisibility.targetState = expanded
+    val detailLayoutActive = detailVisibility.currentState || detailVisibility.targetState
     var hintText by remember { mutableStateOf<String?>(null) }
     val permissionHint = stringResource(R.string.gps_permission_required)
     val copiedHint = stringResource(R.string.gps_location_copied)
@@ -3572,22 +3578,32 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             },
         )
         AnimatedVisibility(
-            visible = expanded,
-            modifier = if (expanded) {
+            visibleState = detailVisibility,
+            modifier = if (detailLayoutActive) {
                 Modifier
                     .align(Alignment.Start)
                     .requiredWidth(300.dp)
             } else {
-                Modifier.fillMaxWidth()
+                Modifier.width(0.dp)
             },
-            enter = fadeIn(tween(150)) + expandVertically(
-                animationSpec = tween(180, easing = FastOutSlowInEasing),
-                expandFrom = Alignment.Top,
-            ),
-            exit = fadeOut(tween(100)) + shrinkVertically(
-                animationSpec = tween(150, easing = FastOutSlowInEasing),
-                shrinkTowards = Alignment.Top,
-            ),
+            enter = fadeIn(tween(150)) +
+                expandHorizontally(
+                    animationSpec = tween(180, easing = FastOutSlowInEasing),
+                    expandFrom = Alignment.Start,
+                ) +
+                expandVertically(
+                    animationSpec = tween(180, easing = FastOutSlowInEasing),
+                    expandFrom = Alignment.Top,
+                ),
+            exit = fadeOut(tween(100)) +
+                shrinkHorizontally(
+                    animationSpec = tween(150, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.Start,
+                ) +
+                shrinkVertically(
+                    animationSpec = tween(150, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.Top,
+                ),
         ) {
             Surface(
                 modifier = Modifier
