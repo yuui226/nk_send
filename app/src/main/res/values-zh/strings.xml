@@ -565,6 +565,13 @@
     <string name="gps_paired_device_count">已配对 %1$d 台设备</string>
     <string name="gps_clear_pairing_message">将清除已保存的相机身份，下次使用时需要重新配对。</string>
     <string name="gps_help_title">GPS 使用提示</string>
-    <string name="gps_help_message">首次使用：相机进入蓝牙配对界面后，点击右侧按钮；看到提示后在相机上按 OK。之后会自动连接。</string>
+    <string name="gps_step_camera">相机</string>
+    <string name="gps_step_open_pairing">进入蓝牙配对界面</string>
+    <string name="gps_step_app">App</string>
+    <string name="gps_step_tap_button">点击 GPS 按钮</string>
+    <string name="gps_step_confirm">相机</string>
+    <string name="gps_step_press_ok">出现提示后按 OK</string>
+    <string name="gps_step_later">之后</string>
+    <string name="gps_step_auto_connect">自动连接并更新位置</string>
     <string name="gps_permission_required">请允许蓝牙和定位权限</string>
 </resources>

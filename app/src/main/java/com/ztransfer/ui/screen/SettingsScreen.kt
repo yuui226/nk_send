@@ -3597,7 +3597,27 @@ internal fun GpsConnectionControl() {
             Surface(shape = RoundedCornerShape(18.dp), color = colors.glassSurfaceHeavy, border = BorderStroke(1.dp, colors.glassPanelBorder)) {
                 TipBubbleContent(
                     title = stringResource(R.string.gps_help_title),
-                    items = listOf(TipBubbleItem(stringResource(R.string.gps_help_message))),
+                    items = listOf(
+                        TipBubbleItem(
+                            label = stringResource(R.string.gps_step_camera),
+                            text = stringResource(R.string.gps_step_open_pairing),
+                            emphasized = true,
+                        ),
+                        TipBubbleItem(
+                            label = stringResource(R.string.gps_step_app),
+                            text = stringResource(R.string.gps_step_tap_button),
+                            emphasized = true,
+                        ),
+                        TipBubbleItem(
+                            label = stringResource(R.string.gps_step_confirm),
+                            text = stringResource(R.string.gps_step_press_ok),
+                            emphasized = true,
+                        ),
+                        TipBubbleItem(
+                            label = stringResource(R.string.gps_step_later),
+                            text = stringResource(R.string.gps_step_auto_connect),
+                        ),
+                    ),
                 )
             }
         }
