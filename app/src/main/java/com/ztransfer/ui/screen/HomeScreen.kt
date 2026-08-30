@@ -793,6 +793,8 @@ fun HomeScreen(
                     )
                 }
 
+                Spacer(Modifier.height(10.dp))
+                GpsConnectionControl()
                 Spacer(Modifier.weight(1f))
 
                 // 工作台在空间关系上位于连接页下方，入口贴近屏幕底部提示下滑方向。

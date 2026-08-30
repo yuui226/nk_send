@@ -220,9 +220,6 @@ fun SettingsOverlay(
     cameraIsStaMode: Boolean = false,
 ) {
     val state by viewModel.state.collectAsState()
-    val gpsViewModel: GpsViewModel = viewModel()
-    val gpsState by gpsViewModel.state.collectAsState()
-    val context = LocalContext.current
     // 弹窗一出现就开始准备效果演示图；ViewModel 会按照片身份去重，重复打开不重复读取。
     LaunchedEffect(Unit) { onEffectPreviewRequested() }
     val colors = AppTheme.colors
@@ -302,9 +299,6 @@ fun SettingsOverlay(
     var settingsPage by remember { mutableStateOf(SettingsPage.MAIN) }
     var showMainSettingsInfo by remember { mutableStateOf(false) }
     var mainSettingsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
-    var showGpsResetDialog by remember { mutableStateOf(false) }
-    var showGpsInfoDialog by remember { mutableStateOf(false) }
-    var gpsHelpViewed by remember { mutableStateOf(gpsViewModel.isHelpViewed()) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var expandedEffectsPreview by remember {
@@ -406,38 +400,6 @@ fun SettingsOverlay(
         footerHintText = text
         footerHintVisible = true
         footerHintNonce++
-    }
-    val gpsPermissionHint = stringResource(R.string.gps_permission_required)
-    val gpsPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { grants ->
-        val locationGranted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
-            (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) ||
-            (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED)
-        val bluetoothGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED)
-        if (locationGranted && bluetoothGranted) {
-            gpsViewModel.setEnabled(true)
-        } else {
-            showFooterHint(gpsPermissionHint)
-        }
-    }
-    fun requestGpsEnable() {
-        val requested = buildList {
-            add(Manifest.permission.ACCESS_FINE_LOCATION)
-            add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                add(Manifest.permission.BLUETOOTH_SCAN)
-                add(Manifest.permission.BLUETOOTH_CONNECT)
-            }
-        }
-        val missing = requested.filter {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missing.isEmpty()) gpsViewModel.setEnabled(true)
-        else gpsPermissionLauncher.launch(missing.toTypedArray())
     }
     LaunchedEffect(footerHintNonce) {
         if (footerHintVisible) {
@@ -920,33 +882,6 @@ fun SettingsOverlay(
                     onHoldCameraWifi = onHoldCameraWifi,
                 )
             }
-            if (showGpsResetDialog) {
-                GpsResetPairingDialog(
-                    pairedDeviceCount = gpsViewModel.pairedDeviceCount(),
-                    onConfirm = {
-                        showGpsResetDialog = false
-                        gpsViewModel.clearPairing()
-                    },
-                    onDismiss = { showGpsResetDialog = false },
-                )
-            }
-            if (showGpsInfoDialog) {
-                Dialog(onDismissRequest = { showGpsInfoDialog = false }) {
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = colors.glassSurfaceHeavy,
-                        border = BorderStroke(1.dp, colors.glassPanelBorder),
-                        tonalElevation = 6.dp,
-                    ) {
-                        TipBubbleContent(
-                            title = stringResource(R.string.gps_help_title),
-                            items = listOf(
-                                TipBubbleItem(stringResource(R.string.gps_help_message)),
-                            ),
-                        )
-                    }
-                }
-            }
             Spacer(Modifier.height(14.dp))
 
             // ---------- 传输目录：标题、单行路径与更改按钮并排；未设置时保留橙色强调 ----------
@@ -1047,116 +982,6 @@ fun SettingsOverlay(
             }
 
             Spacer(Modifier.height(8.dp))
-
-            // ---------- 尼康 GPS：只保留一个无感总开关；配对、定位和重连全部后台完成 ----------
-            val gpsCopiedHint = stringResource(R.string.code_copied)
-            val gpsLocationCopiedHint = stringResource(R.string.gps_location_copied)
-            SettingsCard(
-                borderColor = colors.glassPanelBorder,
-                pressAccentColor = colors.accentBlue,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SectionLabel(
-                        stringResource(R.string.gps_auto_write),
-                        modifier = Modifier
-                            .weight(1f)
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onLongPress = {
-                                        clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
-                                        showFooterHint(gpsCopiedHint)
-                                    },
-                                )
-                            },
-                    )
-                    TipLightbulbButton(
-                        onClick = {
-                            if (!gpsHelpViewed) {
-                                gpsHelpViewed = true
-                                gpsViewModel.markHelpViewed()
-                            }
-                            showGpsInfoDialog = true
-                        },
-                        contentDescription = stringResource(R.string.gps_help_title),
-                        attention = !gpsHelpViewed,
-                        modifier = Modifier.size(34.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    GlassButton(
-                        onClick = { showGpsResetDialog = true },
-                        enabled = gpsViewModel.pairedDeviceCount() > 0,
-                        shape = RoundedCornerShape(11.dp),
-                        contentPadding = PaddingValues(8.dp),
-                        modifier = Modifier.size(34.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.LinkOff,
-                            contentDescription = stringResource(R.string.gps_clear_pairing),
-                            tint = colors.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    GpsStatusButton(
-                        status = gpsState.status,
-                        enabled = gpsState.enabled,
-                        onClick = {
-                            if (!gpsState.enabled) {
-                                requestGpsEnable()
-                            } else if (gpsState.status == GpsStatus.ERROR) {
-                                gpsViewModel.retry()
-                            } else if (gpsState.status == GpsStatus.AP_UNAVAILABLE) {
-                                // Wi-Fi AP mode cannot embed location data on Nikon cameras.
-                            } else {
-                                gpsViewModel.setEnabled(false)
-                            }
-                        },
-                    )
-                }
-                if (gpsState.enabled &&
-                    (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
-                ) {
-                    val coordinates = gpsState.latitude?.let { lat ->
-                        gpsState.longitude?.let { lon ->
-                            "%.5f, %.5f".format(java.util.Locale.US, lat, lon)
-                        }
-                    }
-                    val updatedAt = gpsState.lastSentAtMs?.let {
-                        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                            .format(java.util.Date(it))
-                    }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 4.dp, top = 6.dp, end = 4.dp),
-                    ) {
-                        Text(
-                            text = gpsState.placeName ?: stringResource(R.string.gps_enabled),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    val copied = listOfNotNull(gpsState.placeName, coordinates)
-                                        .joinToString("\n")
-                                    clipboard.setText(AnnotatedString(copied))
-                                    showFooterHint(gpsLocationCopiedHint)
-                                },
-                        )
-                        updatedAt?.let {
-                            Text(
-                                text = "更新 $it",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.onSurfaceVariant.copy(alpha = 0.72f),
-                                maxLines = 1,
-                                modifier = Modifier.padding(top = 2.dp),
-                            )
-                        }
-                    }
-                }
-            }
 
             Spacer(Modifier.height(8.dp))
 
@@ -3620,6 +3445,160 @@ private fun GpsResetPairingDialog(
                         Text(stringResource(R.string.gps_clear_pairing))
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Compact GPS control shared by the connection page; settings no longer owns this entry. */
+@Composable
+internal fun GpsConnectionControl() {
+    val gpsViewModel: GpsViewModel = viewModel()
+    val gpsState by gpsViewModel.state.collectAsState()
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val colors = AppTheme.colors
+    var showInfo by remember { mutableStateOf(false) }
+    var showReset by remember { mutableStateOf(false) }
+    var helpViewed by remember { mutableStateOf(gpsViewModel.isHelpViewed()) }
+    var hintText by remember { mutableStateOf<String?>(null) }
+    val permissionHint = stringResource(R.string.gps_permission_required)
+    val copiedHint = stringResource(R.string.gps_location_copied)
+    val logCopiedHint = stringResource(R.string.code_copied)
+    fun showHint(text: String) { hintText = text }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        val locationGranted = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val bluetoothGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED)
+        if (locationGranted && bluetoothGranted) gpsViewModel.setEnabled(true) else showHint(permissionHint)
+    }
+    fun enableGps() {
+        val permissions = buildList {
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_SCAN)
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
+        val missing = permissions.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) gpsViewModel.setEnabled(true)
+        else permissionLauncher.launch(missing.toTypedArray())
+    }
+    LaunchedEffect(hintText) {
+        if (hintText != null) {
+            delay(1800)
+            hintText = null
+        }
+    }
+    SettingsCard(
+        borderColor = colors.glassPanelBorder,
+        pressAccentColor = colors.accentBlue,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionLabel(
+                stringResource(R.string.gps_auto_write),
+                modifier = Modifier
+                    .weight(1f)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = {
+                            clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
+                            showHint(logCopiedHint)
+                        })
+                    },
+            )
+            TipLightbulbButton(
+                onClick = {
+                    if (!helpViewed) {
+                        helpViewed = true
+                        gpsViewModel.markHelpViewed()
+                    }
+                    showInfo = true
+                },
+                contentDescription = stringResource(R.string.gps_help_title),
+                attention = !helpViewed,
+                modifier = Modifier.size(32.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            GlassButton(
+                onClick = { showReset = true },
+                enabled = gpsViewModel.pairedDeviceCount() > 0,
+                shape = RoundedCornerShape(11.dp),
+                contentPadding = PaddingValues(8.dp),
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(Icons.Default.LinkOff, stringResource(R.string.gps_clear_pairing), tint = colors.onSurfaceVariant, modifier = Modifier.size(17.dp))
+            }
+            Spacer(Modifier.width(6.dp))
+            GpsStatusButton(
+                status = gpsState.status,
+                enabled = gpsState.enabled,
+                onClick = {
+                    when {
+                        !gpsState.enabled -> enableGps()
+                        gpsState.status == GpsStatus.ERROR -> gpsViewModel.retry()
+                        gpsState.status == GpsStatus.AP_UNAVAILABLE -> Unit
+                        else -> gpsViewModel.setEnabled(false)
+                    }
+                },
+            )
+        }
+        if (gpsState.enabled &&
+            (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
+        ) {
+            val coordinates = gpsState.latitude?.let { lat ->
+                gpsState.longitude?.let { lon -> "%.5f, %.5f".format(java.util.Locale.US, lat, lon) }
+            }
+            val updatedAt = gpsState.lastSentAtMs?.let {
+                java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it))
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp, top = 6.dp, end = 4.dp)
+                    .clickable {
+                        clipboard.setText(AnnotatedString(listOfNotNull(gpsState.placeName, coordinates).joinToString("\n")))
+                        showHint(copiedHint)
+                    },
+            ) {
+                Text(
+                    text = gpsState.placeName ?: stringResource(R.string.gps_enabled),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                updatedAt?.let {
+                    Text("更新 $it", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant.copy(alpha = 0.72f), modifier = Modifier.padding(top = 2.dp))
+                }
+            }
+        }
+        hintText?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = colors.accentBlue, modifier = Modifier.align(Alignment.End).padding(top = 5.dp, end = 4.dp))
+        }
+    }
+    if (showReset) {
+        GpsResetPairingDialog(
+            pairedDeviceCount = gpsViewModel.pairedDeviceCount(),
+            onConfirm = { showReset = false; gpsViewModel.clearPairing() },
+            onDismiss = { showReset = false },
+        )
+    }
+    if (showInfo) {
+        Dialog(onDismissRequest = { showInfo = false }) {
+            Surface(shape = RoundedCornerShape(18.dp), color = colors.glassSurfaceHeavy, border = BorderStroke(1.dp, colors.glassPanelBorder)) {
+                TipBubbleContent(
+                    title = stringResource(R.string.gps_help_title),
+                    items = listOf(TipBubbleItem(stringResource(R.string.gps_help_message))),
+                )
             }
         }
     }
