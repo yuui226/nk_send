@@ -39,6 +39,7 @@ internal class NikonGpsBleClient(
         fun onConnecting(name: String?)
         fun onBleAddress(address: String)
         fun onPairing()
+        fun onHandshakeConfirmed(name: String?)
         fun onReady(name: String, device: BluetoothDevice)
         fun onGeoWritten(success: Boolean)
         fun onPairedIdentity(device: Long, nonce: Long)
@@ -321,6 +322,7 @@ internal class NikonGpsBleClient(
 
         override fun onCharacteristicWrite(g: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
             if (gatt !== g) return
+            GpsDiagnostics.record("GATT write uuid=${characteristic.uuid} status=$status")
             writeInFlight = false
             writeInFlightUuid = null
             when (characteristic.uuid) {
@@ -427,6 +429,7 @@ internal class NikonGpsBleClient(
             pairingTimeout?.cancel()
             pairingTimeout = null
             GpsDiagnostics.record("pairing stage4 received")
+            if (savedDeviceId != null) listener.onHandshakeConfirmed(device?.name)
             scope.launch {
                 delay(1_500)
                 queueControllerIdIfNeeded()
@@ -439,6 +442,7 @@ internal class NikonGpsBleClient(
         pairingTimeout?.cancel()
         pairingTimeout = null
         idQueued = true
+        GpsDiagnostics.record("ID queued")
         val bytes = controllerName.toByteArray(Charsets.US_ASCII).copyOf(32)
         writeCharacteristic(gatt ?: return, idChar ?: return, bytes)
     }
