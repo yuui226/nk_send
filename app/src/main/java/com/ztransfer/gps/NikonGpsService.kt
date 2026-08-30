@@ -147,7 +147,18 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     override fun onConnecting(name: String?) {
         GpsDiagnostics.record("connecting name=${name ?: "?"}")
         notificationOverride = null
-        updateState(GpsStatus.CONNECTING, name ?: "Nikon")
+        // A verified session may briefly lose GATT when the camera sleeps. Keep the
+        // stable READY presentation during background reconnect; onReady() restores it
+        // only after the ID handshake succeeds again. A first-time scan has no saved
+        // identity yet, so it must stay in SEARCHING until the pairing stage begins.
+        if (preserveReadyDuringReconnect && hasCompleteSavedIdentity()) {
+            updateState(GpsStatus.READY, name ?: "Nikon", message = "正在重连")
+        } else {
+            updateState(
+                if (hasCompleteSavedIdentity()) GpsStatus.CONNECTING else GpsStatus.SEARCHING,
+                name ?: "Nikon",
+            )
+        }
     }
 
     override fun onBleAddress(address: String) {
@@ -170,13 +181,13 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         cameraReady = true
         cameraVerified = wasReadyBeforeReconnect
         preserveReadyDuringReconnect = false
-        // An ID characteristic write only proves that Android handed the packet to GATT.
-        // Keep a fresh session in "connecting" until the camera also accepts a GEO write;
-        // otherwise the UI can claim success while the camera is still on its pairing screen.
+        // ID write success confirms the saved-pairing link is available. Keep READY gated
+        // by the first GEO write so a connected camera without a valid location fix never
+        // appears as fully enabled.
         updateState(
-            if (wasReadyBeforeReconnect) GpsStatus.READY else GpsStatus.CONNECTING,
+            if (wasReadyBeforeReconnect) GpsStatus.READY else GpsStatus.CONNECTED,
             name,
-            if (wasReadyBeforeReconnect) null else "正在确认连接",
+            null,
         )
         startLocationUpdates()
     }
@@ -272,7 +283,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         preserveReadyDuringReconnect = currentStatus == GpsStatus.READY
         cameraVerified = false
         if (!pairingCompleted && !preserveReadyDuringReconnect) {
-            updateState(GpsStatus.CONNECTING, message = "正在重连")
+            val hasIdentity = hasCompleteSavedIdentity()
+            updateState(
+                if (hasIdentity) GpsStatus.CONNECTING else GpsStatus.SEARCHING,
+                message = if (hasIdentity) "正在重连" else null,
+            )
         }
         reconnectJob?.cancel()
         reconnectJob = serviceScope.launch {
@@ -388,6 +403,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         }
         bleClient.start(savedDeviceId = savedId, savedNonce = savedNonce, savedBleAddress = savedBleAddress)
     }
+
+    private fun hasCompleteSavedIdentity(): Boolean =
+        preferences.getLong(KEY_DEVICE_ID, Long.MIN_VALUE) != Long.MIN_VALUE &&
+            preferences.getLong(KEY_NONCE, Long.MIN_VALUE) != Long.MIN_VALUE
 
     private fun startLocationUpdates() {
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
