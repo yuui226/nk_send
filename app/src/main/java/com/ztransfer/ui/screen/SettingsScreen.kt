@@ -3834,8 +3834,8 @@ private fun GpsStatusButton(
             label = "gpsStatusButtonText",
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .align(Alignment.Center)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .wrapContentSize(Alignment.Center),
         ) { state ->
             val label = when (state) {
                 GpsStatusButtonState.OFF -> stringResource(R.string.gps_enable)
