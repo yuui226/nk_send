@@ -3624,7 +3624,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             AnimatedVisibility(
                 visibleState = detailVisibility,
                 modifier = if (detailLayoutActive) {
-                    Modifier.requiredWidth(300.dp)
+                    Modifier.requiredWidth(286.dp)
                 } else {
                     Modifier.width(0.dp)
                 },
@@ -3660,12 +3660,14 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     .fillMaxWidth()
                     .padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
             ) {
-                Text(
-                    text = stringResource(R.string.gps_detail_description),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 10.dp),
-                )
+                if (!gpsState.enabled) {
+                    Text(
+                        text = stringResource(R.string.gps_detail_description),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
                 if (showGpsSteps) {
                     Column(modifier = Modifier.padding(top = 10.dp)) {
                         GpsConnectionStep(
@@ -3705,7 +3707,8 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     ) {
                         Text(
                             text = stringResource(R.string.gps_location_value, locationText),
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
                             color = colors.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -3716,7 +3719,8 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                                     R.string.gps_altitude_value,
                                     altitude.roundToInt(),
                                 ),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
                                 color = colors.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 2.dp),
                             )
@@ -3724,7 +3728,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         updatedAt?.let {
                             Text(
                                 stringResource(R.string.gps_updated_at, it),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = colors.onSurfaceVariant.copy(alpha = 0.72f),
                                 modifier = Modifier.padding(top = 2.dp),
                             )
