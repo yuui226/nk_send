@@ -3,6 +3,7 @@ package com.ztransfer.ui.screen
 import android.content.Intent
 import android.os.SystemClock
 import android.provider.Settings
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
@@ -77,8 +78,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ztransfer.R
 import com.ztransfer.gps.NikonGpsService
+import com.ztransfer.gps.GpsViewModel
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.ui.theme.*
@@ -174,6 +177,8 @@ fun HomeScreen(
             .distinctUntilChanged()
     }.collectAsState(initial = viewModel.state.value.toHomeConnectionUiState())
     val transferState by transferViewModel.state.collectAsState()
+    val gpsViewModel: GpsViewModel = viewModel()
+    val gpsState by gpsViewModel.state.collectAsState()
     val haptics = rememberHaptics(transferState.hapticsEnabled)
     val currentHaptics by rememberUpdatedState(haptics)
     val context = LocalContext.current
@@ -347,7 +352,7 @@ fun HomeScreen(
         state.staConnectionStatus == StaConnectionStatus.PAIRING ||
         state.staConnectionStatus == StaConnectionStatus.CONNECTING
     val staConnected = state.isConnectedToCamera && state.isStaConnection
-    val staConnectButtonHighlighted = staBusy || staConnected
+    val staConnectButtonHighlighted = !gpsState.enabled && (staBusy || staConnected)
     val staConnectButtonBreath = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(staConnectButtonHighlighted) {
         if (!staConnectButtonHighlighted) {
@@ -437,7 +442,11 @@ fun HomeScreen(
         }
     }
     // 识别传输方式后立即停止提示动画；具体动画在卡片图层内运行，避免每帧重组整个页面。
-    val connectionAttentionActive = selectedConnection == null
+    val connectionAttentionActive = selectedConnection == null && !gpsState.enabled
+    val gpsBlocksConnection = gpsState.enabled
+    fun showGpsConnectionBlockedHint() {
+        Toast.makeText(context, R.string.gps_close_before_connect, Toast.LENGTH_SHORT).show()
+    }
     val soonDays = if (isPro) {
         val subExp = remember(isPro, licenseRefreshNonce) {
             LicenseManager.subExpiresAtSec()
@@ -522,6 +531,8 @@ fun HomeScreen(
                                 selectedConnection == CameraConnectionType.USB
                             },
                             goldBurst = playPremiumConnectionCelebration,
+                            dimmed = gpsBlocksConnection,
+                            onCardClick = if (gpsBlocksConnection) ::showGpsConnectionBlockedHint else null,
                         )
                         Spacer(Modifier.height(gpsSpacing))
                         GpsConnectionControl(modifier = Modifier.fillMaxWidth())
@@ -556,7 +567,8 @@ fun HomeScreen(
                             WifiModeTabs(
                                 selectedMode = state.wirelessMode,
                                 enabled = !connected &&
-                                    state.connectionType != CameraConnectionType.USB,
+                                    state.connectionType != CameraConnectionType.USB &&
+                                    !gpsBlocksConnection,
                                 onSelectAp = {
                                     tipsPopupAnchor = null
                                     viewModel.selectApMode()
@@ -574,6 +586,8 @@ fun HomeScreen(
                         selectionSceneProgress = selectionSceneProgress,
                         successEffectProgress = successEffectProgress,
                         goldBurst = playPremiumConnectionCelebration,
+                        dimmed = gpsBlocksConnection,
+                        onCardClick = if (gpsBlocksConnection) ::showGpsConnectionBlockedHint else null,
                         feedback = if (state.wirelessMode == WirelessMode.AP) {
                             wifiFeedback
                         } else {
@@ -607,6 +621,7 @@ fun HomeScreen(
                                             } catch (_: Exception) {}
                                         },
                                         shape = RoundedCornerShape(12.dp),
+                                        enabled = !gpsBlocksConnection,
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                         textureSeed = WIFI_SETTINGS_BUTTON_TEXTURE_SEED,
                                         modifier = Modifier
@@ -645,7 +660,7 @@ fun HomeScreen(
                                     )
                                     GlassButton(
                                         onClick = { showStaResetDialog = true },
-                                        enabled = !connected,
+                                        enabled = !connected && !gpsBlocksConnection,
                                         shape = RoundedCornerShape(11.dp),
                                         contentPadding = PaddingValues(8.dp),
                                         modifier = Modifier.size(34.dp),
@@ -664,7 +679,7 @@ fun HomeScreen(
                                             viewModel.cancelStaDiscovery()
                                             openHotspotSettings(context)
                                         },
-                                        enabled = !connected,
+                                        enabled = !connected && !gpsBlocksConnection,
                                         shape = RoundedCornerShape(11.dp),
                                         contentPadding = PaddingValues(8.dp),
                                         modifier = Modifier
@@ -689,7 +704,7 @@ fun HomeScreen(
                                             viewModel.discoverStaCamera()
                                         }
                                     },
-                                    enabled = !connected,
+                                    enabled = !connected && !gpsBlocksConnection,
                                     disabledAlpha = if (staConnected) 1f else 0.45f,
                                     shape = RoundedCornerShape(14.dp),
                                     contentPadding = PaddingValues(0.dp),
@@ -1100,7 +1115,9 @@ private fun ConnectionMethodCard(
     goldBurst: Boolean = false,
     feedback: ConnectionCardFeedback? = null,
     feedbackFollowsModeSelector: Boolean = false,
-    footer: (@Composable ColumnScope.() -> Unit)? = null
+    footer: (@Composable ColumnScope.() -> Unit)? = null,
+    dimmed: Boolean = false,
+    onCardClick: (() -> Unit)? = null,
 ) {
     val colors = AppTheme.colors
     val shape = remember { RoundedCornerShape(24.dp) }
@@ -1185,11 +1202,19 @@ private fun ConnectionMethodCard(
                 scaleY = breathingScale * (1f - deformation * 0.024f)
                 rotationZ = pressDirection * deformation * 1.15f
                 translationX = pressDirection * deformation * 1.5.dp.toPx()
+                alpha = if (dimmed) 0.54f else 1f
             }
     ) {
         ConnectionCardSurface(
             modifier = Modifier
                 .fillMaxSize()
+                .then(
+                    if (onCardClick != null) {
+                        Modifier.clickable(onClick = onCardClick)
+                    } else {
+                        Modifier
+                    },
+                )
                 .graphicsLayer {
                     val exitProgress = cardExitProgress()
                     val exitScale = 1f - exitProgress * 0.045f

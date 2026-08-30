@@ -569,4 +569,5 @@
     <string name="gps_step_app">App：点击“开启 GPS”</string>
     <string name="gps_permission_required">请允许蓝牙和定位权限</string>
     <string name="gps_bluetooth_required">请打开手机蓝牙以开启 GPS</string>
+    <string name="gps_close_before_connect">请先关闭 GPS</string>
 </resources>

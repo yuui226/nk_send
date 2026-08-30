@@ -50,6 +50,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private lateinit var preferences: android.content.SharedPreferences
     private var reconnectJob: Job? = null
     private var lastSentAt = 0L
+    private var latestLocationDuringWrite: Location? = null
     private var geoWriteInFlight = false
     private var geoWriteTimeoutJob: Job? = null
     private var readyUiJob: Job? = null
@@ -197,6 +198,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         cameraVerified = false
         pairingConfirmationPending = false
         lastSentAt = 0L
+        latestLocationDuringWrite = null
         geoWriteInFlight = false
         geoWriteTimeoutJob?.cancel()
         geoWriteTimeoutJob = null
@@ -318,6 +320,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             refreshNotification()
         } else {
             lastSentAt = 0L
+            latestLocationDuringWrite = null
             updateState(GpsStatus.ERROR, message = "GPS 写入失败")
             notificationOverride = "GPS 写入失败"
             refreshNotification()
@@ -346,6 +349,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         // Force the first location after a reconnect to be sent again. The camera may have
         // dropped its GPS channel together with GATT even when the coordinates did not change.
         lastSentAt = 0L
+        latestLocationDuringWrite = null
         geoWriteInFlight = false
         geoWriteTimeoutJob?.cancel()
         geoWriteTimeoutJob = null
@@ -392,6 +396,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         cameraVerified = false
         preserveReadyDuringReconnect = false
         pairingConfirmationPending = false
+        latestLocationDuringWrite = null
         readyUiJob?.cancel()
         readyUiJob = null
         if (message.contains("pairing rejected", ignoreCase = true) ||
@@ -537,21 +542,30 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     private fun maybeSend(location: Location) {
-        if (!enabled || geoWriteInFlight) return
-        if (System.currentTimeMillis() - lastSentAt < LOCATION_WRITE_INTERVAL_MS) return
-        val satellites = location.extras?.getInt("satellites", 0) ?: 0
+        if (!enabled) return
+        if (geoWriteInFlight) {
+            latestLocationDuringWrite = Location(location)
+            return
+        }
+        val candidate = latestLocationDuringWrite ?: location
+        if (System.currentTimeMillis() - lastSentAt < LOCATION_WRITE_INTERVAL_MS) {
+            latestLocationDuringWrite = Location(candidate)
+            return
+        }
+        latestLocationDuringWrite = null
+        val satellites = candidate.extras?.getInt("satellites", 0) ?: 0
         val payload = runCatching {
             GeoPayloadEncoder.encode(
-                latitude = location.latitude,
-                longitude = location.longitude,
-                altitudeMeters = location.altitude,
+                latitude = candidate.latitude,
+                longitude = candidate.longitude,
+                altitudeMeters = candidate.altitude,
                 satellites = satellites,
                 timestamp = Instant.now(),
             )
         }.getOrNull() ?: return
         geoWriteInFlight = true
         updateState(GpsStatus.WRITING)
-        GpsDiagnostics.record("GEO queued provider=${location.provider ?: "?"} accuracy=${location.accuracy.toInt()}m")
+        GpsDiagnostics.record("GEO queued provider=${candidate.provider ?: "?"} accuracy=${candidate.accuracy.toInt()}m")
         bleClient.writeGeo(payload)
         geoWriteTimeoutJob?.cancel()
         geoWriteTimeoutJob = serviceScope.launch {
@@ -559,6 +573,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             if (geoWriteInFlight && enabled) {
                 geoWriteInFlight = false
                 lastSentAt = 0L
+                latestLocationDuringWrite = null
                 onError("GPS write timeout")
             }
         }
@@ -578,6 +593,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         readyUiJob?.cancel()
         readyUiJob = null
         lastSentAt = 0L
+        latestLocationDuringWrite = null
         stopLocationUpdates()
         if (::bleClient.isInitialized) bleClient.stop()
         geocodeJob?.cancel()
@@ -608,6 +624,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         readyUiJob?.cancel()
         readyUiJob = null
         lastSentAt = 0L
+        latestLocationDuringWrite = null
         stopLocationUpdates()
         if (::bleClient.isInitialized) bleClient.stop()
         NikonGpsRuntime.state.update { it.copy(enabled = enabled, status = GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用") }
