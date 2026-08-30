@@ -63,6 +63,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private var apModeBlocked = false
     private var preserveReadyDuringReconnect = false
     private var bluetoothOff = false
+    /** Pairing failures wait for an explicit user retry; never reopen the system bond dialog. */
+    private var awaitingPairingUserAction = false
     private var bluetoothReceiverRegistered = false
 
     private val bluetoothReceiver = object : BroadcastReceiver() {
@@ -135,6 +137,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             stopGps()
             stopSelf()
             return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_ENABLE) {
+            // An explicit tap is the only operation allowed to restart a failed pairing flow.
+            awaitingPairingUserAction = false
         }
         // START_STICKY may restart the service with a null intent. Respect the persisted
         // switch instead of silently re-enabling GPS after the user turned it off.
@@ -411,6 +417,15 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                 .apply()
             GpsDiagnostics.record("cached pairing identity cleared")
         }
+        val pairingNeedsUserAction =
+            message.contains("pairing", ignoreCase = true) ||
+                message.contains("配对")
+        if (pairingNeedsUserAction) {
+            awaitingPairingUserAction = true
+            // Close the current BLE/Classic flow before exposing the retry action. This prevents
+            // a late bond callback from starting a second createBond() in the same attempt.
+            bleClient.stop()
+        }
         if (!enabled) return
         val userMessage = when {
             message.contains("permission", ignoreCase = true) -> "需要蓝牙权限"
@@ -431,7 +446,9 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             else GpsStatus.ERROR,
             message = userMessage,
         )
-        if (enabled && !isPermissionError && !bluetoothOff && isBluetoothEnabled()) {
+        if (enabled && !isPermissionError && !pairingNeedsUserAction &&
+            !bluetoothOff && isBluetoothEnabled()
+        ) {
             reconnectJob?.cancel()
             reconnectJob = serviceScope.launch {
                 // A failed GATT setup can leave a non-null connection object on some Android
@@ -461,6 +478,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             updateState(GpsStatus.ERROR, message = "需要蓝牙权限")
             return
         }
+        if (awaitingPairingUserAction) {
+            updateState(GpsStatus.NEEDS_CAMERA, message = "请在相机上打开蓝牙配对")
+            return
+        }
         updateState(GpsStatus.STARTING)
         startBle()
     }
@@ -473,6 +494,14 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         if (bluetoothOff || !isBluetoothEnabled()) {
             bluetoothOff = true
             updateState(GpsStatus.ERROR, message = "请打开手机蓝牙")
+            return
+        }
+        if (awaitingPairingUserAction) {
+            GpsDiagnostics.record("BLE start skipped; pairing awaits explicit retry")
+            return
+        }
+        if (bleClient.isRunning()) {
+            GpsDiagnostics.record("BLE start skipped; attempt already active")
             return
         }
         cameraReady = false
@@ -491,7 +520,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         }
         val savedId = storedId.takeIf { hasCompleteIdentity }
         val savedNonce = storedNonce.takeIf { hasCompleteIdentity }
+        // A BLE address without the complete Nikon identity is only a stale scan result, not a
+        // pairing record. First-time flows must scan and pair instead of direct-connecting it.
         val savedBleAddress = preferences.getString(KEY_BLE_ADDRESS, null)
+            .takeIf { hasCompleteIdentity }
         if (!preserveReadyDuringReconnect) {
             updateState(if (hasCompleteIdentity) GpsStatus.CONNECTING else GpsStatus.SEARCHING)
         }
@@ -581,6 +613,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     private fun stopGps() {
         enabled = false
+        awaitingPairingUserAction = false
         cameraReady = false
         cameraVerified = false
         pairingConfirmationPending = false

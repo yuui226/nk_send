@@ -136,6 +136,10 @@ internal class NikonGpsBleClient(
         beginScan()
     }
 
+    /** True while a scan, GATT session, or Classic pairing flow owns this client. */
+    fun isRunning(): Boolean =
+        gatt != null || scanCallback != null || classicReceiver != null
+
     fun stop() {
         scanTimeout?.cancel()
         scanTimeout = null
