@@ -486,13 +486,13 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(cardHeight),
+                        .heightIn(min = cardHeight),
                     horizontalArrangement = Arrangement.spacedBy(cardSpacing)
                 ) {
                     Column(
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxHeight(),
+                            .heightIn(min = cardHeight),
                     ) {
                         ConnectionMethodCard(
                             modifier = Modifier
@@ -524,7 +524,9 @@ fun HomeScreen(
                     }
 
                     ConnectionMethodCard(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(cardHeight),
                         modeIcon = { tint, iconModifier ->
                             Icon(
                                 imageVector = Icons.Default.Wifi,
