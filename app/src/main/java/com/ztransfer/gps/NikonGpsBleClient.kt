@@ -76,8 +76,6 @@ internal class NikonGpsBleClient(
     private var pendingRebondAddress: String? = null
     /** Address currently undergoing the one allowed createBond attempt. */
     private var classicBondAttemptAddress: String? = null
-    /** Stale bond removed by removeBond; do not immediately recreate it. */
-    private var removedClassicAddress: String? = null
     private var pairingTimeout: Job? = null
     private var pairingNotified = false
     private var directConnectJob: Job? = null
@@ -526,9 +524,7 @@ internal class NikonGpsBleClient(
                             if (found.address == classicBondAttemptAddress) {
                                 classicBondReady = true
                                 if (idQueued) finishClassicPairing()
-                            } else if (classicBondAttemptAddress == null &&
-                                found.address != removedClassicAddress
-                            ) {
+                            } else if (classicBondAttemptAddress == null) {
                                 requestFreshClassicPairing(found)
                             }
                         } else if (found.bondState == BluetoothDevice.BOND_BONDED) {
@@ -552,16 +548,23 @@ internal class NikonGpsBleClient(
                         if (found?.bondState == BluetoothDevice.BOND_NONE &&
                             found.address == pendingRebondAddress
                         ) {
-                            // The stale address was removed. Nikon may now advertise a fresh
-                            // Classic address; retrying this old one opens a misleading pairing
-                            // dialog and races discovery of the replacement address.
-                            GpsDiagnostics.record("Classic stale bond removed address=${found.address}; waiting for fresh address")
-                            removedClassicAddress = found.address
-                            pendingRebondAddress = null
-                            classicBondAttemptAddress = null
+                            // The stale bond is gone. Recreate the bond exactly once for this
+                            // same Classic address; polling remains guarded by pendingRebondAddress.
+                            GpsDiagnostics.record("Classic stale bond removed address=${found.address}; recreating once")
+                            val currentReceiver = this
+                            scope.launch {
+                                delay(350L)
+                                if (classicReceiver == currentReceiver &&
+                                    pendingRebondAddress == found.address &&
+                                    classicBondAttemptAddress == null
+                                ) {
+                                    startClassicBond(found)
+                                }
+                            }
                         } else if (found?.bondState == BluetoothDevice.BOND_BONDED) {
                             if (savedDeviceId == null && found.address != classicBondAttemptAddress) return
                             if (found.address == pendingRebondAddress) pendingRebondAddress = null
+                            classicBondAttemptAddress = null
                             classicBondReady = true
                             if (idQueued) finishClassicPairing()
                         } else if (found?.bondState == BluetoothDevice.BOND_NONE &&
@@ -579,7 +582,6 @@ internal class NikonGpsBleClient(
         classicBondReady = false
         classicTargetAddress = null
         classicBondAttemptAddress = null
-        removedClassicAddress = null
         runCatching {
             val filter = IntentFilter().apply {
                 addAction(BluetoothDevice.ACTION_FOUND)
@@ -627,9 +629,7 @@ internal class NikonGpsBleClient(
                             finishClassicPairing()
                             return@launch
                         }
-                    } else if (bonded.address != removedClassicAddress &&
-                        classicBondAttemptAddress == null
-                    ) {
+                    } else if (classicBondAttemptAddress == null) {
                         classicTargetAddress = bonded.address
                         requestFreshClassicPairing(bonded)
                     }
@@ -674,7 +674,6 @@ internal class NikonGpsBleClient(
         classicTargetAddress = null
         pendingRebondAddress = null
         classicBondAttemptAddress = null
-        removedClassicAddress = null
         val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)?.adapter
         if (wasActive && adapter?.isDiscovering == true) runCatching { adapter.cancelDiscovery() }
     }
@@ -711,7 +710,6 @@ internal class NikonGpsBleClient(
         if (pendingRebondAddress == found.address) return
         classicTargetAddress = found.address
         pendingRebondAddress = found.address
-        removedClassicAddress = found.address
         classicBondReady = false
         val removed = runCatching {
             val method = BluetoothDevice::class.java.getMethod("removeBond")
@@ -726,7 +724,7 @@ internal class NikonGpsBleClient(
 
     /** Start at most one user-mediated Classic pairing attempt for the discovered address. */
     private fun startClassicBond(found: BluetoothDevice) {
-        if (classicBondAttemptAddress != null || found.address == removedClassicAddress) return
+        if (classicBondAttemptAddress != null) return
         classicTargetAddress = found.address
         classicBondAttemptAddress = found.address
         val started = runCatching { found.createBond() }.getOrDefault(false)
