@@ -3486,6 +3486,7 @@ private fun GpsDetailOverflowLayer(
 internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     val gpsViewModel: GpsViewModel = viewModel()
     val gpsState by gpsViewModel.state.collectAsState()
+    val hasGpsPairing = gpsViewModel.hasPairedDevice()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val colors = AppTheme.colors
@@ -3669,7 +3670,10 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     Column(modifier = Modifier.padding(top = 10.dp)) {
                         GpsConnectionStep(
                             index = 1,
-                            text = stringResource(R.string.gps_step_camera),
+                            text = stringResource(
+                                if (hasGpsPairing) R.string.gps_step_camera_reconnect
+                                else R.string.gps_step_camera,
+                            ),
                         )
                         Spacer(Modifier.height(10.dp))
                         GpsConnectionStep(

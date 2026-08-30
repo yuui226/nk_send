@@ -554,7 +554,7 @@
     <string name="gps_connecting">Connecting</string>
     <string name="gps_pairing">Pairing</string>
     <string name="gps_camera_confirm">Press OK on camera</string>
-    <string name="gps_enabled">Enabled</string>
+    <string name="gps_enabled">Connected</string>
     <string name="gps_location_copied">Address and coordinates copied</string>
     <string name="gps_need_camera">Camera pairing</string>
     <string name="gps_ap_unavailable">Unavailable in AP mode</string>
@@ -565,6 +565,7 @@
     <string name="gps_clear_pairing_message">The saved camera identity will be removed. Pair again next time.</string>
     <string name="gps_detail_description">When enabled, camera photos include location information.</string>
     <string name="gps_step_camera">Camera turn on Bluetooth\n- First use: Connect to smart device → Pairing (Bluetooth) → Start pairing</string>
+    <string name="gps_step_camera_reconnect">Camera turn on Bluetooth</string>
     <string name="gps_step_app">App: tap Enable GPS</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
     <string name="gps_bluetooth_required">Turn on Bluetooth to enable GPS</string>
