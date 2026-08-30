@@ -518,6 +518,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         }
 
         fun setApModeBlocked(context: Context, blocked: Boolean) {
+            // The connection screens report the current transport mode when they
+            // compose.  Do not let the initial "not AP" report resurrect a
+            // previously enabled GPS service during app launch; only an already
+            // running service (or an explicit user enable) may be resumed.
+            if (!blocked && !NikonGpsRuntime.state.value.enabled) return
             val intent = Intent(context, NikonGpsService::class.java)
                 .setAction(ACTION_SET_AP_MODE)
                 .putExtra(EXTRA_AP_MODE, blocked)
