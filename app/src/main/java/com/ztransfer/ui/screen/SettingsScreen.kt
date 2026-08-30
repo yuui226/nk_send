@@ -3643,11 +3643,11 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     GlassButton(
                         onClick = { showReset = true },
                         enabled = gpsViewModel.pairedDeviceCount() > 0,
-                        shape = RoundedCornerShape(11.dp),
-                        contentPadding = PaddingValues(8.dp),
-                        modifier = Modifier.size(34.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.size(42.dp),
                     ) {
-                        Icon(Icons.Default.LinkOff, stringResource(R.string.gps_clear_pairing), tint = colors.onSurfaceVariant, modifier = Modifier.size(17.dp))
+                        Icon(Icons.Default.LinkOff, stringResource(R.string.gps_clear_pairing), tint = colors.onSurfaceVariant, modifier = Modifier.size(19.dp))
                     }
                     GpsStatusButton(
                         status = gpsState.status,

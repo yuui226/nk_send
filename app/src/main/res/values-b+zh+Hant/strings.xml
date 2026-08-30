@@ -543,7 +543,7 @@
     <string name="local_photo_save_failed">產生失敗，原照片未受影響</string>
     <string name="cd_camera_battery">相機電量</string>
     <string name="gps_auto_write">GPS</string>
-    <string name="gps_enable">開啟 GPS</string>
+    <string name="gps_enable">開啟GPS</string>
     <string name="gps_searching">正在尋找</string>
     <string name="gps_connecting">正在連線</string>
     <string name="gps_pairing">正在配對</string>
