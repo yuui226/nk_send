@@ -560,13 +560,8 @@
     <string name="gps_clear_pairing_title">清除 GPS 配對？</string>
     <string name="gps_paired_device_count">已配對 %1$d 台裝置</string>
     <string name="gps_clear_pairing_message">將清除已儲存的相機身分，下次使用時需要重新配對。</string>
-    <string name="gps_help_title">GPS 使用提示</string>
     <string name="gps_detail_description">開啟後，相機拍攝的照片會附帶位置資訊。</string>
     <string name="gps_step_camera">相機：連接至智慧型裝置 → 配對（Bluetooth）→ 開始配對</string>
     <string name="gps_step_app">App：點擊「開啟 GPS」</string>
-    <string name="gps_first_connection">首次連線</string>
-    <string name="gps_first_connection_steps">1. 相機：進入藍牙配對畫面\n2. App：點擊 GPS 按鈕\n3. 相機：確認配對時按 OK</string>
-    <string name="gps_follow_up">後續操作</string>
-    <string name="gps_follow_up_steps">開啟相機並保持藍牙開啟，然後點擊 GPS 按鈕，位置會自動更新。</string>
     <string name="gps_permission_required">請允許藍牙和定位權限</string>
 </resources>

@@ -566,13 +566,8 @@
     <string name="gps_clear_pairing_title">Clear GPS pairing?</string>
     <string name="gps_paired_device_count">Paired devices: %1$d</string>
     <string name="gps_clear_pairing_message">The saved camera identity will be removed. Pair again next time.</string>
-    <string name="gps_help_title">GPS help</string>
     <string name="gps_detail_description">When enabled, photos taken with the camera include location information.</string>
     <string name="gps_step_camera">Camera: Connect to smart device → Pairing (Bluetooth) → Start pairing</string>
     <string name="gps_step_app">App: tap Enable GPS</string>
-    <string name="gps_first_connection">First connection</string>
-    <string name="gps_first_connection_steps">1. Camera: open the Bluetooth pairing screen\n2. App: tap the GPS button\n3. Camera: press OK to confirm pairing</string>
-    <string name="gps_follow_up">Follow-up</string>
-    <string name="gps_follow_up_steps">Turn on the camera with Bluetooth enabled, then tap the GPS button. Location updates are automatic.</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
 </resources>

@@ -54,6 +54,7 @@ import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -3459,10 +3460,8 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val colors = AppTheme.colors
-    var showInfo by remember { mutableStateOf(false) }
     var showReset by remember { mutableStateOf(false) }
     var expanded by rememberSaveable { mutableStateOf(false) }
-    var helpViewed by remember { mutableStateOf(gpsViewModel.isHelpViewed()) }
     var hintText by remember { mutableStateOf<String?>(null) }
     val permissionHint = stringResource(R.string.gps_permission_required)
     val copiedHint = stringResource(R.string.gps_location_copied)
@@ -3527,6 +3526,13 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         GpsStatusButtonState.AP_UNAVAILABLE, GpsStatusButtonState.ERROR -> colors.statusError
         else -> colors.accentBlue
     }
+    val showGpsSteps = gpsState.status !in setOf(
+        GpsStatus.PAIRING_SUCCESS,
+        GpsStatus.CONNECTED,
+        GpsStatus.WRITING,
+        GpsStatus.WAITING_FIX,
+        GpsStatus.READY,
+    )
     fun toggleGps() {
         when {
             !gpsState.enabled -> enableGps()
@@ -3584,6 +3590,19 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     color = colors.onSurfaceVariant,
                     modifier = Modifier.padding(top = 10.dp),
                 )
+                if (showGpsSteps) {
+                    Column(modifier = Modifier.padding(top = 10.dp)) {
+                        GpsConnectionStep(
+                            index = 1,
+                            text = stringResource(R.string.gps_step_camera),
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        GpsConnectionStep(
+                            index = 2,
+                            text = stringResource(R.string.gps_step_app),
+                        )
+                    }
+                }
                 if (gpsState.enabled &&
                     (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
                 ) {
@@ -3618,20 +3637,9 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TipLightbulbButton(
-                        onClick = {
-                            if (!helpViewed) {
-                                helpViewed = true
-                                gpsViewModel.markHelpViewed()
-                            }
-                            showInfo = true
-                        },
-                        contentDescription = stringResource(R.string.gps_help_title),
-                        attention = !helpViewed,
-                        modifier = Modifier.size(34.dp),
-                    )
                     GlassButton(
                         onClick = { showReset = true },
                         enabled = gpsViewModel.pairedDeviceCount() > 0,
@@ -3641,14 +3649,14 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     ) {
                         Icon(Icons.Default.LinkOff, stringResource(R.string.gps_clear_pairing), tint = colors.onSurfaceVariant, modifier = Modifier.size(17.dp))
                     }
+                    GpsStatusButton(
+                        status = gpsState.status,
+                        enabled = gpsState.enabled,
+                        fillWidth = true,
+                        modifier = Modifier.weight(1f),
+                        onClick = ::toggleGps,
+                    )
                 }
-                GpsStatusButton(
-                    status = gpsState.status,
-                    enabled = gpsState.enabled,
-                    fillWidth = true,
-                    modifier = Modifier.padding(top = 8.dp),
-                    onClick = ::toggleGps,
-                )
             }
             }
         }
@@ -3668,27 +3676,40 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             onDismiss = { showReset = false },
         )
     }
-    if (showInfo) {
-        Dialog(onDismissRequest = { showInfo = false }) {
-            Surface(shape = RoundedCornerShape(18.dp), color = colors.glassSurfaceHeavy, border = BorderStroke(1.dp, colors.glassPanelBorder)) {
-                TipBubbleContent(
-                    title = stringResource(R.string.gps_help_title),
-                    items = listOf(
-                        TipBubbleItem(
-                            label = stringResource(R.string.gps_first_connection),
-                            labelColor = colors.accentOrange,
-                            text = stringResource(R.string.gps_first_connection_steps),
-                            emphasized = true,
-                        ),
-                        TipBubbleItem(
-                            label = stringResource(R.string.gps_follow_up),
-                            labelColor = colors.accentOrange,
-                            text = stringResource(R.string.gps_follow_up_steps),
-                        ),
-                    ),
-                )
-            }
+}
+
+@Composable
+private fun GpsConnectionStep(
+    index: Int,
+    text: String,
+) {
+    val colors = AppTheme.colors
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .size(21.dp)
+                .alignByBaseline()
+                .clip(CircleShape)
+                .background(colors.accentBlue.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = index.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = colors.accentBlue,
+            )
         }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier
+                .weight(1f)
+                .alignByBaseline(),
+        )
     }
 }
 
