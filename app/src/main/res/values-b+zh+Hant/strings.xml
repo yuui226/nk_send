@@ -543,7 +543,7 @@
     <string name="local_photo_save_failed">產生失敗，原照片未受影響</string>
     <string name="cd_camera_battery">相機電量</string>
     <string name="gps_auto_write">GPS</string>
-    <string name="gps_off">未開啟</string>
+    <string name="gps_off">關閉</string>
     <string name="gps_searching">正在尋找</string>
     <string name="gps_connecting">正在連線</string>
     <string name="gps_pairing">正在配對</string>
@@ -551,7 +551,7 @@
     <string name="gps_pairing_success">配對成功</string>
     <string name="gps_connected">連線成功</string>
     <string name="gps_writing">GPS 寫入中</string>
-    <string name="gps_enabled">已開啟</string>
+    <string name="gps_enabled">開啟</string>
     <string name="gps_location_copied">已複製地址與座標</string>
     <string name="gps_need_camera">開啟相機配對</string>
     <string name="gps_ap_unavailable">AP 模式不可用</string>
@@ -561,11 +561,9 @@
     <string name="gps_paired_device_count">已配對 %1$d 台裝置</string>
     <string name="gps_clear_pairing_message">將清除已儲存的相機身分，下次使用時需要重新配對。</string>
     <string name="gps_help_title">GPS 使用提示</string>
-    <string name="gps_step_camera">相機</string>
-    <string name="gps_step_open_pairing">進入藍牙配對畫面</string>
-    <string name="gps_step_app">App</string>
-    <string name="gps_step_tap_button">點擊 GPS 按鈕</string>
-    <string name="gps_step_confirm">相機</string>
-    <string name="gps_step_press_ok">確認配對時按 OK</string>
+    <string name="gps_first_connection">首次連線</string>
+    <string name="gps_first_connection_steps">1. 相機：進入藍牙配對畫面\n2. App：點擊 GPS 按鈕\n3. 相機：確認配對時按 OK</string>
+    <string name="gps_follow_up">後續操作</string>
+    <string name="gps_follow_up_steps">開啟相機並保持藍牙開啟，然後點擊 GPS 按鈕，位置會自動更新。</string>
     <string name="gps_permission_required">請允許藍牙和定位權限</string>
 </resources>

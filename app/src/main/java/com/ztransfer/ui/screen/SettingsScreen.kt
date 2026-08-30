@@ -3504,29 +3504,33 @@ internal fun GpsConnectionControl() {
         pressAccentColor = colors.accentBlue,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            SectionLabel(
-                stringResource(R.string.gps_auto_write),
-                modifier = Modifier
-                    .weight(1f)
-                    .pointerInput(Unit) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SectionLabel(
+                    stringResource(R.string.gps_auto_write),
+                    modifier = Modifier.pointerInput(Unit) {
                         detectTapGestures(onLongPress = {
                             clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
                             showHint(logCopiedHint)
                         })
                     },
-            )
-            TipLightbulbButton(
-                onClick = {
-                    if (!helpViewed) {
-                        helpViewed = true
-                        gpsViewModel.markHelpViewed()
-                    }
-                    showInfo = true
-                },
-                contentDescription = stringResource(R.string.gps_help_title),
-                attention = !helpViewed,
-                modifier = Modifier.size(32.dp),
-            )
+                )
+                Spacer(Modifier.width(4.dp))
+                TipLightbulbButton(
+                    onClick = {
+                        if (!helpViewed) {
+                            helpViewed = true
+                            gpsViewModel.markHelpViewed()
+                        }
+                        showInfo = true
+                    },
+                    contentDescription = stringResource(R.string.gps_help_title),
+                    attention = !helpViewed,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
             Spacer(Modifier.width(6.dp))
             GlassButton(
                 onClick = { showReset = true },
@@ -3599,19 +3603,15 @@ internal fun GpsConnectionControl() {
                     title = stringResource(R.string.gps_help_title),
                     items = listOf(
                         TipBubbleItem(
-                            label = stringResource(R.string.gps_step_camera),
-                            text = stringResource(R.string.gps_step_open_pairing),
+                            label = stringResource(R.string.gps_first_connection),
+                            labelColor = colors.accentOrange,
+                            text = stringResource(R.string.gps_first_connection_steps),
                             emphasized = true,
                         ),
                         TipBubbleItem(
-                            label = stringResource(R.string.gps_step_app),
-                            text = stringResource(R.string.gps_step_tap_button),
-                            emphasized = true,
-                        ),
-                        TipBubbleItem(
-                            label = stringResource(R.string.gps_step_confirm),
-                            text = stringResource(R.string.gps_step_press_ok),
-                            emphasized = true,
+                            label = stringResource(R.string.gps_follow_up),
+                            labelColor = colors.accentOrange,
+                            text = stringResource(R.string.gps_follow_up_steps),
                         ),
                     ),
                 )
