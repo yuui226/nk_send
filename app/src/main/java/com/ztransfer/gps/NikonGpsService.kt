@@ -53,9 +53,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private var lastGeocodedKey: String? = null
     private var geocodeJob: Job? = null
     private var enabled = false
+    private var cameraReady = false
+    private var apModeBlocked = false
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
+            if (!enabled || !cameraReady) return
             NikonGpsRuntime.state.update {
                 it.copy(
                     latitude = location.latitude,
@@ -86,6 +89,22 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_SET_AP_MODE) {
+            apModeBlocked = intent.getBooleanExtra(EXTRA_AP_MODE, false)
+            if (apModeBlocked) {
+                enabled = preferences.getBoolean(KEY_ENABLED, false)
+                stopActiveConnection()
+                if (enabled) updateState(GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用")
+                else stopSelf()
+            } else if (preferences.getBoolean(KEY_ENABLED, false)) {
+                enabled = true
+                startForegroundCompat()
+                if (enabled) startGpsIfPermitted()
+            } else {
+                stopSelf()
+            }
+            return START_STICKY
+        }
         if (intent?.action == ACTION_DISABLE) {
             stopGps()
             stopSelf()
@@ -100,6 +119,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         enabled = true
         startForegroundCompat()
         if (!enabled) return START_NOT_STICKY
+        if (apModeBlocked) {
+            updateState(GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用")
+            return START_STICKY
+        }
         startGpsIfPermitted()
         return START_STICKY
     }
@@ -131,6 +154,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         GpsDiagnostics.record("GPS ready camera=$name")
         reconnectJob?.cancel()
         reconnectJob = null
+        cameraReady = true
         updateState(GpsStatus.CONNECTED, name)
         startLocationUpdates()
     }
@@ -167,6 +191,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onDisconnected() {
         if (!enabled) return
+        cameraReady = false
         stopLocationUpdates()
         // Force the first location after a reconnect to be sent again. The camera may have
         // dropped its GPS channel together with GATT even when the coordinates did not change.
@@ -198,12 +223,17 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onError(message: String) {
         GpsDiagnostics.record("error=$message")
+        cameraReady = false
         if (message.contains("pairing rejected", ignoreCase = true) ||
             message.contains("identity expired", ignoreCase = true)
         ) {
             // The camera may have forgotten its side of the bond. Drop the cached identity so
             // the next attempt starts a clean pairing handshake instead of retrying stale data.
-            preferences.edit().remove(KEY_DEVICE_ID).remove(KEY_NONCE).apply()
+            preferences.edit()
+                .remove(KEY_DEVICE_ID)
+                .remove(KEY_NONCE)
+                .remove(KEY_BLE_ADDRESS)
+                .apply()
             GpsDiagnostics.record("cached pairing identity cleared")
         }
         if (!enabled) return
@@ -238,6 +268,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     private fun startGpsIfPermitted() {
+        if (apModeBlocked) {
+            updateState(GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用")
+            return
+        }
         val bluetoothOkay = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
         val connectOkay = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
@@ -251,13 +285,22 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     private fun startBle() {
+        if (apModeBlocked) {
+            updateState(GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用")
+            return
+        }
+        cameraReady = false
         val storedId = preferences.getLong(KEY_DEVICE_ID, Long.MIN_VALUE)
             .takeUnless { it == Long.MIN_VALUE }
         val storedNonce = preferences.getLong(KEY_NONCE, Long.MIN_VALUE)
             .takeUnless { it == Long.MIN_VALUE }
         val hasCompleteIdentity = storedId != null && storedNonce != null
         if (!hasCompleteIdentity && (storedId != null || storedNonce != null)) {
-            preferences.edit().remove(KEY_DEVICE_ID).remove(KEY_NONCE).apply()
+            preferences.edit()
+                .remove(KEY_DEVICE_ID)
+                .remove(KEY_NONCE)
+                .remove(KEY_BLE_ADDRESS)
+                .apply()
             GpsDiagnostics.record("incomplete pairing identity cleared")
         }
         val savedId = storedId.takeIf { hasCompleteIdentity }
@@ -342,6 +385,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     private fun stopGps() {
         enabled = false
+        cameraReady = false
         reconnectJob?.cancel()
         reconnectJob = null
         pendingSentLocation = null
@@ -356,6 +400,21 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         geocodeJob = null
         lastGeocodedKey = null
         NikonGpsRuntime.state.value = GpsState()
+    }
+
+    private fun stopActiveConnection() {
+        cameraReady = false
+        reconnectJob?.cancel()
+        reconnectJob = null
+        pendingSentLocation = null
+        geoWriteInFlight = false
+        geoWriteTimeoutJob?.cancel()
+        geoWriteTimeoutJob = null
+        lastSentLocation = null
+        lastSentAt = 0L
+        stopLocationUpdates()
+        if (::bleClient.isInitialized) bleClient.stop()
+        NikonGpsRuntime.state.update { it.copy(enabled = enabled, status = GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用") }
     }
 
     private fun requestPlaceName(location: Location) {
@@ -439,10 +498,19 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         private const val KEY_NONCE = "nonce"
         private const val KEY_BLE_ADDRESS = "ble_address"
         private const val KEY_ENABLED = "enabled"
+        const val ACTION_SET_AP_MODE = "com.ztransfer.gps.SET_AP_MODE"
+        const val EXTRA_AP_MODE = "ap_mode"
 
         fun setEnabled(context: Context, enabled: Boolean) {
             val intent = Intent(context, NikonGpsService::class.java).setAction(if (enabled) ACTION_ENABLE else ACTION_DISABLE)
             if (enabled) ContextCompat.startForegroundService(context, intent) else context.startService(intent)
+        }
+
+        fun setApModeBlocked(context: Context, blocked: Boolean) {
+            val intent = Intent(context, NikonGpsService::class.java)
+                .setAction(ACTION_SET_AP_MODE)
+                .putExtra(EXTRA_AP_MODE, blocked)
+            context.startService(intent)
         }
     }
 }

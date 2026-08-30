@@ -14,6 +14,7 @@ enum class GpsStatus {
     WRITING,
     WAITING_FIX,
     READY,
+    AP_UNAVAILABLE,
     ERROR,
 }
 

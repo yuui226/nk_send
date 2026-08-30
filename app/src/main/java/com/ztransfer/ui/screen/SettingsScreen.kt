@@ -1104,6 +1104,8 @@ fun SettingsOverlay(
                                 requestGpsEnable()
                             } else if (gpsState.status == GpsStatus.ERROR) {
                                 gpsViewModel.retry()
+                            } else if (gpsState.status == GpsStatus.AP_UNAVAILABLE) {
+                                // Wi-Fi AP mode cannot embed location data on Nikon cameras.
                             } else {
                                 gpsViewModel.setEnabled(false)
                             }
@@ -3542,6 +3544,7 @@ private enum class GpsStatusButtonState {
     WRITING,
     ENABLED,
     NEEDS_CAMERA,
+    AP_UNAVAILABLE,
     ERROR,
 }
 
@@ -3646,9 +3649,11 @@ private fun GpsStatusButton(
         GpsStatus.NEEDS_CAMERA -> GpsStatusButtonState.NEEDS_CAMERA
         GpsStatus.WAITING_FIX -> GpsStatusButtonState.CONNECTED
         GpsStatus.READY -> GpsStatusButtonState.ENABLED
+        GpsStatus.AP_UNAVAILABLE -> GpsStatusButtonState.AP_UNAVAILABLE
         GpsStatus.ERROR -> GpsStatusButtonState.ERROR
     }
     val highlighted = buttonState != GpsStatusButtonState.OFF &&
+        buttonState != GpsStatusButtonState.AP_UNAVAILABLE &&
         buttonState != GpsStatusButtonState.ERROR
     val breath = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(highlighted) {
@@ -3672,7 +3677,7 @@ private fun GpsStatusButton(
     val accent by animateColorAsState(
         targetValue = when (buttonState) {
             GpsStatusButtonState.CONNECTED, GpsStatusButtonState.ENABLED -> palette.connected
-            GpsStatusButtonState.ERROR -> colors.statusError
+            GpsStatusButtonState.AP_UNAVAILABLE, GpsStatusButtonState.ERROR -> colors.statusError
             GpsStatusButtonState.OFF -> colors.onSurfaceVariant
             else -> palette.connecting
         },
@@ -3740,6 +3745,7 @@ private fun GpsStatusButton(
                 GpsStatusButtonState.WRITING -> stringResource(R.string.gps_writing)
                 GpsStatusButtonState.ENABLED -> stringResource(R.string.gps_enabled)
                 GpsStatusButtonState.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
+                GpsStatusButtonState.AP_UNAVAILABLE -> stringResource(R.string.gps_ap_unavailable)
                 GpsStatusButtonState.ERROR -> stringResource(R.string.gps_retry)
             }
             Text(

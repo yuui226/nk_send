@@ -114,6 +114,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ztransfer.R
+import com.ztransfer.gps.NikonGpsService
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.NikonCamera
@@ -552,6 +553,13 @@ fun FileListScreen(
     }.collectAsStateWithLifecycle(
         initialValue = transferViewModel.state.value.toFileListTransferUiState(),
     )
+    val gpsContext = LocalContext.current
+    val gpsBlockedByAp = state.isConnectedToCamera &&
+        state.connectionType == CameraConnectionType.WIFI &&
+        !state.isStaConnection
+    LaunchedEffect(gpsBlockedByAp) {
+        NikonGpsService.setApModeBlocked(gpsContext, gpsBlockedByAp)
+    }
     // CameraState publishes authoritative removals immediately. The grid keeps its previous model
     // for one frame only, so every existing animateItem node can arm before the new derived date /
     // burst structure is submitted. No bitmap is copied and additions remain immediate.

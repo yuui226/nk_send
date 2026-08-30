@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import com.ztransfer.R
+import com.ztransfer.gps.NikonGpsService
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.ui.theme.*
@@ -216,6 +217,12 @@ fun HomeScreen(
         colors.accentOrange
     }
     val connected = state.isConnectedToCamera
+    val gpsBlockedByAp = connected &&
+        state.connectionType == CameraConnectionType.WIFI &&
+        !state.isStaConnection
+    LaunchedEffect(gpsBlockedByAp) {
+        NikonGpsService.setApModeBlocked(context, gpsBlockedByAp)
+    }
     val usbError = state.usbConnectionError
     val connectionHapticOutcome = state.connectionHapticOutcome()
     var previousHapticOutcome by remember { mutableStateOf(connectionHapticOutcome) }
