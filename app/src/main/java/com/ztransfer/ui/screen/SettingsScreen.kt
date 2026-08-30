@@ -3694,12 +3694,11 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         )
                     }
                 }
-                if (gpsState.enabled &&
-                    (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
-                ) {
-                    val coordinates = gpsState.latitude?.let { lat ->
-                        gpsState.longitude?.let { lon -> "%.5f, %.5f".format(java.util.Locale.US, lat, lon) }
-                    }
+                val coordinates = gpsState.latitude?.let { lat ->
+                    gpsState.longitude?.let { lon -> "%.5f, %.5f".format(java.util.Locale.US, lat, lon) }
+                }
+                val hasLocation = gpsState.placeName != null || coordinates != null
+                if (gpsState.enabled && hasLocation) {
                     val updatedAt = gpsState.lastSentAtMs?.let {
                         java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).apply {
                             timeZone = java.util.TimeZone.getTimeZone("Asia/Shanghai")
@@ -3723,6 +3722,15 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        coordinates?.let { value ->
+                            Text(
+                                text = stringResource(R.string.gps_coordinates_value, value),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
                         gpsState.altitudeMeters?.let { altitude ->
                             Text(
                                 text = stringResource(
@@ -3744,6 +3752,14 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                             )
                         }
                     }
+                }
+                if (gpsState.enabled) {
+                    Text(
+                        text = stringResource(R.string.gps_update_frequency),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant.copy(alpha = 0.72f),
+                        modifier = Modifier.padding(top = if (hasLocation) 2.dp else 8.dp),
+                    )
                 }
                 Row(
                     modifier = Modifier

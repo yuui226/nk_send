@@ -1158,7 +1158,7 @@ object PhotoFrameExporter {
                     "alt=${enriched.altitudeMeters != null} addr=${!enriched.address.isNullOrBlank()} " +
                     "fields=${metadataSettings.showAddress}/${metadataSettings.showCoordinates}/" +
                     metadataSettings.showAltitude +
-                    " visibleRows=${frameLocationLines(presented).size} uriCount=${metadataUris.size}",
+                    " visibleRows=${frameLocationRows(presented).size} uriCount=${metadataUris.size}",
             )
             presented
         } else {
@@ -1176,7 +1176,7 @@ object PhotoFrameExporter {
                     "parsedGps=${metadata.latitude != null && metadata.longitude != null} " +
                     "alt=${metadata.altitudeMeters != null} " +
                     "addr=${!metadata.address.isNullOrBlank()} " +
-                    "visibleRows=${frameLocationLines(metadata).size} " +
+                    "visibleRows=${frameLocationRows(metadata).size} " +
                     "cameraFallback=$metadataFallbackUsed"
             }
         }
@@ -2174,16 +2174,19 @@ object PhotoFrameExporter {
         val brand = normalizeCameraMake(metadata.make)
         val model = normalizeCameraModel(metadata.make, metadata.model)
         val lens = metadata.lensModel?.trim().orEmpty()
-        val details = listOf(
+        val cameraDetailLine = listOf(
             frameDetailLine(metadata),
             metadata.dateTime.orEmpty(),
-            frameLocationLines(metadata).joinToString("   "),
         )
             .filter(String::isNotBlank)
             .joinToString("   ")
+        val detailLines = buildList {
+            cameraDetailLine.takeIf(String::isNotBlank)?.let(::add)
+            addAll(frameLocationRows(metadata))
+        }
         val hasTitle = brand.isNotEmpty() || model.isNotEmpty()
         val hasLens = lens.isNotEmpty()
-        val hasDetails = details.isNotBlank()
+        val hasDetails = detailLines.isNotEmpty()
         val centerX = layout.canvasWidth / 2f
         val contentArea = if (preset == PhotoFramePreset.FROSTED) {
             frostedMetadataPanelBounds(layout)
@@ -2232,7 +2235,7 @@ object PhotoFrameExporter {
             }
             val maxDetailWidth = layout.canvasWidth *
                 if (preset == PhotoFramePreset.FROSTED) 0.76f else 0.82f
-            val detailWidth = paint.measureText(details)
+            val detailWidth = detailLines.maxOfOrNull(paint::measureText) ?: 0f
             if (detailWidth > maxDetailWidth) {
                 paint.textSize *= maxDetailWidth / detailWidth
             }
@@ -2267,28 +2270,27 @@ object PhotoFrameExporter {
         } else {
             null
         }
-        fun currentRows(): List<FrameTextVisualBounds?> {
-            val title = if (hasTitle) {
-                listOfNotNull(
-                    brand.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, brandPaint) },
-                    model.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, modelPaint) },
-                ).reduce(::mergeTextVisualBounds)
-            } else {
-                null
-            }
-            return listOf(
-                title,
-                lensPaint?.let { textVisualBounds(lens, it) },
-                detailPaint?.let { textVisualBounds(details, it) },
-                watermarkPaint?.let { textVisualBounds(watermarkText, it) },
-            )
+        fun titleBounds(): FrameTextVisualBounds? = if (hasTitle) {
+            listOfNotNull(
+                brand.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, brandPaint) },
+                model.takeIf(String::isNotEmpty)?.let { textVisualBounds(it, modelPaint) },
+            ).reduce(::mergeTextVisualBounds)
+        } else {
+            null
         }
-        var fittedBounds = currentRows()
-        var titleBounds = fittedBounds[0]
-        var lensBounds = fittedBounds[1]
-        var detailBounds = fittedBounds[2]
-        var watermarkBounds = fittedBounds[3]
-        val initialRows = fittedBounds.filterNotNull()
+        fun detailBounds(): List<FrameTextVisualBounds> = detailPaint?.let { paint ->
+            detailLines.map { line -> textVisualBounds(line, paint) }
+        }.orEmpty()
+        var titleBounds = titleBounds()
+        var lensBounds = lensPaint?.let { textVisualBounds(lens, it) }
+        var detailBounds = detailBounds()
+        var watermarkBounds = watermarkPaint?.let { textVisualBounds(watermarkText, it) }
+        val initialRows = buildList {
+            titleBounds?.let(::add)
+            lensBounds?.let(::add)
+            addAll(detailBounds)
+            watermarkBounds?.let(::add)
+        }
         if (initialRows.isEmpty()) return
         if (preset == PhotoFramePreset.FROSTED) {
             drawFrostedMetadataPanel(canvas, layout, contentArea)
@@ -2300,13 +2302,17 @@ object PhotoFrameExporter {
             lensPaint?.let { it.textSize *= rowScale }
             detailPaint?.let { it.textSize *= rowScale }
             watermarkPaint?.let { it.textSize *= rowScale }
-            fittedBounds = currentRows()
-            titleBounds = fittedBounds[0]
-            lensBounds = fittedBounds[1]
-            detailBounds = fittedBounds[2]
-            watermarkBounds = fittedBounds[3]
+            titleBounds = titleBounds()
+            lensBounds = lensPaint?.let { textVisualBounds(lens, it) }
+            detailBounds = detailBounds()
+            watermarkBounds = watermarkPaint?.let { textVisualBounds(watermarkText, it) }
         }
-        val rowBounds = listOfNotNull(titleBounds, lensBounds, detailBounds, watermarkBounds)
+        val rowBounds = buildList {
+            titleBounds?.let(::add)
+            lensBounds?.let(::add)
+            addAll(detailBounds)
+            watermarkBounds?.let(::add)
+        }
         val preferredGap = min(
             layout.canvasWidth * 0.0125f,
             contentArea.height() * 0.09f,
@@ -2320,7 +2326,7 @@ object PhotoFrameExporter {
         var rowIndex = 0
         val titleBaseline = if (titleBounds != null) baselines[rowIndex++] else null
         val lensBaseline = if (lensBounds != null) baselines[rowIndex++] else null
-        val detailBaseline = if (detailBounds != null) baselines[rowIndex++] else null
+        val detailBaselines = detailBounds.map { baselines[rowIndex++] }
         val watermarkBaseline = if (watermarkBounds != null) baselines[rowIndex] else null
 
         titleBaseline?.let { baseline ->
@@ -2338,8 +2344,10 @@ object PhotoFrameExporter {
         if (lensPaint != null && lensBaseline != null) {
             canvas.drawText(lens, centerX, lensBaseline, lensPaint)
         }
-        if (detailPaint != null && detailBaseline != null) {
-            canvas.drawText(details, centerX, detailBaseline, detailPaint)
+        if (detailPaint != null) {
+            detailLines.forEachIndexed { index, line ->
+                canvas.drawText(line, centerX, detailBaselines[index], detailPaint)
+            }
         }
         if (watermarkPaint != null && watermarkBaseline != null) {
             val (x, align) = watermarkHorizontalPlacement(
@@ -2837,13 +2845,19 @@ object PhotoFrameExporter {
             .filter(String::isNotBlank)
             .joinToString(" ")
         val lens = metadata.lensModel?.trim().orEmpty()
-        val details = listOf(
+        // Keep camera details separate from location.  The address gets its own row, while the
+        // compact coordinate/altitude pair shares one row.
+        val cameraDetailLine = listOf(
             immersiveFrameDetailLine(metadata),
             metadata.dateTime.orEmpty(),
-            frameLocationLines(metadata).joinToString("  "),
         )
             .filter(String::isNotBlank)
             .joinToString("  ")
+        val locationDetailLines = frameLocationRows(metadata)
+        val detailLines = buildList {
+            cameraDetailLine.takeIf(String::isNotBlank)?.let(::add)
+            addAll(locationDetailLines)
+        }
         val inlineWatermark = metadataWatermark.takeIf {
             it.enabled && it.content == PhotoFrameWatermarkContent.TEXT &&
                 it.position == PhotoFrameWatermarkPosition.AUTO
@@ -2864,7 +2878,7 @@ object PhotoFrameExporter {
                 setShadowLayer(textSize * 0.11f, 0f, textSize * 0.055f, Color.argb(178, 0, 0, 0))
             }
         }
-        val detailPaint = details.takeIf(String::isNotEmpty)?.let {
+        val detailPaint = detailLines.takeIf(List<String>::isNotEmpty)?.let {
             Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
                 color = Color.rgb(247, 249, 251)
                 textSize = shortEdge * 0.0235f
@@ -2931,7 +2945,7 @@ object PhotoFrameExporter {
             componentGap *= scale
         }
         detailPaint?.let { paint ->
-            val measured = paint.measureText(details)
+            val measured = detailLines.maxOfOrNull(paint::measureText) ?: 0f
             if (measured > maxLineWidth) paint.textSize *= maxLineWidth / measured
         }
         lensPaint?.let { paint ->
@@ -2952,11 +2966,18 @@ object PhotoFrameExporter {
 
         val titleBounds = firstRowBounds()
         val lensBounds = lensPaint?.let { textVisualBounds(lens, it) }
-        val detailBounds = detailPaint?.let { textVisualBounds(details, it) }
+        val detailBounds = detailPaint?.let { paint ->
+            detailLines.map { line -> textVisualBounds(line, paint) }
+        }.orEmpty()
         val separateBounds = separateWatermarkPaint?.let {
             textVisualBounds(separateWatermarkText, it)
         }
-        val rows = listOfNotNull(titleBounds, lensBounds, detailBounds, separateBounds)
+        val rows = buildList {
+            titleBounds?.let(::add)
+            lensBounds?.let(::add)
+            addAll(detailBounds)
+            separateBounds?.let(::add)
+        }
 
         if (rows.isNotEmpty()) {
             val preferredGap = shortEdge * 0.013f
@@ -2990,7 +3011,9 @@ object PhotoFrameExporter {
             var rowIndex = 0
             val titleBaseline = if (titleBounds != null) baselines[rowIndex++] else null
             val lensBaseline = if (lensBounds != null) baselines[rowIndex++] else null
-            val detailBaseline = if (detailBounds != null) baselines[rowIndex++] else null
+            val detailBaselines = detailBounds.map {
+                baselines[rowIndex++]
+            }
             val separateBaseline = if (separateBounds != null) baselines[rowIndex] else null
 
             titleBaseline?.let { baseline ->
@@ -3019,8 +3042,15 @@ object PhotoFrameExporter {
             if (lensPaint != null && lensBaseline != null) {
                 canvas.drawText(lens, photoRect.centerX(), lensBaseline, lensPaint)
             }
-            if (detailPaint != null && detailBaseline != null) {
-                canvas.drawText(details, photoRect.centerX(), detailBaseline, detailPaint)
+            if (detailPaint != null) {
+                detailLines.forEachIndexed { index, line ->
+                    canvas.drawText(
+                        line,
+                        photoRect.centerX(),
+                        detailBaselines[index],
+                        detailPaint,
+                    )
+                }
             }
             if (separateWatermarkPaint != null && separateBaseline != null) {
                 val renderedWatermark = checkNotNull(separateWatermark)
@@ -3801,7 +3831,7 @@ object PhotoFrameExporter {
             metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
             classicSignatureDetailLine(metadata).takeIf(String::isNotBlank)?.let(::add)
             metadata.dateTime?.takeIf(String::isNotBlank)?.let(::add)
-            addAll(frameLocationLines(metadata))
+            addAll(frameLocationRows(metadata))
         }
         val band = RectF(
             0f,
@@ -3955,6 +3985,7 @@ object PhotoFrameExporter {
         val rows = buildList {
             metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
             frameDetailLine(metadata).takeIf(String::isNotBlank)?.let(::add)
+            addAll(frameLocationRows(metadata))
         }
         val band = RectF(
             layout.canvasWidth * 0.08f,
@@ -3997,24 +4028,53 @@ object PhotoFrameExporter {
         canvas.drawText("▶  20", rightX, rightY, sidePaint)
         canvas.restore()
 
-        val rows = editorialMetadataRows(metadata)
+        val identity = listOf(
+            cameraBrandLabel(metadata.make, metadata.model),
+            normalizeCameraModel(metadata.make, metadata.model),
+        ).filter(String::isNotBlank).joinToString(" ")
+        val cameraLine = listOf(
+            identity,
+            metadata.lensModel.orEmpty(),
+            frameDetailLine(metadata),
+            metadata.dateTime.orEmpty(),
+        ).filter(String::isNotBlank).joinToString("   ")
+        val rows = buildList {
+            cameraLine.takeIf(String::isNotBlank)?.let(::add)
+            addAll(frameLocationRows(metadata))
+        }
         if (rows.isNotEmpty()) {
-            val text = rows.joinToString("   ")
             val band = RectF(photo.left, photo.bottom, photo.right, layout.canvasHeight.toFloat())
-            val paint = fittedEditorialPaint(
-                text,
-                photo.width() * 0.016f,
-                band.width() * 0.90f,
-                Color.rgb(224, 170, 124),
-                Typeface.create("sans-serif-condensed", Typeface.NORMAL),
+            val paints = rows.map { text ->
+                fittedEditorialPaint(
+                    text,
+                    photo.width() * 0.016f,
+                    band.width() * 0.90f,
+                    Color.rgb(224, 170, 124),
+                    Typeface.create("sans-serif-condensed", Typeface.NORMAL),
+                )
+            }
+            val preferredGap = band.height() * 0.10f
+            val initialBounds = rows.mapIndexed { index, text ->
+                textVisualBounds(text, paints[index])
+            }
+            val scale = frameTextScaleToFit(
+                (band.height() - preferredGap * (rows.size - 1).coerceAtLeast(0))
+                    .coerceAtLeast(0f),
+                initialBounds,
             )
-            val baseline = centeredFrameTextBaselines(
+            if (scale < 1f) paints.forEach { it.textSize *= scale }
+            val bounds = rows.mapIndexed { index, text ->
+                textVisualBounds(text, paints[index])
+            }
+            val baselines = centeredFrameTextBaselines(
                 band.top,
                 band.bottom,
-                listOf(textVisualBounds(text, paint)),
-                0f,
-            ).single()
-            canvas.drawText(text, band.centerX(), baseline, paint)
+                bounds,
+                preferredGap,
+            )
+            rows.forEachIndexed { index, text ->
+                canvas.drawText(text, band.centerX(), baselines[index], paints[index])
+            }
         }
     }
 
@@ -4119,7 +4179,7 @@ object PhotoFrameExporter {
         metadata.lensModel?.takeIf(String::isNotBlank)?.let(::add)
         frameDetailLine(metadata).takeIf(String::isNotBlank)?.let(::add)
         metadata.dateTime?.takeIf(String::isNotBlank)?.let(::add)
-        addAll(frameLocationLines(metadata))
+        addAll(frameLocationRows(metadata))
     }
 
     private fun classicSignatureDetailLine(metadata: PhotoFrameMetadata): String =
@@ -4195,7 +4255,7 @@ object PhotoFrameExporter {
                     )
                 )
             }
-            frameLocationLines(metadata).forEach { text ->
+            frameLocationRows(metadata).forEach { text ->
                 add(
                     text to colorArchiveTextPaint(
                         text = text,
@@ -4446,13 +4506,14 @@ object PhotoFrameExporter {
         val model = normalizeCameraModel(metadata.make, metadata.model)
         val identity = listOf(brand, model).filter(String::isNotBlank).joinToString(" ")
         val lens = metadata.lensModel?.trim().orEmpty()
-        val details = listOf(
-            frameDetailLine(metadata),
-            metadata.dateTime.orEmpty(),
-            frameLocationLines(metadata).joinToString("   "),
-        )
-            .filter(String::isNotBlank)
-            .joinToString("   ")
+        val details = buildList {
+            listOf(frameDetailLine(metadata), metadata.dateTime.orEmpty())
+                .filter(String::isNotBlank)
+                .joinToString("   ")
+                .takeIf(String::isNotBlank)
+                ?.let(::add)
+            addAll(frameLocationRows(metadata))
+        }
 
         canvas.save()
         canvas.clipPath(Path().apply {
@@ -4495,7 +4556,7 @@ object PhotoFrameExporter {
         photoRect: RectF,
         brand: String,
         lens: String,
-        details: String,
+        details: List<String>,
         occupiedWatermarkBounds: BrandFrameBounds?,
     ) {
         val shortEdge = min(photoRect.width(), photoRect.height())
@@ -4514,7 +4575,7 @@ object PhotoFrameExporter {
                 )
             }
         }
-        val detailPaint = details.takeIf(String::isNotEmpty)?.let { text ->
+        val detailPaints = details.map { text ->
             fittedBrandDetailPaint(
                 text = text,
                 preferredSize = photoRect.width() * 0.021f,
@@ -4528,11 +4589,13 @@ object PhotoFrameExporter {
                 maxWidth = photoRect.width() * 0.78f,
             )
         }
-        val rows = listOfNotNull(
-            brandPaint?.let { textVisualBounds(brand, it) },
-            lensPaint?.let { textVisualBounds(lens, it) },
-            detailPaint?.let { textVisualBounds(details, it) },
-        )
+        val rows = buildList {
+            brandPaint?.let { add(textVisualBounds(brand, it)) }
+            lensPaint?.let { add(textVisualBounds(lens, it)) }
+            details.forEachIndexed { index, text ->
+                add(textVisualBounds(text, detailPaints[index]))
+            }
+        }
         if (rows.isEmpty()) return
         val preferredAreaBottom = photoRect.bottom - shortEdge * 0.030f
         val blockHeight = rows.sumOf { (it.bottom - it.top).toDouble() }.toFloat() +
@@ -4540,7 +4603,8 @@ object PhotoFrameExporter {
         val blockWidth = maxOf(
             brandPaint?.measureText(brand) ?: 0f,
             lensPaint?.measureText(lens) ?: 0f,
-            detailPaint?.measureText(details) ?: 0f,
+            details.zip(detailPaints).maxOfOrNull { (text, paint) -> paint.measureText(text) }
+                ?: 0f,
         ).coerceAtLeast(1f)
         val area = placeBrandMetadataBlock(
             photo = photoRect.toBrandFrameBounds(),
@@ -4563,8 +4627,8 @@ object PhotoFrameExporter {
         if (lensPaint != null) {
             canvas.drawText(lens, photoRect.centerX(), baselines[row++], lensPaint)
         }
-        if (detailPaint != null) {
-            canvas.drawText(details, photoRect.centerX(), baselines[row], detailPaint)
+        details.forEachIndexed { index, text ->
+            canvas.drawText(text, photoRect.centerX(), baselines[row++], detailPaints[index])
         }
     }
 
@@ -4572,7 +4636,7 @@ object PhotoFrameExporter {
         canvas: Canvas,
         photoRect: RectF,
         lens: String,
-        details: String,
+        details: List<String>,
         occupiedWatermarkBounds: BrandFrameBounds?,
     ) {
         if (lens.isEmpty() && details.isEmpty()) return
@@ -4584,23 +4648,26 @@ object PhotoFrameExporter {
                 maxWidth = photoRect.width() * 0.78f,
             )
         }
-        val detailPaint = details.takeIf(String::isNotEmpty)?.let { text ->
+        val detailPaints = details.map { text ->
             fittedBrandDetailPaint(
                 text = text,
                 preferredSize = photoRect.width() * 0.021f,
                 maxWidth = photoRect.width() * 0.78f,
             )
         }
-        val rows = listOfNotNull(
-            lensPaint?.let { textVisualBounds(lens, it) },
-            detailPaint?.let { textVisualBounds(details, it) },
-        )
+        val rows = buildList {
+            lensPaint?.let { add(textVisualBounds(lens, it)) }
+            details.forEachIndexed { index, text ->
+                add(textVisualBounds(text, detailPaints[index]))
+            }
+        }
         val preferredGap = shortEdge * 0.016f
         val blockHeight = rows.sumOf { (it.bottom - it.top).toDouble() }.toFloat() +
             preferredGap * (rows.size - 1).coerceAtLeast(0)
         val blockWidth = maxOf(
             lensPaint?.measureText(lens) ?: 0f,
-            detailPaint?.measureText(details) ?: 0f,
+            details.zip(detailPaints).maxOfOrNull { (text, paint) -> paint.measureText(text) }
+                ?: 0f,
         ).coerceAtLeast(1f)
         val area = placeBrandMetadataBlock(
             photo = photoRect.toBrandFrameBounds(),
@@ -4620,8 +4687,8 @@ object PhotoFrameExporter {
         if (lensPaint != null) {
             canvas.drawText(lens, photoRect.centerX(), baselines[row++], lensPaint)
         }
-        if (detailPaint != null) {
-            canvas.drawText(details, photoRect.centerX(), baselines[row], detailPaint)
+        details.forEachIndexed { index, text ->
+            canvas.drawText(text, photoRect.centerX(), baselines[row++], detailPaints[index])
         }
     }
 
@@ -4811,18 +4878,23 @@ object PhotoFrameExporter {
             ?.uppercase(Locale.ROOT)
         val model = metadata.model?.trim()?.takeIf(String::isNotEmpty)
         val lens = metadata.lensModel?.trim()?.takeIf(String::isNotEmpty)
-        val details = listOf(
-            frameDetailLine(metadata),
-            frameLocationLines(metadata).joinToString("   "),
-        ).joinToString("   ").takeIf(String::isNotEmpty)
         val date = metadata.dateTime?.takeIf(String::isNotEmpty)
+        val rightLines = buildList {
+            listOf(frameDetailLine(metadata), date.orEmpty())
+                .filter(String::isNotBlank)
+                .joinToString("   ")
+                .takeIf(String::isNotBlank)
+                ?.let(::add)
+            addAll(frameLocationRows(metadata))
+        }
         val leftPrimary = make ?: model ?: lens
         val leftSecondary = buildList {
             model?.takeIf { make != null && !it.equals(make, ignoreCase = true) }?.let(::add)
             lens?.takeIf { it != leftPrimary }?.let(::add)
         }.joinToString(" · ").takeIf(String::isNotEmpty)
-        val rightPrimary = details ?: date
-        val rightSecondary = date?.takeIf { details != null }
+        val rightPrimary = rightLines.getOrNull(0)
+        val rightSecondary = rightLines.getOrNull(1)
+        val rightTertiary = rightLines.getOrNull(2)
         val hasLeft = leftPrimary != null
         val hasRight = rightPrimary != null
         val hasLeftBlock = hasLeft
@@ -4867,6 +4939,15 @@ object PhotoFrameExporter {
                 typeface = Typeface.create("sans-serif", Typeface.NORMAL),
             )
         }
+        val rightTertiaryPaint = rightTertiary?.let {
+            createPlaqueTextPaint(
+                text = it,
+                preferredSize = width * 0.018f,
+                maxWidth = rightMaxWidth,
+                color = Color.rgb(103, 106, 106),
+                typeface = Typeface.create("sans-serif", Typeface.NORMAL),
+            )
+        }
         val watermarkText = metadataWatermark.displayText
         val watermarkPaint = if (metadataWatermark.enabled) {
             createWatermarkPaint(
@@ -4903,6 +4984,12 @@ object PhotoFrameExporter {
             } else {
                 null
             }
+        var rightTertiaryBounds =
+            if (rightTertiary != null && rightTertiaryPaint != null) {
+                textVisualBounds(rightTertiary, rightTertiaryPaint)
+            } else {
+                null
+            }
         var watermarkBounds = watermarkPaint?.let { textVisualBounds(watermarkText, it) }
         fun mergedRow(
             left: FrameTextVisualBounds?,
@@ -4914,7 +5001,8 @@ object PhotoFrameExporter {
         }
         var primaryRow = mergedRow(leftPrimaryBounds, rightPrimaryBounds)
         var secondaryRow = mergedRow(leftSecondaryBounds, rightSecondaryBounds)
-        var rows = listOfNotNull(primaryRow, secondaryRow, watermarkBounds)
+        var tertiaryRow = rightTertiaryBounds
+        var rows = listOfNotNull(primaryRow, secondaryRow, tertiaryRow, watermarkBounds)
         if (rows.isEmpty()) return
         val rowScale = frameTextScaleToFit(bandHeight, rows)
         if (rowScale < 1f) {
@@ -4923,6 +5011,7 @@ object PhotoFrameExporter {
                 leftSecondaryPaint,
                 rightPrimaryPaint,
                 rightSecondaryPaint,
+                rightTertiaryPaint,
                 watermarkPaint,
             ).forEach { paint -> paint.textSize *= rowScale }
             leftPrimaryBounds = leftPrimary?.let { text ->
@@ -4937,10 +5026,14 @@ object PhotoFrameExporter {
             rightSecondaryBounds = rightSecondary?.let { text ->
                 rightSecondaryPaint?.let { textVisualBounds(text, it) }
             }
+            rightTertiaryBounds = rightTertiary?.let { text ->
+                rightTertiaryPaint?.let { textVisualBounds(text, it) }
+            }
             watermarkBounds = watermarkPaint?.let { textVisualBounds(watermarkText, it) }
             primaryRow = mergedRow(leftPrimaryBounds, rightPrimaryBounds)
             secondaryRow = mergedRow(leftSecondaryBounds, rightSecondaryBounds)
-            rows = listOfNotNull(primaryRow, secondaryRow, watermarkBounds)
+            tertiaryRow = rightTertiaryBounds
+            rows = listOfNotNull(primaryRow, secondaryRow, tertiaryRow, watermarkBounds)
         }
         val preferredGap = min(width * 0.0115f, bandHeight * 0.095f)
         val baselines = centeredFrameTextBaselines(
@@ -4952,11 +5045,16 @@ object PhotoFrameExporter {
         var rowIndex = 0
         val primaryBaseline = if (primaryRow != null) baselines[rowIndex++] else null
         val secondaryBaseline = if (secondaryRow != null) baselines[rowIndex++] else null
+        val tertiaryBaseline = if (tertiaryRow != null) baselines[rowIndex++] else null
         val watermarkBaseline = if (watermarkBounds != null) baselines[rowIndex] else null
 
         if (hasLeftBlock && hasRight) {
-            val metadataRows = listOfNotNull(primaryRow, secondaryRow)
-            val metadataBaselines = listOfNotNull(primaryBaseline, secondaryBaseline)
+            val metadataRows = listOfNotNull(primaryRow, secondaryRow, tertiaryRow)
+            val metadataBaselines = listOfNotNull(
+                primaryBaseline,
+                secondaryBaseline,
+                tertiaryBaseline,
+            )
             val (infoTop, infoBottom) = plaqueVisualExtent(metadataRows, metadataBaselines)
                 ?: (bandTop to layout.canvasHeight.toFloat())
             Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -5005,6 +5103,13 @@ object PhotoFrameExporter {
             secondaryBaseline != null
         ) {
             canvas.drawText(rightSecondary, rightX, secondaryBaseline, rightSecondaryPaint)
+        }
+        if (
+            rightTertiary != null &&
+            rightTertiaryPaint != null &&
+            tertiaryBaseline != null
+        ) {
+            canvas.drawText(rightTertiary, rightX, tertiaryBaseline, rightTertiaryPaint)
         }
     }
 
@@ -6172,16 +6277,28 @@ internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
         metadata.iso,
     ).joinToString("   ")
 
-/** Location metadata uses dedicated rows so long addresses never squeeze camera settings. */
-internal fun frameLocationLines(metadata: PhotoFrameMetadata): List<String> = buildList {
-    metadata.address?.trim()?.takeIf(String::isNotEmpty)?.let { add(it) }
-    if (metadata.latitude != null && metadata.longitude != null &&
+/**
+ * Location metadata is deliberately compact: a long address gets its own row, while the
+ * machine-readable coordinates and altitude share one row.  Display precision is limited to
+ * four decimals (roughly ten-metre-level); the original EXIF values are never changed.
+ */
+internal fun frameLocationRows(metadata: PhotoFrameMetadata): List<String> = buildList {
+    metadata.address?.trim()?.takeIf(String::isNotEmpty)?.let(::add)
+    val coordinates = if (
+        metadata.latitude != null && metadata.longitude != null &&
         metadata.latitude != 0.0 && metadata.longitude != 0.0
     ) {
-        add(String.format(Locale.US, "%.5f, %.5f", metadata.latitude, metadata.longitude))
+        String.format(Locale.US, "%.4f, %.4f", metadata.latitude, metadata.longitude)
+    } else {
+        null
     }
-    metadata.altitudeMeters?.takeIf { it.isFinite() && it != 0.0 }
-        ?.let { add(String.format(Locale.US, "%.0fm", it)) }
+    val altitude = metadata.altitudeMeters
+        ?.takeIf { it.isFinite() && it != 0.0 }
+        ?.let { String.format(Locale.US, "%.0fm", it) }
+    listOfNotNull(coordinates, altitude)
+        .joinToString("  ")
+        .takeIf(String::isNotBlank)
+        ?.let(::add)
 }
 
 /** Compact two-space rhythm used by the full-bleed signature preset. */

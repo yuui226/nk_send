@@ -554,8 +554,10 @@
     <string name="gps_enabled">已連線</string>
     <string name="gps_location_copied">已複製地址與座標</string>
     <string name="gps_location_value">位置：%1$s</string>
+    <string name="gps_coordinates_value">座標：%1$s</string>
     <string name="gps_altitude_value">海拔：%1$d 公尺</string>
     <string name="gps_updated_at">更新：%1$s</string>
+    <string name="gps_update_frequency">更新頻率：每分鐘</string>
     <string name="gps_need_camera">開啟相機配對</string>
     <string name="gps_ap_unavailable">AP 模式不可用</string>
     <string name="gps_retry">重試</string>

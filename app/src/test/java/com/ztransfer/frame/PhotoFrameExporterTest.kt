@@ -568,6 +568,41 @@ class PhotoFrameExporterTest {
     }
 
     @Test
+    fun locationRowsKeepAddressSeparateAndPairCoordinatesWithAltitude() {
+        assertEquals(
+            listOf("West Lake", "30.1235, 120.9877  520m"),
+            frameLocationRows(
+                PhotoFrameMetadata(
+                    make = null,
+                    model = null,
+                    aperture = null,
+                    shutter = null,
+                    iso = null,
+                    focalLength = null,
+                    latitude = 30.123456,
+                    longitude = 120.987654,
+                    altitudeMeters = 520.0,
+                    address = "West Lake",
+                ),
+            ),
+        )
+        assertEquals(
+            listOf("520m"),
+            frameLocationRows(
+                PhotoFrameMetadata(
+                    make = null,
+                    model = null,
+                    aperture = null,
+                    shutter = null,
+                    iso = null,
+                    focalLength = null,
+                    altitudeMeters = 520.0,
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun cameraModelOnlyRemovesARepeatedLeadingBrand() {
         assertEquals("EOS R5", normalizeCameraModel("Canon", "Canon EOS R5"))
         assertEquals("ILCE-7M4", normalizeCameraModel("SONY", "SONY ILCE-7M4"))
