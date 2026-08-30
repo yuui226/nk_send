@@ -467,6 +467,12 @@ fun HomeScreen(
             }
             val horizontalPadding = if (maxWidth < 360.dp) 14.dp else 20.dp
             val cardSpacing = 12.dp
+            val gpsSpacing = 10.dp
+            // A collapsed GPS card is a 32dp title row plus a 42dp status
+            // button and 24dp card padding.
+            // Reserve that exact height so USB + GPS matches the Wi-Fi card.
+            val gpsCollapsedHeight = 106.dp
+            val usbCardHeight = (cardHeight - gpsSpacing - gpsCollapsedHeight).coerceAtLeast(180.dp)
 
             Column(
                 modifier = Modifier
@@ -484,29 +490,39 @@ fun HomeScreen(
                         .height(cardHeight),
                     horizontalArrangement = Arrangement.spacedBy(cardSpacing)
                 ) {
-                    ConnectionMethodCard(
-                        modifier = Modifier.weight(1f),
-                        modeIcon = { tint, iconModifier ->
-                            ClassicUsbIcon(tint = tint, modifier = iconModifier)
-                        },
-                        title = stringResource(R.string.connection_usb),
-                        accent = colors.accentOrange,
-                        materialSeed = USB_CARD_BADGE_TEXTURE_SEED,
-                        steps = listOf(
-                            stringResource(R.string.usb_step_power),
-                            stringResource(R.string.usb_step_cable)
-                        ),
-                        selected = selectedConnection == CameraConnectionType.USB,
-                        success = celebrate && selectedConnection == CameraConnectionType.USB,
-                        attentionActive = connectionAttentionActive,
-                        attentionPhaseOffset = 0f,
-                        selectionSceneProgress = selectionSceneProgress,
-                        successEffectProgress = successEffectProgress,
-                        error = usbError?.takeIf {
-                            selectedConnection == CameraConnectionType.USB
-                        },
-                        goldBurst = playPremiumConnectionCelebration,
-                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                    ) {
+                        ConnectionMethodCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(usbCardHeight),
+                            modeIcon = { tint, iconModifier ->
+                                ClassicUsbIcon(tint = tint, modifier = iconModifier)
+                            },
+                            title = stringResource(R.string.connection_usb),
+                            accent = colors.accentOrange,
+                            materialSeed = USB_CARD_BADGE_TEXTURE_SEED,
+                            steps = listOf(
+                                stringResource(R.string.usb_step_power),
+                                stringResource(R.string.usb_step_cable)
+                            ),
+                            selected = selectedConnection == CameraConnectionType.USB,
+                            success = celebrate && selectedConnection == CameraConnectionType.USB,
+                            attentionActive = connectionAttentionActive,
+                            attentionPhaseOffset = 0f,
+                            selectionSceneProgress = selectionSceneProgress,
+                            successEffectProgress = successEffectProgress,
+                            error = usbError?.takeIf {
+                                selectedConnection == CameraConnectionType.USB
+                            },
+                            goldBurst = playPremiumConnectionCelebration,
+                        )
+                        Spacer(Modifier.height(gpsSpacing))
+                        GpsConnectionControl(modifier = Modifier.fillMaxWidth())
+                    }
 
                     ConnectionMethodCard(
                         modifier = Modifier.weight(1f),
@@ -793,18 +809,6 @@ fun HomeScreen(
                     )
                 }
 
-                Spacer(Modifier.height(10.dp))
-                // GPS follows the USB card and keeps the same half-width as the
-                // connection cards; the Wi-Fi card column remains unchanged.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(cardSpacing),
-                ) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        GpsConnectionControl()
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                }
                 Spacer(Modifier.weight(1f))
 
                 // 工作台在空间关系上位于连接页下方，入口贴近屏幕底部提示下滑方向。

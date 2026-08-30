@@ -64,6 +64,7 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -3452,7 +3453,7 @@ private fun GpsResetPairingDialog(
 
 /** Compact GPS control shared by the connection page; settings no longer owns this entry. */
 @Composable
-internal fun GpsConnectionControl() {
+internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     val gpsViewModel: GpsViewModel = viewModel()
     val gpsState by gpsViewModel.state.collectAsState()
     val context = LocalContext.current
@@ -3460,6 +3461,7 @@ internal fun GpsConnectionControl() {
     val colors = AppTheme.colors
     var showInfo by remember { mutableStateOf(false) }
     var showReset by remember { mutableStateOf(false) }
+    var expanded by rememberSaveable { mutableStateOf(false) }
     var helpViewed by remember { mutableStateOf(gpsViewModel.isHelpViewed()) }
     var hintText by remember { mutableStateOf<String?>(null) }
     val permissionHint = stringResource(R.string.gps_permission_required)
@@ -3500,10 +3502,14 @@ internal fun GpsConnectionControl() {
         }
     }
     SettingsCard(
+        modifier = modifier,
         borderColor = colors.glassPanelBorder,
         pressAccentColor = colors.accentBlue,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Row(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
@@ -3531,62 +3537,107 @@ internal fun GpsConnectionControl() {
                     modifier = Modifier.size(32.dp),
                 )
             }
-            Spacer(Modifier.width(6.dp))
-            GlassButton(
-                onClick = { showReset = true },
-                enabled = gpsViewModel.pairedDeviceCount() > 0,
-                shape = RoundedCornerShape(11.dp),
-                contentPadding = PaddingValues(8.dp),
+            Spacer(Modifier.width(4.dp))
+            IconButton(
+                onClick = { expanded = !expanded },
                 modifier = Modifier.size(32.dp),
             ) {
-                Icon(Icons.Default.LinkOff, stringResource(R.string.gps_clear_pairing), tint = colors.onSurfaceVariant, modifier = Modifier.size(17.dp))
-            }
-            Spacer(Modifier.width(6.dp))
-            GpsStatusButton(
-                status = gpsState.status,
-                enabled = gpsState.enabled,
-                onClick = {
-                    when {
-                        !gpsState.enabled -> enableGps()
-                        gpsState.status == GpsStatus.ERROR -> gpsViewModel.retry()
-                        gpsState.status == GpsStatus.AP_UNAVAILABLE -> Unit
-                        else -> gpsViewModel.setEnabled(false)
-                    }
-                },
-            )
-        }
-        if (gpsState.enabled &&
-            (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
-        ) {
-            val coordinates = gpsState.latitude?.let { lat ->
-                gpsState.longitude?.let { lon -> "%.5f, %.5f".format(java.util.Locale.US, lat, lon) }
-            }
-            val updatedAt = gpsState.lastSentAtMs?.let {
-                java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it))
-            }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 4.dp, top = 6.dp, end = 4.dp)
-                    .clickable {
-                        clipboard.setText(AnnotatedString(listOfNotNull(gpsState.placeName, coordinates).joinToString("\n")))
-                        showHint(copiedHint)
-                    },
-            ) {
-                Text(
-                    text = gpsState.placeName ?: stringResource(R.string.gps_enabled),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    tint = colors.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
                 )
-                updatedAt?.let {
-                    Text("更新 $it", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant.copy(alpha = 0.72f), modifier = Modifier.padding(top = 2.dp))
+            }
+        }
+        GpsStatusButton(
+            status = gpsState.status,
+            enabled = gpsState.enabled,
+            fillWidth = true,
+            modifier = Modifier.padding(top = 8.dp),
+            onClick = { expanded = !expanded },
+        )
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (gpsState.enabled &&
+                    (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
+                ) {
+                    val coordinates = gpsState.latitude?.let { lat ->
+                        gpsState.longitude?.let { lon -> "%.5f, %.5f".format(java.util.Locale.US, lat, lon) }
+                    }
+                    val updatedAt = gpsState.lastSentAtMs?.let {
+                        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(it))
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clickable {
+                                clipboard.setText(AnnotatedString(listOfNotNull(gpsState.placeName, coordinates).joinToString("\n")))
+                                showHint(copiedHint)
+                            },
+                    ) {
+                        Text(
+                            text = gpsState.placeName ?: stringResource(R.string.gps_enabled),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        updatedAt?.let {
+                            Text("更新 $it", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant.copy(alpha = 0.72f), modifier = Modifier.padding(top = 2.dp))
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    GlassButton(
+                        onClick = {
+                            when {
+                                !gpsState.enabled -> enableGps()
+                                gpsState.status == GpsStatus.ERROR -> gpsViewModel.retry()
+                                gpsState.status == GpsStatus.AP_UNAVAILABLE -> Unit
+                                else -> gpsViewModel.setEnabled(false)
+                            }
+                        },
+                        shape = RoundedCornerShape(11.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            text = if (gpsState.enabled) stringResource(R.string.gps_off) else stringResource(R.string.gps_enabled),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                    }
+                    GlassButton(
+                        onClick = { showReset = true },
+                        enabled = gpsViewModel.pairedDeviceCount() > 0,
+                        shape = RoundedCornerShape(11.dp),
+                        contentPadding = PaddingValues(8.dp),
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(Icons.Default.LinkOff, stringResource(R.string.gps_clear_pairing), tint = colors.onSurfaceVariant, modifier = Modifier.size(17.dp))
+                    }
                 }
             }
         }
         hintText?.let {
-            Text(it, style = MaterialTheme.typography.labelSmall, color = colors.accentBlue, modifier = Modifier.align(Alignment.End).padding(top = 5.dp, end = 4.dp))
+            Text(
+                it,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.accentBlue,
+                modifier = Modifier.align(Alignment.End).padding(top = 5.dp),
+            )
         }
     }
     if (showReset) {
@@ -3624,6 +3675,8 @@ internal fun GpsConnectionControl() {
 private fun GpsStatusButton(
     status: GpsStatus,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
+    fillWidth: Boolean = false,
     onClick: () -> Unit,
 ) {
     val colors = AppTheme.colors
@@ -3689,8 +3742,11 @@ private fun GpsStatusButton(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
         contentPadding = PaddingValues(0.dp),
-        modifier = Modifier
-            .width(116.dp)
+        modifier = (if (fillWidth) {
+            modifier.fillMaxWidth()
+        } else {
+            modifier.width(116.dp)
+        })
             .height(42.dp)
             .drawBehind {
                 if (highlighted) {
