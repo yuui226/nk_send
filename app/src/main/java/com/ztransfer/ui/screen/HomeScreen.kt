@@ -228,6 +228,11 @@ fun HomeScreen(
     LaunchedEffect(gpsBlockedByAp) {
         NikonGpsService.setApModeBlocked(context, gpsBlockedByAp)
     }
+    // GPS 与相机热点共用 Wi‑Fi：开启期间暂停 AP 的后台扫描/自动连接，关闭后由
+    // CameraViewModel 复用原有 watcher 自动恢复，不改变用户选择的连接模式。
+    LaunchedEffect(gpsState.enabled) {
+        viewModel.setGpsConnectionPaused(gpsState.enabled)
+    }
     val usbError = state.usbConnectionError
     val connectionHapticOutcome = state.connectionHapticOutcome()
     var previousHapticOutcome by remember { mutableStateOf(connectionHapticOutcome) }
@@ -1129,7 +1134,6 @@ private fun ConnectionMethodCard(
     var attentionPhase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(attentionActive, attentionPhaseOffset) {
         if (!attentionActive) {
-            attentionPhase = 0f
             return@LaunchedEffect
         }
         val startedAtMs = SystemClock.uptimeMillis()
@@ -1168,6 +1172,17 @@ private fun ConnectionMethodCard(
         animationSpec = spring(dampingRatio = 0.62f, stiffness = 420f),
         label = "connectionProbeLift"
     )
+    // 状态切换时让呼吸与卡片淡化一起收束，避免 GPS 开关导致两张卡瞬间跳回静态样式。
+    val attentionIntensity by animateFloatAsState(
+        targetValue = if (attentionActive) 1f else 0f,
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        label = "connectionAttentionIntensity",
+    )
+    val cardDimAlpha by animateFloatAsState(
+        targetValue = if (dimmed) 0.54f else 1f,
+        animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+        label = "connectionCardDimAlpha",
+    )
 
     fun eased(value: Float): Float {
         val x = value.coerceIn(0f, 1f)
@@ -1195,14 +1210,14 @@ private fun ConnectionMethodCard(
             .zIndex(if (selected) 3f else 0f)
             // 呼吸和按压放在共同父层：玻璃卡、文字、按钮、模式图标始终同步形变。
             .graphicsLayer {
-                val attention = if (attentionActive) connectionAttention(attentionPhase) else 0f
+                val attention = connectionAttention(attentionPhase) * attentionIntensity
                 val breathingScale = 1f + attention * 0.04f
                 val deformation = pressDeformation
                 scaleX = breathingScale * (1f + deformation * 0.012f)
                 scaleY = breathingScale * (1f - deformation * 0.024f)
                 rotationZ = pressDirection * deformation * 1.15f
                 translationX = pressDirection * deformation * 1.5.dp.toPx()
-                alpha = if (dimmed) 0.54f else 1f
+                alpha = cardDimAlpha
             }
     ) {
         ConnectionCardSurface(

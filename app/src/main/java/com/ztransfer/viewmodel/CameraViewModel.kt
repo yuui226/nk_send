@@ -527,6 +527,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var usbConnectFailures = 0
     private var usbRetryPaused = false
     @Volatile private var connectionDiscoveryPaused = false
+    /** GPS 与相机热点共用 Wi‑Fi 射频；开启 GPS 时只暂停 AP 的自动发现/连接。 */
+    @Volatile private var gpsConnectionPaused = application
+        .getSharedPreferences("nikon_gps", Context.MODE_PRIVATE)
+        .getBoolean("enabled", false)
     private val usbManager = application.getSystemService(Context.USB_SERVICE) as UsbManager
     private var attachedUsbDevice: UsbDevice? = null
     private var activeUsbDeviceId: Int? = null
@@ -1193,7 +1197,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     init {
         registerUsbReceiver()
         scanAttachedUsbCamera()
-        if (_state.value.connectionType != CameraConnectionType.USB &&
+        if (!gpsConnectionPaused &&
+            _state.value.connectionType != CameraConnectionType.USB &&
             _state.value.wirelessMode == WirelessMode.AP
         ) {
             registerNetworkCallback()
@@ -1422,6 +1427,33 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         log { "CONNECTION_DISCOVERY resumed after local photo workspace" }
     }
 
+    /** GPS 开启期间暂停 AP 热点的自动扫描/握手，关闭后复用原有发现链路恢复。 */
+    fun setGpsConnectionPaused(paused: Boolean) {
+        if (gpsConnectionPaused == paused) return
+        gpsConnectionPaused = paused
+        if (paused) {
+            if (_state.value.wirelessMode == WirelessMode.AP) {
+                watcherJob?.cancel()
+                watcherJob = null
+                wirelessModeGeneration++
+                apConnectingCamera?.let(::closePendingWirelessCamera)
+                apConnectingCamera = null
+                if (!_state.value.isConnectedToCamera) {
+                    _state.update { it.copy(isConnecting = false) }
+                    if (wifiHeld) releaseWifiNetworkRequest()
+                }
+            }
+            log { "AP_DISCOVERY paused for GPS" }
+        } else {
+            if (_state.value.wirelessMode == WirelessMode.AP &&
+                !_state.value.isConnectedToCamera
+            ) {
+                resumeApDiscovery()
+            }
+            log { "AP_DISCOVERY resumed after GPS" }
+        }
+    }
+
     /**
      * 连接看护：只要未连上相机，就周期性检测手机是否进入候选网段，一旦命中就立即发起连接。
      * 作为系统网络回调的兜底——部分机型回调触发晚或不稳定（DHCP 时序），此循环保证"手机一进
@@ -1440,7 +1472,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun resumeApDiscovery() {
-        if (connectionDiscoveryPaused || purchaseHold || _state.value.isConnectedToCamera ||
+        if (connectionDiscoveryPaused || gpsConnectionPaused || purchaseHold || _state.value.isConnectedToCamera ||
             _state.value.connectionType == CameraConnectionType.USB ||
             _state.value.wirelessMode != WirelessMode.AP
         ) return
@@ -1458,7 +1490,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun startConnectionWatcher() {
-        if (connectionDiscoveryPaused || _state.value.wirelessMode != WirelessMode.AP) {
+        if (connectionDiscoveryPaused || gpsConnectionPaused || _state.value.wirelessMode != WirelessMode.AP) {
             watcherJob?.cancel()
             watcherJob = null
             return
@@ -1466,7 +1498,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (watcherJob?.isActive == true) return
         watcherJob = viewModelScope.launch {
             while (isActive) {
-                if (connectionDiscoveryPaused) break
+                if (connectionDiscoveryPaused || gpsConnectionPaused) break
                 if (_state.value.wirelessMode != WirelessMode.AP) break
                 if (_state.value.connectionType == CameraConnectionType.USB) {
                     delay(WATCH_INTERVAL_MS)
@@ -1484,7 +1516,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 // 同 onWifiChanged：只负责"在相机 Wi-Fi 上就连上"，绝不主动断开，避免误断打断传输。
                 // 购买挂起期间(purchaseHold)不重连:此时是我们自己主动断的，接回去热点就关不掉了。
-                if (onNikonWifi && !purchaseHold && !_state.value.isConnectedToCamera && !_state.value.isConnecting) {
+                if (onNikonWifi && !gpsConnectionPaused && !purchaseHold &&
+                    !_state.value.isConnectedToCamera && !_state.value.isConnecting
+                ) {
                     connectToCameraWithRetry()
                 }
                 delay(WATCH_INTERVAL_MS)
@@ -1495,6 +1529,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var wifiHeld = false
 
     private fun registerNetworkCallback() {
+        if (connectionDiscoveryPaused || gpsConnectionPaused) return
         if (_state.value.connectionType == CameraConnectionType.USB) return
         if (_state.value.wirelessMode != WirelessMode.AP) return
         // Debug 内置相机使用进程内回环端点，不依赖 Wi-Fi；Release 实现恒返回 null。
@@ -1592,11 +1627,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun onWifiChanged() {
-        if (connectionDiscoveryPaused) return
+        if (connectionDiscoveryPaused || gpsConnectionPaused) return
         if (_state.value.wirelessMode != WirelessMode.AP) return
         if (_state.value.connectionType == CameraConnectionType.USB) return
         viewModelScope.launch {
-            if (connectionDiscoveryPaused) return@launch
+            if (connectionDiscoveryPaused || gpsConnectionPaused) return@launch
             if (_state.value.wirelessMode != WirelessMode.AP) return@launch
             val loopback = CameraEndpointOverride.hostOrNull() != null
             val onNikonWifi = loopback || linkSaysCameraWifi || checkNikonWifi()
@@ -1622,7 +1657,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun connectDebugSimulator() {
         selectApMode()
         viewModelScope.launch {
-            if (connectionDiscoveryPaused) return@launch
+            if (connectionDiscoveryPaused || gpsConnectionPaused) return@launch
             if (_state.value.wirelessMode != WirelessMode.AP) return@launch
             if (_state.value.isConnectedToCamera || _state.value.isConnecting) return@launch
             val enabled = withContext(Dispatchers.IO) {
@@ -2308,14 +2343,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 一旦离开候选网段则退出循环，由网络回调在重新连上 Wi-Fi 后再次触发。
      */
     private suspend fun connectToCameraWithRetry() {
-        if (connectionDiscoveryPaused || purchaseHold ||
+        if (connectionDiscoveryPaused || gpsConnectionPaused || purchaseHold ||
             _state.value.wirelessMode != WirelessMode.AP ||
             _state.value.connectionType == CameraConnectionType.USB ||
             _state.value.isConnecting || _state.value.isConnectedToCamera
         ) return
         val modeGeneration = wirelessModeGeneration
         wirelessCleanupJob?.join()
-        if (modeGeneration != wirelessModeGeneration ||
+        if (gpsConnectionPaused || modeGeneration != wirelessModeGeneration ||
             _state.value.wirelessMode != WirelessMode.AP ||
             _state.value.connectionType == CameraConnectionType.USB ||
             _state.value.isConnectedToCamera
@@ -2337,7 +2372,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         // purchaseHold 也随轮检查:重试循环可能在购买挂起前就已在跑,得让它当轮退出。
         var failedAttempts = 0
-        while (!connectionDiscoveryPaused && !purchaseHold &&
+        while (!connectionDiscoveryPaused && !gpsConnectionPaused && !purchaseHold &&
             modeGeneration == wirelessModeGeneration &&
             _state.value.wirelessMode == WirelessMode.AP &&
             _state.value.connectionType != CameraConnectionType.USB &&
@@ -2368,7 +2403,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 onSuccess = {
                     // USB 可能在 Wi-Fi 握手期间接入；此时不发布短暂的 Wi-Fi 成功态，
                     // 先释放刚建立的会话，再由循环出口切换到 USB。
-                    if (connectionDiscoveryPaused || purchaseHold ||
+                    if (connectionDiscoveryPaused || gpsConnectionPaused || purchaseHold ||
                         modeGeneration != wirelessModeGeneration ||
                         _state.value.wirelessMode != WirelessMode.AP ||
                         _state.value.connectionType == CameraConnectionType.USB ||
@@ -2412,7 +2447,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 return
             }
 
-            if (connectionDiscoveryPaused || modeGeneration != wirelessModeGeneration ||
+            if (connectionDiscoveryPaused || gpsConnectionPaused || modeGeneration != wirelessModeGeneration ||
                 _state.value.wirelessMode != WirelessMode.AP
             ) break
 
@@ -2443,7 +2478,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         // 已离开相机 Wi-Fi（或已连上）；清除“连接中”状态，等待下次网络变化再触发。
-        if (modeGeneration == wirelessModeGeneration &&
+        if (!gpsConnectionPaused && modeGeneration == wirelessModeGeneration &&
             _state.value.wirelessMode == WirelessMode.AP
         ) {
             _state.update {
