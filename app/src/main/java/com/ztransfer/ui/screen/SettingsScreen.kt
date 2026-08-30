@@ -3573,7 +3573,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         ) {
             Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .requiredWidth(300.dp)
                     .padding(top = 6.dp),
                 shape = RoundedCornerShape(14.dp),
                 color = colors.glassSurface,
