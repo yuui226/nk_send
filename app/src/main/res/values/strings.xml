@@ -552,10 +552,9 @@
     <string name="gps_off">Off</string>
     <string name="gps_connecting">Connecting</string>
     <string name="gps_pairing">Pairing</string>
-    <string name="gps_need_camera">Turn on camera Bluetooth pairing</string>
-    <string name="gps_waiting_location">Waiting for location</string>
+    <string name="gps_need_camera">Camera pairing</string>
+    <string name="gps_waiting_location">Locating</string>
     <string name="gps_ready">Location updated</string>
-    <string name="gps_unavailable">Unavailable</string>
     <string name="gps_retry">Retry</string>
     <string name="gps_clear_pairing">Clear GPS pairing</string>
     <string name="gps_clear_pairing_title">Clear GPS pairing?</string>

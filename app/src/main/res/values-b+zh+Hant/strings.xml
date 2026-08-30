@@ -546,10 +546,9 @@
     <string name="gps_off">未開啟</string>
     <string name="gps_connecting">正在連線</string>
     <string name="gps_pairing">正在配對</string>
-    <string name="gps_need_camera">請在相機上開啟藍牙配對</string>
-    <string name="gps_waiting_location">等待定位</string>
+    <string name="gps_need_camera">開啟相機配對</string>
+    <string name="gps_waiting_location">正在定位</string>
     <string name="gps_ready">定位已更新</string>
-    <string name="gps_unavailable">暫不可用</string>
     <string name="gps_retry">重試</string>
     <string name="gps_clear_pairing">清除 GPS 配對</string>
     <string name="gps_clear_pairing_title">清除 GPS 配對？</string>

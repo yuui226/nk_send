@@ -26,13 +26,14 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun pairedDeviceCount(): Int = if (
-        preferences.contains(KEY_DEVICE_ID) && preferences.contains(KEY_NONCE)
+        preferences.contains(KEY_DEVICE_ID) || preferences.contains(KEY_NONCE)
     ) 1 else 0
 
     fun clearPairing() {
         preferences.edit()
             .remove(KEY_DEVICE_ID)
             .remove(KEY_NONCE)
+            .remove(KEY_BLE_ADDRESS)
             .apply()
         if (state.value.enabled) setEnabled(false)
     }
@@ -47,5 +48,6 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_ENABLED = "enabled"
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_NONCE = "nonce"
+        const val KEY_BLE_ADDRESS = "ble_address"
     }
 }

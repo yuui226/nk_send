@@ -45,23 +45,28 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private lateinit var bleClient: NikonGpsBleClient
     private lateinit var preferences: android.content.SharedPreferences
     private var reconnectJob: Job? = null
-    private var lastLocation: Location? = null
     private var lastSentLocation: Location? = null
     private var lastSentAt = 0L
+    private var pendingSentLocation: Location? = null
+    private var geoWriteInFlight = false
+    private var geoWriteTimeoutJob: Job? = null
     private var lastGeocodedKey: String? = null
     private var geocodeJob: Job? = null
     private var enabled = false
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            lastLocation = location
             NikonGpsRuntime.state.update {
                 it.copy(
                     latitude = location.latitude,
                     longitude = location.longitude,
                     accuracyMeters = location.accuracy,
-                    status = if (it.status == GpsStatus.READY) it.status else GpsStatus.WAITING_FIX,
-                    message = null,
+                    status = if (it.status == GpsStatus.READY || it.status == GpsStatus.ERROR) {
+                        it.status
+                    } else {
+                        GpsStatus.WAITING_FIX
+                    },
+                    message = if (it.status == GpsStatus.ERROR) it.message else null,
                 )
             }
             requestPlaceName(location)
@@ -91,6 +96,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         }
         enabled = true
         startForegroundCompat()
+        if (!enabled) return START_NOT_STICKY
         startGpsIfPermitted()
         return START_STICKY
     }
@@ -120,15 +126,30 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     override fun onReady(name: String, device: android.bluetooth.BluetoothDevice) {
         GpsDiagnostics.record("GPS ready camera=$name")
+        reconnectJob?.cancel()
+        reconnectJob = null
         updateState(GpsStatus.WAITING_FIX, name)
         startLocationUpdates()
     }
 
     override fun onGeoWritten(success: Boolean) {
         GpsDiagnostics.record("GEO write success=$success")
+        geoWriteTimeoutJob?.cancel()
+        geoWriteTimeoutJob = null
+        geoWriteInFlight = false
         if (success) {
-            NikonGpsRuntime.state.update { it.copy(status = GpsStatus.READY, message = null) }
+            reconnectJob?.cancel()
+            reconnectJob = null
+            pendingSentLocation?.let { sent -> lastSentLocation = Location(sent) }
+            pendingSentLocation = null
+            lastSentAt = System.currentTimeMillis()
+            NikonGpsRuntime.state.update {
+                it.copy(status = GpsStatus.READY, lastSentAtMs = lastSentAt, message = null)
+            }
         } else {
+            pendingSentLocation = null
+            lastSentLocation = null
+            lastSentAt = 0L
             updateState(GpsStatus.ERROR, message = "GPS 写入失败")
         }
     }
@@ -143,6 +164,14 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     override fun onDisconnected() {
         if (!enabled) return
         stopLocationUpdates()
+        // Force the first location after a reconnect to be sent again. The camera may have
+        // dropped its GPS channel together with GATT even when the coordinates did not change.
+        lastSentLocation = null
+        lastSentAt = 0L
+        pendingSentLocation = null
+        geoWriteInFlight = false
+        geoWriteTimeoutJob?.cancel()
+        geoWriteTimeoutJob = null
         updateState(GpsStatus.CONNECTING, message = "正在重连")
         reconnectJob?.cancel()
         reconnectJob = serviceScope.launch {
@@ -213,10 +242,17 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     private fun startBle() {
-        val savedId = preferences.getLong(KEY_DEVICE_ID, Long.MIN_VALUE)
+        val storedId = preferences.getLong(KEY_DEVICE_ID, Long.MIN_VALUE)
             .takeUnless { it == Long.MIN_VALUE }
-        val savedNonce = preferences.getLong(KEY_NONCE, Long.MIN_VALUE)
+        val storedNonce = preferences.getLong(KEY_NONCE, Long.MIN_VALUE)
             .takeUnless { it == Long.MIN_VALUE }
+        val hasCompleteIdentity = storedId != null && storedNonce != null
+        if (!hasCompleteIdentity && (storedId != null || storedNonce != null)) {
+            preferences.edit().remove(KEY_DEVICE_ID).remove(KEY_NONCE).apply()
+            GpsDiagnostics.record("incomplete pairing identity cleared")
+        }
+        val savedId = storedId.takeIf { hasCompleteIdentity }
+        val savedNonce = storedNonce.takeIf { hasCompleteIdentity }
         val savedBleAddress = preferences.getString(KEY_BLE_ADDRESS, null)
         bleClient.start(savedDeviceId = savedId, savedNonce = savedNonce, savedBleAddress = savedBleAddress)
     }
@@ -234,6 +270,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             updateState(GpsStatus.ERROR, message = "请打开手机定位")
             return
         }
+        stopLocationUpdates()
         runCatching {
             if (gpsEnabled && locationManager.getProvider(LocationManager.GPS_PROVIDER) != null) {
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5_000L, 3f, locationListener, Looper.getMainLooper())
@@ -244,10 +281,13 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             // Reuse a recent system fix immediately instead of waiting for the next provider
             // callback. This closes the small window where the user can shoot before the first
             // GPS payload reaches the camera.
+            val now = System.currentTimeMillis()
             val cached = listOfNotNull(
                 if (gpsEnabled) runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull() else null,
                 if (networkEnabled) runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull() else null,
-            ).maxByOrNull { it.time }
+            ).filter { location ->
+                location.time > 0L && kotlin.math.abs(now - location.time) <= CACHED_LOCATION_MAX_AGE_MS
+            }.maxByOrNull { it.time }
             cached?.let(locationListener::onLocationChanged)
         }.onFailure { updateState(GpsStatus.ERROR, message = "无法获取定位") }
     }
@@ -257,7 +297,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     private fun maybeSend(location: Location) {
-        if (!enabled) return
+        if (!enabled || geoWriteInFlight) return
         val previous = lastSentLocation
         val moved = previous == null || location.distanceTo(previous) >= 3f
         val due = System.currentTimeMillis() - lastSentAt >= 20_000L
@@ -269,19 +309,36 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                 longitude = location.longitude,
                 altitudeMeters = location.altitude,
                 satellites = satellites,
-                timestamp = Instant.ofEpochMilli(location.time.coerceAtLeast(1L)),
+                timestamp = Instant.now(),
             )
         }.getOrNull() ?: return
+        geoWriteInFlight = true
+        pendingSentLocation = Location(location)
+        GpsDiagnostics.record("GEO queued provider=${location.provider ?: "?"} accuracy=${location.accuracy.toInt()}m")
         bleClient.writeGeo(payload)
-        lastSentLocation = location
-        lastSentAt = System.currentTimeMillis()
-        NikonGpsRuntime.state.update { it.copy(lastSentAtMs = lastSentAt) }
+        geoWriteTimeoutJob?.cancel()
+        geoWriteTimeoutJob = serviceScope.launch {
+            delay(GEO_WRITE_TIMEOUT_MS)
+            if (geoWriteInFlight && enabled) {
+                geoWriteInFlight = false
+                pendingSentLocation = null
+                lastSentLocation = null
+                lastSentAt = 0L
+                onError("GPS write timeout")
+            }
+        }
     }
 
     private fun stopGps() {
         enabled = false
         reconnectJob?.cancel()
         reconnectJob = null
+        pendingSentLocation = null
+        geoWriteInFlight = false
+        geoWriteTimeoutJob?.cancel()
+        geoWriteTimeoutJob = null
+        lastSentLocation = null
+        lastSentAt = 0L
         stopLocationUpdates()
         if (::bleClient.isInitialized) bleClient.stop()
         geocodeJob?.cancel()
@@ -356,6 +413,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     companion object {
         private const val CHANNEL_ID = "nikon_gps"
         private const val NOTIFICATION_ID = 1003
+        private const val CACHED_LOCATION_MAX_AGE_MS = 2 * 60_000L
+        private const val GEO_WRITE_TIMEOUT_MS = 10_000L
         const val ACTION_ENABLE = "com.ztransfer.gps.ENABLE"
         const val ACTION_DISABLE = "com.ztransfer.gps.DISABLE"
         private const val PREFERENCES = "nikon_gps"

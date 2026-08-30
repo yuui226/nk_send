@@ -1066,7 +1066,7 @@ fun SettingsOverlay(
                     Spacer(Modifier.width(8.dp))
                     GlassButton(
                         onClick = { showGpsResetDialog = true },
-                        enabled = gpsViewModel.pairedDeviceCount() > 0 && gpsState.status != GpsStatus.READY,
+                        enabled = gpsViewModel.pairedDeviceCount() > 0,
                         shape = RoundedCornerShape(11.dp),
                         contentPadding = PaddingValues(8.dp),
                         modifier = Modifier.size(34.dp),
@@ -1110,7 +1110,7 @@ fun SettingsOverlay(
                         },
                     )
                 }
-                if (gpsState.enabled &&
+                if (gpsState.enabled && gpsState.status == GpsStatus.READY &&
                     (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
                 ) {
                     val coordinates = gpsState.latitude?.let { lat ->
