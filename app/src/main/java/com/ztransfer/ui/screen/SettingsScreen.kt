@@ -3779,7 +3779,8 @@ private fun GpsStatusButton(
         animationSpec = tween(320, easing = FastOutSlowInEasing),
         label = "gpsStatusButtonAccent",
     )
-    val foreground = materialButtonForegroundColor(skin, dark, accent)
+    // 与 STA“连接相机”按钮一致：强调色只负责按钮状态，文字按材质和明暗主题取色。
+    val foreground = materialButtonForegroundColor(skin, dark, colors.onBackground)
     GlassButton(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
