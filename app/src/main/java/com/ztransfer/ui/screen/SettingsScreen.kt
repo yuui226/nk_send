@@ -3467,6 +3467,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     val permissionHint = stringResource(R.string.gps_permission_required)
     val copiedHint = stringResource(R.string.gps_location_copied)
     val logCopiedHint = stringResource(R.string.code_copied)
+    val gpsLabel = stringResource(R.string.gps_auto_write)
     fun showHint(text: String) { hintText = text }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -3520,20 +3521,6 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             GpsStatus.ERROR -> GpsStatusButtonState.ERROR
         }
     }
-    val statusText = when (buttonState) {
-        GpsStatusButtonState.OFF -> stringResource(R.string.gps_off)
-        GpsStatusButtonState.SEARCHING -> stringResource(R.string.gps_searching)
-        GpsStatusButtonState.CONNECTING -> stringResource(R.string.gps_connecting)
-        GpsStatusButtonState.PAIRING -> stringResource(R.string.gps_pairing)
-        GpsStatusButtonState.CAMERA_CONFIRM -> stringResource(R.string.gps_camera_confirm)
-        GpsStatusButtonState.PAIRING_SUCCESS -> stringResource(R.string.gps_pairing_success)
-        GpsStatusButtonState.CONNECTED -> stringResource(R.string.gps_connected)
-        GpsStatusButtonState.WRITING -> stringResource(R.string.gps_writing)
-        GpsStatusButtonState.ENABLED -> stringResource(R.string.gps_enabled)
-        GpsStatusButtonState.NEEDS_CAMERA -> stringResource(R.string.gps_need_camera)
-        GpsStatusButtonState.AP_UNAVAILABLE -> stringResource(R.string.gps_ap_unavailable)
-        GpsStatusButtonState.ERROR -> stringResource(R.string.gps_retry)
-    }
     val statusAccent = when (buttonState) {
         GpsStatusButtonState.OFF -> colors.statusWaiting
         GpsStatusButtonState.CONNECTED, GpsStatusButtonState.ENABLED -> colors.statusConnected
@@ -3554,12 +3541,10 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         tintColor = statusAccent,
     ) {
         ReleaseCommitWheel(
-            options = listOf(Unit),
-            selected = Unit,
-            optionLabel = { statusText },
-            onValueCommitted = {},
-            onActivated = { expanded = !expanded },
-            label = stringResource(R.string.gps_auto_write),
+            options = listOf(false, true),
+            selected = expanded,
+            optionLabel = { gpsLabel },
+            onValueCommitted = { expanded = it },
             wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
             showDragHint = false,
             accentColor = statusAccent,
@@ -3576,6 +3561,12 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             exit = fadeOut() + shrinkVertically(),
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = stringResource(R.string.gps_detail_description),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
                 if (gpsState.enabled &&
                     (gpsState.placeName != null || (gpsState.latitude != null && gpsState.longitude != null))
                 ) {
@@ -3606,17 +3597,10 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         }
                     }
                 }
-                GpsStatusButton(
-                    status = gpsState.status,
-                    enabled = gpsState.enabled,
-                    fillWidth = true,
-                    modifier = Modifier.padding(top = 10.dp),
-                    onClick = ::toggleGps,
-                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 8.dp),
+                        .padding(top = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     TipLightbulbButton(
@@ -3641,6 +3625,13 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         Icon(Icons.Default.LinkOff, stringResource(R.string.gps_clear_pairing), tint = colors.onSurfaceVariant, modifier = Modifier.size(17.dp))
                     }
                 }
+                GpsStatusButton(
+                    status = gpsState.status,
+                    enabled = gpsState.enabled,
+                    fillWidth = true,
+                    modifier = Modifier.padding(top = 8.dp),
+                    onClick = ::toggleGps,
+                )
             }
         }
         hintText?.let {

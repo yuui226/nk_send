@@ -565,6 +565,7 @@
     <string name="gps_paired_device_count">已配对 %1$d 台设备</string>
     <string name="gps_clear_pairing_message">将清除已保存的相机身份，下次使用时需要重新配对。</string>
     <string name="gps_help_title">GPS 使用提示</string>
+    <string name="gps_detail_description">开启后，相机拍摄的照片会附带位置信息。</string>
     <string name="gps_first_connection">首次连接</string>
     <string name="gps_first_connection_steps">1. 相机：进入蓝牙配对界面\n2. App：点击 GPS 按钮\n3. 相机：确认配对时按 OK</string>
     <string name="gps_follow_up">后续操作</string>
