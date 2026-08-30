@@ -84,6 +84,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.focus.onFocusChanged
@@ -112,6 +113,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -3456,6 +3458,30 @@ private fun GpsResetPairingDialog(
     }
 }
 
+/**
+ * Places the detail layer at the parent's exact left origin without letting its measured
+ * height push neighbouring connection cards. The child is measured unbounded, so x=0 is
+ * always the same x as the GPS wheel above it.
+ */
+@Composable
+private fun GpsDetailOverflowLayer(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val childConstraints = constraints.copy(
+            minWidth = 0,
+            maxWidth = Constraints.Infinity,
+            minHeight = 0,
+            maxHeight = Constraints.Infinity,
+        )
+        val placeable = measurables.firstOrNull()?.measure(childConstraints)
+        layout(constraints.maxWidth, constraints.minHeight) {
+            placeable?.placeRelative(0, 0)
+        }
+    }
+}
+
 /** Compact GPS control shared by the connection page; settings no longer owns this entry. */
 @Composable
 internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
@@ -3577,15 +3603,14 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                 showHint(logCopiedHint)
             },
         )
-        AnimatedVisibility(
-            visibleState = detailVisibility,
-            modifier = if (detailLayoutActive) {
-                Modifier
-                    .align(Alignment.Start)
-                    .requiredWidth(300.dp)
-            } else {
-                Modifier.width(0.dp)
-            },
+        GpsDetailOverflowLayer(modifier = Modifier.fillMaxWidth()) {
+            AnimatedVisibility(
+                visibleState = detailVisibility,
+                modifier = if (detailLayoutActive) {
+                    Modifier.requiredWidth(300.dp)
+                } else {
+                    Modifier.width(0.dp)
+                },
             enter = fadeIn(tween(150)) +
                 expandHorizontally(
                     animationSpec = tween(180, easing = FastOutSlowInEasing),
@@ -3691,6 +3716,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         onClick = ::toggleGps,
                     )
                 }
+            }
             }
             }
         }
