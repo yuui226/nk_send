@@ -50,10 +50,13 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private var pendingSentLocation: Location? = null
     private var geoWriteInFlight = false
     private var geoWriteTimeoutJob: Job? = null
+    private var readyUiJob: Job? = null
     private var lastGeocodedKey: String? = null
     private var geocodeJob: Job? = null
     private var enabled = false
     private var cameraReady = false
+    private var cameraVerified = false
+    private var pairingConfirmationPending = false
     private var apModeBlocked = false
     private var preserveReadyDuringReconnect = false
 
@@ -67,6 +70,9 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                     accuracyMeters = location.accuracy,
                     status = if (it.status == GpsStatus.READY ||
                         it.status == GpsStatus.WRITING ||
+                        it.status == GpsStatus.CONNECTED ||
+                        it.status == GpsStatus.CONNECTING ||
+                        it.status == GpsStatus.PAIRING_SUCCESS ||
                         it.status == GpsStatus.ERROR
                     ) {
                         it.status
@@ -155,9 +161,18 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         GpsDiagnostics.record("GPS ready camera=$name")
         reconnectJob?.cancel()
         reconnectJob = null
+        val wasReadyBeforeReconnect = preserveReadyDuringReconnect
         cameraReady = true
+        cameraVerified = wasReadyBeforeReconnect
         preserveReadyDuringReconnect = false
-        updateState(GpsStatus.CONNECTED, name)
+        // An ID characteristic write only proves that Android handed the packet to GATT.
+        // Keep a fresh session in "connecting" until the camera also accepts a GEO write;
+        // otherwise the UI can claim success while the camera is still on its pairing screen.
+        updateState(
+            if (wasReadyBeforeReconnect) GpsStatus.READY else GpsStatus.CONNECTING,
+            name,
+            if (wasReadyBeforeReconnect) null else "正在确认连接",
+        )
         startLocationUpdates()
     }
 
@@ -167,13 +182,44 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         geoWriteTimeoutJob = null
         geoWriteInFlight = false
         if (success) {
+            val firstVerifiedWrite = !cameraVerified
+            val confirmedFreshPairing = pairingConfirmationPending
+            cameraVerified = true
+            pairingConfirmationPending = false
+            if (firstVerifiedWrite) {
+                GpsDiagnostics.record("camera connection verified by GEO write")
+            }
             reconnectJob?.cancel()
             reconnectJob = null
             pendingSentLocation?.let { sent -> lastSentLocation = Location(sent) }
             pendingSentLocation = null
             lastSentAt = System.currentTimeMillis()
-            NikonGpsRuntime.state.update {
-                it.copy(status = GpsStatus.READY, lastSentAtMs = lastSentAt, message = null)
+            if (firstVerifiedWrite) {
+                NikonGpsRuntime.state.update {
+                    it.copy(
+                        status = if (confirmedFreshPairing) GpsStatus.PAIRING_SUCCESS else GpsStatus.CONNECTED,
+                        lastSentAtMs = lastSentAt,
+                        message = null,
+                    )
+                }
+                readyUiJob?.cancel()
+                readyUiJob = serviceScope.launch {
+                    if (confirmedFreshPairing) {
+                        delay(650)
+                        if (!enabled || !cameraReady ||
+                            NikonGpsRuntime.state.value.status != GpsStatus.PAIRING_SUCCESS
+                        ) return@launch
+                        NikonGpsRuntime.state.update { it.copy(status = GpsStatus.CONNECTED) }
+                    }
+                    delay(700)
+                    if (enabled && cameraReady && NikonGpsRuntime.state.value.status == GpsStatus.CONNECTED) {
+                        NikonGpsRuntime.state.update { it.copy(status = GpsStatus.READY) }
+                    }
+                }
+            } else {
+                NikonGpsRuntime.state.update {
+                    it.copy(status = GpsStatus.READY, lastSentAtMs = lastSentAt, message = null)
+                }
             }
         } else {
             pendingSentLocation = null
@@ -188,7 +234,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             .putLong(KEY_DEVICE_ID, device)
             .putLong(KEY_NONCE, nonce)
             .apply()
-        updateState(GpsStatus.PAIRING_SUCCESS, message = "配对成功")
+        // Android's Classic bond can exist before the camera has committed its side of the
+        // pairing. Cache the identity, but do not report success until the reconnected camera
+        // accepts the first GEO write.
+        pairingConfirmationPending = true
+        GpsDiagnostics.record("Classic bond ready; awaiting camera GEO verification")
+        updateState(GpsStatus.CONNECTING, message = "正在确认配对")
     }
 
     override fun onDisconnected() {
@@ -203,9 +254,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         geoWriteInFlight = false
         geoWriteTimeoutJob?.cancel()
         geoWriteTimeoutJob = null
+        readyUiJob?.cancel()
+        readyUiJob = null
         val currentStatus = NikonGpsRuntime.state.value.status
         val pairingCompleted = currentStatus == GpsStatus.PAIRING_SUCCESS
         preserveReadyDuringReconnect = currentStatus == GpsStatus.READY
+        cameraVerified = false
         if (!pairingCompleted && !preserveReadyDuringReconnect) {
             updateState(GpsStatus.CONNECTING, message = "正在重连")
         }
@@ -230,7 +284,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     override fun onError(message: String) {
         GpsDiagnostics.record("error=$message")
         cameraReady = false
+        cameraVerified = false
         preserveReadyDuringReconnect = false
+        pairingConfirmationPending = false
+        readyUiJob?.cancel()
+        readyUiJob = null
         if (message.contains("pairing rejected", ignoreCase = true) ||
             message.contains("identity expired", ignoreCase = true)
         ) {
@@ -395,6 +453,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private fun stopGps() {
         enabled = false
         cameraReady = false
+        cameraVerified = false
+        pairingConfirmationPending = false
         preserveReadyDuringReconnect = false
         reconnectJob?.cancel()
         reconnectJob = null
@@ -402,6 +462,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         geoWriteInFlight = false
         geoWriteTimeoutJob?.cancel()
         geoWriteTimeoutJob = null
+        readyUiJob?.cancel()
+        readyUiJob = null
         lastSentLocation = null
         lastSentAt = 0L
         stopLocationUpdates()
@@ -414,6 +476,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     private fun stopActiveConnection() {
         cameraReady = false
+        cameraVerified = false
+        pairingConfirmationPending = false
         preserveReadyDuringReconnect = false
         reconnectJob?.cancel()
         reconnectJob = null
@@ -421,6 +485,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         geoWriteInFlight = false
         geoWriteTimeoutJob?.cancel()
         geoWriteTimeoutJob = null
+        readyUiJob?.cancel()
+        readyUiJob = null
         lastSentLocation = null
         lastSentAt = 0L
         stopLocationUpdates()
