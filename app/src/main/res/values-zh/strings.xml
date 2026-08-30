@@ -565,7 +565,7 @@
     <string name="gps_paired_device_count">已配对 %1$d 台设备</string>
     <string name="gps_clear_pairing_message">将清除已保存的相机身份，下次使用时需要重新配对。</string>
     <string name="gps_detail_description">开启后，相机拍摄的照片会附带位置信息。</string>
-    <string name="gps_step_camera">相机开启蓝牙\n- 首次：连接至智能设备 → 配对（Bluetooth）→ 开始配对\n- 开启蓝牙</string>
+    <string name="gps_step_camera">相机开启蓝牙\n- 首次：连接至智能设备 → 配对（Bluetooth）→ 开始配对</string>
     <string name="gps_step_app">App：点击“开启 GPS”</string>
     <string name="gps_permission_required">请允许蓝牙和定位权限</string>
 </resources>
