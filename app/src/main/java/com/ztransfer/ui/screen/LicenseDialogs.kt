@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -490,13 +491,43 @@ fun ProDialog(
                         }
                         if (feedback != null) {
                             Spacer(Modifier.height(8.dp))
-                            Text(
-                                feedback.first,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = feedback.second,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            if (internetHintNonce > 0) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(feedback.second.copy(alpha = 0.10f))
+                                        .border(
+                                            1.dp,
+                                            feedback.second.copy(alpha = 0.28f),
+                                            RoundedCornerShape(12.dp),
+                                        )
+                                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.WifiOff,
+                                        contentDescription = null,
+                                        tint = feedback.second,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        feedback.first,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = feedback.second,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    feedback.first,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = feedback.second,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     } else {
                         // ================= 激活页（顶掉购买内容，弹窗不增高）=================

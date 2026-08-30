@@ -502,7 +502,7 @@
     <string name="purchase_paid_not_active">Payment received but auto-activation failed — copy the code above and use "Enter activation code".</string>
     <string name="purchase_code_copied">Activation code copied</string>
     <string name="purchase_done">Done</string>
-    <string name="err_purchase_no_network">Please connect to the internet</string>
+    <string name="err_purchase_no_network">Disconnect the camera hotspot before purchasing, then connect to the internet and retry.</string>
     <string name="err_purchase_unreachable">Couldn\'t reach the server. If you\'re on the camera\'s Wi-Fi, disconnect first and retry on a network with internet access.</string>
     <string name="err_purchase_failed">Couldn\'t create the order — try again later or contact support.</string>
     <string name="err_purchase_activation_failed">Activation failed. Please contact support.</string>

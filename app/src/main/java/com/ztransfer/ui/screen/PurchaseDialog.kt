@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -569,12 +570,43 @@ fun PurchaseDialog(
                             // ---- 出错(多为没外网):说明 + 重试 ----
                             error != null -> {
                                 Spacer(Modifier.height(8.dp))
-                                Text(
-                                    stringResource(error!!),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = colors.accentOrange,
-                                    textAlign = TextAlign.Center
-                                )
+                                if (error == R.string.err_purchase_no_network) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(colors.accentOrange.copy(alpha = 0.10f))
+                                            .border(
+                                                1.dp,
+                                                colors.accentOrange.copy(alpha = 0.30f),
+                                                RoundedCornerShape(14.dp),
+                                            )
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.WifiOff,
+                                            contentDescription = null,
+                                            tint = colors.accentOrange,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                        Spacer(Modifier.size(10.dp))
+                                        Text(
+                                            stringResource(error!!),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.accentOrange,
+                                            textAlign = TextAlign.Start,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        stringResource(error!!),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.accentOrange,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                }
                                 Spacer(Modifier.height(12.dp))
                                 GlassButton(
                                     shape = RoundedCornerShape(14.dp),

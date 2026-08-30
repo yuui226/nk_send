@@ -1222,6 +1222,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         _state.update { it.copy(staConnectionHelpViewed = true) }
     }
 
+    /** STA 连接失败时重新提示连接指引。 */
+    fun resetStaConnectionHelpViewed() {
+        if (!_state.value.staConnectionHelpViewed) return
+        prefs.edit().putBoolean(KEY_STA_CONNECTION_HELP_VIEWED, false).apply()
+        _state.update { it.copy(staConnectionHelpViewed = false) }
+    }
+
     fun markLocalPhotoEffectsHelpViewed() {
         if (_state.value.localPhotoEffectsHelpViewed) return
         prefs.edit().putBoolean(KEY_LOCAL_PHOTO_EFFECTS_HELP_VIEWED, true).apply()

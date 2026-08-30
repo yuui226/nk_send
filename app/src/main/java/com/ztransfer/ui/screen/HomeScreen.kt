@@ -412,6 +412,23 @@ fun HomeScreen(
             multiline = true,
         )
     } else null
+    LaunchedEffect(
+        state.staConnectionStatus,
+        state.staConnectionError,
+        state.isConnectedToCamera,
+        state.isStaConnection,
+    ) {
+        if (state.wirelessMode == WirelessMode.STA &&
+            state.staConnectionStatus == StaConnectionStatus.FAILED
+        ) {
+            transferViewModel.resetStaConnectionHelpViewed()
+        } else if (state.wirelessMode == WirelessMode.STA &&
+            state.isConnectedToCamera &&
+            state.isStaConnection
+        ) {
+            transferViewModel.markStaConnectionHelpViewed()
+        }
+    }
     // 识别传输方式后立即停止提示动画；具体动画在卡片图层内运行，避免每帧重组整个页面。
     val connectionAttentionActive = selectedConnection == null
     val soonDays = if (isPro) {
