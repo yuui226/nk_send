@@ -540,7 +540,27 @@ fun HomeScreen(
                             onCardClick = if (gpsBlocksConnection) ::showGpsConnectionBlockedHint else null,
                         )
                         Spacer(Modifier.height(gpsSpacing))
-                        GpsConnectionControl(modifier = Modifier.fillMaxWidth())
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .graphicsLayer {
+                                    // GPS is part of the left connection scene; leave with the
+                                    // cards on successful hand-off instead of lingering under
+                                    // the outgoing hero animation.
+                                    val exitProgress = if (selectedConnection != null) {
+                                        selectionSceneProgress().coerceIn(0f, 1f)
+                                    } else {
+                                        0f
+                                    }
+                                    alpha = 1f - exitProgress
+                                    translationY = exitProgress * 8.dp.toPx()
+                                    val scale = 1f - exitProgress * 0.03f
+                                    scaleX = scale
+                                    scaleY = scale
+                                },
+                        ) {
+                            GpsConnectionControl(modifier = Modifier.fillMaxWidth())
+                        }
                     }
 
                     ConnectionMethodCard(
