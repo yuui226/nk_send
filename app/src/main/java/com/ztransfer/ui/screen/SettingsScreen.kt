@@ -1050,6 +1050,7 @@ fun SettingsOverlay(
 
             // ---------- 尼康 GPS：只保留一个无感总开关；配对、定位和重连全部后台完成 ----------
             val gpsCopiedHint = stringResource(R.string.code_copied)
+            val gpsLocationCopiedHint = stringResource(R.string.gps_location_copied)
             SettingsCard(
                 borderColor = colors.glassPanelBorder,
                 pressAccentColor = colors.accentBlue,
@@ -1124,29 +1125,33 @@ fun SettingsOverlay(
                         java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
                             .format(java.util.Date(it))
                     }
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(start = 4.dp, top = 6.dp, end = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = listOfNotNull(gpsState.placeName, updatedAt?.let { "更新 $it" })
-                                .joinToString(" · "),
+                            text = gpsState.placeName ?: stringResource(R.string.gps_enabled),
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val copied = listOfNotNull(gpsState.placeName, coordinates)
+                                        .joinToString("\n")
+                                    clipboard.setText(AnnotatedString(copied))
+                                    showFooterHint(gpsLocationCopiedHint)
+                                },
                         )
-                        coordinates?.let {
+                        updatedAt?.let {
                             Text(
-                                text = it,
+                                text = "更新 $it",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = colors.onSurfaceVariant.copy(alpha = 0.72f),
                                 maxLines = 1,
-                                textAlign = TextAlign.End,
-                                modifier = Modifier.padding(start = 8.dp),
+                                modifier = Modifier.padding(top = 2.dp),
                             )
                         }
                     }

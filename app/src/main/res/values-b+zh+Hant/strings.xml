@@ -552,6 +552,7 @@
     <string name="gps_connected">連線成功</string>
     <string name="gps_writing">GPS 寫入中</string>
     <string name="gps_enabled">已開啟</string>
+    <string name="gps_location_copied">已複製地址與座標</string>
     <string name="gps_need_camera">開啟相機配對</string>
     <string name="gps_ap_unavailable">AP 模式不可用</string>
     <string name="gps_retry">重試</string>

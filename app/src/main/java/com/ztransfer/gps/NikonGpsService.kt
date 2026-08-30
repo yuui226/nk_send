@@ -55,6 +55,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private var enabled = false
     private var cameraReady = false
     private var apModeBlocked = false
+    private var preserveReadyDuringReconnect = false
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -155,6 +156,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         reconnectJob?.cancel()
         reconnectJob = null
         cameraReady = true
+        preserveReadyDuringReconnect = false
         updateState(GpsStatus.CONNECTED, name)
         startLocationUpdates()
     }
@@ -201,8 +203,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         geoWriteInFlight = false
         geoWriteTimeoutJob?.cancel()
         geoWriteTimeoutJob = null
-        val pairingCompleted = NikonGpsRuntime.state.value.status == GpsStatus.PAIRING_SUCCESS
-        if (!pairingCompleted) updateState(GpsStatus.CONNECTING, message = "正在重连")
+        val currentStatus = NikonGpsRuntime.state.value.status
+        val pairingCompleted = currentStatus == GpsStatus.PAIRING_SUCCESS
+        preserveReadyDuringReconnect = currentStatus == GpsStatus.READY
+        if (!pairingCompleted && !preserveReadyDuringReconnect) {
+            updateState(GpsStatus.CONNECTING, message = "正在重连")
+        }
         reconnectJob?.cancel()
         reconnectJob = serviceScope.launch {
             // The Classic bond callback already confirms the camera; a short settle time is
@@ -224,6 +230,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     override fun onError(message: String) {
         GpsDiagnostics.record("error=$message")
         cameraReady = false
+        preserveReadyDuringReconnect = false
         if (message.contains("pairing rejected", ignoreCase = true) ||
             message.contains("identity expired", ignoreCase = true)
         ) {
@@ -306,7 +313,9 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         val savedId = storedId.takeIf { hasCompleteIdentity }
         val savedNonce = storedNonce.takeIf { hasCompleteIdentity }
         val savedBleAddress = preferences.getString(KEY_BLE_ADDRESS, null)
-        updateState(if (hasCompleteIdentity) GpsStatus.CONNECTING else GpsStatus.SEARCHING)
+        if (!preserveReadyDuringReconnect) {
+            updateState(if (hasCompleteIdentity) GpsStatus.CONNECTING else GpsStatus.SEARCHING)
+        }
         bleClient.start(savedDeviceId = savedId, savedNonce = savedNonce, savedBleAddress = savedBleAddress)
     }
 
@@ -386,6 +395,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private fun stopGps() {
         enabled = false
         cameraReady = false
+        preserveReadyDuringReconnect = false
         reconnectJob?.cancel()
         reconnectJob = null
         pendingSentLocation = null
@@ -404,6 +414,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
 
     private fun stopActiveConnection() {
         cameraReady = false
+        preserveReadyDuringReconnect = false
         reconnectJob?.cancel()
         reconnectJob = null
         pendingSentLocation = null
