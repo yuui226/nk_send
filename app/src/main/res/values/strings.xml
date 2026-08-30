@@ -564,7 +564,7 @@
     <string name="gps_retry">Retry</string>
     <string name="gps_clear_pairing">Clear GPS pairing</string>
     <string name="gps_clear_pairing_title">Clear GPS pairing?</string>
-    <string name="gps_paired_device_count">Paired devices: %1$d</string>
+    <string name="gps_paired_device_status">Camera paired</string>
     <string name="gps_clear_pairing_message">The saved camera identity will be removed. Pair again next time.</string>
     <string name="gps_detail_description">When enabled, camera photos include location information.</string>
     <string name="gps_step_camera">Camera turn on Bluetooth\n- First use: Connect to smart device → Pairing (Bluetooth) → Start pairing</string>

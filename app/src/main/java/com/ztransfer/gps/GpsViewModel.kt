@@ -25,9 +25,8 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
         NikonGpsService.setEnabled(getApplication(), true)
     }
 
-    fun pairedDeviceCount(): Int = if (
-        preferences.contains(KEY_DEVICE_ID) || preferences.contains(KEY_NONCE)
-    ) 1 else 0
+    fun hasPairedDevice(): Boolean =
+        preferences.contains(KEY_DEVICE_ID) && preferences.contains(KEY_NONCE)
 
     fun clearPairing() {
         preferences.edit()

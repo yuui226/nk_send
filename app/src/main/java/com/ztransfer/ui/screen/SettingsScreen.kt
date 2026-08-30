@@ -3391,7 +3391,6 @@ private enum class GpsStatusButtonState {
 
 @Composable
 private fun GpsResetPairingDialog(
-    pairedDeviceCount: Int,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -3427,7 +3426,7 @@ private fun GpsResetPairingDialog(
                     )
                     Spacer(Modifier.width(7.dp))
                     Text(
-                        text = stringResource(R.string.gps_paired_device_count, pairedDeviceCount),
+                        text = stringResource(R.string.gps_paired_device_status),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.onBackground,
@@ -3721,7 +3720,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                 ) {
                     GlassButton(
                         onClick = { showReset = true },
-                        enabled = gpsViewModel.pairedDeviceCount() > 0,
+                        enabled = gpsViewModel.hasPairedDevice(),
                         shape = RoundedCornerShape(14.dp),
                         contentPadding = PaddingValues(0.dp),
                         modifier = Modifier.size(42.dp),
@@ -3751,7 +3750,6 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     }
     if (showReset) {
         GpsResetPairingDialog(
-            pairedDeviceCount = gpsViewModel.pairedDeviceCount(),
             onConfirm = { showReset = false; gpsViewModel.clearPairing() },
             onDismiss = { showReset = false },
         )
