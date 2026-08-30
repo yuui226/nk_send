@@ -304,6 +304,7 @@ fun SettingsOverlay(
     var mainSettingsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var showGpsResetDialog by remember { mutableStateOf(false) }
     var showGpsInfoDialog by remember { mutableStateOf(false) }
+    var gpsHelpViewed by remember { mutableStateOf(gpsViewModel.isHelpViewed()) }
     var showPhotoEffectsInfo by remember { mutableStateOf(false) }
     var photoEffectsInfoAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     var expandedEffectsPreview by remember {
@@ -1068,8 +1069,15 @@ fun SettingsOverlay(
                             },
                     )
                     TipLightbulbButton(
-                        onClick = { showGpsInfoDialog = true },
+                        onClick = {
+                            if (!gpsHelpViewed) {
+                                gpsHelpViewed = true
+                                gpsViewModel.markHelpViewed()
+                            }
+                            showGpsInfoDialog = true
+                        },
                         contentDescription = stringResource(R.string.gps_help_title),
+                        attention = !gpsHelpViewed,
                         modifier = Modifier.size(34.dp),
                     )
                     Spacer(Modifier.width(8.dp))

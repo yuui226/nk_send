@@ -542,7 +542,7 @@
     <string name="local_photo_select_failed">請選擇儲存在本機相簿中且可寫入的照片</string>
     <string name="local_photo_save_failed">產生失敗，原照片未受影響</string>
     <string name="cd_camera_battery">相機電量</string>
-    <string name="gps_auto_write">自動寫入 GPS</string>
+    <string name="gps_auto_write">GPS</string>
     <string name="gps_off">未開啟</string>
     <string name="gps_connecting">正在連線</string>
     <string name="gps_pairing">正在配對</string>
@@ -555,6 +555,6 @@
     <string name="gps_paired_device_count">已配對 %1$d 台裝置</string>
     <string name="gps_clear_pairing_message">將清除已儲存的相機身分，下次使用時需要重新配對。</string>
     <string name="gps_help_title">GPS 使用提示</string>
-    <string name="gps_help_message">首次使用：相機進入藍牙配對畫面後，點擊右側按鈕。之後會自動連線。</string>
+    <string name="gps_help_message">首次使用：相機進入藍牙配對畫面後，點擊右側按鈕並確認一次。之後會自動連線。</string>
     <string name="gps_permission_required">請允許藍牙和定位權限</string>
 </resources>

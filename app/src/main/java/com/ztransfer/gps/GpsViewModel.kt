@@ -29,6 +29,13 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
         preferences.contains(KEY_DEVICE_ID) || preferences.contains(KEY_NONCE)
     ) 1 else 0
 
+    fun isHelpViewed(): Boolean = preferences.getBoolean(KEY_HELP_VIEWED, false)
+
+    fun markHelpViewed() {
+        if (isHelpViewed()) return
+        preferences.edit().putBoolean(KEY_HELP_VIEWED, true).apply()
+    }
+
     fun clearPairing() {
         preferences.edit()
             .remove(KEY_DEVICE_ID)
@@ -49,5 +56,6 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_NONCE = "nonce"
         const val KEY_BLE_ADDRESS = "ble_address"
+        const val KEY_HELP_VIEWED = "gps_help_viewed_v1"
     }
 }

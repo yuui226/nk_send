@@ -92,6 +92,30 @@ internal fun TipLightbulbButton(
     } else {
         1f
     }
+    val attentionDot = if (attention) {
+        val transition = rememberInfiniteTransition(label = "tipLightbulbUnreadDot")
+        val scale by transition.animateFloat(
+            initialValue = 0.72f,
+            targetValue = 1.12f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "tipLightbulbUnreadDotScale",
+        )
+        val alpha by transition.animateFloat(
+            initialValue = 0.58f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "tipLightbulbUnreadDotAlpha",
+        )
+        scale to alpha
+    } else {
+        1f to 1f
+    }
     GlassButton(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
@@ -121,7 +145,12 @@ internal fun TipLightbulbButton(
                         .padding(top = 2.dp, end = 2.dp)
                         .size(7.dp)
                         .background(Color(0xFFFF4D3D), CircleShape)
-                        .border(1.dp, colors.background.copy(alpha = 0.9f), CircleShape),
+                        .border(1.dp, colors.background.copy(alpha = 0.9f), CircleShape)
+                        .graphicsLayer {
+                            scaleX = attentionDot.first
+                            scaleY = attentionDot.first
+                            alpha = attentionDot.second
+                        },
                 )
             }
         }
