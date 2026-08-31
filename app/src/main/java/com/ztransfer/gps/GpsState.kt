@@ -35,6 +35,10 @@ internal enum class GpsRecoveryTarget {
     FULL_CONNECTION,
 }
 
+/** LE identity completion means the camera is connected; GEO delivery is a later work state. */
+internal fun gpsStatusAfterCameraReady(preserveReadyDuringReconnect: Boolean): GpsStatus =
+    if (preserveReadyDuringReconnect) GpsStatus.READY else GpsStatus.CONNECTED
+
 /** Keep an established camera session when only the phone location setup needs another attempt. */
 internal fun gpsRecoveryTarget(
     cameraReady: Boolean,

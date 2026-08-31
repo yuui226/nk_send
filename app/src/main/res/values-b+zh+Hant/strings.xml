@@ -556,9 +556,8 @@
     <string name="gps_location_copied">已複製地址與座標</string>
     <string name="gps_location_value">位置：%1$s</string>
     <string name="gps_coordinates_value">座標：%1$s</string>
-    <string name="gps_coordinates_action">經緯度 · 點擊查看地點</string>
     <string name="gps_place_open">查看地點</string>
-    <string name="gps_place_sheet_title">目前座標的地點</string>
+    <string name="gps_place_title">目前座標的地點</string>
     <string name="gps_place_loading">正在查詢地點…</string>
     <string name="gps_place_unavailable">暫時無法取得地點名稱，請稍後重試</string>
     <string name="gps_place_copy">複製地址與座標</string>

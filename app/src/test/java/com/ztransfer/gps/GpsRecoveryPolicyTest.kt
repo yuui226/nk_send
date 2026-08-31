@@ -5,6 +5,22 @@ import org.junit.Test
 
 class GpsRecoveryPolicyTest {
     @Test
+    fun freshLeIdentityHandshakeIsAlreadyConnected() {
+        assertEquals(
+            GpsStatus.CONNECTED,
+            gpsStatusAfterCameraReady(preserveReadyDuringReconnect = false),
+        )
+    }
+
+    @Test
+    fun establishedReconnectKeepsReadyPresentation() {
+        assertEquals(
+            GpsStatus.READY,
+            gpsStatusAfterCameraReady(preserveReadyDuringReconnect = true),
+        )
+    }
+
+    @Test
     fun connectedCameraRetriesOnlyPhoneLocation() {
         assertEquals(
             GpsRecoveryTarget.LOCATION_ONLY,

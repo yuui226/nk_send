@@ -57,6 +57,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private var latestLocation: Location? = null
     private var pendingAltitudeRefresh = false
     private var altitudeUnavailableLogged = false
+    private var latestTrustedAltitudeFix: Location? = null
     private var readyUiJob: Job? = null
     private var enabled = false
     private var cameraReady = false
@@ -85,18 +86,18 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
             if (!enabled || !cameraReady) return
-            // Android's network provider commonly omits altitude. Reuse the last GPS fix when
-            // available; a GEO packet is deferred until a valid altitude is available.
+            // Some vendor network providers mark a synthetic 0 m altitude as present. Only a
+            // recent GPS fix establishes altitude; nearby network coordinates may reuse it.
             val altitude = resolveAltitude(location)
             val payloadLocation = Location(location).apply {
-                if (altitude != null && (!hasAltitude() || !this.altitude.isFinite())) setAltitude(altitude)
+                if (altitude != null) setAltitude(altitude) else removeAltitude()
             }
             val altitudeWasMissing = NikonGpsRuntime.state.value.altitudeMeters == null
             NikonGpsRuntime.state.update {
                 it.copy(
                     latitude = location.latitude,
                     longitude = location.longitude,
-                    altitudeMeters = altitude ?: it.altitudeMeters,
+                    altitudeMeters = altitude,
                     accuracyMeters = location.accuracy,
                     status = if (it.status == GpsStatus.READY ||
                         it.status == GpsStatus.WRITING ||
@@ -118,14 +119,31 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     }
 
     private fun resolveAltitude(location: Location): Double? {
-        if (location.hasAltitude() && location.altitude.isFinite()) return location.altitude
-        NikonGpsRuntime.state.value.altitudeMeters?.takeIf(Double::isFinite)?.let { return it }
-        return sequenceOf(LocationManager.GPS_PROVIDER, LocationManager.PASSIVE_PROVIDER)
-            .mapNotNull { provider ->
-                runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
-            }
-            .firstOrNull { it.hasAltitude() && it.altitude.isFinite() }
-            ?.altitude
+        val nowMs = System.currentTimeMillis()
+        trustedAltitudeFix(location, nowMs)?.let { altitude ->
+            latestTrustedAltitudeFix = Location(location)
+            return altitude
+        }
+        val cachedFix = latestTrustedAltitudeFix ?: return null
+        val distanceMeters = runCatching { cachedFix.distanceTo(location) }
+            .getOrDefault(Float.POSITIVE_INFINITY)
+        if (!canReuseGpsAltitude(nowMs, cachedFix.time, distanceMeters)) return null
+        return trustedGpsAltitude(
+            provider = cachedFix.provider,
+            hasAltitude = cachedFix.hasAltitude(),
+            altitudeMeters = cachedFix.altitude,
+        )
+    }
+
+    private fun trustedAltitudeFix(location: Location, nowMs: Long): Double? {
+        val altitude = trustedGpsAltitude(
+            provider = location.provider,
+            hasAltitude = location.hasAltitude(),
+            altitudeMeters = location.altitude,
+        ) ?: return null
+        return altitude.takeIf {
+            canReuseGpsAltitude(nowMs, location.time, distanceMeters = 0f)
+        }
     }
 
     override fun onCreate() {
@@ -305,11 +323,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         cameraReady = true
         cameraVerified = wasReadyBeforeReconnect
         preserveReadyDuringReconnect = false
-        // ID write success confirms the saved-pairing link is available. Keep READY gated
-        // by the first GEO write so a connected camera without a valid location fix never
-        // appears as fully enabled.
+        // A successful ID write completes the LE identity handshake. Location acquisition and
+        // GEO delivery happen after the camera is already connected and must not keep the UI in
+        // its connecting state.
         updateState(
-            if (wasReadyBeforeReconnect) GpsStatus.READY else GpsStatus.CONNECTING,
+            gpsStatusAfterCameraReady(wasReadyBeforeReconnect),
             name,
             null,
         )
@@ -547,7 +565,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         }
         if (gpsRecoveryTarget(cameraReady, bleClient.isRunning()) == GpsRecoveryTarget.LOCATION_ONLY) {
             notificationOverride = null
-            updateState(GpsStatus.CONNECTING, message = "正在获取手机位置")
+            updateState(GpsStatus.WAITING_FIX, message = "正在获取手机位置")
             restartLocationPipeline()
             return
         }
@@ -648,12 +666,25 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             // callback. This closes the small window where the user can shoot before the first
             // GPS payload reaches the camera.
             val now = System.currentTimeMillis()
-            val cached = listOfNotNull(
-                if (gpsEnabled) runCatching { locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull() else null,
-                if (networkEnabled) runCatching { locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull() else null,
-            ).filter { location ->
+            val cachedGps = if (gpsEnabled) {
+                runCatching {
+                    locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                }.getOrNull()
+            } else null
+            val cachedNetwork = if (networkEnabled) {
+                runCatching {
+                    locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                }.getOrNull()
+            } else null
+            val recentCachedLocations = listOfNotNull(cachedGps, cachedNetwork).filter { location ->
                 location.time > 0L && kotlin.math.abs(now - location.time) <= CACHED_LOCATION_MAX_AGE_MS
-            }.maxByOrNull { it.time }
+            }
+            cachedGps?.let { gpsFix ->
+                if (trustedAltitudeFix(gpsFix, now) != null) {
+                    latestTrustedAltitudeFix = Location(gpsFix)
+                }
+            }
+            val cached = recentCachedLocations.maxByOrNull { it.time }
             cached?.let(locationListener::onLocationChanged)
             true
         }.getOrElse {
@@ -691,7 +722,18 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             if (!altitudeUnavailableLogged) {
                 GpsDiagnostics.record(
                     "GEO deferred altitude unavailable provider=${candidate.provider ?: "?"} " +
-                        "hasAltitude=${candidate.hasAltitude()}",
+                        "hasAltitude=${candidate.hasAltitude()} rawAltitude=" +
+                        (if (candidate.hasAltitude()) {
+                            "%.1fm".format(Locale.US, candidate.altitude)
+                        } else {
+                            "none"
+                        }) +
+                        " verticalAccuracy=" +
+                        (if (candidate.hasVerticalAccuracy()) {
+                            "%.1fm".format(Locale.US, candidate.verticalAccuracyMeters)
+                        } else {
+                            "none"
+                        }),
                 )
                 altitudeUnavailableLogged = true
             }
@@ -712,6 +754,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             )
         }.getOrNull() ?: return
         geoWriteInFlight = true
+        updateState(GpsStatus.WRITING)
         GpsDiagnostics.record(
             "GEO queued provider=${candidate.provider ?: "?"} " +
                 "accuracy=${candidate.accuracy.toInt()}m altitude=" +
@@ -773,6 +816,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         latestLocation = null
         pendingAltitudeRefresh = false
         altitudeUnavailableLogged = false
+        latestTrustedAltitudeFix = null
         stopLocationUpdates()
         if (::bleClient.isInitialized) bleClient.stop()
         notificationOverride = null
@@ -806,6 +850,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         latestLocation = null
         pendingAltitudeRefresh = false
         altitudeUnavailableLogged = false
+        latestTrustedAltitudeFix = null
         stopLocationUpdates()
         if (::bleClient.isInitialized) bleClient.stop()
         NikonGpsRuntime.state.update { it.copy(enabled = enabled, status = GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用") }
@@ -864,10 +909,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         GpsStatus.STARTING, GpsStatus.SEARCHING -> "正在寻找相机"
         GpsStatus.NEEDS_CAMERA -> state.message ?: "请打开相机蓝牙"
         GpsStatus.CONNECTING -> state.message ?: "正在连接相机"
-        GpsStatus.PAIRING, GpsStatus.CAMERA_CONFIRM, GpsStatus.PAIRING_SUCCESS -> "正在连接相机"
-        GpsStatus.CONNECTED -> "已连接，等待位置更新"
-        GpsStatus.WRITING -> "正在写入相机位置"
-        GpsStatus.WAITING_FIX -> "等待定位"
+        GpsStatus.PAIRING, GpsStatus.CAMERA_CONFIRM -> "正在连接相机"
+        GpsStatus.PAIRING_SUCCESS, GpsStatus.CONNECTED -> "已连接，等待位置更新"
+        GpsStatus.WRITING -> "已连接，正在写入位置"
+        GpsStatus.WAITING_FIX -> "已连接，等待定位"
         GpsStatus.READY -> "已连接，自动写入位置"
         GpsStatus.AP_UNAVAILABLE -> "AP 模式不可用"
         GpsStatus.ERROR -> state.message ?: "GPS 连接失败"
