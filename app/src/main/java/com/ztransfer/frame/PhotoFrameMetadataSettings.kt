@@ -9,9 +9,9 @@ import java.util.Locale
 internal const val DEFAULT_PHOTO_FRAME_DATE_PATTERN = "yyyy-MM-dd"
 internal const val DEFAULT_PHOTO_FRAME_TIME_PATTERN = "HH:mm:ss"
 /**
- * Address reverse-geocoding in exported borders is intentionally disabled for now.  Keep the
- * setting field and decoder for forward compatibility so a future offline/online policy can
- * restore it without invalidating existing preference data.
+ * Address reverse-geocoding in exported borders is intentionally disabled for now.  The setting
+ * field remains source-compatible for a future offline/online policy, but it is never restored
+ * from persisted data or used by the border pipeline.
  */
 internal const val PHOTO_FRAME_ADDRESS_METADATA_ENABLED = false
 internal val PHOTO_FRAME_DATE_PATTERNS = listOf("yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM-dd-yyyy")
@@ -257,7 +257,6 @@ internal fun encodePhotoFrameMetadataSettings(
         value.showBrand,
         value.showModel,
         value.showLensModel,
-        value.showAddress,
         value.showCoordinates,
         value.showAltitude,
         value.datePattern,
@@ -273,19 +272,31 @@ internal fun decodePhotoFrameMetadataSettings(
     encoded.split(ENTRY_SEPARATOR).forEach { entry ->
         val fields = entry.split(FIELD_SEPARATOR)
         // Older versions stored six or seven visibility flags. Accept those entries forever;
-        // GPS visibility flags were appended in the current format and default to off.
-        if (fields.size != 9 && fields.size != 10 && fields.size != 13) return@forEach
+        // the former 13-field location format had an address slot which is deliberately skipped.
+        // The current location format is 12 fields and contains only coordinates + altitude.
+        if (fields.size != 9 && fields.size != 10 && fields.size != 12 && fields.size != 13) {
+            return@forEach
+        }
         val preset = PhotoFramePreset.entries.firstOrNull { it.name == fields[0] }
             ?: return@forEach
         if (preset in restored) return@forEach
         val hasLensModel = fields.size >= 10
-        val hasLocation = fields.size == 13
+        val hasLocation = fields.size == 12 || fields.size == 13
+        val hasLegacyAddressSlot = fields.size == 13
         val booleanEnd = when {
-            hasLocation -> 11
+            fields.size == 13 -> 11
+            fields.size == 12 -> 10
             hasLensModel -> 8
             else -> 7
         }
-        val booleans = fields.subList(1, booleanEnd).map { it.toBooleanStrictOrNull() }
+        // A legacy 13-field entry stores address at index 8.  Omit that token entirely instead
+        // of parsing it; coordinates and altitude then line up with the current nine-flag model.
+        val booleanFieldIndices = if (hasLegacyAddressSlot) {
+            listOf(1, 2, 3, 4, 5, 6, 7, 9, 10)
+        } else {
+            (1 until booleanEnd).toList()
+        }
+        val booleans = booleanFieldIndices.map { fields[it].toBooleanStrictOrNull() }
         if (booleans.any { it == null }) return@forEach
         val value = normalizePhotoFrameMetadataSettings(
             PhotoFrameMetadataSettings(
@@ -296,9 +307,14 @@ internal fun decodePhotoFrameMetadataSettings(
                 showBrand = checkNotNull(booleans[4]),
                 showModel = checkNotNull(booleans[5]),
                 showLensModel = if (hasLensModel) checkNotNull(booleans[6]) else false,
-                showAddress = if (hasLocation) checkNotNull(booleans[7]) else false,
-                showCoordinates = if (hasLocation) checkNotNull(booleans[8]) else false,
-                showAltitude = if (hasLocation) checkNotNull(booleans[9]) else false,
+                // Address was removed from the border feature; retain only coordinate/altitude.
+                showAddress = false,
+                showCoordinates = if (hasLocation) {
+                    checkNotNull(booleans[7])
+                } else false,
+                showAltitude = if (hasLocation) {
+                    checkNotNull(booleans[8])
+                } else false,
                 datePattern = fields[booleanEnd],
                 timePattern = fields[booleanEnd + 1],
             )

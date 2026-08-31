@@ -111,6 +111,18 @@ class PhotoFrameMetadataSettingsTest {
     }
 
     @Test
+    fun legacyAddressSlotIsIgnoredWhileOtherLocationFieldsRemainReadable() {
+        val encoded =
+            "MIST|false|false|true|true|true|true|false|true|true|true|yyyy-MM-dd|HH:mm:ss"
+
+        val restored = decodePhotoFrameMetadataSettings(encoded).getValue(PhotoFramePreset.MIST)
+
+        assertFalse(restored.showAddress)
+        assertTrue(restored.showCoordinates)
+        assertTrue(restored.showAltitude)
+    }
+
+    @Test
     fun unsupportedOrReverseDatePatternsFallBackToNumericDefaults() {
         assertEquals(DEFAULT_PHOTO_FRAME_DATE_PATTERN, normalizePhotoFrameDatePattern("MMM d"))
         assertFalse(PHOTO_FRAME_DATE_PATTERNS.any { it.startsWith("dd") })
