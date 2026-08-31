@@ -3605,6 +3605,9 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
         GpsStatusButtonState.AP_UNAVAILABLE, GpsStatusButtonState.ERROR -> colors.statusError
         else -> colors.accentBlue
     }
+    // Pairing and frequency are configuration actions. Once the GPS switch starts a
+    // connection attempt, keep both controls locked until the user turns it off again.
+    val gpsConfigurationEnabled = !gpsState.enabled
     val showGpsSteps = gpsState.status !in setOf(
         GpsStatus.PAIRING_SUCCESS,
         GpsStatus.CONNECTED,
@@ -3781,7 +3784,7 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                 ) {
                     GlassButton(
                         onClick = { showReset = true },
-                        enabled = gpsViewModel.hasPairedDevice(),
+                        enabled = gpsConfigurationEnabled && gpsViewModel.hasPairedDevice(),
                         shape = RoundedCornerShape(14.dp),
                         contentPadding = PaddingValues(0.dp),
                         modifier = Modifier.size(42.dp),
@@ -3791,7 +3794,8 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     GpsUpdateFrequencyWheel(
                         selected = gpsUpdateFrequency,
                         onValueCommitted = gpsViewModel::setUpdateFrequency,
-                        emphasized = gpsState.enabled,
+                        enabled = gpsConfigurationEnabled,
+                        emphasized = !gpsConfigurationEnabled,
                         modifier = Modifier.weight(0.82f),
                     )
                     GpsStatusButton(
@@ -3863,6 +3867,7 @@ private fun GpsUpdateFrequencyWheel(
     selected: GpsUpdateFrequency,
     onValueCommitted: (GpsUpdateFrequency) -> Unit,
     emphasized: Boolean,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
@@ -3883,6 +3888,7 @@ private fun GpsUpdateFrequencyWheel(
         optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
         showDragHint = false,
         accentColor = colors.accentBlue,
+        enabled = enabled,
         emphasized = emphasized,
         modifier = modifier.fillMaxWidth(),
     )
