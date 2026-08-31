@@ -167,6 +167,8 @@ import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.gps.GpsState
 import com.ztransfer.gps.GpsStatus
 import com.ztransfer.gps.GpsDiagnostics
+import com.ztransfer.gps.GpsPlaceLookupState
+import com.ztransfer.gps.GpsPlaceLookupStatus
 import com.ztransfer.gps.GpsUpdateFrequency
 import com.ztransfer.gps.GpsViewModel
 import com.ztransfer.viewmodel.PhotoExif
@@ -3544,6 +3546,7 @@ internal fun GpsConnectionControl(
     val gpsViewModel: GpsViewModel = viewModel()
     val gpsState by gpsViewModel.state.collectAsState()
     val gpsUpdateFrequency by gpsViewModel.updateFrequency.collectAsState()
+    val placeLookupState by gpsViewModel.placeLookupState.collectAsState()
     val haptics = rememberHaptics(hapticsEnabled)
     val currentHaptics by rememberUpdatedState(haptics)
     val hapticOutcome = gpsState.gpsConnectionHapticOutcome()
@@ -3563,6 +3566,7 @@ internal fun GpsConnectionControl(
     val clipboard = LocalClipboardManager.current
     val colors = AppTheme.colors
     var showReset by remember { mutableStateOf(false) }
+    var showPlaceSheet by remember { mutableStateOf(false) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     val detailVisibility = remember { MutableTransitionState(false) }
     detailVisibility.targetState = expanded
@@ -3768,41 +3772,62 @@ internal fun GpsConnectionControl(
                         )
                     }
                 }
-                val coordinates = gpsState.latitude?.let { lat ->
-                    gpsState.longitude?.let { lon -> "%.5f, %.5f".format(java.util.Locale.US, lat, lon) }
-                }
-                val hasLocation = gpsState.placeName != null || coordinates != null
-                if (gpsState.enabled && hasLocation) {
+                val latitude = gpsState.latitude
+                val longitude = gpsState.longitude
+                if (gpsState.enabled && latitude != null && longitude != null) {
+                    val coordinates = "%.5f, %.5f".format(
+                        java.util.Locale.US,
+                        latitude,
+                        longitude,
+                    )
                     val updatedAt = gpsState.lastSentAtMs?.let {
                         java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).apply {
                             timeZone = java.util.TimeZone.getTimeZone("Asia/Shanghai")
                         }.format(java.util.Date(it))
                     }
-                    val locationText = gpsState.placeName ?: coordinates.orEmpty()
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .clickable {
-                                clipboard.setText(AnnotatedString(listOfNotNull(gpsState.placeName, coordinates).joinToString("\n")))
-                                showHint(copiedHint)
-                            },
+                            .padding(top = 8.dp),
                     ) {
-                        Text(
-                            text = stringResource(R.string.gps_location_value, locationText),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = colors.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        coordinates?.let { value ->
-                            Text(
-                                text = stringResource(R.string.gps_coordinates_value, value),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = colors.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 2.dp),
+                        GlassButton(
+                            onClick = {
+                                haptics.tick()
+                                gpsViewModel.lookupPlaceName(latitude, longitude)
+                                showPlaceSheet = true
+                            },
+                            panel = true,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 9.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                Icons.Default.LocationOn,
+                                contentDescription = null,
+                                tint = colors.accentBlue,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.gps_coordinates_action),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.onSurfaceVariant.copy(alpha = 0.76f),
+                                )
+                                Text(
+                                    text = coordinates,
+                                    fontSize = 17.sp,
+                                    lineHeight = 21.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.onBackground,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = stringResource(R.string.gps_place_open),
+                                tint = colors.onSurfaceVariant,
+                                modifier = Modifier.size(19.dp),
                             )
                         }
                         gpsState.altitudeMeters?.let { altitude ->
@@ -3814,7 +3839,7 @@ internal fun GpsConnectionControl(
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
                                 color = colors.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 2.dp),
+                                modifier = Modifier.padding(start = 2.dp, top = 5.dp),
                             )
                         }
                         updatedAt?.let {
@@ -3822,7 +3847,7 @@ internal fun GpsConnectionControl(
                                 stringResource(R.string.gps_updated_at, it),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.onSurfaceVariant.copy(alpha = 0.72f),
-                                modifier = Modifier.padding(top = 2.dp),
+                                modifier = Modifier.padding(start = 2.dp, top = 2.dp),
                             )
                         }
                     }
@@ -3876,6 +3901,155 @@ internal fun GpsConnectionControl(
             onConfirm = { showReset = false; gpsViewModel.clearPairing() },
             onDismiss = { showReset = false },
         )
+    }
+    if (showPlaceSheet) {
+        GpsPlaceLookupSheet(
+            state = placeLookupState,
+            onRetry = {
+                val lat = placeLookupState.latitude
+                val lon = placeLookupState.longitude
+                if (lat != null && lon != null) gpsViewModel.lookupPlaceName(lat, lon)
+            },
+            onCopy = { text ->
+                clipboard.setText(AnnotatedString(text))
+                showPlaceSheet = false
+                showHint(copiedHint)
+            },
+            onDismiss = { showPlaceSheet = false },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GpsPlaceLookupSheet(
+    state: GpsPlaceLookupState,
+    onRetry: () -> Unit,
+    onCopy: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val coordinates = state.latitude?.let { lat ->
+        state.longitude?.let { lon -> "%.5f, %.5f".format(java.util.Locale.US, lat, lon) }
+    }.orEmpty()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = colors.glassSurfaceHeavy,
+        tonalElevation = 0.dp,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                Icon(
+                    Icons.Default.LocationOn,
+                    contentDescription = null,
+                    tint = colors.accentBlue,
+                    modifier = Modifier.size(23.dp),
+                )
+                Text(
+                    text = stringResource(R.string.gps_place_sheet_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onBackground,
+                )
+            }
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = colors.glassSurface,
+                border = BorderStroke(1.dp, colors.glassPanelBorder),
+            ) {
+                Text(
+                    text = stringResource(R.string.gps_coordinates_value, coordinates),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+                )
+            }
+            when (state.status) {
+                GpsPlaceLookupStatus.IDLE,
+                GpsPlaceLookupStatus.LOADING -> Row(
+                    modifier = Modifier.padding(top = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(11.dp),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.5.dp,
+                        color = colors.accentBlue,
+                    )
+                    Text(
+                        text = stringResource(R.string.gps_place_loading),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+                GpsPlaceLookupStatus.SUCCESS -> {
+                    Text(
+                        text = stringResource(
+                            R.string.gps_location_value,
+                            state.placeName.orEmpty(),
+                        ),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.onBackground,
+                        modifier = Modifier.padding(top = 18.dp),
+                    )
+                    GlassButton(
+                        onClick = {
+                            onCopy(listOfNotNull(state.placeName, coordinates).joinToString("\n"))
+                        },
+                        panel = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 18.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.ContentCopy,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(stringResource(R.string.gps_place_copy))
+                    }
+                }
+                GpsPlaceLookupStatus.ERROR -> {
+                    Text(
+                        text = stringResource(R.string.gps_place_unavailable),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 18.dp),
+                    )
+                    GlassButton(
+                        onClick = onRetry,
+                        panel = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 18.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(stringResource(R.string.gps_retry))
+                    }
+                }
+            }
+        }
     }
 }
 

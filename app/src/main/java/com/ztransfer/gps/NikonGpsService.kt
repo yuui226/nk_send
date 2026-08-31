@@ -17,7 +17,6 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.location.Geocoder
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -59,8 +58,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
     private var pendingAltitudeRefresh = false
     private var altitudeUnavailableLogged = false
     private var readyUiJob: Job? = null
-    private var lastGeocodedKey: String? = null
-    private var geocodeJob: Job? = null
     private var enabled = false
     private var cameraReady = false
     private var cameraVerified = false
@@ -116,7 +113,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                 )
             }
             latestLocation = Location(payloadLocation)
-            requestPlaceName(payloadLocation)
             maybeSend(payloadLocation, force = altitudeWasMissing && altitude != null)
         }
     }
@@ -779,9 +775,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         altitudeUnavailableLogged = false
         stopLocationUpdates()
         if (::bleClient.isInitialized) bleClient.stop()
-        geocodeJob?.cancel()
-        geocodeJob = null
-        lastGeocodedKey = null
         notificationOverride = null
         if (notificationStarted) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -816,37 +809,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         stopLocationUpdates()
         if (::bleClient.isInitialized) bleClient.stop()
         NikonGpsRuntime.state.update { it.copy(enabled = enabled, status = GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用") }
-    }
-
-    private fun requestPlaceName(location: Location) {
-        if (!Geocoder.isPresent()) return
-        val key = "%.3f,%.3f".format(Locale.US, location.latitude, location.longitude)
-        if (key == lastGeocodedKey) return
-        lastGeocodedKey = key
-        geocodeJob?.cancel()
-        geocodeJob = serviceScope.launch(Dispatchers.IO) {
-            val place = runCatching {
-                Geocoder(this@NikonGpsService, Locale.getDefault())
-                    .getFromLocation(location.latitude, location.longitude, 1)
-                    ?.firstOrNull()
-                    ?.let { address ->
-                        address.getAddressLine(0)
-                            ?.takeIf { it.isNotBlank() }
-                            ?: address.featureName
-                            ?: address.thoroughfare
-                            ?: address.locality
-                            ?: address.subLocality
-                            ?: address.adminArea
-                    }
-            }.getOrNull()?.takeIf { it.isNotBlank() }
-            if (place != null) {
-                NikonGpsRuntime.state.update { state ->
-                    if (state.latitude == location.latitude && state.longitude == location.longitude) {
-                        state.copy(placeName = place)
-                    } else state
-                }
-            }
-        }
     }
 
     private fun updateState(status: GpsStatus, cameraName: String? = null, message: String? = null) {
