@@ -1201,10 +1201,10 @@ private fun ConnectionMethodCard(
         animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
         label = "connectionAttentionIntensity",
     )
-    val cardDimAlpha by animateFloatAsState(
-        targetValue = if (dimmed) 0.54f else 1f,
+    val cardDimProgress by animateFloatAsState(
+        targetValue = if (dimmed) 1f else 0f,
         animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
-        label = "connectionCardDimAlpha",
+        label = "connectionCardDimProgress",
     )
 
     fun eased(value: Float): Float {
@@ -1240,7 +1240,6 @@ private fun ConnectionMethodCard(
                 scaleY = breathingScale * (1f - deformation * 0.024f)
                 rotationZ = pressDirection * deformation * 1.15f
                 translationX = pressDirection * deformation * 1.5.dp.toPx()
-                alpha = cardDimAlpha
             }
     ) {
         ConnectionCardSurface(
@@ -1538,6 +1537,20 @@ private fun ConnectionMethodCard(
                     .zIndex(if (goldBurst) 1f else -1f)
             )
         }
+
+        // Do not dim the whole card with graphicsLayer alpha: that creates a rectangular
+        // offscreen layer around the rounded card and some GPUs expose its four corners. A
+        // shape-drawn scrim keeps the disabled cue inside the card while leaving its shadow
+        // and rounded silhouette untouched.
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .zIndex(5f)
+                .background(
+                    color = colors.background.copy(alpha = 0.28f * cardDimProgress),
+                    shape = shape,
+                ),
+        )
     }
 }
 

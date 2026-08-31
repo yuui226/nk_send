@@ -1,6 +1,5 @@
 package com.ztransfer.ui.screen
 
-import com.ztransfer.gps.GpsState
 import com.ztransfer.gps.GpsStatus
 import com.ztransfer.gps.GpsPlaceLookupState
 import com.ztransfer.gps.GpsPlaceLookupStatus
@@ -16,6 +15,44 @@ class GpsConnectionPresentationTest {
         assertEquals(0, gpsDisplayedAltitudeMeters(null))
         assertEquals(0, gpsDisplayedAltitudeMeters(0.0))
         assertEquals(55, gpsDisplayedAltitudeMeters(55.34))
+    }
+
+    @Test
+    fun nextUpdateCountdownUsesLastSuccessfulWriteAndRoundsUp() {
+        assertNull(
+            gpsNextUpdateRemainingSeconds(
+                lastUpdatedAtMs = null,
+                intervalMillis = 60_000L,
+                nowMs = 10_000L,
+            )
+        )
+        assertEquals(
+            60L,
+            gpsNextUpdateRemainingSeconds(
+                lastUpdatedAtMs = 10_000L,
+                intervalMillis = 60_000L,
+                nowMs = 10_001L,
+            )
+        )
+        assertEquals(
+            1L,
+            gpsNextUpdateRemainingSeconds(
+                lastUpdatedAtMs = 10_000L,
+                intervalMillis = 60_000L,
+                nowMs = 69_999L,
+            )
+        )
+        assertEquals(
+            0L,
+            gpsNextUpdateRemainingSeconds(
+                lastUpdatedAtMs = 10_000L,
+                intervalMillis = 60_000L,
+                nowMs = 70_000L,
+            )
+        )
+        assertEquals("0:00", gpsCountdownText(0L))
+        assertEquals("0:09", gpsCountdownText(9L))
+        assertEquals("5:00", gpsCountdownText(300L))
     }
 
     @Test
@@ -51,75 +88,73 @@ class GpsConnectionPresentationTest {
     }
 
     @Test
-    fun leConnectionProgressStillLooksLikeConnectionProgress() {
-        assertEquals(
-            GpsStatusButtonState.CONNECTING,
-            gpsStatusButtonState(enabled = true, status = GpsStatus.CONNECTING),
-        )
-    }
-
-    @Test
-    fun cameraConnectionCompletionProducesSuccessHaptic() {
+    fun onlyEstablishedCameraSessionRequiresHoldToDisable() {
         listOf(
             GpsStatus.PAIRING_SUCCESS,
             GpsStatus.CONNECTED,
-        ).forEach { status ->
-            assertEquals(
-                GpsConnectionHapticOutcome.SUCCESS,
-                GpsState(enabled = true, status = status).gpsConnectionHapticOutcome(),
-            )
-        }
-    }
-
-    @Test
-    fun successfulLocationWorkDoesNotProduceHaptics() {
-        listOf(
             GpsStatus.WRITING,
             GpsStatus.WAITING_FIX,
             GpsStatus.READY,
         ).forEach { status ->
-            assertEquals(
-                GpsConnectionHapticOutcome.NONE,
-                GpsState(enabled = true, status = status).gpsConnectionHapticOutcome(),
-            )
-        }
-    }
-
-    @Test
-    fun actionableConnectionFailuresCollapseIntoOneFailureOutcome() {
-        listOf(
-            GpsStatus.NEEDS_CAMERA,
-            GpsStatus.AP_UNAVAILABLE,
-            GpsStatus.ERROR,
-        ).forEach { status ->
-            assertEquals(
-                GpsConnectionHapticOutcome.FAILURE,
-                GpsState(enabled = true, status = status).gpsConnectionHapticOutcome(),
-            )
-        }
-    }
-
-    @Test
-    fun disabledAndProgressStatesDoNotProduceResultHaptics() {
-        GpsStatus.entries.forEach { status ->
-            assertEquals(
-                GpsConnectionHapticOutcome.NONE,
-                GpsState(enabled = false, status = status).gpsConnectionHapticOutcome(),
-            )
+            assertTrue(gpsStatusRequiresHoldToDisable(enabled = true, status = status))
         }
         listOf(
             GpsStatus.OFF,
             GpsStatus.STARTING,
             GpsStatus.SEARCHING,
+            GpsStatus.NEEDS_CAMERA,
             GpsStatus.CONNECTING,
             GpsStatus.PAIRING,
             GpsStatus.CAMERA_CONFIRM,
+            GpsStatus.AP_UNAVAILABLE,
+            GpsStatus.ERROR,
         ).forEach { status ->
-            assertEquals(
-                GpsConnectionHapticOutcome.NONE,
-                GpsState(enabled = true, status = status).gpsConnectionHapticOutcome(),
-            )
+            assertFalse(gpsStatusRequiresHoldToDisable(enabled = true, status = status))
         }
+        assertFalse(
+            gpsStatusRequiresHoldToDisable(
+                enabled = false,
+                status = GpsStatus.CONNECTED,
+            )
+        )
+    }
+
+    @Test
+    fun timingControlsStayHiddenUntilTheCameraSessionIsEstablished() {
+        listOf(
+            GpsStatus.STARTING,
+            GpsStatus.SEARCHING,
+            GpsStatus.NEEDS_CAMERA,
+            GpsStatus.CONNECTING,
+            GpsStatus.PAIRING,
+            GpsStatus.CAMERA_CONFIRM,
+            GpsStatus.ERROR,
+        ).forEach { status ->
+            assertFalse(gpsTimingControlsVisible(enabled = true, status = status))
+        }
+        listOf(
+            GpsStatus.PAIRING_SUCCESS,
+            GpsStatus.CONNECTED,
+            GpsStatus.WRITING,
+            GpsStatus.WAITING_FIX,
+            GpsStatus.READY,
+        ).forEach { status ->
+            assertTrue(gpsTimingControlsVisible(enabled = true, status = status))
+        }
+        assertFalse(
+            gpsTimingControlsVisible(
+                enabled = false,
+                status = GpsStatus.READY,
+            )
+        )
+    }
+
+    @Test
+    fun leConnectionProgressStillLooksLikeConnectionProgress() {
+        assertEquals(
+            GpsStatusButtonState.CONNECTING,
+            gpsStatusButtonState(enabled = true, status = GpsStatus.CONNECTING),
+        )
     }
 
     @Test

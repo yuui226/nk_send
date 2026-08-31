@@ -92,7 +92,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             val payloadLocation = Location(location).apply {
                 if (altitude != null) setAltitude(altitude) else removeAltitude()
             }
-            val altitudeWasMissing = NikonGpsRuntime.state.value.altitudeMeters == null
+            val previousTrustedAltitude = NikonGpsRuntime.state.value.altitudeMeters
             NikonGpsRuntime.state.update {
                 it.copy(
                     latitude = location.latitude,
@@ -114,7 +114,10 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                 )
             }
             latestLocation = Location(payloadLocation)
-            maybeSend(payloadLocation, force = altitudeWasMissing && altitude != null)
+            maybeSend(
+                payloadLocation,
+                force = shouldForceTrustedAltitudeRefresh(previousTrustedAltitude, altitude),
+            )
         }
     }
 
@@ -717,11 +720,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             return
         }
         latestLocationDuringWrite = null
-        val altitude = resolveAltitude(candidate)
-        if (altitude == null) {
+        val trustedAltitude = resolveAltitude(candidate)
+        if (trustedAltitude == null) {
             if (!altitudeUnavailableLogged) {
                 GpsDiagnostics.record(
-                    "GEO deferred altitude unavailable provider=${candidate.provider ?: "?"} " +
+                    "GEO using fallback altitude=0 provider=${candidate.provider ?: "?"} " +
                         "hasAltitude=${candidate.hasAltitude()} rawAltitude=" +
                         (if (candidate.hasAltitude()) {
                             "%.1fm".format(Locale.US, candidate.altitude)
@@ -737,12 +740,13 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                 )
                 altitudeUnavailableLogged = true
             }
-            // Location.altitude is defined as 0.0 when the provider has no altitude. Never send
-            // that sentinel to the camera; keep the coordinates and wait for a real GPS fix.
-            latestLocation = Location(candidate)
-            return
+        } else {
+            altitudeUnavailableLogged = false
         }
-        altitudeUnavailableLogged = false
+        // Coordinates are useful even when Android cannot provide a trustworthy altitude.
+        // Write 0 m as the explicit fallback; the listener forces one immediate follow-up write
+        // when a real GPS altitude later becomes available.
+        val altitude = cameraAltitudeForWrite(trustedAltitude)
         val satellites = candidate.extras?.getInt("satellites", 0) ?: 0
         val payload = runCatching {
             GeoPayloadEncoder.encode(
@@ -856,9 +860,18 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         NikonGpsRuntime.state.update { it.copy(enabled = enabled, status = GpsStatus.AP_UNAVAILABLE, message = "AP 模式不可用") }
     }
 
-    private fun updateState(status: GpsStatus, cameraName: String? = null, message: String? = null) {
+    private fun updateState(
+        status: GpsStatus,
+        cameraName: String? = null,
+        message: String? = null,
+    ) {
         NikonGpsRuntime.state.update {
-            it.copy(enabled = enabled, status = status, cameraName = cameraName ?: it.cameraName, message = message)
+            it.copy(
+                enabled = enabled,
+                status = status,
+                cameraName = cameraName ?: it.cameraName,
+                message = message,
+            )
         }
         refreshNotification()
     }

@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,7 +83,9 @@ internal fun wheelDragEnabled(optionCount: Int): Boolean = optionCount > 3
  *
  * 拖动期间只更新本地预览位置，不会调用 [onValueCommitted]；正常松手时才吸附到最近一档并
  * 提交一次。手势被取消（例如父级滚动接管）时恢复已保存值，也不会误写偏好。轻点默认向下一档
- * 循环；单项操作型波轮可通过 [onActivated] 执行自己的点击动作。
+ * 循环；单项操作型波轮可通过 [onActivated] 执行自己的点击动作。[readOnly] 保留正常视觉，
+ * 但不响应拖动或点击，供连接后的倒计时等原位状态展示复用。[cornerRadius] 允许较大的
+ * 页面级入口沿用同一拨轮交互，同时匹配其所在卡片的圆角层级。
  */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
@@ -96,9 +99,13 @@ internal fun <T> ReleaseCommitWheel(
     onDetent: () -> Unit = {},
     onActivated: (() -> Unit)? = null,
     enabled: Boolean = true,
+    readOnly: Boolean = false,
+    cornerRadius: Dp = 13.dp,
     wheelHeight: Dp = 50.dp,
     optionRowHeight: Dp = SETTINGS_WHEEL_ROW_HEIGHT,
     optionFontSize: TextUnit = 14.sp,
+    optionTextStyle: TextStyle? = null,
+    optionFontWeight: FontWeight? = null,
     optionMaxLines: Int = 1,
     showDragHint: Boolean = true,
     accentColor: Color? = null,
@@ -107,6 +114,7 @@ internal fun <T> ReleaseCommitWheel(
     centerIcon: (@Composable (Color) -> Unit)? = null,
     favoriteOption: (T) -> Boolean = { false },
     favoriteIconColor: Color? = null,
+    burstProgress: Float = 0f,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
@@ -132,7 +140,7 @@ internal fun <T> ReleaseCommitWheel(
         if (!dragging) position = selectedIndex.toFloat()
     }
 
-    val shape = RoundedCornerShape(13.dp)
+    val shape = RoundedCornerShape(cornerRadius)
     val labelAlpha by animateFloatAsState(
         targetValue = if (dragging) 0f else 1f,
         animationSpec = tween(if (dragging) 90 else 180),
@@ -147,6 +155,7 @@ internal fun <T> ReleaseCommitWheel(
     val badgeText = if (darkTheme) resolvedAccent.copy(alpha = 0.94f) else resolvedAccent
     val badgeBackground = resolvedAccent.copy(alpha = if (darkTheme) 0.13f else 0.10f)
     val badgeBorder = resolvedAccent.copy(alpha = if (darkTheme) 0.25f else 0.30f)
+    val normalizedBurst = burstProgress.coerceIn(0f, 1f)
     val enabledModifier = if (enabled) {
         modifier
     } else {
@@ -165,20 +174,27 @@ internal fun <T> ReleaseCommitWheel(
             .background(
                 resolvedAccent.copy(
                     alpha = (if (darkTheme) 0.045f else 0.035f) +
-                        (if (darkTheme) 0.105f else 0.075f) * emphasisProgress,
+                        (if (darkTheme) 0.105f else 0.075f) * emphasisProgress +
+                        0.18f * normalizedBurst,
                 )
             )
             .border(
                 width = when {
                     dragging -> 1.5.dp
+                    normalizedBurst > 0f -> (1.35f + 0.9f * normalizedBurst).dp
                     emphasisProgress > 0f -> (1f + 0.35f * emphasisProgress).dp
                     else -> 1.dp
                 },
-                brush = if (dragging || emphasisProgress > 0f) {
+                brush = if (dragging || emphasisProgress > 0f || normalizedBurst > 0f) {
                     Brush.verticalGradient(
                         listOf(
-                            resolvedAccent.copy(alpha = 0.92f),
-                            resolvedAccent.copy(alpha = 0.38f + 0.30f * emphasisProgress),
+                            resolvedAccent.copy(
+                                alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f),
+                            ),
+                            resolvedAccent.copy(
+                                alpha = (0.38f + 0.30f * emphasisProgress +
+                                    0.28f * normalizedBurst).coerceAtMost(1f),
+                            ),
                         )
                     )
                 } else {
@@ -195,8 +211,8 @@ internal fun <T> ReleaseCommitWheel(
                     append(optionLabel(options[selectedIndex]))
                 }
             }
-            .pointerInput(options.size, rowPx, enabled) {
-                if (!enabled || !wheelDragEnabled(options.size)) return@pointerInput
+            .pointerInput(options.size, rowPx, enabled, readOnly) {
+                if (!enabled || readOnly || !wheelDragEnabled(options.size)) return@pointerInput
                 var accumulatedDy = 0f
                 try {
                     detectVerticalDragGestures(
@@ -245,7 +261,7 @@ internal fun <T> ReleaseCommitWheel(
             .then(
                 if (onLongClick != null) {
                     Modifier.combinedClickable(
-                        enabled = enabled,
+                        enabled = enabled && !readOnly,
                         onClick = {
                             if (latestActivated != null) {
                                 latestActivated?.invoke()
@@ -261,7 +277,7 @@ internal fun <T> ReleaseCommitWheel(
                         onLongClick = { latestLongClick?.invoke() },
                     )
                 } else {
-                    Modifier.clickable(enabled = enabled) {
+                    Modifier.clickable(enabled = enabled && !readOnly) {
                         latestActivated?.let { activate ->
                             activate()
                             return@clickable
@@ -316,8 +332,8 @@ internal fun <T> ReleaseCommitWheel(
                             placeable.placeRelative(0, itemOffsetY)
                         }
                     }
-                val textStyle = MaterialTheme.typography.labelMedium
-                val textWeight = if (distance < 0.5f) {
+                val textStyle = optionTextStyle ?: MaterialTheme.typography.labelMedium
+                val textWeight = optionFontWeight ?: if (distance < 0.5f) {
                     FontWeight.SemiBold
                 } else {
                     FontWeight.Normal

@@ -69,4 +69,18 @@ class GpsAltitudePolicyTest {
             )
         )
     }
+
+    @Test
+    fun missingAltitudeWritesZeroInsteadOfBlockingCoordinates() {
+        assertEquals(0.0, cameraAltitudeForWrite(null), 0.0)
+        assertEquals(55.3, cameraAltitudeForWrite(55.3), 0.0)
+    }
+
+    @Test
+    fun firstTrustedAltitudeAfterFallbackForcesOneRefresh() {
+        assertTrue(shouldForceTrustedAltitudeRefresh(null, 55.3))
+        assertTrue(shouldForceTrustedAltitudeRefresh(null, 0.0))
+        assertFalse(shouldForceTrustedAltitudeRefresh(null, null))
+        assertFalse(shouldForceTrustedAltitudeRefresh(55.3, 56.1))
+    }
 }

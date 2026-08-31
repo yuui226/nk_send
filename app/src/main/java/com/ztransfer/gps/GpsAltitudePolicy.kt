@@ -5,6 +5,7 @@ import kotlin.math.abs
 internal const val GPS_PROVIDER_NAME = "gps"
 internal const val GPS_ALTITUDE_MAX_AGE_MS = 2 * 60_000L
 internal const val GPS_ALTITUDE_MAX_DISTANCE_METERS = 1_000f
+internal const val GPS_FALLBACK_ALTITUDE_METERS = 0.0
 
 /** Network providers on some phones mark a synthetic 0 m value as present. */
 internal fun trustedGpsAltitude(
@@ -23,3 +24,13 @@ internal fun canReuseGpsAltitude(
     abs(nowMs - fixTimeMs) <= GPS_ALTITUDE_MAX_AGE_MS &&
     distanceMeters.isFinite() &&
     distanceMeters <= GPS_ALTITUDE_MAX_DISTANCE_METERS
+
+/** Coordinates must not be blocked indoors just because Android has no trustworthy altitude. */
+internal fun cameraAltitudeForWrite(trustedAltitudeMeters: Double?): Double =
+    trustedAltitudeMeters ?: GPS_FALLBACK_ALTITUDE_METERS
+
+/** The first trustworthy altitude after a fallback write should bypass the normal GEO cadence. */
+internal fun shouldForceTrustedAltitudeRefresh(
+    previousTrustedAltitudeMeters: Double?,
+    currentTrustedAltitudeMeters: Double?,
+): Boolean = previousTrustedAltitudeMeters == null && currentTrustedAltitudeMeters != null
