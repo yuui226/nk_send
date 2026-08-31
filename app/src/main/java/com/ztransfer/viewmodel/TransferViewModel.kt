@@ -1902,6 +1902,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 val self = coroutineContext[Job]
                 var serviceStarted = false
                 var stoppedAfterCurrent = false
+                val cameraMetadataCache = mutableMapOf<Int, PhotoFrameMetadata>()
 
                 try {
                     val uri = Uri.parse(dirUri)
@@ -2062,7 +2063,21 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 TransferService.start(getApplication(), useWifi = false)
                                 serviceStarted = true
                             }
-                            val cameraForFallback = cameraProvider()
+                            val cameraMetadata = if (effectiveBorder &&
+                                isJpegPhotoName(task.file.fileName)
+                            ) {
+                                cameraMetadataCache[task.file.handle] ?: readCameraFrameMetadataHeader(
+                                    camera = cameraProvider(),
+                                    handle = task.file.handle,
+                                    mode = "existing",
+                                )?.let { header ->
+                                    withContext(Dispatchers.Default) {
+                                        parseCameraFrameMetadata(header, mode = "existing")
+                                    }
+                                }?.also { cameraMetadataCache[task.file.handle] = it }
+                            } else {
+                                null
+                            }
                             launchPhotoFrameExport(
                                 taskId = taskId,
                                 treeUri = uri,
@@ -2077,27 +2092,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 filterRequested = filter,
                                 skipIfExisting = true,
                                 failTaskOnError = true,
-                                fallbackMetadata = {
-                                    PhotoGenerationProbe.note(
-                                        category = "FRAME-FALLBACK",
-                                        message = "header request mode=existing handle=${task.file.handle} " +
-                                            "maxBytes=262144 camera=${cameraForFallback != null}",
-                                    )
-                                    val header = cameraForFallback?.readExifHeader(
-                                        task.file.handle,
-                                        maxSize = 256 * 1024,
-                                    )
-                                    PhotoGenerationProbe.note(
-                                        category = "FRAME-FALLBACK",
-                                        message = "header result mode=existing bytes=${header?.size ?: 0}",
-                                    )
-                                    header?.let {
-                                            PhotoFrameExporter.metadataFromExifHeader(
-                                                getApplication(),
-                                                it,
-                                            )
-                                        }
-                                },
+                                cameraMetadata = cameraMetadata,
                             )
                         }
                         continue
@@ -2225,8 +2220,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     }
 
                     try {
-                        var cameraHeaderMetadata: PhotoFrameMetadata? = null
-                        var cameraHeaderFallbackMetadata: PhotoFrameMetadata? = null
+                        var cameraHeaderPrefix: ByteArray? = null
                         // SAF 的建文件/开流/关闭冲刷都是跨进程 Binder + 磁盘 IO，放 IO 线程，
                         // 不在主线程随每个文件抖一下（状态更新经 StateFlow.update，线程安全）。
                         val result = withContext(Dispatchers.IO) {
@@ -2268,8 +2262,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                             // 用大缓冲包裹 SAF 输出流，把零散的写批量化，减少 ContentProvider 往返。
                             // 缺了它，每个 PTP-IP 数据包都要跨 Binder 写一次 SAF，吞吐直接腰斩（2M/s→<1M/s）。
-                            java.io.BufferedOutputStream(outputStream, 1024 * 1024).use { out ->
-                                val downloadResult = camera.downloadToFile(
+                            val downloadResult = java.io.BufferedOutputStream(
+                                outputStream,
+                                1024 * 1024,
+                            ).use { out ->
+                                camera.downloadToFile(
                                     handle, out,
                                     onProgress = { progress ->
                                         val speed = progress.bytesPerSecond
@@ -2299,54 +2296,23 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     // 协议层在首个数据命令前读取一次，随后整张文件固定该策略。
                                     preferHighThroughputAtStart = { preferHighThroughputTransfers },
                                     captureHeader = task.framePreset != null &&
-                                        task.frameBorderRequested,
+                                        task.frameBorderRequested &&
+                                        isJpegPhotoName(task.file.fileName),
                                 )
-                                if (downloadResult.isSuccess &&
-                                    task.framePreset != null && task.frameBorderRequested
-                                ) {
-                                    val header = downloadResult.getOrNull()?.headerPrefix
-                                    if (header != null) {
-                                        val metadataSettings = task.frameMetadataSettings
-                                            ?: defaultPhotoFrameMetadataSettings(task.framePreset)
-                                        val parsedHeader = PhotoFrameExporter.metadataFromExifHeader(
-                                            // Reverse geocoding runs in the frame worker after the
-                                            // transfer completes; never delay the download thread.
-                                            context = null,
-                                            bytes = header,
-                                        )
-                                        val hasCoordinates = parsedHeader.latitude?.isFinite() == true &&
-                                            parsedHeader.longitude?.isFinite() == true &&
-                                            parsedHeader.latitude != 0.0 &&
-                                            parsedHeader.longitude != 0.0
-                                        val hasAltitude = parsedHeader.altitudeMeters?.isFinite() == true &&
-                                            parsedHeader.altitudeMeters != 0.0
-                                        val hasAnyField = sequenceOf(
-                                            parsedHeader.make,
-                                            parsedHeader.model,
-                                            parsedHeader.aperture,
-                                            parsedHeader.shutter,
-                                            parsedHeader.iso,
-                                            parsedHeader.focalLength,
-                                            parsedHeader.lensModel,
-                                            parsedHeader.dateTime,
-                                            parsedHeader.address,
-                                        ).any { !it.isNullOrBlank() } || hasCoordinates || hasAltitude
-                                        val locationComplete =
-                                            (!metadataSettings.showCoordinates || hasCoordinates) &&
-                                                (!metadataSettings.showAltitude || hasAltitude) &&
-                                                (!metadataSettings.showAddress ||
-                                                    !parsedHeader.address.isNullOrBlank())
-                                        cameraHeaderFallbackMetadata = parsedHeader.takeIf { hasAnyField }
-                                        cameraHeaderMetadata = parsedHeader.takeIf {
-                                            hasAnyField && locationComplete
-                                        }
-                                    }
-                                }
-                                downloadResult
                             }
+                            cameraHeaderPrefix = downloadResult.getOrNull()?.headerPrefix
+                            downloadResult
                         }
                         // withContext 正常返回则 fileDocUri 必已赋值。
                         val createdUri = checkNotNull(fileDocUri)
+                        // Parse the small immutable metadata object in parallel with the provider
+                        // rename/copy below. This releases the 256 KiB prefix promptly instead of
+                        // retaining one byte array per queued frame task.
+                        val cameraMetadataDeferred = cameraHeaderPrefix?.let { header ->
+                            async(Dispatchers.Default) {
+                                parseCameraFrameMetadata(header, mode = "download")
+                            }
+                        }
 
                         result.fold(
                             onSuccess = { stats ->
@@ -2433,6 +2399,29 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                         }
                                     }
                                     if (shouldGenerateFrame) {
+                                        var cameraMetadata = cameraMetadataCache[task.file.handle]
+                                            ?: cameraMetadataDeferred?.await()
+                                        if (resumeOffset > 0 && framePreset != null &&
+                                            task.frameBorderRequested &&
+                                            isJpegPhotoName(task.file.fileName) &&
+                                            cameraMetadata == null
+                                        ) {
+                                            cameraMetadata = readCameraFrameMetadataHeader(
+                                                camera = camera,
+                                                handle = task.file.handle,
+                                                mode = "resume",
+                                            )?.let { header ->
+                                                withContext(Dispatchers.Default) {
+                                                    parseCameraFrameMetadata(
+                                                        header,
+                                                        mode = "resume",
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        cameraMetadata?.let {
+                                            cameraMetadataCache[task.file.handle] = it
+                                        }
                                         // 派生严格发生在正式原片落盘之后。导出器只读取原片并创建
                                         // 新文件；独立低优先级工作池立即接管，传输循环直接处理下一张。
                                         // 无论解码/写入是否失败，都不回滚、不删除原片。
@@ -2453,30 +2442,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                             decorationRequested = framePreset != null,
                                             filterRequested = photoFilter,
                                             skipIfExisting = true,
-                                            metadataSnapshot = cameraHeaderMetadata,
-                                            fallbackMetadata = {
-                                                cameraHeaderFallbackMetadata ?: cameraHeaderMetadata ?: run {
-                                                    PhotoGenerationProbe.note(
-                                                        category = "FRAME-FALLBACK",
-                                                        message = "header request mode=download handle=${task.file.handle} " +
-                                                            "maxBytes=262144 camera=true",
-                                                    )
-                                                    val header = camera.readExifHeader(
-                                                        task.file.handle,
-                                                        maxSize = 256 * 1024,
-                                                    )
-                                                    PhotoGenerationProbe.note(
-                                                        category = "FRAME-FALLBACK",
-                                                        message = "header result mode=download bytes=${header?.size ?: 0}",
-                                                    )
-                                                    header?.let {
-                                                        PhotoFrameExporter.metadataFromExifHeader(
-                                                            getApplication(),
-                                                            it,
-                                                        )
-                                                    }
-                                                }
-                                            },
+                                            cameraMetadata = cameraMetadata,
                                         )
                                     }
                                 } else {
@@ -2826,6 +2792,76 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         return if (dot <= 0) "$name ($n)" else "${name.substring(0, dot)} ($n)${name.substring(dot)}"
     }
 
+    /** 从相机读取效果图所需的 JPEG 文件头；失败只影响派生图，不回滚已落盘原片。 */
+    private suspend fun readCameraFrameMetadataHeader(
+        camera: NikonCamera?,
+        handle: Int,
+        mode: String,
+    ): ByteArray? {
+        PhotoGenerationProbe.note(
+            category = "FRAME-META",
+            message = "header request mode=$mode handle=$handle maxBytes=262144 " +
+                "camera=${camera != null}",
+        )
+        val header = try {
+            camera?.readExifHeader(handle, maxSize = 256 * 1024)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            PhotoGenerationProbe.note(
+                category = "FRAME-META",
+                message = "header error mode=$mode type=${error.javaClass.simpleName}",
+            )
+            null
+        }
+        PhotoGenerationProbe.note(
+            category = "FRAME-META",
+            message = "header result mode=$mode bytes=${header?.size ?: 0}",
+        )
+        return header
+    }
+
+    private fun parseCameraFrameMetadata(
+        header: ByteArray,
+        mode: String,
+    ): PhotoFrameMetadata? {
+        val metadata = PhotoFrameExporter.metadataFromExifHeader(null, header)
+        val hasCoordinates = metadata.latitude?.isFinite() == true &&
+            metadata.longitude?.isFinite() == true &&
+            metadata.latitude != 0.0 && metadata.longitude != 0.0 &&
+            metadata.latitude in -90.0..90.0 && metadata.longitude in -180.0..180.0
+        val hasAltitude = metadata.altitudeMeters?.isFinite() == true &&
+            metadata.altitudeMeters != 0.0
+        val hasCameraField = sequenceOf(
+            metadata.make,
+            metadata.model,
+            metadata.aperture,
+            metadata.shutter,
+            metadata.iso,
+            metadata.focalLength,
+            metadata.lensModel,
+            metadata.dateTime,
+        ).any { !it.isNullOrBlank() }
+        return metadata.takeIf { hasCameraField || hasCoordinates || hasAltitude }.also { parsed ->
+            if (parsed == null) {
+                PhotoGenerationProbe.note(
+                    category = "FRAME-META",
+                    message = "header parse empty mode=$mode bytes=${header.size}",
+                )
+            }
+        }
+    }
+
+    private fun PhotoFrameMetadataSettings.hasVisibleMetadata(): Boolean =
+        showDate || showTime || showFocalLength || showExposure || showBrand || showModel ||
+            showLensModel || showAddress || showCoordinates || showAltitude
+
+    private fun isJpegPhotoName(name: String): Boolean {
+        val extension = name.substringAfterLast('.', "")
+        return extension.equals("jpg", ignoreCase = true) ||
+            extension.equals("jpeg", ignoreCase = true)
+    }
+
     /**
      * 把原片派生移出相机传输协程。双线程工作池提供受控并行，低线程优先级让相机 IO
      * 优先；任务数单独计数，使最后一张效果图完成前前台服务不会被提前停止。
@@ -2844,8 +2880,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         filterRequested: PhotoFilterSelection? = null,
         skipIfExisting: Boolean = false,
         failTaskOnError: Boolean = false,
-        metadataSnapshot: PhotoFrameMetadata? = null,
-        fallbackMetadata: (suspend () -> com.ztransfer.frame.PhotoFrameMetadata?)? = null,
+        cameraMetadata: PhotoFrameMetadata? = null,
     ) {
         val probeStartedAtMs = if (PhotoGenerationProbe.enabled) {
             android.os.SystemClock.elapsedRealtime()
@@ -2871,8 +2906,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 "border=$borderEnabled fields=${metadataSettings.showAddress}/" +
                 "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude} " +
                 "filter=${filterRequested?.preset?.name ?: "none"} " +
-                "cameraSnapshot=${metadataSnapshot != null} " +
-                "cameraFallback=${fallbackMetadata != null}",
+                "cameraMetadata=${cameraMetadata != null}",
         )
         var probeOutcome = "cancelled"
         var frameExportSaved = false
@@ -2929,6 +2963,13 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     )
                 ) {
                     FrameExportOutcome.AlreadyExists
+                } else if (effectiveBorder && isJpegPhotoName(sourceName) &&
+                    metadataSettings.hasVisibleMetadata() &&
+                    cameraMetadata == null
+                ) {
+                    FrameExportOutcome.Failed(
+                        IllegalStateException(str(R.string.error_camera_metadata_unavailable)),
+                    )
                 } else {
                     PhotoGenerationProbe.frameNote(
                         sessionId = probeSession,
@@ -2954,8 +2995,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         metadataSettings = metadataSettings,
                         filter = filterRequested,
                         probeSessionId = probeSession,
-                        metadataSnapshot = metadataSnapshot,
-                        fallbackMetadata = fallbackMetadata,
+                        metadataSnapshot = cameraMetadata,
+                        allowLocalMetadataRead = false,
                     ).fold(
                         onSuccess = { FrameExportOutcome.Saved(it.displayName) },
                         onFailure = { FrameExportOutcome.Failed(it) },

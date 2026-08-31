@@ -324,6 +324,7 @@
     <!-- Transfer errors -->
     <string name="error_dir_invalid">Transfer folder is no longer valid. Please choose it again</string>
     <string name="error_camera_connection_lost">Camera connection lost — retry to resume after reconnecting</string>
+    <string name="error_camera_metadata_unavailable">Could not read photo details from the camera. Please retry.</string>
     <string name="error_create_file">Couldn\'t create file</string>
     <string name="error_open_file">Couldn\'t open file</string>
     <string name="error_local_original_missing">The saved original could not be found. Transfer it again first.</string>

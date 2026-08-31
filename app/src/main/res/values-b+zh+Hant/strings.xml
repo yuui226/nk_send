@@ -320,6 +320,7 @@
     <!-- 傳輸錯誤 -->
     <string name="error_dir_invalid">傳輸目錄已失效，請重新選擇</string>
     <string name="error_camera_connection_lost">相機連線中斷，重連後重試可續傳</string>
+    <string name="error_camera_metadata_unavailable">無法讀取相機照片資訊，請重試</string>
     <string name="error_create_file">無法建立檔案</string>
     <string name="error_open_file">無法開啟檔案</string>
     <string name="error_local_original_missing">找不到已儲存的原片，請先重新傳輸</string>

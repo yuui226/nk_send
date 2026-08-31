@@ -129,8 +129,9 @@ internal fun PhotoFrameMetadata.withPresentation(
     previewLocale: Locale = Locale.getDefault(),
 ): PhotoFrameMetadata {
     val normalized = normalizePhotoFrameMetadataSettings(settings)
-    val hasCoordinates = latitude != null && longitude != null &&
-        latitude != 0.0 && longitude != 0.0
+    val hasCoordinates = latitude?.isFinite() == true && longitude?.isFinite() == true &&
+        latitude != 0.0 && longitude != 0.0 &&
+        latitude in -90.0..90.0 && longitude in -180.0..180.0
     val locationAddress = address?.trim()?.takeIf(String::isNotEmpty)
     val addressValue = when {
         !normalized.showAddress -> null

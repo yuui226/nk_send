@@ -1,6 +1,7 @@
 package com.ztransfer.ui.screen
 
 import com.ztransfer.frame.PhotoFramePreset
+import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkContent
 import com.ztransfer.frame.PhotoFrameWatermarkFont
@@ -31,6 +32,15 @@ class LocalPhotoEffectsPreferencesTest {
             decorationEnabled = true,
             borderEnabled = false,
             preset = PhotoFramePreset.PLAQUE,
+            metadataSettings = mapOf(
+                PhotoFramePreset.PLAQUE to defaultPhotoFrameMetadataSettings(
+                    PhotoFramePreset.PLAQUE,
+                ).copy(
+                    showAddress = true,
+                    showCoordinates = true,
+                    showAltitude = true,
+                ),
+            ),
             watermark = PhotoFrameWatermark(
                 content = PhotoFrameWatermarkContent.IMAGE,
                 imageHash = "a".repeat(64),
@@ -57,6 +67,11 @@ class LocalPhotoEffectsPreferencesTest {
         assertNull(restored.filterId)
         assertFalse(restored.filterEnabled)
         assertEquals(54, restored.filterIntensityPercent)
+        val metadata = restored.metadataSettings[PhotoFramePreset.PLAQUE]
+            ?: defaultPhotoFrameMetadataSettings(PhotoFramePreset.PLAQUE)
+        assertFalse(metadata.showAddress)
+        assertFalse(metadata.showCoordinates)
+        assertFalse(metadata.showAltitude)
     }
 
     @Test

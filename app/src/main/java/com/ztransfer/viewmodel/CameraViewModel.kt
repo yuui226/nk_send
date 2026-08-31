@@ -4281,13 +4281,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         val coordinates = exif.latLong
         val latitude = (coordinates?.getOrNull(0)
-            ?.takeIf { it.isFinite() && it != 0.0 }
+            ?.takeIf { it.isFinite() && it != 0.0 && it in -90.0..90.0 }
             ?: parseGpsCoordinate(
                 exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
                 exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
             ))?.takeIf { it.isFinite() && it in -90.0..90.0 }
         val longitude = (coordinates?.getOrNull(1)
-            ?.takeIf { it.isFinite() && it != 0.0 }
+            ?.takeIf { it.isFinite() && it != 0.0 && it in -180.0..180.0 }
             ?: parseGpsCoordinate(
                 exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
                 exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),

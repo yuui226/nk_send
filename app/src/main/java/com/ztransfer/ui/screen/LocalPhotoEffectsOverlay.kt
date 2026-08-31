@@ -436,7 +436,6 @@ fun LocalPhotoEffectsPage(
                                 context = context,
                                 resolver = context.contentResolver,
                                 source = selectedSource,
-                                metadata = selection?.metadata,
                                 preset = preset,
                                 watermark = renderWatermark,
                                 borderEnabled = decorationEnabled && borderEnabled,

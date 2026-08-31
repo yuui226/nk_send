@@ -619,8 +619,13 @@ object PhotoFrameExporter {
         PhotoFrameMetadata(null, null, null, null, null, null)
     private val bundledTypefaceCache = mutableMapOf<PhotoFrameWatermarkFont, Typeface>()
     private val watermarkImageCache = linkedMapOf<String, Bitmap>()
-    private val geocodeCache = object : LinkedHashMap<String, String>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>): Boolean =
+    private data class GeocodeCacheEntry(val address: String?, val cachedAtMs: Long)
+
+    private val geocodeCache =
+        object : LinkedHashMap<String, GeocodeCacheEntry>(8, 0.75f, true) {
+        override fun removeEldestEntry(
+            eldest: MutableMap.MutableEntry<String, GeocodeCacheEntry>,
+        ): Boolean =
             size > 8
     }
 
@@ -640,7 +645,7 @@ object PhotoFrameExporter {
         filter: PhotoFilterSelection? = null,
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
         metadataSnapshot: PhotoFrameMetadata? = null,
-        fallbackMetadata: (suspend () -> PhotoFrameMetadata?)? = null,
+        allowLocalMetadataRead: Boolean = true,
     ): Result<PhotoFrameExportResult> {
         return try {
             currentCoroutineContext().ensureActive()
@@ -662,7 +667,7 @@ object PhotoFrameExporter {
                 metadataSnapshot = metadataSnapshot,
                 filter = filter,
                 probeSessionId = probeSessionId,
-                fallbackMetadata = fallbackMetadata,
+                allowLocalMetadataRead = allowLocalMetadataRead,
             )
             recordGenerationStage(
                 probeSessionId,
@@ -684,6 +689,7 @@ object PhotoFrameExporter {
                     filter = filter,
                     bitmap = rendered,
                     probeSessionId = probeSessionId,
+                    cameraMetadata = metadataSnapshot,
                 ).also {
                     recordGenerationStage(
                         probeSessionId,
@@ -713,7 +719,6 @@ object PhotoFrameExporter {
         context: Context,
         resolver: ContentResolver,
         source: PhotoFrameMediaStoreSource,
-        metadata: PhotoFrameMetadata? = null,
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean = true,
@@ -732,7 +737,6 @@ object PhotoFrameExporter {
                 // MediaStore URI resolved alongside the picker URI while still decoding pixels
                 // from the granted source URI.
                 metadataSourceUri = source.relatedMediaUri ?: source.sourceUri,
-                metadataSnapshot = metadata,
                 preset = preset,
                 watermark = renderedWatermark,
                 borderEnabled = borderEnabled,
@@ -1036,13 +1040,7 @@ object PhotoFrameExporter {
     internal fun readPreviewMetadata(
         resolver: ContentResolver,
         sourceUri: Uri,
-        context: Context? = null,
-    ): PhotoFrameMetadata = readMetadata(
-        resolver,
-        sourceUri,
-        context,
-        requireLocation = true,
-    )
+    ): PhotoFrameMetadata = readMetadata(resolver, sourceUri)
 
     private suspend fun renderSource(
         context: Context,
@@ -1056,10 +1054,9 @@ object PhotoFrameExporter {
         metadataSettings: PhotoFrameMetadataSettings,
         filter: PhotoFilterSelection?,
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
-        fallbackMetadata: (suspend () -> PhotoFrameMetadata?)? = null,
+        allowLocalMetadataRead: Boolean = true,
     ): Bitmap {
         val metadataStartedAtMs = generationProbeClock()
-        var metadataFallbackUsed = false
         val metadataTrace: ((String) -> Unit)? =
             if (probeSessionId == PhotoGenerationProbe.NO_SESSION) {
                 null
@@ -1095,10 +1092,11 @@ object PhotoFrameExporter {
             )
         }
         val metadata = if (borderEnabled) {
-            if (metadataSnapshot != null) {
-                val snapshotWithAddress = resolveAddress(metadataSnapshot)
+            if (metadataSnapshot != null || !allowLocalMetadataRead) {
+                val authoritativeMetadata = metadataSnapshot ?: EMPTY_METADATA
+                val snapshotWithAddress = resolveAddress(authoritativeMetadata)
                 metadataTrace?.invoke(
-                    "source=snapshot result=${snapshotWithAddress.debugSummary()} " +
+                    "source=camera-header result=${snapshotWithAddress.debugSummary()} " +
                         "fields=${metadataSettings.showAddress}/" +
                         "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
                 )
@@ -1147,57 +1145,13 @@ object PhotoFrameExporter {
                         ),
                     )
                 }
-                val missingLocation = buildList {
-                    if (metadataSettings.showCoordinates && !merged.hasValidCoordinates()) {
-                        add("coordinates")
-                    }
-                    if (metadataSettings.showAltitude && merged.altitudeMeters == null) {
-                        add("altitude")
-                    }
-                    if (metadataSettings.showAddress && merged.address.isNullOrBlank()) {
-                        add("address")
-                    }
-                }
-                val enriched = if (requireLocation && missingLocation.isNotEmpty()) {
-                    if (fallbackMetadata == null) {
-                        metadataTrace?.invoke(
-                            "fallback=unavailable missing=${missingLocation.joinToString(",")} " +
-                                "local=${merged.debugSummary()}",
-                        )
-                        merged
-                    } else {
-                        metadataTrace?.invoke(
-                            "fallback=request missing=${missingLocation.joinToString(",")} " +
-                                "local=${merged.debugSummary()}",
-                        )
-                        val fallbackResult = runCatching { fallbackMetadata.invoke() }
-                        fallbackResult.exceptionOrNull()?.let { error ->
-                            metadataTrace?.invoke(
-                                "fallback=error type=${error.javaClass.simpleName}",
-                            )
-                        }
-                        val fallback = fallbackResult.getOrNull()
-                        metadataTrace?.invoke(
-                            "fallback=result=${fallback?.debugSummary() ?: "none"}",
-                        )
-                        fallback?.let {
-                            metadataFallbackUsed = true
-                            merged.mergeLocationFrom(it)
-                        } ?: merged
-                    }
-                } else {
-                    metadataTrace?.invoke(
-                        "fallback=not-needed local=${merged.debugSummary()}",
-                    )
-                    merged
-                }
-                val presented = resolveAddress(enriched).withPresentation(metadataSettings)
+                val presented = resolveAddress(merged).withPresentation(metadataSettings)
                 PhotoGenerationProbe.frameNote(
                     sessionId = probeSessionId,
                     category = "FRAME-EXPORT",
                     message = "metadata " +
-                        "raw=${enriched.debugSummary()} " +
-                        "gpsValid=${enriched.hasValidCoordinates()} " +
+                        "raw=${merged.debugSummary()} " +
+                        "gpsValid=${merged.hasValidCoordinates()} " +
                         "fields=${metadataSettings.showAddress}/${metadataSettings.showCoordinates}/" +
                         metadataSettings.showAltitude +
                         " visibleRows=${frameLocationRows(presented).size} uriCount=${metadataUris.size}",
@@ -1220,7 +1174,7 @@ object PhotoFrameExporter {
                     "alt=${metadata.altitudeMeters != null} " +
                     "addr=${!metadata.address.isNullOrBlank()} " +
                     "visibleRows=${frameLocationRows(metadata).size} " +
-                    "cameraFallback=$metadataFallbackUsed"
+                    "localMetadata=$allowLocalMetadataRead"
             }
         }
         if (borderEnabled && preset != PhotoFramePreset.IMMERSIVE) {
@@ -1530,14 +1484,14 @@ object PhotoFrameExporter {
         // ExifInterface may expose a present-but-zero latLong pair when the GPS IFD contains
         // malformed/placeholder values.  Do not let that suppress valid raw DMS tags.
         val latitude = (coordinates?.getOrNull(0)
-            ?.takeIf { it.isFinite() && it != 0.0 }
+            ?.takeIf { it.isFinite() && it != 0.0 && it in -90.0..90.0 }
             ?: parseExifCoordinate(
                 exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
                 exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
             ))
             ?.takeIf { it.isFinite() && it in -90.0..90.0 }
         val longitude = (coordinates?.getOrNull(1)
-            ?.takeIf { it.isFinite() && it != 0.0 }
+            ?.takeIf { it.isFinite() && it != 0.0 && it in -180.0..180.0 }
             ?: parseExifCoordinate(
                 exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
                 exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),
@@ -1635,8 +1589,15 @@ object PhotoFrameExporter {
     private fun reverseGeocode(context: Context, latitude: Double, longitude: Double): String? {
         if (!Geocoder.isPresent()) return null
         val key = String.format(Locale.US, "%.4f,%.4f", latitude, longitude)
+        val now = android.os.SystemClock.elapsedRealtime()
         synchronized(geocodeCache) {
-            geocodeCache[key]?.let { return it }
+            val cached = geocodeCache[key]
+            if (cached != null &&
+                (cached.address != null || now - cached.cachedAtMs < 60_000L)
+            ) {
+                return cached.address
+            }
+            if (cached != null) geocodeCache.remove(key)
         }
         val result = runCatching {
             Geocoder(context, Locale.getDefault())
@@ -1650,7 +1611,9 @@ object PhotoFrameExporter {
                         ?: address.adminArea?.takeIf(String::isNotBlank)
                 }
         }.getOrNull()
-        result?.let { value -> synchronized(geocodeCache) { geocodeCache[key] = value } }
+        synchronized(geocodeCache) {
+            geocodeCache[key] = GeocodeCacheEntry(result, now)
+        }
         return result
     }
 
@@ -3199,6 +3162,7 @@ object PhotoFrameExporter {
         targetUri: Uri,
         width: Int,
         height: Int,
+        cameraMetadata: PhotoFrameMetadata? = null,
     ) {
         // Some picker/DocumentsProvider descriptors are readable for pixels but do not expose a
         // seekable file descriptor to ExifInterface.  Try the descriptor first (fast path), then
@@ -3221,7 +3185,11 @@ object PhotoFrameExporter {
                     }
                 }
             }.getOrNull()
-        if (attributes.isNullOrEmpty()) {
+        val cameraLocation = cameraMetadata?.takeIf { it.hasValidCoordinates() }
+        val cameraAltitude = cameraMetadata?.altitudeMeters?.takeIf {
+            it.isFinite() && it != 0.0
+        }
+        if (attributes.isNullOrEmpty() && cameraLocation == null && cameraAltitude == null) {
             PhotoGenerationProbe.note(
                 category = "FRAME-EXPORT",
                 message = "source EXIF empty; preserve step skipped",
@@ -3233,6 +3201,13 @@ object PhotoFrameExporter {
             resolver.openFileDescriptor(targetUri, "rw")?.use { descriptor ->
                 val target = ExifInterface(descriptor.fileDescriptor)
                 attributes.orEmpty().forEach { (tag, value) -> target.setAttribute(tag, value) }
+                if (cameraLocation != null) {
+                    target.setLatLong(
+                        checkNotNull(cameraLocation.latitude),
+                        checkNotNull(cameraLocation.longitude),
+                    )
+                }
+                cameraAltitude?.let(target::setAltitude)
                 target.setAttribute(
                     ExifInterface.TAG_ORIENTATION,
                     ExifInterface.ORIENTATION_NORMAL.toString(),
@@ -5416,6 +5391,7 @@ object PhotoFrameExporter {
         filter: PhotoFilterSelection?,
         bitmap: Bitmap,
         probeSessionId: Long,
+        cameraMetadata: PhotoFrameMetadata? = null,
     ): PhotoFrameExportResult {
         val parentUri = destination.directoryUri
         val preferred = photoFrameOutputName(
@@ -5468,6 +5444,7 @@ object PhotoFrameExporter {
                 targetUri = temp,
                 width = bitmap.width,
                 height = bitmap.height,
+                cameraMetadata = cameraMetadata,
             )
             recordGenerationStage(
                 probeSessionId,
@@ -6397,8 +6374,9 @@ internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
 internal fun frameLocationRows(metadata: PhotoFrameMetadata): List<String> = buildList {
     metadata.address?.trim()?.takeIf(String::isNotEmpty)?.let(::add)
     val coordinates = if (
-        metadata.latitude != null && metadata.longitude != null &&
-        metadata.latitude != 0.0 && metadata.longitude != 0.0
+        metadata.latitude?.isFinite() == true && metadata.longitude?.isFinite() == true &&
+        metadata.latitude != 0.0 && metadata.longitude != 0.0 &&
+        metadata.latitude in -90.0..90.0 && metadata.longitude in -180.0..180.0
     ) {
         String.format(Locale.US, "%.4f, %.4f", metadata.latitude, metadata.longitude)
     } else {

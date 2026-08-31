@@ -600,6 +600,22 @@ class PhotoFrameExporterTest {
                 ),
             ),
         )
+        assertEquals(
+            emptyList<String>(),
+            frameLocationRows(
+                PhotoFrameMetadata(
+                    make = null,
+                    model = null,
+                    aperture = null,
+                    shutter = null,
+                    iso = null,
+                    focalLength = null,
+                    latitude = Double.NaN,
+                    longitude = 181.0,
+                    altitudeMeters = 0.0,
+                ),
+            ),
+        )
     }
 
     @Test

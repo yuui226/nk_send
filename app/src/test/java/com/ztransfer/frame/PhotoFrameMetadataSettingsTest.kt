@@ -302,5 +302,10 @@ class PhotoFrameMetadataSettingsTest {
             .withPresentation(settings)
         assertNull(zeroCoordinates.latitude)
         assertNull(zeroCoordinates.longitude)
+
+        val invalidCoordinates = actual.copy(latitude = Double.NaN, longitude = 181.0)
+            .withPresentation(settings)
+        assertNull(invalidCoordinates.latitude)
+        assertNull(invalidCoordinates.longitude)
     }
 }
