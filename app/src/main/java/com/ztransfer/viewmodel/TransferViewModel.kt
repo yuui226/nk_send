@@ -2316,9 +2316,15 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
                         result.fold(
                             onSuccess = { stats ->
+                                PhotoGenerationProbe.note(
+                                    category = "FRAME-META",
+                                    message = "original download complete bytes=${stats.bytes} " +
+                                        "headerBytes=${cameraHeaderPrefix?.size ?: 0}",
+                                )
                                 // 下载完整 → 把临时名改成真正文件名（相机上报的文件名即为准）。
                                 val finalName = task.file.fileName
                                 var savedName = finalName
+                                var originalSaveMode = if (renameBroken) "full_copy" else "rename"
                                 var renamedUri = if (renameBroken) null else renameQuietly(createdUri, finalName)
                                 if (renamedUri == null && !renameBroken) {
                                     for (n in 1..99) {
@@ -2350,6 +2356,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     val copiedUri = copied.getOrNull()
                                     if (copiedUri != null) {
                                         renameBroken = true
+                                        originalSaveMode = "full_copy"
                                         deleteQuietly(createdUri)
                                         savedName = displayNameOf(copiedUri) ?: copyName
                                         renamedUri = copiedUri
@@ -2359,6 +2366,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     }
                                 }
                                 if (renamedUri != null) {
+                                    PhotoGenerationProbe.note(
+                                        category = "FRAME-META",
+                                        message = "original saved mode=$originalSaveMode " +
+                                            "name=$savedName bytes=${stats.bytes}",
+                                    )
                                     directoryIndex.addFile(savedName, stats.bytes, renamedUri)
                                     directoryIndex.removePart(task.file.fileName)
                                     recordExistingExport(
