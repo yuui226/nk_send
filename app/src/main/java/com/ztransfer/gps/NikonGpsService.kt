@@ -165,9 +165,9 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             preferences.edit()
                 .putLong(GpsUpdateFrequency.PREFERENCE_KEY, frequency.seconds)
                 .apply()
-            // Re-anchor the ticker so a newly selected shorter interval does not wait
-            // for the previous interval to expire. No BLE reconnect is required.
-            if (enabled && cameraReady) startGeoWriteTicker()
+            // Replace only the phone-location subscription and re-anchor the ticker. The
+            // established camera BLE session remains untouched.
+            if (enabled && cameraReady) restartLocationPipeline()
             return START_STICKY
         }
         if (intent?.action == ACTION_DISABLE) {
@@ -623,13 +623,31 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             updateState(GpsStatus.ERROR, message = "请打开手机定位")
             return false
         }
+        val frequency = configuredUpdateFrequency()
         return runCatching {
             if (gpsEnabled && locationManager.getProvider(LocationManager.GPS_PROVIDER) != null) {
-                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5_000L, 0f, locationListener, Looper.getMainLooper())
+                locationManager.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER,
+                    frequency.gpsSamplingIntervalMillis,
+                    0f,
+                    locationListener,
+                    Looper.getMainLooper(),
+                )
             }
             if (networkEnabled && locationManager.getProvider(LocationManager.NETWORK_PROVIDER) != null) {
-                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 15_000L, 0f, locationListener, Looper.getMainLooper())
+                locationManager.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    frequency.networkSamplingIntervalMillis,
+                    0f,
+                    locationListener,
+                    Looper.getMainLooper(),
+                )
             }
+            GpsDiagnostics.record(
+                "location sampling gps=${frequency.gpsSamplingIntervalMillis}ms " +
+                    "network=${frequency.networkSamplingIntervalMillis}ms " +
+                    "write=${frequency.intervalMillis}ms",
+            )
             // Reuse a recent system fix immediately instead of waiting for the next provider
             // callback. This closes the small window where the user can shoot before the first
             // GPS payload reaches the camera.
@@ -732,9 +750,11 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         }
     }
 
-    private fun configuredWriteIntervalMs(): Long = GpsUpdateFrequency.fromSeconds(
+    private fun configuredUpdateFrequency(): GpsUpdateFrequency = GpsUpdateFrequency.fromSeconds(
         preferences.getLong(GpsUpdateFrequency.PREFERENCE_KEY, GpsUpdateFrequency.DEFAULT_SECONDS),
-    ).intervalMillis
+    )
+
+    private fun configuredWriteIntervalMs(): Long = configuredUpdateFrequency().intervalMillis
 
     private fun stopGps() {
         enabled = false
