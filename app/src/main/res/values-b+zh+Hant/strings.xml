@@ -574,7 +574,7 @@
     <string name="gps_step_camera">相機開啟藍牙\n- 首次：連接至智慧型裝置 → 配對（Bluetooth）→ 開始配對</string>
     <string name="gps_step_camera_reconnect">相機開啟藍牙</string>
     <string name="gps_step_app">App：點擊「開啟 GPS」</string>
-    <string name="gps_background_keep_alive_hint">建議將 Z傳耗電管理設為「不限制」，並在多工中鎖定</string>
+    <string name="gps_background_keep_alive_hint">建議：耗電管理 → 不限制 · 多工 → 鎖定</string>
     <string name="gps_permission_required">請允許藍牙和定位權限</string>
     <string name="gps_bluetooth_required">請開啟手機藍牙以啟用 GPS</string>
     <string name="gps_close_before_connect">請先關閉 GPS</string>

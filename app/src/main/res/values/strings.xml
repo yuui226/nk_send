@@ -580,7 +580,7 @@
     <string name="gps_step_camera">Camera turn on Bluetooth\n- First use: Connect to smart device → Pairing (Bluetooth) → Start pairing</string>
     <string name="gps_step_camera_reconnect">Camera turn on Bluetooth</string>
     <string name="gps_step_app">App: tap Enable GPS</string>
-    <string name="gps_background_keep_alive_hint">For reliable background updates, set ZTransfer battery usage to “Unrestricted” and lock it in recent apps</string>
+    <string name="gps_background_keep_alive_hint">Recommended: Battery usage → Unrestricted · Recent apps → Lock</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
     <string name="gps_bluetooth_required">Turn on Bluetooth to enable GPS</string>
     <string name="gps_close_before_connect">Turn off GPS before connecting</string>

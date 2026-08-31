@@ -3690,6 +3690,12 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         color = colors.onSurfaceVariant,
                         modifier = Modifier.padding(top = 10.dp),
                     )
+                    Text(
+                        text = stringResource(R.string.gps_background_keep_alive_hint),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.accentBlue,
+                        modifier = Modifier.padding(top = 5.dp),
+                    )
                 }
                 if (showGpsSteps) {
                     Column(modifier = Modifier.padding(top = 10.dp)) {
@@ -3704,12 +3710,6 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         GpsConnectionStep(
                             index = 2,
                             text = stringResource(R.string.gps_step_app),
-                        )
-                        Text(
-                            text = stringResource(R.string.gps_background_keep_alive_hint),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colors.accentBlue,
-                            modifier = Modifier.padding(start = 29.dp, top = 9.dp),
                         )
                     }
                 }
