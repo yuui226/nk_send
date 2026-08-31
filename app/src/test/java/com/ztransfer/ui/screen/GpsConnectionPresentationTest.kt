@@ -12,6 +12,29 @@ import org.junit.Test
 
 class GpsConnectionPresentationTest {
     @Test
+    fun unavailableAltitudeDisplaysAsZeroMeters() {
+        assertEquals(0, gpsDisplayedAltitudeMeters(null))
+        assertEquals(0, gpsDisplayedAltitudeMeters(0.0))
+        assertEquals(55, gpsDisplayedAltitudeMeters(55.34))
+    }
+
+    @Test
+    fun closingAnimatedLayersStayMountedUntilTheirExitCompletes() {
+        assertTrue(
+            gpsAnimatedLayerActive(
+                currentState = true,
+                targetState = false,
+            )
+        )
+        assertFalse(
+            gpsAnimatedLayerActive(
+                currentState = false,
+                targetState = false,
+            )
+        )
+    }
+
+    @Test
     fun connectedCameraWorkStatesNeverLookLikeConnectionProgress() {
         listOf(
             GpsStatus.PAIRING_SUCCESS,
@@ -36,16 +59,27 @@ class GpsConnectionPresentationTest {
     }
 
     @Test
-    fun connectedStatesCollapseIntoOneSuccessOutcome() {
+    fun cameraConnectionCompletionProducesSuccessHaptic() {
         listOf(
             GpsStatus.PAIRING_SUCCESS,
             GpsStatus.CONNECTED,
+        ).forEach { status ->
+            assertEquals(
+                GpsConnectionHapticOutcome.SUCCESS,
+                GpsState(enabled = true, status = status).gpsConnectionHapticOutcome(),
+            )
+        }
+    }
+
+    @Test
+    fun successfulLocationWorkDoesNotProduceHaptics() {
+        listOf(
             GpsStatus.WRITING,
             GpsStatus.WAITING_FIX,
             GpsStatus.READY,
         ).forEach { status ->
             assertEquals(
-                GpsConnectionHapticOutcome.SUCCESS,
+                GpsConnectionHapticOutcome.NONE,
                 GpsState(enabled = true, status = status).gpsConnectionHapticOutcome(),
             )
         }
