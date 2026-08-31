@@ -2462,9 +2462,8 @@ private fun PhotoFrameMetadataInlineSettings(
             Triple(R.string.photo_frame_metadata_model, settings.showModel) {
                 settings.copy(showModel = !settings.showModel)
             }.takeIf { availability.model },
-            Triple(R.string.photo_frame_metadata_address, settings.showAddress) {
-                settings.copy(showAddress = !settings.showAddress)
-            }.takeIf { showLocationFields },
+            // Address reverse-geocoding is reserved for a future offline/online policy.  It is
+            // intentionally not exposed in the border editor so AP and STA exports stay equal.
             Triple(R.string.photo_frame_metadata_coordinates, settings.showCoordinates) {
                 settings.copy(showCoordinates = !settings.showCoordinates)
             }.takeIf { showLocationFields },

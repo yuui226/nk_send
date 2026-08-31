@@ -8,6 +8,12 @@ import java.util.Locale
 
 internal const val DEFAULT_PHOTO_FRAME_DATE_PATTERN = "yyyy-MM-dd"
 internal const val DEFAULT_PHOTO_FRAME_TIME_PATTERN = "HH:mm:ss"
+/**
+ * Address reverse-geocoding in exported borders is intentionally disabled for now.  Keep the
+ * setting field and decoder for forward compatibility so a future offline/online policy can
+ * restore it without invalidating existing preference data.
+ */
+internal const val PHOTO_FRAME_ADDRESS_METADATA_ENABLED = false
 internal val PHOTO_FRAME_DATE_PATTERNS = listOf("yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd", "MM-dd-yyyy")
 internal val PHOTO_FRAME_TIME_PATTERNS = listOf("HH:mm", "HH:mm:ss", "HH.mm", "HH.mm.ss")
 
@@ -89,6 +95,8 @@ internal fun resolvedPhotoFrameMetadataSettings(
 internal fun normalizePhotoFrameMetadataSettings(
     settings: PhotoFrameMetadataSettings,
 ): PhotoFrameMetadataSettings = settings.copy(
+    // Reserved for a future address policy; never trigger reverse geocoding during export.
+    showAddress = settings.showAddress && PHOTO_FRAME_ADDRESS_METADATA_ENABLED,
     datePattern = normalizePhotoFrameDatePattern(settings.datePattern),
     timePattern = normalizePhotoFrameTimePattern(settings.timePattern),
 )

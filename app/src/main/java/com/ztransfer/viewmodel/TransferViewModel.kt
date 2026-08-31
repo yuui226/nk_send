@@ -2866,7 +2866,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     private fun PhotoFrameMetadataSettings.hasVisibleMetadata(): Boolean =
         showDate || showTime || showFocalLength || showExposure || showBrand || showModel ||
-            showLensModel || showAddress || showCoordinates || showAltitude
+            showLensModel || showCoordinates || showAltitude
 
     private fun isJpegPhotoName(name: String): Boolean {
         val extension = name.substringAfterLast('.', "")

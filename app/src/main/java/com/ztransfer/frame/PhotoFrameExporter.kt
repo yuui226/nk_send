@@ -654,6 +654,10 @@ object PhotoFrameExporter {
             ) {
                 "Only JPG/JPEG/PNG supports borders or watermarks"
             }
+            // Normalize legacy preferences before any metadata read.  Address is a reserved
+            // field and is currently disabled, so an old saved=true value cannot trigger
+            // reverse-geocoding during export.
+            val effectiveMetadataSettings = normalizePhotoFrameMetadataSettings(metadataSettings)
             val renderedWatermark = watermark.forBorderMode(borderEnabled)
             val renderStartedAtMs = generationProbeClock()
             val rendered = renderSource(
@@ -663,7 +667,7 @@ object PhotoFrameExporter {
                 preset = preset,
                 watermark = renderedWatermark,
                 borderEnabled = borderEnabled,
-                metadataSettings = metadataSettings,
+                metadataSettings = effectiveMetadataSettings,
                 metadataSnapshot = metadataSnapshot,
                 filter = filter,
                 probeSessionId = probeSessionId,
@@ -685,7 +689,7 @@ object PhotoFrameExporter {
                     preset = preset,
                     watermark = renderedWatermark,
                     borderEnabled = borderEnabled,
-                    metadataSettings = metadataSettings,
+                    metadataSettings = effectiveMetadataSettings,
                     filter = filter,
                     bitmap = rendered,
                     probeSessionId = probeSessionId,
@@ -727,6 +731,7 @@ object PhotoFrameExporter {
     ): Result<PhotoFrameExportResult> {
         return try {
             currentCoroutineContext().ensureActive()
+            val effectiveMetadataSettings = normalizePhotoFrameMetadataSettings(metadataSettings)
             val renderedWatermark = watermark.forBorderMode(borderEnabled)
             val rendered = renderSource(
                 context = context,
@@ -740,7 +745,7 @@ object PhotoFrameExporter {
                 preset = preset,
                 watermark = renderedWatermark,
                 borderEnabled = borderEnabled,
-                metadataSettings = metadataSettings,
+                metadataSettings = effectiveMetadataSettings,
                 filter = filter,
             )
             val saved = try {
@@ -751,7 +756,7 @@ object PhotoFrameExporter {
                     preset = preset,
                     watermark = renderedWatermark,
                     borderEnabled = borderEnabled,
-                    metadataSettings = metadataSettings,
+                    metadataSettings = effectiveMetadataSettings,
                     filter = filter,
                     bitmap = rendered,
                 )
@@ -1068,9 +1073,12 @@ object PhotoFrameExporter {
                         message = message,
                     )
                 }
-            }
+        }
         fun resolveAddress(metadata: PhotoFrameMetadata): PhotoFrameMetadata {
-            if (!metadataSettings.showAddress || !metadata.address.isNullOrBlank() ||
+            // Kept as a small extension point for a future offline/online address policy.  The
+            // current border pipeline never performs reverse-geocoding.
+            if (!PHOTO_FRAME_ADDRESS_METADATA_ENABLED || !metadataSettings.showAddress ||
+                !metadata.address.isNullOrBlank() ||
                 metadata.latitude?.isFinite() != true ||
                 metadata.longitude?.isFinite() != true ||
                 metadata.latitude == 0.0 || metadata.longitude == 0.0
@@ -1505,7 +1513,10 @@ object PhotoFrameExporter {
                     if (exif.getAttributeInt(ExifInterface.TAG_GPS_ALTITUDE_REF, 0) == 1) -value
                     else value
                 }
-        val address = if (context != null && latitude != null && longitude != null &&
+        // Address reverse-geocoding is intentionally disabled for border metadata.  Keep this
+        // guarded branch for a future policy that can provide deterministic offline behavior.
+        val address = if (PHOTO_FRAME_ADDRESS_METADATA_ENABLED && context != null &&
+            latitude != null && longitude != null &&
             latitude != 0.0 && longitude != 0.0
         ) {
             trace?.invoke(
@@ -6367,12 +6378,12 @@ internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
     ).joinToString("   ")
 
 /**
- * Location metadata is deliberately compact: a long address gets its own row, while the
- * machine-readable coordinates and altitude share one row.  Display precision is limited to
- * four decimals (roughly ten-metre-level); the original EXIF values are never changed.
+ * Location metadata is deliberately compact: machine-readable coordinates and altitude share
+ * one row.  Address reverse-geocoding is intentionally not rendered in borders for now because
+ * it is network-dependent and would make AP/STA exports diverge.  Display precision is limited
+ * to four decimals (roughly ten-metre-level); the original EXIF values are never changed.
  */
 internal fun frameLocationRows(metadata: PhotoFrameMetadata): List<String> = buildList {
-    metadata.address?.trim()?.takeIf(String::isNotEmpty)?.let(::add)
     val coordinates = if (
         metadata.latitude?.isFinite() == true && metadata.longitude?.isFinite() == true &&
         metadata.latitude != 0.0 && metadata.longitude != 0.0 &&
@@ -6511,7 +6522,8 @@ internal fun photoFrameWatermarkFingerprint(
     preset: PhotoFramePreset,
     metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
 ): String {
-    val metadataToken = photoFrameMetadataSettingsFingerprintToken(preset, metadataSettings)
+    val effectiveMetadataSettings = normalizePhotoFrameMetadataSettings(metadataSettings)
+    val metadataToken = photoFrameMetadataSettingsFingerprintToken(preset, effectiveMetadataSettings)
     val baseIdentity = if (watermark.enabled) {
         val renderedPosition = resolvedWatermarkPosition(preset, watermark.position)
         buildList {
@@ -6557,9 +6569,8 @@ internal fun photoFrameWatermarkFingerprint(
         "$baseIdentity\u0000metadata=$metadataToken"
     }
     val versionedIdentity = if (
-        metadataSettings.showAddress ||
-        metadataSettings.showCoordinates ||
-        metadataSettings.showAltitude
+        effectiveMetadataSettings.showCoordinates ||
+        effectiveMetadataSettings.showAltitude
     ) {
         "$identity\u0000location-v=$PHOTO_FRAME_LOCATION_RENDER_VERSION"
     } else {

@@ -266,7 +266,7 @@ class PhotoFrameMetadataSettingsTest {
     }
 
     @Test
-    fun gpsFieldsUsePreviewPlaceholdersButNeverLeakIntoExport() {
+    fun gpsFieldsUsePreviewPlaceholdersButAddressIsReservedForFuturePolicy() {
         val settings = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
             showAddress = true,
             showCoordinates = true,
@@ -274,7 +274,7 @@ class PhotoFrameMetadataSettingsTest {
         )
         val empty = PhotoFrameMetadata(null, null, null, null, null, null)
         val preview = empty.withPresentation(settings, preview = true, previewLocale = Locale.SIMPLIFIED_CHINESE)
-        assertEquals("一个非常好的地方", preview.address)
+        assertNull(preview.address)
         assertEquals(66.6666, preview.latitude!!, 0.00001)
         assertEquals(66.6666, preview.longitude!!, 0.00001)
         assertEquals(520.0, preview.altitudeMeters!!, 0.0)
@@ -291,7 +291,7 @@ class PhotoFrameMetadataSettingsTest {
             altitudeMeters = 520.0,
             address = "上海市黄浦区",
         ).withPresentation(settings)
-        assertEquals("上海市黄浦区", actual.address)
+        assertNull(actual.address)
         assertEquals(31.2304, actual.latitude!!, 0.00001)
         assertEquals(121.4737, actual.longitude!!, 0.00001)
         assertEquals(520.0, actual.altitudeMeters!!, 0.0)
