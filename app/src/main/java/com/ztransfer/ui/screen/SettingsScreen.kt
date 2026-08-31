@@ -3766,12 +3766,6 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         }
                     }
                 }
-                GpsUpdateFrequencyWheel(
-                    selected = gpsUpdateFrequency,
-                    onValueCommitted = gpsViewModel::setUpdateFrequency,
-                    emphasized = gpsState.enabled,
-                    modifier = Modifier.padding(top = if (hasLocation) 8.dp else 10.dp),
-                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3788,11 +3782,17 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                     ) {
                         Icon(Icons.Default.LinkOff, stringResource(R.string.gps_clear_pairing), tint = colors.onSurfaceVariant, modifier = Modifier.size(19.dp))
                     }
+                    GpsUpdateFrequencyWheel(
+                        selected = gpsUpdateFrequency,
+                        onValueCommitted = gpsViewModel::setUpdateFrequency,
+                        emphasized = gpsState.enabled,
+                        modifier = Modifier.weight(0.82f),
+                    )
                     GpsStatusButton(
                         status = gpsState.status,
                         enabled = gpsState.enabled,
                         fillWidth = true,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1.18f),
                         onClick = ::toggleGps,
                     )
                 }
