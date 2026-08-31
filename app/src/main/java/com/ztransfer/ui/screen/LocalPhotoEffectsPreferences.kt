@@ -31,6 +31,7 @@ import com.ztransfer.frame.decodePhotoFrameMetadataSettings
 import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.encodePhotoFrameMetadataSettings
 import com.ztransfer.frame.normalizePhotoFrameMetadataSettings
+import com.ztransfer.frame.withoutLocationFields
 
 /** Persisted editor controls only. The selected source photo intentionally is not part of this model. */
 internal data class LocalPhotoEffectsSettings(
@@ -112,6 +113,7 @@ internal fun normalizeLocalPhotoEffectsSettings(
         metadataSettings = settings.metadataSettings
             .mapNotNull { (preset, value) ->
                 normalizePhotoFrameMetadataSettings(value)
+                    .withoutLocationFields()
                     .takeUnless { it == defaultPhotoFrameMetadataSettings(preset) }
                     ?.let { preset to it }
             }

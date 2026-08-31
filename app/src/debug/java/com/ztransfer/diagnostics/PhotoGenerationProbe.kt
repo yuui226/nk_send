@@ -9,7 +9,7 @@ import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 
-/** Debug 专用的效果图生成耗时探针；只记录时长和尺寸，不读取或保留照片内容。 */
+/** Debug 专用的效果图生成耗时探针；只记录时长和诊断摘要，不读取或保留照片内容。 */
 object PhotoGenerationProbe {
     const val enabled: Boolean = true
     const val NO_SESSION: Long = -1L
@@ -89,12 +89,36 @@ object PhotoGenerationProbe {
         bump()
     }
 
-    /** Shares the existing bottom Debug log with low-frequency protocol diagnostics. */
-    @Suppress("UNUSED_PARAMETER")
+    /**
+     * Shares the existing bottom Debug log with frame diagnostics only.  STA/protocol notes stay
+     * suppressed so enabling this focused trace cannot flood the timing window.
+     */
     fun note(category: String, message: String) {
-        // Keep the timing window focused on generation stages; protocol/export notes are noisy
-        // and are intentionally suppressed until a focused diagnostic session is requested.
-        Unit
+        if (!category.startsWith("FRAME-")) return
+        synchronized(lock) {
+            notes += DiagnosticNote(
+                elapsedMs = SystemClock.elapsedRealtime(),
+                category = category,
+                message = message,
+            )
+            while (notes.size > MAX_NOTES) notes.removeAt(0)
+        }
+        bump()
+    }
+
+    /** Adds a session-relative marker while keeping the global note format backwards compatible. */
+    fun frameNote(sessionId: Long, category: String, message: String) {
+        if (sessionId == NO_SESSION) {
+            note(category, message)
+            return
+        }
+        val offset = synchronized(lock) {
+            sessions[sessionId]?.let { SystemClock.elapsedRealtime() - it.startedAtElapsedMs }
+        }
+        note(
+            category = category,
+            message = "session=$sessionId offsetMs=${offset ?: -1} $message",
+        )
     }
 
     fun clear() {

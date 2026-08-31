@@ -51,6 +51,9 @@ private fun normalizedCameraIdentifier(value: String?): String? {
     }
 }
 
+/** Maximum JPEG prefix retained while a fresh file is streamed to disk for EXIF parsing. */
+private const val EXIF_HEADER_CAPTURE_BYTES = 256 * 1024
+
 /** 写入本地文件失败（非相机连接错误），用于区分"掉线"与"磁盘/存储"问题。 */
 class OutputWriteException(message: String, cause: Throwable) : Exception(message, cause)
 
@@ -3768,13 +3771,16 @@ class NikonCamera(private val context: Context) {
         /** 本次实际从相机读取的字节数，不包含续传前已经存在的部分。 */
         val transferredBytes: Long,
         /** 本文件进入协议下载流程的单调时钟时间戳（包含块间让路时间）。 */
-        val startedAtElapsedMs: Long
+        val startedAtElapsedMs: Long,
+        /** Fresh downloads retain a bounded JPEG prefix so export can parse camera EXIF directly. */
+        val headerPrefix: ByteArray? = null,
     )
 
     /**
      * 下载文件到 [output]。[totalSize] 为 ObjectInfo 中的文件大小（0/SIZE_UNKNOWN=未知）；
      * [resumeOffset] 非零时从该偏移续传（调用方须已把 output 定位到该偏移）。
      * [preferHighThroughputAtStart] 在首个文件数据命令前仅取值一次，之后页面切换不会改变当前文件。
+     * [captureHeader] 在新文件传输时保留有限的文件头，供效果图导出复用；不会额外发起相机请求。
      *
      * 两条数据相位路径共用同一个 [pump] 循环，只是驱动它的命令不同：
      * - 分块（GetPartialObjectEx）：浏览模式的 Wi-Fi 已知大小文件，以及高吞吐模式下的
@@ -3792,10 +3798,19 @@ class NikonCamera(private val context: Context) {
         resumeOffset: Long = 0L,
         totalSize: Long = 0L,
         preferHighThroughputAtStart: () -> Boolean = { false },
+        captureHeader: Boolean = false,
     ): Result<DownloadStats> = ioGate.withDownloadActivity {
         withContext(Dispatchers.IO) {
             val scope = this
             var totalDownloaded = resumeOffset
+            // A resumed file already has bytes on disk; only fresh downloads can capture a
+            // complete header without another camera request. Keep the prefix bounded and release
+            // it with DownloadStats after the export task receives its parsed snapshot.
+            val headerCapture = if (captureHeader && resumeOffset == 0L) {
+                ByteArrayOutputStream(EXIF_HEADER_CAPTURE_BYTES)
+            } else {
+                null
+            }
             // 从任务真正进入协议层开始计时；相机准备、分块事务、写入，以及分块之间为
             // FHD / EXIF 让路的时间都属于用户实际等待时间，实时速度必须使用这条时间线。
             val startTime = android.os.SystemClock.elapsedRealtime()
@@ -3806,6 +3821,7 @@ class NikonCamera(private val context: Context) {
                     bytes = totalDownloaded,
                     transferredBytes = transferredBytesThisAttempt(totalDownloaded, resumeOffset),
                     startedAtElapsedMs = startTime,
+                    headerPrefix = headerCapture?.toByteArray()?.takeIf { it.isNotEmpty() },
                 )
             }
 
@@ -3826,6 +3842,22 @@ class NikonCamera(private val context: Context) {
                     lastProgressTime = now
                 }
             }
+            fun writeChunk(bytes: ByteArray, offset: Int, count: Int) {
+                try {
+                    output.write(bytes, offset, count)
+                } catch (e: java.io.IOException) {
+                    throw OutputWriteException(
+                        context.getString(R.string.error_write_file, e.message),
+                        e,
+                    )
+                }
+                headerCapture?.let { capture ->
+                    val remaining = EXIF_HEADER_CAPTURE_BYTES - capture.size()
+                    if (remaining > 0) {
+                        capture.write(bytes, offset, minOf(count, remaining))
+                    }
+                }
+            }
             fun incomplete(got: Long, want: Long) =
                 Result.failure<DownloadStats>(Exception(context.getString(R.string.error_incomplete_data, got, want)))
             fun failed(respCode: Int) =
@@ -3844,11 +3876,7 @@ class NikonCamera(private val context: Context) {
                         onDataStart = { emitProgress(total, force = true) },
                     ) { bytes, offset, count ->
                         scope.ensureActive()
-                        try {
-                            output.write(bytes, offset, count)
-                        } catch (e: java.io.IOException) {
-                            throw OutputWriteException(context.getString(R.string.error_write_file, e.message), e)
-                        }
+                        writeChunk(bytes, offset, count)
                         totalDownloaded += count
                         emitProgress(total)
                     }
@@ -3876,11 +3904,7 @@ class NikonCamera(private val context: Context) {
                         }
                         PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
                             if (len > 4) {
-                                try {
-                                    output.write(buf, 4, len - 4)
-                                } catch (e: java.io.IOException) {
-                                    throw OutputWriteException(context.getString(R.string.error_write_file, e.message), e)
-                                }
+                                writeChunk(buf, 4, len - 4)
                                 written += len - 4
                                 totalDownloaded += len - 4
                                 val total = if (progressTotalHint > 0) progressTotalHint else expected

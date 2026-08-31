@@ -1,12 +1,10 @@
 package com.ztransfer.frame
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
-import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -31,7 +29,6 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
-import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
 import androidx.core.content.res.ResourcesCompat
 import com.ztransfer.R
@@ -345,39 +342,6 @@ internal fun canCreateDerivedImageInOriginalPath(
 ): Boolean = isStandardImageRelativePath(relativePath) ||
     (sdkInt >= Build.VERSION_CODES.R && hasRelatedMediaUri)
 
-/**
- * Returns a URI that asks MediaStore for the original, non-redacted image bytes when the app has
- * the Android 10+ media-location permission.  SAF/other providers are left untouched because
- * their granted URI already represents the exact document the user selected.
- */
-internal fun exifReadUri(context: Context?, uri: Uri): Uri {
-    if (context == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
-        ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_MEDIA_LOCATION,
-        ) != PackageManager.PERMISSION_GRANTED
-    ) {
-        return uri
-    }
-    val mediaUri = if (uri.authority == MediaStore.AUTHORITY) {
-        uri
-    } else {
-        runCatching { MediaStore.getMediaUri(context, uri) }.getOrNull()
-            ?: resolveMediaDocumentUriForExif(uri)
-    } ?: return uri
-    return runCatching { MediaStore.setRequireOriginal(mediaUri) }.getOrDefault(mediaUri)
-}
-
-private fun resolveMediaDocumentUriForExif(uri: Uri): Uri? {
-    if (uri.authority != "com.android.providers.media.documents") return null
-    val documentId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull()
-        ?: return null
-    val parts = documentId.split(':', limit = 2)
-    if (parts.size != 2 || parts[0] != "image") return null
-    val mediaId = parts[1].toLongOrNull() ?: return null
-    return ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, mediaId)
-}
-
 internal data class PhotoFrameLayout(
     val canvasWidth: Int,
     val canvasHeight: Int,
@@ -675,6 +639,7 @@ object PhotoFrameExporter {
         metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
         filter: PhotoFilterSelection? = null,
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
+        metadataSnapshot: PhotoFrameMetadata? = null,
         fallbackMetadata: (suspend () -> PhotoFrameMetadata?)? = null,
     ): Result<PhotoFrameExportResult> {
         return try {
@@ -694,6 +659,7 @@ object PhotoFrameExporter {
                 watermark = renderedWatermark,
                 borderEnabled = borderEnabled,
                 metadataSettings = metadataSettings,
+                metadataSnapshot = metadataSnapshot,
                 filter = filter,
                 probeSessionId = probeSessionId,
                 fallbackMetadata = fallbackMetadata,
@@ -707,7 +673,6 @@ object PhotoFrameExporter {
                 currentCoroutineContext().ensureActive()
                 val saveStartedAtMs = generationProbeClock()
                 saveRendered(
-                    context = context,
                     resolver = resolver,
                     destination = destination,
                     sourceUri = sourceUri,
@@ -748,6 +713,7 @@ object PhotoFrameExporter {
         context: Context,
         resolver: ContentResolver,
         source: PhotoFrameMediaStoreSource,
+        metadata: PhotoFrameMetadata? = null,
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean = true,
@@ -766,6 +732,7 @@ object PhotoFrameExporter {
                 // MediaStore URI resolved alongside the picker URI while still decoding pixels
                 // from the granted source URI.
                 metadataSourceUri = source.relatedMediaUri ?: source.sourceUri,
+                metadataSnapshot = metadata,
                 preset = preset,
                 watermark = renderedWatermark,
                 borderEnabled = borderEnabled,
@@ -775,7 +742,6 @@ object PhotoFrameExporter {
             val saved = try {
                 currentCoroutineContext().ensureActive()
                 saveRenderedToMediaStore(
-                    context = context,
                     resolver = resolver,
                     source = source,
                     preset = preset,
@@ -1076,7 +1042,6 @@ object PhotoFrameExporter {
         sourceUri,
         context,
         requireLocation = true,
-        exifContext = context,
     )
 
     private suspend fun renderSource(
@@ -1084,6 +1049,7 @@ object PhotoFrameExporter {
         resolver: ContentResolver,
         sourceUri: Uri,
         metadataSourceUri: Uri = sourceUri,
+        metadataSnapshot: PhotoFrameMetadata? = null,
         preset: PhotoFramePreset,
         watermark: PhotoFrameWatermark,
         borderEnabled: Boolean,
@@ -1094,73 +1060,150 @@ object PhotoFrameExporter {
     ): Bitmap {
         val metadataStartedAtMs = generationProbeClock()
         var metadataFallbackUsed = false
-        val metadata = if (borderEnabled) {
-            val requireLocation = metadataSettings.showAddress ||
-                metadataSettings.showCoordinates || metadataSettings.showAltitude
-            val metadataUris = buildList {
-                add(metadataSourceUri)
-                // A downloaded original is often exposed through a DocumentsProvider URI while
-                // its MediaStore row remains the only descriptor that contains the camera GPS
-                // block. Resolving this alternate URI is cheap and only attempted when a GPS
-                // field is enabled for the frame.
-                if (requireLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    runCatching { MediaStore.getMediaUri(context, sourceUri) }
-                        .getOrNull()
-                        ?.takeIf { it != metadataSourceUri }
-                        ?.let(::add)
+        val metadataTrace: ((String) -> Unit)? =
+            if (probeSessionId == PhotoGenerationProbe.NO_SESSION) {
+                null
+            } else {
+                { message ->
+                    PhotoGenerationProbe.frameNote(
+                        sessionId = probeSessionId,
+                        category = "FRAME-META",
+                        message = message,
+                    )
                 }
-                sourceUri.takeIf { it != metadataSourceUri }?.let(::add)
-            }.distinct()
-            // Providers can split EXIF between descriptor and stream (or between the picker and
-            // MediaStore URI). Merge location fields from every candidate; camera fields stay
-            // anchored to the first URI so the existing frame layout remains unchanged.
-            val merged = metadataUris.drop(1).fold(
-                readMetadata(
-                    resolver,
-                    metadataUris.first(),
-                    context.takeIf { metadataSettings.showAddress },
-                    requireLocation = requireLocation,
-                    exifContext = context.takeIf { requireLocation },
-                ),
-            ) { current, uri ->
-                current.mergeLocationFrom(
+            }
+        fun resolveAddress(metadata: PhotoFrameMetadata): PhotoFrameMetadata {
+            if (!metadataSettings.showAddress || !metadata.address.isNullOrBlank() ||
+                metadata.latitude?.isFinite() != true ||
+                metadata.longitude?.isFinite() != true ||
+                metadata.latitude == 0.0 || metadata.longitude == 0.0
+            ) {
+                return metadata
+            }
+            val latitude = checkNotNull(metadata.latitude)
+            val longitude = checkNotNull(metadata.longitude)
+            metadataTrace?.invoke(
+                "reverseGeocode=request coords=" +
+                    String.format(Locale.US, "%.6f,%.6f", latitude, longitude),
+            )
+            return metadata.copy(
+                address = reverseGeocode(context, latitude, longitude).also { result ->
+                    metadataTrace?.invoke(
+                        "reverseGeocode=result=${result?.take(80) ?: "none"}",
+                    )
+                },
+            )
+        }
+        val metadata = if (borderEnabled) {
+            if (metadataSnapshot != null) {
+                val snapshotWithAddress = resolveAddress(metadataSnapshot)
+                metadataTrace?.invoke(
+                    "source=snapshot result=${snapshotWithAddress.debugSummary()} " +
+                        "fields=${metadataSettings.showAddress}/" +
+                        "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
+                )
+                snapshotWithAddress.withPresentation(metadataSettings)
+            } else {
+                val requireLocation = metadataSettings.showAddress ||
+                    metadataSettings.showCoordinates || metadataSettings.showAltitude
+                val metadataUris = buildList {
+                    add(metadataSourceUri)
+                    // A downloaded original is often exposed through a DocumentsProvider URI while
+                    // its MediaStore row remains the only descriptor that contains the camera GPS
+                    // block. Resolving this alternate URI is cheap and only attempted when a GPS
+                    // field is enabled for the frame.
+                    if (requireLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        runCatching { MediaStore.getMediaUri(context, sourceUri) }
+                            .getOrNull()
+                            ?.takeIf { it != metadataSourceUri }
+                            ?.let(::add)
+                    }
+                    sourceUri.takeIf { it != metadataSourceUri }?.let(::add)
+                }.distinct()
+                metadataTrace?.invoke(
+                    "source=local candidates=${metadataUris.joinToString(", ", transform = ::debugUri)} " +
+                        "requireLocation=$requireLocation fields=${metadataSettings.showAddress}/" +
+                        "${metadataSettings.showCoordinates}/${metadataSettings.showAltitude}",
+                )
+                // Providers can split EXIF between descriptor and stream (or between the picker and
+                // MediaStore URI). Merge location fields from every candidate; camera fields stay
+                // anchored to the first URI so the existing frame layout remains unchanged.
+                val merged = metadataUris.drop(1).fold(
                     readMetadata(
                         resolver,
-                        uri,
+                        metadataUris.first(),
                         context.takeIf { metadataSettings.showAddress },
-                        requireLocation = true,
-                        exifContext = context,
+                        requireLocation = requireLocation,
+                        trace = metadataTrace,
                     ),
-                )
-            }
-            val enriched = if (
-                requireLocation && fallbackMetadata != null &&
-                (metadataSettings.showCoordinates && !merged.hasValidCoordinates() ||
-                    metadataSettings.showAltitude && merged.altitudeMeters == null ||
-                    metadataSettings.showAddress && merged.address.isNullOrBlank())
-            ) {
-                runCatching { fallbackMetadata.invoke() }
-                    .getOrNull()
-                    ?.let { fallback ->
-                        metadataFallbackUsed = true
-                        merged.mergeLocationFrom(fallback)
+                ) { current, uri ->
+                    current.mergeLocationFrom(
+                        readMetadata(
+                            resolver,
+                            uri,
+                            context.takeIf { metadataSettings.showAddress },
+                            requireLocation = true,
+                            trace = metadataTrace,
+                        ),
+                    )
+                }
+                val missingLocation = buildList {
+                    if (metadataSettings.showCoordinates && !merged.hasValidCoordinates()) {
+                        add("coordinates")
                     }
-                    ?: merged
-            } else {
-                merged
+                    if (metadataSettings.showAltitude && merged.altitudeMeters == null) {
+                        add("altitude")
+                    }
+                    if (metadataSettings.showAddress && merged.address.isNullOrBlank()) {
+                        add("address")
+                    }
+                }
+                val enriched = if (requireLocation && missingLocation.isNotEmpty()) {
+                    if (fallbackMetadata == null) {
+                        metadataTrace?.invoke(
+                            "fallback=unavailable missing=${missingLocation.joinToString(",")} " +
+                                "local=${merged.debugSummary()}",
+                        )
+                        merged
+                    } else {
+                        metadataTrace?.invoke(
+                            "fallback=request missing=${missingLocation.joinToString(",")} " +
+                                "local=${merged.debugSummary()}",
+                        )
+                        val fallbackResult = runCatching { fallbackMetadata.invoke() }
+                        fallbackResult.exceptionOrNull()?.let { error ->
+                            metadataTrace?.invoke(
+                                "fallback=error type=${error.javaClass.simpleName}",
+                            )
+                        }
+                        val fallback = fallbackResult.getOrNull()
+                        metadataTrace?.invoke(
+                            "fallback=result=${fallback?.debugSummary() ?: "none"}",
+                        )
+                        fallback?.let {
+                            metadataFallbackUsed = true
+                            merged.mergeLocationFrom(it)
+                        } ?: merged
+                    }
+                } else {
+                    metadataTrace?.invoke(
+                        "fallback=not-needed local=${merged.debugSummary()}",
+                    )
+                    merged
+                }
+                val presented = resolveAddress(enriched).withPresentation(metadataSettings)
+                PhotoGenerationProbe.frameNote(
+                    sessionId = probeSessionId,
+                    category = "FRAME-EXPORT",
+                    message = "metadata " +
+                        "raw=${enriched.debugSummary()} " +
+                        "gpsValid=${enriched.hasValidCoordinates()} " +
+                        "fields=${metadataSettings.showAddress}/${metadataSettings.showCoordinates}/" +
+                        metadataSettings.showAltitude +
+                        " visibleRows=${frameLocationRows(presented).size} uriCount=${metadataUris.size}",
+                )
+                presented
             }
-            val presented = enriched.withPresentation(metadataSettings)
-            PhotoGenerationProbe.note(
-                category = "FRAME-EXPORT",
-                message = "metadata " +
-                    "gps=${enriched.latitude != null && enriched.longitude != null} " +
-                    "gpsValid=${enriched.hasValidCoordinates()} " +
-                    "alt=${enriched.altitudeMeters != null} addr=${!enriched.address.isNullOrBlank()} " +
-                    "fields=${metadataSettings.showAddress}/${metadataSettings.showCoordinates}/" +
-                    metadataSettings.showAltitude +
-                    " visibleRows=${frameLocationRows(presented).size} uriCount=${metadataUris.size}",
-            )
-            presented
         } else {
             EMPTY_METADATA
         }
@@ -1360,31 +1403,63 @@ object PhotoFrameExporter {
         uri: Uri,
         context: Context? = null,
         requireLocation: Boolean = false,
-        exifContext: Context? = context,
+        trace: ((String) -> Unit)? = null,
     ): PhotoFrameMetadata {
-        val exifUri = exifReadUri(exifContext, uri)
+        var descriptorOpened = false
+        var descriptorError: Throwable? = null
         val descriptorResult = runCatching {
-            resolver.openFileDescriptor(exifUri, "r")?.use { pfd ->
-                metadataFrom(ExifInterface(pfd.fileDescriptor), context)
+            resolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                descriptorOpened = true
+                metadataFrom(ExifInterface(pfd.fileDescriptor), context, trace)
             }
-        }.getOrNull()
+        }.onFailure { descriptorError = it }.getOrNull()
+        trace?.invoke(
+            "candidate=${debugUri(uri)} descriptor=" +
+                (if (descriptorOpened) {
+                    descriptorResult?.debugSummary() ?: "empty"
+                } else {
+                    "unavailable"
+                }) + descriptorError?.let { " error=${it.javaClass.simpleName}" }.orEmpty(),
+        )
         if (descriptorResult != null && !requireLocation) {
+            trace?.invoke("candidate=${debugUri(uri)} selected=descriptor")
             return descriptorResult
         }
 
         // 少数 DocumentsProvider 返回不可 seek 的文件描述符，但输入流仍可正常读取。
+        var streamOpened = false
+        var streamError: Throwable? = null
         val streamResult = runCatching {
-            resolver.openInputStream(exifUri)?.use { input ->
-                BufferedInputStream(input).use { metadataFrom(ExifInterface(it), context) }
+            resolver.openInputStream(uri)?.use { input ->
+                streamOpened = true
+                BufferedInputStream(input).use { metadataFrom(ExifInterface(it), context, trace) }
             }
-        }.getOrNull()
-        return when {
+        }.onFailure { streamError = it }.getOrNull()
+        trace?.invoke(
+            "candidate=${debugUri(uri)} stream=" +
+                (if (streamOpened) {
+                    streamResult?.debugSummary() ?: "empty"
+                } else {
+                    "unavailable"
+                }) + streamError?.let { " error=${it.javaClass.simpleName}" }.orEmpty(),
+        )
+        val selected = when {
             descriptorResult != null && streamResult != null ->
                 descriptorResult.mergeLocationFrom(streamResult)
             descriptorResult != null -> descriptorResult
             streamResult != null -> streamResult
             else -> EMPTY_METADATA
         }
+        trace?.invoke(
+            "candidate=${debugUri(uri)} selected=" +
+                when {
+                    descriptorResult != null && streamResult != null -> "descriptor+stream"
+                    descriptorResult != null -> "descriptor"
+                    streamResult != null -> "stream"
+                    else -> "empty"
+                } + " result=${selected.debugSummary()}",
+        )
+        return selected
     }
 
     private fun PhotoFrameMetadata.mergeLocationFrom(fallback: PhotoFrameMetadata): PhotoFrameMetadata =
@@ -1400,7 +1475,45 @@ object PhotoFrameExporter {
             latitude.isFinite() && longitude.isFinite() &&
             latitude != 0.0 && longitude != 0.0
 
-    private fun metadataFrom(exif: ExifInterface, context: Context? = null): PhotoFrameMetadata {
+    private fun PhotoFrameMetadata.debugSummary(): String = buildString {
+        append("make=").append(make?.trim().orEmpty().ifEmpty { "none" })
+        append(" model=").append(model?.trim().orEmpty().ifEmpty { "none" })
+        append(" lens=").append(lensModel?.trim().orEmpty().ifEmpty { "none" })
+        append(" focal=").append(focalLength ?: "none")
+        append(" aperture=").append(aperture ?: "none")
+        append(" shutter=").append(shutter ?: "none")
+        append(" iso=").append(iso ?: "none")
+        append(" date=").append(dateTime ?: "none")
+        append(" gps=").append(
+            if (hasValidCoordinates()) {
+                String.format(
+                    Locale.US,
+                    "%.6f,%.6f",
+                    checkNotNull(latitude),
+                    checkNotNull(longitude),
+                )
+            } else {
+                "none"
+            },
+        )
+        append(" altitude=").append(
+            altitudeMeters?.takeIf { it.isFinite() && it != 0.0 }
+                ?.let { String.format(Locale.US, "%.1fm", it) } ?: "none",
+        )
+        append(" address=").append(
+            address?.trim()?.replace(Regex("\\s+"), " ")?.take(80)
+                ?.ifEmpty { "none" } ?: "none",
+        )
+    }
+
+    private fun debugUri(uri: Uri): String =
+        uri.toString().replace(Regex("[\\r\\n\\t]+"), " ").take(180)
+
+    private fun metadataFrom(
+        exif: ExifInterface,
+        context: Context? = null,
+        trace: ((String) -> Unit)? = null,
+    ): PhotoFrameMetadata {
         val fNumber = exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, Double.NaN)
             .takeIf { it.isFinite() && it > 0.0 }
             ?: exif.getAttributeDouble(ExifInterface.TAG_APERTURE_VALUE, Double.NaN)
@@ -1441,7 +1554,13 @@ object PhotoFrameExporter {
         val address = if (context != null && latitude != null && longitude != null &&
             latitude != 0.0 && longitude != 0.0
         ) {
-            reverseGeocode(context, latitude, longitude)
+            trace?.invoke(
+                "reverseGeocode=request coords=" +
+                    String.format(Locale.US, "%.6f,%.6f", latitude, longitude),
+            )
+            reverseGeocode(context, latitude, longitude).also { result ->
+                trace?.invoke("reverseGeocode=result=${result?.take(80) ?: "none"}")
+            }
         } else null
         return PhotoFrameMetadata(
             make = exif.getAttribute(ExifInterface.TAG_MAKE),
@@ -1475,7 +1594,7 @@ object PhotoFrameExporter {
 
     /** Parses the same camera EXIF header used by the live preview for export fallback. */
     internal fun metadataFromExifHeader(
-        context: Context,
+        context: Context?,
         bytes: ByteArray,
     ): PhotoFrameMetadata = runCatching {
         metadataFrom(ExifInterface(ByteArrayInputStream(bytes)), context)
@@ -3075,7 +3194,6 @@ object PhotoFrameExporter {
     }
 
     private fun copyRenderedExif(
-        context: Context?,
         resolver: ContentResolver,
         sourceUri: Uri,
         targetUri: Uri,
@@ -3085,9 +3203,8 @@ object PhotoFrameExporter {
         // Some picker/DocumentsProvider descriptors are readable for pixels but do not expose a
         // seekable file descriptor to ExifInterface.  Try the descriptor first (fast path), then
         // fall back to a buffered stream so the generated frame keeps the original GPS/EXIF data.
-        val exifUri = exifReadUri(context, sourceUri)
         val attributes = runCatching {
-            resolver.openFileDescriptor(exifUri, "r")?.use { descriptor ->
+            resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
                 val source = ExifInterface(descriptor.fileDescriptor)
                 COPIED_EXIF_TAGS.mapNotNull { tag ->
                     source.getAttribute(tag)?.let { value -> tag to value }
@@ -3095,7 +3212,7 @@ object PhotoFrameExporter {
             }
         }.getOrNull()?.takeIf { it.isNotEmpty() }
             ?: runCatching {
-                resolver.openInputStream(exifUri)?.use { input ->
+                resolver.openInputStream(sourceUri)?.use { input ->
                     BufferedInputStream(input).use { buffered ->
                         val source = ExifInterface(buffered)
                         COPIED_EXIF_TAGS.mapNotNull { tag ->
@@ -5139,7 +5256,6 @@ object PhotoFrameExporter {
         }
 
     private suspend fun saveRenderedToMediaStore(
-        context: Context,
         resolver: ContentResolver,
         source: PhotoFrameMediaStoreSource,
         preset: PhotoFramePreset,
@@ -5168,9 +5284,10 @@ object PhotoFrameExporter {
         if (canTryOriginal) {
             try {
                 return writeRenderedToMediaStore(
-                    context = context,
                     resolver = resolver,
-                    sourceUri = source.relatedMediaUri ?: source.sourceUri,
+                    // Keep the picker-granted URI for EXIF copying.  The related MediaStore URI
+                    // is useful for placement, but may expose a redacted descriptor.
+                    sourceUri = source.sourceUri,
                     collectionUri = source.collectionUri,
                     relativePath = checkNotNull(originalPath),
                     relatedMediaUri = source.relatedMediaUri,
@@ -5204,9 +5321,8 @@ object PhotoFrameExporter {
         }
         return try {
             writeRenderedToMediaStore(
-                context = context,
                 resolver = resolver,
-                sourceUri = source.relatedMediaUri ?: source.sourceUri,
+                sourceUri = source.sourceUri,
                 collectionUri = source.fallbackCollectionUri,
                 relativePath = LOCAL_PHOTO_FALLBACK_RELATIVE_PATH,
                 relatedMediaUri = null,
@@ -5223,7 +5339,6 @@ object PhotoFrameExporter {
     }
 
     private suspend fun writeRenderedToMediaStore(
-        context: Context,
         resolver: ContentResolver,
         sourceUri: Uri,
         collectionUri: Uri,
@@ -5263,7 +5378,6 @@ object PhotoFrameExporter {
             } == true
             if (!written) error("Cannot write derived photo")
             copyRenderedExif(
-                context = context,
                 resolver = resolver,
                 sourceUri = sourceUri,
                 targetUri = target,
@@ -5291,7 +5405,6 @@ object PhotoFrameExporter {
     }
 
     private suspend fun saveRendered(
-        context: Context,
         resolver: ContentResolver,
         destination: PhotoFrameDestination,
         sourceUri: Uri,
@@ -5350,7 +5463,6 @@ object PhotoFrameExporter {
             ) { "${bitmap.width}x${bitmap.height} q=$PHOTO_FRAME_JPEG_QUALITY" }
             val exifStartedAtMs = generationProbeClock()
             copyRenderedExif(
-                context = context,
                 resolver = resolver,
                 sourceUri = sourceUri,
                 targetUri = temp,

@@ -10,4 +10,5 @@ object PhotoGenerationProbe {
     fun stage(sessionId: Long, name: String, durationMs: Long, detail: String = "") = Unit
     fun finish(sessionId: Long, outcome: String, totalMs: Long) = Unit
     fun note(category: String, message: String) = Unit
+    fun frameNote(sessionId: Long, category: String, message: String) = Unit
 }

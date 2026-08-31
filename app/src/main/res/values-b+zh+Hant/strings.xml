@@ -557,7 +557,11 @@
     <string name="gps_coordinates_value">座標：%1$s</string>
     <string name="gps_altitude_value">海拔：%1$d 公尺</string>
     <string name="gps_updated_at">更新：%1$s</string>
-    <string name="gps_update_frequency">更新頻率：每分鐘</string>
+    <string name="gps_update_frequency_label">更新頻率</string>
+    <string name="gps_frequency_30_seconds">30 秒</string>
+    <string name="gps_frequency_1_minute">1 分鐘</string>
+    <string name="gps_frequency_2_minutes">2 分鐘</string>
+    <string name="gps_frequency_5_minutes">5 分鐘</string>
     <string name="gps_need_camera">開啟相機配對</string>
     <string name="gps_ap_unavailable">AP 模式不可用</string>
     <string name="gps_retry">重試</string>

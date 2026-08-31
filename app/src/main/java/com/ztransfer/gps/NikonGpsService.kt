@@ -158,6 +158,18 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             }
             return START_STICKY
         }
+        if (intent?.action == ACTION_SET_UPDATE_FREQUENCY) {
+            val frequency = GpsUpdateFrequency.fromSeconds(
+                intent.getLongExtra(EXTRA_UPDATE_FREQUENCY_SECONDS, GpsUpdateFrequency.DEFAULT_SECONDS),
+            )
+            preferences.edit()
+                .putLong(GpsUpdateFrequency.PREFERENCE_KEY, frequency.seconds)
+                .apply()
+            // Re-anchor the ticker so a newly selected shorter interval does not wait
+            // for the previous interval to expire. No BLE reconnect is required.
+            if (enabled && cameraReady) startGeoWriteTicker()
+            return START_STICKY
+        }
         if (intent?.action == ACTION_DISABLE) {
             stopGps()
             stopSelf()
@@ -633,7 +645,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             return
         }
         val candidate = latestLocationDuringWrite ?: location
-        if (!force && System.currentTimeMillis() - lastSentAt < LOCATION_WRITE_INTERVAL_MS) {
+        if (!force && System.currentTimeMillis() - lastSentAt < configuredWriteIntervalMs()) {
             latestLocationDuringWrite = Location(candidate)
             return
         }
@@ -682,20 +694,25 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         }
     }
 
-    /** Keep the one-minute GEO cadence independent from provider callbacks. */
+    /** Keep the configured GEO cadence independent from provider callbacks. */
     private fun startGeoWriteTicker() {
         periodicGeoWriteJob?.cancel()
         periodicGeoWriteJob = serviceScope.launch {
             while (isActive && enabled && cameraReady) {
+                val intervalMs = configuredWriteIntervalMs()
                 val elapsed = System.currentTimeMillis() - lastSentAt
-                val waitMs = if (lastSentAt == 0L) LOCATION_WRITE_INTERVAL_MS
-                else (LOCATION_WRITE_INTERVAL_MS - elapsed).coerceAtLeast(1_000L)
+                val waitMs = if (lastSentAt == 0L) intervalMs
+                else (intervalMs - elapsed).coerceAtLeast(1_000L)
                 delay(waitMs)
                 if (!isActive || !enabled || !cameraReady) break
                 latestLocation?.let(::maybeSend)
             }
         }
     }
+
+    private fun configuredWriteIntervalMs(): Long = GpsUpdateFrequency.fromSeconds(
+        preferences.getLong(GpsUpdateFrequency.PREFERENCE_KEY, GpsUpdateFrequency.DEFAULT_SECONDS),
+    ).intervalMillis
 
     private fun stopGps() {
         enabled = false
@@ -859,7 +876,6 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         private const val CHANNEL_ID = "nikon_gps"
         private const val NOTIFICATION_ID = 1003
         private const val CACHED_LOCATION_MAX_AGE_MS = 2 * 60_000L
-        private const val LOCATION_WRITE_INTERVAL_MS = 60_000L
         private const val GEO_WRITE_TIMEOUT_MS = 10_000L
         const val ACTION_ENABLE = "com.ztransfer.gps.ENABLE"
         const val ACTION_DISABLE = "com.ztransfer.gps.DISABLE"
@@ -870,6 +886,8 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         private const val KEY_ENABLED = "enabled"
         const val ACTION_SET_AP_MODE = "com.ztransfer.gps.SET_AP_MODE"
         const val EXTRA_AP_MODE = "ap_mode"
+        const val ACTION_SET_UPDATE_FREQUENCY = "com.ztransfer.gps.SET_UPDATE_FREQUENCY"
+        const val EXTRA_UPDATE_FREQUENCY_SECONDS = "update_frequency_seconds"
 
         fun setEnabled(context: Context, enabled: Boolean) {
             val intent = Intent(context, NikonGpsService::class.java).setAction(if (enabled) ACTION_ENABLE else ACTION_DISABLE)
@@ -885,6 +903,13 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             val intent = Intent(context, NikonGpsService::class.java)
                 .setAction(ACTION_SET_AP_MODE)
                 .putExtra(EXTRA_AP_MODE, blocked)
+            context.startService(intent)
+        }
+
+        fun setUpdateFrequency(context: Context, frequency: GpsUpdateFrequency) {
+            val intent = Intent(context, NikonGpsService::class.java)
+                .setAction(ACTION_SET_UPDATE_FREQUENCY)
+                .putExtra(EXTRA_UPDATE_FREQUENCY_SECONDS, frequency.seconds)
             context.startService(intent)
         }
     }

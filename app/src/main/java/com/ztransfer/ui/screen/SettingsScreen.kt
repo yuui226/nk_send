@@ -166,6 +166,7 @@ import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.gps.GpsStatus
 import com.ztransfer.gps.GpsDiagnostics
+import com.ztransfer.gps.GpsUpdateFrequency
 import com.ztransfer.gps.GpsViewModel
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
@@ -1803,9 +1804,13 @@ internal data class PhotoFrameMetadataAvailability(
     val date: Boolean,
     val time: Boolean,
 ) {
-    /** The editor also exposes GPS fields that may be absent from the current preview. */
+    /** The transfer editor may expose GPS fields even when the preview has no location data. */
     val hasAny: Boolean
         get() = true
+
+    /** Metadata fields that were available before location controls were introduced. */
+    val hasLegacyFields: Boolean
+        get() = focalLength || exposure || lensModel || brand || model || date || time
 }
 
 /** Mirrors what the renderer can actually obtain from the current preview photo. */
@@ -1838,6 +1843,7 @@ internal fun PhotoFrameWatermarkEditor(
     borderEnabled: Boolean,
     preset: PhotoFramePreset,
     metadataSettings: PhotoFrameMetadataSettings,
+    showLocationFields: Boolean = true,
     previewMetadata: PhotoFrameMetadata?,
     watermark: PhotoFrameWatermark,
     watermarkContentSource: PhotoFrameWatermark = watermark,
@@ -1868,6 +1874,11 @@ internal fun PhotoFrameWatermarkEditor(
     var watermarkSettingsExpanded by remember { mutableStateOf(false) }
     val metadataAvailability = remember(previewMetadata) {
         photoFrameMetadataAvailability(previewMetadata)
+    }
+    val metadataHasAny = if (showLocationFields) {
+        metadataAvailability.hasAny
+    } else {
+        metadataAvailability.hasLegacyFields
     }
     val frameChoicesInCatalogOrder = listOf(
         PhotoFramePreset.MIST to stringResource(R.string.photo_frame_mist),
@@ -1953,8 +1964,8 @@ internal fun PhotoFrameWatermarkEditor(
     LaunchedEffect(borderEnabled) {
         if (!borderEnabled) metadataSettingsExpanded = false
     }
-    LaunchedEffect(metadataAvailability.hasAny) {
-        if (!metadataAvailability.hasAny) metadataSettingsExpanded = false
+    LaunchedEffect(metadataHasAny) {
+        if (!metadataHasAny) metadataSettingsExpanded = false
     }
     LaunchedEffect(watermark.enabled) {
         if (!watermark.enabled) watermarkSettingsExpanded = false
@@ -2027,7 +2038,7 @@ internal fun PhotoFrameWatermarkEditor(
                 accentColor = frameAccent,
                 modifier = Modifier.weight(PHOTO_EFFECTS_PRIMARY_WHEEL_WEIGHT),
             )
-            if (metadataAvailability.hasAny) {
+            if (metadataHasAny) {
                 val metadataLabel = stringResource(R.string.photo_frame_metadata_button)
                 ReleaseCommitWheel(
                     options = listOf(Unit),
@@ -2057,13 +2068,14 @@ internal fun PhotoFrameWatermarkEditor(
         }
 
         AnimatedVisibility(
-            visible = borderEnabled && metadataAvailability.hasAny && metadataSettingsExpanded,
+            visible = borderEnabled && metadataHasAny && metadataSettingsExpanded,
             enter = fadeIn() + expandVertically(),
             exit = fadeOut() + shrinkVertically(),
         ) {
             PhotoFrameMetadataInlineSettings(
                 settings = metadataSettings,
                 availability = metadataAvailability,
+                showLocationFields = showLocationFields,
                 onSettingsChanged = onMetadataSettingsChanged,
                 onDetent = haptics::tick,
                 modifier = Modifier.padding(top = 8.dp),
@@ -2409,6 +2421,7 @@ internal fun PhotoFrameWatermarkEditor(
 private fun PhotoFrameMetadataInlineSettings(
     settings: PhotoFrameMetadataSettings,
     availability: PhotoFrameMetadataAvailability,
+    showLocationFields: Boolean,
     onSettingsChanged: (PhotoFrameMetadataSettings) -> Unit,
     onDetent: () -> Unit,
     modifier: Modifier = Modifier,
@@ -2451,13 +2464,13 @@ private fun PhotoFrameMetadataInlineSettings(
             }.takeIf { availability.model },
             Triple(R.string.photo_frame_metadata_address, settings.showAddress) {
                 settings.copy(showAddress = !settings.showAddress)
-            },
+            }.takeIf { showLocationFields },
             Triple(R.string.photo_frame_metadata_coordinates, settings.showCoordinates) {
                 settings.copy(showCoordinates = !settings.showCoordinates)
-            },
+            }.takeIf { showLocationFields },
             Triple(R.string.photo_frame_metadata_altitude, settings.showAltitude) {
                 settings.copy(showAltitude = !settings.showAltitude)
-            },
+            }.takeIf { showLocationFields },
         )
         choices.chunked(3).forEach { rowChoices ->
             Row(
@@ -3504,6 +3517,7 @@ private fun GpsDetailOverflowLayer(
 internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     val gpsViewModel: GpsViewModel = viewModel()
     val gpsState by gpsViewModel.state.collectAsState()
+    val gpsUpdateFrequency by gpsViewModel.updateFrequency.collectAsState()
     val hasGpsPairing = gpsViewModel.hasPairedDevice()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -3753,14 +3767,12 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
                         }
                     }
                 }
-                if (gpsState.enabled) {
-                    Text(
-                        text = stringResource(R.string.gps_update_frequency),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant.copy(alpha = 0.72f),
-                        modifier = Modifier.padding(top = if (hasLocation) 2.dp else 8.dp),
-                    )
-                }
+                GpsUpdateFrequencyWheel(
+                    selected = gpsUpdateFrequency,
+                    onValueCommitted = gpsViewModel::setUpdateFrequency,
+                    emphasized = gpsState.enabled,
+                    modifier = Modifier.padding(top = if (hasLocation) 8.dp else 10.dp),
+                )
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -3840,6 +3852,38 @@ private fun GpsConnectionStep(
         )
     }
 }
+
+@Composable
+private fun GpsUpdateFrequencyWheel(
+    selected: GpsUpdateFrequency,
+    onValueCommitted: (GpsUpdateFrequency) -> Unit,
+    emphasized: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val frequencyLabels = mapOf(
+        GpsUpdateFrequency.THIRTY_SECONDS to stringResource(R.string.gps_frequency_30_seconds),
+        GpsUpdateFrequency.ONE_MINUTE to stringResource(R.string.gps_frequency_1_minute),
+        GpsUpdateFrequency.TWO_MINUTES to stringResource(R.string.gps_frequency_2_minutes),
+        GpsUpdateFrequency.FIVE_MINUTES to stringResource(R.string.gps_frequency_5_minutes),
+    )
+    ReleaseCommitWheel(
+        options = GPS_UPDATE_FREQUENCY_OPTIONS,
+        selected = selected,
+        optionLabel = { frequency -> frequencyLabels.getValue(frequency) },
+        onValueCommitted = onValueCommitted,
+        label = stringResource(R.string.gps_update_frequency_label),
+        wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
+        optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
+        optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
+        showDragHint = false,
+        accentColor = colors.accentBlue,
+        emphasized = emphasized,
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
+private val GPS_UPDATE_FREQUENCY_OPTIONS = GpsUpdateFrequency.values().toList()
 
 @Composable
 private fun GpsStatusButton(

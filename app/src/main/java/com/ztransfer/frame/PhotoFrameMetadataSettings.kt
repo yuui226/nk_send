@@ -93,6 +93,16 @@ internal fun normalizePhotoFrameMetadataSettings(
     timePattern = normalizePhotoFrameTimePattern(settings.timePattern),
 )
 
+/**
+ * The local-photo workbench predates location metadata controls. Keep its settings independent
+ * from the camera-transfer editor by explicitly removing the three location fields there.
+ */
+internal fun PhotoFrameMetadataSettings.withoutLocationFields(): PhotoFrameMetadataSettings = copy(
+    showAddress = false,
+    showCoordinates = false,
+    showAltitude = false,
+)
+
 internal fun normalizePhotoFrameDatePattern(pattern: String): String =
     pattern.trim().takeIf { it in PHOTO_FRAME_DATE_PATTERNS }
         ?: DEFAULT_PHOTO_FRAME_DATE_PATTERN

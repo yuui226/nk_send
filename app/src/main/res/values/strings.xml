@@ -563,7 +563,11 @@
     <string name="gps_coordinates_value">Coordinates: %1$s</string>
     <string name="gps_altitude_value">Altitude: %1$d m</string>
     <string name="gps_updated_at">Updated: %1$s</string>
-    <string name="gps_update_frequency">Update frequency: every minute</string>
+    <string name="gps_update_frequency_label">Update frequency</string>
+    <string name="gps_frequency_30_seconds">30 sec</string>
+    <string name="gps_frequency_1_minute">1 min</string>
+    <string name="gps_frequency_2_minutes">2 min</string>
+    <string name="gps_frequency_5_minutes">5 min</string>
     <string name="gps_need_camera">Camera pairing</string>
     <string name="gps_ap_unavailable">Unavailable in AP mode</string>
     <string name="gps_retry">Retry</string>
