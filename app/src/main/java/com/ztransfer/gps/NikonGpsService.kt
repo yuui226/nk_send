@@ -317,8 +317,7 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             name,
             null,
         )
-        startLocationUpdates()
-        startGeoWriteTicker()
+        restartLocationPipeline()
     }
 
     override fun onGeoWritten(success: Boolean) {
@@ -462,11 +461,15 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         cameraReady = false
         periodicGeoWriteJob?.cancel()
         periodicGeoWriteJob = null
+        stopLocationUpdates()
         cameraVerified = false
         preserveReadyDuringReconnect = false
         pairingConfirmationPending = false
         latestLocationDuringWrite = null
         pendingAltitudeRefresh = false
+        geoWriteInFlight = false
+        geoWriteTimeoutJob?.cancel()
+        geoWriteTimeoutJob = null
         readyUiJob?.cancel()
         readyUiJob = null
         if (message.contains("pairing rejected", ignoreCase = true) ||
@@ -546,6 +549,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
             updateState(GpsStatus.NEEDS_CAMERA, message = "请在相机上打开蓝牙配对")
             return
         }
+        if (gpsRecoveryTarget(cameraReady, bleClient.isRunning()) == GpsRecoveryTarget.LOCATION_ONLY) {
+            notificationOverride = null
+            updateState(GpsStatus.CONNECTING, message = "正在获取手机位置")
+            restartLocationPipeline()
+            return
+        }
         updateState(GpsStatus.STARTING)
         startBle()
     }
@@ -598,21 +607,23 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         preferences.getLong(KEY_DEVICE_ID, Long.MIN_VALUE) != Long.MIN_VALUE &&
             preferences.getLong(KEY_NONCE, Long.MIN_VALUE) != Long.MIN_VALUE
 
-    private fun startLocationUpdates() {
+    private fun startLocationUpdates(): Boolean {
+        // A retry replaces any previous subscription. In particular, do this before permission
+        // and provider checks so an error cannot leave an old high-frequency listener running.
+        stopLocationUpdates()
         val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!fine && !coarse) {
             updateState(GpsStatus.ERROR, message = "需要定位权限")
-            return
+            return false
         }
         val gpsEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)
         val networkEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
         if (!gpsEnabled && !networkEnabled) {
             updateState(GpsStatus.ERROR, message = "请打开手机定位")
-            return
+            return false
         }
-        stopLocationUpdates()
-        runCatching {
+        return runCatching {
             if (gpsEnabled && locationManager.getProvider(LocationManager.GPS_PROVIDER) != null) {
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5_000L, 0f, locationListener, Looper.getMainLooper())
             }
@@ -630,11 +641,22 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
                 location.time > 0L && kotlin.math.abs(now - location.time) <= CACHED_LOCATION_MAX_AGE_MS
             }.maxByOrNull { it.time }
             cached?.let(locationListener::onLocationChanged)
-        }.onFailure { updateState(GpsStatus.ERROR, message = "无法获取定位") }
+            true
+        }.getOrElse {
+            stopLocationUpdates()
+            updateState(GpsStatus.ERROR, message = "无法获取定位")
+            false
+        }
     }
 
     private fun stopLocationUpdates() {
         runCatching { locationManager.removeUpdates(locationListener) }
+    }
+
+    private fun restartLocationPipeline() {
+        periodicGeoWriteJob?.cancel()
+        periodicGeoWriteJob = null
+        if (startLocationUpdates()) startGeoWriteTicker()
     }
 
     private fun maybeSend(location: Location, force: Boolean = false) {

@@ -559,7 +559,10 @@ fun HomeScreen(
                                     scaleY = scale
                                 },
                         ) {
-                            GpsConnectionControl(modifier = Modifier.fillMaxWidth())
+                            GpsConnectionControl(
+                                hapticsEnabled = transferState.hapticsEnabled,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                         }
                     }
 

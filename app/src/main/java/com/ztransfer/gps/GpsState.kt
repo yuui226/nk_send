@@ -30,3 +30,18 @@ data class GpsState(
     val lastSentAtMs: Long? = null,
     val message: String? = null,
 )
+
+internal enum class GpsRecoveryTarget {
+    LOCATION_ONLY,
+    FULL_CONNECTION,
+}
+
+/** Keep an established camera session when only the phone location setup needs another attempt. */
+internal fun gpsRecoveryTarget(
+    cameraReady: Boolean,
+    bleClientRunning: Boolean,
+): GpsRecoveryTarget = if (cameraReady && bleClientRunning) {
+    GpsRecoveryTarget.LOCATION_ONLY
+} else {
+    GpsRecoveryTarget.FULL_CONNECTION
+}

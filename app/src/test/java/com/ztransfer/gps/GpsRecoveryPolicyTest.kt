@@ -1,0 +1,31 @@
+package com.ztransfer.gps
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class GpsRecoveryPolicyTest {
+    @Test
+    fun connectedCameraRetriesOnlyPhoneLocation() {
+        assertEquals(
+            GpsRecoveryTarget.LOCATION_ONLY,
+            gpsRecoveryTarget(cameraReady = true, bleClientRunning = true),
+        )
+    }
+
+    @Test
+    fun incompleteCameraSessionUsesFullConnectionRecovery() {
+        listOf(
+            false to false,
+            false to true,
+            true to false,
+        ).forEach { (cameraReady, bleClientRunning) ->
+            assertEquals(
+                GpsRecoveryTarget.FULL_CONNECTION,
+                gpsRecoveryTarget(
+                    cameraReady = cameraReady,
+                    bleClientRunning = bleClientRunning,
+                ),
+            )
+        }
+    }
+}

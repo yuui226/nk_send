@@ -571,8 +571,8 @@
     <string name="gps_paired_device_status">相機已配對</string>
     <string name="gps_clear_pairing_message">將清除已儲存的相機身分，下次使用時需要重新配對。</string>
     <string name="gps_detail_description">開啟則相機拍的照片會附帶位置資訊</string>
-    <string name="gps_step_camera">相機開啟藍牙\n- 首次：連接至智慧型裝置 → 配對（Bluetooth）→ 開始配對</string>
-    <string name="gps_step_camera_reconnect">相機開啟藍牙</string>
+    <string name="gps_step_camera">手機開啟藍牙與定位服務\n相機開啟藍牙\n- 首次：連接至智慧型裝置 → 配對（Bluetooth）→ 開始配對</string>
+    <string name="gps_step_camera_reconnect">手機開啟藍牙與定位服務\n相機開啟藍牙</string>
     <string name="gps_step_app">App：點擊「開啟 GPS」</string>
     <string name="gps_background_keep_alive_hint">建議：耗電管理 → 不限制 · 多工 → 鎖定</string>
     <string name="gps_permission_required">請允許藍牙和定位權限</string>

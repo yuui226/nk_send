@@ -164,6 +164,7 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.TransferViewModel
+import com.ztransfer.gps.GpsState
 import com.ztransfer.gps.GpsStatus
 import com.ztransfer.gps.GpsDiagnostics
 import com.ztransfer.gps.GpsUpdateFrequency
@@ -3416,6 +3417,29 @@ private enum class GpsStatusButtonState {
     ERROR,
 }
 
+internal enum class GpsConnectionHapticOutcome {
+    NONE,
+    SUCCESS,
+    FAILURE,
+}
+
+/**
+ * Collapse GPS's detailed progress into stable result events so intermediate state changes do not
+ * vibrate, and connected sub-states do not repeat the success feedback during location updates.
+ */
+internal fun GpsState.gpsConnectionHapticOutcome(): GpsConnectionHapticOutcome = when {
+    !enabled -> GpsConnectionHapticOutcome.NONE
+    status == GpsStatus.PAIRING_SUCCESS ||
+        status == GpsStatus.CONNECTED ||
+        status == GpsStatus.WRITING ||
+        status == GpsStatus.WAITING_FIX ||
+        status == GpsStatus.READY -> GpsConnectionHapticOutcome.SUCCESS
+    status == GpsStatus.NEEDS_CAMERA ||
+        status == GpsStatus.AP_UNAVAILABLE ||
+        status == GpsStatus.ERROR -> GpsConnectionHapticOutcome.FAILURE
+    else -> GpsConnectionHapticOutcome.NONE
+}
+
 @Composable
 private fun GpsResetPairingDialog(
     onConfirm: () -> Unit,
@@ -3513,10 +3537,27 @@ private fun GpsDetailOverflowLayer(
 
 /** Compact GPS control shared by the connection page; settings no longer owns this entry. */
 @Composable
-internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
+internal fun GpsConnectionControl(
+    hapticsEnabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
     val gpsViewModel: GpsViewModel = viewModel()
     val gpsState by gpsViewModel.state.collectAsState()
     val gpsUpdateFrequency by gpsViewModel.updateFrequency.collectAsState()
+    val haptics = rememberHaptics(hapticsEnabled)
+    val currentHaptics by rememberUpdatedState(haptics)
+    val hapticOutcome = gpsState.gpsConnectionHapticOutcome()
+    var previousHapticOutcome by remember { mutableStateOf(hapticOutcome) }
+    LaunchedEffect(hapticOutcome) {
+        if (hapticOutcome != previousHapticOutcome) {
+            when (hapticOutcome) {
+                GpsConnectionHapticOutcome.SUCCESS -> currentHaptics.success()
+                GpsConnectionHapticOutcome.FAILURE -> currentHaptics.failure()
+                GpsConnectionHapticOutcome.NONE -> Unit
+            }
+        }
+        previousHapticOutcome = hapticOutcome
+    }
     val hasGpsPairing = gpsViewModel.hasPairedDevice()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -3538,6 +3579,13 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
     ) {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
         if (adapter?.isEnabled == true) gpsViewModel.setEnabled(true) else showHint(bluetoothHint)
+    }
+    val locationSettingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        // The camera-side BLE session may still be healthy. The service will retain it and only
+        // recreate the phone location subscription when that is sufficient.
+        gpsViewModel.retry()
     }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -3620,6 +3668,10 @@ internal fun GpsConnectionControl(modifier: Modifier = Modifier) {
             !gpsState.enabled -> enableGps()
             gpsState.status == GpsStatus.ERROR && gpsState.message?.contains("蓝牙") == true ->
                 bluetoothEnableLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+            gpsState.status == GpsStatus.ERROR && gpsState.message?.contains("定位权限") == true ->
+                enableGps()
+            gpsState.status == GpsStatus.ERROR && gpsState.message?.contains("手机定位") == true ->
+                locationSettingsLauncher.launch(Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
             gpsState.status == GpsStatus.ERROR -> gpsViewModel.retry()
             gpsState.status == GpsStatus.AP_UNAVAILABLE -> Unit
             else -> gpsViewModel.setEnabled(false)
