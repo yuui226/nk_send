@@ -6,7 +6,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.location.Geocoder
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.ConnectivityManager
@@ -1357,15 +1356,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     // Fetch EXIF only after the FHD succeeds. If a foreground task cancels this
                     // step, do not latch the attempt: the same photo can retry when IO is idle.
-                    val exif = loadExif(latest)?.let { value ->
-                        if (value.latitude != null && value.longitude != null) {
-                            value.copy(
-                                address = withContext(Dispatchers.IO) {
-                                    reverseGeocode(value.latitude, value.longitude)
-                                },
-                            )
-                        } else value
-                    }
+                    // Border address metadata is intentionally disabled.  Keep the preview
+                    // camera-header read limited to local EXIF fields; never geocode here.
+                    val exif = loadExif(latest)
                     effectPreviewAttemptKey = key
                     if (_state.value.isConnectedToCamera &&
                         effectPreviewKey(
@@ -4183,22 +4176,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             raw.toFloatOrNull()
         }
-    }
-
-    private fun reverseGeocode(latitude: Double?, longitude: Double?): String? {
-        if (latitude == null || longitude == null || !Geocoder.isPresent()) return null
-        return runCatching {
-            Geocoder(getApplication<Application>(), java.util.Locale.getDefault())
-                .getFromLocation(latitude, longitude, 1)
-                ?.firstOrNull()
-                ?.let { address ->
-                    address.getAddressLine(0)?.takeIf(String::isNotBlank)
-                        ?: address.featureName?.takeIf(String::isNotBlank)
-                        ?: address.thoroughfare?.takeIf(String::isNotBlank)
-                        ?: address.locality?.takeIf(String::isNotBlank)
-                        ?: address.adminArea?.takeIf(String::isNotBlank)
-                }
-        }.getOrNull()
     }
 
     /**
