@@ -4377,7 +4377,6 @@ private fun GpsConnectionGuide(
         ) {
             GpsConnectionSteps(
                 hasGpsPairing = hasGpsPairing,
-                modifier = Modifier.padding(end = 36.dp),
             )
             TipLightbulbButton(
                 onClick = { if (showHelpButton) onHelpClick() },
@@ -4404,20 +4403,28 @@ private fun GpsConnectionSteps(
 ) {
     val colors = AppTheme.colors
     Column(modifier = modifier.fillMaxWidth()) {
-        GpsPreparationRow(
-            icon = Icons.Default.PhoneAndroid,
-            title = stringResource(R.string.gps_phone_label),
-            detail = stringResource(R.string.gps_phone_ready),
-        )
-        Spacer(Modifier.height(10.dp))
-        GpsPreparationRow(
-            icon = Icons.Default.PhotoCamera,
-            title = stringResource(R.string.gps_camera_label),
-            detail = stringResource(R.string.gps_camera_ready),
-            status = stringResource(R.string.gps_paired_badge).takeIf {
-                hasGpsPairing
-            },
-        )
+        // The help button occupies only the top preparation area. Do not reserve its width for
+        // the pairing instruction below; that card sits lower and can use the full panel width.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 36.dp),
+        ) {
+            GpsPreparationRow(
+                icon = Icons.Default.PhoneAndroid,
+                title = stringResource(R.string.gps_phone_label),
+                detail = stringResource(R.string.gps_phone_ready),
+            )
+            Spacer(Modifier.height(10.dp))
+            GpsPreparationRow(
+                icon = Icons.Default.PhotoCamera,
+                title = stringResource(R.string.gps_camera_label),
+                detail = stringResource(R.string.gps_camera_ready),
+                status = stringResource(R.string.gps_paired_badge).takeIf {
+                    hasGpsPairing
+                },
+            )
+        }
         if (!hasGpsPairing) {
             Surface(
                 modifier = Modifier
@@ -4442,8 +4449,8 @@ private fun GpsConnectionSteps(
                         Text(
                             text = stringResource(R.string.gps_first_pairing_path),
                             style = MaterialTheme.typography.labelSmall.copy(
-                                fontSize = 11.sp,
-                                lineHeight = 14.sp,
+                                fontSize = 10.sp,
+                                lineHeight = 13.sp,
                             ),
                             color = colors.onBackground,
                             modifier = Modifier.weight(1f),

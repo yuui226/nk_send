@@ -12,7 +12,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
@@ -142,10 +141,11 @@ internal fun TipLightbulbButton(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 2.dp, end = 2.dp)
+                        // Keep the unread marker inside the rounded button surface. Placing it
+                        // on the edge lets the button's corner clip the marker into a crescent.
+                        .padding(top = 5.dp, end = 5.dp)
                         .size(7.dp)
                         .background(Color(0xFFFF4D3D), CircleShape)
-                        .border(1.dp, colors.background.copy(alpha = 0.9f), CircleShape)
                         .graphicsLayer {
                             scaleX = attentionDot.first
                             scaleY = attentionDot.first
