@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Bitmap
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -535,6 +536,8 @@ fun FileListScreen(
     autoQueueFlightRequest: AutoQueueFlightRequest? = null,
     onAutoQueueFlightConsumed: (Long) -> Unit = {},
     onPreviewVisibilityChanged: (Boolean) -> Unit,
+    backHandlerEnabled: Boolean,
+    onRequestExitConfirmation: () -> Unit,
     onNavigateToRemote: () -> Unit
 ) {
     val state by remember(cameraViewModel) {
@@ -778,7 +781,14 @@ fun FileListScreen(
         }
     }
 
-    // 筛选浮层的返回键收起由 FilterOverlay 内部（AnchorPopup 的 BackHandler）处理，此处不再拦截。
+    // 照片列表是连接成功后的主工作页：系统返回不能走 NavHost 默认 popBackStack，
+    // 否则会把用户带回连接页。这里必须保留页内拦截，并复用宿主的全局二次退出确认；
+    // 队列页打开时交给 TransferScreen，筛选/预览等更深层的 BackHandler 仍优先消费。
+    BackHandler(
+        enabled = backHandlerEnabled,
+        onBack = onRequestExitConfirmation,
+    )
+    // 筛选浮层的返回键收起由 FilterOverlay 内部（AnchorPopup 的 BackHandler）处理。
 
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()

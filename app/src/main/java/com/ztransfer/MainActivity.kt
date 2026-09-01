@@ -629,7 +629,8 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     }
     // 页面级 BackHandler（弹窗、预览、工作台、队列等）在组合树后部注册，会优先消费返回；
     // 只有没有其它返回动作时，才落到这里执行全局二次退出确认。
-    BackHandler {
+    // 照片列表页另有一层页内拦截复用此回调，防止 NavHost 默认返回连接页。
+    val requestExitConfirmation: () -> Unit = {
         val now = System.currentTimeMillis()
         if (now - lastBackTime < 2_000L) {
             context.findActivity()?.finish()
@@ -641,6 +642,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
             backExitHintNonce++
         }
     }
+    BackHandler(onBack = requestExitConfirmation)
     val preferHighThroughputTransfers = shouldPreferHighThroughputTransfers(
         activeWorkspaceRoute
     )
@@ -819,6 +821,9 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                             if (cameraState.isConnectedToCamera &&
                                 navController.currentDestination?.route == Screen.Home.route
                             ) {
+                                // USB、Wi-Fi AP、Wi-Fi STA 最终都进入同一个照片列表工作区。
+                                // Home 保留在栈中用于状态恢复，但照片列表页必须拦截系统返回，
+                                // 不能让 NavHost 把用户带回连接页（见 FileListScreen）。
                                 navController.navigate(Screen.Files.route) {
                                     popUpTo(Screen.Home.route) { saveState = true }
                                     launchSingleTop = true
@@ -873,6 +878,8 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                                     if (index >= 0) autoQueueFlightRequests.removeAt(index)
                                 },
                                 onPreviewVisibilityChanged = { filePreviewVisible = it },
+                                backHandlerEnabled = !queuePageVisible,
+                                onRequestExitConfirmation = requestExitConfirmation,
                                 onNavigateToRemote = {
                                     navController.navigate(Screen.Remote.route) {
                                         launchSingleTop = true
