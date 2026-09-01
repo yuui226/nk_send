@@ -22,6 +22,7 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
+import com.ztransfer.BuildConfig
 import com.ztransfer.MainActivity
 import com.ztransfer.R
 import java.time.Instant
@@ -617,7 +618,12 @@ class NikonGpsService : Service(), NikonGpsBleClient.Listener {
         if (!preserveReadyDuringReconnect) {
             updateState(if (hasCompleteIdentity) GpsStatus.CONNECTING else GpsStatus.SEARCHING)
         }
-        bleClient.start(savedDeviceId = savedId, savedNonce = savedNonce, savedBleAddress = savedBleAddress)
+        bleClient.start(
+            controllerName = BuildConfig.GPS_CONTROLLER_NAME,
+            savedDeviceId = savedId,
+            savedNonce = savedNonce,
+            savedBleAddress = savedBleAddress,
+        )
     }
 
     private fun hasCompleteSavedIdentity(): Boolean =

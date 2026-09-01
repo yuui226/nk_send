@@ -583,6 +583,7 @@
     <string name="gps_help_intro">为了稳定运行，建议：</string>
     <string name="gps_help_battery">1. 耗电管理 → 不限制</string>
     <string name="gps_help_multitask">2. 多任务 → 锁定</string>
+    <string name="gps_help_accuracy_note">GPS 信号较弱时，定位精度会下降；海拔显示 0 米或位置偏差较大属于正常现象。</string>
     <string name="gps_permission_required">请允许蓝牙和定位权限</string>
     <string name="gps_bluetooth_required">请打开手机蓝牙以开启 GPS</string>
     <string name="gps_close_before_connect">请先关闭 GPS</string>

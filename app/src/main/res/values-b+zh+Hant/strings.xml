@@ -579,6 +579,7 @@
     <string name="gps_help_intro">為了穩定運行，建議：</string>
     <string name="gps_help_battery">1. 耗電管理 → 不限制</string>
     <string name="gps_help_multitask">2. 多工 → 鎖定</string>
+    <string name="gps_help_accuracy_note">GPS 訊號較弱時，定位精度會下降；海拔顯示 0 公尺或位置偏差較大屬於正常現象。</string>
     <string name="gps_permission_required">請允許藍牙和定位權限</string>
     <string name="gps_bluetooth_required">請開啟手機藍牙以啟用 GPS</string>
     <string name="gps_close_before_connect">請先關閉 GPS</string>

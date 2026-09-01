@@ -49,8 +49,10 @@ android {
             // 调试包与已安装的正式包并存，避免模拟器验证覆盖用户数据或遇到签名冲突。
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            buildConfigField("String", "GPS_CONTROLLER_NAME", "\"ZTDebug\"")
         }
         release {
+            buildConfigField("String", "GPS_CONTROLLER_NAME", "\"ZTransfer\"")
             signingConfig = if (hasReleaseKeystore) {
                 signingConfigs.getByName("release")
             } else {

@@ -19,6 +19,8 @@ class CoordinateFormatTest {
             "40.7128°N, 74.0060°W",
             formatDecimalDegreeCoordinates(40.7128, -74.006, fractionDigits = 4),
         )
+        assertEquals("31.23040°N", formatDecimalDegreeLatitude(31.2304, fractionDigits = 5))
+        assertEquals("121.47370°E", formatDecimalDegreeLongitude(121.4737, fractionDigits = 5))
     }
 
     @Test

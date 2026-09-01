@@ -12,19 +12,40 @@ internal fun formatDecimalDegreeCoordinates(
     longitude: Double,
     fractionDigits: Int,
 ): String {
-    require(latitude.isFinite() && latitude in -90.0..90.0) { "latitude out of range" }
-    require(longitude.isFinite() && longitude in -180.0..180.0) { "longitude out of range" }
-    require(fractionDigits in 0..8) { "fractionDigits out of range" }
+    return "${formatDecimalDegreeLatitude(latitude, fractionDigits)}, " +
+        formatDecimalDegreeLongitude(longitude, fractionDigits)
+}
 
-    val latitudeHemisphere = if (latitude < 0.0) "S" else "N"
-    val longitudeHemisphere = if (longitude < 0.0) "W" else "E"
-    val coordinatePattern = "%.${fractionDigits}f°%s, %.${fractionDigits}f°%s"
-    return String.format(
-        Locale.US,
-        coordinatePattern,
-        abs(latitude),
-        latitudeHemisphere,
-        abs(longitude),
-        longitudeHemisphere,
+internal fun formatDecimalDegreeLatitude(latitude: Double, fractionDigits: Int): String =
+    formatDecimalDegreeValue(
+        value = latitude,
+        maximum = 90.0,
+        positiveHemisphere = "N",
+        negativeHemisphere = "S",
+        fractionDigits = fractionDigits,
+        errorLabel = "latitude",
     )
+
+internal fun formatDecimalDegreeLongitude(longitude: Double, fractionDigits: Int): String =
+    formatDecimalDegreeValue(
+        value = longitude,
+        maximum = 180.0,
+        positiveHemisphere = "E",
+        negativeHemisphere = "W",
+        fractionDigits = fractionDigits,
+        errorLabel = "longitude",
+    )
+
+private fun formatDecimalDegreeValue(
+    value: Double,
+    maximum: Double,
+    positiveHemisphere: String,
+    negativeHemisphere: String,
+    fractionDigits: Int,
+    errorLabel: String,
+): String {
+    require(value.isFinite() && value in -maximum..maximum) { "$errorLabel out of range" }
+    require(fractionDigits in 0..8) { "fractionDigits out of range" }
+    val hemisphere = if (value < 0.0) negativeHemisphere else positiveHemisphere
+    return String.format(Locale.US, "%.${fractionDigits}f°%s", abs(value), hemisphere)
 }

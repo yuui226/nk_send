@@ -2121,6 +2121,7 @@ private fun GpsHelpBubble(
     anchorBounds: Rect?,
     onDismiss: () -> Unit,
 ) {
+    val colors = AppTheme.colors
     val density = LocalDensity.current
     val panelTop = anchorBounds?.let {
         with(density) { it.bottom.toDp() } + 8.dp
@@ -2155,7 +2156,17 @@ private fun GpsHelpBubble(
                 text = stringResource(R.string.gps_help_multitask),
                 style = MaterialTheme.typography.bodySmall,
                 lineHeight = 18.sp,
-                color = AppTheme.colors.onSurfaceVariant,
+                color = colors.onSurfaceVariant,
+            )
+            Divider(
+                modifier = Modifier.padding(vertical = 8.dp),
+                color = colors.glassPanelBorder.copy(alpha = 0.65f),
+            )
+            Text(
+                text = stringResource(R.string.gps_help_accuracy_note),
+                style = MaterialTheme.typography.labelSmall,
+                lineHeight = 16.sp,
+                color = colors.onSurfaceVariant,
             )
         }
     }

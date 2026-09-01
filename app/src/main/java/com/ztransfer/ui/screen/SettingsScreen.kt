@@ -166,6 +166,8 @@ import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.PROGRESSIVE_HOLD_HAPTIC_DURATION_MS
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.util.formatDecimalDegreeCoordinates
+import com.ztransfer.util.formatDecimalDegreeLatitude
+import com.ztransfer.util.formatDecimalDegreeLongitude
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.gps.GpsState
 import com.ztransfer.gps.GpsStatus
@@ -3724,7 +3726,7 @@ internal fun GpsConnectionControl(
     var placeBubbleCoordinates by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var placeBubbleRequestId by remember { mutableIntStateOf(0) }
     var coordinateCopied by remember { mutableStateOf(false) }
-    var copiedCoordinateText by remember { mutableStateOf("") }
+    var copiedCoordinateSlot by remember { mutableIntStateOf(0) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     val detailVisibility = remember { MutableTransitionState(false) }
     detailVisibility.targetState = expanded
@@ -4067,72 +4069,54 @@ internal fun GpsConnectionControl(
                                     displayLongitude,
                                     fractionDigits = 5,
                                 )
+                                val latitudeText = formatDecimalDegreeLatitude(
+                                    displayLatitude,
+                                    fractionDigits = 5,
+                                )
+                                val longitudeText = formatDecimalDegreeLongitude(
+                                    displayLongitude,
+                                    fractionDigits = 5,
+                                )
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(top = 8.dp),
                                 ) {
-                                    Box(modifier = Modifier.wrapContentSize(Alignment.TopStart)) {
-                                        val stableCoordinateText = copiedCoordinateText
-                                            .takeIf { coordinateCopied && it.isNotBlank() }
-                                            ?: coordinates
-                                        val copiedProgress by animateFloatAsState(
-                                            targetValue = if (coordinateCopied) 1f else 0f,
-                                            animationSpec = tween(
-                                                if (coordinateCopied) 140 else 190,
-                                                easing = FastOutSlowInEasing,
-                                            ),
-                                            label = "gpsCoordinateCopied",
-                                        )
+                                    Box(modifier = Modifier.fillMaxWidth()) {
                                         val copiedLabel = stringResource(R.string.code_copied)
-                                        GpsDetailItemSurface(
-                                            onClick = {
-                                                copiedCoordinateText = coordinates
-                                                clipboard.setText(AnnotatedString(coordinates))
-                                                coordinateCopied = true
-                                                placeBubbleCoordinates =
-                                                    displayLatitude to displayLongitude
-                                                placeBubbleRequestId += 1
-                                                gpsViewModel.lookupPlaceName(
-                                                    displayLatitude,
-                                                    displayLongitude,
-                                                )
-                                            },
-                                        ) {
-                                            Icon(
-                                                Icons.Default.LocationOn,
-                                                contentDescription = null,
-                                                tint = colors.accentBlue,
-                                                modifier = Modifier
-                                                    .size(20.dp)
-                                                    .graphicsLayer {
-                                                        alpha = 1f - copiedProgress
-                                                    },
-                                            )
-                                            Text(
-                                                text = stableCoordinateText,
-                                                fontSize = 17.sp,
-                                                lineHeight = 21.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = colors.onBackground,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.graphicsLayer {
-                                                    alpha = 1f - copiedProgress
-                                                },
+                                        fun copyCoordinates(slot: Int) {
+                                            copiedCoordinateSlot = slot
+                                            clipboard.setText(AnnotatedString(coordinates))
+                                            coordinateCopied = true
+                                            placeBubbleCoordinates =
+                                                displayLatitude to displayLongitude
+                                            placeBubbleRequestId += 1
+                                            gpsViewModel.lookupPlaceName(
+                                                displayLatitude,
+                                                displayLongitude,
                                             )
                                         }
-                                        Text(
-                                            text = copiedLabel,
-                                            fontSize = 17.sp,
-                                            lineHeight = 21.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = colors.onBackground,
-                                            maxLines = 1,
-                                            modifier = Modifier
-                                                .align(Alignment.Center)
-                                                .graphicsLayer { alpha = copiedProgress },
-                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            GpsCoordinateValueSurface(
+                                                value = latitudeText,
+                                                copied = coordinateCopied &&
+                                                    copiedCoordinateSlot == 1,
+                                                copiedLabel = copiedLabel,
+                                                onClick = { copyCoordinates(1) },
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            GpsCoordinateValueSurface(
+                                                value = longitudeText,
+                                                copied = coordinateCopied &&
+                                                    copiedCoordinateSlot == 2,
+                                                copiedLabel = copiedLabel,
+                                                onClick = { copyCoordinates(2) },
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                        }
                                         GpsPlaceLookupBubble(
                                             expanded = placeBubbleCoordinates != null &&
                                                 detailPrimaryContent ==
@@ -4144,12 +4128,6 @@ internal fun GpsConnectionControl(
                                     GpsDetailItemSurface(
                                         modifier = Modifier.padding(top = 6.dp),
                                     ) {
-                                        Icon(
-                                            Icons.Default.Terrain,
-                                            contentDescription = null,
-                                            tint = colors.accentBlue,
-                                            modifier = Modifier.size(20.dp),
-                                        )
                                         Text(
                                             text = stringResource(
                                                 R.string.gps_altitude_value,
@@ -4531,11 +4509,65 @@ private fun GpsPreparationRow(
     }
 }
 
+/** 单个经纬度框在固定宽度内切换“已复制”，避免反馈改变整行尺寸。 */
+@Composable
+private fun GpsCoordinateValueSurface(
+    value: String,
+    copied: Boolean,
+    copiedLabel: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val copiedProgress by animateFloatAsState(
+        targetValue = if (copied) 1f else 0f,
+        animationSpec = tween(
+            if (copied) 140 else 190,
+            easing = FastOutSlowInEasing,
+        ),
+        label = "gpsCoordinateCopied",
+    )
+    GpsDetailItemSurface(
+        modifier = modifier,
+        onClick = onClick,
+        horizontalPadding = 8.dp,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = value,
+                fontSize = 17.sp,
+                lineHeight = 21.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { alpha = 1f - copiedProgress },
+            )
+            Text(
+                text = copiedLabel,
+                fontSize = 17.sp,
+                lineHeight = 21.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onBackground,
+                maxLines = 1,
+                modifier = Modifier.graphicsLayer { alpha = copiedProgress },
+            )
+        }
+    }
+}
+
 /** 坐标与海拔共用同一套容器，避免可点击状态改变静止时的底色、描边或圆角。 */
 @Composable
 private fun GpsDetailItemSurface(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    horizontalPadding: Dp = 14.dp,
     content: @Composable RowScope.() -> Unit,
 ) {
     val colors = AppTheme.colors
@@ -4543,7 +4575,7 @@ private fun GpsDetailItemSurface(
         Row(
             modifier = Modifier
                 .height(COMPACT_SETTINGS_WHEEL_HEIGHT)
-                .padding(horizontal = 14.dp),
+                .padding(horizontal = horizontalPadding),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             content = content,
