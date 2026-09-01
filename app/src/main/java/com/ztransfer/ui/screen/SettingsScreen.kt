@@ -3938,6 +3938,7 @@ internal fun GpsConnectionControl(
             showDragHint = false,
             accentColor = statusAccent,
             emphasized = expanded || buttonState != GpsStatusButtonState.OFF,
+            showEmphasisBorder = false,
             ambientEffectColor = gpsEntryAccent,
             ambientEffectAlpha = gpsEntryAmbientAlpha,
             modifier = Modifier.fillMaxWidth(),
@@ -3998,7 +3999,17 @@ internal fun GpsConnectionControl(
             ) {
                 AnimatedContent(
                     targetState = detailPrimaryPresentation,
-                    contentKey = { it.content },
+                    // Turning GPS on moves from the off guide to the same connection guide.
+                    // Keep both states on one animation key so the panel itself does not flash
+                    // or replay its copy; only the controls below are allowed to transition.
+                    contentKey = {
+                        when (it.content) {
+                            GpsDetailPrimaryContent.OFF_GUIDE,
+                            GpsDetailPrimaryContent.CONNECTION_STEPS ->
+                                GpsDetailPrimaryContent.CONNECTION_STEPS
+                            else -> it.content
+                        }
+                    },
                     transitionSpec = {
                         (fadeIn(tween(180, delayMillis = 45)) togetherWith
                             fadeOut(tween(130)))
@@ -4016,37 +4027,16 @@ internal fun GpsConnectionControl(
                     modifier = Modifier.fillMaxWidth(),
                 ) { presentation ->
                     when (presentation.content) {
-                        GpsDetailPrimaryContent.OFF_GUIDE -> Column(
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 12.dp),
-                            ) {
-                                GpsConnectionSteps(
-                                    hasGpsPairing = hasGpsPairing,
-                                    modifier = Modifier.padding(end = 36.dp),
-                                )
-                                TipLightbulbButton(
-                                    onClick = {
-                                        gpsViewModel.markConnectionHelpViewed()
-                                        onHelpRequested(gpsHelpAnchorBounds)
-                                    },
-                                    contentDescription = stringResource(R.string.gps_auto_write),
-                                    attention = !gpsConnectionHelpViewed,
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .size(30.dp)
-                                        .onGloballyPositioned {
-                                            gpsHelpAnchorBounds = it.boundsInRoot()
-                                        },
-                                )
-                            }
-                        }
-                        GpsDetailPrimaryContent.CONNECTION_STEPS -> GpsConnectionSteps(
+                        GpsDetailPrimaryContent.OFF_GUIDE,
+                        GpsDetailPrimaryContent.CONNECTION_STEPS -> GpsConnectionGuide(
                             hasGpsPairing = hasGpsPairing,
-                            modifier = Modifier.padding(top = 10.dp),
+                            showHelpButton = !gpsState.enabled,
+                            helpAttention = !gpsConnectionHelpViewed,
+                            onHelpClick = {
+                                gpsViewModel.markConnectionHelpViewed()
+                                onHelpRequested(gpsHelpAnchorBounds)
+                            },
+                            onHelpPositioned = { gpsHelpAnchorBounds = it.boundsInRoot() },
                         )
                         GpsDetailPrimaryContent.LOCATION -> {
                             val displayLatitude = presentation.latitude
@@ -4161,7 +4151,7 @@ internal fun GpsConnectionControl(
                         contentAlignment = Alignment.Center,
                         label = "gpsLeadingControl",
                         modifier = Modifier
-                            .weight(0.88f)
+                            .weight(0.82f)
                             .height(COMPACT_SETTINGS_WHEEL_HEIGHT),
                     ) { controlMode ->
                         when (controlMode) {
@@ -4203,7 +4193,7 @@ internal fun GpsConnectionControl(
                         showCountdown = timingControlsVisible,
                         lastUpdatedAtMs = gpsState.lastSentAtMs,
                         status = gpsState.status,
-                        modifier = Modifier.weight(0.74f),
+                        modifier = Modifier.weight(0.86f),
                     )
                     GpsStatusButton(
                         status = gpsState.status,
@@ -4356,6 +4346,53 @@ private fun GpsPlaceLookupBubble(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun GpsConnectionGuide(
+    hasGpsPairing: Boolean,
+    showHelpButton: Boolean,
+    helpAttention: Boolean,
+    onHelpClick: () -> Unit,
+    onHelpPositioned: (androidx.compose.ui.layout.LayoutCoordinates) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val helpAlpha by animateFloatAsState(
+        targetValue = if (showHelpButton) 1f else 0f,
+        animationSpec = tween(140, easing = FastOutSlowInEasing),
+        label = "gpsHelpButtonAlpha",
+    )
+    val helpScale by animateFloatAsState(
+        targetValue = if (showHelpButton) 1f else 0.92f,
+        animationSpec = tween(160, easing = FastOutSlowInEasing),
+        label = "gpsHelpButtonScale",
+    )
+    Column(modifier = modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+        ) {
+            GpsConnectionSteps(
+                hasGpsPairing = hasGpsPairing,
+                modifier = Modifier.padding(end = 36.dp),
+            )
+            TipLightbulbButton(
+                onClick = { if (showHelpButton) onHelpClick() },
+                contentDescription = stringResource(R.string.gps_auto_write),
+                attention = helpAttention && showHelpButton,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(30.dp)
+                    .graphicsLayer {
+                        alpha = helpAlpha
+                        scaleX = helpScale
+                        scaleY = helpScale
+                    }
+                    .onGloballyPositioned(onHelpPositioned),
+            )
         }
     }
 }
@@ -4708,6 +4745,7 @@ private fun GpsUpdateFrequencyWheel(
                     accentColor = colors.accentBlue,
                     enabled = enabled,
                     emphasized = emphasized,
+                    showEmphasisBorder = false,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

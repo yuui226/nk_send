@@ -6,7 +6,6 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Bitmap
 import android.provider.Settings
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -536,7 +535,6 @@ fun FileListScreen(
     autoQueueFlightRequest: AutoQueueFlightRequest? = null,
     onAutoQueueFlightConsumed: (Long) -> Unit = {},
     onPreviewVisibilityChanged: (Boolean) -> Unit,
-    backHandlerEnabled: Boolean,
     onNavigateToRemote: () -> Unit
 ) {
     val state by remember(cameraViewModel) {
@@ -744,8 +742,6 @@ fun FileListScreen(
     }
     // 断开时点击缩略图/整组按钮：信号按钮放大缩回强调一下，配合提示条指向"病因"。
     var signalPulse by remember { mutableStateOf(0) }
-    // 提示条文案在非组合的回调（BackHandler/onClick）里使用，先在组合期取出。
-    val exitHint = stringResource(R.string.press_back_to_exit)
     val notConnectedHint = stringResource(R.string.camera_not_connected)
     val transferDirectoryRequiredHint = stringResource(R.string.transfer_directory_required_hint)
     // 免费版监看时长用完的引导（指向设置里的"高级版"入口），轻提示不打断。
@@ -782,17 +778,6 @@ fun FileListScreen(
         }
     }
 
-    // 文件列表是连接成功后的主页面：返回不回到连接页，而是"再按一次退出应用"。
-    var lastBackTime by remember { mutableStateOf(0L) }
-    BackHandler(enabled = backHandlerEnabled) {
-        val now = System.currentTimeMillis()
-        if (now - lastBackTime < 2000L) {
-            context.findActivity()?.finish()
-        } else {
-            lastBackTime = now
-            showHint(exitHint)
-        }
-    }
     // 筛选浮层的返回键收起由 FilterOverlay 内部（AnchorPopup 的 BackHandler）处理，此处不再拦截。
 
     val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()

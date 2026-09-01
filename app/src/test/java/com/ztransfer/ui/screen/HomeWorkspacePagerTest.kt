@@ -23,10 +23,32 @@ class HomeWorkspacePagerTest {
     }
 
     @Test
-    fun `only the return direction uses the more responsive snap threshold`() {
-        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD >= 0.04f)
-        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD <= 0.08f)
+    fun `return threshold is easier than entry threshold`() {
+        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD >= 0.08f)
+        assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD <= 0.12f)
         assertTrue(WORKSPACE_ENTRY_SNAP_THRESHOLD >= 0.40f)
         assertTrue(WORKSPACE_RETURN_SNAP_THRESHOLD < WORKSPACE_ENTRY_SNAP_THRESHOLD)
+    }
+
+    @Test
+    fun `GPS blocks entering workbench but allows returning to connection page`() {
+        assertFalse(
+            workspacePagerUserScrollEnabled(
+                gpsEnabled = true,
+                currentPage = 0,
+            )
+        )
+        assertTrue(
+            workspacePagerUserScrollEnabled(
+                gpsEnabled = true,
+                currentPage = 1,
+            )
+        )
+        assertTrue(
+            workspacePagerUserScrollEnabled(
+                gpsEnabled = false,
+                currentPage = 0,
+            )
+        )
     }
 }

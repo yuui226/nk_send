@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -376,18 +378,21 @@ private fun FirstLaunchNotificationHint() {
 
 /** Shared bottom glass bubble for lightweight, non-blocking action feedback. */
 @Composable
-private fun BottomGlassHint(text: String, modifier: Modifier = Modifier) {
+private fun BottomGlassHint(
+    text: String,
+    modifier: Modifier = Modifier,
+    verticalPadding: Dp = 10.dp,
+) {
     val colors = AppTheme.colors
     Surface(
         modifier = modifier.widthIn(max = 340.dp),
         shape = RoundedCornerShape(22.dp),
         color = colors.glassSurfaceHeavy,
-        shadowElevation = 6.dp,
         border = BorderStroke(1.dp, colors.glassPanelBorder),
     ) {
         Text(
             text = text,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = verticalPadding),
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.labelLarge,
             color = colors.onBackground,
@@ -596,6 +601,12 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     val currentRoute = currentBackStackEntry?.destination?.route
     val currentDestinationResumed = rememberBackStackEntryResumed(currentBackStackEntry)
     var queuePageVisible by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val exitHintBottomPadding = (LocalConfiguration.current.screenHeightDp * 0.12f).dp
+    val backExitHint = stringResource(R.string.return_again_to_exit)
+    var lastBackTime by rememberSaveable { mutableLongStateOf(0L) }
+    var backExitHintVisible by remember { mutableStateOf(false) }
+    var backExitHintNonce by remember { mutableLongStateOf(0L) }
     val activeWorkspaceRoute = if (
         currentRoute == Screen.Files.route && queuePageVisible
     ) {
@@ -603,9 +614,31 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     } else {
         currentRoute
     }
-    LaunchedEffect(currentRoute) {
+    LaunchedEffect(currentRoute, queuePageVisible) {
+        lastBackTime = 0L
+        backExitHintVisible = false
         if (currentRoute != null && currentRoute != Screen.Files.route) {
             queuePageVisible = false
+        }
+    }
+    LaunchedEffect(backExitHintNonce) {
+        if (backExitHintNonce > 0L && backExitHintVisible) {
+            delay(1_800L)
+            backExitHintVisible = false
+        }
+    }
+    // 页面级 BackHandler（弹窗、预览、工作台、队列等）在组合树后部注册，会优先消费返回；
+    // 只有没有其它返回动作时，才落到这里执行全局二次退出确认。
+    BackHandler {
+        val now = System.currentTimeMillis()
+        if (now - lastBackTime < 2_000L) {
+            context.findActivity()?.finish()
+            lastBackTime = 0L
+            backExitHintVisible = false
+        } else {
+            lastBackTime = now
+            backExitHintVisible = true
+            backExitHintNonce++
         }
     }
     val preferHighThroughputTransfers = shouldPreferHighThroughputTransfers(
@@ -840,7 +873,6 @@ fun MainScreen(transferViewModel: TransferViewModel) {
                                     if (index >= 0) autoQueueFlightRequests.removeAt(index)
                                 },
                                 onPreviewVisibilityChanged = { filePreviewVisible = it },
-                                backHandlerEnabled = !queuePageVisible,
                                 onNavigateToRemote = {
                                     navController.navigate(Screen.Remote.route) {
                                         launchSingleTop = true
@@ -895,7 +927,21 @@ fun MainScreen(transferViewModel: TransferViewModel) {
             )
         }
         AnimatedVisibility(
-            visible = staReconnectHintVisible,
+            visible = backExitHintVisible,
+            enter = fadeIn() + slideInVertically { it / 2 },
+            exit = fadeOut() + slideOutVertically { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = exitHintBottomPadding),
+        ) {
+            BottomGlassHint(
+                text = backExitHint,
+                verticalPadding = 14.dp,
+            )
+        }
+        AnimatedVisibility(
+            visible = !backExitHintVisible && staReconnectHintVisible,
             enter = fadeIn() + slideInVertically { it / 2 },
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier

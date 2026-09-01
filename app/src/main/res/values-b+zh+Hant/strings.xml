@@ -72,7 +72,7 @@
     <string name="no_photos_on_camera">相機中沒有照片</string>
     <string name="usb_turn_on_camera_hint">請開啟相機電源</string>
     <string name="camera_not_connected">相機未連線</string>
-    <string name="press_back_to_exit">再按一次離開</string>
+    <string name="return_again_to_exit">再次返回離開</string>
     <string name="no_photos_match_filter">沒有符合篩選的照片</string>
     <string name="clear_filters">清除篩選</string>
     <string name="loading_more">正在載入更多…</string>
@@ -556,7 +556,7 @@
     <string name="gps_place_loading">正在查詢地點…</string>
     <string name="gps_place_unavailable">暫時無法取得地點名稱，請稍後重試</string>
     <string name="gps_altitude_value">海拔：%1$d 公尺</string>
-    <string name="gps_update_frequency_label">更新頻率</string>
+    <string name="gps_update_frequency_label">頻率</string>
     <string name="gps_frequency_30_seconds">30 秒</string>
     <string name="gps_frequency_1_minute">1 分鐘</string>
     <string name="gps_frequency_2_minutes">2 分鐘</string>

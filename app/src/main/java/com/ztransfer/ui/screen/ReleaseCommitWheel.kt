@@ -111,6 +111,7 @@ internal fun <T> ReleaseCommitWheel(
     showDragHint: Boolean = true,
     accentColor: Color? = null,
     emphasized: Boolean = false,
+    showEmphasisBorder: Boolean = true,
     onLongClick: (() -> Unit)? = null,
     centerIcon: (@Composable (Color) -> Unit)? = null,
     favoriteOption: (T) -> Boolean = { false },
@@ -159,6 +160,7 @@ internal fun <T> ReleaseCommitWheel(
     val badgeBackground = resolvedAccent.copy(alpha = if (darkTheme) 0.13f else 0.10f)
     val badgeBorder = resolvedAccent.copy(alpha = if (darkTheme) 0.25f else 0.30f)
     val normalizedBurst = burstProgress.coerceIn(0f, 1f)
+    val borderEmphasisProgress = if (showEmphasisBorder) emphasisProgress else 0f
     val enabledModifier = if (enabled) {
         modifier
     } else {
@@ -185,17 +187,20 @@ internal fun <T> ReleaseCommitWheel(
                 width = when {
                     dragging -> 1.5.dp
                     normalizedBurst > 0f -> (1.35f + 0.9f * normalizedBurst).dp
-                    emphasisProgress > 0f -> (1f + 0.35f * emphasisProgress).dp
+                    borderEmphasisProgress > 0f ->
+                        (1f + 0.35f * borderEmphasisProgress).dp
                     else -> 1.dp
                 },
-                brush = if (dragging || emphasisProgress > 0f || normalizedBurst > 0f) {
+                brush = if (
+                    dragging || borderEmphasisProgress > 0f || normalizedBurst > 0f
+                ) {
                     Brush.verticalGradient(
                         listOf(
                             resolvedAccent.copy(
                                 alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f),
                             ),
                             resolvedAccent.copy(
-                                alpha = (0.38f + 0.30f * emphasisProgress +
+                                alpha = (0.38f + 0.30f * borderEmphasisProgress +
                                     0.28f * normalizedBurst).coerceAtMost(1f),
                             ),
                         )

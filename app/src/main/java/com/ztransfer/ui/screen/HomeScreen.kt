@@ -171,6 +171,7 @@ fun HomeScreen(
     transferViewModel: TransferViewModel,
     onConnectionCelebrationFinished: () -> Unit,
     onOpenLocalPhotoEffects: () -> Unit,
+    localPhotoEffectsEnabled: Boolean = true,
 ) {
     val state by remember(viewModel) {
         viewModel.state
@@ -872,6 +873,7 @@ fun HomeScreen(
                 // 工作台在空间关系上位于连接页下方，入口贴近屏幕底部提示下滑方向。
                 GlassButton(
                     onClick = onOpenLocalPhotoEffects,
+                    enabled = localPhotoEffectsEnabled,
                     shape = RoundedCornerShape(16.dp),
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
                     modifier = Modifier.height(44.dp),
