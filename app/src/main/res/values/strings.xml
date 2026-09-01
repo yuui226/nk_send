@@ -580,9 +580,11 @@
     <string name="gps_phone_ready">Turn on Bluetooth and Location</string>
     <string name="gps_camera_label">Camera</string>
     <string name="gps_camera_ready">Turn on Bluetooth</string>
-    <string name="gps_first_pairing_label">First connection</string>
-    <string name="gps_first_pairing_path">Camera menu: Connect to smart device → Pairing (Bluetooth) → Start pairing</string>
-    <string name="gps_background_keep_alive_hint">Recommended: Battery usage → Unrestricted · Recent apps → Lock</string>
+    <string name="gps_first_pairing_label">First:</string>
+    <string name="gps_first_pairing_path">Connect to smart device → Pairing → Start pairing</string>
+    <string name="gps_help_intro">For stable operation:</string>
+    <string name="gps_help_battery">1. Battery usage → Unrestricted</string>
+    <string name="gps_help_multitask">2. Recent apps → Lock</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
     <string name="gps_bluetooth_required">Turn on Bluetooth to enable GPS</string>
     <string name="gps_close_before_connect">Turn off GPS before connecting</string>

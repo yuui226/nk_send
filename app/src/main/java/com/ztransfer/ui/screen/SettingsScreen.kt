@@ -3579,6 +3579,36 @@ private const val GPS_PLACE_BUBBLE_EXIT_MS = 220L
 private const val GPS_PLACE_BUBBLE_TIMEOUT_MS = 8_000L
 
 @Composable
+private fun rememberGpsEntryAmbientAlpha(
+    active: Boolean,
+    breathing: Boolean,
+    error: Boolean,
+): State<Float> {
+    val restingAlpha = when {
+        error -> 0f
+        active -> 0.105f
+        else -> 0.070f
+    }
+    return if (breathing) {
+        val transition = rememberInfiniteTransition(label = "gpsEntryBreathing")
+        transition.animateFloat(
+            initialValue = if (active) 0.075f else 0.050f,
+            targetValue = if (active) 0.160f else 0.145f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = if (active) 2_400 else 2_800,
+                    easing = FastOutSlowInEasing,
+                ),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "gpsEntryFillAlpha",
+        )
+    } else {
+        rememberUpdatedState(restingAlpha)
+    }
+}
+
+@Composable
 private fun GpsResetPairingDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
@@ -3678,10 +3708,12 @@ private fun GpsDetailOverflowLayer(
 internal fun GpsConnectionControl(
     hapticsEnabled: Boolean,
     modifier: Modifier = Modifier,
+    onHelpRequested: (Rect?) -> Unit = {},
 ) {
     val gpsViewModel: GpsViewModel = viewModel()
     val gpsState by gpsViewModel.state.collectAsState()
     val gpsUpdateFrequency by gpsViewModel.updateFrequency.collectAsState()
+    val gpsConnectionHelpViewed by gpsViewModel.connectionHelpViewed.collectAsState()
     val placeLookupState by gpsViewModel.placeLookupState.collectAsState()
     val haptics = rememberHaptics(hapticsEnabled)
     val hasGpsPairing = gpsViewModel.hasPairedDevice()
@@ -3704,6 +3736,7 @@ internal fun GpsConnectionControl(
     val permissionHint = stringResource(R.string.gps_permission_required)
     val logCopiedHint = stringResource(R.string.code_copied)
     val bluetoothHint = stringResource(R.string.gps_bluetooth_required)
+    var gpsHelpAnchorBounds by remember { mutableStateOf<Rect?>(null) }
     val gpsLabel = stringResource(R.string.gps_auto_write)
     fun showHint(text: String) { hintText = text }
     val bluetoothEnableLauncher = rememberLauncherForActivityResult(
@@ -3760,7 +3793,18 @@ internal fun GpsConnectionControl(
             hintText = null
         }
     }
+    LaunchedEffect(expanded) {
+        if (!expanded) onHelpRequested(null)
+    }
     val buttonState = gpsStatusButtonState(gpsState.enabled, gpsState.status)
+    val gpsEntryError = buttonState == GpsStatusButtonState.AP_UNAVAILABLE ||
+        buttonState == GpsStatusButtonState.ERROR
+    val gpsEntryAccent = if (gpsEntryError) colors.statusError else colors.accentBlue
+    val gpsEntryAmbientAlpha = rememberGpsEntryAmbientAlpha(
+        active = gpsState.enabled,
+        breathing = !expanded && !gpsEntryError,
+        error = gpsEntryError,
+    )
     val statusAccent = when (buttonState) {
         GpsStatusButtonState.OFF -> colors.statusWaiting
         GpsStatusButtonState.ENABLED -> colors.statusConnected
@@ -3895,6 +3939,9 @@ internal fun GpsConnectionControl(
             showDragHint = false,
             accentColor = statusAccent,
             emphasized = expanded || buttonState != GpsStatusButtonState.OFF,
+            ambientEffectColor = gpsEntryAccent,
+            ambientEffectAlpha = gpsEntryAmbientAlpha,
+            drawBorder = true,
             modifier = Modifier.fillMaxWidth(),
             onLongClick = {
                 clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
@@ -3976,38 +4023,36 @@ internal fun GpsConnectionControl(
                                 .fillMaxWidth()
                                 .padding(top = 10.dp),
                         ) {
-                            Text(
-                                text = stringResource(R.string.gps_detail_description),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = colors.onBackground,
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.gps_detail_description),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.onBackground,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TipLightbulbButton(
+                                    onClick = {
+                                        gpsViewModel.markConnectionHelpViewed()
+                                        onHelpRequested(gpsHelpAnchorBounds)
+                                    },
+                                    contentDescription = stringResource(R.string.gps_auto_write),
+                                    attention = !gpsConnectionHelpViewed,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .onGloballyPositioned {
+                                            gpsHelpAnchorBounds = it.boundsInRoot()
+                                        },
+                                )
+                            }
                             GpsConnectionSteps(
                                 hasGpsPairing = hasGpsPairing,
                                 modifier = Modifier.padding(top = 10.dp),
                             )
-                            Row(
-                                modifier = Modifier.padding(top = 11.dp),
-                                verticalAlignment = Alignment.Top,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = null,
-                                    tint = colors.onSurfaceVariant,
-                                    modifier = Modifier
-                                        .padding(top = 1.dp)
-                                        .size(14.dp),
-                                )
-                                Text(
-                                    text = stringResource(
-                                        R.string.gps_background_keep_alive_hint,
-                                    ),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    lineHeight = 15.sp,
-                                    color = colors.onSurfaceVariant,
-                                )
-                            }
                         }
                         GpsDetailPrimaryContent.CONNECTION_STEPS -> GpsConnectionSteps(
                             hasGpsPairing = hasGpsPairing,
@@ -4386,19 +4431,31 @@ private fun GpsConnectionSteps(
                 border = BorderStroke(1.dp, colors.accentBlue.copy(alpha = 0.20f)),
             ) {
                 Column(modifier = Modifier.padding(horizontal = 11.dp, vertical = 9.dp)) {
-                    Text(
-                        text = stringResource(R.string.gps_first_pairing_label),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.accentBlue,
-                    )
-                    Text(
-                        text = stringResource(R.string.gps_first_pairing_path),
-                        style = MaterialTheme.typography.bodySmall,
-                        lineHeight = 17.sp,
-                        color = colors.onBackground,
-                        modifier = Modifier.padding(top = 3.dp),
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.gps_first_pairing_label),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.accentBlue,
+                        )
+                        Icon(
+                            imageVector = Icons.Default.PhotoCamera,
+                            contentDescription = null,
+                            tint = colors.accentBlue,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.gps_first_pairing_path),
+                            style = MaterialTheme.typography.bodySmall,
+                            lineHeight = 17.sp,
+                            color = colors.onBackground,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                 }
             }
         }

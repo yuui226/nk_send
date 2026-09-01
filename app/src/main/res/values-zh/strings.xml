@@ -578,9 +578,11 @@
     <string name="gps_phone_ready">开启蓝牙与定位服务</string>
     <string name="gps_camera_label">相机</string>
     <string name="gps_camera_ready">开启蓝牙</string>
-    <string name="gps_first_pairing_label">首次连接</string>
-    <string name="gps_first_pairing_path">相机菜单：连接至智能设备 → 配对（Bluetooth）→ 开始配对</string>
-    <string name="gps_background_keep_alive_hint">推荐：耗电管理 → 不限制 · 多任务 → 锁定</string>
+    <string name="gps_first_pairing_label">首次:</string>
+    <string name="gps_first_pairing_path">连接至智能设备 → 配对 → 开始配对</string>
+    <string name="gps_help_intro">为了稳定运行，建议：</string>
+    <string name="gps_help_battery">1. 耗电管理 → 不限制</string>
+    <string name="gps_help_multitask">2. 多任务 → 锁定</string>
     <string name="gps_permission_required">请允许蓝牙和定位权限</string>
     <string name="gps_bluetooth_required">请打开手机蓝牙以开启 GPS</string>
     <string name="gps_close_before_connect">请先关闭 GPS</string>

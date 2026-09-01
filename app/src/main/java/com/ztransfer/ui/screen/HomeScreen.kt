@@ -76,6 +76,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -201,6 +202,7 @@ fun HomeScreen(
     // 给弹窗，避免每帧坐标变化触发整个连接页重组，也避免展开途中锚点继续漂移。
     val liveTipsButtonBounds = remember { LayoutBoundsHolder() }
     var tipsPopupAnchor by remember { mutableStateOf<Rect?>(null) }
+    var gpsHelpPopupAnchor by remember { mutableStateOf<Rect?>(null) }
     var showStaResetDialog by remember { mutableStateOf(false) }
 
     val colors = AppTheme.colors
@@ -471,7 +473,6 @@ fun HomeScreen(
                 .fillMaxSize()
                 .systemBarsPadding()
         ) {
-            val compact = maxHeight < 690.dp
             // 提示只占用卡片内部留白，不改变卡片外形，避免识别结果出现时整页跳动。
             // 英文步骤换行更多，单独为其保留额外高度；中文与繁中保持紧凑卡片。
             val cardHeight = if (LocalConfiguration.current.locales[0].language == "en") {
@@ -486,9 +487,16 @@ fun HomeScreen(
             // Reserve its exact collapsed height so USB + GPS matches the Wi-Fi card.
             val gpsCollapsedHeight = 50.dp
             val usbCardHeight = (cardHeight - gpsSpacing - gpsCollapsedHeight).coerceAtLeast(180.dp)
-            val spacerWeight = if (compact) 0.18f else 0.32f
+            // Keep one proportional rule for every screen size; the available room itself
+            // naturally shrinks on compact displays, so a separate compact branch is unnecessary.
+            val spacerWeight = 0.28f
             val spacerRoom = (maxHeight - 56.dp - cardHeight - 62.dp).coerceAtLeast(0.dp)
             val topSpacerHeight = spacerRoom * (spacerWeight / (spacerWeight + 1f))
+            // Lift the complete connection scene while leaving the bottom workspace entry in
+            // place. Derive the lift from the same proportional spacer as the cards, so the
+            // expanded GPS detail gets a little more lower breathing room without hard-coded
+            // large/small-screen offsets.
+            val connectionSceneLift = topSpacerHeight * 0.06f
 
             Column(
                 modifier = Modifier
@@ -504,6 +512,7 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .offset(y = -connectionSceneLift)
                         .heightIn(min = cardHeight),
                     horizontalArrangement = Arrangement.spacedBy(cardSpacing)
                 ) {
@@ -562,6 +571,7 @@ fun HomeScreen(
                             GpsConnectionControl(
                                 hapticsEnabled = transferState.hapticsEnabled,
                                 modifier = Modifier.fillMaxWidth(),
+                                onHelpRequested = { gpsHelpPopupAnchor = it },
                             )
                         }
                     }
@@ -967,6 +977,12 @@ fun HomeScreen(
                 anchorBounds = frozenAnchor,
                 wirelessMode = state.wirelessMode,
                 onDismiss = { tipsPopupAnchor = null },
+            )
+        }
+        gpsHelpPopupAnchor?.let { frozenAnchor ->
+            GpsHelpBubble(
+                anchorBounds = frozenAnchor,
+                onDismiss = { gpsHelpPopupAnchor = null },
             )
         }
 
@@ -2095,6 +2111,52 @@ private fun TipsBubble(
             }
         } else {
             TipBubbleContent(title = title, items = items)
+        }
+    }
+}
+
+/** GPS 后台保活提示气泡；由 GPS 说明卡右上角的灯泡按钮触发。 */
+@Composable
+private fun GpsHelpBubble(
+    anchorBounds: Rect?,
+    onDismiss: () -> Unit,
+) {
+    val density = LocalDensity.current
+    val panelTop = anchorBounds?.let {
+        with(density) { it.bottom.toDp() } + 8.dp
+    } ?: 96.dp
+    AnchorPopup(
+        anchorBounds = anchorBounds,
+        onDismiss = onDismiss,
+        panelModifier = Modifier
+            .padding(start = 18.dp, end = 18.dp, top = panelTop)
+            .widthIn(max = 244.dp),
+        panelAlignment = Alignment.TopEnd,
+        shape = RoundedCornerShape(18.dp),
+        dim = false,
+    ) { _ ->
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.gps_help_intro),
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
+                color = AppTheme.colors.onBackground,
+            )
+            Spacer(Modifier.height(5.dp))
+            Text(
+                text = stringResource(R.string.gps_help_battery),
+                style = MaterialTheme.typography.bodySmall,
+                lineHeight = 18.sp,
+                color = AppTheme.colors.onSurfaceVariant,
+            )
+            Text(
+                text = stringResource(R.string.gps_help_multitask),
+                style = MaterialTheme.typography.bodySmall,
+                lineHeight = 18.sp,
+                color = AppTheme.colors.onSurfaceVariant,
+            )
         }
     }
 }

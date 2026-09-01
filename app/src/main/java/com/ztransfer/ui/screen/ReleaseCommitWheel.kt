@@ -26,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -115,6 +116,9 @@ internal fun <T> ReleaseCommitWheel(
     favoriteOption: (T) -> Boolean = { false },
     favoriteIconColor: Color? = null,
     burstProgress: Float = 0f,
+    ambientEffectColor: Color? = null,
+    ambientEffectAlpha: State<Float>? = null,
+    drawBorder: Boolean = true,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
@@ -161,10 +165,10 @@ internal fun <T> ReleaseCommitWheel(
     } else {
         modifier.graphicsLayer { alpha = 0.48f }
     }
-    Box(
-        modifier = enabledModifier
-            .height(wheelHeight)
-            .clip(shape)
+    val clippedContainer = enabledModifier
+        .height(wheelHeight)
+        .clip(shape)
+    val decoratedContainer = clippedContainer
             .background(colors.glassSurface)
             .background(
                 Brush.verticalGradient(
@@ -178,32 +182,40 @@ internal fun <T> ReleaseCommitWheel(
                         0.18f * normalizedBurst,
                 )
             )
-            .border(
-                width = when {
-                    dragging -> 1.5.dp
-                    normalizedBurst > 0f -> (1.35f + 0.9f * normalizedBurst).dp
-                    emphasisProgress > 0f -> (1f + 0.35f * emphasisProgress).dp
-                    else -> 1.dp
-                },
-                brush = if (dragging || emphasisProgress > 0f || normalizedBurst > 0f) {
-                    Brush.verticalGradient(
-                        listOf(
-                            resolvedAccent.copy(
-                                alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f),
-                            ),
-                            resolvedAccent.copy(
-                                alpha = (0.38f + 0.30f * emphasisProgress +
-                                    0.28f * normalizedBurst).coerceAtMost(1f),
-                            ),
-                        )
+            .then(
+                if (drawBorder) {
+                    Modifier.border(
+                        width = when {
+                            dragging -> 1.5.dp
+                            normalizedBurst > 0f -> (1.35f + 0.9f * normalizedBurst).dp
+                            emphasisProgress > 0f -> (1f + 0.35f * emphasisProgress).dp
+                            else -> 1.dp
+                        },
+                        brush = if (dragging || emphasisProgress > 0f || normalizedBurst > 0f) {
+                            Brush.verticalGradient(
+                                listOf(
+                                    resolvedAccent.copy(
+                                        alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f),
+                                    ),
+                                    resolvedAccent.copy(
+                                        alpha = (0.38f + 0.30f * emphasisProgress +
+                                            0.28f * normalizedBurst).coerceAtMost(1f),
+                                    ),
+                                )
+                            )
+                        } else {
+                            Brush.verticalGradient(
+                                listOf(colors.glassBorderTop, colors.glassBorderBottom)
+                            )
+                        },
+                        shape = shape,
                     )
                 } else {
-                    Brush.verticalGradient(
-                        listOf(colors.glassBorderTop, colors.glassBorderBottom)
-                    )
+                    Modifier
                 },
-                shape = shape
             )
+    Box(
+        modifier = decoratedContainer
             .semantics {
                 contentDescription = buildString {
                     if (!label.isNullOrBlank()) append("$label, ")
@@ -292,6 +304,20 @@ internal fun <T> ReleaseCommitWheel(
                 },
             )
     ) {
+        if (ambientEffectColor != null && ambientEffectAlpha != null) {
+            // The alpha state is consumed by the layer itself. An ambient animation therefore
+            // redraws only this clipped overlay without remeasuring the wheel or fading its text.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = ambientEffectAlpha.value }
+                    // Keep the breathing wash inside the material. It must never recreate the
+                    // wheel's old white/bright outline in any state.
+                    .background(ambientEffectColor, shape)
+                    .clearAndSetSemantics { },
+            )
+        }
+
         if (label != null) {
             ControlTileCornerBadge(
                 text = label,
@@ -321,17 +347,24 @@ internal fun <T> ReleaseCommitWheel(
                 val distance = abs(index - position)
                 val itemAlpha = if (distance < 0.5f) 1f else 0.38f
                 val itemOffsetY = (rowPx * (index - position)).roundToInt()
-                val itemModifier = Modifier
-                    .fillMaxWidth()
-                    // The lambda offset overload places every full-width text row in a separate
-                    // graphics layer. On screenshot capture that layer boundary can become a faint
-                    // wheel-wide band. A layout-only offset keeps identical motion without a layer.
-                    .layout { measurable, constraints ->
-                        val placeable = measurable.measure(constraints)
-                        layout(placeable.width, placeable.height) {
-                            placeable.placeRelative(0, itemOffsetY)
+                val itemModifier = if (wheelDragEnabled(options.size)) {
+                    Modifier
+                        .fillMaxWidth()
+                        // The lambda offset overload places every full-width text row in a separate
+                        // graphics layer. On screenshot capture that layer boundary can become a faint
+                        // wheel-wide band. A layout-only offset keeps identical motion without a layer.
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            layout(placeable.width, placeable.height) {
+                                placeable.placeRelative(0, itemOffsetY)
+                            }
                         }
-                    }
+                } else {
+                    // Two-option controls (including the GPS entry) never enter drag mode. Avoid
+                    // an unnecessary layout node so its transparent row cannot become a screenshot
+                    // band on devices with imperfect layer compositing.
+                    Modifier.fillMaxWidth()
+                }
                 val textStyle = optionTextStyle ?: MaterialTheme.typography.labelMedium
                 val textWeight = optionFontWeight ?: if (distance < 0.5f) {
                     FontWeight.SemiBold

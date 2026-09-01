@@ -25,6 +25,10 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<GpsState> = _state.asStateFlow()
     private val _updateFrequency = MutableStateFlow(readUpdateFrequency())
     val updateFrequency: StateFlow<GpsUpdateFrequency> = _updateFrequency.asStateFlow()
+    private val _connectionHelpViewed = MutableStateFlow(
+        preferences.getBoolean(KEY_CONNECTION_HELP_VIEWED, false),
+    )
+    val connectionHelpViewed: StateFlow<Boolean> = _connectionHelpViewed.asStateFlow()
     private val _placeLookupState = MutableStateFlow(GpsPlaceLookupState())
     val placeLookupState: StateFlow<GpsPlaceLookupState> = _placeLookupState.asStateFlow()
     private val placeNameCache = GpsPlaceNameCache()
@@ -55,6 +59,13 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
         if (state.value.enabled) {
             NikonGpsService.setUpdateFrequency(getApplication(), frequency)
         }
+    }
+
+    /** The GPS guidance reminder is dismissed permanently after the user opens it once. */
+    fun markConnectionHelpViewed() {
+        if (_connectionHelpViewed.value) return
+        preferences.edit().putBoolean(KEY_CONNECTION_HELP_VIEWED, true).apply()
+        _connectionHelpViewed.value = true
     }
 
     fun lookupPlaceName(latitude: Double, longitude: Double) {
@@ -183,5 +194,6 @@ class GpsViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_DEVICE_ID = "device_id"
         const val KEY_NONCE = "nonce"
         const val KEY_BLE_ADDRESS = "ble_address"
+        const val KEY_CONNECTION_HELP_VIEWED = "connection_help_viewed"
     }
 }
