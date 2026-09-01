@@ -164,6 +164,7 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.PROGRESSIVE_HOLD_HAPTIC_DURATION_MS
 import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.util.formatDecimalDegreeCoordinates
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.gps.GpsState
 import com.ztransfer.gps.GpsStatus
@@ -3818,10 +3819,10 @@ internal fun GpsConnectionControl(
         val requestId = placeBubbleRequestId
         when (lookup.status) {
             GpsPlaceLookupStatus.SUCCESS -> {
-                val coordinateText = "%.5f, %.5f".format(
-                    java.util.Locale.US,
+                val coordinateText = formatDecimalDegreeCoordinates(
                     requestedCoordinates.first,
                     requestedCoordinates.second,
+                    fractionDigits = 5,
                 )
                 clipboard.setText(
                     AnnotatedString(
@@ -3998,10 +3999,10 @@ internal fun GpsConnectionControl(
                             val displayLatitude = presentation.latitude
                             val displayLongitude = presentation.longitude
                             if (displayLatitude != null && displayLongitude != null) {
-                                val coordinates = "%.5f, %.5f".format(
-                                    java.util.Locale.US,
+                                val coordinates = formatDecimalDegreeCoordinates(
                                     displayLatitude,
                                     displayLongitude,
+                                    fractionDigits = 5,
                                 )
                                 Column(
                                     modifier = Modifier

@@ -39,6 +39,7 @@ import com.ztransfer.protocol.NefPreviewReference
 import com.ztransfer.protocol.largestEmbeddedJpegRange
 import com.ztransfer.protocol.parseNefHeaderMetadata
 import com.ztransfer.util.applyExifOrientation
+import com.ztransfer.util.formatDecimalDegreeCoordinates
 import java.io.ByteArrayInputStream
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -6378,10 +6379,10 @@ internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
     ).joinToString("   ")
 
 /**
- * Location metadata is deliberately compact: machine-readable coordinates and altitude share
- * one row.  Address reverse-geocoding is intentionally not rendered in borders for now because
- * it is network-dependent and would make AP/STA exports diverge.  Display precision is limited
- * to four decimals (roughly ten-metre-level); the original EXIF values are never changed.
+ * Location metadata is deliberately compact: standard decimal degrees with hemisphere directions
+ * and altitude share one row. Address reverse-geocoding is intentionally not rendered in borders
+ * because it is network-dependent and would make AP/STA exports diverge. Display precision is
+ * limited to four decimals (roughly ten-metre-level); the original EXIF values are never changed.
  */
 internal fun frameLocationRows(metadata: PhotoFrameMetadata): List<String> = buildList {
     val coordinates = if (
@@ -6389,7 +6390,11 @@ internal fun frameLocationRows(metadata: PhotoFrameMetadata): List<String> = bui
         metadata.latitude != 0.0 && metadata.longitude != 0.0 &&
         metadata.latitude in -90.0..90.0 && metadata.longitude in -180.0..180.0
     ) {
-        String.format(Locale.US, "%.4f, %.4f", metadata.latitude, metadata.longitude)
+        formatDecimalDegreeCoordinates(
+            latitude = metadata.latitude,
+            longitude = metadata.longitude,
+            fractionDigits = 4,
+        )
     } else {
         null
     }
