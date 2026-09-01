@@ -3943,7 +3943,6 @@ internal fun GpsConnectionControl(
             emphasized = expanded || buttonState != GpsStatusButtonState.OFF,
             ambientEffectColor = gpsEntryAccent,
             ambientEffectAlpha = gpsEntryAmbientAlpha,
-            drawBorder = true,
             modifier = Modifier.fillMaxWidth(),
             onLongClick = {
                 clipboard.setText(AnnotatedString(GpsDiagnostics.snapshot()))
@@ -4759,8 +4758,6 @@ private fun GpsStatusButton(
     onHoldComplete: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val skin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
-    val dark = colors.background.luminance() < 0.5f
     val buttonState = gpsStatusButtonState(enabled, status)
     val requiresHold = gpsStatusRequiresHoldToDisable(enabled, status)
     val holdToDisableLabel = stringResource(R.string.gps_hold_to_disable)
@@ -4778,7 +4775,9 @@ private fun GpsStatusButton(
         label = "gpsHoldGlow",
     )
     // 状态只由文案表达；按钮材质不再叠加连接色，避免各主题出现绿色或彩色光圈。
-    val foreground = materialButtonForegroundColor(skin, dark, colors.onBackground)
+    // GPS remains on the app's semantic foreground color; it does not inherit material-skin
+    // foreground overrides used by the other themed controls.
+    val foreground = colors.onBackground
     val buttonShape = GPS_ACTION_BUTTON_SHAPE
     val buttonModifier = modifier
         .fillMaxWidth()

@@ -118,7 +118,6 @@ internal fun <T> ReleaseCommitWheel(
     burstProgress: Float = 0f,
     ambientEffectColor: Color? = null,
     ambientEffectAlpha: State<Float>? = null,
-    drawBorder: Boolean = true,
 ) {
     require(options.isNotEmpty()) { "ReleaseCommitWheel requires at least one option" }
 
@@ -182,37 +181,31 @@ internal fun <T> ReleaseCommitWheel(
                         0.18f * normalizedBurst,
                 )
             )
-            .then(
-                if (drawBorder) {
-                    Modifier.border(
-                        width = when {
-                            dragging -> 1.5.dp
-                            normalizedBurst > 0f -> (1.35f + 0.9f * normalizedBurst).dp
-                            emphasisProgress > 0f -> (1f + 0.35f * emphasisProgress).dp
-                            else -> 1.dp
-                        },
-                        brush = if (dragging || emphasisProgress > 0f || normalizedBurst > 0f) {
-                            Brush.verticalGradient(
-                                listOf(
-                                    resolvedAccent.copy(
-                                        alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f),
-                                    ),
-                                    resolvedAccent.copy(
-                                        alpha = (0.38f + 0.30f * emphasisProgress +
-                                            0.28f * normalizedBurst).coerceAtMost(1f),
-                                    ),
-                                )
-                            )
-                        } else {
-                            Brush.verticalGradient(
-                                listOf(colors.glassBorderTop, colors.glassBorderBottom)
-                            )
-                        },
-                        shape = shape,
+            .border(
+                width = when {
+                    dragging -> 1.5.dp
+                    normalizedBurst > 0f -> (1.35f + 0.9f * normalizedBurst).dp
+                    emphasisProgress > 0f -> (1f + 0.35f * emphasisProgress).dp
+                    else -> 1.dp
+                },
+                brush = if (dragging || emphasisProgress > 0f || normalizedBurst > 0f) {
+                    Brush.verticalGradient(
+                        listOf(
+                            resolvedAccent.copy(
+                                alpha = (0.92f + 0.08f * normalizedBurst).coerceAtMost(1f),
+                            ),
+                            resolvedAccent.copy(
+                                alpha = (0.38f + 0.30f * emphasisProgress +
+                                    0.28f * normalizedBurst).coerceAtMost(1f),
+                            ),
+                        )
                     )
                 } else {
-                    Modifier
+                    Brush.verticalGradient(
+                        listOf(colors.glassBorderTop, colors.glassBorderBottom)
+                    )
                 },
+                shape = shape,
             )
     Box(
         modifier = decoratedContainer
