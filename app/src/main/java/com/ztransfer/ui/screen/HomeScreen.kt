@@ -2136,38 +2136,20 @@ private fun GpsHelpBubble(
         shape = RoundedCornerShape(18.dp),
         dim = false,
     ) { _ ->
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.gps_help_intro),
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-                color = AppTheme.colors.onBackground,
-            )
-            Spacer(Modifier.height(5.dp))
-            Text(
-                text = stringResource(R.string.gps_help_battery),
-                style = MaterialTheme.typography.bodySmall,
-                lineHeight = 18.sp,
-                color = AppTheme.colors.onSurfaceVariant,
-            )
-            Text(
-                text = stringResource(R.string.gps_help_multitask),
-                style = MaterialTheme.typography.bodySmall,
-                lineHeight = 18.sp,
-                color = colors.onSurfaceVariant,
-            )
-            Divider(
-                modifier = Modifier.padding(vertical = 8.dp),
-                color = colors.glassPanelBorder.copy(alpha = 0.65f),
-            )
-            Text(
-                text = stringResource(R.string.gps_help_accuracy_note),
-                style = MaterialTheme.typography.labelSmall,
-                lineHeight = 16.sp,
-                color = colors.onSurfaceVariant,
-            )
-        }
+        TipBubbleContent(
+            title = stringResource(R.string.gps_detail_description),
+            items = listOf(
+                TipBubbleItem(
+                    label = stringResource(R.string.gps_help_intro),
+                    labelColor = colors.accentOrange,
+                    text = "${stringResource(R.string.gps_help_battery)}\n" +
+                        stringResource(R.string.gps_help_multitask),
+                    emphasized = true,
+                ),
+                TipBubbleItem(
+                    text = stringResource(R.string.gps_help_accuracy_note),
+                ),
+            ),
+        )
     }
 }

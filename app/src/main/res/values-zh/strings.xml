@@ -573,7 +573,7 @@
     <string name="gps_paired_device_status">相机已配对</string>
     <string name="gps_paired_badge">已配对</string>
     <string name="gps_clear_pairing_message">将清除已保存的相机身份，下次使用时需要重新配对。</string>
-    <string name="gps_detail_description">开启则相机拍的照片会附带位置信息</string>
+    <string name="gps_detail_description">使相机拍照附带位置信息</string>
     <string name="gps_phone_label">手机</string>
     <string name="gps_phone_ready">开启蓝牙与定位服务</string>
     <string name="gps_camera_label">相机</string>
@@ -583,7 +583,7 @@
     <string name="gps_help_intro">为了稳定运行，建议：</string>
     <string name="gps_help_battery">1. 耗电管理 → 不限制</string>
     <string name="gps_help_multitask">2. 多任务 → 锁定</string>
-    <string name="gps_help_accuracy_note">GPS 信号较弱时，定位精度会下降；海拔显示 0 米或位置偏差较大属于正常现象。</string>
+    <string name="gps_help_accuracy_note">GPS 信号弱时，定位精度会下降，海拔可能显示 0 米，属于正常现象。</string>
     <string name="gps_permission_required">请允许蓝牙和定位权限</string>
     <string name="gps_bluetooth_required">请打开手机蓝牙以开启 GPS</string>
     <string name="gps_close_before_connect">请先关闭 GPS</string>

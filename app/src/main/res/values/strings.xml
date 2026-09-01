@@ -585,7 +585,7 @@
     <string name="gps_help_intro">For stable operation:</string>
     <string name="gps_help_battery">1. Battery usage → Unrestricted</string>
     <string name="gps_help_multitask">2. Recent apps → Lock</string>
-    <string name="gps_help_accuracy_note">With a weak GPS signal, accuracy may drop; 0 m altitude or a noticeable position offset can be normal.</string>
+    <string name="gps_help_accuracy_note">With a weak GPS signal, accuracy may drop and altitude may show 0 m; this is normal.</string>
     <string name="gps_permission_required">Allow Bluetooth and location to enable GPS</string>
     <string name="gps_bluetooth_required">Turn on Bluetooth to enable GPS</string>
     <string name="gps_close_before_connect">Turn off GPS before connecting</string>
