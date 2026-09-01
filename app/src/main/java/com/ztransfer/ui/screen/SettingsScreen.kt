@@ -4439,16 +4439,12 @@ private fun GpsConnectionSteps(
                             fontWeight = FontWeight.Bold,
                             color = colors.accentBlue,
                         )
-                        Icon(
-                            imageVector = Icons.Default.PhotoCamera,
-                            contentDescription = null,
-                            tint = colors.accentBlue,
-                            modifier = Modifier.size(16.dp),
-                        )
                         Text(
                             text = stringResource(R.string.gps_first_pairing_path),
-                            style = MaterialTheme.typography.bodySmall,
-                            lineHeight = 17.sp,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp,
+                            ),
                             color = colors.onBackground,
                             modifier = Modifier.weight(1f),
                         )
