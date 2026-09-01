@@ -2389,6 +2389,8 @@ object PhotoFrameExporter {
         if (preset == PhotoFramePreset.FROSTED) {
             drawFrostedMetadataPanel(canvas, layout, contentArea)
         }
+        // 先保持字号，让基线布局在空间不足时压缩行间距；只有文字本身仍然放不下时，
+        // 才统一缩小字号，避免信息项较多时优先把文字缩得过小。
         val rowScale = frameTextScaleToFit(contentArea.height(), initialRows)
         if (rowScale < 1f) {
             brandPaint.textSize *= rowScale
