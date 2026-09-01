@@ -59,15 +59,13 @@ if not defined ADB_DEVICE_FOUND (
 
 if defined ADB_INSTALL_FAILED (
     echo One or more device installations FAILED.
-    pause
-    exit /b 1
 )
 
 if defined ADB_LAUNCH_FAILED (
     echo ZTransfer could not be launched on one or more devices.
-    pause
-    exit /b 1
 )
 
 :finish
-pause
+rem The APK build succeeded. ADB installation/launch is optional, so close a window opened by
+rem double-clicking this script regardless of its result. Build failures exit earlier after pause.
+exit /b 0

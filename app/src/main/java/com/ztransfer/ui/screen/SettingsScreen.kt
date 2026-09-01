@@ -78,6 +78,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -3978,18 +3979,35 @@ internal fun GpsConnectionControl(
                             Text(
                                 text = stringResource(R.string.gps_detail_description),
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = colors.onSurfaceVariant,
-                            )
-                            Text(
-                                text = stringResource(R.string.gps_background_keep_alive_hint),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.accentBlue,
-                                modifier = Modifier.padding(top = 5.dp),
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.onBackground,
                             )
                             GpsConnectionSteps(
                                 hasGpsPairing = hasGpsPairing,
                                 modifier = Modifier.padding(top = 10.dp),
                             )
+                            Row(
+                                modifier = Modifier.padding(top = 11.dp),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = null,
+                                    tint = colors.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .padding(top = 1.dp)
+                                        .size(14.dp),
+                                )
+                                Text(
+                                    text = stringResource(
+                                        R.string.gps_background_keep_alive_hint,
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    lineHeight = 15.sp,
+                                    color = colors.onSurfaceVariant,
+                                )
+                            }
                         }
                         GpsDetailPrimaryContent.CONNECTION_STEPS -> GpsConnectionSteps(
                             hasGpsPairing = hasGpsPairing,
@@ -4342,19 +4360,117 @@ private fun GpsConnectionSteps(
     hasGpsPairing: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val colors = AppTheme.colors
     Column(modifier = modifier.fillMaxWidth()) {
-        GpsConnectionStep(
-            index = 1,
-            text = stringResource(
-                if (hasGpsPairing) R.string.gps_step_camera_reconnect
-                else R.string.gps_step_camera,
-            ),
+        GpsPreparationRow(
+            icon = Icons.Default.PhoneAndroid,
+            title = stringResource(R.string.gps_phone_label),
+            detail = stringResource(R.string.gps_phone_ready),
         )
-        Spacer(Modifier.height(10.dp))
-        GpsConnectionStep(
-            index = 2,
-            text = stringResource(R.string.gps_step_app),
+        Spacer(Modifier.height(7.dp))
+        GpsPreparationRow(
+            icon = Icons.Default.PhotoCamera,
+            title = stringResource(R.string.gps_camera_label),
+            detail = stringResource(R.string.gps_camera_ready),
+            status = stringResource(R.string.gps_paired_badge).takeIf {
+                hasGpsPairing
+            },
         )
+        if (!hasGpsPairing) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                shape = GPS_DETAIL_ITEM_SHAPE,
+                color = colors.accentBlue.copy(alpha = 0.065f),
+                border = BorderStroke(1.dp, colors.accentBlue.copy(alpha = 0.20f)),
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 11.dp, vertical = 9.dp)) {
+                    Text(
+                        text = stringResource(R.string.gps_first_pairing_label),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.accentBlue,
+                    )
+                    Text(
+                        text = stringResource(R.string.gps_first_pairing_path),
+                        style = MaterialTheme.typography.bodySmall,
+                        lineHeight = 17.sp,
+                        color = colors.onBackground,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GpsPreparationRow(
+    icon: ImageVector,
+    title: String,
+    detail: String,
+    status: String? = null,
+) {
+    val colors = AppTheme.colors
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(colors.accentBlue.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = colors.accentBlue,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(start = 9.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onSurfaceVariant,
+                )
+                status?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 9.sp,
+                        lineHeight = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.accentBlue,
+                        modifier = Modifier
+                            .padding(start = 5.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(colors.accentBlue.copy(alpha = 0.08f))
+                            .border(
+                                width = 1.dp,
+                                color = colors.accentBlue.copy(alpha = 0.18f),
+                                shape = RoundedCornerShape(50),
+                            )
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
+            }
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                color = colors.onBackground,
+            )
+        }
     }
 }
 
@@ -4392,41 +4508,6 @@ private fun GpsDetailItemSurface(
             color = colors.onBackground.copy(alpha = 0.05f),
             border = BorderStroke(1.dp, colors.glassPanelBorder),
             content = rowContent,
-        )
-    }
-}
-
-@Composable
-private fun GpsConnectionStep(
-    index: Int,
-    text: String,
-) {
-    val colors = AppTheme.colors
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier
-                .size(21.dp)
-                .alignByBaseline()
-                .clip(CircleShape)
-                .background(colors.accentBlue.copy(alpha = 0.14f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = index.toString(),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = colors.accentBlue,
-            )
-        }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            color = colors.onSurfaceVariant,
-            modifier = Modifier
-                .weight(1f)
-                .alignByBaseline(),
         )
     }
 }
