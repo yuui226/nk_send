@@ -496,6 +496,35 @@ class PhotoFrameExporterTest {
     }
 
     @Test
+    fun crowdedMetadataAreaCompressesGapsAndKeepsVerticalPadding() {
+        val areaHeight = 100f
+        val verticalPadding = frameMetadataVerticalPadding(areaHeight)
+        val rows = listOf(
+            FrameTextVisualBounds(top = -20f, bottom = 10f),
+            FrameTextVisualBounds(top = -15f, bottom = 10f),
+            FrameTextVisualBounds(top = -10f, bottom = 10f),
+        )
+        val textAreaTop = verticalPadding
+        val textAreaBottom = areaHeight - verticalPadding
+        val scale = frameTextScaleToFit(textAreaBottom - textAreaTop, rows)
+        val baselines = centeredFrameTextBaselines(
+            areaTop = textAreaTop,
+            areaBottom = textAreaBottom,
+            rows = rows,
+            preferredGap = 10f,
+        )
+
+        val firstTop = baselines.first() + rows.first().top
+        val lastBottom = baselines.last() + rows.last().bottom
+        val firstGap = baselines[1] + rows[1].top - (baselines[0] + rows[0].bottom)
+
+        assertEquals(1f, scale, 0.001f)
+        assertEquals(6f, firstTop, 0.001f)
+        assertEquals(94f, lastBottom, 0.001f)
+        assertTrue(firstGap < 10f)
+    }
+
+    @Test
     fun oversizedWatermarkRowsAreScaledBeforeBaselineLayout() {
         val rows = listOf(
             FrameTextVisualBounds(top = -60f, bottom = 10f),

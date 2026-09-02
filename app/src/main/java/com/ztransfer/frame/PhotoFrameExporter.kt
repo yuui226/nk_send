@@ -2389,9 +2389,14 @@ object PhotoFrameExporter {
         if (preset == PhotoFramePreset.FROSTED) {
             drawFrostedMetadataPanel(canvas, layout, contentArea)
         }
+        // 对称收窄排版区不改变宽松场景的视觉居中；空间不足时则优先压缩行间距，
+        // 同时保证文字墨迹不会贴住信息区（或磨砂卡片）的上下边缘。
+        val verticalPadding = frameMetadataVerticalPadding(contentArea.height())
+        val textAreaTop = contentArea.top + verticalPadding
+        val textAreaBottom = contentArea.bottom - verticalPadding
         // 先保持字号，让基线布局在空间不足时压缩行间距；只有文字本身仍然放不下时，
         // 才统一缩小字号，避免信息项较多时优先把文字缩得过小。
-        val rowScale = frameTextScaleToFit(contentArea.height(), initialRows)
+        val rowScale = frameTextScaleToFit(textAreaBottom - textAreaTop, initialRows)
         if (rowScale < 1f) {
             brandPaint.textSize *= rowScale
             modelPaint.textSize *= rowScale
@@ -2414,8 +2419,8 @@ object PhotoFrameExporter {
             contentArea.height() * 0.09f,
         )
         val baselines = centeredFrameTextBaselines(
-            areaTop = contentArea.top,
-            areaBottom = contentArea.bottom,
+            areaTop = textAreaTop,
+            areaBottom = textAreaBottom,
             rows = rowBounds,
             preferredGap = preferredGap,
         )
@@ -6249,6 +6254,12 @@ internal fun frameTextScaleToFit(
     if (textHeight <= 0f || textHeight <= areaHeight) return 1f
     // 留 2% 抗锯齿余量，避免不同 Android 字体栅格化实现恰好贴边时出现一像素相交。
     return (areaHeight / textHeight * 0.98f).coerceIn(0f, 1f)
+}
+
+/** 前四种边框共用的信息区，上下各保留 6% 的文字安全留白。 */
+internal fun frameMetadataVerticalPadding(areaHeight: Float): Float {
+    require(areaHeight >= 0f)
+    return areaHeight * 0.06f
 }
 
 /**
