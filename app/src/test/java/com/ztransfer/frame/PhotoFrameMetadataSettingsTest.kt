@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 import java.util.Locale
 
 class PhotoFrameMetadataSettingsTest {
@@ -289,7 +290,7 @@ class PhotoFrameMetadataSettingsTest {
         assertNull(preview.address)
         assertEquals(66.6666, preview.latitude!!, 0.00001)
         assertEquals(66.6666, preview.longitude!!, 0.00001)
-        assertEquals(520.0, preview.altitudeMeters!!, 0.0)
+        assertEquals(PREVIEW_FAKE_ALTITUDE_METERS, preview.altitudeMeters!!, 0.0)
 
         val exported = empty.withPresentation(settings)
         assertNull(exported.address)
@@ -319,5 +320,130 @@ class PhotoFrameMetadataSettingsTest {
             .withPresentation(settings)
         assertNull(invalidCoordinates.latitude)
         assertNull(invalidCoordinates.longitude)
+    }
+
+    @Test
+    fun previewUsesClearlyFakeValuesForMissingMetadata() {
+        val settings = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
+            showDate = true,
+            showTime = true,
+            showFocalLength = true,
+            showExposure = true,
+            showBrand = true,
+            showModel = true,
+            showLensModel = true,
+            showCoordinates = true,
+            showAltitude = true,
+            datePattern = DEFAULT_PHOTO_FRAME_DATE_PATTERN,
+            timePattern = DEFAULT_PHOTO_FRAME_TIME_PATTERN,
+        )
+        val tomorrowBeforePresentation = LocalDate.now().plusDays(1)
+        val preview = PhotoFrameMetadata(null, null, null, null, null, null)
+            .withPresentation(settings, preview = true)
+        val tomorrowAfterPresentation = LocalDate.now().plusDays(1)
+
+        assertEquals(PREVIEW_FAKE_BRAND, preview.make)
+        assertEquals(PREVIEW_FAKE_MODEL, preview.model)
+        assertEquals(PREVIEW_FAKE_LENS_MODEL, preview.lensModel)
+        assertEquals(PREVIEW_FAKE_FOCAL_LENGTH, preview.focalLength)
+        assertEquals(PREVIEW_FAKE_APERTURE, preview.aperture)
+        assertEquals(PREVIEW_FAKE_SHUTTER, preview.shutter)
+        assertEquals(PREVIEW_FAKE_ISO, preview.iso)
+        assertTrue(
+            preview.dateTime in setOf(
+                "$tomorrowBeforePresentation 25:61:61",
+                "$tomorrowAfterPresentation 25:61:61",
+            ),
+        )
+        assertEquals(PREVIEW_FAKE_LATITUDE, preview.latitude!!, 0.00001)
+        assertEquals(PREVIEW_FAKE_LONGITUDE, preview.longitude!!, 0.00001)
+        assertEquals(PREVIEW_FAKE_ALTITUDE_METERS, preview.altitudeMeters!!, 0.0)
+    }
+
+    @Test
+    fun previewFakeTimeMatchesEverySelectableFormat() {
+        val base = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
+            showDate = false,
+            showTime = true,
+        )
+        val expectedByPattern = mapOf(
+            "HH:mm" to "25:61",
+            "HH:mm:ss" to "25:61:61",
+            "HH.mm" to "25.61",
+            "HH.mm.ss" to "25.61.61",
+        )
+
+        expectedByPattern.forEach { (pattern, expected) ->
+            assertEquals(
+                expected,
+                formatPhotoFrameCaptureDateTime(
+                    value = "2026-08-17",
+                    settings = base.copy(timePattern = pattern),
+                    preview = true,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun realMetadataOverridesPreviewValuesFieldByField() {
+        val settings = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
+            showDate = true,
+            showTime = true,
+            showFocalLength = true,
+            showExposure = true,
+            showBrand = true,
+            showModel = true,
+            showLensModel = true,
+        )
+        val source = PhotoFrameMetadata(
+            make = "NIKON CORPORATION",
+            model = "NIKON Z 8",
+            aperture = "f/4.0",
+            shutter = null,
+            iso = "ISO640",
+            focalLength = "85mm",
+            lensModel = null,
+            dateTime = "2026:08:10 14:25:36",
+        )
+        val presented = source.withPresentation(settings, preview = true)
+
+        assertEquals("NIKON CORPORATION", presented.make)
+        assertEquals("NIKON Z 8", presented.model)
+        assertEquals("f/4.0", presented.aperture)
+        assertEquals(PREVIEW_FAKE_SHUTTER, presented.shutter)
+        assertEquals("ISO640", presented.iso)
+        assertEquals("85mm", presented.focalLength)
+        assertEquals(PREVIEW_FAKE_LENS_MODEL, presented.lensModel)
+        assertEquals("2026-08-10 14:25:36", presented.dateTime)
+    }
+
+    @Test
+    fun previewOnlyFakeValuesNeverAppearInExportPresentation() {
+        val settings = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
+            showDate = true,
+            showTime = true,
+            showFocalLength = true,
+            showExposure = true,
+            showBrand = true,
+            showModel = true,
+            showLensModel = true,
+            showCoordinates = true,
+            showAltitude = true,
+        )
+        val exported = PhotoFrameMetadata(null, null, null, null, null, null)
+            .withPresentation(settings, preview = false)
+
+        assertEquals(null, exported.make)
+        assertEquals(null, exported.model)
+        assertEquals(null, exported.lensModel)
+        assertEquals(null, exported.focalLength)
+        assertEquals(null, exported.aperture)
+        assertEquals(null, exported.shutter)
+        assertEquals(null, exported.iso)
+        assertEquals(null, exported.dateTime)
+        assertEquals(null, exported.latitude)
+        assertEquals(null, exported.longitude)
+        assertEquals(null, exported.altitudeMeters)
     }
 }

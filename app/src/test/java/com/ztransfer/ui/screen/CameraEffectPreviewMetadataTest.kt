@@ -2,8 +2,6 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.viewmodel.PhotoExif
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraEffectPreviewMetadataTest {
@@ -71,42 +69,5 @@ class CameraEffectPreviewMetadataTest {
         assertEquals(null, metadata.focalLength)
         assertEquals(null, metadata.lensModel)
         assertEquals(null, metadata.dateTime)
-    }
-
-    @Test
-    fun availabilityContainsOnlyFieldsPresentOnThePreviewPhoto() {
-        val availability = photoFrameMetadataAvailability(
-            cameraEffectPreviewMetadata(
-                manufacturer = "NIKON CORPORATION",
-                model = "NIKON Z 30",
-                exif = PhotoExif(
-                    aperture = "f/4.0",
-                    shutterSpeed = null,
-                    iso = "ISO200",
-                    focalLength = null,
-                    dateTime = "2026:08:17 09:08:07",
-                ),
-            )
-        )
-
-        assertTrue(availability.brand)
-        assertTrue(availability.model)
-        assertTrue(availability.exposure)
-        assertTrue(availability.date)
-        assertTrue(availability.time)
-        assertFalse(availability.focalLength)
-        assertFalse(availability.lensModel)
-        assertTrue(availability.hasAny)
-    }
-
-    @Test
-    fun emptyPreviewStillExposesMetadataSettingsForGpsFields() {
-        val availability = photoFrameMetadataAvailability(null)
-
-        assertTrue(availability.hasAny)
-        assertFalse(availability.brand)
-        assertFalse(availability.model)
-        assertFalse(availability.date)
-        assertFalse(availability.time)
     }
 }

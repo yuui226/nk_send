@@ -412,7 +412,9 @@ fun LocalPhotoEffectsPage(
                         metadataSettings,
                         preset,
                     ).withoutLocationFields(),
-                    previewPlaceholders = false,
+                    // Keep the same clearly-fake preview values as the camera editor whenever
+                    // local EXIF is missing; location fields remain removed above.
+                    previewPlaceholders = true,
                     watermark = renderWatermark,
                     filter = selectedFilter,
                     prefetchFilters = previewFilterPrefetch,
@@ -524,7 +526,6 @@ fun LocalPhotoEffectsPage(
                     preset,
                 ).withoutLocationFields(),
                 showLocationFields = false,
-                previewMetadata = selection?.metadata,
                 watermark = editorWatermark,
                 watermarkContentSource = watermarkDraft,
                 isPro = isPro,

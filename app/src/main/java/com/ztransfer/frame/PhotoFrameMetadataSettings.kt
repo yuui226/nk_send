@@ -9,6 +9,20 @@ import java.util.Locale
 internal const val DEFAULT_PHOTO_FRAME_DATE_PATTERN = "yyyy-MM-dd"
 internal const val DEFAULT_PHOTO_FRAME_TIME_PATTERN = "HH:mm:ss"
 /**
+ * Deliberately absurd values used only while rendering the in-app preview.  They make it
+ * impossible to mistake missing EXIF for real camera data.  Export always drops these values.
+ */
+internal const val PREVIEW_FAKE_BRAND = "NIKON"
+internal const val PREVIEW_FAKE_MODEL = "Z 233"
+internal const val PREVIEW_FAKE_LENS_MODEL = "1-800mm f/0.1"
+internal const val PREVIEW_FAKE_FOCAL_LENGTH = "5100mm"
+internal const val PREVIEW_FAKE_APERTURE = "f/0.1"
+internal const val PREVIEW_FAKE_SHUTTER = "1/99999"
+internal const val PREVIEW_FAKE_ISO = "ISO999999"
+internal const val PREVIEW_FAKE_LATITUDE = 66.6666
+internal const val PREVIEW_FAKE_LONGITUDE = 66.6666
+internal const val PREVIEW_FAKE_ALTITUDE_METERS = 23333.0
+/**
  * Address reverse-geocoding in exported borders is intentionally disabled for now.  The setting
  * field remains source-compatible for a future offline/online policy, but it is never restored
  * from persisted data or used by the border pipeline.
@@ -137,6 +151,12 @@ internal fun PhotoFrameMetadata.withPresentation(
     previewLocale: Locale = Locale.getDefault(),
 ): PhotoFrameMetadata {
     val normalized = normalizePhotoFrameMetadataSettings(settings)
+    val sourceMake = make?.trim()?.takeIf(String::isNotEmpty)
+    val sourceModel = model?.trim()?.takeIf(String::isNotEmpty)
+    val sourceLensModel = lensModel?.trim()?.takeIf(String::isNotEmpty)
+    val inferredBrand = cameraBrandLabel(make, model).takeIf(String::isNotBlank)
+    val sourceNormalizedModel = normalizeCameraModel(make, model)
+        .takeIf(String::isNotBlank)
     val hasCoordinates = latitude?.isFinite() == true && longitude?.isFinite() == true &&
         latitude != 0.0 && longitude != 0.0 &&
         latitude in -90.0..90.0 && longitude in -180.0..180.0
@@ -155,58 +175,114 @@ internal fun PhotoFrameMetadata.withPresentation(
     return copy(
         make = when {
             !normalized.showBrand -> null
-            !normalized.showModel && make.isNullOrBlank() ->
-                cameraBrandLabel(make, model).takeIf(String::isNotBlank)
-            else -> make
+            sourceMake != null -> sourceMake
+            // Preserve export presentation: model-derived brand fallback was historically only
+            // materialized when the model row was hidden. Preview may also use that real inference
+            // before falling back to the deliberately fake brand.
+            !normalized.showModel -> inferredBrand
+                ?: PREVIEW_FAKE_BRAND.takeIf { preview }
+            preview && inferredBrand != null -> inferredBrand
+            preview -> PREVIEW_FAKE_BRAND
+            else -> null
         },
         model = when {
             !normalized.showModel -> null
-            !normalized.showBrand -> normalizeCameraModel(make, model)
-            else -> model
+            !normalized.showBrand -> sourceNormalizedModel
+                ?: PREVIEW_FAKE_MODEL.takeIf { preview }
+            sourceModel != null -> sourceModel
+            preview -> PREVIEW_FAKE_MODEL
+            else -> null
         },
-        aperture = aperture.takeIf { normalized.showExposure },
-        shutter = shutter.takeIf { normalized.showExposure },
-        iso = iso.takeIf { normalized.showExposure },
-        focalLength = focalLength.takeIf { normalized.showFocalLength },
-        lensModel = lensModel?.trim()?.takeIf(String::isNotEmpty)
-            ?.takeIf { normalized.showLensModel },
+        aperture = when {
+            !normalized.showExposure -> null
+            !aperture.isNullOrBlank() -> aperture.trim()
+            preview -> PREVIEW_FAKE_APERTURE
+            else -> null
+        },
+        shutter = when {
+            !normalized.showExposure -> null
+            !shutter.isNullOrBlank() -> shutter.trim()
+            preview -> PREVIEW_FAKE_SHUTTER
+            else -> null
+        },
+        iso = when {
+            !normalized.showExposure -> null
+            !iso.isNullOrBlank() -> iso.trim()
+            preview -> PREVIEW_FAKE_ISO
+            else -> null
+        },
+        focalLength = when {
+            !normalized.showFocalLength -> null
+            !focalLength.isNullOrBlank() -> focalLength.trim()
+            preview -> PREVIEW_FAKE_FOCAL_LENGTH
+            else -> null
+        },
+        lensModel = when {
+            !normalized.showLensModel -> null
+            sourceLensModel != null -> sourceLensModel
+            preview -> PREVIEW_FAKE_LENS_MODEL
+            else -> null
+        },
         address = addressValue,
         latitude = when {
             !normalized.showCoordinates -> null
             hasCoordinates -> latitude
-            preview -> 66.6666
+            preview -> PREVIEW_FAKE_LATITUDE
             else -> null
         },
         longitude = when {
             !normalized.showCoordinates -> null
             hasCoordinates -> longitude
-            preview -> 66.6666
+            preview -> PREVIEW_FAKE_LONGITUDE
             else -> null
         },
         altitudeMeters = when {
             !normalized.showAltitude -> null
             altitudeMeters?.takeIf { it.isFinite() && it != 0.0 } != null -> altitudeMeters
-            preview -> 520.0
+            preview -> PREVIEW_FAKE_ALTITUDE_METERS
             else -> null
         },
-        dateTime = formatPhotoFrameCaptureDateTime(dateTime, normalized),
+        dateTime = formatPhotoFrameCaptureDateTime(dateTime, normalized, preview = preview),
     )
 }
 
 internal fun formatPhotoFrameCaptureDateTime(
     value: String?,
     settings: PhotoFrameMetadataSettings,
+    preview: Boolean = false,
 ): String? {
     if (!settings.showDate && !settings.showTime) return null
-    val parsed = parsePhotoFrameCaptureDateTime(value) ?: return null
+    val parsed = parsePhotoFrameCaptureDateTime(value)
+    val fallbackDate = if (preview) LocalDate.now().plusDays(1) else null
+    val date = when {
+        !settings.showDate -> null
+        parsed != null -> formatPhotoFrameTemporalPattern(parsed, settings.datePattern)
+        fallbackDate != null -> formatPhotoFrameTemporalPattern(
+            fallbackDate.atStartOfDay(),
+            settings.datePattern,
+        )
+        else -> null
+    }
+    val time = when {
+        !settings.showTime -> null
+        parsed?.hasTime == true -> formatPhotoFrameTemporalPattern(parsed, settings.timePattern)
+        preview -> previewFakeTime(settings.timePattern)
+        else -> null
+    }
     return buildList {
-        if (settings.showDate) {
-            add(formatPhotoFrameTemporalPattern(parsed, settings.datePattern))
-        }
-        if (settings.showTime && parsed.hasTime) {
-            add(formatPhotoFrameTemporalPattern(parsed, settings.timePattern))
-        }
+        date?.takeIf(String::isNotBlank)?.let(::add)
+        time?.takeIf(String::isNotBlank)?.let(::add)
     }.filter(String::isNotBlank).joinToString(" ").takeIf(String::isNotBlank)
+}
+
+/** Invalid-on-purpose clock values used only for the preview fallback. */
+private fun previewFakeTime(pattern: String): String = when (
+    normalizePhotoFrameTimePattern(pattern)
+) {
+    "HH:mm" -> "25:61"
+    "HH.mm" -> "25.61"
+    "HH.mm.ss" -> "25.61.61"
+    else -> "25:61:61"
 }
 
 private data class ParsedCaptureDateTime(
