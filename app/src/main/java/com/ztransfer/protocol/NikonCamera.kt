@@ -1274,6 +1274,8 @@ class NikonCamera(private val context: Context) {
         private set
     @Volatile internal var staStorageProbeReached = false
         private set
+    private var staEmptyObjectListObserved = false
+    private var staObjectHandlesObserved = false
     /** ObjectInfo/GetThumb are denied, but size and partial original reads were verified. */
     @Volatile internal var staDirectObjectReadValidated = false
         private set
@@ -1601,6 +1603,8 @@ class NikonCamera(private val context: Context) {
         try {
             staAlbumAccessValidated = false
             staStorageProbeReached = false
+            staEmptyObjectListObserved = false
+            staObjectHandlesObserved = false
             staDirectObjectReadValidated = false
             staFhdPictureSupported = null
             staLargeThumbSupported = null
@@ -4299,7 +4303,11 @@ class NikonCamera(private val context: Context) {
         }
         staDiagnosticLines += "result=FULL_ALBUM_UNAVAILABLE"
         throw java.io.IOException(
-            "STA album access unavailable (${hexResponse(storageResponse)})",
+            if (staEmptyObjectListObserved && !staObjectHandlesObserved) {
+                context.getString(R.string.sta_camera_no_media)
+            } else {
+                "STA album access unavailable (${hexResponse(storageResponse)})"
+            },
         )
     }
 
@@ -4308,6 +4316,10 @@ class NikonCamera(private val context: Context) {
         sendCmd(PtpConstants.GET_OBJECT_HANDLES, -1, -1, 0)
         val (handlesResponse, handlesData) = recvRespWithPayload()
         val handles = parseUInt32Array(handlesData)
+        staObjectHandlesObserved = staObjectHandlesObserved || handles.isNotEmpty()
+        staEmptyObjectListObserved = staEmptyObjectListObserved ||
+            (handlesResponse == PtpConstants.RESPONSE_OK &&
+                handlesData?.size == 4 && handlesData.getIntLE(0) == 0)
         staDiagnosticLines +=
             "$label:GetObjectHandles(*)=${hexResponse(handlesResponse)} count=${handles.size}"
         if (handlesResponse != PtpConstants.RESPONSE_OK || handles.isEmpty()) return false
