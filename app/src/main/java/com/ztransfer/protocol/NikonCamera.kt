@@ -34,8 +34,6 @@ import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -319,19 +317,8 @@ private fun cameraBaseFileName(value: String): String? {
 
 /** PTP/IP Event payload: u16 code + u32 transactionId + optional u32 parameters. */
 internal fun parsePtpIpEvent(payload: ByteArray?): Pair<Int, Long>? {
-    if (payload == null || payload.size < 6) return null
-    val code = (payload[0].toInt() and 0xFF) or
-        ((payload[1].toInt() and 0xFF) shl 8)
-    val firstParameter = if (payload.size >= 10) {
-        var value = 0L
-        repeat(4) { index ->
-            value = value or ((payload[6 + index].toLong() and 0xFF) shl (index * 8))
-        }
-        value
-    } else {
-        0L
-    }
-    return code to firstParameter
+    val event = PtpIpProtocolCodec.decodeEvent(payload) ?: return null
+    return event.code to event.firstParameter
 }
 
 /** Decodes a standalone PTP string and rejects truncated or unsafe filename values. */
@@ -1514,12 +1501,10 @@ class NikonCamera(private val context: Context) {
                 )
             }
 
-            val payload = ack.payload ?: return@withContext Result.failure(Exception(context.getString(R.string.error_handshake_empty)))
-            val sessionId = payload.getIntLE(0)
-            if (payload.size >= 20) {
-                responderGuid = payload.copyOfRange(4, 20)
-                    .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
-            }
+            val initAck = PtpIpProtocolCodec.decodeInitCommandAck(ack.payload)
+                ?: return@withContext Result.failure(Exception(context.getString(R.string.error_handshake_empty)))
+            val sessionId = initAck.connectionNumber
+            initAck.responderGuidHex?.let { responderGuid = it }
 
             evtSocket = newSocket().apply {
                 soTimeout = SO_TIMEOUT_MS
@@ -1527,11 +1512,7 @@ class NikonCamera(private val context: Context) {
             }
             evtInput = evtSocket!!.getInputStream()
 
-            val evtInit = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
-                putInt(12)
-                putInt(PtpConstants.INIT_EVT_REQ)
-                putInt(sessionId)
-            }.array()
+            val evtInit = PtpIpProtocolCodec.encodeInitEventRequest(sessionId)
             evtSocket!!.getOutputStream().write(evtInit)
             evtSocket!!.getOutputStream().flush()
 
@@ -1658,14 +1639,11 @@ class NikonCamera(private val context: Context) {
                     ) else Exception(context.getString(R.string.error_handshake_bad_ack))
                 )
             }
-            val payload = commandAck.payload ?: return@withContext Result.failure(
+            val initAck = PtpIpProtocolCodec.decodeInitCommandAck(commandAck.payload) ?: return@withContext Result.failure(
                 Exception(context.getString(R.string.error_handshake_empty))
             )
-            val connectionNumber = payload.getIntLE(0)
-            if (payload.size >= 20) {
-                responderGuid = payload.copyOfRange(4, 20)
-                    .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
-            }
+            val connectionNumber = initAck.connectionNumber
+            initAck.responderGuidHex?.let { responderGuid = it }
             if (!isExpectedStaResponder(expectedResponderGuid, responderGuid)) {
                 staDiagnosticLines +=
                     "responder=UNEXPECTED expected=$expectedResponderGuid actual=$responderGuid"
@@ -1676,11 +1654,7 @@ class NikonCamera(private val context: Context) {
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
             }
             evtInput = evtSocket!!.getInputStream()
-            val eventInit = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
-                putInt(12)
-                putInt(PtpConstants.INIT_EVT_REQ)
-                putInt(connectionNumber)
-            }.array()
+            val eventInit = PtpIpProtocolCodec.encodeInitEventRequest(connectionNumber)
             evtSocket!!.getOutputStream().write(eventInit)
             evtSocket!!.getOutputStream().flush()
             val eventAck = evtReader.readPacket(evtInput!!)
@@ -4493,37 +4467,19 @@ class NikonCamera(private val context: Context) {
     /** Existing camera-hotspot InitCommandRequest; keep byte-for-byte behavior unchanged. */
     private fun makeInitReq(): ByteArray {
         val hostname = "NikonPTP"
-        val nameBytes = hostname.toByteArray(Charsets.UTF_16LE) + byteArrayOf(0, 0)
         val guid = ByteArray(16).also { java.security.SecureRandom().nextBytes(it) }
-        val length = 8 + 16 + nameBytes.size + 2
-        val pkt = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(length)
-            putInt(PtpConstants.INIT_CMD_REQ)
-            put(guid)
-            put(nameBytes)
-            putShort(1)
-        }.array()
-        return pkt
+        return PtpIpProtocolCodec.encodeLegacyInitCommandRequest(guid, hostname)
     }
 
     /** Nikon PC/STA mode needs a stable initiator and the standard 32-bit protocol version. */
     private fun makeStaInitReq(identity: StaInitiatorIdentity): ByteArray {
-        val nameBytes = "ZTransfer".toByteArray(Charsets.UTF_16LE) + byteArrayOf(0, 0)
         val guid = persistentInitiatorId(
             when (identity) {
                 StaInitiatorIdentity.PAIRED_COMPUTER -> "initiator_id"
                 StaInitiatorIdentity.ALBUM_EXPLORER -> "sta_album_explorer_id"
             },
         )
-        val length = 8 + 16 + nameBytes.size + 4
-        val pkt = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(length)
-            putInt(PtpConstants.INIT_CMD_REQ)
-            put(guid)
-            put(nameBytes)
-            putInt(0x00010000)
-        }.array()
-        return pkt
+        return PtpIpProtocolCodec.encodeStandardInitCommandRequest(guid, "ZTransfer")
     }
 
     internal fun sendCmd(code: Int, vararg params: Int) {
@@ -4531,17 +4487,11 @@ class NikonCamera(private val context: Context) {
             usb.sendCommand(code, nextTid(), params)
             return
         }
-        val paramCount = params.size.coerceAtMost(5)
-        val pkt = ByteBuffer.allocate(18 + paramCount * 4).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(18 + paramCount * 4)
-            putInt(PtpConstants.CMD_REQUEST)
-            putInt(1)
-            putShort(code.toShort())
-            putInt(nextTid())
-            for (i in 0 until paramCount) {
-                putInt(params[i])
-            }
-        }.array()
+        val pkt = PtpIpProtocolCodec.encodeCommandRequest(
+            operationCode = code,
+            transactionId = nextTid(),
+            parameters = params,
+        )
         cmdOutput?.write(pkt)
         cmdOutput?.flush()
     }
@@ -4558,27 +4508,12 @@ class NikonCamera(private val context: Context) {
             usb.sendData(code, t, data)
             return
         }
-        val paramCount = params.size.coerceAtMost(5)
-        val pkt = ByteBuffer.allocate(18 + paramCount * 4 + 20 + 12 + data.size)
-            .order(ByteOrder.LITTLE_ENDIAN).apply {
-                // CMD_REQUEST，dataPhaseInfo=2（本事务带 data-out 阶段）
-                putInt(18 + paramCount * 4)
-                putInt(PtpConstants.CMD_REQUEST)
-                putInt(2)
-                putShort(code.toShort())
-                putInt(t)
-                for (i in 0 until paramCount) putInt(params[i])
-                // Start-Data：TID + 总长（64 位）
-                putInt(20)
-                putInt(PtpConstants.START_DATA_PACKET)
-                putInt(t)
-                putLong(data.size.toLong())
-                // End-Data：TID + 数据
-                putInt(12 + data.size)
-                putInt(PtpConstants.END_DATA_PACKET)
-                putInt(t)
-                put(data)
-            }.array()
+        val pkt = PtpIpProtocolCodec.encodeCommandWithData(
+            operationCode = code,
+            transactionId = t,
+            data = data,
+            parameters = params,
+        )
         cmdOutput?.write(pkt)
         cmdOutput?.flush()
     }
@@ -4597,7 +4532,7 @@ class NikonCamera(private val context: Context) {
             val packet = cmdReader.readPacketRaw(cmdInput!!)
             when (packet.type) {
                 PtpConstants.CMD_RESPONSE ->
-                    return if (packet.payloadLen >= 2) packet.buffer.getUShortLE(0) else 0
+                    return PtpIpProtocolCodec.decodeResponseCode(packet.buffer, packet.payloadLen)
                 PtpConstants.PING -> sendPong(cmdOutput)
             }
         }
@@ -4611,7 +4546,7 @@ class NikonCamera(private val context: Context) {
             val packet = cmdReader.readPacket(cmdInput!!)
             when (packet.type) {
                 PtpConstants.CMD_RESPONSE -> {
-                    val respCode = packet.payload?.getUShortLE(0) ?: 0
+                    val respCode = packet.payload?.let { PtpIpProtocolCodec.decodeResponseCode(it) } ?: 0
                     return respCode to buffer?.toByteArray()
                 }
                 PtpConstants.DATA_PACKET, PtpConstants.END_DATA_PACKET -> {
@@ -4655,11 +4590,7 @@ class NikonCamera(private val context: Context) {
 
     /** PTP/IP Cancel 包：请求相机中止当前事务（[tid] 为最后发出的事务号）的数据阶段。 */
     private fun sendCancel() {
-        val pkt = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(12)
-            putInt(PtpConstants.CANCEL)
-            putInt(tid)
-        }.array()
+        val pkt = PtpIpProtocolCodec.encodeCancelRequest(tid)
         cmdOutput?.write(pkt)
         cmdOutput?.flush()
     }
