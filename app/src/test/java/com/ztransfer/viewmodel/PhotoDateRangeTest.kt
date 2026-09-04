@@ -36,6 +36,20 @@ class PhotoDateRangeTest {
     fun `invalid persisted range is ignored`() {
         assertNull(PhotoDateRange.restore("bad", "2026-08-06"))
         assertNull(PhotoDateRange.restore("2026-08-01", null))
+        assertNull(PhotoDateRange.restore("2026-02-29", "2026-03-01"))
+        assertNull(PhotoDateRange.restore("2026-2-09", "2026-03-01"))
+        assertNull(PhotoDateRange.restore(" 2026-02-09", "2026-03-01"))
+        assertNull(PhotoDateRange.restore("1900-02-29", "1900-03-01"))
+    }
+
+    @Test
+    fun `valid persisted range uses the same normalization and leap year rules`() {
+        val reversed = PhotoDateRange.restore("2026-08-06", "2026-08-02")
+        assertEquals(LocalDate.of(2026, 8, 2), reversed?.start)
+        assertEquals(LocalDate.of(2026, 8, 6), reversed?.endInclusive)
+
+        val leapDay = PhotoDateRange.restore("2000-02-29", "2000-02-29")
+        assertEquals(LocalDate.of(2000, 2, 29), leapDay?.start)
     }
 
     @Test

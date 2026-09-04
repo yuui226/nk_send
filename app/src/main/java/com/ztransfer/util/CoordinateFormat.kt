@@ -1,7 +1,9 @@
 package com.ztransfer.util
 
+import com.ztransfer.format.formatDecimalDegreeCoordinatesText
+import com.ztransfer.format.formatDecimalDegreeLatitudeText
+import com.ztransfer.format.formatDecimalDegreeLongitudeText
 import java.util.Locale
-import kotlin.math.abs
 
 /**
  * Human-readable decimal-degree coordinates. Hemispheres replace signed values so the result is
@@ -12,40 +14,27 @@ internal fun formatDecimalDegreeCoordinates(
     longitude: Double,
     fractionDigits: Int,
 ): String {
-    return "${formatDecimalDegreeLatitude(latitude, fractionDigits)}, " +
-        formatDecimalDegreeLongitude(longitude, fractionDigits)
+    return formatDecimalDegreeCoordinatesText(
+        latitude = latitude,
+        longitude = longitude,
+        fractionDigits = fractionDigits,
+        renderFixedDecimal = ::renderUsFixedDecimal,
+    )
 }
 
 internal fun formatDecimalDegreeLatitude(latitude: Double, fractionDigits: Int): String =
-    formatDecimalDegreeValue(
-        value = latitude,
-        maximum = 90.0,
-        positiveHemisphere = "N",
-        negativeHemisphere = "S",
+    formatDecimalDegreeLatitudeText(
+        latitude = latitude,
         fractionDigits = fractionDigits,
-        errorLabel = "latitude",
+        renderFixedDecimal = ::renderUsFixedDecimal,
     )
 
 internal fun formatDecimalDegreeLongitude(longitude: Double, fractionDigits: Int): String =
-    formatDecimalDegreeValue(
-        value = longitude,
-        maximum = 180.0,
-        positiveHemisphere = "E",
-        negativeHemisphere = "W",
+    formatDecimalDegreeLongitudeText(
+        longitude = longitude,
         fractionDigits = fractionDigits,
-        errorLabel = "longitude",
+        renderFixedDecimal = ::renderUsFixedDecimal,
     )
 
-private fun formatDecimalDegreeValue(
-    value: Double,
-    maximum: Double,
-    positiveHemisphere: String,
-    negativeHemisphere: String,
-    fractionDigits: Int,
-    errorLabel: String,
-): String {
-    require(value.isFinite() && value in -maximum..maximum) { "$errorLabel out of range" }
-    require(fractionDigits in 0..8) { "fractionDigits out of range" }
-    val hemisphere = if (value < 0.0) negativeHemisphere else positiveHemisphere
-    return String.format(Locale.US, "%.${fractionDigits}f°%s", abs(value), hemisphere)
-}
+private fun renderUsFixedDecimal(value: Double, fractionDigits: Int): String =
+    String.format(Locale.US, "%.${fractionDigits}f", value)

@@ -1,6 +1,7 @@
 package com.ztransfer.viewmodel
 
 import com.ztransfer.catalog.CaptureDayRange
+import com.ztransfer.catalog.compactCaptureDayRangeLabel
 import com.ztransfer.catalog.latestCaptureDayKey
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -41,23 +42,13 @@ internal fun latestCaptureLocalDate(captureDates: Sequence<String?>): LocalDate?
 
 /** 主筛选面板使用的两位年份短摘要，保证起止日期格式稳定且适合单行显示。 */
 internal fun compactDateRangeLabel(range: PhotoDateRange?): String? {
-    range ?: return null
-    return if (range.start == range.endInclusive) {
-        range.start.formatShortDate()
-    } else {
-        "${range.start.formatShortDate()}–${range.endInclusive.formatShortDate()}"
-    }
+    return compactCaptureDayRangeLabel(range?.captureDayRange)
 }
 
 private fun LocalDate.toDayKey(): Int = year * 10_000 + monthValue * 100 + dayOfMonth
 
 private fun Int.toLocalDate(): LocalDate =
     LocalDate.of(this / 10_000, this / 100 % 100, this % 100)
-
-private fun LocalDate.formatShortDate(): String =
-    "${(year % 100).twoDigits()}/${monthValue.twoDigits()}/${dayOfMonth.twoDigits()}"
-
-private fun Int.twoDigits(): String = toString().padStart(2, '0')
 
 private fun parseIsoLocalDate(value: String): LocalDate? = try {
     LocalDate.parse(value, DateTimeFormatter.ISO_LOCAL_DATE)

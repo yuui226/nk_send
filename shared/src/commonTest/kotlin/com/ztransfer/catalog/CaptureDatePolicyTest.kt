@@ -54,4 +54,17 @@ class CaptureDatePolicyTest {
         assertFailsWith<IllegalArgumentException> { CaptureDayRange.between(20260229, 20260301) }
         assertFailsWith<IllegalArgumentException> { CaptureDayRange.between(20260801, 20261301) }
     }
+
+    @Test
+    fun compactRangeLabelKeepsTwoDigitYearAndEnDash() {
+        assertNull(compactCaptureDayRangeLabel(null))
+        assertEquals(
+            "26/08/06",
+            compactCaptureDayRangeLabel(CaptureDayRange.between(20260806, 20260806)),
+        )
+        assertEquals(
+            "26/12/31–27/01/02",
+            compactCaptureDayRangeLabel(CaptureDayRange.between(20261231, 20270102)),
+        )
+    }
 }

@@ -31,5 +31,26 @@ class CoordinateFormatTest {
         assertThrows(IllegalArgumentException::class.java) {
             formatDecimalDegreeCoordinates(0.0, 181.0, fractionDigits = 5)
         }
+        assertThrows(IllegalArgumentException::class.java) {
+            formatDecimalDegreeLatitude(Double.NaN, fractionDigits = 5)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            formatDecimalDegreeLongitude(Double.POSITIVE_INFINITY, fractionDigits = 5)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            formatDecimalDegreeLatitude(0.0, fractionDigits = -1)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            formatDecimalDegreeLatitude(0.0, fractionDigits = 9)
+        }
+    }
+
+    @Test
+    fun roundingSignedZeroAndLegalLimitsStayStable() {
+        assertEquals("1.01°N", formatDecimalDegreeLatitude(1.005, fractionDigits = 2))
+        assertEquals("0.00001°S", formatDecimalDegreeLatitude(-0.000005, fractionDigits = 5))
+        assertEquals("0.00000°N", formatDecimalDegreeLatitude(-0.0, fractionDigits = 5))
+        assertEquals("90°S", formatDecimalDegreeLatitude(-90.0, fractionDigits = 0))
+        assertEquals("180.00000000°E", formatDecimalDegreeLongitude(180.0, fractionDigits = 8))
     }
 }

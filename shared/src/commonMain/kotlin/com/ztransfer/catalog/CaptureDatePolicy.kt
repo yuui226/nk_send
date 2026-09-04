@@ -49,6 +49,26 @@ fun captureDayKey(captureDate: String?): Int? {
 fun latestCaptureDayKey(captureDates: Sequence<String?>): Int? =
     captureDates.mapNotNull(::captureDayKey).maxOrNull()
 
+/** Compact, locale-independent yy/MM/dd label used by the camera-date filter. */
+fun compactCaptureDayRangeLabel(range: CaptureDayRange?): String? {
+    range ?: return null
+    val start = compactCaptureDayLabel(range.startDayKey)
+    return if (range.startDayKey == range.endInclusiveDayKey) {
+        start
+    } else {
+        "$start–${compactCaptureDayLabel(range.endInclusiveDayKey)}"
+    }
+}
+
+private fun compactCaptureDayLabel(dayKey: Int): String {
+    val year = dayKey / 10_000
+    val month = dayKey / 100 % 100
+    val day = dayKey % 100
+    return "${(year % 100).twoDigits()}/${month.twoDigits()}/${day.twoDigits()}"
+}
+
+private fun Int.twoDigits(): String = toString().padStart(2, '0')
+
 private fun isValidCaptureDayKey(key: Int): Boolean {
     val year = key / 10_000
     val month = key / 100 % 100
