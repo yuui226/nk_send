@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：文件浏览与传输纯规则已完成共享，继续迁移遥控参数格式与档位规则
-- 下一项：`R01` 曝光、ISO、快门、光圈等格式与档位
+- 当前阶段：文件浏览、传输及遥控参数纯规则已完成共享，继续迁移遥控动作调度状态机
+- 下一项：`R02` 对焦、拍摄、录像与实时监看调度状态机
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -79,8 +79,8 @@
 
 | ID | 状态 | 任务 | 主要范围 |
 |---|---|---|---|
-| R01 | NEXT | 曝光、ISO、快门、光圈等格式与档位 | 迁移 `Remote*Test` |
-| R02 | TODO | 对焦、拍摄、录像与实时监看调度状态机 | 相机 IO 走公共接口 |
+| R01 | DONE | 曝光、ISO、快门、光圈等格式与档位 | 参数模型、显示语义、属性兼容、Auto ISO 与拨轮规则已共享；Android Locale 渲染保持原位 |
+| R02 | NEXT | 对焦、拍摄、录像与实时监看调度状态机 | 相机 IO 走公共接口 |
 | G01 | DONE | GPS 更新频率模型 | 原包名/API 不变，现有单测迁入 `commonTest` |
 | G02 | DONE | GPS 公开状态模型 | `GpsStatus/GpsState` 已共享，Android 恢复策略独立验证 |
 | G03 | DONE | GPS 恢复与海拔规则 | 公共规则已共享，常量保持模块内可见，原测试迁入 `commonTest` |
@@ -167,6 +167,8 @@
 | 2026-09-04 | T04 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-191117.apk`，SHA-256 `C9D981428AB4C87A0D3B076048227CBAAB4030CBF1FB4A126A42FEEBFF45D31B`；Manifest 与 T03 完全相同，6 个共享下载策略类型/门面及 Android 原续传异常均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；当前仍是进程内失败重试，未虚报跨进程队列/断点恢复；本轮无已授权 ADB 设备 |
 | 2026-09-04 | T05 | 原片副本后缀/目录键、日期目录、自动任务身份、MIME、无平台文件索引、`.nkpart_` 身份与解析、1..99 重名候选及严格复制长度已迁入 shared；Android 保留同步锁、`ConcurrentHashMap`、`LocalDate` 时间来源、SAF/Uri、provider 实际名、rename/copy、取消和失败清理，相框渲染身份留待 E01/E02 |
 | 2026-09-04 | T05 | JVM 旧正则与 `Locale.ROOT` 对照、year 0000、未知大小、旧 part 名和复制边界样本通过；shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-192902.apk`，SHA-256 `3C4439DA91F072F1B5707E32E45FD59CA6B3BDC31DA472DEEC5597F128AF8A7C`；Manifest 与 T04 完全相同，5 个迁入/适配类型在 APK 中各一个定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备 |
+| 2026-09-04 | R01 | `RcParam`、照片/录像曝光网格、DevicePropDesc 转换、属性别名与探测顺序、详细/紧凑显示语义、Auto ISO、拨轮方向/锚点/步进、电池及水平仪规则已迁入 shared；Android 继续负责默认 Locale 字符串渲染、相机命令/重试/协程及 Compose 状态，保留标准快门回退等现有边界行为 |
+| 2026-09-04 | R01 | shared 与 Android 遥控定向测试、全量单测、App/shared Lint、标准 Debug 打包均通过；`ZTransfer-debug-1.81-20260904-195509.apk`，SHA-256 `6AF889A3E1C99918D14EAB9AA36ADB42A471504763F109F59F250CD22B030E04`；Manifest 与 T05 完全相同，共享策略/参数/展示类型均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；真机 `3B65BV001L500000` 安装启动成功、PID `14875` |
 
 ## 更新约定
 
