@@ -38,75 +38,6 @@ class TransferStateTest {
     }
 
     @Test
-    fun enqueueStartsOnlyWhenTheExecutionGateAllowsIt() {
-        assertEquals(
-            true,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = false,
-                isTransferring = false,
-                pauseAfterCurrent = false,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = true,
-                isTransferring = false,
-                pauseAfterCurrent = false,
-            ),
-        )
-        assertEquals(
-            true,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = true,
-                isTransferring = true,
-                pauseAfterCurrent = false,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = false,
-                isTransferring = true,
-                pauseAfterCurrent = true,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldRunQueueAfterEnqueue(
-                deferTransferStart = false,
-                isTransferring = false,
-                pauseAfterCurrent = true,
-            ),
-        )
-    }
-
-    @Test
-    fun pauseIsObservedOnlyBetweenCompleteQueueTasks() {
-        assertEquals(
-            true,
-            shouldPauseBeforeNextTransfer(
-                pauseAfterCurrent = true,
-                isRecheckingCurrentTask = false,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldPauseBeforeNextTransfer(
-                pauseAfterCurrent = true,
-                isRecheckingCurrentTask = true,
-            ),
-        )
-        assertEquals(
-            false,
-            shouldPauseBeforeNextTransfer(
-                pauseAfterCurrent = false,
-                isRecheckingCurrentTask = false,
-            ),
-        )
-    }
-
-    @Test
     fun frameGenerationTimingUsesUserVisibleMonotonicInterval() {
         val started = TransferTask(file(1)).startFrameGeneration(nowElapsedMs = 1_000L)
 
@@ -186,13 +117,6 @@ class TransferStateTest {
     }
 
     @Test
-    fun queueSpeedSurvivesZeroSamplesBetweenFiles() {
-        assertEquals(12L * 1024L * 1024L, retainLastValidTransferSpeed(0L, 12L * 1024L * 1024L))
-        assertEquals(12L * 1024L * 1024L, retainLastValidTransferSpeed(12L * 1024L * 1024L, 0L))
-        assertEquals(9L * 1024L * 1024L, retainLastValidTransferSpeed(12L * 1024L * 1024L, 9L * 1024L * 1024L))
-    }
-
-    @Test
     fun activeProgressIsMergedOnlyIntoItsMatchingTaskSnapshot() {
         val activeTask = TransferTask(file(1), status = TransferStatus.TRANSFERING)
         val waitingTask = TransferTask(file(2), status = TransferStatus.WAITING)
@@ -209,8 +133,17 @@ class TransferStateTest {
         assertEquals(0.4f, merged.progress)
         assertEquals(40L, merged.downloaded)
         assertEquals(12L, merged.speed)
+        assertNotEquals(progress.retainedBytesPerSecond, merged.speed)
         assertEquals(0f, activeTask.progress)
         assertEquals(waitingTask, waitingTask.withActiveProgress(progress))
+        assertEquals(
+            activeTask.copy(status = TransferStatus.WAITING),
+            activeTask.copy(status = TransferStatus.WAITING).withActiveProgress(progress),
+        )
+        assertEquals(
+            activeTask.copy(status = TransferStatus.COMPLETED),
+            activeTask.copy(status = TransferStatus.COMPLETED).withActiveProgress(progress),
+        )
     }
 
     @Test
@@ -226,19 +159,6 @@ class TransferStateTest {
         assertEquals(first, queue.takeFirst())
         assertEquals(third, queue.takeFirst())
         assertEquals(null, queue.takeFirst())
-    }
-
-    @Test
-    fun retryAllExcludesTasksThatAreAlreadyLeavingTheUi() {
-        val departing = TransferTask(file(1), status = TransferStatus.CANCELLED)
-        val failed = TransferTask(file(2), status = TransferStatus.FAILED)
-
-        val retryIds = retryableTransferTaskIds(
-            tasks = listOf(departing, failed),
-            excludedTaskIds = setOf(departing.taskId),
-        )
-
-        assertEquals(setOf(failed.taskId), retryIds)
     }
 
     @Test

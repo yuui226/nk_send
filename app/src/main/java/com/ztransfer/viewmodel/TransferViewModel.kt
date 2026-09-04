@@ -92,10 +92,6 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.ResolverStyle
 
-enum class TransferStatus {
-    WAITING, TRANSFERING, COMPLETED, FAILED, CANCELLED
-}
-
 private val transferTaskIds = AtomicLong(0L)
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION = 2
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY =
@@ -152,7 +148,7 @@ internal class ExistingFileNameIndex<T> {
 data class TransferTask(
     val file: NikonCamera.FileInfo,
     /** 队列任务的进程内唯一标识；同一相机文件可以按不同装饰配置创建多个独立任务。 */
-    val taskId: Long = transferTaskIds.incrementAndGet(),
+    override val taskId: Long = transferTaskIds.incrementAndGet(),
     /** 入队时锁定的边框样式；null 表示该任务不生成边框/水印派生图。 */
     val framePreset: PhotoFramePreset? = null,
     /** false 表示保留原照片画布，仅叠加画面内水印。 */
@@ -165,7 +161,7 @@ data class TransferTask(
     val photoFilterRequested: PhotoFilterSelection? = null,
     /** 非空时原图写入传输根目录下的该日期文件夹，效果图再写入其 ZTFrames 子目录。 */
     val destinationFolderName: String? = null,
-    val status: TransferStatus = TransferStatus.WAITING,
+    override val status: TransferStatus = TransferStatus.WAITING,
     val progress: Float = 0f,
     val speed: Long = 0,
     val downloaded: Long = 0,
@@ -181,7 +177,7 @@ data class TransferTask(
     val frameGenerationStartedAtElapsedMs: Long? = null,
     /** 单次派生从显示“生成中”到结束的用户可感知耗时。 */
     val frameGenerationElapsedMs: Long? = null,
-)
+) : TransferQueueItem
 
 internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask = copy(
     isGeneratingFrame = true,
@@ -292,16 +288,6 @@ class ExportedOriginalIndex internal constructor() {
  * 唯一活动下载的高频状态。它与低频 [TransferState.tasks] 分离：协议层约每 200ms 更新时
  * 只替换这个常量大小对象，不再复制整个任务列表，也不会令订阅设置/筛选的页面失效。
  */
-data class ActiveTransferProgress(
-    val taskId: Long,
-    val fraction: Float = 0f,
-    val downloaded: Long = 0L,
-    /** 当前协议采样速度；0 表示本次采样未得到有效速度。 */
-    val bytesPerSecond: Long = 0L,
-    /** 跨文件短间隙保留的最近有效速度，供顶部队列胶囊稳定显示。 */
-    val retainedBytesPerSecond: Long = 0L,
-)
-
 internal fun TransferTask.withActiveProgress(
     active: ActiveTransferProgress?,
 ): TransferTask = if (active?.taskId == taskId && status == TransferStatus.TRANSFERING) {
@@ -317,33 +303,25 @@ internal fun TransferTask.withActiveProgress(
 /** 仅负责低频队列调度；任务历史继续留在 TransferState 供 UI 展示。 */
 internal class PendingTransferQueue {
     private val lock = Any()
-    private val tasks = LinkedHashMap<Long, TransferTask>()
-    private val withdrawnClaimedTaskIds = HashSet<Long>()
+    private val queue = TransferTaskQueue<TransferTask>()
 
     fun addAll(newTasks: Collection<TransferTask>) = synchronized(lock) {
-        newTasks.forEach { tasks[it.taskId] = it }
+        queue.addAll(newTasks)
     }
 
-    fun takeFirst(): TransferTask? = synchronized(lock) {
-        val iterator = tasks.entries.iterator()
-        if (!iterator.hasNext()) return@synchronized null
-        iterator.next().also { iterator.remove() }.value
-    }
+    fun takeFirst(): TransferTask? = synchronized(lock) { queue.takeFirst() }
 
     /** 队列内任务直接移除；已经被调度器取走但尚在预检查的任务留下撤回标记。 */
     fun withdraw(taskIds: Collection<Long>) = synchronized(lock) {
-        taskIds.forEach { taskId ->
-            if (tasks.remove(taskId) == null) withdrawnClaimedTaskIds += taskId
-        }
+        queue.withdraw(taskIds)
     }
 
     fun consumeWithdrawal(taskId: Long): Boolean = synchronized(lock) {
-        withdrawnClaimedTaskIds.remove(taskId)
+        queue.consumeWithdrawal(taskId)
     }
 
     fun clear() = synchronized(lock) {
-        tasks.clear()
-        withdrawnClaimedTaskIds.clear()
+        queue.clear()
     }
 }
 
@@ -361,16 +339,6 @@ private fun TransferTask.newAttempt(): TransferTask = copy(
     frameGenerationStartedAtElapsedMs = null,
     frameGenerationElapsedMs = null,
 )
-
-internal fun retryableTransferTaskIds(
-    tasks: List<TransferTask>,
-    excludedTaskIds: Set<Long>,
-): Set<Long> = tasks.asSequence()
-    .filter { task ->
-        task.taskId !in excludedTaskIds &&
-            (task.status == TransferStatus.FAILED || task.status == TransferStatus.CANCELLED)
-    }
-    .mapTo(HashSet()) { it.taskId }
 
 private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
     "$fileName|$size|$captureDate"
@@ -461,22 +429,6 @@ data class TransferState(
 )
 
 /**
- * A running queue may keep accepting work unless a pause boundary has been requested. When idle,
- * the persisted deferred-start preference controls whether the first queued item starts itself.
- */
-internal fun shouldRunQueueAfterEnqueue(
-    deferTransferStart: Boolean,
-    isTransferring: Boolean,
-    pauseAfterCurrent: Boolean,
-): Boolean = !pauseAfterCurrent && (isTransferring || !deferTransferStart)
-
-/** A local existing-file recheck is still part of the claimed task, not the next queue item. */
-internal fun shouldPauseBeforeNextTransfer(
-    pauseAfterCurrent: Boolean,
-    isRecheckingCurrentTask: Boolean,
-): Boolean = pauseAfterCurrent && !isRecheckingCurrentTask
-
-/**
  * Publishes a task list whose identity, order, or size changed and invalidates UI indexes derived
  * from that structure. Status/progress-only element replacements must continue to use [copy].
  */
@@ -485,8 +437,22 @@ internal fun TransferState.withTaskStructure(tasks: List<TransferTask>): Transfe
     taskStructureRevision = taskStructureRevision + 1L,
 )
 
-internal fun retainLastValidTransferSpeed(previous: Long, sample: Long): Long =
-    if (sample > 0L) sample else previous.coerceAtLeast(0L)
+private val TransferState.transferExecutionState: TransferExecutionState
+    get() = TransferExecutionState(isTransferring, pauseAfterCurrent)
+
+private fun TransferState.withTransferExecutionState(
+    execution: TransferExecutionState,
+): TransferState = if (
+    isTransferring == execution.isTransferring &&
+    pauseAfterCurrent == execution.pauseAfterCurrent
+) {
+    this
+} else {
+    copy(
+        isTransferring = execution.isTransferring,
+        pauseAfterCurrent = execution.pauseAfterCurrent,
+    )
+}
 
 /** 文件页所有筛选条件的原子快照，避免筛选项增加后依赖位置参数传递。 */
 data class PhotoFilterCriteria(
@@ -1864,7 +1830,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val dirUri = snapshot.transferDirUri ?: return
         val waiting = snapshot.tasks.filter { it.status == TransferStatus.WAITING }
         if (waiting.isEmpty()) return
-        _state.update { it.copy(pauseAfterCurrent = false) }
+        _state.update { state ->
+            state.withTransferExecutionState(state.transferExecutionState.resumed())
+        }
         prewarmPhotoFilterFor(waiting)
         processQueue(dirUri, cameraProvider)
     }
@@ -1872,7 +1840,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     /** The active task is never interrupted; the scheduler observes this before claiming the next. */
     fun requestPauseAfterCurrent() {
         _state.update { state ->
-            if (state.isTransferring) state.copy(pauseAfterCurrent = true) else state
+            state.withTransferExecutionState(state.transferExecutionState.pauseRequested())
         }
     }
 
@@ -2558,13 +2526,8 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         _activeTransferProgress.value = null
                         lastValidTransferSpeed = 0L
                         _state.update { state ->
-                            state.copy(
-                                isTransferring = false,
-                                pauseAfterCurrent = if (stoppedAfterCurrent) {
-                                    true
-                                } else {
-                                    false
-                                },
+                            state.withTransferExecutionState(
+                                state.transferExecutionState.finished(stoppedAfterCurrent),
                             )
                         }
                         stopTransferServiceIfIdle()
@@ -2574,7 +2537,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         transferJob = job
         // Publish the running state before starting the lazy coroutine. Auto-start enqueue and the
         // deferred pill therefore cannot expose a one-frame false paused state.
-        _state.update { it.copy(isTransferring = true, pauseAfterCurrent = false) }
+        _state.update { state ->
+            state.withTransferExecutionState(state.transferExecutionState.started())
+        }
         job.start()
     }
 
