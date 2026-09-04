@@ -84,63 +84,17 @@ suspend fun NikonCamera.labSetProp(prop: Int, raw: ByteArray): Int =
 
 // ============================ PTP 数据集解析 ============================
 
-/** 按属性语义把原始值排成人话（快门分数、光圈 f 值、EV 等）。 */
-private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
-    Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> "f/%.1f".format(raw / 100.0)
-    Lab.PROP_NK_SHUTTER, Lab.PROP_NK_MOVIE_SHUTTER -> when (raw) {
-        0xFFFFFFFFL -> "Bulb"
-        0xFFFFFFFEL -> "x200"
-        0xFFFFFFFDL -> "Time"
-        else -> {
-            // 分子/分母编码，慢速档分子>1（如 300/10=30s），直接打分数不像人话，约分展示。
-            val num = (raw ushr 16) and 0xFFFFL
-            val den = raw and 0xFFFFL
-            when {
-                num == 0L || den == 0L -> "$raw"
-                num == 1L -> "1/${den}s"
-                num % den == 0L -> "${num / den}s"            // 300/10 → 30s
-                den % num == 0L -> "1/${den / num}s"          // 2/500 → 1/250s
-                else -> "%.1fs".format(num.toDouble() / den)  // 13/10 → 1.3s
-            }
-        }
+/** 数值仍由 Android 默认 Locale 渲染，shared 只决定相机语义、位数、正号与单位。 */
+private fun RcValuePresentation.renderWithAndroidLocale(): String = when (this) {
+    is RcValuePresentation.Text -> value
+    is RcValuePresentation.Decimal -> {
+        val pattern = "%${if (alwaysShowSign) "+" else ""}.${fractionDigits}f"
+        prefix + pattern.format(value) + suffix
     }
-    Lab.PROP_EXPOSURE_TIME_STD -> "%.4fs".format(raw / 10000.0)
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_EXP_COMPENSATION,
-    Lab.PROP_NK_MOVIE_EXP_COMP -> "%+.1fEV".format(raw / 1000.0)
-    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_ISO_CONTROL_SENSITIVITY,
-    Lab.PROP_NK_MOVIE_ISO -> "ISO$raw"
-    Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT -> if (raw == 0L) "Off" else "On"
-    // 16.16 定点度数（详见 rcAngleLevelRoll 的编码说明）。
-    Lab.PROP_NK_ANGLE_LEVEL -> "%.1f°".format(raw / 65536.0)
-    Lab.PROP_EXPOSURE_PROGRAM -> when (raw) {
-        1L -> "M"
-        2L -> "P"
-        3L -> "A"
-        4L -> "S"
-        // Nikon 在全自动档使用厂商扩展枚举；不是操作失败或错误码。
-        0x8010L -> "AUTO"
-        else -> "0x${raw.toString(16)}"
-    }
-    Lab.PROP_FOCUS_MODE -> when (raw) {
-        1L -> "MF"
-        2L -> "AF"
-        3L -> "AF Macro"
-        0x8010L -> "AF-S"
-        0x8011L -> "AF-C"
-        0x8012L -> "AF-A"
-        0x8013L -> "AF-F"
-        else -> "0x${raw.toString(16)}"
-    }
-    Lab.PROP_NK_AF_MODE -> when (raw) {
-        0L -> "AF-S"
-        1L -> "AF-C"
-        2L -> "AF-A"
-        // 3/4 会在部分机型 AF 失败后出现，并不代表用户切到了 MF。
-        // 语义未确认前保留为未知值，由上层隐藏标签。
-        else -> "0x${raw.toString(16)}"
-    }
-    else -> "$raw"
 }
+
+internal fun rcDetailedFormat(prop: Int, raw: Long): String =
+    rcDetailedValuePresentation(prop, raw).renderWithAndroidLocale()
 
 /**
  * 解析标准 DevicePropDesc。即使请求参数是 Nikon 的 32 位属性编号，返回数据集里的
@@ -155,24 +109,24 @@ private fun parsePropDesc(prop: Int, d: ByteArray): String {
     val desc = parseProbePropDescData(prop, d)
     val form = when (desc.formFlag) {
         1 ->
-            "range[${fmtVal(prop, desc.rangeMin ?: 0L)}.." +
-                "${fmtVal(prop, desc.rangeMax ?: 0L)} step ${desc.rangeStep}]"
+            "range[${rcDetailedFormat(prop, desc.rangeMin ?: 0L)}.." +
+                "${rcDetailedFormat(prop, desc.rangeMax ?: 0L)} step ${desc.rangeStep}]"
         2 -> {
             // 数字变焦的全部档位正是这次探测要回收的核心信息，即使超过 12 档也不截断。
             // 其他属性仍保持紧凑展示；它们的完整二进制始终另行写入 raw 字段。
             val displayLimit = if (prop in Lab.DIGITAL_ZOOM_PROPS) Int.MAX_VALUE else 12
             val shown = desc.enumValues.take(displayLimit)
-                .joinToString(",") { fmtVal(prop, it) }
+                .joinToString(",") { rcDetailedFormat(prop, it) }
             val suffix = if (desc.enumValues.size > displayLimit) ",…]" else "]"
             "enum(${desc.enumValues.size})[$shown$suffix"
         }
         else -> "none"
     }
     val curTxt =
-        if (desc.currentIsScalar) "${fmtVal(prop, desc.current)} (raw=${desc.current})"
+        if (desc.currentIsScalar) "${rcDetailedFormat(prop, desc.current)} (raw=${desc.current})"
         else "<non-scalar>"
     val defTxt =
-        if (desc.defaultIsScalar) fmtVal(prop, desc.defaultValue)
+        if (desc.defaultIsScalar) rcDetailedFormat(prop, desc.defaultValue)
         else "<non-scalar>"
     return "type=${hex4(desc.dataType)} ${if (desc.writable) "RW" else "RO"} " +
         "cur=$curTxt def=$defTxt $form"
@@ -187,31 +141,6 @@ private fun findJpegStart(d: ByteArray): Int {
 }
 
 // ============================ 正式遥控页协议支持 ============================
-
-/** DevicePropDesc 的结构化解析结果。 */
-private data class PropDescData(
-    val dataType: Int,
-    val writable: Boolean,
-    val current: Long,
-    val enumValues: List<Long>
-)
-
-private fun parsePropDescData(d: ByteArray): PropDescData {
-    val descriptor = parsePtpDevicePropDescriptor(d)
-    val values = when (descriptor.formFlag) {
-        // Nikon 的布尔属性常用 Range(0..1) 而不是 Enumeration。只把严格的
-        // 二值范围展开；其他连续范围仍保持为空，避免为曝光参数制造庞大值表。
-        1 -> {
-            val min = descriptor.rangeMin
-            val max = descriptor.rangeMax
-            val step = descriptor.rangeStep
-            if (min == 0L && max == 1L && step == 1L) listOf(0L, 1L) else emptyList()
-        }
-        2 -> descriptor.enumValues
-        else -> emptyList()
-    }
-    return PropDescData(descriptor.dataType, descriptor.writable, descriptor.current, values)
-}
 
 /**
  * 深度探测不暴力枚举未知整数空间：只使用相机自己给出的 enum，或 range 的端点/
@@ -243,45 +172,6 @@ private fun digitalZoomProbeValues(desc: PtpDevicePropDescriptor): List<Long> {
     return evenlySpaced.distinct()
 }
 
-/** 一个曝光参数的完整描述。值域来自相机且随曝光模式动态变化，收到
- *  DevicePropChanged(0x4006) 事件后应重新拉取。 */
-data class RcParam(
-    val prop: Int,
-    val dataType: Int,
-    val writable: Boolean,
-    val current: Long,
-    val values: List<Long>
-)
-
-/** 各 Nikon 世代的 Auto ISO 属性优先级；按能力探测，不按型号字符串分支。 */
-internal fun rcAutoIsoCandidateProps(movieMode: Boolean): List<Int> =
-    if (movieMode) {
-        listOf(
-            Lab.PROP_NK_MOVIE_AUTO_ISO,
-            Lab.PROP_NK_AUTO_ISO_ALT,
-            Lab.PROP_NK_AUTO_ISO
-        )
-    } else {
-        listOf(Lab.PROP_NK_AUTO_ISO, Lab.PROP_NK_AUTO_ISO_ALT)
-    }
-
-/**
- * 判断属性能否作为 Auto ISO 开关。
- *
- * 部分 Nikon 机身会把 D0AD/D054/D16A 描述为可写 UINT8，却不附带 enum/range form；
- * 这仍是标准的 0/1 On/Off 属性。只对 8 位、当前值确实为 0/1 的无 form 属性放宽，
- * 写入端仍会回读确认，避免把其他厂商属性误认成开关。
- */
-internal fun RcParam.rcIsBinaryToggle(): Boolean {
-    if (!writable) return false
-    val hasExplicitStates = values.any { it == 0L } && values.any { it != 0L }
-    val isImplicitByteToggle =
-        values.isEmpty() &&
-            dataType in setOf(0x0001, 0x0002) &&
-            current in 0L..1L
-    return hasExplicitStates || isImplicitByteToggle
-}
-
 /** 当前镜头伺服方式。现代 Z 机优先走标准 FocusMode(0x500A)，旧 Nikon
  *  机身回退到厂商属性 0xD161；未知枚举保留原始值供日志定位，不伪造名称。 */
 data class RcFocusMode(
@@ -292,39 +182,14 @@ data class RcFocusMode(
 )
 
 /** 遥控参数 UI 的紧凑读数；tile 已标明 ISO/EV，因此数值中不重复单位。 */
-fun rcFormat(prop: Int, raw: Long): String = when (prop) {
-    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_ISO_CONTROL_SENSITIVITY,
-    Lab.PROP_NK_MOVIE_ISO -> raw.toString()
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_EXP_COMPENSATION,
-    Lab.PROP_NK_MOVIE_EXP_COMP ->
-        "%+.1f".format(raw / 1000.0)
-    else -> fmtVal(prop, raw)
-}
+fun rcFormat(prop: Int, raw: Long): String =
+    rcCompactValuePresentation(prop, raw).renderWithAndroidLocale()
 
 suspend fun NikonCamera.rcGetParam(prop: Int): RcParam? {
     val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_DESC, prop)
     if (rc != Lab.OK || d == null) return null
-    val desc = runCatching { parsePropDescData(d) }.getOrNull() ?: return null
-    return RcParam(prop, desc.dataType, desc.writable, desc.current, desc.enumValues)
-}
-
-/**
- * 把不同 Nikon 世代对同一曝光参数使用的属性码归一到 UI 的逻辑属性。
- * UI 始终用逻辑属性作 key，[RcParam.prop] 则保留机身实际支持、实际写入的属性码。
- */
-fun rcCanonicalExposureProp(prop: Int): Int = when (prop) {
-    Lab.PROP_NK_EXP_COMPENSATION -> Lab.PROP_EXP_COMPENSATION
-    Lab.PROP_NK_ISO_EX -> Lab.PROP_ISO
-    Lab.PROP_EXPOSURE_TIME_STD -> Lab.PROP_NK_SHUTTER
-    else -> prop
-}
-
-private fun compatibleExposureProps(logicalProp: Int): IntArray = when (logicalProp) {
-    Lab.PROP_EXP_COMPENSATION ->
-        intArrayOf(Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_EXP_COMPENSATION)
-    Lab.PROP_ISO -> intArrayOf(Lab.PROP_ISO, Lab.PROP_NK_ISO_EX)
-    Lab.PROP_NK_SHUTTER -> intArrayOf(Lab.PROP_NK_SHUTTER, Lab.PROP_EXPOSURE_TIME_STD)
-    else -> intArrayOf(logicalProp)
+    val descriptor = runCatching { parsePtpDevicePropDescriptor(d) }.getOrNull() ?: return null
+    return rcParamFromDescriptor(prop, descriptor)
 }
 
 /**
@@ -333,7 +198,7 @@ private fun compatibleExposureProps(logicalProp: Int): IntArray = when (logicalP
  */
 suspend fun NikonCamera.rcGetCompatibleParam(logicalProp: Int): RcParam? {
     var readableFallback: RcParam? = null
-    for (actualProp in compatibleExposureProps(logicalProp)) {
+    for (actualProp in rcCompatibleExposureProps(logicalProp)) {
         val param = rcGetParam(actualProp) ?: continue
         if (param.writable && param.values.isNotEmpty()) return param
         if (readableFallback == null) readableFallback = param
@@ -348,32 +213,6 @@ suspend fun NikonCamera.rcRefreshParam(param: RcParam): RcParam? {
     val decoded = runCatching { decodePtpTypedValue(param.dataType, data) }.getOrNull()
         ?: return null
     return if (decoded.isScalar) param.copy(current = decoded.value) else null
-}
-
-/**
- * 机身电子水平仪（Nikon AngleLevel 0xD067）的滚转角：单位度、范围 (-180,180]，0 即水平。
- * 无法解释的编码返回 null，调用方据此不画任何角度。
- *
- * 编码依据：该属性是只读 INT32，值为 16.16 定点的度数（libgphoto2 对 0xD067 固定按
- * 1/65536 缩放渲染）。libgphoto2 自带的 nikon-z7 属性 dump 可直接验算：
- * `Angle Level(0xd067):(read only) (type=0x5) 358.8' (23514322)` → 23514322/65536 = 358.8，
- * 即相机按 0..360 的环报角，358.8 就是反方向偏 1.2°、几乎水平。
- * 8/16 位类型装不下 360° 的 16.16 编码，只可能是整度数，一并容错。
- *
- * 正负方向（顺时针为正还是为负）尚未在真机核对；若实机上水平线歪的方向相反，
- * 只需在这里对结果取反即可，绘制层不必改。
- */
-fun rcAngleLevelRoll(param: RcParam): Float? {
-    val degrees = when (param.dataType) {
-        0x0005, 0x0006 -> param.current.toDouble() / 65536.0   // INT32/UINT32：16.16 定点
-        0x0001, 0x0002, 0x0003, 0x0004 -> param.current.toDouble()
-        else -> return null
-    }
-    if (!degrees.isFinite()) return null
-    var roll = degrees % 360.0
-    if (roll > 180.0) roll -= 360.0
-    if (roll <= -180.0) roll += 360.0
-    return roll.toFloat()
 }
 
 /**
@@ -401,7 +240,7 @@ suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
                 acc or ((valueData[i].toLong() and 0xFF) shl (8 * i))
             }
         } else continue
-        val label = fmtVal(prop, raw)
+        val label = rcDetailedFormat(prop, raw)
         // 未确认的厂商枚举不把十六进制原值当成面向用户的模式标签。
         if (label.startsWith("0x")) continue
         val result = RcFocusMode(
@@ -487,19 +326,6 @@ data class RcTapFocusResult(
     val trackingStarted: Boolean,
     val afResult: RcAfResult?
 )
-
-/**
- * 相机上报的标准 PTP BatteryLevel(0x5001)。该属性规定为 UINT8 0..100；
- * 值域外的数字（部分机身可能用 0xFF 表示未知）不猜测、不折算。
- */
-fun rcBatteryPercentage(param: RcParam?): Int? = param
-    ?.takeIf {
-        it.prop == Lab.PROP_BATTERY_LEVEL &&
-            it.dataType == 0x0002 &&
-            it.current in 0L..100L
-    }
-    ?.current
-    ?.toInt()
 
 internal data class RcTapFocusStartResult(
     val moveResponseCode: Int?,

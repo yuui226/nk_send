@@ -138,7 +138,10 @@ class RemoteLiveViewSchedulingTest {
             Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_EXP_COMPENSATION.toLong(),
             Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_NK_EXP_COMPENSATION.toLong(),
             Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_ISO.toLong(),
+            Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_NK_ISO_EX.toLong(),
             Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_ISO.toLong(),
+            Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_EXPOSURE_TIME_STD.toLong(),
+            Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_NK_SHUTTER.toLong(),
             objectEvent
         )
 
@@ -146,6 +149,7 @@ class RemoteLiveViewSchedulingTest {
             listOf(
                 Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_EXP_COMPENSATION.toLong(),
                 Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_ISO.toLong(),
+                Lab.EVT_DEVICE_PROP_CHANGED to Lab.PROP_EXPOSURE_TIME_STD.toLong(),
                 objectEvent
             ),
             coalesceRemoteEvents(events, suppressPropertyChanges = false)

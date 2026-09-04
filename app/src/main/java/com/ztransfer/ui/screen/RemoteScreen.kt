@@ -124,12 +124,15 @@ import com.ztransfer.protocol.labStartLiveView
 import com.ztransfer.protocol.liveViewWarmupRemainingMs
 import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcAngleLevelRoll
+import com.ztransfer.protocol.rcAllExposureProps
 import com.ztransfer.protocol.rcAutoIsoCandidateProps
+import com.ztransfer.protocol.rcAutoIsoTarget
 import com.ztransfer.protocol.rcBatteryPercentage
 import com.ztransfer.protocol.rcCapture
 import com.ztransfer.protocol.rcFocusAt
 import com.ztransfer.protocol.rcChangeApplicationMode
 import com.ztransfer.protocol.rcCanonicalExposureProp
+import com.ztransfer.protocol.rcDownStepSign
 import com.ztransfer.protocol.rcEndMovie
 import com.ztransfer.protocol.rcEndSubjectTracking
 import com.ztransfer.protocol.rcFormat
@@ -142,6 +145,10 @@ import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.protocol.rcPrepareAndStartMovieDetailed
 import com.ztransfer.protocol.rcRefreshParam
 import com.ztransfer.protocol.rcIsBinaryToggle
+import com.ztransfer.protocol.rcExposureProps
+import com.ztransfer.protocol.rcParamAnchorIndex
+import com.ztransfer.protocol.rcParamLabel
+import com.ztransfer.protocol.rcSteppedValue
 import com.ztransfer.protocol.rcSetApplicationMode
 import com.ztransfer.protocol.rcSetControlMode
 import com.ztransfer.protocol.rcSetLvSize
@@ -188,15 +195,10 @@ import kotlin.math.hypot
 // 第一排 曝光补偿 / ISO，第二排 光圈 / 快门速度。
 // 照片与录像的参数在机内是两套独立属性（Z 30 实测：拨杆在录像位时照片侧属性
 // 读不到/不可写），拨杆位置决定网格绑定哪一组。
-private val EXPOSURE_PROPS = listOf(
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_ISO, Lab.PROP_F_NUMBER, Lab.PROP_NK_SHUTTER
-)
-private val MOVIE_EXPOSURE_PROPS = listOf(
-    Lab.PROP_NK_MOVIE_EXP_COMP, Lab.PROP_NK_MOVIE_ISO,
-    Lab.PROP_NK_MOVIE_F_NUMBER, Lab.PROP_NK_MOVIE_SHUTTER
-)
+private val EXPOSURE_PROPS = rcExposureProps(movieMode = false)
+private val MOVIE_EXPOSURE_PROPS = rcExposureProps(movieMode = true)
 // 事件刷新的匹配范围（两套都听：拨杆随时可能切换）
-private val ALL_EXPOSURE_PROPS = EXPOSURE_PROPS + MOVIE_EXPOSURE_PROPS
+private val ALL_EXPOSURE_PROPS = rcAllExposureProps()
 private val ALL_AUTO_ISO_PROPS =
     (rcAutoIsoCandidateProps(false) + rcAutoIsoCandidateProps(true)).distinct()
 private const val USB_LIVE_VIEW_STABLE_FRAMES = 8
@@ -1512,13 +1514,8 @@ private fun RemoteContent(
 
     fun stepParam(prop: Int, delta: Int) {
         val p = params[prop] ?: return
-        if (!p.writable || p.values.isEmpty()) return
-        // 起点用共用锚点（精确命中或按物理量最近档）：当前值不在枚举里时哪怕 delta
-        // 走不动也发一次，把值吸附回枚举，否则拖动完全失灵（indexOf 永远 -1）。
-        val from = paramAnchorIdx(prop, p.values, p.current)
-        val newIdx = (from + delta).coerceIn(0, p.values.size - 1)
-        if (newIdx == from && p.values[from] == p.current) return
-        sendValue(prop, p.values[newIdx], immediate = false)
+        val value = rcSteppedValue(logicalProp = prop, param = p, delta = delta) ?: return
+        sendValue(prop, value, immediate = false)
     }
 
     // 拍摄：capturing 从触发一直保持到收到 ObjectAdded（相机确认新照片已生成）——
@@ -1901,11 +1898,7 @@ private fun RemoteContent(
     fun setAutoIso(enabled: Boolean) {
         val p = autoIsoProp?.let { params[it] } ?: return
         if (!p.writable || autoIsoBusy) return
-        val target = if (enabled) {
-            p.values.firstOrNull { it != 0L } ?: 1L
-        } else {
-            p.values.firstOrNull { it == 0L } ?: 0L
-        }
+        val target = rcAutoIsoTarget(p, enabled)
         val requestedMovieMode = movieMode
         if ((p.current != 0L) == enabled) return
 
@@ -1934,11 +1927,7 @@ private fun RemoteContent(
                 }
                 var confirmedParam: RcParam? = null
                 for (candidate in candidates) {
-                    val candidateTarget = if (enabled) {
-                        candidate.values.firstOrNull { it != 0L } ?: 1L
-                    } else {
-                        candidate.values.firstOrNull { it == 0L } ?: 0L
-                    }
+                    val candidateTarget = rcAutoIsoTarget(candidate, enabled)
                     if ((candidate.current != 0L) == enabled) {
                         confirmedParam = candidate
                         break
@@ -2594,7 +2583,7 @@ private fun RemoteContent(
                             val hasAutoIso =
                                 prop == isoProp && autoIsoAvailable
                             ParamTile(
-                                label = paramLabel(prop),
+                                label = rcParamLabel(prop),
                                 param = params[prop],
                                 autoIsoEnabled = if (hasAutoIso) autoIsoEnabled else null,
                                 autoIsoValue = if (hasAutoIso) effectiveAutoIsoValue else null,
@@ -2917,7 +2906,7 @@ private fun RemoteContent(
                                             val hasAutoIso =
                                                 prop == isoProp && autoIsoAvailable
                                             ParamTile(
-                                                label = paramLabel(prop),
+                                                label = rcParamLabel(prop),
                                                 param = params[prop],
                                                 autoIsoEnabled =
                                                     if (hasAutoIso) autoIsoEnabled else null,
@@ -3916,63 +3905,13 @@ private fun ViewfinderImage(
 // 跟手又能精确单步(> 触摸 slop);大跨度不靠拖,点数值弹全表直跳。太钝调小、太跳调大。
 private val PARAM_WHEEL_ROW_DP = 18.dp
 
-/** 参数在 tile 左上角的短标（相机通用符号，不进 i18n）。 */
-private fun paramLabel(prop: Int): String = when (prop) {
-    Lab.PROP_NK_SHUTTER, Lab.PROP_NK_MOVIE_SHUTTER -> "S"
-    Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> "f"
-    Lab.PROP_ISO, Lab.PROP_NK_MOVIE_ISO -> "ISO"
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP -> "EV"
-    else -> ""
-}
-
-/**
- * 参数的"物理量"度量：数值越大 = 向下拖趋近的方向（用户定义的向下语义）。
- * 快门→速度(分母/分子,越快越大)、光圈→开口(用 -f,f 越小开口越大)、ISO→感光度、EV→补偿值。
- */
-private fun paramMetric(prop: Int, raw: Long): Double = when (prop) {
-    Lab.PROP_NK_SHUTTER, Lab.PROP_NK_MOVIE_SHUTTER -> when (raw) {
-        0xFFFFFFFFL, 0xFFFFFFFEL, 0xFFFFFFFDL -> 0.0   // Bulb/x200/Time：当作极慢
-        else -> {
-            val num = ((raw ushr 16) and 0xFFFFL).toDouble()
-            val den = (raw and 0xFFFFL).toDouble()
-            if (num > 0) den / num else 0.0
-        }
-    }
-    Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> -raw.toDouble()   // f 越小开口越大
-    Lab.PROP_ISO, Lab.PROP_NK_ISO_EX, Lab.PROP_NK_MOVIE_ISO -> raw.toDouble()  // ISO 越大越高
-    Lab.PROP_EXP_COMPENSATION, Lab.PROP_NK_MOVIE_EXP_COMP -> raw.toDouble()    // EV（已带符号）
-    else -> raw.toDouble()
-}
-
-/**
- * 向下拖对应的 enum 步进方向（+1 / -1）：使"向下拖 = 增大物理量"。
- * 通过比较枚举首尾值的度量得到，与枚举本身升/降序无关（换机型也稳）。
- */
-private fun downStepSign(param: RcParam): Int {
-    val vals = param.values
-    if (vals.size < 2) return -1
-    return if (paramMetric(param.prop, vals.last()) > paramMetric(param.prop, vals.first())) 1 else -1
-}
-
-/**
- * 当前值的锚点索引：优先精确命中；不在枚举里（非标准档位/值域刚随模式变化）时按
- * 物理量取最近档。拨轮定位与 stepParam 的步进起点共用，保证两者永不打架。
- * 仅在 [values] 为空时返回 -1。
- */
-private fun paramAnchorIdx(prop: Int, values: List<Long>, current: Long): Int {
-    val i = values.indexOf(current)
-    if (i >= 0) return i
-    val m = paramMetric(prop, current)
-    return values.indices.minByOrNull { abs(paramMetric(prop, values[it]) - m) } ?: -1
-}
-
 /**
  * 参数微调 tile：iOS 拨轮式交互——数值列随手指 1:1 同向连续滚动（可停在档间），
  * 每跨过一档触感反馈（走 onStep→sendValue→haptics），松手平滑吸附最近档位，
  * 端点橡皮筋阻尼。无惯性甩动（有意为之：拖动只管微调，大跨度靠点数值弹全表直跳）。
  * 点一下打开完整值表。只读参数整块压暗 + 锁，拖动禁用。
  * 方向按物理量：向下拖 = 增大物理量（快门更快 / 光圈开口更大 / ISO 更高 / EV 更正），
- * 具体 enum 步进方向由 [downStepSign] 判定（不依赖枚举升/降序）。跟手滚动决定了
+ * 具体 enum 步进方向由 [rcDownStepSign] 判定（不依赖枚举升/降序）。跟手滚动决定了
  * 向下拖趋近的档位显示在【上】缘、随手指落入中心（内容与手指同向，苹果拨轮语义）。
  */
 @Composable
@@ -3998,13 +3937,13 @@ private fun ParamTile(
     val scope = rememberCoroutineScope()
 
     // 向下拖对应的 enum 步进方向（向下=增大物理量）。
-    val downSign = if (writable && param != null) downStepSign(param) else -1
+    val downSign = if (writable && param != null) rcDownStepSign(param) else -1
 
     // 当前值的锚点索引（精确命中或按物理量最近档；remember 避免值不在枚举时每次重组
-    // 都全表扫描）。与 stepParam 共用 paramAnchorIdx，保证拨轮位置和步进起点不打架。
+    // 都全表扫描）。与 stepParam 共用 rcParamAnchorIndex，保证拨轮位置和步进起点不打架。
     val values = param?.values ?: emptyList()
     val curIdx = if (param == null || values.isEmpty()) -1
-        else remember(param) { paramAnchorIdx(param.prop, values, param.current) }
+        else remember(param) { rcParamAnchorIndex(param.prop, values, param.current) }
 
     // 拨轮位置：枚举索引空间的连续值，拖动/吸附过程中可停在档间，静止时必为整数档。
     val pos = remember { Animatable(0f) }
