@@ -11,6 +11,7 @@ import android.os.SystemClock
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.catalog.CameraCatalogFile
 import com.ztransfer.catalog.cameraFileExtension
 import com.ztransfer.catalog.isCameraFileHeadPreferred
 import com.ztransfer.connection.StaInitiatorIdentity
@@ -1606,18 +1607,18 @@ class NikonCamera(private val context: Context) {
     }
 
     data class FileInfo(
-        val handle: Int,
+        override val handle: Int,
         val size: Long,
-        val fileName: String,
+        override val fileName: String,
         /** PTP DateTime 完整串（YYYYMMDDThhmmss…，至少 8 位日期）；分组取前 8 位，组内按完整串排序。 */
-        val captureDate: String?,
+        override val captureDate: String?,
         /** 机内"保护"(🔑)标记（ObjectInfo ProtectionStatus ≠ 0）。摄影师机内选片的常用手段。 */
-        val isProtected: Boolean = false,
+        override val isProtected: Boolean = false,
         /** 文件所在的 PTP StorageID；备份模式去重后可能同时属于两张卡。 */
-        val storageIds: Set<Int> = emptySet(),
-    ) {
+        override val storageIds: Set<Int> = emptySet(),
+    ) : CameraCatalogFile {
         /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
-        val extension: String = cameraFileExtension(fileName)
+        override val extension: String = cameraFileExtension(fileName)
     }
 
     /**
