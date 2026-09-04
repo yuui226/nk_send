@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：协议与业务迁移金样本已闭环，开始收口平台能力边界
-- 下一项：`S03` 明确平台接口清单
+- 当前阶段：平台能力边界已锁定，开始迁移 GPS 配对核心
+- 下一项：`G05` GPS 配对协议与业务状态机
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -42,7 +42,7 @@
 |---|---|---|---|
 | S01 | DONE | 列出可共享类型、Android/Java 依赖和迁移顺序 | 已按直接迁移、先拆边界、平台保留三类完成盘点 |
 | S02 | DONE | 冻结协议和业务固定样本 | PTP 字节、排序结果、队列状态、GPS payload、EXIF/滤镜结果均有确定性 oracle |
-| S03 | NEXT | 明确平台接口清单 | 网络、USB、文件、蓝牙、定位、后台、录像、支付、更新 |
+| S03 | DONE | 明确平台接口清单 | 九类能力已有端侧归属和窄接口时机；不预建空壳总接口 |
 
 ### 2. 纯模型与基础规则
 
@@ -114,11 +114,12 @@
 | I04 | MAC | iOS 录像、购买和更新实现 | AVFoundation、StoreKit、App Store |
 | Q01 | TODO | Android 迁移最终多轮回归 | 全测试、Lint、APK、Manifest、固定样本、性能、真机功能矩阵 |
 | Q02 | MAC | iOS 模拟器和真机功能矩阵 | 权限、网络、传输、后台、异常恢复 |
-| Q03 | TODO | 双端代码边界审计 | 无重复业务规则，无平台 API 泄漏到 `commonMain` |
+| Q03a | TODO | Android/common 边界审计 | 无平台 API 泄漏到 `commonMain`，Android 端无残留重复纯规则 |
+| Q03b | MAC | 双端代码边界审计 | iOS 实现完成后确认双端无重复业务规则 |
 
 ## Android 阶段结束条件
 
-只有 `C/P/T/R/G/E/L/V/A` 中计划共享的任务全部完成，并且 `Q01`、`Q03` 通过，才宣布 Android 共享化改造结束。平台专属代码保留不算未完成。
+只有 `C/P/T/R/G/E/L/V/A` 中计划共享的任务全部完成，并且 `Q01`、`Q03a` 通过，才宣布 Android 共享化改造结束。平台专属代码保留不算未完成；`U/I/Q03b` 属于随后进行的 iOS 与共享 UI 阶段。
 
 ## S01 盘点结论
 
@@ -138,6 +139,24 @@
 | GPS | 完整 41 字节 payload、频率、恢复与海拔规则 | `Gps*Test` `commonTest` |
 | EXIF/相框 | 固定标签到完整元数据、DMS/rational 回退和布局规则 | `PhotoFrameExporterTest` |
 | 滤镜 | NCP、NP3 curve、NP3 tonal 的完整 ARGB 输出 | `PhotoFilterRendererTest` |
+
+## S03 平台能力边界
+
+原则：共享层只接触业务语义，不接触 `Context`、`Uri`、Socket、GATT、系统任务或商店对象。只有共享用例已经成为真实调用方时才建立窄接口，不提前创建一套没人使用的总接口。
+
+| 能力 | Android 当前归属 | iOS 对应实现/差异 | 共享边界与接口时机 |
+|---|---|---|---|
+| 相机网络 | `NikonCamera`、`PtpIpDiscovery`、`RemoteLab` 的 Network/Socket | `Network.framework` / `NWConnection`、热点引导和局域网权限 | PTP codec、扫描/连接决策已共享；到 `I01` 有真实调用方时再建窄 transport |
+| USB | `UsbPtpConnection`、`UsbManager`、Bulk Endpoint | 普通 iOS App 无任意 USB Host PTP 等价能力，首版不提供 | 协议规则共享；不做虚假 iOS USB 实现，只由平台能力控制入口可见性 |
+| 文件/照片 | `TransferViewModel` 的 SAF、`PhotoFrameExporter` 的 MediaStore/ContentResolver | PhotoKit、Files、安全作用域 URL，权限模型不同 | 命名、队列、断点、元数据规则共享；到 `I02` 建语义化 `PhotoStorage` |
+| 蓝牙 | `NikonGpsBleClient` 的扫描、GATT 与 Android Classic bond | CoreBluetooth；系统配对行为和 Classic API 不同 | 配对包与握手决策在 `G05` 共享；transport 只暴露通知/写入等语义事件 |
+| 定位 | `NikonGpsService`、LocationManager、Geocoder | CoreLocation / CLGeocoder | fix、频率、恢复、海拔和 payload 共享；provider 返回平台中立位置值 |
+| 后台 | `CameraSessionService`、`TransferService`、`NikonGpsService`、通知/WakeLock | iOS background task/宽限，不能托管长期自定义 PTP TCP | 共享任务状态和可恢复检查点；生命周期与续跑能力由各平台编排 |
+| 录像 | `ViewfinderRecorder` 的 MediaCodec/MediaMuxer/音频 | AVFoundation / VideoToolbox | 录像允许/回退/状态规则已共享；需要共享用例调用时再引入 recorder 接口 |
+| 支付/会员 | `LicenseManager` 的外部支付、二维码、激活码与服务器恢复 | StoreKit 2 购买/恢复；不可直接复制 Android 购买入口 | 只共享权益、额度与商品语义；两端购买流程不强行抽成相同实现 |
+| 更新 | `AppUpdateManager` 的 APK 下载、验包和安装 | App Store / TestFlight，不能自行安装 IPA | 更新执行完全平台化；需要共用 UI 时最多共享“有更新”等展示状态 |
+
+执行约束：平台接口使用领域值和确定性结果；不返回平台异常或句柄；不为 USB、后台、支付、更新的客观差异伪造“1:1”实现；`expect/actual` 仅用于很小的值适配，长期对象优先显式注入。
 
 ## 验证记录
 
@@ -189,6 +208,7 @@
 | 2026-09-04 | C04 | commonTest 的 6 份 hex 解码与 3 份 Int 字节构造统一为两个 `internal` 固定样本工具；协议 hex 文本逐项比对完全一致，工具覆盖大小写、高位/空字节、非法输入和低 8 位转换；shared 全量测试通过，未新增生产 API、依赖、资源目录或平台/文件 IO，因此沿用 C03 Android 验收结果 |
 | 2026-09-04 | S02 | 六类迁移 oracle 齐全；新增三组 NCP/NP3 完整 ARGB 金向量及固定 EXIF 标签到完整元数据样本，直接复用生产算法，没有复制公式或修改公开 API；两路只读复核均通过 |
 | 2026-09-04 | S02 | shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-213525.apk`，SHA-256 `7ADA03F50161AF940873A628CFA6F0F0BE6263515EFB5E289E8EF30113384EC2`；Manifest 与 C03 完全相同；本轮无已授权 ADB 设备 |
+| 2026-09-04 | S03 | 网络、USB、文件/照片、蓝牙、定位、后台、录像、支付/会员、更新九类能力逐项确认 Android 所有者、iOS 等价/限制和共享边界；不新增空壳接口、模块或依赖；将 Windows 可完成的 `Q03a` 与 iOS 完成后执行的 `Q03b` 分开，避免伪验收 |
 
 ## 更新约定
 
