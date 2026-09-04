@@ -1811,8 +1811,7 @@ class NikonCamera(private val context: Context) {
                 if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 4) {
                     return@withContext emptyList()
                 }
-                val count = data.getIntLE(0)
-                (0 until count).map { data.getIntLE(4 + it * 4) }
+                parsePtpUInt32Array(data) ?: emptyList()
             } catch (_: Exception) {
                 emptyList()
             }
@@ -1850,8 +1849,9 @@ class NikonCamera(private val context: Context) {
                         payloadBytes = data?.size ?: 0,
                     )
                 }
-                val count = data.getIntLE(0)
-                if (count < 0 || count > (data.size - 4) / 4) {
+                val storageIds = parsePtpUInt32Array(data)
+                if (storageIds == null) {
+                    val count = data.getIntLE(0)
                     return@withContext StorageIdsResult(
                         storageIds = emptyList(),
                         successful = false,
@@ -1861,7 +1861,7 @@ class NikonCamera(private val context: Context) {
                     )
                 }
                 StorageIdsResult(
-                    storageIds = (0 until count).map { data.getIntLE(4 + it * 4) },
+                    storageIds = storageIds,
                     successful = true,
                     responseCode = response,
                     payloadBytes = data.size,
@@ -1929,9 +1929,9 @@ class NikonCamera(private val context: Context) {
                         payloadBytes = data?.size ?: 0,
                     )
                 }
-                val count = data.getIntLE(0)
-                // 先用除法校验，避免损坏载荷里的 count 在 count * 4 时整型溢出。
-                if (count < 0 || count > (data.size - 4) / 4) {
+                val handles = parsePtpUInt32Array(data)
+                if (handles == null) {
+                    val count = data.getIntLE(0)
                     return@withContext ObjectHandlesResult(
                         handles = emptyList(),
                         successful = false,
@@ -1941,7 +1941,7 @@ class NikonCamera(private val context: Context) {
                     )
                 }
                 ObjectHandlesResult(
-                    handles = (0 until count).map { data.getIntLE(4 + it * 4) },
+                    handles = handles,
                     successful = true,
                     responseCode = respCode,
                     payloadBytes = data.size,
@@ -4052,7 +4052,7 @@ class NikonCamera(private val context: Context) {
         sendCmd(PtpConstants.GET_STORAGE_IDS)
         val (storageResponse, storageData) = recvRespWithPayload()
         staStorageProbeReached = true
-        val initialStorageIds = parseUInt32Array(storageData)
+        val initialStorageIds = parsePtpUInt32Array(storageData).orEmpty()
         staDiagnosticLines +=
             "GetStorageIDs=${hexResponse(storageResponse)} ids=${formatStorageIds(initialStorageIds)}"
         if (shouldForceStaProfilePairing(
@@ -4134,7 +4134,7 @@ class NikonCamera(private val context: Context) {
 
                 sendCmd(PtpConstants.GET_STORAGE_IDS)
                 val (modeStorageResponse, modeStorageData) = recvRespWithPayload()
-                val modeStorageIds = parseUInt32Array(modeStorageData)
+                val modeStorageIds = parsePtpUInt32Array(modeStorageData).orEmpty()
                 staDiagnosticLines +=
                     "mode:GetStorageIDs=${hexResponse(modeStorageResponse)} " +
                         "ids=${formatStorageIds(modeStorageIds)}"
@@ -4171,7 +4171,7 @@ class NikonCamera(private val context: Context) {
     private fun validateStaObjectAccess(label: String, storageIds: List<Int>): Boolean {
         sendCmd(PtpConstants.GET_OBJECT_HANDLES, -1, -1, 0)
         val (handlesResponse, handlesData) = recvRespWithPayload()
-        val handles = parseUInt32Array(handlesData)
+        val handles = parsePtpUInt32Array(handlesData).orEmpty()
         staObjectHandlesObserved = staObjectHandlesObserved || handles.isNotEmpty()
         staEmptyObjectListObserved = staEmptyObjectListObserved ||
             (handlesResponse == PtpConstants.RESPONSE_OK &&
@@ -4344,14 +4344,6 @@ class NikonCamera(private val context: Context) {
 
     private fun formatStorageIds(ids: List<Int>): String =
         "${ids.size}[${ids.joinToString(",") { "0x%08X".format(it) }}]"
-
-    /** Safely parses a PTP AUINT32 without trusting a malformed count field. */
-    private fun parseUInt32Array(data: ByteArray?): List<Int> {
-        if (data == null || data.size < 4) return emptyList()
-        val count = data.getIntLE(0)
-        if (count < 0 || count > (data.size - 4) / 4) return emptyList()
-        return List(count) { index -> data.getIntLE(4 + index * 4) }
-    }
 
     /** Existing camera-hotspot InitCommandRequest; keep byte-for-byte behavior unchanged. */
     private fun makeInitReq(): ByteArray {
