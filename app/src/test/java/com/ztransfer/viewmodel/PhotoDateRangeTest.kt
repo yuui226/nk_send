@@ -1,6 +1,6 @@
 package com.ztransfer.viewmodel
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -106,7 +106,7 @@ class PhotoDateRangeTest {
         )
     }
 
-    private fun file(handle: Int, captureDate: String?) = NikonCamera.FileInfo(
+    private fun file(handle: Int, captureDate: String?) = CameraFileInfo(
         handle = handle,
         size = 1L,
         fileName = "$handle.JPG",

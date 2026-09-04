@@ -1,6 +1,6 @@
 package com.ztransfer.diagnostics
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 
 /** 文件顺序问题已确认；保留空 API 以免诊断移除触碰稳定的相机枚举链路。 */
 @Suppress("UNUSED_PARAMETER")
@@ -22,7 +22,7 @@ object FileOrderProbe {
     fun appendScheduledHandles(handles: List<Int>) = Unit
     fun recordObjectInfoBatch(
         requestedHandles: List<Int>,
-        files: List<NikonCamera.FileInfo>,
+        files: List<CameraFileInfo>,
         elapsedMs: Long,
     ) = Unit
     fun beginThumbnail(handle: Int, lane: String): Int = -1

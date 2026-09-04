@@ -11,9 +11,7 @@ import android.os.SystemClock
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
-import com.ztransfer.catalog.CameraCatalogFile
 import com.ztransfer.catalog.cameraThumbnailCacheIdentity
-import com.ztransfer.catalog.cameraFileExtension
 import com.ztransfer.catalog.selectNewestCameraFileHeadIndex
 import com.ztransfer.connection.StaInitiatorIdentity
 import com.ztransfer.connection.hasUsableStaAlbumStorage
@@ -62,7 +60,7 @@ class CameraRefusedException(message: String) : Exception(message)
  * 时间相同保持卡槽输入顺序稳定，不再拿不透明的 handle 数值打破平局。
  */
 internal fun selectNewestFileHeadIndex(
-    heads: List<NikonCamera.FileInfo?>,
+    heads: List<CameraFileInfo?>,
 ): Int? = selectNewestCameraFileHeadIndex(heads)
 
 /**
@@ -720,7 +718,7 @@ class NikonCamera(private val context: Context) {
     private val staDirectThumbnails = LinkedHashMap<Int, ByteArray>(16, 0.75f, true)
     private var staDirectThumbnailBytes = 0
     private val staDirectNoThumbnail = HashSet<Int>()
-    private val staDirectFiles = HashMap<Int, FileInfo>()
+    private val staDirectFiles = HashMap<Int, CameraFileInfo>()
     private val staDirectJpegMpfPreviews = HashMap<Int, List<JpegMpfPreviewReference>>()
     private val staDirectRawPreviews = HashMap<Int, List<NefPreviewReference>>()
     // Same-camera NEFs usually place their grid JPEG at a stable offset. This session-only hint is
@@ -1508,21 +1506,6 @@ class NikonCamera(private val context: Context) {
         }
     }
 
-    data class FileInfo(
-        override val handle: Int,
-        val size: Long,
-        override val fileName: String,
-        /** PTP DateTime 完整串（YYYYMMDDThhmmss…，至少 8 位日期）；分组取前 8 位，组内按完整串排序。 */
-        override val captureDate: String?,
-        /** 机内"保护"(🔑)标记（ObjectInfo ProtectionStatus ≠ 0）。摄影师机内选片的常用手段。 */
-        override val isProtected: Boolean = false,
-        /** 文件所在的 PTP StorageID；备份模式去重后可能同时属于两张卡。 */
-        override val storageIds: Set<Int> = emptySet(),
-    ) : CameraCatalogFile {
-        /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
-        override val extension: String = cameraFileExtension(fileName)
-    }
-
     /**
      * 通过 PTP GetThumb 获取缩略图 JPEG 字节。相机【确认】无缩略图（No_Thumbnail_Present /
      * Invalid_Object_Handle）返回 null——调用方可安全负缓存、不再重试；
@@ -1814,7 +1797,7 @@ class NikonCamera(private val context: Context) {
     suspend fun streamFileInfo(
         handles: List<Int>,
         batchSize: Int = 20,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit
+        onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
         val loadContext = coroutineContext
         val total = handles.size
@@ -1861,7 +1844,7 @@ class NikonCamera(private val context: Context) {
         handles: List<Int>,
         storageIds: List<Int> = emptyList(),
         batchSize: Int = 12,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         check(staDirectObjectReadValidated) { "STA direct object reads were not validated" }
         require(batchSize > 0) { "batchSize must be positive" }
@@ -1917,7 +1900,7 @@ class NikonCamera(private val context: Context) {
         newestFirstHandlesByStorage: List<Pair<Int, List<Int>>>,
         storageIds: List<Int> = newestFirstHandlesByStorage.map { it.first },
         batchSize: Int = 12,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         check(staDirectObjectReadValidated) { "STA direct object reads were not validated" }
         require(batchSize > 0) { "batchSize must be positive" }
@@ -1933,7 +1916,7 @@ class NikonCamera(private val context: Context) {
 
         val total = groups.sumOf { it.second.size }
         val cursors = IntArray(groups.size)
-        val heads = MutableList<FileInfo?>(groups.size) { null }
+        val heads = MutableList<CameraFileInfo?>(groups.size) { null }
         var completed = 0
         var allSucceeded = true
 
@@ -2099,7 +2082,7 @@ class NikonCamera(private val context: Context) {
                 allowSessionFileNumberAnchor = storageId == null,
             )
         return StaDirectObjectHeader(
-            file = FileInfo(
+            file = CameraFileInfo(
                 handle = handle,
                 size = size,
                 fileName = fileName,
@@ -2159,7 +2142,7 @@ class NikonCamera(private val context: Context) {
     }
 
     private data class StaDirectObjectHeader(
-        val file: FileInfo?,
+        val file: CameraFileInfo?,
         val thumbnail: ByteArray?,
         val successful: Boolean,
         val thumbnailChecked: Boolean = true,
@@ -2462,7 +2445,7 @@ class NikonCamera(private val context: Context) {
             append(extension)
         }
         return StaDirectObjectHeader(
-            file = FileInfo(
+            file = CameraFileInfo(
                 handle = handle,
                 size = size,
                 fileName = fileName,
@@ -2602,7 +2585,7 @@ class NikonCamera(private val context: Context) {
     }
 
     /** Must be called while [ioMutex] is held; invoked only for a visible RAW thumbnail. */
-    private fun readStaDirectRawThumbnailInternal(file: FileInfo): ByteArray? {
+    private fun readStaDirectRawThumbnailInternal(file: CameraFileInfo): ByteArray? {
         fun readReference(reference: NefPreviewReference): ByteArray? =
             readStaDirectPartialInternal(
                 handle = file.handle,
@@ -2810,7 +2793,7 @@ class NikonCamera(private val context: Context) {
     }
 
     /** Must be called while [ioMutex] is held; selects the smallest indexed RAW preview that is FHD. */
-    private fun readStaDirectRawPreviewInternal(file: FileInfo): ByteArray? {
+    private fun readStaDirectRawPreviewInternal(file: CameraFileInfo): ByteArray? {
         fun readReference(reference: NefPreviewReference): ByteArray? =
             readStaDirectPartialInternal(
                 handle = file.handle,
@@ -2978,7 +2961,7 @@ class NikonCamera(private val context: Context) {
     }
 
     /** Must be called while [ioMutex] is held; never reads the full video. */
-    private fun readStaDirectVideoThumbnailInternal(file: FileInfo): ByteArray? {
+    private fun readStaDirectVideoThumbnailInternal(file: CameraFileInfo): ByteArray? {
         val requestSize = minOf(
             file.size,
             STA_DIRECT_VIDEO_THUMBNAIL_PREFIX_BYTES.toLong(),
@@ -3039,7 +3022,7 @@ class NikonCamera(private val context: Context) {
     suspend fun streamMergedFileInfo(
         newestFirstHandlesByStorage: List<List<Int>>,
         batchSize: Int = 20,
-        onBatch: suspend (List<FileInfo>, Int, Int) -> Unit,
+        onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit,
     ): Boolean = withContext(Dispatchers.IO) {
         require(batchSize > 0) { "batchSize must be positive" }
         val groups = newestFirstHandlesByStorage.filter { it.isNotEmpty() }
@@ -3048,13 +3031,13 @@ class NikonCamera(private val context: Context) {
         val loadContext = coroutineContext
         val total = groups.sumOf { it.size }
         val cursors = IntArray(groups.size)
-        val heads = MutableList<FileInfo?>(groups.size) { null }
+        val heads = MutableList<CameraFileInfo?>(groups.size) { null }
         var completed = 0
         var allObjectInfoSucceeded = true
 
         while (completed < total) {
             val requestedHandles = ArrayList<Int>(batchSize)
-            val observedFiles = ArrayList<FileInfo>(batchSize)
+            val observedFiles = ArrayList<CameraFileInfo>(batchSize)
             val probeStartedAtMs = if (FileOrderProbe.enabled) SystemClock.elapsedRealtime() else 0L
             val completedBeforeBatch = completed
 
@@ -3117,7 +3100,7 @@ class NikonCamera(private val context: Context) {
     }
 
     internal data class ObjectInfoResult(
-        val file: FileInfo?,
+        val file: CameraFileInfo?,
         /** false 只表示 PTP/载荷失败；成功返回的文件夹等非媒体对象仍为 true。 */
         val successful: Boolean,
     )
@@ -3140,7 +3123,7 @@ class NikonCamera(private val context: Context) {
         // ImagePixWidth/Height(26/30)——竖拍存的也是传感器原生横向像素,方向只在
         // EXIF Orientation 里且依赖机内"自动旋转图像"设置,判不出构图。）
         return ObjectInfoResult(
-            file = FileInfo(
+            file = CameraFileInfo(
                 handle = parsed.handle,
                 size = parsed.size,
                 fileName = checkNotNull(parsed.fileName),

@@ -1,6 +1,6 @@
 package com.ztransfer.ui.screen
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.viewmodel.ExportedOriginalIndex
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
@@ -61,7 +61,7 @@ class PhotoListDerivedStateTest {
         handle: Int,
         name: String,
         size: Long = 100L,
-    ) = NikonCamera.FileInfo(
+    ) = CameraFileInfo(
         handle = handle,
         fileName = name,
         size = size,

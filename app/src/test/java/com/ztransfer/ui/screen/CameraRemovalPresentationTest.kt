@@ -1,11 +1,11 @@
 package com.ztransfer.ui.screen
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class CameraRemovalPresentationTest {
-    private fun file(handle: Int, day: String = "20260827") = NikonCamera.FileInfo(
+    private fun file(handle: Int, day: String = "20260827") = CameraFileInfo(
         handle = handle,
         size = 1_000L,
         fileName = "DSC_${handle.toString().padStart(4, '0')}.JPG",

@@ -1,6 +1,6 @@
 package com.ztransfer.viewmodel
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.PtpConstants
 import java.util.Locale
 import org.junit.Assert.assertEquals
@@ -10,7 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExistingFileNameIndexTest {
-    private fun file(name: String, size: Long) = NikonCamera.FileInfo(
+    private fun file(name: String, size: Long) = CameraFileInfo(
         handle = 1,
         size = size,
         fileName = name,

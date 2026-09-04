@@ -11,7 +11,7 @@ import com.ztransfer.frame.PhotoFrameWatermarkPosition
 import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.PhotoFilterSelection
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -59,7 +59,7 @@ class TransferStateTest {
         assertEquals(task, task.finishFrameGeneration(nowElapsedMs = 10_000L))
     }
 
-    private fun file(handle: Int) = NikonCamera.FileInfo(
+    private fun file(handle: Int) = CameraFileInfo(
         handle = handle,
         size = 100L,
         fileName = "DSC_$handle.JPG",

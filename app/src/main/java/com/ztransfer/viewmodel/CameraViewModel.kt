@@ -58,6 +58,7 @@ import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
 import com.ztransfer.protocol.CameraRefusedException
 import com.ztransfer.protocol.Lab
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
@@ -135,23 +136,23 @@ private val LARGE_EXIF_HEADER_EXTENSIONS = NIKON_RAW_EXTENSIONS + TIFF_EXTENSION
 private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
 
 /** 未知 PTP 对象(.bin 等)仍显示在列表，但不会被“照片/视频自动传输”误收。 */
-internal fun isAutoTransferMedia(file: NikonCamera.FileInfo): Boolean =
+internal fun isAutoTransferMedia(file: CameraFileInfo): Boolean =
     file.extension in AUTO_TRANSFER_MEDIA_EXTENSIONS
 
 /** Selects the newest still image deterministically; video covers must never become effect demos. */
-internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCamera.FileInfo? =
+internal fun latestEffectPreviewFile(files: List<CameraFileInfo>): CameraFileInfo? =
     files.asSequence()
         .filter { it.extension !in EFFECT_PREVIEW_VIDEO_EXTENSIONS }
-        .maxWithOrNull(compareBy<NikonCamera.FileInfo>({ it.captureDate.orEmpty() }, { it.handle }))
+        .maxWithOrNull(compareBy<CameraFileInfo>({ it.captureDate.orEmpty() }, { it.handle }))
 
-private fun NikonCamera.FileInfo.logicalIdentity(): String =
+private fun CameraFileInfo.logicalIdentity(): String =
     cameraFileLogicalIdentity(fileName, size, captureDate)
 
 /** 双卡备份文件仍只显示一份，但保留它在两张卡上的完整归属。 */
 internal fun mergeStorageMembership(
-    existing: NikonCamera.FileInfo,
-    duplicate: NikonCamera.FileInfo,
-): NikonCamera.FileInfo {
+    existing: CameraFileInfo,
+    duplicate: CameraFileInfo,
+): CameraFileInfo {
     val mergedStorageIds = mergeStorageIds(existing.storageIds, duplicate.storageIds)
     if (mergedStorageIds === existing.storageIds) return existing
     return existing.copy(storageIds = mergedStorageIds)
@@ -163,11 +164,11 @@ internal fun mergeStorageMembership(
  * instead of removing the logical photo. Display order is preserved.
  */
 internal fun reconcilePublishedCameraFiles(
-    publishedFiles: List<NikonCamera.FileInfo>,
+    publishedFiles: List<CameraFileInfo>,
     currentHandles: Set<Int>,
-    indexedFilesByHandle: Map<Int, NikonCamera.FileInfo>,
-): List<NikonCamera.FileInfo> {
-    val aliasesByIdentity = LinkedHashMap<String, MutableList<NikonCamera.FileInfo>>()
+    indexedFilesByHandle: Map<Int, CameraFileInfo>,
+): List<CameraFileInfo> {
+    val aliasesByIdentity = LinkedHashMap<String, MutableList<CameraFileInfo>>()
     indexedFilesByHandle.forEach { (handle, file) ->
         if (handle in currentHandles) {
             aliasesByIdentity.getOrPut(file.logicalIdentity()) { ArrayList(1) } += file
@@ -188,9 +189,9 @@ internal fun reconcilePublishedCameraFiles(
 
 /** 日期范围只改变优先级，不改变最终全量填充集合。范围完成后自然接回全局新→旧。 */
 internal fun prioritizedThumbnailFiles(
-    files: List<NikonCamera.FileInfo>,
+    files: List<CameraFileInfo>,
     range: PhotoDateRange?,
-): List<NikonCamera.FileInfo> = sharedPrioritizedThumbnailFiles(files, range?.captureDayRange)
+): List<CameraFileInfo> = sharedPrioritizedThumbnailFiles(files, range?.captureDayRange)
 
 /**
  * 一次相机会话内的整卡枚举快照。大图预览只暂停 ObjectInfo 阶段，关闭后可直接复用
@@ -253,7 +254,7 @@ data class CameraState(
     val cameraModel: String? = null,
     val usbConnectionError: String? = null,
     val wifiConnectionStatus: WifiConnectionStatus = WifiConnectionStatus.IDLE,
-    val files: List<NikonCamera.FileInfo> = emptyList(),
+    val files: List<CameraFileInfo> = emptyList(),
     /** 当前相机已插卡的 PTP StorageID；卡槽映射由 [storageIdsBySlot] 统一解释。 */
     val storageIds: List<Int> = emptyList(),
     val isLoadingFiles: Boolean = false,
@@ -298,7 +299,7 @@ internal fun formatExposureCompensation(value: Float?): String? {
 
 data class NewCameraMedia(
     val camera: NikonCamera,
-    val files: List<NikonCamera.FileInfo>,
+    val files: List<CameraFileInfo>,
 )
 
 class CameraViewModel(application: Application) : AndroidViewModel(application) {
@@ -361,7 +362,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val knownHandles = HashSet<Int>()
     // Contains every successfully decoded raw handle, including the hidden second copy in backup
     // mode. It is session-bound and lets a deletion switch aliases without re-reading metadata.
-    private val indexedCameraFiles = LinkedHashMap<Int, NikonCamera.FileInfo>()
+    private val indexedCameraFiles = LinkedHashMap<Int, CameraFileInfo>()
     private var usbPermissionJob: Job? = null
     private var usbConnectJob: Job? = null
     private var staDiscoveryJob: Job? = null
@@ -411,7 +412,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val exifCache = HashMap<String, PhotoExif?>()
 
     /** EXIF 缓存键：与缩略图磁盘缓存同一稳定身份，跨会话/重连命中同一张照片。 */
-    private fun exifKey(file: NikonCamera.FileInfo): String =
+    private fun exifKey(file: CameraFileInfo): String =
         "${file.fileName}_${file.size}_${file.captureDate ?: "0"}"
 
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
@@ -430,7 +431,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val reportedStaMetadataDiagnostics = HashSet<String>()
     // 本轮发生真实写入失败（含磁盘满）后停止后台落盘；换相机/重连时重新尝试。
     private var thumbnailDiskWritesBlocked = false
-    private val thumbnailFillQueue = ThumbnailFillQueue<NikonCamera.FileInfo>()
+    private val thumbnailFillQueue = ThumbnailFillQueue<CameraFileInfo>()
     private val thumbnailFillWake = Channel<Unit>(Channel.CONFLATED)
 
     private suspend fun activateThumbnailDiskCache(cam: NikonCamera) {
@@ -1236,7 +1237,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun effectPreviewKey(file: NikonCamera.FileInfo): String =
+    private fun effectPreviewKey(file: CameraFileInfo): String =
         "${file.handle}|${file.fileName}|${file.size}|${file.captureDate.orEmpty()}"
 
     /** Temporarily disables every automatic camera-discovery entry point. */
@@ -2530,7 +2531,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private fun removeMissingCameraHandles(
         removedHandles: Set<Int>,
         currentHandles: Set<Int>,
-    ): List<NikonCamera.FileInfo> {
+    ): List<CameraFileInfo> {
         removedHandles.forEach { handle ->
             indexedCameraFiles.remove(handle)
             thumbnailCache.remove(handle)
@@ -2695,8 +2696,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun resolveNewCameraObject(
         cam: NikonCamera,
         handle: Int,
-    ): NikonCamera.FileInfo? = try {
-        var result: NikonCamera.FileInfo? = null
+    ): CameraFileInfo? = try {
+        var result: CameraFileInfo? = null
         if (cam.staDirectObjectReadValidated) {
             val currentStorageIds = _state.value.storageIds
             val memberships = resolveStaDirectStorageMembership(
@@ -2704,7 +2705,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 handle = handle,
                 storageIds = currentStorageIds,
             )
-            val onBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
+            val onBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit =
                 { batch, _, _ ->
                     result = batch.firstOrNull()?.let { file ->
                         if (memberships.isEmpty()) file else file.copy(storageIds = memberships)
@@ -2741,7 +2742,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private suspend fun publishNewCameraObject(
         cam: NikonCamera,
         handle: Int,
-        info: NikonCamera.FileInfo,
+        info: CameraFileInfo,
     ) {
         if (camera !== cam) return
         val hasKnownBaseline = knownHandlesCamera === cam
@@ -2861,7 +2862,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (preserveExisting && camera === cam) _state.value.files else emptyList()
                 var existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
                 var newHandlesToReport: Set<Int> = emptySet()
-                val scanDiscoveredMedia = ArrayList<NikonCamera.FileInfo>()
+                val scanDiscoveredMedia = ArrayList<CameraFileInfo>()
                 val reusableSnapshot = resumeSnapshot?.takeIf { it.belongsTo(cam) }
                 val storageIds: List<Int>
                 val remainingHandleOrders: List<StorageHandleOrder>
@@ -3148,7 +3149,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 val dynamicDualCardSchedule = activeSnapshot.handleOrders.count {
                     it.newestFirstHandles.isNotEmpty()
                 } > 1
-                val publishBatch: suspend (List<NikonCamera.FileInfo>, Int, Int) -> Unit =
+                val publishBatch: suspend (List<CameraFileInfo>, Int, Int) -> Unit =
                     { rawBatch, loaded, total ->
                     val batch = if (cam.staDirectObjectReadValidated &&
                         activeSnapshot.staDirectStorageIdsByHandle.isNotEmpty()
@@ -3163,8 +3164,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         rawBatch
                     }
                     val publishedSizeBeforeBatch = publishedFiles.size
-                    val additions = ArrayList<NikonCamera.FileInfo>(batch.size)
-                    val replacements = HashMap<Int, NikonCamera.FileInfo>()
+                    val additions = ArrayList<CameraFileInfo>(batch.size)
+                    val replacements = HashMap<Int, CameraFileInfo>()
                     batch.forEach { file ->
                         val identity = file.logicalIdentity()
                         val existingIndex = indexByIdentity[identity]
@@ -3191,7 +3192,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
                     publishedFiles = publishedFiles.withBatch(replacements, additions)
-                    val snapshot: List<NikonCamera.FileInfo> = publishedFiles
+                    val snapshot: List<CameraFileInfo> = publishedFiles
                     // onBatch may run on the protocol IO dispatcher. Validate and publish on Main
                     // as one non-suspending section: otherwise a replacement connection could
                     // slip between the stale-session check and these session-global writes.
@@ -3391,7 +3392,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * USB 与传输页内的无线高吞吐模式，大文件/续传每 64MB 让路，普通文件 GetObject 需等当前文件。
      */
     suspend fun loadThumbnail(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         allowRemote: Boolean = true,
     ): ImageBitmap? {
         val handle = file.handle
@@ -3444,7 +3445,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 解码入内存，扫到后面会把前面（以及视口附近）的全部挤出去——扫描白跑，还破坏
      * 可见区缓存。落盘不占堆内存，几千张也只有几十 MB；格子滚到时从磁盘毫秒级解码。
      */
-    suspend fun prefetchThumbnail(file: NikonCamera.FileInfo): Boolean {
+    suspend fun prefetchThumbnail(file: CameraFileInfo): Boolean {
         val handle = file.handle
         if (handle in noThumbHandles) return true
         val expectedCamera = camera ?: return false
@@ -3503,7 +3504,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * PTP 和磁盘 IO 会由各自实现切到 IO 调度器，不会阻塞界面线程。
      */
     private suspend fun prefetchPublishedFileBatch(
-        batch: List<NikonCamera.FileInfo>,
+        batch: List<CameraFileInfo>,
         expectedCamera: NikonCamera,
         expectedGeneration: Long,
     ) = withContext(Dispatchers.Main.immediate) {
@@ -3690,7 +3691,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         return Bitmap.createBitmap(src, 0, cut + 1, w, h - (cut + 1) * 2)
     }
 
-    private suspend fun loadThumbnailFromDisk(file: NikonCamera.FileInfo): ImageBitmap? {
+    private suspend fun loadThumbnailFromDisk(file: CameraFileInfo): ImageBitmap? {
         val diskCache = activeThumbnailDiskCache ?: return null
         val expectedCacheGeneration = thumbnailCacheSessionGeneration
         val cacheFileName = thumbnailDiskCacheFileName(file)
@@ -3728,7 +3729,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun fetchAndDecodeThumb(file: NikonCamera.FileInfo): ImageBitmap? {
+    private suspend fun fetchAndDecodeThumb(file: CameraFileInfo): ImageBitmap? {
         val handle = file.handle
         return try {
             // 创建共享远程请求前已经查过一次磁盘；排队期间后台可能刚好写入，再查一次
@@ -3792,7 +3793,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun decodeThumbnail(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         data: ByteArray,
         diskCache: ThumbnailDiskCache.CameraCache?,
         cacheFileName: String,
@@ -3819,7 +3820,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun decodeThumbnailFile(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         encodedSize: Long,
         diskCache: ThumbnailDiskCache.CameraCache,
         cacheFileName: String,
@@ -3843,7 +3844,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun publishDecodedThumbnail(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         image: ImageBitmap?,
         encodedSize: Long,
         diskCache: ThumbnailDiskCache.CameraCache?,
@@ -3878,7 +3879,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun postProcessThumbnail(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         decoded: Bitmap?,
     ): ImageBitmap? = decoded
         ?.let { cropLetterbox(it) }
@@ -3897,7 +3898,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 的像素方向，继续由既有手动旋转功能负责。
      * 调用方应先通过 [setFhdActive] 暂停后台缩略图填充，再调用本方法。
      */
-    suspend fun loadFhdPreview(file: NikonCamera.FileInfo): ImageBitmap? {
+    suspend fun loadFhdPreview(file: CameraFileInfo): ImageBitmap? {
         return loadFhdBitmap(
             file,
             Bitmap.Config.RGB_565,
@@ -3913,7 +3914,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private suspend fun loadFhdBitmap(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         config: Bitmap.Config,
         honorExifOrientation: Boolean,
         retryDeviceBusy: Boolean,
@@ -4004,7 +4005,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * [androidx.exifinterface.media.ExifInterface] 解析标准标签 + Nikon MakerNote。
      * 任何环节失败返回 null——EXIF 是纯体验增强，静默失败。
      */
-    suspend fun loadExif(file: NikonCamera.FileInfo): PhotoExif? {
+    suspend fun loadExif(file: CameraFileInfo): PhotoExif? {
         val key = exifKey(file)
         // containsKey 区分"未尝试"与"已尝试但为 null（负缓存）"——?.let 无法区分。
         if (key in exifCache) return exifCache[key]
@@ -4027,7 +4028,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /** Reads EXIF from an already-transferred local original without touching the camera session. */
-    suspend fun loadLocalExif(file: NikonCamera.FileInfo, sourceUri: Uri): PhotoExif? {
+    suspend fun loadLocalExif(file: CameraFileInfo, sourceUri: Uri): PhotoExif? {
         val key = exifKey(file)
         if (key in exifCache) return exifCache[key]
         if (file.extension !in EXIF_SUPPORTED_EXTENSIONS) {
@@ -4200,7 +4201,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun thumbnailDiskCacheFileName(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
     ): String =
         if (useStaKeys) {
@@ -4210,7 +4211,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
     private fun alternateThumbnailDiskCacheFileName(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         useStaKeys: Boolean = activeThumbnailDiskCacheUsesStaKeys,
     ): String? =
         if (useStaKeys) {
@@ -4219,12 +4220,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             null
         }
 
-    private fun legacyThumbnailDiskCacheFileName(file: NikonCamera.FileInfo): String =
+    private fun legacyThumbnailDiskCacheFileName(file: CameraFileInfo): String =
         legacyThumbnailCacheFileName(file.fileName, file.size, file.captureDate)
 
     private suspend fun reconcileThumbnailCache(
         diskCache: ThumbnailDiskCache.CameraCache,
-        files: List<NikonCamera.FileInfo>,
+        files: List<CameraFileInfo>,
         useStaKeys: Boolean,
     ) {
         withContext(Dispatchers.IO) {

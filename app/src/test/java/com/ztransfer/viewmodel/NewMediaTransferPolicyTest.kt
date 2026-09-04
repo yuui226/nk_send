@@ -3,7 +3,7 @@ package com.ztransfer.viewmodel
 import java.time.LocalDate
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,7 +13,7 @@ import org.junit.Test
 class NewMediaTransferPolicyTest {
     @Test
     fun `catalog reconciliation switches a deleted backup primary to its surviving alias`() {
-        val card1 = NikonCamera.FileInfo(
+        val card1 = CameraFileInfo(
             handle = 10,
             size = 42L,
             fileName = "DSC_0010.JPG",
@@ -60,7 +60,7 @@ class NewMediaTransferPolicyTest {
 
     @Test
     fun `queue task snapshots dated folder setting when it is added`() {
-        val file = NikonCamera.FileInfo(7, 1L, "DSC_0007.JPG", "20260817T142530")
+        val file = CameraFileInfo(7, 1L, "DSC_0007.JPG", "20260817T142530")
         fun task(organized: Boolean) = createQueueTasks(
             files = listOf(file),
             photoFrameEnabled = false,
@@ -76,7 +76,7 @@ class NewMediaTransferPolicyTest {
 
     @Test
     fun `automatic transfer accepts known photos and videos but not unknown objects`() {
-        fun file(name: String) = NikonCamera.FileInfo(1, 1L, name, null)
+        fun file(name: String) = CameraFileInfo(1, 1L, name, null)
 
         assertTrue(isAutoTransferMedia(file("DSC_0001.JPG")))
         assertTrue(isAutoTransferMedia(file("DSC_0002.NEF")))

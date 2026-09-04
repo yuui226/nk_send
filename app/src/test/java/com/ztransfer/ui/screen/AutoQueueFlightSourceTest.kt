@@ -1,13 +1,13 @@
 package com.ztransfer.ui.screen
 
 import androidx.compose.ui.geometry.Rect
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AutoQueueFlightSourceTest {
-    private val file = NikonCamera.FileInfo(42, 1L, "DSC_0042.JPG", "20260827T120000")
+    private val file = CameraFileInfo(42, 1L, "DSC_0042.JPG", "20260827T120000")
     private val photoBounds = Rect(10f, 20f, 110f, 120f)
     private val burstBounds = Rect(30f, 40f, 130f, 140f)
 

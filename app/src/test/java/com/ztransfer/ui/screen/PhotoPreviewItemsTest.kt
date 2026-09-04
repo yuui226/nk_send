@@ -1,6 +1,6 @@
 package com.ztransfer.ui.screen
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.PtpConstants
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhotoPreviewItemsTest {
-    private fun file(number: Int) = NikonCamera.FileInfo(
+    private fun file(number: Int) = CameraFileInfo(
         handle = number,
         size = 1_000L,
         fileName = "DSC_${number.toString().padStart(4, '0')}.JPG",

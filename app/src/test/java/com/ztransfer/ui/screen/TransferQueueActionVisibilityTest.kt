@@ -1,6 +1,6 @@
 package com.ztransfer.ui.screen
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
 import org.junit.Assert.assertFalse
@@ -13,7 +13,7 @@ class TransferQueueActionVisibilityTest {
         status: TransferStatus,
         isGeneratingFrame: Boolean = false,
     ) = TransferTask(
-        file = NikonCamera.FileInfo(
+        file = CameraFileInfo(
             handle = handle,
             size = 100L,
             fileName = "DSC_$handle.JPG",

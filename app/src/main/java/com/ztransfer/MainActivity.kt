@@ -69,6 +69,7 @@ import com.ztransfer.ui.theme.rememberAppBackgroundBrush
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.update.AppUpdateHost
 import com.ztransfer.update.AppUpdateManager
@@ -685,7 +686,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 照片页不可见期间只在可变 Map 中 O(1) 累积；恢复可见时才一次性生成动画快照。
     // 不能每来一批都复制此前的 List，监看页长时间间隔拍摄会退化成 O(n²)。
     val pendingAutoQueueFiles = remember {
-        LinkedHashMap<NikonCamera, LinkedHashMap<Int, NikonCamera.FileInfo>>()
+        LinkedHashMap<NikonCamera, LinkedHashMap<Int, CameraFileInfo>>()
     }
     var nextAutoQueueFlightId by remember { mutableLongStateOf(0L) }
     var filesWorkspaceSettled by remember { mutableStateOf(false) }
@@ -698,7 +699,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
 
     fun publishAutoQueueFlight(
         camera: NikonCamera,
-        files: List<NikonCamera.FileInfo>,
+        files: List<CameraFileInfo>,
     ) {
         if (files.isEmpty()) return
         autoQueueFlightRequests += AutoQueueFlightRequest(
@@ -749,7 +750,7 @@ fun MainScreen(transferViewModel: TransferViewModel) {
     // 才生成视觉事件。短时间连续到达会合成一摞；照片页不可见时继续合并，回来只播一次，
     // 不让监看连拍在返回后逐张刷动画。
     LaunchedEffect(cameraViewModel, transferViewModel) {
-        val stagedFiles = LinkedHashMap<NikonCamera, LinkedHashMap<Int, NikonCamera.FileInfo>>()
+        val stagedFiles = LinkedHashMap<NikonCamera, LinkedHashMap<Int, CameraFileInfo>>()
         var flushJob: Job? = null
         cameraViewModel.newMediaFiles.collect { event ->
             if (cameraViewModel.getCamera() === event.camera) {

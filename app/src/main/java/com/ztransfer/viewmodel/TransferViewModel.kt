@@ -63,6 +63,7 @@ import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.ExistingPartAction
 import com.ztransfer.protocol.FailedPartAction
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.ResumeUnavailableException
@@ -125,7 +126,7 @@ internal class ExistingFileNameIndex<T> {
 }
 
 data class TransferTask(
-    val file: NikonCamera.FileInfo,
+    val file: CameraFileInfo,
     /** 队列任务的进程内唯一标识；同一相机文件可以按不同装饰配置创建多个独立任务。 */
     override val taskId: Long = transferTaskIds.incrementAndGet(),
     /** 入队时锁定的边框样式；null 表示该任务不生成边框/水印派生图。 */
@@ -227,7 +228,7 @@ class ExportedOriginalIndex internal constructor() {
     }
 
     internal fun contains(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         destinationFolderName: String? = null,
     ): Boolean {
         val filesBySize = filesByDestination[transferDestinationLookupKey(destinationFolderName)]
@@ -240,7 +241,7 @@ class ExportedOriginalIndex internal constructor() {
     }
 
     internal fun localUriString(
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         destinationFolderName: String? = null,
     ): String? {
         val filesBySize = filesByDestination[transferDestinationLookupKey(destinationFolderName)]
@@ -317,7 +318,7 @@ internal fun TransferTask.newAttempt(): TransferTask = copy(
     frameGenerationElapsedMs = null,
 )
 
-private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
+private fun CameraFileInfo.autoTransferIdentity(): String =
     automaticTransferFileIdentity(fileName, size, captureDate)
 
 data class TransferState(
@@ -586,7 +587,7 @@ internal fun transferDestinationFolderName(
 
 /** 相机文件是否已在当前保存目录中落盘；列表对号、筛选和任务模式必须共用该判定。 */
 internal fun isTransferredOriginal(
-    file: NikonCamera.FileInfo,
+    file: CameraFileInfo,
     existingExportIndex: ExportedOriginalIndex,
     organizeTransfersByDate: Boolean,
 ): Boolean = existingExportIndex.contains(
@@ -599,7 +600,7 @@ internal fun isTransferredOriginal(
 
 /** Returns the already-indexed local original for preview, using the exact same destination rule. */
 internal fun transferredOriginalUri(
-    file: NikonCamera.FileInfo,
+    file: CameraFileInfo,
     existingExportIndex: ExportedOriginalIndex,
     organizeTransfersByDate: Boolean,
 ): Uri? = existingExportIndex.localUriString(
@@ -612,13 +613,13 @@ internal fun transferredOriginalUri(
 
 /** 已入队任务使用入队时锁定的目标目录，不受之后的“按天保存”开关变化影响。 */
 internal fun isTransferredOriginal(
-    file: NikonCamera.FileInfo,
+    file: CameraFileInfo,
     existingExportIndex: ExportedOriginalIndex,
     destinationFolderName: String?,
 ): Boolean = existingExportIndex.contains(file, destinationFolderName)
 
 internal fun createQueueTasks(
-    files: List<NikonCamera.FileInfo>,
+    files: List<CameraFileInfo>,
     photoFrameEnabled: Boolean,
     photoFrameBorderEnabled: Boolean = true,
     photoFramePreset: PhotoFramePreset,
@@ -778,7 +779,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
         fun containsDisplayName(displayName: String): Boolean = files.containsDisplayName(displayName)
 
-        fun findOriginal(file: NikonCamera.FileInfo): LocalOriginal? = files
+        fun findOriginal(file: CameraFileInfo): LocalOriginal? = files
             .find(file.fileName, file.size)
             ?.let { LocalOriginal(it.displayName, it.size, it.value) }
 
@@ -839,11 +840,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** 文件内容身份令牌：大小+拍摄时间，仅留字母数字与点（内嵌半成品名，不含下划线分隔符）。 */
-    private fun identityToken(file: NikonCamera.FileInfo): String =
+    private fun identityToken(file: CameraFileInfo): String =
         transferPartIdentityToken(file.size, file.captureDate)
 
     /** 半成品文件名 = 前缀 + 身份令牌 + "_" + 原文件名（原名可含下划线，解析按【首个】下划线切分）。 */
-    private fun partFileName(file: NikonCamera.FileInfo): String =
+    private fun partFileName(file: CameraFileInfo): String =
         transferPartFileName(file.fileName, file.size, file.captureDate)
 
     init {
@@ -1740,7 +1741,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun addToQueue(files: List<NikonCamera.FileInfo>, cameraProvider: () -> NikonCamera?) {
+    fun addToQueue(files: List<CameraFileInfo>, cameraProvider: () -> NikonCamera?) {
         val snapshot = _state.value
         val dirUri = snapshot.transferDirUri ?: return
         val newTasks = createQueueTasks(
@@ -1776,9 +1777,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     /** 自动入口不改变手动重复导出的语义，只避免同一次新增事件与现有任务撞车。 */
     fun addNewMediaToQueue(
-        files: List<NikonCamera.FileInfo>,
+        files: List<CameraFileInfo>,
         cameraProvider: () -> NikonCamera?,
-    ): List<NikonCamera.FileInfo> {
+    ): List<CameraFileInfo> {
         val snapshot = _state.value
         if (!snapshot.autoTransferNewMedia || snapshot.transferDirUri == null) return emptyList()
         if (cameraProvider() == null) return emptyList()
@@ -2630,7 +2631,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     /** 失败后只查询这一份半成品的大小并更新缓存；不为一次重试重扫整个目录。 */
     private suspend fun refreshPartIndexForRetry(
         directoryIndex: ExistingDirectoryIndex,
-        file: NikonCamera.FileInfo,
+        file: CameraFileInfo,
         partUri: Uri?,
     ) {
         if (partUri == null) return

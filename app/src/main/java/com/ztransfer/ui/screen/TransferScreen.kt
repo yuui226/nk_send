@@ -74,7 +74,7 @@ import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.protocol.CameraConnectionType
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatDuration
@@ -1153,7 +1153,7 @@ private fun ConfirmCard(
  */
 @Composable
 private fun QueueThumbnail(
-    file: NikonCamera.FileInfo,
+    file: CameraFileInfo,
     retryNudge: Boolean,
     cameraViewModel: CameraViewModel,
     modifier: Modifier = Modifier,

@@ -6,7 +6,7 @@ internal data class ParsedObjectCacheIdentity(
     val complete: Boolean,
 )
 
-/** Pure decoded ObjectInfo fields; transport and Android's nested FileInfo remain platform-side. */
+/** Pure decoded ObjectInfo fields; transport stays platform-side and publishes [CameraFileInfo]. */
 class PtpObjectInfo internal constructor(
     val handle: Int,
     val storageId: Int,

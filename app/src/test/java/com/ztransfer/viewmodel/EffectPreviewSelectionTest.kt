@@ -1,6 +1,6 @@
 package com.ztransfer.viewmodel
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -31,7 +31,7 @@ class EffectPreviewSelectionTest {
         assertEquals(newest, latestEffectPreviewFile(listOf(newest, older)))
     }
 
-    private fun file(handle: Int, name: String, capturedAt: String?) = NikonCamera.FileInfo(
+    private fun file(handle: Int, name: String, capturedAt: String?) = CameraFileInfo(
         handle = handle,
         size = 1_024L,
         fileName = name,

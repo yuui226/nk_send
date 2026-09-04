@@ -1,6 +1,6 @@
 package com.ztransfer.viewmodel
 
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Test
@@ -17,7 +17,7 @@ class CameraStorageTest {
         assertSame(merged, mergeStorageMembership(merged, card2))
     }
 
-    private fun file(handle: Int, storageId: Int) = NikonCamera.FileInfo(
+    private fun file(handle: Int, storageId: Int) = CameraFileInfo(
         handle = handle,
         size = 1024L,
         fileName = "DSC_0001.JPG",

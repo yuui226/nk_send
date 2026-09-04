@@ -118,6 +118,7 @@ import com.ztransfer.R
 import com.ztransfer.gps.NikonGpsService
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.Haptics
@@ -165,21 +166,21 @@ import java.time.YearMonth
 
 data class FileGroup(
     val date: String,
-    val files: List<NikonCamera.FileInfo>
+    val files: List<CameraFileInfo>
 )
 
 /** 已由自动传输入口接纳、等待照片页播放一次入队反馈的文件批次。 */
 data class AutoQueueFlightRequest(
     val id: Long,
     val camera: NikonCamera,
-    val files: List<NikonCamera.FileInfo>,
+    val files: List<CameraFileInfo>,
 )
 
 internal fun burstCollectionGridKey(id: String): String = "burst_collection_$id"
 
 /** 只从当前真实可见的普通格位或折叠合集格位选择自动入队动画起点。 */
 internal fun resolveAutoQueueFlightSource(
-    files: List<NikonCamera.FileInfo>,
+    files: List<CameraFileInfo>,
     visibleKeys: Set<Any>,
     cellBoundsByHandle: Map<Int, Rect>,
     burstBoundsById: Map<String, Rect>,
@@ -198,7 +199,7 @@ internal data class FileListCameraUiState(
     val isConnectedToCamera: Boolean,
     val connectionType: CameraConnectionType?,
     val isStaConnection: Boolean,
-    val files: List<NikonCamera.FileInfo>,
+    val files: List<CameraFileInfo>,
     val storageIds: List<Int>,
     val isLoadingFiles: Boolean,
     val hasCompletedFileScan: Boolean,
@@ -287,7 +288,7 @@ internal fun CameraState.toFileListSignalUiState(): FileListSignalUiState =
 /** 一段真实连拍。它只描述检测结果；是否折成虚拟卡位由列表设置决定。 */
 internal data class BurstPhotoGroup(
     val id: String,
-    val files: List<NikonCamera.FileInfo>
+    val files: List<CameraFileInfo>
 )
 
 /** LazyGrid 的展示层条目；合集卡不是相机文件，使用独立类型避免混入照片语义。 */
@@ -295,7 +296,7 @@ internal sealed interface ThumbnailGridItem {
     val key: Any
 
     data class Photo(
-        val file: NikonCamera.FileInfo,
+        val file: CameraFileInfo,
         val burstId: String? = null
     ) : ThumbnailGridItem {
         override val key: Any = file.handle
@@ -303,7 +304,7 @@ internal sealed interface ThumbnailGridItem {
 
     data class BurstCollection(
         val id: String,
-        val files: List<NikonCamera.FileInfo>
+        val files: List<CameraFileInfo>
     ) : ThumbnailGridItem {
         override val key: Any = burstCollectionGridKey(id)
     }
@@ -320,7 +321,7 @@ internal fun buildLatestTaskIndexByHandle(tasks: List<TransferTask>): Map<Int, I
 }
 
 internal fun exportedHandlesForUntransferredFilter(
-    files: List<NikonCamera.FileInfo>,
+    files: List<CameraFileInfo>,
     index: ExportedOriginalIndex,
     organizeTransfersByDate: Boolean,
     enabled: Boolean,
@@ -497,7 +498,7 @@ internal fun Context.findActivity(): Activity? {
     return null
 }
 
-fun groupFilesByDate(files: List<NikonCamera.FileInfo>): List<FileGroup> {
+fun groupFilesByDate(files: List<CameraFileInfo>): List<FileGroup> {
     return groupCameraFilesByDate(files).map { group ->
         FileGroup(date = group.date, files = group.files)
     }
@@ -509,7 +510,7 @@ private data class PublishedCameraFileIdentity(
     val captureDate: String?,
 )
 
-private fun NikonCamera.FileInfo.publishedIdentity() = PublishedCameraFileIdentity(
+private fun CameraFileInfo.publishedIdentity() = PublishedCameraFileIdentity(
     fileName = fileName,
     size = size,
     captureDate = captureDate,
@@ -517,8 +518,8 @@ private fun NikonCamera.FileInfo.publishedIdentity() = PublishedCameraFileIdenti
 
 /** Dates whose logical camera photos disappeared in the latest authoritative update. */
 internal fun publishedCameraRemovalDates(
-    previous: List<NikonCamera.FileInfo>,
-    current: List<NikonCamera.FileInfo>,
+    previous: List<CameraFileInfo>,
+    current: List<CameraFileInfo>,
 ): Set<String> {
     if (previous.isEmpty()) return emptySet()
     val currentHandles = current.asSequence().mapTo(HashSet(current.size)) { it.handle }
@@ -1143,7 +1144,7 @@ fun FileListScreen(
             }
         }
     }
-    val onPreview: (NikonCamera.FileInfo, Rect) -> Unit = { file, rect ->
+    val onPreview: (CameraFileInfo, Rect) -> Unit = { file, rect ->
         // 几千张照片时构建分页快照会产生一批临时集合；不要把这段 O(n) 工作塞在
         // 长按手势的主线程回调里，否则动画第一帧会被推迟甚至直接错过。
         haptics.longPress()
@@ -1165,7 +1166,7 @@ fun FileListScreen(
             }
         }
     }
-    val onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit =
+    val onPreviewBurst: (String, List<CameraFileInfo>, Rect) -> Unit =
         onPreviewBurst@{ burstId, files, rect ->
             val first = files.firstOrNull() ?: return@onPreviewBurst
             // 快照直接包含目标成员并落到第一张；长按不提前改变底层网格，避免预览层
@@ -1197,7 +1198,7 @@ fun FileListScreen(
     ) {
         buildLatestTaskIndexByHandle(transferState.tasks)
     }
-    val hasLocalOriginal: (NikonCamera.FileInfo) -> Boolean = { file ->
+    val hasLocalOriginal: (CameraFileInfo) -> Boolean = { file ->
         isTransferredOriginal(
             file,
             transferState.existingExportIndex,
@@ -1206,7 +1207,7 @@ fun FileListScreen(
     }
     // 单文件入队共用同一套前置检查与任务创建；只有动画按操作来源分流：列表继续
     // QueueFlight，预览页由自己的上滑投递动画反馈，不能隔着遮罩再飞一次底层格子。
-    val enqueueSingleFile: (NikonCamera.FileInfo, Boolean) -> Boolean =
+    val enqueueSingleFile: (CameraFileInfo, Boolean) -> Boolean =
         enqueueSingleFile@{ file, animateFromList ->
             if (transferState.transferDirUri == null) {
                 // 预览层盖在设置面板之上，先关掉预览再弹设置，否则用户看不见。
@@ -1240,14 +1241,14 @@ fun FileListScreen(
                 true
             }
         }
-    val onTapFile: (NikonCamera.FileInfo) -> Unit = { file ->
+    val onTapFile: (CameraFileInfo) -> Unit = { file ->
         enqueueSingleFile(file, true)
     }
-    val onTransferFromPreview: (NikonCamera.FileInfo) -> Boolean = { file ->
+    val onTransferFromPreview: (CameraFileInfo) -> Boolean = { file ->
         enqueueSingleFile(file, false)
     }
 
-    val onTransferBurstPreview: (List<NikonCamera.FileInfo>) -> Boolean =
+    val onTransferBurstPreview: (List<CameraFileInfo>) -> Boolean =
         onTransferBurstPreview@{ files ->
             val remaining = files
             if (remaining.isEmpty()) return@onTransferBurstPreview false
@@ -1271,7 +1272,7 @@ fun FileListScreen(
 
     // 关闭预览前把当前照片放回视野。很远时先在全黑预览层后无感预定位到相邻几行，
     // 再走 LazyGrid 自身的短程平滑滚动；这样不会让框架为性能做的长距离跳段暴露出来。
-    val preparePreviewDismissTarget: suspend (NikonCamera.FileInfo) -> Rect? =
+    val preparePreviewDismissTarget: suspend (CameraFileInfo) -> Rect? =
         prepare@{ file ->
             val groupsSnapshot = groups
             val stillInCurrentResults = withContext(Dispatchers.Default) {
@@ -1475,7 +1476,7 @@ fun FileListScreen(
             // 分组批量传输。gating 用响应式的 isConnectedToCamera；
             // 队列内部经 provider 现取当前相机实例，中途重连后续传任务自动用新连接。
             // 单文件入队见外层 enqueueSingleFile；这里仅处理日期整组。
-            val onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit = onTransferGroup@{ remaining, fromBounds ->
+            val onTransferGroup: (List<CameraFileInfo>, Rect?) -> Unit = onTransferGroup@{ remaining, fromBounds ->
                 if (transferState.transferDirUri == null) {
                     requestTransferDirectory()
                     return@onTransferGroup
@@ -2974,7 +2975,7 @@ private fun GroupHeader(
     group: FileGroup,
     collapsed: Boolean,
     onToggleCollapse: () -> Unit,
-    onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit
+    onTransferGroup: (List<CameraFileInfo>, Rect?) -> Unit
 ) {
     val colors = AppTheme.colors
     Row(
@@ -3060,7 +3061,7 @@ private fun GroupHeader(
 }
 
 internal fun buildThumbnailGridItems(
-    files: List<NikonCamera.FileInfo>,
+    files: List<CameraFileInfo>,
     burstIdByHandle: Map<Int, String>,
     collapseBurstPhotos: Boolean,
     expandedBurstIds: Set<String>
@@ -3144,10 +3145,10 @@ private fun ThumbnailGrid(
     allowRemoteThumbnails: Boolean,
     collapsedDates: MutableMap<String, Boolean>,
     cameraViewModel: CameraViewModel,
-    onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
-    onTapFile: (NikonCamera.FileInfo) -> Unit,
-    onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
-    onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit,
+    onTransferGroup: (List<CameraFileInfo>, Rect?) -> Unit,
+    onTapFile: (CameraFileInfo) -> Unit,
+    onPreview: (CameraFileInfo, Rect) -> Unit,
+    onPreviewBurst: (String, List<CameraFileInfo>, Rect) -> Unit,
     tapToPreview: Boolean,
     cellBoundsRegistry: MutableMap<Int, Rect>,
     burstBoundsRegistry: MutableMap<String, Rect>,
@@ -3522,12 +3523,12 @@ private fun ThumbnailGrid(
 @Composable
 private fun BurstCollectionCell(
     collectionId: String,
-    files: List<NikonCamera.FileInfo>,
+    files: List<CameraFileInfo>,
     expanded: Boolean,
     transfersBusy: Boolean,
     allowRemoteThumbnails: Boolean,
     cameraViewModel: CameraViewModel,
-    onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
+    onTransferGroup: (List<CameraFileInfo>, Rect?) -> Unit,
     onToggle: () -> Unit,
     onPreviewFirst: (Rect) -> Unit,
     onBoundsChanged: (Rect?) -> Unit,
@@ -3731,7 +3732,7 @@ private fun BurstCollectionCell(
 
 @Composable
 internal fun BurstStackPhoto(
-    file: NikonCamera.FileInfo,
+    file: CameraFileInfo,
     cameraViewModel: CameraViewModel,
     transfersBusy: Boolean,
     loadEnabled: Boolean = true,
@@ -3790,7 +3791,7 @@ internal fun BurstStackPhoto(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ThumbnailCell(
-    file: NikonCamera.FileInfo,
+    file: CameraFileInfo,
     task: TransferTask?,
     transferred: Boolean,
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
@@ -3798,8 +3799,8 @@ private fun ThumbnailCell(
     transfersBusy: Boolean,
     allowRemoteThumbnail: Boolean,
     cameraViewModel: CameraViewModel,
-    onTapFile: (NikonCamera.FileInfo) -> Unit,
-    onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
+    onTapFile: (CameraFileInfo) -> Unit,
+    onPreview: (CameraFileInfo, Rect) -> Unit,
     tapToPreview: Boolean,
     cellBoundsRegistry: MutableMap<Int, Rect>,
     modifier: Modifier = Modifier,
@@ -5139,7 +5140,7 @@ private fun QueueFlightGhost(flight: QueueFlight, target: Rect?, onDone: () -> U
  * 对 RAW+JPG 双格式连拍两条轨各自成组。O(n log n)，仅在文件列表变化时重算。
  * 已知边界：编号 9999 回卷、跨零点的连拍会被切成两段——都只影响标记完整性，可接受。
  */
-internal fun computeBurstGroups(files: List<NikonCamera.FileInfo>): List<BurstPhotoGroup> {
+internal fun computeBurstGroups(files: List<CameraFileInfo>): List<BurstPhotoGroup> {
     return detectCameraBurstGroups(files).map { group ->
         BurstPhotoGroup(id = group.id, files = group.files)
     }

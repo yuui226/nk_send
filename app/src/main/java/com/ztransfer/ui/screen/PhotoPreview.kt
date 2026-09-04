@@ -102,7 +102,7 @@ import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.frame.PhotoFrameExporter
-import com.ztransfer.protocol.NikonCamera
+import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatFileSize
@@ -207,7 +207,7 @@ internal sealed interface PhotoPreviewItem {
     val key: Any
 
     data class Photo(
-        val file: NikonCamera.FileInfo,
+        val file: CameraFileInfo,
         val burstId: String? = null
     ) : PhotoPreviewItem {
         override val key: Any = file.handle
@@ -215,7 +215,7 @@ internal sealed interface PhotoPreviewItem {
 
     data class BurstCollection(
         val id: String,
-        val files: List<NikonCamera.FileInfo>
+        val files: List<CameraFileInfo>
     ) : PhotoPreviewItem {
         override val key: Any = "preview_burst_$id"
     }
@@ -232,7 +232,7 @@ internal sealed interface PhotoPreviewItem {
  */
 internal fun <T> snapshotPreviewSessionSources(
     items: List<PhotoPreviewItem>,
-    sourceFor: (NikonCamera.FileInfo) -> T?,
+    sourceFor: (CameraFileInfo) -> T?,
 ): Map<Int, T?> = buildMap {
     items.forEach { item ->
         when (item) {
@@ -321,27 +321,27 @@ internal fun PhotoPreviewOverlay(
     // 连拍成员 handle 集(列表页的检测结果):预览左上角展示连拍角标用;空集即不展示。
     burstHandles: Set<Int> = emptySet(),
     // 复用列表的任务索引与完成判定，预览不维护第二套传输状态。
-    queueTaskFor: (NikonCamera.FileInfo) -> TransferTask? = { null },
-    isTransferred: (NikonCamera.FileInfo) -> Boolean = { false },
+    queueTaskFor: (CameraFileInfo) -> TransferTask? = { null },
+    isTransferred: (CameraFileInfo) -> Boolean = { false },
     // 与完成对号复用同一导出索引；三种连接模式都先走本地 URI，再回退相机 FHD。
-    localOriginalUriFor: (NikonCamera.FileInfo) -> Uri? = { null },
+    localOriginalUriFor: (CameraFileInfo) -> Uri? = { null },
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
     // 根坐标中的真实队列胶囊承载区；预览残影使用它计算与列表一致的弧线落点。
     queueTargetBounds: Rect? = null,
     onQueueFlightCaught: () -> Unit = {},
     // 把当前预览文件加入传输队列（父层只负责目录/连接校验与入队；动画留在本层）。
-    onTransfer: (NikonCamera.FileInfo) -> Boolean = { false },
+    onTransfer: (CameraFileInfo) -> Boolean = { false },
     // 合集页整组入队；动画在本层复用当前合集叠片，不借用被遮住的列表坐标。
-    onTransferBurst: (List<NikonCamera.FileInfo>) -> Boolean = { false },
+    onTransferBurst: (List<CameraFileInfo>) -> Boolean = { false },
     // 预览内主动展开/收起合集时同步底层列表，关闭预览后两处状态一致。
     onBurstExpandedChange: (String, Boolean) -> Unit = { _, _ -> },
     // 每次旋转后回传归一化方向，父层写入全局偏好。
     onRotationChanged: (Int) -> Unit = {},
     onHistogramVisibleChanged: (Boolean) -> Unit = {},
     // 关闭前让底层列表把当前照片准备到可见位置，并返回它最新的根坐标。
-    prepareDismissTarget: suspend (NikonCamera.FileInfo) -> Rect? = { null },
+    prepareDismissTarget: suspend (CameraFileInfo) -> Rect? = { null },
     // 非空表示当前照片已在底层列表找到，可在预览消失后播放定位脉冲。
-    onDismiss: (NikonCamera.FileInfo?) -> Unit
+    onDismiss: (CameraFileInfo?) -> Unit
 ) {
     // 会话内固定持有自己的分页快照；后台增量加载/筛选不会让正在看的页突然换内容。
     // 只有用户在合集页主动展开/收起时，才在当前页后插入/移除该组成员。
@@ -368,7 +368,7 @@ internal fun PhotoPreviewOverlay(
     val sessionLocalOriginalUris = remember {
         snapshotPreviewSessionSources(items, localOriginalUriFor)
     }
-    val sessionLocalOriginalUriFor: (NikonCamera.FileInfo) -> Uri? = remember(
+    val sessionLocalOriginalUriFor: (CameraFileInfo) -> Uri? = remember(
         sessionLocalOriginalUris,
     ) {
         { file -> sessionLocalOriginalUris[file.handle] }
@@ -463,7 +463,7 @@ internal fun PhotoPreviewOverlay(
     var queueFlightProgress by remember { mutableFloatStateOf(0f) }
     var queueFlightBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     var queueFlightBurstFiles by remember {
-        mutableStateOf<List<NikonCamera.FileInfo>?>(null)
+        mutableStateOf<List<CameraFileInfo>?>(null)
     }
     var queueFlightRotation by remember { mutableFloatStateOf(0f) }
     var queueFlightTarget by remember { mutableStateOf<Rect?>(null) }
@@ -498,7 +498,7 @@ internal fun PhotoPreviewOverlay(
     fun startPreviewQueueFlight(
         bitmap: ImageBitmap?,
         rotation: Float,
-        burstFiles: List<NikonCamera.FileInfo>? = null,
+        burstFiles: List<CameraFileInfo>? = null,
         enqueue: () -> Boolean,
     ) {
         if (queueAnimating || closing) return
@@ -564,7 +564,7 @@ internal fun PhotoPreviewOverlay(
         }
     }
 
-    fun enqueueFromPreview(file: NikonCamera.FileInfo) {
+    fun enqueueFromPreview(file: CameraFileInfo) {
         // FHD 已经在屏幕上时直接复用；否则复用打开预览所用的缓存缩略图。
         // 先挂载 alpha=0 的影子并预留两帧，再开始飞行，避免首次绘制纹理闪现。
         val bitmap = highResolutionBitmaps[file.handle]
@@ -1685,7 +1685,7 @@ private fun BurstCollectionPreviewPage(
  */
 @Composable
 private fun BurstCollectionStack(
-    files: List<NikonCamera.FileInfo>,
+    files: List<CameraFileInfo>,
     cameraViewModel: CameraViewModel,
     loadEnabled: Boolean,
     stackSize: Dp,
@@ -1751,7 +1751,7 @@ private fun BurstCollectionStack(
 /** 当前合集叠片沿单张预览完全相同的弧线收进队列胶囊。 */
 @Composable
 private fun PreviewBurstQueueFlightGhost(
-    files: List<NikonCamera.FileInfo>,
+    files: List<CameraFileInfo>,
     cameraViewModel: CameraViewModel,
     flightProgress: () -> Float,
     targetBounds: Rect?,
@@ -1993,7 +1993,7 @@ private const val DOUBLE_TAP_ZOOM = 2.5f
 
 @Composable
 private fun PreviewPage(
-    file: NikonCamera.FileInfo,
+    file: CameraFileInfo,
     cameraViewModel: CameraViewModel,
     fhdBitmap: ImageBitmap?,
     isLoadingFhd: Boolean,
