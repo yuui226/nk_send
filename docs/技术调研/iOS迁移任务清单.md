@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：平台能力边界已锁定，开始迁移 GPS 配对核心
-- 下一项：`G05` GPS 配对协议与业务状态机
+- 当前阶段：GPS 配对与会员限制核心已共享，滤镜模型/目录已完成第一批
+- 下一项：`E01` EXIF、相框元数据与纯布局规则
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -85,10 +85,10 @@
 | G02 | DONE | GPS 公开状态模型 | `GpsStatus/GpsState` 已共享，Android 恢复策略独立验证 |
 | G03 | DONE | GPS 恢复与海拔规则 | 公共规则已共享，常量保持模块内可见，原测试迁入 `commonTest` |
 | G04 | DONE | GPS payload codec | 完整 41 字节向量固定；纯 Kotlin writer 与平台 UTC 适配已分离 |
-| G05 | TODO | GPS 配对业务状态机 | Android BLE 与 iOS CoreBluetooth 分开 |
+| G05 | DONE | GPS 配对业务状态机 | 17B codec、熵映射、认证算法与四阶段决策共享；BLE/加密/随机数分平台 |
 | E01 | TODO | EXIF、相框元数据和布局规则 | Bitmap/Canvas 渲染留平台层 |
-| E02 | TODO | 滤镜参数、收藏和水印规则 | 渲染器通过平台接口实现 |
-| L01 | TODO | 免费版限制和会员权益判断 | 支付流程不共享 |
+| E02 | TODO | 滤镜参数、收藏和水印规则 | 参数/强度/50 个 NP3 目录已共享；收藏和水印规则待 E01 模型后迁移 |
+| L01 | DONE | 免费版限制和会员权益判断 | 三项限制与额度判断共享；日账、验签和支付流程保留平台层 |
 
 ### 6. ViewModel 与共享 UI
 
@@ -209,6 +209,10 @@
 | 2026-09-04 | S02 | 六类迁移 oracle 齐全；新增三组 NCP/NP3 完整 ARGB 金向量及固定 EXIF 标签到完整元数据样本，直接复用生产算法，没有复制公式或修改公开 API；两路只读复核均通过 |
 | 2026-09-04 | S02 | shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-213525.apk`，SHA-256 `7ADA03F50161AF940873A628CFA6F0F0BE6263515EFB5E289E8EF30113384EC2`；Manifest 与 C03 完全相同；本轮无已授权 ADB 设备 |
 | 2026-09-04 | S03 | 网络、USB、文件/照片、蓝牙、定位、后台、录像、支付/会员、更新九类能力逐项确认 Android 所有者、iOS 等价/限制和共享边界；不新增空壳接口、模块或依赖；将 Windows 可完成的 `Q03a` 与 iOS 完成后执行的 `Q03b` 分开，避免伪验收 |
+| 2026-09-04 | G05 | Nikon GPS 17B 小端包、stage-1 熵映射、8 组 salt 的 stage-2/3 算法及四阶段握手决策迁入 shared；Android 原 facade 和 captured Blowfish 向量不变，真实 BLE 路径使用共享 decision；SecureRandom、Cipher、GATT、Classic bond、日志和超时均留 Android |
+| 2026-09-04 | L01 | 免费版每日 25 个、单文件 400 MiB、监看 3 分钟及 quota/limit 判断迁入 shared；Android `LicenseManager` 保持原 API、Pro 短路和 SharedPreferences 日账读写，验签/设备身份/订单/二维码/更新未动 |
+| 2026-09-04 | E02 第一批 | 滤镜模型、强度/tone curve、50 个 NP3 定义与目录迁入 shared；原转换 ID 预计算保持 SHA-256 身份，Android 只保留 `R.string` 映射；完整顺序、代表参数、曲线及原 ARGB renderer 金向量通过 |
+| 2026-09-04 | G05/L01/E02 第一批 | shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-215225.apk`，SHA-256 `54EBA8A919A31B16D18B85A262B20293CDB6E6E82029D7430EF34C5F99E7EC15`；Manifest 与 S02 完全相同；本轮无已授权 ADB 设备 |
 
 ## 更新约定
 
