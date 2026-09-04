@@ -2776,10 +2776,12 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         mode: String,
     ): PhotoFrameMetadata? {
         val metadata = PhotoFrameExporter.metadataFromExifHeader(null, header)
-        val hasCoordinates = metadata.latitude?.isFinite() == true &&
-            metadata.longitude?.isFinite() == true &&
-            metadata.latitude != 0.0 && metadata.longitude != 0.0 &&
-            metadata.latitude in -90.0..90.0 && metadata.longitude in -180.0..180.0
+        val latitude = metadata.latitude
+        val longitude = metadata.longitude
+        val hasCoordinates = latitude?.isFinite() == true &&
+            longitude?.isFinite() == true &&
+            latitude != 0.0 && longitude != 0.0 &&
+            latitude in -90.0..90.0 && longitude in -180.0..180.0
         val hasAltitude = metadata.altitudeMeters?.isFinite() == true &&
             metadata.altitudeMeters != 0.0
         val hasCameraField = sequenceOf(

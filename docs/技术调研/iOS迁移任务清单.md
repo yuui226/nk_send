@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：GPS 配对与会员限制核心已共享，滤镜模型/目录已完成第一批
-- 下一项：`E01` EXIF、相框元数据与纯布局规则
+- 当前阶段：EXIF、相框领域/布局/文本/设置与滤镜收藏已共享
+- 下一项：`E02` 水印偏好、成片身份与滤镜收尾
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -86,8 +86,8 @@
 | G03 | DONE | GPS 恢复与海拔规则 | 公共规则已共享，常量保持模块内可见，原测试迁入 `commonTest` |
 | G04 | DONE | GPS payload codec | 完整 41 字节向量固定；纯 Kotlin writer 与平台 UTC 适配已分离 |
 | G05 | DONE | GPS 配对业务状态机 | 17B codec、熵映射、认证算法与四阶段决策共享；BLE/加密/随机数分平台 |
-| E01 | TODO | EXIF、相框元数据和布局规则 | Bitmap/Canvas 渲染留平台层 |
-| E02 | TODO | 滤镜参数、收藏和水印规则 | 参数/强度/50 个 NP3 目录已共享；收藏和水印规则待 E01 模型后迁移 |
+| E01 | DONE | EXIF、相框元数据和布局规则 | 模型、EXIF 归一、布局、文本、水印位置和元数据设置已共享；Bitmap/Canvas/ExifInterface/Geocoder 留平台层 |
+| E02 | NEXT | 滤镜参数、收藏和水印规则 | 参数/强度/50 个 NP3 目录与收藏已共享；水印偏好和成片身份待收尾 |
 | L01 | DONE | 免费版限制和会员权益判断 | 三项限制与额度判断共享；日账、验签和支付流程保留平台层 |
 
 ### 6. ViewModel 与共享 UI
@@ -213,6 +213,8 @@
 | 2026-09-04 | L01 | 免费版每日 25 个、单文件 400 MiB、监看 3 分钟及 quota/limit 判断迁入 shared；Android `LicenseManager` 保持原 API、Pro 短路和 SharedPreferences 日账读写，验签/设备身份/订单/二维码/更新未动 |
 | 2026-09-04 | E02 第一批 | 滤镜模型、强度/tone curve、50 个 NP3 定义与目录迁入 shared；原转换 ID 预计算保持 SHA-256 身份，Android 只保留 `R.string` 映射；完整顺序、代表参数、曲线及原 ARGB renderer 金向量通过 |
 | 2026-09-04 | G05/L01/E02 第一批 | shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-215225.apk`，SHA-256 `54EBA8A919A31B16D18B85A262B20293CDB6E6E82029D7430EF34C5F99E7EC15`；Manifest 与 S02 完全相同；本轮无已授权 ADB 设备 |
+| 2026-09-04 | E01/E02 收藏 | 相框模型、13 种持久化预设、水印值与位置规则、全部布局族、品牌/元数据文本、设置 codec/fingerprint、EXIF APEX/DMS/rational 回退及滤镜/相框收藏迁入 shared；Android 仅保留 Locale/date、ExifInterface/Geocoder、Bitmap/Canvas、MediaStore/SAF 和文件 IO 适配，原 app 回归测试继续通过 |
+| 2026-09-04 | E01/E02 收藏 | shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-221343.apk`，SHA-256 `1DEE83D781642E70ADF17FFD032C3F5A53D8FEB4A2284C9974D19FCA0E04A5AF`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`；`commonMain/commonTest` 无 Android/JVM 导入；本轮无已授权 ADB 设备 |
 
 ## 更新约定
 

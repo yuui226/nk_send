@@ -39,7 +39,6 @@ import com.ztransfer.protocol.NefPreviewReference
 import com.ztransfer.protocol.largestEmbeddedJpegRange
 import com.ztransfer.protocol.parseNefHeaderMetadata
 import com.ztransfer.util.applyExifOrientation
-import com.ztransfer.util.formatDecimalDegreeCoordinates
 import java.io.ByteArrayInputStream
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -50,7 +49,6 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -65,24 +63,7 @@ internal const val PHOTO_FRAME_JPEG_QUALITY = 100
 internal const val PHOTO_FRAME_REGION_TARGET_PIXELS = 4 * 1024 * 1024
 private val PHOTO_FRAME_SESSION_PREFIX =
     "$PHOTO_FRAME_PART_PREFIX${UUID.randomUUID().toString().take(8)}_"
-private const val PLAQUE_BAND_TO_WIDTH = 0.12f
 private const val LOCAL_RAW_PREVIEW_INDEX_BYTES = 16 * 1024 * 1024
-private const val BRAND_FRAME_SIDE_TO_PHOTO_WIDTH = 0.032f
-private const val BRAND_INSET_BOTTOM_TO_PHOTO_WIDTH = 0.032f
-private const val BRAND_GALLERY_BOTTOM_TO_PHOTO_WIDTH = 0.16f
-private const val CLASSIC_SIGNATURE_SIDE_TO_PHOTO_WIDTH = 0.03f
-private const val CLASSIC_SIGNATURE_TOP_TO_PHOTO_WIDTH = 0.095f
-private const val CLASSIC_SIGNATURE_BOTTOM_TO_PHOTO_WIDTH = 0.15f
-private const val FILM_GALLERY_SIDE_TO_PHOTO_WIDTH = 0.085f
-private const val FILM_GALLERY_TOP_TO_PHOTO_WIDTH = 0.16f
-private const val FILM_GALLERY_BAR_TO_PHOTO_WIDTH = 0.09f
-private const val FILM_GALLERY_BOTTOM_TO_PHOTO_WIDTH = 0.34f
-private const val FILM_EDGE_SIDE_TO_PHOTO_WIDTH = 0.07f
-private const val FILM_EDGE_TOP_TO_PHOTO_WIDTH = 0.035f
-private const val FILM_EDGE_BOTTOM_TO_PHOTO_WIDTH = 0.085f
-private const val COLOR_ARCHIVE_SIDE_TO_PHOTO_WIDTH = 0.04f
-private const val COLOR_ARCHIVE_TOP_TO_PHOTO_WIDTH = 0.04f
-private const val COLOR_ARCHIVE_BOTTOM_TO_PHOTO_WIDTH = 0.17f
 private val COLOR_ARCHIVE_FALLBACK_PALETTE = intArrayOf(
     0xFF262F12.toInt(),
     0xFF697B6C.toInt(),
@@ -104,167 +85,6 @@ private inline fun recordGenerationStage(
         PhotoGenerationProbe.stage(sessionId, name, durationMs, detail())
     }
 }
-
-/** 设置页可选的成片样式。名称是持久化键，不要随意改名。 */
-enum class PhotoFramePreset(internal val fileSuffix: String) {
-    MIST("mist"),
-    CINEMA("dark"),
-    MINIMAL("clean"),
-    FROSTED("glass"),
-    PLAQUE("plaque"),
-    IMMERSIVE("immersive"),
-    BRAND_INSET("brand_inset"),
-    BRAND_GALLERY("brand_gallery"),
-    CLASSIC_SIGNATURE("classic_signature"),
-    GALLERY_MAT("gallery_mat"),
-    COLOR_ARCHIVE("color_archive"),
-    FILM_GALLERY("film_gallery"),
-    FILM_EDGE("film_edge"),
-}
-
-/** 自定义水印选项。枚举名称会直接持久化，新增档位可以，已有名称不要修改。 */
-enum class PhotoFrameWatermarkFont { SIGNATURE, ELEGANT, CALLIGRAPHY, SIMPLE, BOLD }
-
-enum class PhotoFrameWatermarkContent { TEXT, IMAGE }
-
-enum class PhotoFrameWatermarkPosition {
-    AUTO,
-    LEFT,
-    CENTER,
-    RIGHT,
-    PHOTO_TOP_LEFT,
-    PHOTO_TOP_CENTER,
-    PHOTO_TOP_RIGHT,
-    PHOTO_CENTER,
-    PHOTO_BOTTOM_LEFT,
-    PHOTO_BOTTOM_CENTER,
-    PHOTO_BOTTOM_RIGHT,
-}
-
-enum class PhotoFrameWatermarkEffect { AUTO, NONE, SHADOW, OUTLINE }
-
-enum class PhotoFrameWatermarkColor {
-    ADAPTIVE,
-    WHITE,
-    BLACK,
-    GOLD,
-    MIST_BLUE,
-    ROSE_GOLD,
-}
-
-data class PhotoFrameWatermark(
-    val enabled: Boolean = true,
-    val content: PhotoFrameWatermarkContent = PhotoFrameWatermarkContent.TEXT,
-    val text: String = DEFAULT_PHOTO_FRAME_WATERMARK_TEXT,
-    val imageHash: String? = null,
-    val font: PhotoFrameWatermarkFont = PhotoFrameWatermarkFont.CALLIGRAPHY,
-    val sizePercent: Int = DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
-    val position: PhotoFrameWatermarkPosition = PhotoFrameWatermarkPosition.AUTO,
-    val color: PhotoFrameWatermarkColor = PhotoFrameWatermarkColor.ADAPTIVE,
-    val opacityPercent: Int = DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
-    val effect: PhotoFrameWatermarkEffect = PhotoFrameWatermarkEffect.AUTO,
-) {
-    val displayText: String
-        get() = limitPhotoFrameWatermarkText(text.trim())
-            .ifEmpty { DEFAULT_PHOTO_FRAME_WATERMARK_TEXT }
-}
-
-internal const val DEFAULT_PHOTO_FRAME_WATERMARK_TEXT = "ZTransfer"
-internal const val MAX_PHOTO_FRAME_WATERMARK_LENGTH = 24
-internal const val MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 1
-internal const val MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 300
-internal const val DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT = 80
-private const val PHOTO_FRAME_WATERMARK_SIZE_PERCENT_OFFSET = 49
-internal const val MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 1
-internal const val MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 100
-internal const val DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 72
-internal const val PHOTO_FRAME_WATERMARK_IMAGE_DIRECTORY = "photo-frame-watermarks"
-private val PHOTO_FRAME_WATERMARK_IMAGE_HASH = Regex("[0-9a-f]{64}")
-private val PHOTO_FRAME_WATERMARK_LINE_BREAKS = Regex("[\\r\\n\\t]+")
-private val PHOTO_FRAME_SOURCE_EXTENSIONS = setOf("jpg", "jpeg", "png")
-
-internal fun isSupportedPhotoFrameSourceExtension(extension: String): Boolean =
-    extension.removePrefix(".").lowercase(Locale.ROOT) in PHOTO_FRAME_SOURCE_EXTENSIONS
-
-/** 保持单行并按 Unicode code point 截断，避免粘贴控制符或切断 emoji 代理对。 */
-internal fun limitPhotoFrameWatermarkText(value: String): String {
-    val singleLine = value
-        .replace(PHOTO_FRAME_WATERMARK_LINE_BREAKS, " ")
-        .filterNot(Char::isISOControl)
-    val count = singleLine.codePointCount(0, singleLine.length)
-    if (count <= MAX_PHOTO_FRAME_WATERMARK_LENGTH) return singleLine
-    return singleLine.substring(
-        0,
-        singleLine.offsetByCodePoints(0, MAX_PHOTO_FRAME_WATERMARK_LENGTH),
-    )
-}
-
-internal fun normalizePhotoFrameWatermarkSizePercent(value: Int): Int =
-    value.coerceIn(
-        MIN_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
-        MAX_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
-    )
-
-/** New 1% starts at the former 50% visual size; every following step keeps the old spacing. */
-internal fun legacyPhotoFrameWatermarkSizePercent(value: Int): Int =
-    normalizePhotoFrameWatermarkSizePercent(value) + PHOTO_FRAME_WATERMARK_SIZE_PERCENT_OFFSET
-
-/** Converts a persisted value from the former 1..200 scale without changing its rendered size. */
-internal fun migratedPhotoFrameWatermarkSizePercent(value: Int): Int =
-    normalizePhotoFrameWatermarkSizePercent(value - PHOTO_FRAME_WATERMARK_SIZE_PERCENT_OFFSET)
-
-internal fun normalizePhotoFrameWatermarkOpacityPercent(value: Int): Int =
-    value.coerceIn(
-        MIN_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
-        MAX_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
-    )
-
-/** 百分比连续变化，同时精确经过旧小/中/大三个尺寸锚点，升级后像素尺寸不跳变。 */
-internal fun photoFrameWatermarkTextSizeFraction(sizePercent: Int): Float =
-    piecewiseWatermarkSizeFraction(
-        sizePercent = sizePercent,
-        smallPercent = 58,
-        smallFraction = 0.0105f,
-        mediumPercent = 75,
-        mediumFraction = 0.0135f,
-        largeFraction = 0.018f,
-    )
-
-internal fun photoFrameWatermarkImageSizeFraction(sizePercent: Int): Float =
-    piecewiseWatermarkSizeFraction(
-        sizePercent = sizePercent,
-        smallPercent = 47,
-        smallFraction = 0.035f,
-        mediumPercent = 69,
-        mediumFraction = 0.052f,
-        largeFraction = 0.075f,
-    )
-
-private fun piecewiseWatermarkSizeFraction(
-    sizePercent: Int,
-    smallPercent: Int,
-    smallFraction: Float,
-    mediumPercent: Int,
-    mediumFraction: Float,
-    largeFraction: Float,
-): Float {
-    val percent = legacyPhotoFrameWatermarkSizePercent(sizePercent)
-    return when {
-        percent <= smallPercent -> smallFraction * percent / smallPercent
-        percent <= mediumPercent -> {
-            val progress = (percent - smallPercent).toFloat() / (mediumPercent - smallPercent)
-            smallFraction + (mediumFraction - smallFraction) * progress
-        }
-        percent <= 100 -> {
-            val progress = (percent - mediumPercent).toFloat() / (100 - mediumPercent)
-            mediumFraction + (largeFraction - mediumFraction) * progress
-        }
-        else -> largeFraction * percent / 100f
-    }
-}
-
-internal fun validPhotoFrameWatermarkImageHash(value: String?): String? =
-    value?.lowercase(Locale.ROOT)?.takeIf(PHOTO_FRAME_WATERMARK_IMAGE_HASH::matches)
 
 internal fun photoFrameWatermarkImageFile(context: Context, imageHash: String): File {
     val safeHash = requireNotNull(validPhotoFrameWatermarkImageHash(imageHash)) {
@@ -342,16 +162,6 @@ internal fun canCreateDerivedImageInOriginalPath(
     sdkInt: Int,
 ): Boolean = isStandardImageRelativePath(relativePath) ||
     (sdkInt >= Build.VERSION_CODES.R && hasRelatedMediaUri)
-
-internal data class PhotoFrameLayout(
-    val canvasWidth: Int,
-    val canvasHeight: Int,
-    val photoLeft: Float,
-    val photoTop: Float,
-    val photoRight: Float,
-    val photoBottom: Float,
-    val metadataTop: Float,
-)
 
 internal data class OrientedPhotoSize(val width: Int, val height: Int)
 internal data class OrientedPhotoRegion(
@@ -502,21 +312,6 @@ internal fun orientedPhotoRegion(
     }
 }
 
-internal data class PhotoFrameMetadata(
-    val make: String?,
-    val model: String?,
-    val aperture: String?,
-    val shutter: String?,
-    val iso: String?,
-    val focalLength: String?,
-    val lensModel: String? = null,
-    val dateTime: String? = null,
-    val latitude: Double? = null,
-    val longitude: Double? = null,
-    val altitudeMeters: Double? = null,
-    val address: String? = null,
-)
-
 internal interface PhotoFrameExifReader {
     fun getAttribute(tag: String): String?
     fun getAttributeDouble(tag: String, defaultValue: Double): Double
@@ -540,38 +335,6 @@ private class AndroidPhotoFrameExifReader(
         get() = delegate.latLong
 
     override fun getAltitude(defaultValue: Double): Double = delegate.getAltitude(defaultValue)
-}
-
-internal data class FrameTextVisualBounds(
-    /** 相对基线的顶部坐标，通常为负数。 */
-    val top: Float,
-    /** 相对基线的底部坐标，通常为零或正数。 */
-    val bottom: Float,
-)
-
-internal data class PhotoWatermarkTextBounds(
-    val left: Float,
-    val top: Float,
-    val right: Float,
-    val bottom: Float,
-)
-
-internal data class PhotoWatermarkPlacement(
-    val originX: Float,
-    val baseline: Float,
-)
-
-internal data class BrandFrameBounds(
-    val left: Float,
-    val top: Float,
-    val right: Float,
-    val bottom: Float,
-) {
-    val width: Float get() = right - left
-    val height: Float get() = bottom - top
-
-    fun intersects(other: BrandFrameBounds): Boolean =
-        left < other.right && other.left < right && top < other.bottom && other.top < bottom
 }
 
 private sealed interface PhotoWatermarkRenderLayout {
@@ -1458,10 +1221,12 @@ object PhotoFrameExporter {
             address = address ?: fallback.address,
         )
 
-    private fun PhotoFrameMetadata.hasValidCoordinates(): Boolean =
-        latitude != null && longitude != null &&
-            latitude.isFinite() && longitude.isFinite() &&
+    private fun PhotoFrameMetadata.hasValidCoordinates(): Boolean {
+        val latitude = latitude ?: return false
+        val longitude = longitude ?: return false
+        return latitude.isFinite() && longitude.isFinite() &&
             latitude != 0.0 && longitude != 0.0
+    }
 
     private fun PhotoFrameMetadata.debugSummary(): String = buildString {
         append("make=").append(make?.trim().orEmpty().ifEmpty { "none" })
@@ -1515,45 +1280,52 @@ object PhotoFrameExporter {
         context: Context? = null,
         trace: ((String) -> Unit)? = null,
     ): PhotoFrameMetadata {
-        val fNumber = exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, Double.NaN)
-            .takeIf { it.isFinite() && it > 0.0 }
-            ?: exif.getAttributeDouble(ExifInterface.TAG_APERTURE_VALUE, Double.NaN)
-                .takeIf { it.isFinite() }
-                ?.let { 2.0.pow(it / 2.0) }
-        val exposureSeconds =
-            exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, Double.NaN)
-                .takeIf { it.isFinite() && it > 0.0 }
-                ?: exif.getAttributeDouble(
+        val coordinates = exif.latLong
+        val metadata = photoFrameMetadataFromExifValues(
+            values = PhotoFrameExifValues(
+                make = exif.getAttribute(ExifInterface.TAG_MAKE),
+                model = exif.getAttribute(ExifInterface.TAG_MODEL),
+                fNumber = exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, Double.NaN),
+                apertureValue = exif.getAttributeDouble(
+                    ExifInterface.TAG_APERTURE_VALUE,
+                    Double.NaN,
+                ),
+                exposureTimeSeconds = exif.getAttributeDouble(
+                    ExifInterface.TAG_EXPOSURE_TIME,
+                    Double.NaN,
+                ),
+                shutterSpeedValue = exif.getAttributeDouble(
                     ExifInterface.TAG_SHUTTER_SPEED_VALUE,
                     Double.NaN,
-                ).takeIf { it.isFinite() }?.let { 2.0.pow(-it) }
-        val coordinates = exif.latLong
-        // ExifInterface may expose a present-but-zero latLong pair when the GPS IFD contains
-        // malformed/placeholder values.  Do not let that suppress valid raw DMS tags.
-        val latitude = (coordinates?.getOrNull(0)
-            ?.takeIf { it.isFinite() && it != 0.0 && it in -90.0..90.0 }
-            ?: parseExifCoordinate(
-                exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
-                exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
-            ))
-            ?.takeIf { it.isFinite() && it in -90.0..90.0 }
-        val longitude = (coordinates?.getOrNull(1)
-            ?.takeIf { it.isFinite() && it != 0.0 && it in -180.0..180.0 }
-            ?: parseExifCoordinate(
-                exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
-                exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),
-            ))
-            ?.takeIf { it.isFinite() && it in -180.0..180.0 }
-        val altitude = exif.getAltitude(Double.NaN)
-            .takeIf { it.isFinite() && it != 0.0 }
-            ?: parseExifRational(exif.getAttribute(ExifInterface.TAG_GPS_ALTITUDE).orEmpty())
-                ?.takeIf { it.isFinite() && it != 0.0 }
-                ?.let { value ->
-                    if (exif.getAttributeInt(ExifInterface.TAG_GPS_ALTITUDE_REF, 0) == 1) -value
-                    else value
-                }
+                ),
+                iso = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY),
+                focalLength = exif.getAttributeDouble(
+                    ExifInterface.TAG_FOCAL_LENGTH,
+                    Double.NaN,
+                ),
+                lensModel = exif.getAttribute(ExifInterface.TAG_LENS_MODEL),
+                dateTimeOriginal = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL),
+                dateTimeDigitized = exif.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED),
+                dateTime = exif.getAttribute(ExifInterface.TAG_DATETIME),
+                decodedLatitude = coordinates?.getOrNull(0),
+                decodedLongitude = coordinates?.getOrNull(1),
+                latitudeDms = exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE),
+                latitudeReference = exif.getAttribute(ExifInterface.TAG_GPS_LATITUDE_REF),
+                longitudeDms = exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE),
+                longitudeReference = exif.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),
+                decodedAltitudeMeters = exif.getAltitude(Double.NaN),
+                altitudeRational = exif.getAttribute(ExifInterface.TAG_GPS_ALTITUDE),
+                altitudeBelowSeaLevel =
+                    exif.getAttributeInt(ExifInterface.TAG_GPS_ALTITUDE_REF, 0) == 1,
+            ),
+            formatAperture = ::formatAperture,
+            formatShutter = ::formatShutter,
+            formatFocalLength = { String.format(Locale.US, "%.0fmm", it) },
+        )
         // Address reverse-geocoding is intentionally disabled for border metadata.  Keep this
         // guarded branch for a future policy that can provide deterministic offline behavior.
+        val latitude = metadata.latitude
+        val longitude = metadata.longitude
         val address = if (PHOTO_FRAME_ADDRESS_METADATA_ENABLED && context != null &&
             latitude != null && longitude != null &&
             latitude != 0.0 && longitude != 0.0
@@ -1566,34 +1338,7 @@ object PhotoFrameExporter {
                 trace?.invoke("reverseGeocode=result=${result?.take(80) ?: "none"}")
             }
         } else null
-        return PhotoFrameMetadata(
-            make = exif.getAttribute(ExifInterface.TAG_MAKE),
-            model = exif.getAttribute(ExifInterface.TAG_MODEL),
-            aperture = fNumber?.let(::formatAperture),
-            shutter = exposureSeconds?.let(::formatShutter),
-            iso = normalizeIso(
-                exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY),
-            ),
-            focalLength = exif.getAttributeDouble(
-                ExifInterface.TAG_FOCAL_LENGTH,
-                Double.NaN,
-            ).takeIf { it.isFinite() && it > 0.0 }
-                ?.let { String.format(Locale.US, "%.0fmm", it) },
-            lensModel = exif.getAttribute(ExifInterface.TAG_LENS_MODEL)
-                ?.trim()
-                ?.takeIf(String::isNotEmpty),
-            dateTime = sequenceOf(
-                ExifInterface.TAG_DATETIME_ORIGINAL,
-                ExifInterface.TAG_DATETIME_DIGITIZED,
-                ExifInterface.TAG_DATETIME,
-            ).mapNotNull(exif::getAttribute)
-                .mapNotNull(::normalizeCaptureDateTime)
-                .firstOrNull(),
-            latitude = latitude,
-            longitude = longitude,
-            altitudeMeters = altitude,
-            address = address,
-        )
+        return if (address == null) metadata else metadata.copy(address = address)
     }
 
     /** Parses the same camera EXIF header used by the live preview for export fallback. */
@@ -1603,38 +1348,6 @@ object PhotoFrameExporter {
     ): PhotoFrameMetadata = runCatching {
         metadataFrom(ExifInterface(ByteArrayInputStream(bytes)), context)
     }.getOrDefault(EMPTY_METADATA)
-
-    private fun parseExifCoordinate(value: String?, reference: String?): Double? {
-        val parts = value
-            ?.trim()
-            ?.removePrefix("[")
-            ?.removeSuffix("]")
-            ?.split(Regex("[,;\\s]+"))
-            ?.map { it.trim().trim('"', '\'') }
-            ?.filter(String::isNotEmpty)
-            ?: return null
-        val absolute = when {
-            parts.size == 1 -> parseExifRational(parts[0]) ?: return null
-            parts.size >= 3 -> {
-                val degrees = parseExifRational(parts[0]) ?: return null
-                val minutes = parseExifRational(parts[1]) ?: return null
-                val seconds = parseExifRational(parts[2]) ?: return null
-                degrees + minutes / 60.0 + seconds / 3600.0
-            }
-            else -> return null
-        }
-        return if (reference.equals("S", ignoreCase = true) ||
-            reference.equals("W", ignoreCase = true)
-        ) -absolute else absolute
-    }
-
-    private fun parseExifRational(value: String): Double? {
-        val pieces = value.split('/', limit = 2)
-        if (pieces.size == 1) return pieces[0].toDoubleOrNull()
-        val numerator = pieces[0].toDoubleOrNull() ?: return null
-        val denominator = pieces[1].toDoubleOrNull()?.takeIf { it != 0.0 } ?: return null
-        return numerator / denominator
-    }
 
     private fun reverseGeocode(context: Context, latitude: Double, longitude: Double): String? {
         if (!Geocoder.isPresent()) return null
@@ -5643,427 +5356,6 @@ object PhotoFrameExporter {
             }
         }.getOrNull()
 }
-
-internal fun calculatePhotoFrameLayout(
-    sourceWidth: Int,
-    sourceHeight: Int,
-    longEdge: Int = 3200,
-): PhotoFrameLayout {
-    require(sourceWidth > 0 && sourceHeight > 0)
-    val sourceAspect = sourceWidth.toFloat() / sourceHeight
-    // 常规照片沿用参考图的 4:3/3:4 成片，2:3 竖图保留匹配画布；
-    // 方图与超宽/超长图单独适配，
-    // 避免为了固定模板产生夸张空边，同时仍然完整保留原片、不裁切。
-    val (canvasWidth, canvasHeight) = when {
-        sourceAspect > 1.9f -> longEdge to longEdge * 9 / 16
-        sourceAspect > 1.1f -> longEdge to longEdge * 3 / 4
-        sourceAspect >= 0.9f -> longEdge to longEdge
-        sourceAspect >= 0.72f -> longEdge * 3 / 4 to longEdge
-        sourceAspect >= 0.56f -> longEdge * 2 / 3 to longEdge
-        else -> longEdge * 9 / 16 to longEdge
-    }
-    val portrait = canvasHeight > canvasWidth
-    val square = canvasHeight == canvasWidth
-    val side = canvasWidth * 0.052f
-    val top = canvasHeight * when {
-        portrait -> 0.030f
-        square -> 0.040f
-        else -> 0.050f
-    }
-    val metadataTop = canvasHeight * when {
-        portrait -> 0.900f
-        square -> 0.870f
-        else -> 0.830f
-    }
-    val availableWidth = canvasWidth - side * 2f
-    val availableHeight = metadataTop - top - canvasHeight * 0.012f
-    val scale = min(availableWidth / sourceWidth, availableHeight / sourceHeight)
-    val photoWidth = sourceWidth * scale
-    val photoHeight = sourceHeight * scale
-    val left = (canvasWidth - photoWidth) / 2f
-    val photoAreaCenterY = top + availableHeight / 2f
-    val photoTop = photoAreaCenterY - photoHeight / 2f
-    return PhotoFrameLayout(
-        canvasWidth = canvasWidth,
-        canvasHeight = canvasHeight,
-        photoLeft = left,
-        photoTop = photoTop,
-        photoRight = left + photoWidth,
-        photoBottom = photoTop + photoHeight,
-        metadataTop = metadataTop,
-    )
-}
-
-/**
- * Builds the decorative canvas around a 1:1 source-photo rectangle. The canvas grows until the
- * existing preset margins and metadata band can contain every original source pixel; it never
- * shrinks the photo to a fixed sharing resolution.
- */
-internal fun calculateOriginalQualityPhotoFrameLayout(
-    sourceWidth: Int,
-    sourceHeight: Int,
-): PhotoFrameLayout {
-    require(sourceWidth > 0 && sourceHeight > 0)
-
-    fun fits(longEdge: Int): Boolean {
-        val layout = calculatePhotoFrameLayout(sourceWidth, sourceHeight, longEdge)
-        return layout.photoRight - layout.photoLeft >= sourceWidth.toFloat() &&
-            layout.photoBottom - layout.photoTop >= sourceHeight.toFloat()
-    }
-
-    var low = maxOf(sourceWidth, sourceHeight)
-    var high = low
-    while (!fits(high)) {
-        check(high <= Int.MAX_VALUE / 2) { "Original photo is too large to frame" }
-        high *= 2
-    }
-    while (low < high) {
-        val middle = low + (high - low) / 2
-        if (fits(middle)) high = middle else low = middle + 1
-    }
-
-    val base = calculatePhotoFrameLayout(sourceWidth, sourceHeight, low)
-    val left = ((base.canvasWidth - sourceWidth) / 2f)
-        .roundToInt()
-        .coerceIn(0, base.canvasWidth - sourceWidth)
-        .toFloat()
-    val desiredTop = (
-        (base.photoTop + base.photoBottom) / 2f - sourceHeight / 2f
-        ).roundToInt()
-    val maxTop = minOf(
-        base.canvasHeight - sourceHeight,
-        (base.metadataTop - sourceHeight).toInt(),
-    ).coerceAtLeast(0)
-    val top = desiredTop.coerceIn(0, maxTop).toFloat()
-    return base.copy(
-        photoLeft = left,
-        photoTop = top,
-        photoRight = left + sourceWidth,
-        photoBottom = top + sourceHeight,
-    )
-}
-
-/** The plaque adds its information band outside the original 1:1 photo rectangle. */
-internal fun calculateOriginalQualityPlaqueLayout(
-    sourceWidth: Int,
-    sourceHeight: Int,
-): PhotoFrameLayout {
-    require(sourceWidth > 0 && sourceHeight > 0)
-    val bandHeight = (sourceWidth * PLAQUE_BAND_TO_WIDTH).roundToInt().coerceAtLeast(1)
-    check(sourceHeight <= Int.MAX_VALUE - bandHeight) { "Original photo is too large to frame" }
-    return PhotoFrameLayout(
-        canvasWidth = sourceWidth,
-        canvasHeight = sourceHeight + bandHeight,
-        photoLeft = 0f,
-        photoTop = 0f,
-        photoRight = sourceWidth.toFloat(),
-        photoBottom = sourceHeight.toFloat(),
-        metadataTop = sourceHeight.toFloat(),
-    )
-}
-
-/**
- * “铭牌”不建立固定比例的装饰画布，只在原片下方增加宽度约 12% 的信息带。
- * 预览成片的长边限制在 [longEdge] 内；原品质导出使用独立的 1:1 布局函数。
- */
-internal fun calculatePlaqueFrameLayout(
-    sourceWidth: Int,
-    sourceHeight: Int,
-    longEdge: Int = 3200,
-): PhotoFrameLayout {
-    require(sourceWidth > 0 && sourceHeight > 0)
-    require(longEdge > 0)
-    val compositeHeight = sourceHeight + sourceWidth * PLAQUE_BAND_TO_WIDTH
-    val scale = min(
-        longEdge.toFloat() / sourceWidth,
-        longEdge.toFloat() / compositeHeight,
-    )
-    val canvasWidth = (sourceWidth * scale).roundToInt().coerceAtLeast(1)
-    val preferredBandHeight =
-        (canvasWidth * PLAQUE_BAND_TO_WIDTH).roundToInt().coerceAtLeast(1)
-    val photoHeight = (sourceHeight * scale).roundToInt()
-        .coerceIn(1, maxOf(1, longEdge - preferredBandHeight))
-    val canvasHeight = photoHeight + preferredBandHeight
-    return PhotoFrameLayout(
-        canvasWidth = canvasWidth,
-        canvasHeight = canvasHeight,
-        photoLeft = 0f,
-        photoTop = 0f,
-        photoRight = canvasWidth.toFloat(),
-        photoBottom = photoHeight.toFloat(),
-        metadataTop = photoHeight.toFloat(),
-    )
-}
-
-/** Full-bleed output keeps the source aspect ratio and only caps its longest edge. */
-internal fun calculateImmersiveFrameLayout(
-    sourceWidth: Int,
-    sourceHeight: Int,
-    longEdge: Int = 3200,
-): PhotoFrameLayout {
-    require(sourceWidth > 0 && sourceHeight > 0)
-    require(longEdge > 0)
-    val scale = min(1f, longEdge.toFloat() / maxOf(sourceWidth, sourceHeight))
-    val canvasWidth = (sourceWidth * scale).roundToInt().coerceAtLeast(1)
-    val canvasHeight = (sourceHeight * scale).roundToInt().coerceAtLeast(1)
-    return PhotoFrameLayout(
-        canvasWidth = canvasWidth,
-        canvasHeight = canvasHeight,
-        photoLeft = 0f,
-        photoTop = 0f,
-        photoRight = canvasWidth.toFloat(),
-        photoBottom = canvasHeight.toFloat(),
-        metadataTop = canvasHeight.toFloat(),
-    )
-}
-
-internal fun calculateBrandFrameLayout(
-    sourceWidth: Int,
-    sourceHeight: Int,
-    preset: PhotoFramePreset,
-    longEdge: Int = 3200,
-): PhotoFrameLayout {
-    require(sourceWidth > 0 && sourceHeight > 0)
-    require(longEdge > 0)
-    require(preset.isBrandFrame())
-    val bottomRatio = when (preset) {
-        PhotoFramePreset.BRAND_INSET -> BRAND_INSET_BOTTOM_TO_PHOTO_WIDTH
-        PhotoFramePreset.BRAND_GALLERY -> BRAND_GALLERY_BOTTOM_TO_PHOTO_WIDTH
-        else -> error("Not a brand frame")
-    }
-    val compositeWidth = sourceWidth * (1f + BRAND_FRAME_SIDE_TO_PHOTO_WIDTH * 2f)
-    val compositeHeight = sourceHeight + sourceWidth *
-        (BRAND_FRAME_SIDE_TO_PHOTO_WIDTH + bottomRatio)
-    val scale = min(longEdge / compositeWidth, longEdge / compositeHeight)
-    val photoWidth = (sourceWidth * scale).roundToInt().coerceAtLeast(1)
-    val photoHeight = (sourceHeight * scale).roundToInt().coerceAtLeast(1)
-    val side = (photoWidth * BRAND_FRAME_SIDE_TO_PHOTO_WIDTH).roundToInt().coerceAtLeast(1)
-    val top = side
-    val bottom = (photoWidth * bottomRatio).roundToInt().coerceAtLeast(1)
-    val canvasWidth = photoWidth + side * 2
-    val canvasHeight = photoHeight + top + bottom
-    return PhotoFrameLayout(
-        canvasWidth = canvasWidth,
-        canvasHeight = canvasHeight,
-        photoLeft = side.toFloat(),
-        photoTop = top.toFloat(),
-        photoRight = (side + photoWidth).toFloat(),
-        photoBottom = (top + photoHeight).toFloat(),
-        metadataTop = (top + photoHeight).toFloat(),
-    )
-}
-
-internal fun calculateOriginalQualityBrandFrameLayout(
-    sourceWidth: Int,
-    sourceHeight: Int,
-    preset: PhotoFramePreset,
-): PhotoFrameLayout {
-    require(sourceWidth > 0 && sourceHeight > 0)
-    require(preset.isBrandFrame())
-    val bottomRatio = when (preset) {
-        PhotoFramePreset.BRAND_INSET -> BRAND_INSET_BOTTOM_TO_PHOTO_WIDTH
-        PhotoFramePreset.BRAND_GALLERY -> BRAND_GALLERY_BOTTOM_TO_PHOTO_WIDTH
-        else -> error("Not a brand frame")
-    }
-    val side = (sourceWidth * BRAND_FRAME_SIDE_TO_PHOTO_WIDTH)
-        .roundToInt()
-        .coerceAtLeast(1)
-    val bottom = (sourceWidth * bottomRatio).roundToInt().coerceAtLeast(1)
-    check(sourceWidth <= Int.MAX_VALUE - side * 2) { "Original photo is too large to frame" }
-    check(sourceHeight <= Int.MAX_VALUE - side - bottom) {
-        "Original photo is too large to frame"
-    }
-    return PhotoFrameLayout(
-        canvasWidth = sourceWidth + side * 2,
-        canvasHeight = sourceHeight + side + bottom,
-        photoLeft = side.toFloat(),
-        photoTop = side.toFloat(),
-        photoRight = (side + sourceWidth).toFloat(),
-        photoBottom = (side + sourceHeight).toFloat(),
-        metadataTop = (side + sourceHeight).toFloat(),
-    )
-}
-
-internal fun calculateEditorialFrameLayout(
-    sourceWidth: Int,
-    sourceHeight: Int,
-    preset: PhotoFramePreset,
-    longEdge: Int = 3200,
-): PhotoFrameLayout {
-    require(longEdge > 0)
-    val original = calculateOriginalQualityEditorialFrameLayout(sourceWidth, sourceHeight, preset)
-    val scale = longEdge.toFloat() / maxOf(original.canvasWidth, original.canvasHeight)
-    fun scaled(value: Float): Float = value * scale
-    val canvasWidth = (original.canvasWidth * scale).roundToInt().coerceAtLeast(1)
-    val canvasHeight = (original.canvasHeight * scale).roundToInt().coerceAtLeast(1)
-    return PhotoFrameLayout(
-        canvasWidth = canvasWidth,
-        canvasHeight = canvasHeight,
-        photoLeft = scaled(original.photoLeft),
-        photoTop = scaled(original.photoTop),
-        photoRight = scaled(original.photoRight),
-        photoBottom = scaled(original.photoBottom),
-        metadataTop = scaled(original.metadataTop),
-    )
-}
-
-/** Every editorial preset keeps the source rectangle at exactly 1:1 in original-quality export. */
-internal fun calculateOriginalQualityEditorialFrameLayout(
-    sourceWidth: Int,
-    sourceHeight: Int,
-    preset: PhotoFramePreset,
-): PhotoFrameLayout {
-    require(sourceWidth > 0 && sourceHeight > 0)
-    require(preset.isEditorialFrame())
-    fun px(ratio: Float): Int = (sourceWidth * ratio).roundToInt().coerceAtLeast(1)
-    return when (preset) {
-        PhotoFramePreset.CLASSIC_SIGNATURE -> {
-            val side = px(CLASSIC_SIGNATURE_SIDE_TO_PHOTO_WIDTH)
-            val top = px(CLASSIC_SIGNATURE_TOP_TO_PHOTO_WIDTH)
-            val bottom = px(CLASSIC_SIGNATURE_BOTTOM_TO_PHOTO_WIDTH)
-            PhotoFrameLayout(
-                canvasWidth = sourceWidth + side * 2,
-                canvasHeight = sourceHeight + top + bottom,
-                photoLeft = side.toFloat(),
-                photoTop = top.toFloat(),
-                photoRight = (side + sourceWidth).toFloat(),
-                photoBottom = (top + sourceHeight).toFloat(),
-                metadataTop = (top + sourceHeight).toFloat(),
-            )
-        }
-        PhotoFramePreset.GALLERY_MAT -> {
-            val aspect = sourceWidth.toFloat() / sourceHeight
-            val (widthFraction, heightFraction) = when {
-                aspect > 1.08f -> 0.80f to 0.56f
-                aspect < 0.92f -> 0.56f to 0.80f
-                else -> 0.68f to 0.68f
-            }
-            val side = maxOf(
-                sourceWidth / widthFraction,
-                sourceHeight / heightFraction,
-            ).roundToInt().coerceAtLeast(maxOf(sourceWidth, sourceHeight))
-            val left = (side - sourceWidth) / 2f
-            val top = (side - sourceHeight) * 0.45f
-            PhotoFrameLayout(
-                canvasWidth = side,
-                canvasHeight = side,
-                photoLeft = left,
-                photoTop = top,
-                photoRight = left + sourceWidth,
-                photoBottom = top + sourceHeight,
-                metadataTop = top + sourceHeight,
-            )
-        }
-        PhotoFramePreset.COLOR_ARCHIVE -> {
-            val side = px(COLOR_ARCHIVE_SIDE_TO_PHOTO_WIDTH)
-            val top = px(COLOR_ARCHIVE_TOP_TO_PHOTO_WIDTH)
-            val bottom = px(COLOR_ARCHIVE_BOTTOM_TO_PHOTO_WIDTH)
-            PhotoFrameLayout(
-                canvasWidth = sourceWidth + side * 2,
-                canvasHeight = sourceHeight + top + bottom,
-                photoLeft = side.toFloat(),
-                photoTop = top.toFloat(),
-                photoRight = (side + sourceWidth).toFloat(),
-                photoBottom = (top + sourceHeight).toFloat(),
-                metadataTop = (top + sourceHeight).toFloat(),
-            )
-        }
-        PhotoFramePreset.FILM_GALLERY -> {
-            val side = px(FILM_GALLERY_SIDE_TO_PHOTO_WIDTH)
-            val top = px(FILM_GALLERY_TOP_TO_PHOTO_WIDTH)
-            val bar = px(FILM_GALLERY_BAR_TO_PHOTO_WIDTH)
-            val bottom = px(FILM_GALLERY_BOTTOM_TO_PHOTO_WIDTH)
-            val photoTop = top + bar
-            PhotoFrameLayout(
-                canvasWidth = sourceWidth + side * 2,
-                canvasHeight = sourceHeight + top + bar * 2 + bottom,
-                photoLeft = side.toFloat(),
-                photoTop = photoTop.toFloat(),
-                photoRight = (side + sourceWidth).toFloat(),
-                photoBottom = (photoTop + sourceHeight).toFloat(),
-                metadataTop = (photoTop + sourceHeight + bar).toFloat(),
-            )
-        }
-        PhotoFramePreset.FILM_EDGE -> {
-            val side = px(FILM_EDGE_SIDE_TO_PHOTO_WIDTH)
-            val top = px(FILM_EDGE_TOP_TO_PHOTO_WIDTH)
-            val bottom = px(FILM_EDGE_BOTTOM_TO_PHOTO_WIDTH)
-            PhotoFrameLayout(
-                canvasWidth = sourceWidth + side * 2,
-                canvasHeight = sourceHeight + top + bottom,
-                photoLeft = side.toFloat(),
-                photoTop = top.toFloat(),
-                photoRight = (side + sourceWidth).toFloat(),
-                photoBottom = (top + sourceHeight).toFloat(),
-                metadataTop = (top + sourceHeight).toFloat(),
-            )
-        }
-        else -> error("Not an editorial frame")
-    }
-}
-
-internal fun PhotoFramePreset.isBrandFrame(): Boolean =
-    this == PhotoFramePreset.BRAND_INSET || this == PhotoFramePreset.BRAND_GALLERY
-
-internal fun PhotoFramePreset.isEditorialFrame(): Boolean = when (this) {
-    PhotoFramePreset.CLASSIC_SIGNATURE,
-    PhotoFramePreset.GALLERY_MAT,
-    PhotoFramePreset.COLOR_ARCHIVE,
-    PhotoFramePreset.FILM_GALLERY,
-    PhotoFramePreset.FILM_EDGE -> true
-    else -> false
-}
-
-/**
- * Places the brand/EXIF block at its intended lower-center position, moving it just above the
- * real rendered watermark bounds only when the two rectangles intersect. Watermarks placed in a
- * corner therefore do not cause unrelated metadata to jump, while large bottom/center watermarks
- * always receive an explicit safety gap.
- */
-internal fun placeBrandMetadataBlock(
-    photo: BrandFrameBounds,
-    preferredBottom: Float,
-    blockHeight: Float,
-    blockWidth: Float,
-    occupied: BrandFrameBounds?,
-    gap: Float,
-): BrandFrameBounds {
-    require(photo.width > 0f && photo.height > 0f)
-    require(blockHeight in 0f..photo.height)
-    require(blockWidth > 0f)
-    require(gap >= 0f)
-
-    val width = blockWidth.coerceAtMost(photo.width)
-    val left = photo.left + (photo.width - width) / 2f
-    fun blockEndingAt(bottom: Float): BrandFrameBounds {
-        val clampedBottom = bottom.coerceIn(photo.top + blockHeight, photo.bottom)
-        return BrandFrameBounds(left, clampedBottom - blockHeight, left + width, clampedBottom)
-    }
-
-    val preferred = blockEndingAt(preferredBottom)
-    if (occupied == null || !preferred.intersects(occupied)) return preferred
-
-    val above = blockEndingAt(occupied.top - gap)
-    if (above.top >= photo.top && !above.intersects(occupied)) return above
-
-    val belowTop = occupied.bottom + gap
-    if (belowTop + blockHeight <= photo.bottom) {
-        val below = BrandFrameBounds(left, belowTop, left + width, belowTop + blockHeight)
-        if (!below.intersects(occupied)) return below
-    }
-
-    // Current watermark size limits always leave a vertical lane. Keep this deterministic fallback
-    // for corrupted legacy values: prefer the edge with the larger free span.
-    val roomAbove = (occupied.top - gap - photo.top).coerceAtLeast(0f)
-    val roomBelow = (photo.bottom - occupied.bottom - gap).coerceAtLeast(0f)
-    return if (roomAbove >= roomBelow) {
-        blockEndingAt((occupied.top - gap).coerceAtLeast(photo.top + blockHeight))
-    } else {
-        val top = (occupied.bottom + gap).coerceAtMost(photo.bottom - blockHeight)
-        BrandFrameBounds(left, top, left + width, top + blockHeight)
-    }
-}
-
 private fun PhotoFrameLayout.photoRect(): RectF = RectF(
     photoLeft,
     photoTop,
@@ -6078,196 +5370,6 @@ private fun RectF.toBrandFrameBounds(): BrandFrameBounds = BrandFrameBounds(
     bottom = bottom,
 )
 
-private fun PhotoFrameWatermark.forBrandPhoto(
-    preset: PhotoFramePreset,
-): PhotoFrameWatermark = when (preset) {
-    PhotoFramePreset.BRAND_INSET -> if (position.isPhotoPlacement()) {
-        this
-    } else {
-        copy(
-            position = when (position) {
-                PhotoFrameWatermarkPosition.LEFT -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT
-                PhotoFrameWatermarkPosition.CENTER -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER
-                PhotoFrameWatermarkPosition.AUTO,
-                PhotoFrameWatermarkPosition.RIGHT -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
-                else -> position
-            }
-        )
-    }
-    PhotoFramePreset.BRAND_GALLERY -> when {
-        position.isPhotoPlacement() -> this
-        position == PhotoFrameWatermarkPosition.AUTO ->
-            copy(position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT)
-        content == PhotoFrameWatermarkContent.IMAGE ->
-            copy(position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT)
-        else -> copy(enabled = false)
-    }
-    else -> error("Not a brand frame")
-}
-
-private fun PhotoFrameWatermark.forEditorialPhoto(
-    preset: PhotoFramePreset,
-): PhotoFrameWatermark {
-    require(preset.isEditorialFrame())
-    if (position.isPhotoPlacement()) return this
-    val mappedPosition = when (position) {
-        PhotoFrameWatermarkPosition.LEFT -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT
-        PhotoFrameWatermarkPosition.CENTER -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER
-        PhotoFrameWatermarkPosition.RIGHT -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
-        PhotoFrameWatermarkPosition.AUTO -> when (preset) {
-            PhotoFramePreset.GALLERY_MAT,
-            PhotoFramePreset.FILM_GALLERY -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER
-            else -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
-        }
-        else -> position
-    }
-    val shouldUsePhoto = when (preset) {
-        PhotoFramePreset.CLASSIC_SIGNATURE ->
-            position == PhotoFrameWatermarkPosition.AUTO ||
-                content == PhotoFrameWatermarkContent.IMAGE
-        PhotoFramePreset.COLOR_ARCHIVE -> true
-        PhotoFramePreset.GALLERY_MAT,
-        PhotoFramePreset.FILM_GALLERY -> content == PhotoFrameWatermarkContent.IMAGE
-        PhotoFramePreset.FILM_EDGE -> true
-        else -> false
-    }
-    return if (shouldUsePhoto) copy(position = mappedPosition) else copy(enabled = false)
-}
-
-private fun PhotoFrameWatermark.bandWatermarkFor(
-    preset: PhotoFramePreset,
-): PhotoFrameWatermark? {
-    if (!enabled || content != PhotoFrameWatermarkContent.TEXT || position.isPhotoPlacement()) {
-        return null
-    }
-    val supported = when (preset) {
-        PhotoFramePreset.CLASSIC_SIGNATURE -> position != PhotoFrameWatermarkPosition.AUTO
-        PhotoFramePreset.GALLERY_MAT,
-        PhotoFramePreset.FILM_GALLERY -> true
-        PhotoFramePreset.FILM_EDGE -> false
-        else -> false
-    }
-    if (!supported) return null
-    return if (position == PhotoFrameWatermarkPosition.AUTO) {
-        copy(position = PhotoFrameWatermarkPosition.CENTER)
-    } else {
-        this
-    }
-}
-
-private fun brandFrameCornerRadius(layout: PhotoFrameLayout): Float =
-    (layout.photoRight - layout.photoLeft) * 0.014f
-
-/** 照片与毛玻璃参数卡共用的圆角，随底部信息区高度等比缩放。 */
-internal fun photoFrameCornerRadius(layout: PhotoFrameLayout): Float =
-    (layout.canvasHeight - layout.metadataTop) * 0.26f
-
-internal fun PhotoFrameWatermarkPosition.isPhotoPlacement(): Boolean = when (this) {
-    PhotoFrameWatermarkPosition.PHOTO_TOP_LEFT,
-    PhotoFrameWatermarkPosition.PHOTO_TOP_CENTER,
-    PhotoFrameWatermarkPosition.PHOTO_TOP_RIGHT,
-    PhotoFrameWatermarkPosition.PHOTO_CENTER,
-    PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT,
-    PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER,
-    PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT -> true
-    PhotoFrameWatermarkPosition.AUTO,
-    PhotoFrameWatermarkPosition.LEFT,
-    PhotoFrameWatermarkPosition.CENTER,
-    PhotoFrameWatermarkPosition.RIGHT -> false
-}
-
-/** 无边框模式只接受照片内位置，并彻底消除隐藏边框样式对渲染身份的影响。 */
-private fun PhotoFrameWatermark.forBorderMode(
-    borderEnabled: Boolean,
-): PhotoFrameWatermark =
-    if (!borderEnabled && !position.isPhotoPlacement()) {
-        copy(position = PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER)
-    } else {
-        this
-    }
-
-private fun PhotoFrameWatermark.withoutPhotoPlacement(): PhotoFrameWatermark =
-    if (position.isPhotoPlacement() || content == PhotoFrameWatermarkContent.IMAGE) {
-        copy(enabled = false)
-    } else {
-        this
-    }
-
-/**
- * Calculates the text origin from its actual glyph bounds. The 4% inset is based on the
- * photo's short edge, so landscape and portrait photos keep the same visual breathing room.
- */
-internal fun calculatePhotoWatermarkPlacement(
-    photoLeft: Float,
-    photoTop: Float,
-    photoRight: Float,
-    photoBottom: Float,
-    textBounds: PhotoWatermarkTextBounds,
-    position: PhotoFrameWatermarkPosition,
-): PhotoWatermarkPlacement {
-    require(photoRight > photoLeft)
-    require(photoBottom > photoTop)
-    require(textBounds.right >= textBounds.left)
-    require(textBounds.bottom >= textBounds.top)
-    require(position.isPhotoPlacement())
-
-    val safeInset = min(photoRight - photoLeft, photoBottom - photoTop) * 0.04f
-    val minOriginX = photoLeft + safeInset - textBounds.left
-    val maxOriginX = photoRight - safeInset - textBounds.right
-    val minBaseline = photoTop + safeInset - textBounds.top
-    val maxBaseline = photoBottom - safeInset - textBounds.bottom
-    val centeredOriginX = (photoLeft + photoRight - textBounds.left - textBounds.right) / 2f
-    val centeredBaseline = (photoTop + photoBottom - textBounds.top - textBounds.bottom) / 2f
-
-    val requestedX = when (position) {
-        PhotoFrameWatermarkPosition.PHOTO_TOP_LEFT,
-        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT -> minOriginX
-        PhotoFrameWatermarkPosition.PHOTO_TOP_CENTER,
-        PhotoFrameWatermarkPosition.PHOTO_CENTER,
-        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER -> centeredOriginX
-        PhotoFrameWatermarkPosition.PHOTO_TOP_RIGHT,
-        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT -> maxOriginX
-        else -> error("A metadata placement cannot be positioned inside the photo")
-    }
-    val requestedBaseline = when (position) {
-        PhotoFrameWatermarkPosition.PHOTO_TOP_LEFT,
-        PhotoFrameWatermarkPosition.PHOTO_TOP_CENTER,
-        PhotoFrameWatermarkPosition.PHOTO_TOP_RIGHT -> minBaseline
-        PhotoFrameWatermarkPosition.PHOTO_CENTER -> centeredBaseline
-        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_LEFT,
-        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER,
-        PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT -> maxBaseline
-        else -> error("A metadata placement cannot be positioned inside the photo")
-    }
-    return PhotoWatermarkPlacement(
-        originX = if (minOriginX <= maxOriginX) {
-            requestedX.coerceIn(minOriginX, maxOriginX)
-        } else {
-            centeredOriginX
-        },
-        baseline = if (minBaseline <= maxBaseline) {
-            requestedBaseline.coerceIn(minBaseline, maxBaseline)
-        } else {
-            centeredBaseline
-        },
-    )
-}
-
-/** 用户看到的透明度档位就是最终 Alpha，不再受颜色预设原始透明度二次影响。 */
-internal fun watermarkAlpha(opacityPercent: Int): Int =
-    (normalizePhotoFrameWatermarkOpacityPercent(opacityPercent) * 255f / 100f).roundToInt()
-
-private fun resolvedWatermarkEffect(
-    watermark: PhotoFrameWatermark,
-): PhotoFrameWatermarkEffect = when (watermark.effect) {
-    PhotoFrameWatermarkEffect.AUTO -> if (watermark.position.isPhotoPlacement()) {
-        PhotoFrameWatermarkEffect.SHADOW
-    } else {
-        PhotoFrameWatermarkEffect.NONE
-    }
-    else -> watermark.effect
-}
-
 private fun contrastingWatermarkColor(color: Int, alpha: Int): Int {
     val perceivedBrightness =
         (Color.red(color) * 299 + Color.green(color) * 587 + Color.blue(color) * 114) / 1000
@@ -6276,230 +5378,6 @@ private fun contrastingWatermarkColor(color: Int, alpha: Int): Int {
     } else {
         Color.argb(alpha.coerceIn(0, 255), 248, 249, 250)
     }
-}
-
-/**
- * 返回让所有文字墨迹高度都能放进信息区的统一缩放比例。绘制端先整体缩小字号，再计算
- * 基线，因此任意水印字号、字体和相机元数据组合都不会互相覆盖。
- */
-internal fun frameTextScaleToFit(
-    areaHeight: Float,
-    rows: List<FrameTextVisualBounds>,
-): Float {
-    require(areaHeight >= 0f)
-    rows.forEach { require(it.bottom >= it.top) }
-    val textHeight = rows.sumOf { (it.bottom - it.top).toDouble() }.toFloat()
-    if (textHeight <= 0f || textHeight <= areaHeight) return 1f
-    // 留 2% 抗锯齿余量，避免不同 Android 字体栅格化实现恰好贴边时出现一像素相交。
-    return (areaHeight / textHeight * 0.98f).coerceIn(0f, 1f)
-}
-
-/** 前四种边框共用的信息区，上下各保留 6% 的文字安全留白。 */
-internal fun frameMetadataVerticalPadding(areaHeight: Float): Float {
-    require(areaHeight >= 0f)
-    return areaHeight * 0.06f
-}
-
-/**
- * 按每行文字的真实可见边界计算基线，使整组文字在指定区域内视觉上下居中。
- *
- * [FrameTextVisualBounds] 来自 Paint.getTextBounds，而不是字体抽象行高，因此大写品牌、
- * 数字参数和自定义字体混排时仍以实际墨迹边界为准。调用方先通过
- * [frameTextScaleToFit] 保证总墨迹高度可容纳；本函数再压缩行间距而不改变顺序。
- */
-internal fun centeredFrameTextBaselines(
-    areaTop: Float,
-    areaBottom: Float,
-    rows: List<FrameTextVisualBounds>,
-    preferredGap: Float,
-): List<Float> {
-    require(areaBottom >= areaTop)
-    require(preferredGap >= 0f)
-    if (rows.isEmpty()) return emptyList()
-    rows.forEach { require(it.bottom >= it.top) }
-
-    val areaHeight = areaBottom - areaTop
-    val textHeight = rows.sumOf { (it.bottom - it.top).toDouble() }.toFloat()
-    val gapCount = rows.size - 1
-    val gap = if (gapCount > 0) {
-        min(preferredGap, ((areaHeight - textHeight) / gapCount).coerceAtLeast(0f))
-    } else {
-        0f
-    }
-    val groupHeight = textHeight + gap * gapCount
-    var cursor = areaTop + (areaHeight - groupHeight).coerceAtLeast(0f) / 2f
-    return rows.map { row ->
-        val baseline = cursor - row.top
-        cursor += row.bottom - row.top + gap
-        baseline
-    }
-}
-
-internal fun normalizeCameraMake(make: String?): String {
-    val value = make?.trim().orEmpty()
-    return when {
-        value.contains("nikon", ignoreCase = true) -> "Nikon"
-        value.contains("canon", ignoreCase = true) -> "Canon"
-        value.contains("sony", ignoreCase = true) -> "SONY"
-        value.contains("fujifilm", ignoreCase = true) -> "FUJIFILM"
-        value.contains("hasselblad", ignoreCase = true) -> "Hasselblad"
-        value.contains("leica", ignoreCase = true) -> "Leica"
-        value.contains("panasonic", ignoreCase = true) -> "Panasonic"
-        value.contains("olympus", ignoreCase = true) ||
-            value.contains("om digital", ignoreCase = true) -> "OM SYSTEM"
-        value.contains("pentax", ignoreCase = true) -> "PENTAX"
-        value.contains("ricoh", ignoreCase = true) -> "RICOH"
-        value.contains("apple", ignoreCase = true) -> "Apple"
-        value.contains("samsung", ignoreCase = true) -> "SAMSUNG"
-        value.contains("google", ignoreCase = true) -> "Google"
-        value.contains("xiaomi", ignoreCase = true) ||
-            value.contains("redmi", ignoreCase = true) -> "XIAOMI"
-        value.contains("huawei", ignoreCase = true) -> "HUAWEI"
-        value.contains("honor", ignoreCase = true) -> "HONOR"
-        value.contains("oneplus", ignoreCase = true) -> "ONEPLUS"
-        value.contains("oppo", ignoreCase = true) -> "OPPO"
-        value.contains("vivo", ignoreCase = true) -> "VIVO"
-        value.contains("realme", ignoreCase = true) -> "REALME"
-        value.contains("motorola", ignoreCase = true) -> "MOTOROLA"
-        value.isNotEmpty() -> value
-        else -> ""
-    }
-}
-
-/** Uppercase typographic brand used by the two brand-frame presets; no trademark artwork. */
-internal fun cameraBrandLabel(make: String?, model: String?): String {
-    val normalizedMake = normalizeCameraMake(make).trim()
-    if (normalizedMake.isNotEmpty()) {
-        return normalizedMake.uppercase(Locale.ROOT).take(32)
-    }
-    val modelValue = model?.trim().orEmpty()
-    val inferred = when {
-        modelValue.contains("nikon", ignoreCase = true) -> "NIKON"
-        modelValue.contains("canon", ignoreCase = true) -> "CANON"
-        modelValue.contains("sony", ignoreCase = true) -> "SONY"
-        modelValue.contains("fujifilm", ignoreCase = true) -> "FUJIFILM"
-        modelValue.contains("hasselblad", ignoreCase = true) -> "HASSELBLAD"
-        modelValue.contains("leica", ignoreCase = true) -> "LEICA"
-        modelValue.contains("panasonic", ignoreCase = true) -> "PANASONIC"
-        modelValue.contains("olympus", ignoreCase = true) ||
-            modelValue.contains("om system", ignoreCase = true) -> "OM SYSTEM"
-        modelValue.contains("pentax", ignoreCase = true) -> "PENTAX"
-        modelValue.contains("ricoh", ignoreCase = true) -> "RICOH"
-        modelValue.contains("iphone", ignoreCase = true) -> "APPLE"
-        modelValue.contains("pixel", ignoreCase = true) -> "GOOGLE"
-        modelValue.contains("galaxy", ignoreCase = true) -> "SAMSUNG"
-        modelValue.startsWith("SM-", ignoreCase = true) -> "SAMSUNG"
-        modelValue.contains("xiaomi", ignoreCase = true) ||
-            modelValue.contains("redmi", ignoreCase = true) -> "XIAOMI"
-        modelValue.contains("huawei", ignoreCase = true) -> "HUAWEI"
-        modelValue.contains("honor", ignoreCase = true) -> "HONOR"
-        modelValue.contains("oneplus", ignoreCase = true) -> "ONEPLUS"
-        modelValue.contains("oppo", ignoreCase = true) -> "OPPO"
-        modelValue.contains("vivo", ignoreCase = true) -> "VIVO"
-        modelValue.contains("realme", ignoreCase = true) -> "REALME"
-        else -> null
-    }
-    return inferred.orEmpty()
-}
-
-/**
- * 很多相机会把厂商名同时写进 Make 和 Model（如 NIKON CORPORATION + NIKON Z 5）。
- * 品牌已经单独排版时，从机型开头移除重复厂商，避免出现“Nikon NIKON Z 5”。
- */
-internal fun normalizeCameraModel(make: String?, model: String?): String {
-    val value = model?.trim().orEmpty()
-    if (value.isEmpty()) return ""
-    val brand = normalizeCameraMake(make)
-    val prefixes = buildList {
-        make?.trim()?.takeIf { it.isNotEmpty() }?.let(::add)
-        if (brand.isNotEmpty()) add(brand)
-    }.distinctBy { it.lowercase(Locale.ROOT) }
-        .sortedByDescending(String::length)
-    val prefix = prefixes.firstOrNull { value.startsWith(it, ignoreCase = true) }
-        ?: return value
-    return value.substring(prefix.length)
-        .trimStart(' ', '-', '_')
-}
-
-internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =
-    listOfNotNull(
-        metadata.focalLength,
-        metadata.aperture?.replace("f/", "F", ignoreCase = true),
-        metadata.shutter?.let { if (it.endsWith("s", ignoreCase = true)) it else "${it}s" },
-        metadata.iso,
-    ).joinToString("   ")
-
-/**
- * Location metadata is deliberately compact: standard decimal degrees with hemisphere directions
- * and altitude share one row. Address reverse-geocoding is intentionally not rendered in borders
- * because it is network-dependent and would make AP/STA exports diverge. Display precision is
- * limited to four decimals (roughly ten-metre-level); the original EXIF values are never changed.
- */
-internal fun frameLocationRows(metadata: PhotoFrameMetadata): List<String> = buildList {
-    val coordinates = if (
-        metadata.latitude?.isFinite() == true && metadata.longitude?.isFinite() == true &&
-        metadata.latitude != 0.0 && metadata.longitude != 0.0 &&
-        metadata.latitude in -90.0..90.0 && metadata.longitude in -180.0..180.0
-    ) {
-        formatDecimalDegreeCoordinates(
-            latitude = metadata.latitude,
-            longitude = metadata.longitude,
-            fractionDigits = 4,
-        )
-    } else {
-        null
-    }
-    val altitude = metadata.altitudeMeters
-        ?.takeIf { it.isFinite() && it != 0.0 }
-        ?.let { String.format(Locale.US, "%.0fm", it) }
-    listOfNotNull(coordinates, altitude)
-        .joinToString("  ")
-        .takeIf(String::isNotBlank)
-        ?.let(::add)
-}
-
-/** Compact two-space rhythm used by the full-bleed signature preset. */
-internal fun immersiveFrameDetailLine(metadata: PhotoFrameMetadata): String =
-    listOfNotNull(
-        metadata.focalLength,
-        metadata.aperture?.let {
-            if (it.startsWith("f/", ignoreCase = true)) it.lowercase(Locale.ROOT) else "f/$it"
-        },
-        metadata.shutter?.let { if (it.endsWith("s", ignoreCase = true)) it else "${it}s" },
-        metadata.iso,
-    ).joinToString("  ")
-
-internal fun normalizeCaptureDateTime(value: String?): String? {
-    val trimmed = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
-    val isExifDate =
-        trimmed.length >= 10 &&
-            trimmed[4] == ':' &&
-            trimmed[7] == ':' &&
-            trimmed.substring(0, 4).all(Char::isDigit) &&
-            trimmed.substring(5, 7).all(Char::isDigit) &&
-            trimmed.substring(8, 10).all(Char::isDigit)
-    return if (isExifDate) {
-        buildString(trimmed.length) {
-            append(trimmed, 0, 4)
-            append('-')
-            append(trimmed, 5, 7)
-            append('-')
-            append(trimmed.substring(8))
-        }
-    } else {
-        trimmed
-    }
-}
-
-internal fun normalizeIso(value: String?): String? {
-    val firstValue = value?.substringBefore(',')?.trim().orEmpty()
-    if (firstValue.isEmpty()) return null
-    val withoutPrefix = if (firstValue.startsWith("ISO", ignoreCase = true)) {
-        firstValue.substring(3).trimStart(' ', ':')
-    } else {
-        firstValue
-    }
-    return withoutPrefix.takeIf { it.isNotEmpty() }?.let { "ISO$it" }
 }
 
 internal fun photoFrameTempName(nonce: Long): String =
@@ -6665,27 +5543,6 @@ private fun watermarkOpacityFingerprintToken(opacityPercent: Int): String =
         else -> "${normalized}P"
     }
 
-private fun resolvedWatermarkPosition(
-    preset: PhotoFramePreset,
-    requested: PhotoFrameWatermarkPosition,
-): PhotoFrameWatermarkPosition = when (requested) {
-    PhotoFrameWatermarkPosition.AUTO -> {
-        when (preset) {
-            PhotoFramePreset.PLAQUE -> PhotoFrameWatermarkPosition.LEFT
-            // AUTO is an inline signature in this preset, while CENTER is a separate row.
-            PhotoFramePreset.IMMERSIVE -> PhotoFrameWatermarkPosition.AUTO
-            PhotoFramePreset.BRAND_INSET,
-            PhotoFramePreset.BRAND_GALLERY -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
-            PhotoFramePreset.CLASSIC_SIGNATURE,
-            PhotoFramePreset.COLOR_ARCHIVE,
-            PhotoFramePreset.FILM_EDGE -> PhotoFrameWatermarkPosition.PHOTO_BOTTOM_RIGHT
-            PhotoFramePreset.GALLERY_MAT,
-            PhotoFramePreset.FILM_GALLERY -> PhotoFrameWatermarkPosition.CENTER
-            else -> PhotoFrameWatermarkPosition.CENTER
-        }
-    }
-    else -> requested
-}
 
 /**
  * 判断目标目录中是否已经有该原片按指定预设与水印配置生成的成片。
@@ -6769,20 +5626,17 @@ internal fun uniqueName(preferred: String, occupied: Set<String>): String {
     return "${stem}_${System.currentTimeMillis()}$ext"
 }
 
-private fun formatAperture(value: Double): String =
-    if (value % 1.0 < 0.05) {
-        String.format(Locale.US, "f/%.0f", value)
-    } else {
-        String.format(Locale.US, "f/%.1f", value)
+internal fun frameLocationRows(metadata: PhotoFrameMetadata): List<String> =
+    frameLocationRows(metadata) { value, fractionDigits ->
+        String.format(Locale.US, "%.${fractionDigits}f", value)
     }
 
-internal fun formatShutter(seconds: Double): String = when {
-    seconds >= 1.0 -> if (seconds % 1.0 < 0.05) {
-        String.format(Locale.US, "%.0fs", seconds)
-    } else {
-        String.format(Locale.US, "%.1fs", seconds)
+private fun formatAperture(value: Double): String =
+    formatApertureText(value) { number, fractionDigits ->
+        String.format(Locale.US, "%.${fractionDigits}f", number)
     }
-    seconds >= 0.4 -> String.format(Locale.US, "%.1fs", seconds)
-    seconds > 0.0 -> String.format(Locale.US, "1/%.0f", 1.0 / seconds)
-    else -> ""
-}
+
+internal fun formatShutter(seconds: Double): String =
+    formatShutterText(seconds) { value, fractionDigits ->
+        String.format(Locale.US, "%.${fractionDigits}f", value)
+    }

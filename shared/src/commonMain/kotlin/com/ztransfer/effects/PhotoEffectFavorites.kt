@@ -78,18 +78,18 @@ data class FavoriteFrameWatermarkEffect(
     }
 }
 
-internal const val FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY = "favorite_photo_filters_v1"
-internal const val FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY = "favorite_frame_effects_v1"
-internal const val PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY = "photo_filter_intensities_v1"
+const val FAVORITE_PHOTO_FILTERS_PREFERENCE_KEY = "favorite_photo_filters_v1"
+const val FAVORITE_FRAME_EFFECTS_PREFERENCE_KEY = "favorite_frame_effects_v1"
+const val PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY = "photo_filter_intensities_v1"
 
 private const val ENTRY_SEPARATOR = ";"
 private const val FIELD_SEPARATOR = ","
 private val FAVORITE_CATALOG_KEY = Regex("[A-Za-z0-9._-]{1,128}")
 
-internal fun encodeFavoritePhotoFilters(favorites: List<FavoritePhotoFilter>): String =
+fun encodeFavoritePhotoFilters(favorites: List<FavoritePhotoFilter>): String =
     favorites.joinToString(ENTRY_SEPARATOR) { it.catalogKey }
 
-internal fun decodeFavoritePhotoFilters(
+fun decodeFavoritePhotoFilters(
     encoded: String?,
     validCatalogKeys: Set<String>,
 ): List<FavoritePhotoFilter> {
@@ -108,7 +108,7 @@ internal fun decodeFavoritePhotoFilters(
 }
 
 /** Stable catalog key -> last user-selected intensity. Display names are deliberately not keys. */
-internal fun encodePhotoFilterIntensities(intensities: Map<String, Int>): String =
+fun encodePhotoFilterIntensities(intensities: Map<String, Int>): String =
     intensities.entries
         .filter { (key, _) -> FAVORITE_CATALOG_KEY.matches(key) }
         .sortedBy { it.key }
@@ -116,7 +116,7 @@ internal fun encodePhotoFilterIntensities(intensities: Map<String, Int>): String
             "$key$FIELD_SEPARATOR${normalizePhotoFilterIntensity(intensity)}"
         }
 
-internal fun decodePhotoFilterIntensities(
+fun decodePhotoFilterIntensities(
     encoded: String?,
     validCatalogKeys: Set<String>,
 ): Map<String, Int> {
@@ -133,7 +133,7 @@ internal fun decodePhotoFilterIntensities(
     return restored
 }
 
-internal fun encodeFavoriteFrameEffects(
+fun encodeFavoriteFrameEffects(
     favorites: List<FavoriteFrameWatermarkEffect>,
 ): String = favorites.joinToString(ENTRY_SEPARATOR) { favorite ->
     listOf(
@@ -149,7 +149,7 @@ internal fun encodeFavoriteFrameEffects(
     ).joinToString(FIELD_SEPARATOR)
 }
 
-internal fun decodeFavoriteFrameEffects(
+fun decodeFavoriteFrameEffects(
     encoded: String?,
 ): List<FavoriteFrameWatermarkEffect> {
     if (encoded.isNullOrBlank()) return emptyList()
@@ -184,7 +184,7 @@ internal fun decodeFavoriteFrameEffects(
     }
 }
 
-internal fun <T, K> orderWithFavorites(
+fun <T, K> orderWithFavorites(
     items: List<T>,
     favoriteKeys: List<K>,
     keyOf: (T) -> K,

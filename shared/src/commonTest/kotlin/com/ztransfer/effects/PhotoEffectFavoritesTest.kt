@@ -7,9 +7,9 @@ import com.ztransfer.frame.PhotoFrameWatermarkContent
 import com.ztransfer.frame.PhotoFrameWatermarkEffect
 import com.ztransfer.frame.PhotoFrameWatermarkFont
 import com.ztransfer.frame.PhotoFrameWatermarkPosition
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
 
 class PhotoEffectFavoritesTest {
     @Test
