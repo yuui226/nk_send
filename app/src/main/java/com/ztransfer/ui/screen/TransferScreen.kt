@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.builtInPhotoFilterNameResId
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraFileInfo
@@ -1038,7 +1039,7 @@ private fun photoFramePresetLabel(preset: PhotoFramePreset): String = stringReso
 
 @Composable
 private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
-    BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
+    builtInPhotoFilterNameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
 /**
  * 右下角悬浮的"图标 FAB + 二次确认"控件（清空/重试全部共用）：毛玻璃圆形按钮，

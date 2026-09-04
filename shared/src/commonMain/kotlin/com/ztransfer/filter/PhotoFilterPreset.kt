@@ -25,7 +25,8 @@ data class NcpPhotoFilterParameters(
         validateToneCurve(toneCurve)
     }
 
-    internal val normalizedToneCurve = normalizeToneCurve(toneCurve)
+    /** Normalized lookup values consumed by each platform renderer. */
+    val normalizedToneCurve = normalizeToneCurve(toneCurve)
 }
 
 /** Supported Flexible Color controls converted from an NP3 preset. */
@@ -53,7 +54,8 @@ data class Np3PhotoFilterParameters(
         toneCurve?.let(::validateToneCurve)
     }
 
-    internal val normalizedToneCurve = toneCurve?.let(::normalizeToneCurve)
+    /** Normalized lookup values consumed by each platform renderer, when a curve is present. */
+    val normalizedToneCurve = toneCurve?.let(::normalizeToneCurve)
 }
 
 data class PhotoFilterColorBand(
@@ -79,7 +81,7 @@ fun normalizePhotoFilterIntensity(value: Int): Int {
     return ((clamped + 1) / 2 * 2).coerceAtMost(100)
 }
 
-internal fun mapPhotoFilterToneCurve(value: Float, curve: FloatArray): Float {
+fun mapPhotoFilterToneCurve(value: Float, curve: FloatArray): Float {
     val position = value.coerceIn(0f, 1f) * (PHOTO_FILTER_TONE_CURVE_POINT_COUNT - 1)
     val left = position.toInt().coerceIn(0, PHOTO_FILTER_TONE_CURVE_POINT_COUNT - 1)
     val right = minOf(left + 1, PHOTO_FILTER_TONE_CURVE_POINT_COUNT - 1)
@@ -97,7 +99,7 @@ private fun normalizeToneCurve(curve: IntArray) =
         curve[index] / PHOTO_FILTER_TONE_CURVE_MAX_VALUE.toFloat()
     }
 
-internal val PHOTO_FILTER_COLOR_BAND_CENTERS = floatArrayOf(
+val PHOTO_FILTER_COLOR_BAND_CENTERS = listOf(
     0f,
     30f,
     60f,
@@ -108,5 +110,5 @@ internal val PHOTO_FILTER_COLOR_BAND_CENTERS = floatArrayOf(
     320f,
 )
 
-internal const val PHOTO_FILTER_TONE_CURVE_POINT_COUNT = 257
-internal const val PHOTO_FILTER_TONE_CURVE_MAX_VALUE = 0x7fff
+const val PHOTO_FILTER_TONE_CURVE_POINT_COUNT = 257
+const val PHOTO_FILTER_TONE_CURVE_MAX_VALUE = 0x7fff

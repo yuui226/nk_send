@@ -153,6 +153,7 @@ import com.ztransfer.frame.photoFrameTimePatternExample
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.filter.builtInPhotoFilterNameResId
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.filter.normalizePhotoFilterIntensity
@@ -1798,7 +1799,7 @@ private fun FittedRotatingBitmap(
 
 @Composable
 private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
-    BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
+    builtInPhotoFilterNameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
 @Composable
 internal fun PhotoFrameWatermarkEditor(
