@@ -1,5 +1,6 @@
 package com.ztransfer.ui.screen
 
+import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.Orientation
@@ -57,6 +58,8 @@ internal fun shouldReleaseLocalWorkspace(
 ): Boolean = isConnecting || isConnected
 
 /** Two vertically adjacent home pages: camera connection above, phone-photo processing below. */
+// `.value` only seeds the mapped flows; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeWorkspacePager(

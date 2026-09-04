@@ -9,6 +9,7 @@
 .cxx
 local.properties
 /app/build
+/shared/build
 /app/release
 *.apk
 *.ap_
@@ -45,3 +46,8 @@ tools/ossutil/**/*.zip
 
 # Local Codex-generated interactive drafts
 .codex/
+
+# Xcode per-user state and local build products
+iosApp/*.xcodeproj/project.xcworkspace/xcuserdata/
+iosApp/*.xcodeproj/xcuserdata/
+iosApp/build/

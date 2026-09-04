@@ -8,7 +8,7 @@ internal const val GPS_ALTITUDE_MAX_DISTANCE_METERS = 1_000f
 internal const val GPS_FALLBACK_ALTITUDE_METERS = 0.0
 
 /** Network providers on some phones mark a synthetic 0 m value as present. */
-internal fun trustedGpsAltitude(
+fun trustedGpsAltitude(
     provider: String?,
     hasAltitude: Boolean,
     altitudeMeters: Double,
@@ -16,7 +16,7 @@ internal fun trustedGpsAltitude(
     provider == GPS_PROVIDER_NAME && hasAltitude && altitudeMeters.isFinite()
 }
 
-internal fun canReuseGpsAltitude(
+fun canReuseGpsAltitude(
     nowMs: Long,
     fixTimeMs: Long,
     distanceMeters: Float,
@@ -26,11 +26,11 @@ internal fun canReuseGpsAltitude(
     distanceMeters <= GPS_ALTITUDE_MAX_DISTANCE_METERS
 
 /** Coordinates must not be blocked indoors just because Android has no trustworthy altitude. */
-internal fun cameraAltitudeForWrite(trustedAltitudeMeters: Double?): Double =
+fun cameraAltitudeForWrite(trustedAltitudeMeters: Double?): Double =
     trustedAltitudeMeters ?: GPS_FALLBACK_ALTITUDE_METERS
 
 /** The first trustworthy altitude after a fallback write should bypass the normal GEO cadence. */
-internal fun shouldForceTrustedAltitudeRefresh(
+fun shouldForceTrustedAltitudeRefresh(
     previousTrustedAltitudeMeters: Double?,
     currentTrustedAltitudeMeters: Double?,
 ): Boolean = previousTrustedAltitudeMeters == null && currentTrustedAltitudeMeters != null

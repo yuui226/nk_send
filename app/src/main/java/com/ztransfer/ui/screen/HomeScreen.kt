@@ -1,5 +1,6 @@
 package com.ztransfer.ui.screen
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.SystemClock
 import android.provider.Settings
@@ -165,6 +166,8 @@ internal fun shouldShowSubscriptionExpiryNotice(isPro: Boolean, daysLeft: Int): 
  * 连接成功后自动跳到文件列表，且用户不会再返回本页。
  * 高级版购买、激活与续费入口统一收进设置面板，连接页本身只承担相机连接引导。
  */
+// `.value` only seeds the mapped flow; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @Composable
 fun HomeScreen(
     viewModel: CameraViewModel,

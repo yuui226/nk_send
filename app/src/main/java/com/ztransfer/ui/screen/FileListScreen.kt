@@ -1,5 +1,6 @@
 package com.ztransfer.ui.screen
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -524,6 +525,8 @@ internal fun publishedCameraRemovalDates(
         .mapTo(LinkedHashSet()) { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
 }
 
+// `.value` only seeds the mapped flows; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @Composable
 fun FileListScreen(
     cameraViewModel: CameraViewModel,
@@ -2684,6 +2687,8 @@ internal fun signalBarPalette(
 }
 
 /** RSSI 的周期更新只在这个小范围内重组，不再使照片页正文和网格失效。 */
+// `.value` only seeds the mapped flow; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @Composable
 private fun FileListSignalPill(
     cameraViewModel: CameraViewModel,

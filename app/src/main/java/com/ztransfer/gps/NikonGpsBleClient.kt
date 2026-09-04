@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
@@ -392,7 +393,7 @@ internal class NikonGpsBleClient(
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (g.writeDescriptor(descriptor, enabled) != BluetoothGatt.GATT_SUCCESS) {
+            if (g.writeDescriptor(descriptor, enabled) != BluetoothStatusCodes.SUCCESS) {
                 listener.onError("Bluetooth setup failed")
             }
         } else {

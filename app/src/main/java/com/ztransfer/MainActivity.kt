@@ -1,6 +1,7 @@
 package com.ztransfer
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
@@ -404,6 +405,8 @@ private fun BottomGlassHint(
  * 照片列表与传输页共用同一个顶部队列控件实例。它位于 NavHost 之外，因此两页横向
  * 切换时不会随页面退场、重建并重播胶囊动画；只有点击语义随当前页面变化。
  */
+// `.value` only seeds the mapped flow; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @Composable
 private fun SharedQueueControls(
     route: String,
@@ -575,6 +578,8 @@ private fun SharedQueueControls(
     }
 }
 
+// `.value` only seeds the mapped flows; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @Composable
 fun MainScreen(transferViewModel: TransferViewModel) {
     val navController = rememberNavController()

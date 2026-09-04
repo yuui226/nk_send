@@ -1,5 +1,6 @@
 package com.ztransfer.ui.screen
 
+import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -137,6 +138,8 @@ private fun CameraState.toTransferCameraUiState(): TransferCameraUiState = Trans
 )
 
 /** 队列页固定顶栏；由工作区宿主在页面转场过半后显现，不参与正文横向位移。 */
+// `.value` only seeds the mapped flow; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @Composable
 fun TransferTopControls(
     cameraViewModel: CameraViewModel,
@@ -181,6 +184,8 @@ fun TransferTopControls(
     }
 }
 
+// `.value` only seeds the mapped flow; ongoing updates are collected immediately below.
+@SuppressLint("StateFlowValueCalledInComposition")
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TransferScreen(

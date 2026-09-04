@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "ZTransfer"
 include(":app")
+include(":shared")

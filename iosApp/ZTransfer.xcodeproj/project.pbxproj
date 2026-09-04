@@ -1,0 +1,292 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		7A1100000000000000000008 /* ZTransferApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1100000000000000000006 /* ZTransferApp.swift */; };
+		7A1100000000000000000009 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1100000000000000000007 /* ContentView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		7A1100000000000000000004 /* ZTransfer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZTransfer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A1100000000000000000006 /* ZTransferApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTransferApp.swift; sourceTree = "<group>"; };
+		7A1100000000000000000007 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7A1100000000000000000014 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		7A1100000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				7A1100000000000000000005 /* ZTransfer */,
+				7A1100000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		7A1100000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7A1100000000000000000004 /* ZTransfer.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7A1100000000000000000005 /* ZTransfer */ = {
+			isa = PBXGroup;
+			children = (
+				7A1100000000000000000006 /* ZTransferApp.swift */,
+				7A1100000000000000000007 /* ContentView.swift */,
+			);
+			path = ZTransfer;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		7A1100000000000000000010 /* ZTransfer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7A1100000000000000000012 /* Build configuration list for PBXNativeTarget "ZTransfer" */;
+			buildPhases = (
+				7A1100000000000000000016 /* Build shared Kotlin framework */,
+				7A1100000000000000000013 /* Sources */,
+				7A1100000000000000000014 /* Frameworks */,
+				7A1100000000000000000015 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ZTransfer;
+			productName = ZTransfer;
+			productReference = 7A1100000000000000000004 /* ZTransfer.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7A1100000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					7A1100000000000000000010 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = 7A1100000000000000000011 /* Build configuration list for PBXProject "ZTransfer" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				zh-Hans,
+				zh-Hant,
+			);
+			mainGroup = 7A1100000000000000000002;
+			productRefGroup = 7A1100000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				7A1100000000000000000010 /* ZTransfer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		7A1100000000000000000015 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		7A1100000000000000000016 /* Build shared Kotlin framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build shared Kotlin framework";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"YES\" = \"$OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED\" ]; then\n  echo \"Skipping duplicate Kotlin framework build\"\n  exit 0\nfi\ncd \"$SRCROOT/..\"\n/bin/sh ./gradlew :shared:embedAndSignAppleFrameworkForXcode\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		7A1100000000000000000013 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7A1100000000000000000009 /* ContentView.swift in Sources */,
+				7A1100000000000000000008 /* ZTransferApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		7A1100000000000000000017 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		7A1100000000000000000018 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		7A1100000000000000000019 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 54;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Z传";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "用于连接尼康相机并写入 GPS 信息。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接尼康相机并传输照片和视频。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于将手机定位信息写入相机照片。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于为手机端监看录像录制声音。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于把相机照片、视频和效果图保存到照片图库。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.81;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					ZTransferShared,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ztransfer.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		7A1100000000000000000020 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 54;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Z传";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "用于连接尼康相机并写入 GPS 信息。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接尼康相机并传输照片和视频。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于将手机定位信息写入相机照片。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于为手机端监看录像录制声音。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于把相机照片、视频和效果图保存到照片图库。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.81;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					ZTransferShared,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.ztransfer.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		7A1100000000000000000011 /* Build configuration list for PBXProject "ZTransfer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A1100000000000000000017 /* Debug */,
+				7A1100000000000000000018 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7A1100000000000000000012 /* Build configuration list for PBXNativeTarget "ZTransfer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A1100000000000000000019 /* Debug */,
+				7A1100000000000000000020 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 7A1100000000000000000001 /* Project object */;
+}
