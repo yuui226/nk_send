@@ -161,21 +161,4 @@ class StaConnectionIsolationTest {
         assertEquals(WirelessMode.STA, restoredWirelessMode("STA"))
     }
 
-    @Test
-    fun apStillRejectsAggregateStorageIds() {
-        assertEquals(
-            listOf(0x00010001),
-            usableStorageIds(listOf(0x00010000, 0x00010001), isStaConnection = false),
-        )
-        assertEquals(0x00010001, objectHandleQueryStorageId(0x00010001, false))
-    }
-
-    @Test
-    fun staKeepsNikonAggregateStorageAndQueriesItByWildcard() {
-        assertEquals(
-            listOf(0x00010000),
-            usableStorageIds(listOf(0, -1, 0x00010000), isStaConnection = true),
-        )
-        assertEquals(-1, objectHandleQueryStorageId(0x00010000, true))
-    }
 }

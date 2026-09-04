@@ -137,7 +137,7 @@ import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.latestCaptureLocalDate
-import com.ztransfer.viewmodel.storageIdsBySlot
+import com.ztransfer.catalog.storageIdsBySlot
 import com.ztransfer.viewmodel.transferredOriginalUri
 import kotlin.math.abs
 import kotlin.math.roundToInt

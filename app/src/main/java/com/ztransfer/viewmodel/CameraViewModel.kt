@@ -26,6 +26,17 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
+import com.ztransfer.catalog.CameraHandleDelta
+import com.ztransfer.catalog.StorageHandleBatch
+import com.ztransfer.catalog.StorageHandleOrder
+import com.ztransfer.catalog.analyzeStaDirectStorageLayout
+import com.ztransfer.catalog.cameraFileLogicalIdentity
+import com.ztransfer.catalog.cameraHandleDelta
+import com.ztransfer.catalog.mergeStorageIds
+import com.ztransfer.catalog.newestFirstHandleOrders
+import com.ztransfer.catalog.objectHandleQueryStorageId
+import com.ztransfer.catalog.storageIdsBySlot
+import com.ztransfer.catalog.usableStorageIds
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.protocol.CameraConnectionType
@@ -156,19 +167,6 @@ internal fun restoredStaInitiatorIdentity(value: String?): StaInitiatorIdentity 
     runCatching { StaInitiatorIdentity.valueOf(value.orEmpty()) }
         .getOrDefault(StaInitiatorIdentity.PAIRED_COMPUTER)
 
-/** AP keeps the proven slot filter; STA also accepts Nikon's non-zero aggregate storage IDs. */
-internal fun usableStorageIds(rawIds: List<Int>, isStaConnection: Boolean): List<Int> = rawIds
-    .filter { storageId ->
-        if (isStaConnection) storageId != 0 && storageId != -1
-        else storageId and 0xFFFF != 0
-    }
-    .distinct()
-    .sorted()
-
-/** Paired Nikon STA exposes its aggregate store through wildcard object enumeration. */
-internal fun objectHandleQueryStorageId(storageId: Int, isStaConnection: Boolean): Int =
-    if (isStaConnection && storageId and 0xFFFF == 0) -1 else storageId
-
 private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 internal val NIKON_RAW_EXTENSIONS = setOf(".nef", ".nrw")
 internal val TIFF_EXTENSIONS = setOf(".tif", ".tiff")
@@ -186,29 +184,16 @@ internal fun latestEffectPreviewFile(files: List<NikonCamera.FileInfo>): NikonCa
         .maxWithOrNull(compareBy<NikonCamera.FileInfo>({ it.captureDate.orEmpty() }, { it.handle }))
 
 private fun NikonCamera.FileInfo.logicalIdentity(): String =
-    "$fileName|$size|$captureDate"
-
-internal data class CameraHandleDelta(
-    val added: Set<Int>,
-    val removed: Set<Int>,
-)
-
-/** 两个完整且成功的 GetObjectHandles 快照之间的权威差量。 */
-internal fun cameraHandleDelta(
-    knownHandles: Set<Int>,
-    currentHandles: Set<Int>,
-): CameraHandleDelta = CameraHandleDelta(
-    added = currentHandles - knownHandles,
-    removed = knownHandles - currentHandles,
-)
+    cameraFileLogicalIdentity(fileName, size, captureDate)
 
 /** 双卡备份文件仍只显示一份，但保留它在两张卡上的完整归属。 */
 internal fun mergeStorageMembership(
     existing: NikonCamera.FileInfo,
     duplicate: NikonCamera.FileInfo,
 ): NikonCamera.FileInfo {
-    if (duplicate.storageIds.all { it in existing.storageIds }) return existing
-    return existing.copy(storageIds = existing.storageIds + duplicate.storageIds)
+    val mergedStorageIds = mergeStorageIds(existing.storageIds, duplicate.storageIds)
+    if (mergedStorageIds === existing.storageIds) return existing
+    return existing.copy(storageIds = mergedStorageIds)
 }
 
 /**
@@ -240,35 +225,6 @@ internal fun reconcilePublishedCameraFiles(
     }
 }
 
-/**
- * PTP StorageID 高 16 位是物理存储、低 16 位是其逻辑分区。优先据此识别卡槽；
- * 对少数非标准编号，按稳定排序补进尚未占用的卡 1/2。
- */
-internal fun storageIdsBySlot(storageIds: List<Int>): Map<Int, Set<Int>> {
-    val result = sortedMapOf<Int, MutableSet<Int>>()
-    val unassignedGroups = linkedMapOf<Int, MutableSet<Int>>()
-    storageIds.distinct().sorted().forEach { storageId ->
-        val physical = storageId ushr 16 and 0xFFFF
-        val logical = storageId and 0xFFFF
-        val slot = when {
-            physical in 1..2 -> physical
-            physical == 0 && logical in 1..2 -> logical
-            else -> null
-        }
-        if (slot != null) {
-            result.getOrPut(slot) { linkedSetOf() } += storageId
-        } else {
-            val groupKey = if (physical == 0) storageId else physical
-            unassignedGroups.getOrPut(groupKey) { linkedSetOf() } += storageId
-        }
-    }
-    unassignedGroups.values.forEach { ids ->
-        val freeSlot = (1..2).firstOrNull { it !in result } ?: return@forEach
-        result[freeSlot] = ids
-    }
-    return result.mapValues { it.value.toSet() }
-}
-
 /** 日期范围只改变优先级，不改变最终全量填充集合。范围完成后自然接回全局新→旧。 */
 internal fun prioritizedThumbnailFiles(
     files: List<NikonCamera.FileInfo>,
@@ -285,71 +241,6 @@ internal fun prioritizedThumbnailFiles(
     }
     prioritized.addAll(remaining)
     return prioritized
-}
-
-/** 单个 PTP StorageID 内由新到旧的 handle 顺序；顺序来自相机原始数组的反序。 */
-internal data class StorageHandleOrder(
-    val storageId: Int,
-    val newestFirstHandles: List<Int>,
-)
-
-/**
- * Nikon 返回的单卡 handle 数组在实机上是旧到新，并且天然把同次拍摄的 JPG/RAW、视频
- * 按拍摄顺序交错排列。只反转每张卡，不能再按 handle 数值排序：handle 高位含格式特征，
- * 数值排序会把 MP4/JPG/RAW 拆成大块。跨卡重复 handle 仍按第一张卡出现的位置保留一次。
- */
-internal fun newestFirstHandleOrders(
-    rawHandlesByStorage: List<Pair<Int, List<Int>>>,
-): List<StorageHandleOrder> {
-    val seen = HashSet<Int>()
-    return rawHandlesByStorage.map { (storageId, rawHandles) ->
-        StorageHandleOrder(
-            storageId = storageId,
-            newestFirstHandles = rawHandles.asReversed().filter { seen.add(it) },
-        )
-    }
-}
-
-/**
- * STA direct browsing cannot ask ObjectInfo for an object's StorageID. Derive the membership from
- * the per-storage GetObjectHandles responses, but only expose the card filter when those responses
- * are unambiguous. A handle returned for two physical slots means the camera ignored/aliased the
- * storage selector; treating every such object as belonging to both cards would be misleading.
- */
-internal data class StaDirectStorageLayout(
-    val storageIdsByHandle: Map<Int, Set<Int>>,
-    val filterStorageIds: List<Int>,
-    val crossSlotOverlapCount: Int,
-)
-
-internal fun analyzeStaDirectStorageLayout(
-    rawHandlesByStorage: List<Pair<Int, List<Int>>>,
-): StaDirectStorageLayout {
-    val storageIds = rawHandlesByStorage.map { it.first }.distinct().sorted()
-    val slotByStorageId = buildMap {
-        storageIdsBySlot(storageIds).forEach { (slot, ids) ->
-            ids.forEach { storageId -> put(storageId, slot) }
-        }
-    }
-    val observedStorageIds = LinkedHashMap<Int, MutableSet<Int>>()
-    rawHandlesByStorage.forEach { (storageId, handles) ->
-        handles.forEach { handle ->
-            observedStorageIds.getOrPut(handle) { linkedSetOf() } += storageId
-        }
-    }
-    val crossSlotOverlapCount = observedStorageIds.values.count { memberships ->
-        memberships.mapNotNull(slotByStorageId::get).distinct().size > 1
-    }
-    val reliable = crossSlotOverlapCount == 0
-    return StaDirectStorageLayout(
-        storageIdsByHandle = if (reliable) {
-            observedStorageIds.mapValues { (_, ids) -> ids.toSet() }
-        } else {
-            emptyMap()
-        },
-        filterStorageIds = if (reliable) storageIds else emptyList(),
-        crossSlotOverlapCount = crossSlotOverlapCount,
-    )
 }
 
 /**
@@ -2940,12 +2831,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     ): Set<Int> {
         if (storageIds.isEmpty()) return emptySet()
         if (storageIds.size == 1) return setOf(storageIds.single())
-        val rawHandlesByStorage = ArrayList<Pair<Int, List<Int>>>(storageIds.size)
+        val rawHandlesByStorage = ArrayList<StorageHandleBatch>(storageIds.size)
         for (storageId in storageIds) {
             val queryStorageId = objectHandleQueryStorageId(storageId, isStaConnection = true)
             val result = cam.getObjectHandlesWithStatus(queryStorageId)
             if (!result.successful) return emptySet()
-            rawHandlesByStorage += storageId to result.handles
+            rawHandlesByStorage += StorageHandleBatch(storageId, result.handles)
         }
         val layout = analyzeStaDirectStorageLayout(rawHandlesByStorage)
         return layout.storageIdsByHandle[handle].orEmpty()
@@ -3170,7 +3061,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     val handleQueriesSucceeded = handleResultsByStorage.all { it.second.successful }
                     val rawHandlesByStorage = handleResultsByStorage.map { (storageId, result) ->
-                        storageId to result.handles
+                        StorageHandleBatch(storageId, result.handles)
                     }
                     val staDirectStorageLayout = if (cam.staDirectObjectReadValidated) {
                         analyzeStaDirectStorageLayout(rawHandlesByStorage)
@@ -3192,7 +3083,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (fileLoadGeneration != generation || camera !== cam) return@launch
                     if (handleQueriesSucceeded) {
                         val currentHandles = rawHandlesByStorage
-                            .flatMapTo(HashSet()) { it.second.asIterable() }
+                            .flatMapTo(HashSet()) { it.handles.asIterable() }
                         val hadKnownBaseline = knownHandlesCamera === cam
                         val delta = if (hadKnownBaseline) {
                             cameraHandleDelta(knownHandles, currentHandles)

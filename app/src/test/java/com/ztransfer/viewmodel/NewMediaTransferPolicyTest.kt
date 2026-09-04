@@ -12,42 +12,6 @@ import org.junit.Test
 
 class NewMediaTransferPolicyTest {
     @Test
-    fun `handle delta reports additions and removals independently`() {
-        assertEquals(
-            CameraHandleDelta(added = setOf(12), removed = emptySet()),
-            cameraHandleDelta(
-                knownHandles = setOf(10, 11),
-                currentHandles = setOf(10, 11, 12),
-            ),
-        )
-        assertEquals(
-            CameraHandleDelta(added = setOf(12), removed = setOf(11)),
-            cameraHandleDelta(
-                knownHandles = setOf(10, 11),
-                currentHandles = setOf(10, 12),
-            ),
-        )
-    }
-
-    @Test
-    fun `empty card handle delta remains well defined`() {
-        assertEquals(
-            CameraHandleDelta(added = setOf(1), removed = emptySet()),
-            cameraHandleDelta(
-                knownHandles = emptySet(),
-                currentHandles = setOf(1),
-            ),
-        )
-        assertEquals(
-            CameraHandleDelta(added = emptySet(), removed = setOf(1)),
-            cameraHandleDelta(
-                knownHandles = setOf(1),
-                currentHandles = emptySet(),
-            ),
-        )
-    }
-
-    @Test
     fun `catalog reconciliation switches a deleted backup primary to its surviving alias`() {
         val card1 = NikonCamera.FileInfo(
             handle = 10,
