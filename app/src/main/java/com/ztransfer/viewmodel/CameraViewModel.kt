@@ -29,12 +29,14 @@ import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.catalog.CameraHandleDelta
 import com.ztransfer.catalog.StorageHandleBatch
 import com.ztransfer.catalog.StorageHandleOrder
+import com.ztransfer.catalog.ThumbnailFillQueue
 import com.ztransfer.catalog.analyzeStaDirectStorageLayout
 import com.ztransfer.catalog.cameraFileLogicalIdentity
 import com.ztransfer.catalog.cameraHandleDelta
 import com.ztransfer.catalog.mergeStorageIds
 import com.ztransfer.catalog.newestFirstHandleOrders
 import com.ztransfer.catalog.objectHandleQueryStorageId
+import com.ztransfer.catalog.prioritizedThumbnailFiles as sharedPrioritizedThumbnailFiles
 import com.ztransfer.catalog.storageIdsBySlot
 import com.ztransfer.catalog.usableStorageIds
 import com.ztransfer.connection.StaConnectionStatus
@@ -186,19 +188,7 @@ internal fun reconcilePublishedCameraFiles(
 internal fun prioritizedThumbnailFiles(
     files: List<NikonCamera.FileInfo>,
     range: PhotoDateRange?,
-): List<NikonCamera.FileInfo> {
-    // Kotlin 的排序稳定：同一拍摄时间保留文件枚举时的相机自然顺序，让 JPG/RAW 配对
-    // 继续相邻。不能再用 handle 打破平局，其高位在 Nikon 上含格式特征。
-    val ordered = files.sortedByDescending { it.captureDate.orEmpty() }
-    if (range == null) return ordered
-    val prioritized = ArrayList<NikonCamera.FileInfo>(ordered.size)
-    val remaining = ArrayList<NikonCamera.FileInfo>(ordered.size)
-    ordered.forEach { file ->
-        if (range.containsCaptureDate(file.captureDate)) prioritized += file else remaining += file
-    }
-    prioritized.addAll(remaining)
-    return prioritized
-}
+): List<NikonCamera.FileInfo> = sharedPrioritizedThumbnailFiles(files, range?.captureDayRange)
 
 /**
  * 一次相机会话内的整卡枚举快照。大图预览只暂停 ObjectInfo 阶段，关闭后可直接复用
@@ -438,7 +428,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val reportedStaMetadataDiagnostics = HashSet<String>()
     // 本轮发生真实写入失败（含磁盘满）后停止后台落盘；换相机/重连时重新尝试。
     private var thumbnailDiskWritesBlocked = false
-    private val thumbnailFillQueue = ThumbnailFillQueue()
+    private val thumbnailFillQueue = ThumbnailFillQueue<NikonCamera.FileInfo>()
     private val thumbnailFillWake = Channel<Unit>(Channel.CONFLATED)
 
     private suspend fun activateThumbnailDiskCache(cam: NikonCamera) {
@@ -1086,7 +1076,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // 日期范围变化只重排尚未处理的队列。当前 GetThumb 完成后再采用新顺序。
         viewModelScope.launch {
             thumbnailPriorityRangeFlow.collect { range ->
-                thumbnailFillQueue.updatePriorityRange(range)
+                thumbnailFillQueue.updatePriorityRange(range?.captureDayRange)
                 thumbnailFillQueue.retryFailed()
                 thumbnailFillWake.trySend(Unit)
             }
@@ -1108,7 +1098,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 if (blocked || !connected || !scanComplete) return@collectLatest
                 val expectedCacheGeneration = thumbnailCacheSessionGeneration
                 val expectedQueueRevision = thumbnailFillQueue.revision
-                thumbnailFillQueue.seed(state.value.files, thumbnailPriorityRangeFlow.value)
+                thumbnailFillQueue.seed(
+                    state.value.files,
+                    thumbnailPriorityRangeFlow.value?.captureDayRange,
+                )
                 thumbnailFillQueue.retryFailed()
                 log { "THUMB_FILL resume pending=${thumbnailFillQueue.pendingCount}" }
                 var loaded = 0
