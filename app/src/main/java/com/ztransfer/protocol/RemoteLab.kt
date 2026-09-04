@@ -399,7 +399,13 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
     // 16.16 定点度数（详见 rcAngleLevelRoll 的编码说明）。
     Lab.PROP_NK_ANGLE_LEVEL -> "%.1f°".format(raw / 65536.0)
     Lab.PROP_EXPOSURE_PROGRAM -> when (raw) {
-        1L -> "M"; 2L -> "P"; 3L -> "A"; 4L -> "S"; else -> "0x${raw.toString(16)}"
+        1L -> "M"
+        2L -> "P"
+        3L -> "A"
+        4L -> "S"
+        // Nikon 在全自动档使用厂商扩展枚举；不是操作失败或错误码。
+        0x8010L -> "AUTO"
+        else -> "0x${raw.toString(16)}"
     }
     Lab.PROP_FOCUS_MODE -> when (raw) {
         1L -> "MF"
