@@ -1,22 +1,19 @@
 package com.ztransfer.viewmodel
 
 import android.content.SharedPreferences
+import com.ztransfer.connection.StaCameraProfile
 import com.ztransfer.connection.StaInitiatorIdentity
+import com.ztransfer.connection.hasReusableStaProfileUsing
+import com.ztransfer.connection.mostRecentStaProfileForIp
+import com.ztransfer.connection.mostRecentlyUsedStaProfile
+import com.ztransfer.connection.normalizeResponderGuid
+import com.ztransfer.connection.preferredStaIdentityForCandidate
 import com.ztransfer.protocol.STA_PAIRING_MARKER_PREFIX
 
 /**
  * One ZTransfer installation is one PTP/IP initiator. Cameras remember that shared computer
  * identity; this store only keeps the per-body routing hints needed to find it again.
  */
-internal data class StaCameraProfile(
-    val responderGuid: String,
-    val lastIp: String?,
-    val preferredIdentity: StaInitiatorIdentity,
-    val pairingConfirmed: Boolean,
-    val lastSeenAtMs: Long,
-    val deviceModel: String? = null,
-)
-
 internal class StaCameraProfileStore(
     private val preferences: SharedPreferences,
     private val pairingPreferences: SharedPreferences,
@@ -242,47 +239,4 @@ internal class StaCameraProfileStore(
         const val FIELD_LAST_SEEN = "last_seen"
         const val FIELD_DEVICE_MODEL = "device_model"
     }
-}
-
-private val RESPONDER_GUID_PATTERN = Regex("[0-9a-f]{32}")
-
-internal fun normalizeResponderGuid(value: String?): String? = value
-    ?.trim()
-    ?.lowercase()
-    ?.takeIf(RESPONDER_GUID_PATTERN::matches)
-
-internal fun mostRecentStaProfileForIp(
-    profiles: List<StaCameraProfile>,
-    ip: String,
-): StaCameraProfile? = profiles.asSequence()
-    .filter { it.lastIp == ip }
-    .maxByOrNull(StaCameraProfile::lastSeenAtMs)
-
-internal fun preferredStaIdentityForCandidate(
-    ip: String,
-    profiles: List<StaCameraProfile>,
-): StaInitiatorIdentity = mostRecentStaProfileForIp(
-    profiles = profiles.filter(StaCameraProfile::pairingConfirmed),
-    ip = ip,
-)?.preferredIdentity
-    ?: StaInitiatorIdentity.PAIRED_COMPUTER
-
-internal fun hasReusableStaProfileUsing(
-    profiles: List<StaCameraProfile>,
-    identity: StaInitiatorIdentity,
-): Boolean = profiles.any {
-    it.pairingConfirmed && it.preferredIdentity == identity
-}
-
-internal fun mostRecentlyUsedStaProfile(
-    profiles: List<StaCameraProfile>,
-    lastUsedIp: String?,
-): StaCameraProfile? {
-    val confirmedProfiles = profiles.filter(StaCameraProfile::pairingConfirmed)
-    if (lastUsedIp != null) {
-        mostRecentStaProfileForIp(confirmedProfiles, lastUsedIp)?.let { return it }
-    }
-    return confirmedProfiles.asSequence()
-        .filter { it.lastSeenAtMs > 0L }
-        .maxByOrNull(StaCameraProfile::lastSeenAtMs)
 }

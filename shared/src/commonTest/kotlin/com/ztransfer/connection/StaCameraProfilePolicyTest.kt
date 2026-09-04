@@ -1,13 +1,12 @@
-package com.ztransfer.viewmodel
+package com.ztransfer.connection
 
-import com.ztransfer.connection.StaInitiatorIdentity
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
-class StaCameraProfileSelectionTest {
+class StaCameraProfilePolicyTest {
     @Test
     fun responderGuidNormalizationRejectsUnstableValues() {
         assertEquals(
@@ -53,7 +52,7 @@ class StaCameraProfileSelectionTest {
     }
 
     @Test
-    fun unknownCameraStartsWithPairingIdentity() {
+    fun unknownOrUnconfirmedCameraStartsWithPairingIdentity() {
         assertEquals(
             StaInitiatorIdentity.PAIRED_COMPUTER,
             preferredStaIdentityForCandidate(
@@ -61,10 +60,7 @@ class StaCameraProfileSelectionTest {
                 profiles = emptyList(),
             ),
         )
-    }
 
-    @Test
-    fun unconfirmedAlbumRouteCannotBypassPairingIdentity() {
         val unconfirmed = profile(
             guid = "11111111111111111111111111111111",
             ip = "192.168.50.10",
@@ -82,7 +78,7 @@ class StaCameraProfileSelectionTest {
     }
 
     @Test
-    fun olderConfirmedRouteWinsOverNewerUnconfirmedRouteAtSameAddress() {
+    fun confirmedRouteWinsOverNewerUnconfirmedRouteAtSameAddress() {
         val confirmed = profile(
             guid = "11111111111111111111111111111111",
             ip = "192.168.50.10",
@@ -136,14 +132,32 @@ class StaCameraProfileSelectionTest {
     }
 
     @Test
-    fun lastUsedBodyIsSelectedByGuidInsteadOfDhcpAddressAlone() {
-        val previous = profile(
+    fun equalTimestampsPreserveTheFirstMatchingInput() {
+        val first = profile(
+            guid = "11111111111111111111111111111111",
+            ip = "192.168.50.10",
+            identity = StaInitiatorIdentity.PAIRED_COMPUTER,
+            seenAt = 20L,
+        )
+        val second = profile(
+            guid = "22222222222222222222222222222222",
+            ip = first.lastIp!!,
+            identity = StaInitiatorIdentity.ALBUM_EXPLORER,
+            seenAt = 20L,
+        )
+
+        assertEquals(first, mostRecentStaProfileForIp(listOf(first, second), first.lastIp!!))
+    }
+
+    @Test
+    fun lastUsedRoutePrecedesTheGlobalNewestFallback() {
+        val lastUsed = profile(
             guid = "11111111111111111111111111111111",
             ip = "192.168.50.10",
             identity = StaInitiatorIdentity.PAIRED_COMPUTER,
             seenAt = 10L,
         )
-        val lastUsed = profile(
+        val globalNewest = profile(
             guid = "22222222222222222222222222222222",
             ip = "192.168.50.11",
             identity = StaInitiatorIdentity.PAIRED_COMPUTER,
@@ -152,30 +166,49 @@ class StaCameraProfileSelectionTest {
 
         assertEquals(
             lastUsed,
-            mostRecentlyUsedStaProfile(listOf(previous, lastUsed), lastUsed.lastIp),
+            mostRecentlyUsedStaProfile(listOf(lastUsed, globalNewest), lastUsed.lastIp),
         )
         assertEquals(
-            lastUsed,
+            globalNewest,
             mostRecentlyUsedStaProfile(
-                profiles = listOf(previous, lastUsed),
+                profiles = listOf(lastUsed, globalNewest),
                 lastUsedIp = "192.168.50.99",
             ),
         )
     }
 
     @Test
-    fun unconfirmedLastUsedBodyIsNotRestoredAsExpectedCamera() {
+    fun unconfirmedOrNeverSeenProfilesAreNotGlobalFallbacks() {
         val unconfirmed = profile(
             guid = "11111111111111111111111111111111",
             ip = "192.168.50.10",
             identity = StaInitiatorIdentity.ALBUM_EXPLORER,
             seenAt = 20L,
         ).copy(pairingConfirmed = false)
+        val neverSeen = profile(
+            guid = "22222222222222222222222222222222",
+            ip = "192.168.50.11",
+            identity = StaInitiatorIdentity.PAIRED_COMPUTER,
+            seenAt = 0L,
+        )
 
         assertNull(
             mostRecentlyUsedStaProfile(
                 profiles = listOf(unconfirmed),
                 lastUsedIp = unconfirmed.lastIp,
+            ),
+        )
+        assertNull(
+            mostRecentlyUsedStaProfile(
+                profiles = listOf(neverSeen),
+                lastUsedIp = null,
+            ),
+        )
+        assertEquals(
+            neverSeen,
+            mostRecentlyUsedStaProfile(
+                profiles = listOf(neverSeen),
+                lastUsedIp = neverSeen.lastIp,
             ),
         )
     }
