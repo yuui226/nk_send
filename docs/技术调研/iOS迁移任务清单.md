@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：文件浏览、传输及遥控参数纯规则已完成共享，继续迁移遥控动作调度状态机
-- 下一项：`R02` 对焦、拍摄、录像与实时监看调度状态机
+- 当前阶段：文件浏览、传输、遥控参数及动作调度已完成共享，继续收口通用值模型
+- 下一项：`C02` 通用枚举、错误和相机/文件值模型
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -49,7 +49,7 @@
 | ID | 状态 | 任务 | 主要范围 |
 |---|---|---|---|
 | C01 | DONE | 迁移连接方式模型 | `CameraConnectionType` 已由 Android 使用 |
-| C02 | TODO | 迁移通用枚举、错误和相机/文件值模型 | 不包含 `android.*`、`java.io` 或 Socket |
+| C02 | NEXT | 迁移通用枚举、错误和相机/文件值模型 | 不包含 `android.*`、`java.io` 或 Socket |
 | C03 | TODO | 迁移格式化、坐标、日期和数值规则 | 替换或隔离 JVM-only API |
 | C04 | TODO | 迁移共享测试工具和固定样本加载 | 后续协议任务复用 |
 
@@ -80,7 +80,7 @@
 | ID | 状态 | 任务 | 主要范围 |
 |---|---|---|---|
 | R01 | DONE | 曝光、ISO、快门、光圈等格式与档位 | 参数模型、显示语义、属性兼容、Auto ISO 与拨轮规则已共享；Android Locale 渲染保持原位 |
-| R02 | NEXT | 对焦、拍摄、录像与实时监看调度状态机 | 相机 IO 走公共接口 |
+| R02 | DONE | 对焦、拍摄、录像与实时监看调度状态机 | 纯调度通过闭包共享；平台 IO、锁、时钟、渲染与 USB 原子序列留在端侧 |
 | G01 | DONE | GPS 更新频率模型 | 原包名/API 不变，现有单测迁入 `commonTest` |
 | G02 | DONE | GPS 公开状态模型 | `GpsStatus/GpsState` 已共享，Android 恢复策略独立验证 |
 | G03 | DONE | GPS 恢复与海拔规则 | 公共规则已共享，常量保持模块内可见，原测试迁入 `commonTest` |
@@ -169,6 +169,8 @@
 | 2026-09-04 | T05 | JVM 旧正则与 `Locale.ROOT` 对照、year 0000、未知大小、旧 part 名和复制边界样本通过；shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-192902.apk`，SHA-256 `3C4439DA91F072F1B5707E32E45FD59CA6B3BDC31DA472DEEC5597F128AF8A7C`；Manifest 与 T04 完全相同，5 个迁入/适配类型在 APK 中各一个定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备 |
 | 2026-09-04 | R01 | `RcParam`、照片/录像曝光网格、DevicePropDesc 转换、属性别名与探测顺序、详细/紧凑显示语义、Auto ISO、拨轮方向/锚点/步进、电池及水平仪规则已迁入 shared；Android 继续负责默认 Locale 字符串渲染、相机命令/重试/协程及 Compose 状态，保留标准快门回退等现有边界行为 |
 | 2026-09-04 | R01 | shared 与 Android 遥控定向测试、全量单测、App/shared Lint、标准 Debug 打包均通过；`ZTransfer-debug-1.81-20260904-195509.apk`，SHA-256 `6AF889A3E1C99918D14EAB9AA36ADB42A471504763F109F59F250CD22B030E04`；Manifest 与 T05 完全相同，共享策略/参数/展示类型均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；真机 `3B65BV001L500000` 安装启动成功、PID `14875` |
+| 2026-09-04 | R02 | 对焦模式/主体追踪/AF 轮询与点击对焦结果归约、Live View 启停/就绪/预热/取帧回退和错误恢复、拍摄确认顺序、录像事件/迟到回声/启动接管/停止收尾及诊断规则已迁入 shared；Android Socket/USB、锁、SystemClock、协程/Flow/Channel、Bitmap/触感/媒体和 USB 录像原子序列保持原位，未扩大为高耦合平台接口 |
+| 2026-09-04 | R02 | 三路只读审查、shared/Android 定向及全量单测、App/shared Lint、标准 Debug 打包均通过；`ZTransfer-debug-1.81-20260904-203223.apk`，SHA-256 `EFDEB52988CBEFAA5D7BED7A4AC4912314AAB22AE5CB34978B24244F69A28741`；Manifest 与 R01 完全相同，12 个抽查共享类型/门面均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；真机 `3B65BV001L500000` 安装启动成功、PID `31359`，最近日志无启动崩溃 |
 
 ## 更新约定
 
