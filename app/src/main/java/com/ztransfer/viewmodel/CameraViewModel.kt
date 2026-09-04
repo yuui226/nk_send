@@ -37,6 +37,8 @@ import com.ztransfer.catalog.mergeStorageIds
 import com.ztransfer.catalog.newestFirstHandleOrders
 import com.ztransfer.catalog.objectHandleQueryStorageId
 import com.ztransfer.catalog.prioritizedThumbnailFiles as sharedPrioritizedThumbnailFiles
+import com.ztransfer.catalog.shouldPrefetchThumbnailInBackground
+import com.ztransfer.catalog.shouldRememberThumbnailMiss
 import com.ztransfer.catalog.storageIdsBySlot
 import com.ztransfer.catalog.usableStorageIds
 import com.ztransfer.connection.StaConnectionStatus
@@ -3462,7 +3464,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (cached != null) return true
         // Direct STA RAW/video thumbnails need bounded multi-MiB partial reads. Treat them as lazy-visible
         // work instead of blocking the progressive 829-object catalog with background prefetch.
-        if (expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg") return true
+        if (!shouldPrefetchThumbnailInBackground(
+                expectedCamera.staDirectObjectReadValidated,
+                file.extension,
+            )
+        ) return true
         if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
         // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
@@ -3746,7 +3752,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (bytes == null || bytes.isEmpty()) {
                 // Direct STA RAW/video only performed a bounded fallback probe. Null is not the
                 // camera's authoritative NoThumbnail response, so a later visible retry remains valid.
-                if (!(expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg")) {
+                if (shouldRememberThumbnailMiss(
+                        expectedCamera.staDirectObjectReadValidated,
+                        file.extension,
+                    )
+                ) {
                     noThumbHandles.add(handle)
                 }
                 log { "THUMB no-thumb handle=$handle (resp non-OK / empty)" }
@@ -3850,7 +3860,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             if (!fromDisk &&
                 thumbnailCacheSessionGeneration == expectedCacheGeneration &&
-                !(camera?.staDirectObjectReadValidated == true && file.extension != ".jpg")
+                shouldRememberThumbnailMiss(
+                    camera?.staDirectObjectReadValidated == true,
+                    file.extension,
+                )
             ) {
                 noThumbHandles.add(file.handle)
             }

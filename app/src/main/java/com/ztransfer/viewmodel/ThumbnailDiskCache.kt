@@ -1,9 +1,12 @@
 package com.ztransfer.viewmodel
 
+import com.ztransfer.catalog.THUMBNAIL_CAMERA_CACHE_MAX_IDLE_MS
+import com.ztransfer.catalog.isThumbnailCameraCacheExpired
+import com.ztransfer.catalog.staThumbnailCacheKeyMaterial
+import com.ztransfer.catalog.thumbnailCacheKeyMaterial
 import java.io.File
 import java.security.MessageDigest
 
-internal const val THUMBNAIL_CAMERA_CACHE_MAX_IDLE_MS = 90L * 24 * 60 * 60 * 1_000
 private val LEGACY_FILE_NAME_UNSAFE_CHARS = Regex("[^A-Za-z0-9._-]")
 private val SHA_256 = object : ThreadLocal<MessageDigest>() {
     override fun initialValue(): MessageDigest = MessageDigest.getInstance("SHA-256")
@@ -17,11 +20,11 @@ internal fun thumbnailCacheFileName(
     fileName: String,
     size: Long,
     captureDate: String?,
-): String = sha256("$fileName\u0000$size\u0000${captureDate.orEmpty()}") + ".jpg"
+): String = sha256(thumbnailCacheKeyMaterial(fileName, size, captureDate)) + ".jpg"
 
 /** STA metadata is discovered progressively, so its cache identity must not change with names/dates. */
 internal fun staThumbnailCacheFileName(handle: Int, size: Long): String =
-    sha256("sta\u0000${handle.toLong() and 0xFFFFFFFFL}\u0000$size") + ".jpg"
+    sha256(staThumbnailCacheKeyMaterial(handle, size)) + ".jpg"
 
 internal fun legacyThumbnailCacheFileName(
     fileName: String,
@@ -83,7 +86,8 @@ internal class ThumbnailDiskCache(
 
     fun cleanupExpiredCameraCaches(): CleanupResult = synchronized(rootLock) {
         rootDirectory.mkdirs()
-        val cutoff = nowMs() - THUMBNAIL_CAMERA_CACHE_MAX_IDLE_MS
+        val now = nowMs()
+        val cutoff = now - THUMBNAIL_CAMERA_CACHE_MAX_IDLE_MS
         var expiredDirectories = 0
         var temporaryFiles = 0
         var legacyFiles = 0
@@ -95,7 +99,9 @@ internal class ThumbnailDiskCache(
                     temporaryFiles += openCache?.cleanupTemporaryFiles()
                         ?: deleteTemporaryFiles(entry)
                     val lastConnected = readLastConnected(entry)
-                    if (lastConnected < cutoff && deleteDirectChildDirectory(entry)) {
+                    if (isThumbnailCameraCacheExpired(lastConnected, now) &&
+                        deleteDirectChildDirectory(entry)
+                    ) {
                         expiredDirectories++
                     }
                 }

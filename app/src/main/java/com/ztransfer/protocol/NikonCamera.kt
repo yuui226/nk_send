@@ -12,6 +12,7 @@ import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.catalog.CameraCatalogFile
+import com.ztransfer.catalog.cameraThumbnailCacheIdentity
 import com.ztransfer.catalog.cameraFileExtension
 import com.ztransfer.catalog.selectNewestCameraFileHeadIndex
 import com.ztransfer.connection.StaInitiatorIdentity
@@ -45,17 +46,6 @@ import java.net.Socket
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-
-private fun normalizedCameraIdentifier(value: String?): String? {
-    val normalized = value?.trim()?.takeIf(String::isNotEmpty) ?: return null
-    when (normalized.lowercase()) {
-        "unknown", "none", "null", "n/a" -> return null
-    }
-    // 全 0（可夹分隔符）是部分设备在没有真实序列号时使用的占位值。
-    return normalized.takeIf { text ->
-        text.any { character -> character.isLetter() || (character.isDigit() && character != '0') }
-    }
-}
 
 /** Maximum JPEG prefix retained while a fresh file is streamed to disk for EXIF parsing. */
 private const val EXIF_HEADER_CAPTURE_BYTES = 256 * 1024
@@ -901,14 +891,13 @@ class NikonCamera(private val context: Context) {
      */
     val thumbnailCacheIdentity: String
         get() {
-            val manufacturer = deviceManufacturer.orEmpty().trim()
-            val model = deviceModel.orEmpty().trim()
             val transportId = if (usbPtp != null) usbDeviceSerial else responderGuid
-            val physicalId = normalizedCameraIdentifier(cachedDeviceInfo?.serial)
-                ?: normalizedCameraIdentifier(transportId)
-                // 极少数机身不报告任何序列身份；仍维持按型号隔离，不退回全局混存。
-                ?: "unknown-device"
-            return "$manufacturer\u0000$model\u0000$physicalId"
+            return cameraThumbnailCacheIdentity(
+                manufacturer = deviceManufacturer,
+                model = deviceModel,
+                reportedSerial = cachedDeviceInfo?.serial,
+                fallbackPhysicalId = transportId,
+            )
         }
     val connectionType: CameraConnectionType
         get() = if (usbPtp != null) CameraConnectionType.USB else CameraConnectionType.WIFI
