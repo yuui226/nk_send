@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：传输队列与暂停/继续状态机已共享，继续迁移重试、错误和断点规则
-- 下一项：`T04` 重试、错误分类、分块和断点规则
+- 当前阶段：传输队列、分块与断点纯策略已共享，继续迁移文件命名和完整性规则
+- 下一项：`T05` 命名、同名文件、临时文件和完整性规则
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -72,8 +72,8 @@
 | T01 | DONE | 文件排序、筛选、日期分组和连拍识别 | 原文件模型直接实现只读共享边界；排序/筛选/日期/连拍规则及测试已共享 |
 | T02 | DONE | 缩略图调度、优先级和缓存规则 | 通用队列、优先级、键材料、身份、过期与负缓存规则已共享；平台存储/解码/IO 保持原位 |
 | T03 | DONE | 传输任务、队列和暂停/继续状态机 | 状态/进度、最小任务边界、FIFO/撤回和执行状态已共享；UI、Service 与 IO 保持原位 |
-| T04 | NEXT | 重试、错误分类、分块和断点规则 | 文件 IO 通过接口注入 |
-| T05 | TODO | 命名、同名文件、临时文件和完整性规则 | Android 结果保持一致 |
+| T04 | DONE | 重试、错误分类、分块和断点规则 | 数值/响应/断点/失败处置纯决策已共享；异常、协议与文件 IO 留平台层 |
+| T05 | NEXT | 命名、同名文件、临时文件和完整性规则 | Android 结果保持一致 |
 
 ### 5. 遥控、GPS 与媒体规则
 
@@ -163,6 +163,8 @@
 | 2026-09-04 | T02 | 迁移前后固定哈希/目录名向量一致；shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-184505.apk`，SHA-256 `675C68963CA7B9C758D7799182A9A970B4D5A7986029043D815CF4694346BDB3`；Manifest 与 T01 完全相同，两项新增共享类在 APK 中各只有一个定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
 | 2026-09-04 | T03 | `TransferStatus`、活动进度、最小任务只读边界、FIFO/预检查撤回队列、执行状态转换以及入队/暂停/速度/重试判定已迁入 shared；Android 原 `TransferTask` 直接实现接口，原队列保留 `synchronized` 薄壳，`TransferState` 只映射原执行标志；SAF、相机下载、协程 Job、效果生成和 `TransferService` 未改 |
 | 2026-09-04 | T03 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-185744.apk`，SHA-256 `35BF8D7901BDB5F620B15E8E404BD467320867F28F3E51308117CD57DADEF57E`；Manifest 与 T02 完全相同，5 个共享传输类型均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
+| 2026-09-04 | T04 | 未知大小解析、PartialObject/全量路径、4/32/64 MiB 分块、128/512 MiB 阈值、安全回退、短读/总长完整性、匹配半成品的完成/续传/丢弃规划、速度、失败后半成品处置和平台中立错误展示类别已迁入 shared；Android 保留异常对象、PTP/USB/Socket、SAF、取消排空和本地化文案，重试任务完整快照由 Android 适配测试固定 |
+| 2026-09-04 | T04 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-191117.apk`，SHA-256 `C9D981428AB4C87A0D3B076048227CBAAB4030CBF1FB4A126A42FEEBFF45D31B`；Manifest 与 T03 完全相同，6 个共享下载策略类型/门面及 Android 原续传异常均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；当前仍是进程内失败重试，未虚报跨进程队列/断点恢复；本轮无已授权 ADB 设备 |
 
 ## 更新约定
 
