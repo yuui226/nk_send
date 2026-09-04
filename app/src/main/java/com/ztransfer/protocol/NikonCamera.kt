@@ -11,6 +11,7 @@ import android.os.SystemClock
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.catalog.cameraFileExtension
 import com.ztransfer.catalog.isCameraFileHeadPreferred
 import com.ztransfer.connection.StaInitiatorIdentity
 import com.ztransfer.connection.hasUsableStaAlbumStorage
@@ -1616,9 +1617,7 @@ class NikonCamera(private val context: Context) {
         val storageIds: Set<Int> = emptySet(),
     ) {
         /** 归一化扩展名：小写且带前导点（如 ".jpg"）；无扩展名返回 ""。UI 按此比较颜色/图标。 */
-        val extension: String = fileName.lastIndexOf('.').let { dot ->
-            if (dot < 0) "" else fileName.substring(dot).lowercase()
-        }
+        val extension: String = cameraFileExtension(fileName)
     }
 
     /**

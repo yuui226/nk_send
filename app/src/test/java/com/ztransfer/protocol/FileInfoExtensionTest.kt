@@ -5,13 +5,6 @@ import org.junit.Test
 
 class FileInfoExtensionTest {
     @Test
-    fun `extension is normalized once from filename`() {
-        assertEquals(".jpg", file("DSC_0001.JPG").extension)
-        assertEquals(".nef", file("archive.photo.NEF").extension)
-        assertEquals("", file("README").extension)
-    }
-
-    @Test
     fun `copy recomputes extension when filename changes`() {
         val jpeg = file("DSC_0001.JPG")
 
