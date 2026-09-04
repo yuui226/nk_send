@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：EXIF、相框领域/布局/文本/设置与滤镜收藏已共享
-- 下一项：`E02` 水印偏好、成片身份与滤镜收尾
+- 当前阶段：相框、滤镜、水印偏好与成片身份规则已完整共享
+- 下一项：`V01` CameraViewModel 最小纯策略收尾
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -87,7 +87,7 @@
 | G04 | DONE | GPS payload codec | 完整 41 字节向量固定；纯 Kotlin writer 与平台 UTC 适配已分离 |
 | G05 | DONE | GPS 配对业务状态机 | 17B codec、熵映射、认证算法与四阶段决策共享；BLE/加密/随机数分平台 |
 | E01 | DONE | EXIF、相框元数据和布局规则 | 模型、EXIF 归一、布局、文本、水印位置和元数据设置已共享；Bitmap/Canvas/ExifInterface/Geocoder 留平台层 |
-| E02 | NEXT | 滤镜参数、收藏和水印规则 | 参数/强度/50 个 NP3 目录与收藏已共享；水印偏好和成片身份待收尾 |
+| E02 | DONE | 滤镜参数、收藏和水印规则 | 参数/强度/50 个 NP3、收藏、水印偏好、像素内核和成片身份材料已共享；Bitmap/线程池/SHA-256 留平台层 |
 | L01 | DONE | 免费版限制和会员权益判断 | 三项限制与额度判断共享；日账、验签和支付流程保留平台层 |
 
 ### 6. ViewModel 与共享 UI
@@ -215,6 +215,8 @@
 | 2026-09-04 | G05/L01/E02 第一批 | shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-215225.apk`，SHA-256 `54EBA8A919A31B16D18B85A262B20293CDB6E6E82029D7430EF34C5F99E7EC15`；Manifest 与 S02 完全相同；本轮无已授权 ADB 设备 |
 | 2026-09-04 | E01/E02 收藏 | 相框模型、13 种持久化预设、水印值与位置规则、全部布局族、品牌/元数据文本、设置 codec/fingerprint、EXIF APEX/DMS/rational 回退及滤镜/相框收藏迁入 shared；Android 仅保留 Locale/date、ExifInterface/Geocoder、Bitmap/Canvas、MediaStore/SAF 和文件 IO 适配，原 app 回归测试继续通过 |
 | 2026-09-04 | E01/E02 收藏 | shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-221343.apk`，SHA-256 `1DEE83D781642E70ADF17FFD032C3F5A53D8FEB4A2284C9974D19FCA0E04A5AF`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`；`commonMain/commonTest` 无 Android/JVM 导入；本轮无已授权 ADB 设备 |
+| 2026-09-04 | E02 | 旧水印尺寸/透明度恢复、免费版权益水印、图片水印与边框位置约束、JPG/JPEG/PNG 派生门槛、成片 unhashed identity 迁入 shared；Android 继续负责 SHA-256 和本地路径。NCP/NP3 HSL、tone curve、色带、tonal controls 与中性色保护像素内核迁入 shared，Android 仍保留 Bitmap、ForkJoinPool、24-bit LUT、分条与取消编排 |
+| 2026-09-04 | E02 | 三组完整 ARGB 金向量、透明像素、旧摘要/成片文件名及水印兼容样本在 shared/app 全量单测中通过；双模块 Lint 与标准 Debug 打包通过。`ZTransfer-debug-1.81-20260904-223436.apk`，SHA-256 `8AFE0FEBDCA01DB4D336BCF16F412F266561ADB5F5E70CA68BC4063195C1D061`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`；本轮无已授权 ADB 设备 |
 
 ## 更新约定
 

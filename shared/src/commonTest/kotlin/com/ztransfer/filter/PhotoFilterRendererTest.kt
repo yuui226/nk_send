@@ -1,40 +1,40 @@
 package com.ztransfer.filter
 
 import kotlin.math.abs
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class PhotoFilterRendererTest {
     @Test
     fun neutralProtectionRejectsNoiseAndPreservesEstablishedColor() {
-        assertEquals(0f, PhotoFilterRenderer.neutralProtectionWeight(0f), 0f)
+        assertEquals(0f, photoFilterNeutralProtectionWeight(0f), 0f)
         assertEquals(
             0f,
-            PhotoFilterRenderer.neutralProtectionWeight(
-                PhotoFilterRenderer.NEUTRAL_PROTECTION_CHROMA_START,
+            photoFilterNeutralProtectionWeight(
+                NEUTRAL_PROTECTION_CHROMA_START,
             ),
             0f,
         )
         assertEquals(
             1f,
-            PhotoFilterRenderer.neutralProtectionWeight(
-                PhotoFilterRenderer.NEUTRAL_PROTECTION_CHROMA_END,
+            photoFilterNeutralProtectionWeight(
+                NEUTRAL_PROTECTION_CHROMA_END,
             ),
             0f,
         )
-        assertEquals(1f, PhotoFilterRenderer.neutralProtectionWeight(1f), 0f)
+        assertEquals(1f, photoFilterNeutralProtectionWeight(1f), 0f)
     }
 
     @Test
     fun neutralProtectionTransitionsSmoothlyAndMonotonically() {
-        val start = PhotoFilterRenderer.NEUTRAL_PROTECTION_CHROMA_START
-        val end = PhotoFilterRenderer.NEUTRAL_PROTECTION_CHROMA_END
+        val start = NEUTRAL_PROTECTION_CHROMA_START
+        val end = NEUTRAL_PROTECTION_CHROMA_END
         val middle = (start + end) / 2f
-        assertEquals(0.5f, PhotoFilterRenderer.neutralProtectionWeight(middle), 0.0001f)
+        assertEquals(0.5f, photoFilterNeutralProtectionWeight(middle), 0.0001f)
 
         val weights = (0..16).map { step ->
-            PhotoFilterRenderer.neutralProtectionWeight(start + (end - start) * step / 16f)
+            photoFilterNeutralProtectionWeight(start + (end - start) * step / 16f)
         }
         assertTrue(weights.zipWithNext().all { (left, right) -> left <= right })
     }
@@ -43,7 +43,7 @@ class PhotoFilterRendererTest {
     fun boundedHueNormalizationMatchesModuloDefinition() {
         listOf(-60f, -30f, -0.01f, 0f, 30f, 359.99f, 360f, 390f).forEach { hue ->
             val modulo = ((hue % 360f) + 360f) % 360f
-            assertEquals(modulo, PhotoFilterRenderer.normalizeHue(hue), 0f)
+            assertEquals(modulo, normalizePhotoFilterHue(hue), 0f)
         }
     }
 
@@ -55,7 +55,7 @@ class PhotoFilterRendererTest {
             val expected = 0.73f * (1f - abs(section % 2f - 1f))
             assertEquals(
                 expected,
-                PhotoFilterRenderer.hslSecondaryComponent(
+                photoFilterHslSecondaryComponent(
                     section = section,
                     sector = section.toInt(),
                     chroma = 0.73f,
@@ -70,15 +70,15 @@ class PhotoFilterRendererTest {
         val mapped = 0x00123456
         assertEquals(
             0xff123456.toInt(),
-            PhotoFilterRenderer.exactLookupOutputColor(0x00112233, mapped, false),
+            exactLookupOutputColor(0x00112233, mapped, false),
         )
         assertEquals(
             0x7f123456,
-            PhotoFilterRenderer.exactLookupOutputColor(0x7f112233, mapped, true),
+            exactLookupOutputColor(0x7f112233, mapped, true),
         )
         assertEquals(
             0x00112233,
-            PhotoFilterRenderer.exactLookupOutputColor(0x00112233, mapped, true),
+            exactLookupOutputColor(0x00112233, mapped, true),
         )
     }
 
@@ -157,12 +157,12 @@ class PhotoFilterRendererTest {
         assertEquals(
             "00112233,80050e14,ff000000,ffffffff,ff525252,ffa3000f,ff0fa300," +
                 "ff000fa3,ffff8551,ff503646",
-            PhotoFilterRenderer.renderArgbPixels(source, ncp, preserveAlpha = true).hexVector(),
+            renderPhotoFilterArgbPixels(source, ncp, preserveAlpha = true).hexVector(),
         )
         assertEquals(
             "00112233,80020508,ff000000,ffffffff,ff404040,ff750900,ff0e7100," +
                 "ff00136c,ffff934c,ff3b2835",
-            PhotoFilterRenderer.renderArgbPixels(
+            renderPhotoFilterArgbPixels(
                 source,
                 np3WithCurve,
                 preserveAlpha = true,
@@ -171,7 +171,7 @@ class PhotoFilterRendererTest {
         assertEquals(
             "00112233,800d2134,ff000000,ffffffff,ff7f7f7f,fff70d00,ff16f300," +
                 "ff001ef1,ffffc094,ff855d76",
-            PhotoFilterRenderer.renderArgbPixels(
+            renderPhotoFilterArgbPixels(
                 source,
                 np3WithoutCurve,
                 preserveAlpha = true,

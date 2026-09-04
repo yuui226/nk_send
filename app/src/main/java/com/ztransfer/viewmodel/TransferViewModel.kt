@@ -40,11 +40,7 @@ import com.ztransfer.frame.PHOTO_FRAME_PART_PREFIX
 import com.ztransfer.frame.hasFrameFor
 import com.ztransfer.frame.isCurrentPhotoFrameTempName
 import com.ztransfer.frame.isPhotoFrameOutputName
-import com.ztransfer.frame.isPhotoPlacement
 import com.ztransfer.frame.isSupportedPhotoFrameSourceExtension
-import com.ztransfer.frame.migratedPhotoFrameWatermarkSizePercent
-import com.ztransfer.frame.normalizePhotoFrameWatermarkOpacityPercent
-import com.ztransfer.frame.normalizePhotoFrameWatermarkSizePercent
 import com.ztransfer.frame.importPhotoFrameWatermarkImage as storePhotoFrameWatermarkImage
 import com.ztransfer.frame.photoFrameWatermarkImageFile
 import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
@@ -448,46 +444,6 @@ data class PhotoFilterCriteria(
 
 internal fun normalizeThumbnailColumns(columns: Int): Int = columns.coerceIn(2, 4)
 
-/** 迁移旧尺寸刻度；旧 50% 及以上保持视觉大小，低于 50% 的值归入新的最小档。 */
-internal fun restoredPhotoFrameWatermarkSizePercent(
-    persisted: Any?,
-    content: PhotoFrameWatermarkContent,
-    usesLegacyScale: Boolean = false,
-): Int {
-    if (persisted == null) return DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
-    val isLegacyNamedValue = persisted is String && persisted.toIntOrNull() == null
-    val rawPercent = when (persisted) {
-        is Number -> persisted.toInt()
-        is String -> persisted.toIntOrNull() ?: when (persisted) {
-            "SMALL" -> if (content == PhotoFrameWatermarkContent.IMAGE) 47 else 58
-            "MEDIUM" -> if (content == PhotoFrameWatermarkContent.IMAGE) 69 else 75
-            "LARGE" -> 100
-            else -> 75
-        }
-        else -> DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
-    }
-    return if (usesLegacyScale || isLegacyNamedValue) {
-        migratedPhotoFrameWatermarkSizePercent(rawPercent)
-    } else {
-        normalizePhotoFrameWatermarkSizePercent(rawPercent)
-    }
-}
-
-/** 兼容旧版 SUBTLE/STANDARD/STRONG 字符串；新版本直接持久化百分比。 */
-internal fun restoredPhotoFrameWatermarkOpacityPercent(persisted: Any?): Int {
-    val rawPercent = when (persisted) {
-        is Number -> persisted.toInt()
-        is String -> persisted.toIntOrNull() ?: when (persisted) {
-            "SUBTLE" -> 40
-            "STANDARD" -> 72
-            "STRONG" -> 100
-            else -> DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
-        }
-        else -> DEFAULT_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT
-    }
-    return normalizePhotoFrameWatermarkOpacityPercent(rawPercent)
-}
-
 internal val TransferState.photoFrameWatermark: PhotoFrameWatermark
     get() = PhotoFrameWatermark(
         enabled = photoFrameWatermarkEnabled,
@@ -502,67 +458,12 @@ internal val TransferState.photoFrameWatermark: PhotoFrameWatermark
         effect = photoFrameWatermarkEffect,
     )
 
-private const val FREE_PHOTO_FRAME_WATERMARK_SIZE_PERCENT =
-    DEFAULT_PHOTO_FRAME_WATERMARK_SIZE_PERCENT
-private const val FREE_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT = 80
-
-/** 免费版固定品牌水印；与高级版的默认偏好分开，避免产品水印调整覆盖用户设置。 */
-internal fun freeEditionPhotoFrameWatermark(): PhotoFrameWatermark = PhotoFrameWatermark(
-    sizePercent = FREE_PHOTO_FRAME_WATERMARK_SIZE_PERCENT,
-    opacityPercent = FREE_PHOTO_FRAME_WATERMARK_OPACITY_PERCENT,
-)
-
 internal val TransferState.photoFilterSelection: PhotoFilterSelection?
     get() {
         if (!photoFilterEnabled) return null
         val preset = photoFilters.firstOrNull { it.id == selectedPhotoFilterId } ?: return null
         return PhotoFilterSelection(preset, photoFilterIntensityPercent)
     }
-
-/** 免费版固定使用默认水印；高级版完整采用用户设置。预览和真正导出必须共用该入口。 */
-internal fun effectivePhotoFrameWatermark(
-    isPro: Boolean,
-    preference: PhotoFrameWatermark,
-    borderEnabled: Boolean = true,
-): PhotoFrameWatermark {
-    val permitted = if (isPro) preference else freeEditionPhotoFrameWatermark()
-    val imageHash = validPhotoFrameWatermarkImageHash(permitted.imageHash)
-    val content = if (
-        permitted.content == PhotoFrameWatermarkContent.IMAGE && imageHash != null
-    ) {
-        PhotoFrameWatermarkContent.IMAGE
-    } else {
-        PhotoFrameWatermarkContent.TEXT
-    }
-    return permitted.copy(
-        content = content,
-        text = permitted.displayText,
-        imageHash = imageHash,
-        sizePercent = normalizePhotoFrameWatermarkSizePercent(permitted.sizePercent),
-        opacityPercent = normalizePhotoFrameWatermarkOpacityPercent(permitted.opacityPercent),
-        position = if ((!borderEnabled || content == PhotoFrameWatermarkContent.IMAGE) &&
-            !permitted.position.isPhotoPlacement()
-        ) {
-            PhotoFrameWatermarkPosition.PHOTO_BOTTOM_CENTER
-        } else {
-            permitted.position
-        },
-    )
-}
-
-/** Normalizes persisted watermark values without replacing a temporarily unavailable position. */
-internal fun normalizedPhotoFrameWatermarkPreference(
-    preference: PhotoFrameWatermark,
-    borderEnabled: Boolean,
-): PhotoFrameWatermark = effectivePhotoFrameWatermark(
-    isPro = true,
-    preference = preference,
-    borderEnabled = borderEnabled,
-).copy(position = preference.position)
-
-/** 只允许 JPG/JPEG/PNG 派生效果图；视频、RAW 和未知类型始终保持原样传输。 */
-internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Boolean =
-    enabled && isSupportedPhotoFrameSourceExtension(extension)
 
 /** PTP 拍摄时间通常为 yyyyMMdd'T'HHmmss；异常或缺失时固定回退到入队当天。 */
 internal fun transferDateFolderName(
