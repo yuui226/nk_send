@@ -98,7 +98,7 @@ private const val EXTENDED_SOUND_LEVELS_OFFSET = 824
  * 未知版本/长度一律返回 null。AF 框记录使用同一份头部声明的数量与选中索引；
  * 只有完整记录区、索引和坐标都通过边界校验时才把框位交给 UI。
  */
-internal fun parseLiveViewMetadata(
+fun parseLiveViewMetadata(
     payload: ByteArray,
     jpegOffset: Int,
     operation: Int

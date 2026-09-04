@@ -1,9 +1,9 @@
 package com.ztransfer.protocol
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
-import org.junit.Test
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 class LiveViewMetadataTest {
     private fun putBe16(data: ByteArray, offset: Int, value: Int) {
@@ -121,6 +121,48 @@ class LiveViewMetadataTest {
     }
 
     @Test
+    fun declaredHeaderAndJpegLengthsMustMatchThePacketExactly() {
+        val wrongHeaderLength = z30Packet().also { putBe32(it, 8, 1024) }
+        assertNull(
+            parseLiveViewMetadata(
+                wrongHeaderLength,
+                jpegOffset = 512,
+                operation = Lab.NK_GET_LIVE_VIEW_IMG_EX,
+            ),
+        )
+
+        val wrongJpegLength = z30Packet().also { putBe32(it, 12, 31) }
+        assertNull(
+            parseLiveViewMetadata(
+                wrongJpegLength,
+                jpegOffset = 512,
+                operation = Lab.NK_GET_LIVE_VIEW_IMG_EX,
+            ),
+        )
+    }
+
+    @Test
+    fun rejectsUnknownJudgementAndZeroCoordinateCanvas() {
+        val unknownJudgement = z30Packet(judgement = 3)
+        assertNull(
+            parseLiveViewMetadata(
+                unknownJudgement,
+                jpegOffset = 512,
+                operation = Lab.NK_GET_LIVE_VIEW_IMG_EX,
+            ),
+        )
+
+        val zeroWidth = z30Packet().also { putBe16(it, 16, 0) }
+        assertNull(
+            parseLiveViewMetadata(
+                zeroWidth,
+                jpegOffset = 512,
+                operation = Lab.NK_GET_LIVE_VIEW_IMG_EX,
+            ),
+        )
+    }
+
+    @Test
     fun parsesSelectedFrameFromMultiFrameTrackingHeader() {
         val packet = z30Packet(frameCount = 2, selectedIndex = 1).also {
             putBe16(it, 48, 120)
@@ -169,6 +211,25 @@ class LiveViewMetadataTest {
 
         assertEquals(LiveViewFocusJudgement.FOCUSED, metadata?.focusJudgement)
         assertNull(metadata?.selectedFocusFrame)
+    }
+
+    @Test
+    fun acceptsTheLargestFrameTableThatEndsAtTheJpegBoundary() {
+        val lastFrameOffset = 48 + 57 * 8
+        val packet = z30Packet(frameCount = 58, selectedIndex = 57).also {
+            putBe16(it, lastFrameOffset, 200)
+            putBe16(it, lastFrameOffset + 2, 100)
+            putBe16(it, lastFrameOffset + 4, 2_784)
+            putBe16(it, lastFrameOffset + 6, 1_856)
+        }
+
+        val metadata = parseLiveViewMetadata(
+            packet,
+            jpegOffset = 512,
+            operation = Lab.NK_GET_LIVE_VIEW_IMG_EX,
+        )
+
+        assertNotNull(metadata?.selectedFocusFrame)
     }
 
     @Test
