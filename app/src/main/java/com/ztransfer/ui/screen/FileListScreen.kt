@@ -130,6 +130,15 @@ import com.ztransfer.viewmodel.ExportedOriginalIndex
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.PhotoFilterCriteria
 import com.ztransfer.viewmodel.PhotoDateRange
+import com.ztransfer.catalog.CameraFileFilter
+import com.ztransfer.catalog.UNKNOWN_CAPTURE_DATE_GROUP_KEY
+import com.ztransfer.catalog.filterCameraFiles
+import com.ztransfer.catalog.groupCameraFilesByDate
+import com.ztransfer.catalog.isStorageSlotSelected
+import com.ztransfer.catalog.normalizeStorageSlotFilter
+import com.ztransfer.catalog.storageFilterSlots
+import com.ztransfer.catalog.storageIdsBySlot
+import com.ztransfer.catalog.toggleStorageSlotSelection
 import com.ztransfer.viewmodel.TransferState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferTask
@@ -137,7 +146,6 @@ import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
 import com.ztransfer.viewmodel.latestCaptureLocalDate
-import com.ztransfer.catalog.storageIdsBySlot
 import com.ztransfer.viewmodel.transferredOriginalUri
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -447,7 +455,7 @@ private val TYPE_BADGE_COLORED_EXTS = setOf(".jpg", ".nef", ".mov", ".mp4")
 
 // 无拍摄日期文件的分组键（非显示文案，显示时映射到 R.string.unknown_date）。
 // 以 "zzz" 开头保证按键降序排序时排在所有 "yyyyMMdd" 日期之前，与原行为一致。
-private const val UNKNOWN_DATE_KEY = "zzz_unknown"
+private const val UNKNOWN_DATE_KEY = UNKNOWN_CAPTURE_DATE_GROUP_KEY
 
 // 回到顶部：翻过多少条目（含分组头）才算"够深"；点击回顶时先瞬移到该位置再动画收尾。
 private const val BACK_TO_TOP_MIN_INDEX = 30
@@ -489,10 +497,9 @@ internal fun Context.findActivity(): Activity? {
 }
 
 fun groupFilesByDate(files: List<NikonCamera.FileInfo>): List<FileGroup> {
-    val grouped = files.groupBy { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
-    return grouped.map { (date, groupFiles) ->
-        FileGroup(date = date, files = groupFiles.sortedByDescending { it.captureDate ?: "" })
-    }.sortedByDescending { it.date }
+    return groupCameraFilesByDate(files).map { group ->
+        FileGroup(date = group.date, files = group.files)
+    }
 }
 
 private data class PublishedCameraFileIdentity(
@@ -966,17 +973,23 @@ fun FileListScreen(
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
-        val files = presentedCameraFiles.asSequence()
-            .filter { filterExts == null || it.extension in filterExts }
-            .filter { !filterProtected || it.isProtected }
-            .filter { !filterBurst || it.handle in burstHandles }
-            .filter { !filterUntransferred || it.handle !in filteredExportHandles }
-            .filter { file ->
-                filterStorageSlot == null ||
-                    selectedStorageIds?.any { storageId -> storageId in file.storageIds } == true
-            }
-            .filter { filterDateRange == null || filterDateRange.containsCaptureDate(it.captureDate) }
-            .toList()
+        val files = filterCameraFiles(
+            files = presentedCameraFiles,
+            criteria = CameraFileFilter(
+                extensions = filterExts,
+                protectedOnly = filterProtected,
+                burstOnly = filterBurst,
+                untransferredOnly = filterUntransferred,
+                selectedStorageIds = if (filterStorageSlot == null) {
+                    null
+                } else {
+                    selectedStorageIds.orEmpty()
+                },
+                dateRange = filterDateRange?.captureDayRange,
+            ),
+            burstHandles = burstHandles,
+            transferredHandles = filteredExportHandles,
+        )
         groupFilesByDate(files)
     }
     LaunchedEffect(presentedCameraFiles) {
@@ -4173,41 +4186,6 @@ private fun LoadingMoreRow() {
 private fun formatDateHeader(date: String): String {
     if (date.length < 8 || date == UNKNOWN_DATE_KEY) return date
     return "${date.substring(0, 4)}-${date.substring(4, 6)}-${date.substring(6, 8)}"
-}
-
-/**
- * null 表示全部可用卡槽都选中；非 null 表示只选中了该卡槽。
- * 相机最多有两个卡槽，因此这两个状态即可完整表达“默认多选 / 筛选时单选”。
- */
-internal fun isStorageSlotSelected(selectedSlot: Int?, slot: Int): Boolean =
-    selectedSlot == null || selectedSlot == slot
-
-/** 只有当前相机明确存在至少两个卡槽时，卡槽筛选才有可表达的意义。 */
-internal fun storageFilterSlots(availableSlots: Collection<Int>): List<Int> =
-    availableSlots.distinct().sorted().takeIf { it.size > 1 }.orEmpty()
-
-/** 扫描完成后将单卡、无卡或无效选择归回“全部”；扫描途中不根据暂缺数据误清。 */
-internal fun normalizeStorageSlotFilter(
-    selectedSlot: Int?,
-    availableSlots: List<Int>,
-    hasCompletedFileScan: Boolean,
-): Int? {
-    if (selectedSlot == null || !hasCompletedFileScan) return selectedSlot
-    return selectedSlot.takeIf { availableSlots.size > 1 && it in availableSlots }
-}
-
-internal fun toggleStorageSlotSelection(
-    selectedSlot: Int?,
-    toggledSlot: Int,
-    availableSlots: List<Int>,
-): Int? {
-    val slots = availableSlots.distinct()
-    if (toggledSlot !in slots) return selectedSlot
-    return when {
-        selectedSlot == null -> slots.singleOrNull { it != toggledSlot }
-        selectedSlot == toggledSlot -> selectedSlot // 至少保留一张卡，不能筛成空集
-        else -> null // 补选另一张卡，恢复默认的“全部卡槽”状态
-    }
 }
 
 /** 大图打开时，底层照片网格只能读本地缓存，不能继续向相机取缩略图。 */
