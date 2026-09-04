@@ -54,6 +54,17 @@ class CameraCatalogPolicyTest {
     }
 
     @Test
+    fun fileHeadPreferenceReleasesMissingDatesAndKeepsTiesStable() {
+        assertEquals(true, isCameraFileHeadPreferred(null, "20260807T090000"))
+        assertEquals(false, isCameraFileHeadPreferred("20260807T090000", null))
+        assertEquals(false, isCameraFileHeadPreferred(null, null))
+        assertEquals(false, isCameraFileHeadPreferred("20260807T090000", "20260807T090000"))
+        assertEquals(true, isCameraFileHeadPreferred("20260808T090000", "20260807T090000"))
+        // Existing behavior is lexical comparison, even for malformed date strings.
+        assertEquals(true, isCameraFileHeadPreferred("invalid", "20260807T090000"))
+    }
+
+    @Test
     fun standardAndFallbackStorageSlotsRemainStable() {
         assertEquals(
             mapOf(1 to setOf(0x00010001), 2 to setOf(0x00020001)),

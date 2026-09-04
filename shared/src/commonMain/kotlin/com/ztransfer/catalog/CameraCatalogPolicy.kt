@@ -39,6 +39,20 @@ fun mergeStorageIds(existing: Set<Int>, duplicate: Set<Int>): Set<Int> =
     if (duplicate.all(existing::contains)) existing else existing + duplicate
 
 /**
+ * Selects between two present per-card catalog heads. A missing capture date is deliberately
+ * released first so it cannot block newer dated files behind it; equal values keep card order.
+ */
+fun isCameraFileHeadPreferred(
+    candidateCaptureDate: String?,
+    selectedCaptureDate: String?,
+): Boolean = when {
+    candidateCaptureDate == null && selectedCaptureDate != null -> true
+    candidateCaptureDate != null && selectedCaptureDate == null -> false
+    candidateCaptureDate == null -> false
+    else -> candidateCaptureDate > checkNotNull(selectedCaptureDate)
+}
+
+/**
  * Maps PTP StorageIDs to physical card slots. Standard physical and low-word slot identifiers are
  * preferred; non-standard physical groups fill remaining slots in stable signed-ID order.
  */

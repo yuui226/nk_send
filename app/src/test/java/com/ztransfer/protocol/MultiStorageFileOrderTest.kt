@@ -1,9 +1,20 @@
 package com.ztransfer.protocol
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class MultiStorageFileOrderTest {
+    @Test
+    fun emptyHeadsAreIgnoredWithoutInventingAnIndex() {
+        assertNull(selectNewestFileHeadIndex(emptyList()))
+        assertNull(selectNewestFileHeadIndex(listOf(null, null)))
+        assertEquals(
+            1,
+            selectNewestFileHeadIndex(listOf(null, file(2, "20260807T090000"))),
+        )
+    }
+
     @Test
     fun newestDatedHeadWinsAcrossCards() {
         assertEquals(
@@ -40,6 +51,14 @@ class MultiStorageFileOrderTest {
                     file(2, null),
                 )
             ),
+        )
+    }
+
+    @Test
+    fun twoMissingDatesKeepStableStorageOrder() {
+        assertEquals(
+            0,
+            selectNewestFileHeadIndex(listOf(file(1, null), file(2, null))),
         )
     }
 

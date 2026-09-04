@@ -11,6 +11,7 @@ import android.os.SystemClock
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
+import com.ztransfer.catalog.isCameraFileHeadPreferred
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import kotlinx.coroutines.CancellationException
@@ -74,15 +75,9 @@ internal fun selectNewestFileHeadIndex(
             return@forEachIndexed
         }
         val selectedFile = heads[selected] ?: return@forEachIndexed
-        val candidateDate = candidate.captureDate
-        val selectedDate = selectedFile.captureDate
-        val candidateIsNewer = when {
-            candidateDate == null && selectedDate != null -> true
-            candidateDate != null && selectedDate == null -> false
-            candidateDate == null -> false
-            else -> candidateDate > checkNotNull(selectedDate)
+        if (isCameraFileHeadPreferred(candidate.captureDate, selectedFile.captureDate)) {
+            selected = index
         }
-        if (candidateIsNewer) selected = index
     }
     return selected.takeIf { it >= 0 }
 }
