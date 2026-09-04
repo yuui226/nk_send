@@ -1,5 +1,6 @@
 package com.ztransfer.protocol
 
+import com.ztransfer.test.hexBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -7,7 +8,7 @@ import kotlin.test.assertFails
 class NikonDatasetParserTest {
     @Test
     fun deviceInfoMatchesFixedDataset() {
-        val payload = hex(
+        val payload = hexBytes(
             "6400EFCDAB8905A0033C5CB75E0000010003000000011028942894" +
                 "01000000084002000000015067D000000000010000000138" +
                 "064E0069006B006F006E000000" +
@@ -45,12 +46,12 @@ class NikonDatasetParserTest {
     fun legacyAndExtendedEventsMatchExistingShapes() {
         assertEquals(
             listOf(0x4002 to 0x291961F6L),
-            parseNikonEvents(hex("01000240F6611929")),
+            parseNikonEvents(hexBytes("01000240F6611929")),
         )
         assertEquals(
             listOf(0x4002 to 0x291961F6L, 0x400D to 0L),
             parseNikonExtendedEvents(
-                hex("0200000002400200F6611929010001000D400000"),
+                hexBytes("0200000002400200F6611929010001000D400000"),
             ),
         )
     }
@@ -58,13 +59,13 @@ class NikonDatasetParserTest {
     @Test
     fun malformedEventsKeepThrowing() {
         assertFails {
-            parseNikonExtendedEvents(hex("0100000002400100"))
+            parseNikonExtendedEvents(hexBytes("0100000002400100"))
         }
         assertFails {
-            parseNikonExtendedEvents(hex("0100000002400600") + ByteArray(24))
+            parseNikonExtendedEvents(hexBytes("0100000002400600") + ByteArray(24))
         }
         assertFails {
-            parseNikonEvents(hex("01000240"))
+            parseNikonEvents(hexBytes("01000240"))
         }
     }
 
@@ -72,31 +73,25 @@ class NikonDatasetParserTest {
     fun vendorCodesStay32BitAndRejectFalseCounts() {
         assertEquals(
             setOf(0xD1A3, 0x1D033, 0xD1BD),
-            parseVendorCodes32(hex("03000000A3D1000033D00100BDD10000")),
+            parseVendorCodes32(hexBytes("03000000A3D1000033D00100BDD10000")),
         )
         assertFails {
-            parseVendorCodes32(hex("0200000033D00100"))
+            parseVendorCodes32(hexBytes("0200000033D00100"))
         }
     }
 
     @Test
     fun truncatedDeviceInfoStillFailsInsteadOfReturningPartialCapabilities() {
         assertFails { parseDeviceInfo(byteArrayOf()) }
-        assertFails { parseDeviceInfo(hex("64000A00000064000100")) }
+        assertFails { parseDeviceInfo(hexBytes("64000A00000064000100")) }
         assertFails {
-            parseDeviceInfo(hex("64000A0000006400000000FFFFFFFF"))
+            parseDeviceInfo(hexBytes("64000A0000006400000000FFFFFFFF"))
         }
 
         assertEquals(
             "\uFFFDX\uFFFD",
-            hex("00D8580000DC").decodeUtf16LittleEndian(offset = 0, codeUnits = 3),
+            hexBytes("00D8580000DC").decodeUtf16LittleEndian(offset = 0, codeUnits = 3),
         )
     }
 
-    private fun hex(value: String): ByteArray {
-        require(value.length % 2 == 0)
-        return ByteArray(value.length / 2) { index ->
-            value.substring(index * 2, index * 2 + 2).toInt(16).toByte()
-        }
-    }
 }

@@ -1,5 +1,6 @@
 package com.ztransfer.protocol
 
+import com.ztransfer.test.hexBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -12,7 +13,7 @@ class PtpObjectInfoParserTest {
         val parsed = requireNotNull(
             parsePtpObjectInfo(
                 handle = 7,
-                data = hex(
+                data = hexBytes(
                     "0100010001B10080FFFFFFFF01380403020140010000F00000004020000080150000" +
                         "0E000000000000000000000000007856341209677147723DD800DE2E004E00450046000000" +
                         "1032003000320036003000390030003400540031003500300036003000370000000000",
@@ -94,7 +95,7 @@ class PtpObjectInfoParserTest {
         assertNull(parsePtpObjectFileName(ptpString("BAD:0001.JPG")))
         assertNull(parsePtpObjectFileName(path.copyOf(path.size - 1)))
 
-        val propertyList = hex(
+        val propertyList = hexBytes(
             "010000004433221107DCFFFF0D" +
                 "4400530043005F0030003000300031002E004A00500047000000",
         )
@@ -138,10 +139,4 @@ class PtpObjectInfoParserTest {
             }
         }
 
-    private fun hex(value: String): ByteArray {
-        require(value.length % 2 == 0)
-        return ByteArray(value.length / 2) { index ->
-            value.substring(index * 2, index * 2 + 2).toInt(16).toByte()
-        }
-    }
 }

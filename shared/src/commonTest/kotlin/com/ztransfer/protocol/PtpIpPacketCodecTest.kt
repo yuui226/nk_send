@@ -1,5 +1,6 @@
 package com.ztransfer.protocol
 
+import com.ztransfer.test.byteValues
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -13,7 +14,7 @@ class PtpIpPacketCodecTest {
         val packet = PtpIpPacketCodec.encode(PtpConstants.PONG)
 
         assertContentEquals(
-            bytes(0x08, 0, 0, 0, 0x0E, 0, 0, 0),
+            byteValues(0x08, 0, 0, 0, 0x0E, 0, 0, 0),
             packet,
         )
         assertEquals(8, PtpIpPacketCodec.readLength(packet))
@@ -22,7 +23,7 @@ class PtpIpPacketCodecTest {
 
     @Test
     fun eventPacketWithPayloadMatchesTheWireVector() {
-        val payload = bytes(
+        val payload = byteValues(
             0x08, 0x40,
             0x44, 0x33, 0x22, 0x11,
             0x88, 0x77, 0x66, 0x55,
@@ -31,7 +32,7 @@ class PtpIpPacketCodecTest {
         val packet = PtpIpPacketCodec.encode(PtpConstants.EVENT, payload)
 
         assertContentEquals(
-            bytes(
+            byteValues(
                 0x12, 0, 0, 0,
                 0x08, 0, 0, 0,
                 0x08, 0x40,
@@ -62,7 +63,7 @@ class PtpIpPacketCodecTest {
         bytes.writeInt64LittleEndian(6, 0x0123456789ABCDEFL)
 
         assertContentEquals(
-            bytes(
+            byteValues(
                 0x05, 0xA0,
                 0xEF, 0xCD, 0xAB, 0x89,
                 0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01,
@@ -75,6 +76,4 @@ class PtpIpPacketCodecTest {
         assertEquals(0x0123456789ABCDEFL, bytes.readInt64LittleEndian(6))
     }
 
-    private fun bytes(vararg values: Int): ByteArray =
-        ByteArray(values.size) { index -> values[index].toByte() }
 }

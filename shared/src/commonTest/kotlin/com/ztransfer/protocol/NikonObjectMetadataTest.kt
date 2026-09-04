@@ -1,5 +1,6 @@
 package com.ztransfer.protocol
 
+import com.ztransfer.test.hexBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -59,7 +60,7 @@ class NikonObjectMetadataTest {
         assertEquals(
             mapOf(0x291961F5 to "20260824T204540"),
             parseNikonObjectsMetadataCaptureDates(
-                hex("6400000001000000F56119290000000000282D141808EA07"),
+                hexBytes("6400000001000000F56119290000000000282D141808EA07"),
             ),
         )
         assertEquals(
@@ -155,7 +156,4 @@ class NikonObjectMetadataTest {
         repeat(4) { index -> this[offset + index] = (value ushr (index * 8)).toByte() }
     }
 
-    private fun hex(value: String): ByteArray = value.chunked(2)
-        .map { it.toInt(16).toByte() }
-        .toByteArray()
 }

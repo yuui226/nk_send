@@ -1,5 +1,6 @@
 package com.ztransfer.gps
 
+import com.ztransfer.test.byteValues
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -17,7 +18,7 @@ class GeoPayloadEncoderTest {
         )
 
         assertContentEquals(
-            bytes(
+            byteValues(
                 0x7F, 0x00,
                 'N'.code, 39, 54, 25, 20,
                 'W'.code, 116, 24, 44, 39,
@@ -49,7 +50,7 @@ class GeoPayloadEncoderTest {
         assertEquals(5, payload[22].toInt())
         assertEquals(0, payload[23].toInt())
         assertEquals(1, payload[24].toInt())
-        assertContentEquals(bytes('W'.code, 'G'.code, 'S'.code, '-'.code, '8'.code, '4'.code), payload.copyOfRange(25, 31))
+        assertContentEquals(byteValues('W'.code, 'G'.code, 'S'.code, '-'.code, '8'.code, '4'.code), payload.copyOfRange(25, 31))
     }
 
     @Test
@@ -63,7 +64,7 @@ class GeoPayloadEncoderTest {
         )
 
         assertContentEquals(
-            bytes(
+            byteValues(
                 0x7F, 0x00,
                 'N'.code, 0, 0, 0, 0,
                 'E'.code, 0, 0, 0, 0,
@@ -85,6 +86,4 @@ class GeoPayloadEncoderTest {
         (this[offset].toInt() and 0xFF) or
             ((this[offset + 1].toInt() and 0xFF) shl 8)
 
-    private fun bytes(vararg values: Int): ByteArray =
-        ByteArray(values.size) { index -> values[index].toByte() }
 }

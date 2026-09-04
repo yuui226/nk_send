@@ -1,5 +1,6 @@
 package com.ztransfer.protocol
 
+import com.ztransfer.test.hexBytes
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
@@ -12,7 +13,7 @@ class PtpDevicePropertyCodecTest {
     @Test
     fun unsignedEnumerationDescriptorMatchesFixedDataset() {
         val descriptor = parsePtpDevicePropDescriptor(
-            hex("0F500400016400C8000203006400C800FFFF"),
+            hexBytes("0F500400016400C8000203006400C800FFFF"),
         )
 
         assertEquals(0x500F, descriptor.propertyCode)
@@ -28,7 +29,7 @@ class PtpDevicePropertyCodecTest {
     @Test
     fun signedRangeAndBooleanRangeMatchFixedDatasets() {
         val signed = parsePtpDevicePropDescriptor(
-            hex("1050030001000018FC0178EC88134D01"),
+            hexBytes("1050030001000018FC0178EC88134D01"),
         )
         assertEquals(0L, signed.defaultValue)
         assertEquals(-1000L, signed.current)
@@ -36,7 +37,7 @@ class PtpDevicePropertyCodecTest {
         assertEquals(5000L, signed.rangeMax)
         assertEquals(333L, signed.rangeStep)
 
-        val boolean = parsePtpDevicePropDescriptor(hex("54D0020001000101000101"))
+        val boolean = parsePtpDevicePropDescriptor(hexBytes("54D0020001000101000101"))
         assertEquals(1L, boolean.current)
         assertEquals(0L, boolean.rangeMin)
         assertEquals(1L, boolean.rangeMax)
@@ -45,7 +46,7 @@ class PtpDevicePropertyCodecTest {
 
     @Test
     fun writableAndUnknownFormRulesIgnoreTrailingBytes() {
-        val base = hex("01500200020506037F")
+        val base = hexBytes("01500200020506037F")
         val descriptor = parsePtpDevicePropDescriptor(base + byteArrayOf(0x55))
 
         assertFalse(descriptor.writable)
@@ -56,7 +57,7 @@ class PtpDevicePropertyCodecTest {
         assertNull(descriptor.rangeMin)
 
         val echoFailure = runCatching {
-            parsePtpDevicePropDescriptor(0x5002, hex("0150"))
+            parsePtpDevicePropDescriptor(0x5002, hexBytes("0150"))
         }.exceptionOrNull()
         requireNotNull(echoFailure)
         assertTrue(echoFailure.message.orEmpty().contains("descriptor echoed 0x5001"))
@@ -78,18 +79,18 @@ class PtpDevicePropertyCodecTest {
         assertEquals(4, ptpScalarSize(0x0006))
         assertEquals(8, ptpScalarSize(0x0008))
         assertNull(ptpScalarSize(0xFFFF))
-        assertContentEquals(hex("EFCDAB89"), encodePtpScalar(0x0006, 0x89ABCDEFL))
+        assertContentEquals(hexBytes("EFCDAB89"), encodePtpScalar(0x0006, 0x89ABCDEFL))
     }
 
     @Test
     fun nonScalarAndMalformedArrayValuesAreBounded() {
-        val stringValue = decodePtpTypedValue(0xFFFF, hex("0241000000"))
+        val stringValue = decodePtpTypedValue(0xFFFF, hexBytes("0241000000"))
         assertFalse(stringValue.isScalar)
         assertEquals(0L, stringValue.value)
 
-        val arrayValue = decodePtpTypedValue(0x4004, hex("020000000100FFFF"))
+        val arrayValue = decodePtpTypedValue(0x4004, hexBytes("020000000100FFFF"))
         assertFalse(arrayValue.isScalar)
-        assertFails { decodePtpTypedValue(0x4004, hex("FFFFFFFF")) }
+        assertFails { decodePtpTypedValue(0x4004, hexBytes("FFFFFFFF")) }
         assertFails { decodePtpTypedValue(0x0009, ByteArray(15)) }
     }
 
@@ -97,21 +98,15 @@ class PtpDevicePropertyCodecTest {
     fun vendorUInt16CodesDeduplicateAndFalseCountsFail() {
         assertEquals(
             listOf(0x5001, 0xD067),
-            parseVendorCodes16(hex("030000000150015067D0")).toList(),
+            parseVendorCodes16(hexBytes("030000000150015067D0")).toList(),
         )
-        assertFails { parseVendorCodes16(hex("FFFFFFFF")) }
+        assertFails { parseVendorCodes16(hexBytes("FFFFFFFF")) }
     }
 
     private fun assertValue(dataType: Int, encoded: String, expected: Long) {
-        val decoded = decodePtpTypedValue(dataType, hex(encoded))
+        val decoded = decodePtpTypedValue(dataType, hexBytes(encoded))
         assertTrue(decoded.isScalar)
         assertEquals(expected, decoded.value)
     }
 
-    private fun hex(value: String): ByteArray {
-        require(value.length % 2 == 0)
-        return ByteArray(value.length / 2) { index ->
-            value.substring(index * 2, index * 2 + 2).toInt(16).toByte()
-        }
-    }
 }
