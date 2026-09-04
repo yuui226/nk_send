@@ -1,9 +1,18 @@
 package com.ztransfer.filter
 
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 
 class PhotoFilterPresetTest {
+    @Test
+    fun colorBandCentersRemainPrimitiveHotPathLookup() {
+        assertContentEquals(
+            floatArrayOf(0f, 30f, 60f, 120f, 180f, 240f, 280f, 320f),
+            PHOTO_FILTER_COLOR_BAND_CENTERS,
+        )
+    }
+
     @Test
     fun toneCurveMapsEndpointsAndInterpolatesBetweenSamples() {
         val curve = FloatArray(PHOTO_FILTER_TONE_CURVE_POINT_COUNT) { index ->

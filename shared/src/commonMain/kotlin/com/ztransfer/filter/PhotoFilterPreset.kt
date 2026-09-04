@@ -99,7 +99,7 @@ private fun normalizeToneCurve(curve: IntArray) =
         curve[index] / PHOTO_FILTER_TONE_CURVE_MAX_VALUE.toFloat()
     }
 
-val PHOTO_FILTER_COLOR_BAND_CENTERS = listOf(
+internal val PHOTO_FILTER_COLOR_BAND_CENTERS = floatArrayOf(
     0f,
     30f,
     60f,

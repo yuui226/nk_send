@@ -112,7 +112,7 @@
 | I02 | MAC | iOS 文件与照片实现 | PhotoKit、Files、临时文件和恢复 |
 | I03 | MAC | iOS 蓝牙、定位与后台实现 | CoreBluetooth、CoreLocation、后台宽限 |
 | I04 | MAC | iOS 录像、购买和更新实现 | AVFoundation、StoreKit、App Store |
-| Q01 | DONE | Android 迁移最终多轮回归 | 667 项测试、双模块 Lint、标准 APK、Manifest/DEX 与独立等价审计通过 |
+| Q01 | DONE | Android 迁移最终多轮回归 | 668 项测试、双模块 Lint、标准 APK、Manifest/DEX 与独立等价审计通过 |
 | Q02 | MAC | iOS 模拟器和真机功能矩阵 | 权限、网络、传输、后台、异常恢复 |
 | Q03a | DONE | Android/common 边界审计 | `commonMain/commonTest` 无平台 API，迁入模型/规则单一定义，依赖保持 `app -> shared` |
 | Q03b | MAC | 双端代码边界审计 | iOS 实现完成后确认双端无重复业务规则 |
@@ -219,7 +219,8 @@
 | 2026-09-04 | E02 | 三组完整 ARGB 金向量、透明像素、旧摘要/成片文件名及水印兼容样本在 shared/app 全量单测中通过；双模块 Lint 与标准 Debug 打包通过。`ZTransfer-debug-1.81-20260904-223436.apk`，SHA-256 `8AFE0FEBDCA01DB4D336BCF16F412F266561ADB5F5E70CA68BC4063195C1D061`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`；本轮无已授权 ADB 设备 |
 | 2026-09-04 | V01/V02/V03 | `CameraViewModel` 的发布/双卡归并、扫描句柄、EXIF/预览身份规则，`TransferViewModel` 的完整任务快照、入队/进度/撤回/清理/重试 reducer，以及 Home/文件列表/队列最小 presentation state 迁入 shared；Android 原调用点改用共享实现，平台会话、锁、StateFlow、AtomicLong、LocalDate、Compose、动画、Service 和 IO 保持原位 |
 | 2026-09-04 | A01/Q03a | 两路独立只读审计逐项对照 `c06c1e6`，未发现语义、性能或线程变化；`app -> shared` 单向依赖，`commonMain/commonTest` 的 Android/JVM API 导入为 0；相册发布 typed identity 已收为单一定义，未改成存在分隔符碰撞可能的字符串身份 |
-| 2026-09-04 | Q01 | shared 350 项 + app 317 项单测全部通过，双模块 Lint 各 0 issue，标准 Debug 打包成功；`ZTransfer-debug-1.81-20260904-231421.apk`，SHA-256 `C101D923527EB2B22D5E0C270CD895AFEF6E7B43553E7455081EF4D4F3CB7E0F`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`，7 个抽查迁入模型均为单一 DEX 定义；本轮无已授权 ADB 设备，沿用本分支此前真机安装启动证据 |
+| 2026-09-04 | Q01 | shared 350 项 + app 317 项单测全部通过，双模块 Lint 均通过（各 0 Error；shared 0 issue，app 175 Warning/12 Hint），标准 Debug 打包成功；`ZTransfer-debug-1.81-20260904-231421.apk`，SHA-256 `C101D923527EB2B22D5E0C270CD895AFEF6E7B43553E7455081EF4D4F3CB7E0F`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`，7 个抽查迁入模型均为单一 DEX 定义；本轮无已授权 ADB 设备，沿用本分支此前真机安装启动证据 |
+| 2026-09-05 | Q01 复审 | 修复 common metadata 不支持 `putIfAbsent` 的编译阻断，并恢复滤镜色带中心为迁移前的 `FloatArray` 热路径；common metadata 强制编译通过，shared 351 项 + app 317 项单测全部通过，双模块 Lint 各 0 Error。Release APK/AAB 任务图通过，shared/App Release 编译、R8、Lint Vital 和正式签名校验实跑通过；`dist/build.bat` 与混淆规则未被共享化改动，签名配置和 keystore 可用，脚本可继续使用，本轮未生成正式包且未改动 `dist`。标准 Debug 包 `ZTransfer-debug-1.81-20260905-003118.apk`，SHA-256 `BD4C702C9843D1D6FFE3B745DB28FF4AA907691226EF0B840853F6FFF1470B2E`；v2 签名有效，包名/版本为 `com.ztransfer.debug` / `1.81-debug (54)`，APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`；用户已对上一最终包真机验证有线与 STA 模式无异常 |
 
 ## 更新约定
 

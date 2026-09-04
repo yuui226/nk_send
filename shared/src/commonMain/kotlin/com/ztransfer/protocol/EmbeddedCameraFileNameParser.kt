@@ -32,10 +32,10 @@ fun findEmbeddedCameraFileNames(
             parsePtpObjectFileName(data, offset)?.first
                 ?.takeIf(::isPlausibleCameraFileName)
                 ?.let { name ->
-                    results.putIfAbsent(
-                        "$offset:$name",
-                        EmbeddedCameraFileName(offset, name, "ptp-string"),
-                    )
+                    val key = "$offset:$name"
+                    if (key !in results) {
+                        results[key] = EmbeddedCameraFileName(offset, name, "ptp-string")
+                    }
                 }
         }
     }
@@ -62,10 +62,10 @@ fun findEmbeddedCameraFileNames(
                 for (index in start until end) append((data[index].toInt() and 0xFF).toChar())
             }
             if (isPlausibleCameraFileName(candidate)) {
-                results.putIfAbsent(
-                    "$start:$candidate",
-                    EmbeddedCameraFileName(start, candidate, "ascii"),
-                )
+                val key = "$start:$candidate"
+                if (key !in results) {
+                    results[key] = EmbeddedCameraFileName(start, candidate, "ascii")
+                }
             }
         }
         dot++
