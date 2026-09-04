@@ -259,117 +259,6 @@ suspend fun NikonCamera.labSetProp(prop: Int, raw: ByteArray): Int =
 
 // ============================ PTP 数据集解析 ============================
 
-/** 小端游标读取器（解析 DeviceInfo/PropDesc/事件等数据集用，越界抛异常由调用方兜住）。 */
-private class Cur(val d: ByteArray) {
-    var p = 0
-    fun u8(): Int = d[p++].toInt() and 0xFF
-    fun u16(): Int {
-        val v = (d[p].toInt() and 0xFF) or ((d[p + 1].toInt() and 0xFF) shl 8)
-        p += 2; return v
-    }
-    fun u32(): Long {
-        var v = 0L
-        for (i in 0 until 4) v = v or ((d[p + i].toLong() and 0xFF) shl (8 * i))
-        p += 4; return v
-    }
-    fun u64(): Long {
-        var v = 0L
-        for (i in 0 until 8) v = v or ((d[p + i].toLong() and 0xFF) shl (8 * i))
-        p += 8; return v
-    }
-
-    /** PTP 字符串：u8 字符数（含终止 null）+ UTF-16LE。 */
-    fun str(): String {
-        val n = u8()
-        if (n == 0) return ""
-        val s = String(d, p, n * 2, Charsets.UTF_16LE).trimEnd('\u0000')
-        p += n * 2
-        return s
-    }
-
-    /** PTP AUINT16 数组：u32 count + count×u16。 */
-    fun u16Array(): IntArray {
-        val n = u32().toInt()
-        return IntArray(n) { u16() }
-    }
-
-    /**
-     * 按 PTP dataType 读一个值。标量返回符号处理后的 Long；字符串/数组返回 0 并跳过。
-     * 返回 (raw, 是否标量)。
-     */
-    fun typed(dataType: Int): Pair<Long, Boolean> = when (dataType) {
-        0x0001 -> u8().toByte().toLong() to true            // INT8
-        0x0002 -> u8().toLong() to true                     // UINT8
-        0x0003 -> u16().toShort().toLong() to true          // INT16
-        0x0004 -> u16().toLong() to true                    // UINT16
-        0x0005 -> u32().toInt().toLong() to true            // INT32
-        0x0006 -> u32() to true                             // UINT32
-        0x0007, 0x0008 -> u64() to true                     // INT64/UINT64（显示按无符号即可）
-        0x0009, 0x000A -> { p += 16; 0L to false }          // INT128/UINT128
-        0xFFFF -> { str(); 0L to false }                    // STR
-        else -> {                                            // 数组类型 0x40xx：u32 count + 元素
-            if (dataType and 0x4000 != 0) {
-                val elem = dataType and 0xFF
-                val size = when (elem) {
-                    0x01, 0x02 -> 1; 0x03, 0x04 -> 2; 0x05, 0x06 -> 4; else -> 8
-                }
-                val n = u32().toInt()
-                p += n * size
-            }
-            0L to false
-        }
-    }
-}
-
-/**
- * Nikon GetVendorCodes(0x9439) 使用 u32 count + count×u32 code。
- * 先校验数量，避免损坏的载荷按虚假数量分配大数组。
- */
-internal fun parseVendorCodes32(d: ByteArray): Set<Int> {
-    require(d.size >= 4) { "missing u32 count" }
-    val c = Cur(d)
-    val count = c.u32()
-    val available = (d.size - 4) / 4
-    require(count <= available.toLong()) {
-        "declared $count codes but payload only contains $available"
-    }
-    val result = LinkedHashSet<Int>(count.toInt())
-    repeat(count.toInt()) { result += c.u32().toInt() }
-    return result
-}
-
-data class LabDeviceInfo(
-    val manufacturer: String,
-    val model: String,
-    val deviceVersion: String,
-    val serial: String,
-    val vendorExtId: Long,
-    val vendorExtVersion: Int,
-    val vendorExtDesc: String,
-    val operations: Set<Int>,
-    val events: Set<Int>,
-    val props: Set<Int>,
-)
-
-internal fun parseDeviceInfo(d: ByteArray): LabDeviceInfo {
-    val c = Cur(d)
-    c.u16()                       // StandardVersion
-    val vendorExtId = c.u32()
-    val vendorExtVersion = c.u16()
-    val vendorExtDesc = c.str()
-    c.u16()                       // FunctionalMode
-    val ops = c.u16Array().toSet()
-    val events = c.u16Array().toSet()
-    val props = c.u16Array().toSet()
-    c.u16Array()                  // CaptureFormats
-    c.u16Array()                  // ImageFormats
-    val manufacturer = c.str()
-    val model = c.str()
-    val version = c.str()
-    val serial = c.str()
-    return LabDeviceInfo(manufacturer, model, version, serial, vendorExtId, vendorExtVersion, vendorExtDesc, ops, events, props)
-}
-
 /** 按属性语义把原始值排成人话（快门分数、光圈 f 值、EV 等）。 */
 private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
     Lab.PROP_F_NUMBER, Lab.PROP_NK_MOVIE_F_NUMBER -> "f/%.1f".format(raw / 100.0)
@@ -428,63 +317,12 @@ private fun fmtVal(prop: Int, raw: Long): String = when (prop) {
     else -> "$raw"
 }
 
-private data class ProbePropDescData(
-    val dataType: Int,
-    val writable: Boolean,
-    val defaultValue: Long,
-    val defaultIsScalar: Boolean,
-    val current: Long,
-    val currentIsScalar: Boolean,
-    val formFlag: Int,
-    val rangeMin: Long? = null,
-    val rangeMax: Long? = null,
-    val rangeStep: Long? = null,
-    val enumValues: List<Long> = emptyList(),
-)
-
 /**
  * 解析标准 DevicePropDesc。即使请求参数是 Nikon 的 32 位属性编号，返回数据集里的
  * DevicePropCode 仍是标准 u16；完整编号只存在于命令参数和 0x9439 能力表中。
  */
-private fun parseProbePropDescData(prop: Int, d: ByteArray): ProbePropDescData {
-    val c = Cur(d)
-    val echoedProp = c.u16()
-    require(echoedProp == (prop and 0xFFFF)) {
-        "descriptor echoed ${hex4(echoedProp)}, expected ${hex4(prop)}"
-    }
-    val dataType = c.u16()
-    val writable = c.u8() == 1
-    val (def, defScalar) = c.typed(dataType)
-    val (cur, curScalar) = c.typed(dataType)
-    val formFlag = c.u8()
-    var rangeMin: Long? = null
-    var rangeMax: Long? = null
-    var rangeStep: Long? = null
-    var enumValues = emptyList<Long>()
-    when (formFlag) {
-        1 -> {
-            rangeMin = c.typed(dataType).first
-            rangeMax = c.typed(dataType).first
-            rangeStep = c.typed(dataType).first
-        }
-        2 -> {
-            val n = c.u16()
-            enumValues = (0 until n).map { c.typed(dataType).first }
-        }
-    }
-    return ProbePropDescData(
-        dataType = dataType,
-        writable = writable,
-        defaultValue = def,
-        defaultIsScalar = defScalar,
-        current = cur,
-        currentIsScalar = curScalar,
-        formFlag = formFlag,
-        rangeMin = rangeMin,
-        rangeMax = rangeMax,
-        rangeStep = rangeStep,
-        enumValues = enumValues,
-    )
+private fun parseProbePropDescData(prop: Int, d: ByteArray): PtpDevicePropDescriptor {
+    return parsePtpDevicePropDescriptor(prop, d)
 }
 
 /** 解析 DevicePropDesc 并格式化成单段日志文本。 */
@@ -515,42 +353,6 @@ private fun parsePropDesc(prop: Int, d: ByteArray): String {
         "cur=$curTxt def=$defTxt $form"
 }
 
-/** 解析 Nikon GetEvent(0x90C7)：u16 count + count×{u16 code, u32 param}。 */
-internal fun parseNikonEvents(d: ByteArray): List<Pair<Int, Long>> {
-    require(d.size >= 2) { "missing Nikon event count" }
-    val c = Cur(d)
-    val n = c.u16()
-    require(n <= (d.size - 2) / 6) { "truncated Nikon event payload" }
-    return (0 until n).map { c.u16() to c.u32() }
-}
-
-/**
- * 解析 Nikon GetEventEx(0x941C)：u16 count + u16 reserved，随后每项为
- * u16 code + u16 parameterCount + parameterCount×u32。只向现有调用方暴露首参数。
- */
-internal fun parseNikonExtendedEvents(d: ByteArray): List<Pair<Int, Long>> {
-    require(d.size >= 2) { "missing Nikon extended event count" }
-    val count = Cur(d).u16()
-    if (count == 0) return emptyList()
-    require(d.size >= 4 && count <= (d.size - 4) / 4) {
-        "truncated Nikon extended event payload"
-    }
-    val cursor = Cur(d).apply { p = 4 }
-    return buildList(count) {
-        repeat(count) {
-            require(cursor.p + 4 <= d.size) { "missing Nikon extended event header" }
-            val code = cursor.u16()
-            val parameterCount = cursor.u16()
-            require(parameterCount in 0..5 && cursor.p + parameterCount * 4 <= d.size) {
-                "invalid Nikon extended event parameter count"
-            }
-            val firstParameter = if (parameterCount > 0) cursor.u32() else 0L
-            repeat((parameterCount - 1).coerceAtLeast(0)) { cursor.u32() }
-            add(code to firstParameter)
-        }
-    }
-}
-
 /** 在数据里找 JPEG SOI（FF D8 FF）偏移；找不到返回 -1。 */
 private fun findJpegStart(d: ByteArray): Int {
     for (i in 0 until d.size - 2) {
@@ -570,50 +372,27 @@ private data class PropDescData(
 )
 
 private fun parsePropDescData(d: ByteArray): PropDescData {
-    val c = Cur(d)
-    c.u16()
-    val dataType = c.u16()
-    val writable = c.u8() == 1           // GetSet
-    c.typed(dataType)                    // default
-    val (cur, _) = c.typed(dataType)
-    val formFlag = c.u8()
-    val values = when (formFlag) {
+    val descriptor = parsePtpDevicePropDescriptor(d)
+    val values = when (descriptor.formFlag) {
         // Nikon 的布尔属性常用 Range(0..1) 而不是 Enumeration。只把严格的
         // 二值范围展开；其他连续范围仍保持为空，避免为曝光参数制造庞大值表。
         1 -> {
-            val min = c.typed(dataType).first
-            val max = c.typed(dataType).first
-            val step = c.typed(dataType).first
+            val min = descriptor.rangeMin
+            val max = descriptor.rangeMax
+            val step = descriptor.rangeStep
             if (min == 0L && max == 1L && step == 1L) listOf(0L, 1L) else emptyList()
         }
-        2 -> {
-            val n = c.u16()
-            (0 until n).map { c.typed(dataType).first }
-        }
+        2 -> descriptor.enumValues
         else -> emptyList()
     }
-    return PropDescData(dataType, writable, cur, values)
+    return PropDescData(descriptor.dataType, descriptor.writable, descriptor.current, values)
 }
-
-private fun encodeScalar(dataType: Int, v: Long): ByteArray {
-    val size = scalarSize(dataType) ?: 8
-    return ByteArray(size) { i -> ((v shr (8 * i)) and 0xFF).toByte() }
-}
-
-private fun scalarSize(dataType: Int): Int? =
-    when (dataType) {
-        0x0001, 0x0002 -> 1
-        0x0003, 0x0004 -> 2
-        0x0005, 0x0006 -> 4
-        0x0007, 0x0008 -> 8
-        else -> null
-    }
 
 /**
  * 深度探测不暴力枚举未知整数空间：只使用相机自己给出的 enum，或 range 的端点/
  * 当前值相邻一步。最多 8 档，既能反推出写法，也避免让用户等待几十秒。
  */
-private fun digitalZoomProbeValues(desc: ProbePropDescData): List<Long> {
+private fun digitalZoomProbeValues(desc: PtpDevicePropDescriptor): List<Long> {
     val candidates = when (desc.formFlag) {
         2 -> desc.enumValues
         1 -> buildList {
@@ -741,9 +520,9 @@ suspend fun NikonCamera.rcGetCompatibleParam(logicalProp: Int): RcParam? {
 suspend fun NikonCamera.rcRefreshParam(param: RcParam): RcParam? {
     val (rc, data) = labCommand(Lab.GET_DEVICE_PROP_VALUE, param.prop)
     if (rc != Lab.OK || data == null) return null
-    val (current, scalar) = runCatching { Cur(data).typed(param.dataType) }.getOrNull()
+    val decoded = runCatching { decodePtpTypedValue(param.dataType, data) }.getOrNull()
         ?: return null
-    return if (scalar) param.copy(current = current) else null
+    return if (decoded.isScalar) param.copy(current = decoded.value) else null
 }
 
 /**
@@ -816,7 +595,7 @@ suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
 }
 
 suspend fun NikonCamera.rcSetValue(param: RcParam, value: Long): Int =
-    labSetProp(param.prop, encodeScalar(param.dataType, value))
+    labSetProp(param.prop, encodePtpScalar(param.dataType, value))
 
 /** 写入后由机身回读得到的结果，避免把 0x2001 误当成“参数已经采用”。 */
 data class RcSetResult(
@@ -1364,7 +1143,7 @@ internal suspend fun NikonCamera.rcStartMovieDetailed(
         log("!! StartMovieRec resp=${hex4(rc)}")
         val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_MOV_PROHIBIT)
         if (prc == Lab.OK && pd != null && pd.size >= 4) {
-            val cond = Cur(pd).u32()
+            val cond = decodePtpUInt32(pd)
             prohibitCondition = cond
             if (cond != 0L) log("!! MovRecProhibit=${hex8(cond)}")
         }
@@ -1389,7 +1168,7 @@ private fun NikonCamera.prepareAndStartMovieLocked(): RcMovieStartResult {
             Lab.GET_DEVICE_PROP_VALUE,
             Lab.PROP_NK_MOV_PROHIBIT
         ).let { (rc, data) ->
-            if (rc == Lab.OK && data != null && data.size >= 4) Cur(data).u32() else null
+            if (rc == Lab.OK && data != null && data.size >= 4) decodePtpUInt32(data) else null
         }
 
     val prohibitExtendedRc = command(
@@ -1545,7 +1324,7 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
         // 失败才读禁止条件用于诊断——成功路径省掉这条往返，进页更快。
         val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_LV_PROHIBIT)
         if (prc == Lab.OK && pd != null && pd.size >= 4) {
-            log("!! LV prohibit condition = ${hex8(Cur(pd).u32())}")
+            log("!! LV prohibit condition = ${hex8(decodePtpUInt32(pd))}")
         }
         return false
     }
@@ -2012,7 +1791,7 @@ suspend fun NikonCamera.runLabProbe(
     if (Lab.NK_GET_VENDOR_PROP_CODES in ops) {
         val (rc, d) = labCommand(Lab.NK_GET_VENDOR_PROP_CODES)
         if (rc == Lab.OK && d != null) {
-            val parsed = runCatching { Cur(d).u16Array().toSet() }
+            val parsed = runCatching { parseVendorCodes16(d) }
             parsed.onSuccess {
                 vendorProps90ca = it
                 logProbeCodes(log, "GetVendorPropCodes(0x90CA).properties", it, Lab.INTEREST_PROPS)
@@ -2114,7 +1893,7 @@ suspend fun NikonCamera.runLabProbe(
     var valueOkCount = 0
     val digitalZoomDesc = mutableMapOf<Int, String>()
     val digitalZoomValue = mutableMapOf<Int, String>()
-    val digitalZoomParsedDesc = mutableMapOf<Int, ProbePropDescData>()
+    val digitalZoomParsedDesc = mutableMapOf<Int, PtpDevicePropDescriptor>()
     val digitalZoomDescRoute = mutableMapOf<Int, Int>()
     val digitalZoomValueRoute = mutableMapOf<Int, Int>()
     val digitalZoomValueRaw = mutableMapOf<Int, ByteArray>()
@@ -2314,7 +2093,7 @@ suspend fun NikonCamera.runLabProbe(
             val original = digitalZoomValueRaw[prop]
             val valueRoute = digitalZoomValueRoute[prop]
             val descRoute = digitalZoomDescRoute[prop]
-            val scalarBytes = desc?.let { scalarSize(it.dataType) }
+            val scalarBytes = desc?.let { ptpScalarSize(it.dataType) }
             val writeRoute =
                 if (
                     descRoute == Lab.GET_DEVICE_PROP_DESC &&
@@ -2348,7 +2127,7 @@ suspend fun NikonCamera.runLabProbe(
             val activeValueRoute = checkNotNull(valueRoute)
             val activeWriteRoute = checkNotNull(writeRoute)
             val candidates = digitalZoomProbeValues(activeDesc).map {
-                it to encodeScalar(activeDesc.dataType, it)
+                it to encodePtpScalar(activeDesc.dataType, it)
             }.filter { (_, raw) -> !raw.contentEquals(originalRaw) }
             if (candidates.isEmpty()) {
                 digitalZoomSweepResult[prop] = "SKIP(no-alternate-enum-or-range-value)"

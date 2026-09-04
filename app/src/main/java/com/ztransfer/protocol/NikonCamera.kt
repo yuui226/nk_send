@@ -87,56 +87,6 @@ internal fun selectNewestFileHeadIndex(
     return selected.takeIf { it >= 0 }
 }
 
-internal data class ParsedObjectCacheIdentity(
-    val fileName: String,
-    val captureDate: String?,
-    val complete: Boolean,
-)
-
-private fun hasUtf16NullTerminator(data: ByteArray, offset: Int, codeUnits: Int): Boolean {
-    if (codeUnits <= 0 || codeUnits > (data.size - offset) / 2) return false
-    val terminatorOffset = offset + codeUnits * 2 - 2
-    return data[terminatorOffset] == 0.toByte() && data[terminatorOffset + 1] == 0.toByte()
-}
-
-/** 只解析参与磁盘缓存身份的 ObjectInfo 字段；载荷不完整时保留 UI 兜底值但禁止缓存清理。 */
-internal fun parseObjectCacheIdentity(
-    handle: Int,
-    extension: String,
-    data: ByteArray,
-): ParsedObjectCacheIdentity {
-    val fallbackName = "DSC_%04d%s".format(handle and 0xFFFF, extension)
-    if (data.size < 53) return ParsedObjectCacheIdentity(fallbackName, null, false)
-
-    val nameLen = data[52].toInt() and 0xFF
-    val nameFieldComplete = hasUtf16NullTerminator(data, 53, nameLen)
-    val decodedFileName = if (nameFieldComplete) {
-        String(data, 53, nameLen * 2, Charsets.UTF_16LE).trimEnd('\u0000')
-    } else null
-    val fileName = decodedFileName?.takeIf(String::isNotEmpty) ?: fallbackName
-    if (!nameFieldComplete || decodedFileName.isNullOrEmpty()) {
-        return ParsedObjectCacheIdentity(fileName, null, false)
-    }
-
-    val dateOffset = 53 + nameLen * 2
-    if (data.size <= dateOffset) return ParsedObjectCacheIdentity(fileName, null, false)
-    val dateLen = data[dateOffset].toInt() and 0xFF
-    if (dateLen == 0) return ParsedObjectCacheIdentity(fileName, null, true)
-    if (dateLen > (data.size - dateOffset - 1) / 2) {
-        return ParsedObjectCacheIdentity(fileName, null, false)
-    }
-    if (!hasUtf16NullTerminator(data, dateOffset + 1, dateLen)) {
-        return ParsedObjectCacheIdentity(fileName, null, false)
-    }
-    val date = String(
-        data,
-        dateOffset + 1,
-        dateLen * 2,
-        Charsets.UTF_16LE,
-    ).trimEnd('\u0000').takeIf { it.length >= 8 }
-    return ParsedObjectCacheIdentity(fileName, date, date != null)
-}
-
 /**
  * 续传无法进行：已有半成品，但本次下载走不了分块路径（相机不支持 GetPartialObjectEx，
  * 或 >4GB 文件拿不到真实大小无法对齐）。全量 GetObject 只能从 0 开始、会写坏已定位到
@@ -306,33 +256,10 @@ internal fun isExpectedStaResponder(
     actualResponderGuid: String?,
 ): Boolean = expectedResponderGuid == null || expectedResponderGuid == actualResponderGuid
 
-private fun cameraBaseFileName(value: String): String? {
-    val baseName = value.substringAfterLast('/').substringAfterLast('\\').trim()
-    return baseName.takeIf { name ->
-        name.isNotEmpty() &&
-            name.length <= 255 &&
-            name.none { it.code < 0x20 || it == ':' }
-    }
-}
-
 /** PTP/IP Event payload: u16 code + u32 transactionId + optional u32 parameters. */
 internal fun parsePtpIpEvent(payload: ByteArray?): Pair<Int, Long>? {
     val event = PtpIpProtocolCodec.decodeEvent(payload) ?: return null
     return event.code to event.firstParameter
-}
-
-/** Decodes a standalone PTP string and rejects truncated or unsafe filename values. */
-internal fun parsePtpObjectFileName(data: ByteArray, offset: Int = 0): Pair<String, Int>? {
-    if (offset !in data.indices) return null
-    val codeUnits = data[offset].toInt() and 0xFF
-    if (codeUnits <= 1) return null
-    val byteCount = codeUnits * 2
-    val valueOffset = offset + 1
-    if (valueOffset + byteCount > data.size) return null
-    if (!hasUtf16NullTerminator(data, valueOffset, codeUnits)) return null
-    val decoded = String(data, valueOffset, byteCount, Charsets.UTF_16LE).trimEnd('\u0000')
-    val fileName = cameraBaseFileName(decoded) ?: return null
-    return fileName to (valueOffset + byteCount)
 }
 
 internal data class EmbeddedCameraFileName(
@@ -404,39 +331,6 @@ internal fun findEmbeddedCameraFileNames(
         dot++
     }
     return results.values.toList()
-}
-
-/** Parses GetObjectPropList queried specifically for ObjectFileName (0xDC07). */
-internal fun parseObjectFileNamePropertyList(data: ByteArray): Map<Int, String> {
-    fun int32Le(offset: Int): Int =
-        (data[offset].toInt() and 0xFF) or
-            ((data[offset + 1].toInt() and 0xFF) shl 8) or
-            ((data[offset + 2].toInt() and 0xFF) shl 16) or
-            ((data[offset + 3].toInt() and 0xFF) shl 24)
-
-    fun uint16Le(offset: Int): Int =
-        (data[offset].toInt() and 0xFF) or
-            ((data[offset + 1].toInt() and 0xFF) shl 8)
-
-    if (data.size < 4) return emptyMap()
-    val count = int32Le(0).toLong() and 0xFFFFFFFFL
-    if (count > (data.size - 4) / 9L) return emptyMap()
-    val names = LinkedHashMap<Int, String>(count.toInt().coerceAtMost(4096))
-    var offset = 4
-    repeat(count.toInt()) {
-        if (offset + 8 > data.size) return emptyMap()
-        val handle = int32Le(offset)
-        val propertyCode = uint16Le(offset + 4)
-        val dataType = uint16Le(offset + 6)
-        offset += 8
-        if (propertyCode != PtpConstants.OBJECT_PROP_OBJECT_FILE_NAME || dataType != 0xFFFF) {
-            return emptyMap()
-        }
-        val parsed = parsePtpObjectFileName(data, offset) ?: return emptyMap()
-        names[handle] = parsed.first
-        offset = parsed.second
-    }
-    return names
 }
 
 internal fun hasUsableStaAlbumStorage(response: Int, storageIds: List<Int>): Boolean =
@@ -3685,39 +3579,34 @@ class NikonCamera(private val context: Context) {
     internal fun getObjectInfoInternal(handle: Int): ObjectInfoResult {
         sendCmd(PtpConstants.GET_OBJECT_INFO, handle)
         val (respCode, data) = recvRespWithPayload()
-        if (respCode != PtpConstants.RESPONSE_OK || data == null || data.size < 53) {
+        if (respCode != PtpConstants.RESPONSE_OK || data == null) {
             return ObjectInfoResult(null, false)
         }
-
-        val storageId = data.getIntLE(0)
-        val format = data.getUShortLE(4)
+        val parsed = parsePtpObjectInfo(handle, data) ?: return ObjectInfoResult(null, false)
         // 关联对象（0x3001 = 文件夹）不是文件，一律不收录：常见机型的全量枚举可能不含它，
         // 但换卡/目录滚动时相机新建文件夹会带 ObjectAdded 事件，实时新增路径必须拦住，
         // 否则列表会冒出一个 0 字节的"100NIKON"条目。
-        if (format == 0x3001) return ObjectInfoResult(null, true)
+        if (parsed.isAssociation) return ObjectInfoResult(null, true)
         // PTP ObjectInfo 的大小字段是 32 位无符号；>4GB 的对象（长视频）相机报 0xFFFFFFFF（未知）。
-        val size = data.getIntLE(8).toLong() and 0xFFFFFFFFL
-        val ext = PtpConstants.getExt(format)
-
-        val cacheIdentity = parseObjectCacheIdentity(handle, ext, data)
-
         // ProtectionStatus(偏移 6,u16) 与文件同载荷,解析零额外流量。
         //（ObjectInfo 里还有两组刻意不用的字段:SequenceNumber(48)——机型可能恒填 0、
         // 语义不统一,连拍检测走"文件编号 + 秒级时间戳"的自有算法(computeBurstHandles);
         // ImagePixWidth/Height(26/30)——竖拍存的也是传感器原生横向像素,方向只在
         // EXIF Orientation 里且依赖机内"自动旋转图像"设置,判不出构图。）
-        val isProtected = data.getUShortLE(6) != 0
-
         return ObjectInfoResult(
             file = FileInfo(
-                handle = handle,
-                size = size,
-                fileName = cacheIdentity.fileName,
-                captureDate = cacheIdentity.captureDate,
-                isProtected = isProtected,
-                storageIds = if (storageId == 0 || storageId == -1) emptySet() else setOf(storageId),
+                handle = parsed.handle,
+                size = parsed.size,
+                fileName = checkNotNull(parsed.fileName),
+                captureDate = parsed.captureDate,
+                isProtected = parsed.isProtected,
+                storageIds = if (parsed.storageId == 0 || parsed.storageId == -1) {
+                    emptySet()
+                } else {
+                    setOf(parsed.storageId)
+                },
             ),
-            successful = cacheIdentity.complete,
+            successful = parsed.identityComplete,
         )
     }
 

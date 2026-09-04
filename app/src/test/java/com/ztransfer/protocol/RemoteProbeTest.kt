@@ -8,44 +8,6 @@ import org.junit.Test
 
 class RemoteProbeTest {
     @Test
-    fun parsesLegacyAndExtendedNikonEventsIntoTheSameShape() {
-        val legacy = byteArrayOf(
-            0x01, 0x00,
-            0x02, 0x40,
-            0xF6.toByte(), 0x61, 0x19, 0x29,
-        )
-        val extended = byteArrayOf(
-            0x02, 0x00, 0x00, 0x00,
-            0x02, 0x40, 0x02, 0x00,
-            0xF6.toByte(), 0x61, 0x19, 0x29,
-            0x01, 0x00, 0x01, 0x00,
-            0x0D, 0x40, 0x00, 0x00,
-        )
-
-        assertEquals(listOf(0x4002 to 0x291961F6L), parseNikonEvents(legacy))
-        assertEquals(
-            listOf(0x4002 to 0x291961F6L, 0x400D to 0L),
-            parseNikonExtendedEvents(extended),
-        )
-    }
-
-    @Test
-    fun rejectsTruncatedOrOversizedNikonExtendedEvents() {
-        val truncated = byteArrayOf(
-            0x01, 0x00, 0x00, 0x00,
-            0x02, 0x40, 0x01, 0x00,
-        )
-        val tooManyParameters = byteArrayOf(
-            0x01, 0x00, 0x00, 0x00,
-            0x02, 0x40, 0x06, 0x00,
-            *ByteArray(24),
-        )
-
-        assertTrue(runCatching { parseNikonExtendedEvents(truncated) }.isFailure)
-        assertTrue(runCatching { parseNikonExtendedEvents(tooManyParameters) }.isFailure)
-    }
-
-    @Test
     fun parsesPtpIpObjectAddedEventPayload() {
         val payload = byteArrayOf(
             0x02, 0x40,
@@ -86,30 +48,11 @@ class RemoteProbeTest {
     }
 
     @Test
-    fun extendedVendorCodesStay32BitInParserAndReport() {
-        val payload = byteArrayOf(
-            0x03, 0x00, 0x00, 0x00,
-            0xA3.toByte(), 0xD1.toByte(), 0x00, 0x00,
-            0x33, 0xD0.toByte(), 0x01, 0x00,
-            0xBD.toByte(), 0xD1.toByte(), 0x00, 0x00,
-        )
+    fun extendedVendorCodeReportKeepsTheFull32BitValue() {
+        val report = formatProbeCodeLines("properties", setOf(0x1D033)).joinToString("\n")
 
-        val codes = parseVendorCodes32(payload)
-        val report = formatProbeCodeLines("properties", codes).joinToString("\n")
-
-        assertEquals(setOf(0xD1A3, 0x1D033, 0xD1BD), codes)
         assertTrue(report.contains("0x1D033"))
         assertFalse(report.contains("0xD033"))
-    }
-
-    @Test
-    fun malformedExtendedVendorCodeCountIsRejected() {
-        val truncated = byteArrayOf(
-            0x02, 0x00, 0x00, 0x00,
-            0x33, 0xD0.toByte(), 0x01, 0x00,
-        )
-
-        assertTrue(runCatching { parseVendorCodes32(truncated) }.isFailure)
     }
 
     @Test
