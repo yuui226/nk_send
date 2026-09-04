@@ -132,6 +132,7 @@ import com.ztransfer.viewmodel.PhotoFilterCriteria
 import com.ztransfer.viewmodel.PhotoDateRange
 import com.ztransfer.catalog.CameraFileFilter
 import com.ztransfer.catalog.UNKNOWN_CAPTURE_DATE_GROUP_KEY
+import com.ztransfer.catalog.detectCameraBurstGroups
 import com.ztransfer.catalog.filterCameraFiles
 import com.ztransfer.catalog.groupCameraFilesByDate
 import com.ztransfer.catalog.isStorageSlotSelected
@@ -5139,54 +5140,7 @@ private fun QueueFlightGhost(flight: QueueFlight, target: Rect?, onDone: () -> U
  * 已知边界：编号 9999 回卷、跨零点的连拍会被切成两段——都只影响标记完整性，可接受。
  */
 internal fun computeBurstGroups(files: List<NikonCamera.FileInfo>): List<BurstPhotoGroup> {
-    if (files.size < 3) return emptyList()
-
-    class Shot(
-        val file: NikonCamera.FileInfo,
-        val num: Int,
-        val daySec: Int,
-        val date: String
-    )
-
-    val result = ArrayList<BurstPhotoGroup>()
-    files.groupBy { it.extension }.forEach { (extension, group) ->
-        val shots = group.mapNotNull { f ->
-            // 时间：PTP DateTime "YYYYMMDDThhmmss…"，取日期串 + 当日秒数。
-            val d = f.captureDate ?: return@mapNotNull null
-            if (d.length < 15 || !d.substring(9, 15).all { it.isDigit() }) return@mapNotNull null
-            val daySec = d.substring(9, 11).toInt() * 3600 +
-                    d.substring(11, 13).toInt() * 60 + d.substring(13, 15).toInt()
-            // 编号：文件名主干末尾的数字段（"DSC_1234" → 1234）；无编号不参与。
-            val dot = f.fileName.lastIndexOf('.')
-            val stem = if (dot < 0) f.fileName else f.fileName.substring(0, dot)
-            val digits = stem.takeLastWhile { it.isDigit() }
-            if (digits.isEmpty() || digits.length > 9) return@mapNotNull null
-            Shot(f, digits.toInt(), daySec, d.substring(0, 8))
-        }.sortedWith(compareBy({ it.date }, { it.num }))
-
-        var runStart = 0
-        for (i in 1..shots.size) {
-            val timeGap = if (i < shots.size) {
-                shots[i].daySec - shots[i - 1].daySec
-            } else {
-                Int.MAX_VALUE
-            }
-            val broke = i == shots.size ||
-                    shots[i].date != shots[i - 1].date ||
-                    shots[i].num != shots[i - 1].num + 1 ||
-                    timeGap !in 0..1
-            if (broke) {
-                if (i - runStart >= 3) {
-                    val first = shots[runStart]
-                    result += BurstPhotoGroup(
-                        // handle 保证双卡/同名序列也不会撞 key；最早帧不变时，末尾续拍仍稳定。
-                        id = "${extension}_${first.date}_${first.num}_${first.file.handle}",
-                        files = shots.subList(runStart, i).map { it.file }
-                    )
-                }
-                runStart = i
-            }
-        }
+    return detectCameraBurstGroups(files).map { group ->
+        BurstPhotoGroup(id = group.id, files = group.files)
     }
-    return result
 }
