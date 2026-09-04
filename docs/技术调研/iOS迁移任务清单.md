@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：通用代码盘点完成，开始按原子批次迁移纯 Kotlin 逻辑
-- 下一项：`P06` AP/STA 发现和配对状态规则
+- 当前阶段：PTP 基础协议、对象目录及 AP/STA 纯连接规则已共享，继续迁移遥控协议状态
+- 下一项：`P07` 遥控、实时监看和录像协议状态
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -62,8 +62,8 @@
 | P03 | DONE | PTP/IP 握手和命令/事件包 | AP/STA 握手、命令/data-out、响应码、事件与 Cancel 已共享；Socket/身份/TID 留平台层 |
 | P04 | DONE | Nikon 属性、能力和对象信息解析 | DeviceInfo、属性描述/标量、ObjectInfo/文件名均以固定二进制样本共享 |
 | P05 | DONE | 存储卡、对象元数据与双卡合并规则 | AUINT32、顺序、别名、去重、双卡归属及 Nikon 文件头元数据均已共享 |
-| P06 | NEXT | AP/STA 发现和配对状态规则 | 网络扫描实现留在平台层 |
-| P07 | TODO | 遥控、实时监看和录像协议状态 | 与平台视频渲染分离 |
+| P06 | DONE | AP/STA 发现和配对状态规则 | IPv4 扫描策略、配对/档案/连接状态规则已共享；网络扫描与状态发布留在平台层 |
+| P07 | NEXT | 遥控、实时监看和录像协议状态 | 与平台视频渲染分离 |
 
 ### 4. 文件浏览与传输
 
@@ -153,6 +153,8 @@
 | 2026-09-04 | P04 | shared 测试、Android `protocol` 包全量测试和 App/shared Lint 通过；`ZTransfer-debug-1.81-20260904-162447.apk`，SHA-256 `C9A63A7410399A2D7C520EC633AC7B623D335F11EBC38113A7B32813D1734100`；Manifest 不变，共享解析类在 APK 中均为单一定义；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
 | 2026-09-04 | P05 | PTP AUINT32、StorageID/卡槽、handle 差量与顺序、STA 双卡归属、逻辑别名/成员集合、跨卡文件头比较、Nikon 0x9434/DCF/MakerNote/内嵌文件名已迁入 shared；`NikonCamera.FileInfo`、Socket/Mutex、会话快照、流式扫描和 StateFlow 留在 Android，未引入重复文件模型 |
 | 2026-09-04 | P05 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-171031.apk`，SHA-256 `28E0DA9AC6CFFD6BB7790847B0DFBC516DA260D8740AA481E10AB2851A2F50DF`；Manifest 与 P04 相同，共享类均为单一定义，真机 `3B65BV001L500000` 安装启动成功、PID `32068` 且未发现启动崩溃 |
+| 2026-09-04 | P06 | IPv4 路由归属/扫描主机、STA initiator identity、配对门槛、responder 匹配、相机档案选择、AP/STA 状态枚举、偏好恢复、发现保活、会话激活和 3/8/15/30 秒重连退避已迁入 shared；Android NSD/网卡/Socket、SharedPreferences、Throwable 分类、StateFlow/Job/generation 和状态发布保持原位 |
+| 2026-09-04 | P06 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-174118.apk`，SHA-256 `9C50881D3568125EFFD78F49002DE3A70DBEE0F58298AAC930D87DDC8BB8D6F7`；Manifest 与 P05 相同，迁入类型均为单一 DEX 定义且旧包定义为 0；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
 
 ## 更新约定
 
