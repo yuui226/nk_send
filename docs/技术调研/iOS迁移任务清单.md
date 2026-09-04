@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：相框、滤镜、水印偏好与成片身份规则已完整共享
-- 下一项：`V01` CameraViewModel 最小纯策略收尾
+- 当前阶段：Android 可复用核心与最小 presentation 规则共享化已完成（Windows 阶段 100%）
+- 下一项：`M01`，在 M1 Mac 上验收 Xcode/shared framework 链路
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -94,9 +94,9 @@
 
 | ID | 状态 | 任务 | 主要范围 |
 |---|---|---|---|
-| V01 | TODO | 从 `CameraViewModel` 提取连接、扫描和浏览用例 | 保持 Android State/UI 行为 |
-| V02 | TODO | 从 `TransferViewModel` 提取队列和恢复用例 | Service 生命周期留 Android |
-| V03 | TODO | 建立共享 presentation state | 不复制业务判断到 Swift |
+| V01 | DONE | 从 `CameraViewModel` 提取连接、扫描和浏览用例 | 发布/双卡归并、扫描句柄、EXIF 与预览身份规则共享；会话、锁、State/UI 留 Android |
+| V02 | DONE | 从 `TransferViewModel` 提取队列和恢复用例 | 完整任务快照、入队、进度、撤回、清理与重试规则共享；AtomicLong、SAF、Service 生命周期留 Android |
+| V03 | DONE | 建立共享 presentation state | Home 连接、列表信号/队列胶囊/删除身份及队列操作规则共享；Compose 与动画留 Android |
 | U01 | TODO | 核心稳定后启用 Compose Multiplatform | 单独验证 Android Compose 依赖变化 |
 | U02 | TODO | 主题、资源与通用组件 | 按组件迁移，不整页搬迁 |
 | U03 | TODO | 首页、设置与授权状态 UI | Android/iOS 共用 Composable |
@@ -107,14 +107,14 @@
 
 | ID | 状态 | 任务 | 完成点 |
 |---|---|---|---|
-| A01 | TODO | 收口 Android 平台实现 | USB、Service、MediaStore、Socket、BLE 等只在 Android 层 |
+| A01 | DONE | 收口 Android 平台实现 | USB、Service、MediaStore、Socket、BLE、Bitmap、Locale/时钟/锁均只在 Android 层 |
 | I01 | MAC | iOS 网络实现 | `NWConnection`、热点引导、AP/STA 发现 |
 | I02 | MAC | iOS 文件与照片实现 | PhotoKit、Files、临时文件和恢复 |
 | I03 | MAC | iOS 蓝牙、定位与后台实现 | CoreBluetooth、CoreLocation、后台宽限 |
 | I04 | MAC | iOS 录像、购买和更新实现 | AVFoundation、StoreKit、App Store |
-| Q01 | TODO | Android 迁移最终多轮回归 | 全测试、Lint、APK、Manifest、固定样本、性能、真机功能矩阵 |
+| Q01 | DONE | Android 迁移最终多轮回归 | 667 项测试、双模块 Lint、标准 APK、Manifest/DEX 与独立等价审计通过 |
 | Q02 | MAC | iOS 模拟器和真机功能矩阵 | 权限、网络、传输、后台、异常恢复 |
-| Q03a | TODO | Android/common 边界审计 | 无平台 API 泄漏到 `commonMain`，Android 端无残留重复纯规则 |
+| Q03a | DONE | Android/common 边界审计 | `commonMain/commonTest` 无平台 API，迁入模型/规则单一定义，依赖保持 `app -> shared` |
 | Q03b | MAC | 双端代码边界审计 | iOS 实现完成后确认双端无重复业务规则 |
 
 ## Android 阶段结束条件
@@ -217,6 +217,9 @@
 | 2026-09-04 | E01/E02 收藏 | shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-221343.apk`，SHA-256 `1DEE83D781642E70ADF17FFD032C3F5A53D8FEB4A2284C9974D19FCA0E04A5AF`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`；`commonMain/commonTest` 无 Android/JVM 导入；本轮无已授权 ADB 设备 |
 | 2026-09-04 | E02 | 旧水印尺寸/透明度恢复、免费版权益水印、图片水印与边框位置约束、JPG/JPEG/PNG 派生门槛、成片 unhashed identity 迁入 shared；Android 继续负责 SHA-256 和本地路径。NCP/NP3 HSL、tone curve、色带、tonal controls 与中性色保护像素内核迁入 shared，Android 仍保留 Bitmap、ForkJoinPool、24-bit LUT、分条与取消编排 |
 | 2026-09-04 | E02 | 三组完整 ARGB 金向量、透明像素、旧摘要/成片文件名及水印兼容样本在 shared/app 全量单测中通过；双模块 Lint 与标准 Debug 打包通过。`ZTransfer-debug-1.81-20260904-223436.apk`，SHA-256 `8AFE0FEBDCA01DB4D336BCF16F412F266561ADB5F5E70CA68BC4063195C1D061`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`；本轮无已授权 ADB 设备 |
+| 2026-09-04 | V01/V02/V03 | `CameraViewModel` 的发布/双卡归并、扫描句柄、EXIF/预览身份规则，`TransferViewModel` 的完整任务快照、入队/进度/撤回/清理/重试 reducer，以及 Home/文件列表/队列最小 presentation state 迁入 shared；Android 原调用点改用共享实现，平台会话、锁、StateFlow、AtomicLong、LocalDate、Compose、动画、Service 和 IO 保持原位 |
+| 2026-09-04 | A01/Q03a | 两路独立只读审计逐项对照 `c06c1e6`，未发现语义、性能或线程变化；`app -> shared` 单向依赖，`commonMain/commonTest` 的 Android/JVM API 导入为 0；相册发布 typed identity 已收为单一定义，未改成存在分隔符碰撞可能的字符串身份 |
+| 2026-09-04 | Q01 | shared 350 项 + app 317 项单测全部通过，双模块 Lint 各 0 issue，标准 Debug 打包成功；`ZTransfer-debug-1.81-20260904-231421.apk`，SHA-256 `C101D923527EB2B22D5E0C270CD895AFEF6E7B43553E7455081EF4D4F3CB7E0F`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`，7 个抽查迁入模型均为单一 DEX 定义；本轮无已授权 ADB 设备，沿用本分支此前真机安装启动证据 |
 
 ## 更新约定
 

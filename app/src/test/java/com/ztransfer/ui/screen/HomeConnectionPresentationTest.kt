@@ -1,98 +1,42 @@
 package com.ztransfer.ui.screen
 
+import com.ztransfer.connection.StaConnectionStatus
+import com.ztransfer.connection.WifiConnectionStatus
+import com.ztransfer.connection.WirelessMode
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.viewmodel.CameraState
-import com.ztransfer.connection.StaConnectionStatus
-import com.ztransfer.connection.WirelessMode
-import com.ztransfer.connection.WifiConnectionStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeConnectionPresentationTest {
     @Test
-    fun allThreeConnectionTypesHaveDistinctSuccessOutcomes() {
-        assertEquals(
-            ConnectionHapticOutcome.USB_SUCCESS,
-            CameraState(
-                isConnectedToCamera = true,
-                connectionType = CameraConnectionType.USB,
-            ).toHomeConnectionUiState().connectionHapticOutcome(),
+    fun connectionMapperPreservesEverySharedPresentationField() {
+        val source = CameraState(
+            isConnectedToCamera = true,
+            connectionType = CameraConnectionType.WIFI,
+            wirelessMode = WirelessMode.STA,
+            isStaConnection = true,
+            staConnectionStatus = StaConnectionStatus.FAILED,
+            staConnectionError = "STA failed",
+            usbConnectionError = "USB failed",
+            wifiConnectionStatus = WifiConnectionStatus.RECONNECTING,
         )
+
         assertEquals(
-            ConnectionHapticOutcome.AP_SUCCESS,
-            CameraState(
-                isConnectedToCamera = true,
-                connectionType = CameraConnectionType.WIFI,
-                wirelessMode = WirelessMode.AP,
-            ).toHomeConnectionUiState().connectionHapticOutcome(),
-        )
-        assertEquals(
-            ConnectionHapticOutcome.STA_SUCCESS,
-            CameraState(
+            HomeConnectionUiState(
                 isConnectedToCamera = true,
                 connectionType = CameraConnectionType.WIFI,
                 wirelessMode = WirelessMode.STA,
                 isStaConnection = true,
-            ).toHomeConnectionUiState().connectionHapticOutcome(),
-        )
-    }
-
-    @Test
-    fun allThreeConnectionTypesHaveFailureOutcomes() {
-        val usbFailure = CameraState(
-            connectionType = CameraConnectionType.USB,
-            usbConnectionError = "USB failed",
-        ).toHomeConnectionUiState().connectionHapticOutcome()
-        val staFailure = CameraState(
-            wirelessMode = WirelessMode.STA,
-            staConnectionStatus = StaConnectionStatus.FAILED,
-            staConnectionError = "STA failed",
-        ).toHomeConnectionUiState().connectionHapticOutcome()
-
-        assertEquals(ConnectionHapticOutcome.USB_FAILURE, usbFailure)
-        assertEquals(ConnectionHapticOutcome.STA_FAILURE, staFailure)
-        assertTrue(usbFailure.isFailure)
-        assertTrue(staFailure.isFailure)
-
-        listOf(
-            WifiConnectionStatus.NOT_FOUND,
-            WifiConnectionStatus.REFUSED,
-            WifiConnectionStatus.FAILED,
-        ).forEach { status ->
-            val outcome = CameraState(
-                wirelessMode = WirelessMode.AP,
-                wifiConnectionStatus = status,
-            ).toHomeConnectionUiState().connectionHapticOutcome()
-            assertEquals(ConnectionHapticOutcome.AP_FAILURE, outcome)
-            assertTrue(outcome.isFailure)
-        }
-    }
-
-    @Test
-    fun transientConnectionStatesDoNotProduceResultHaptics() {
-        listOf(
-            CameraState(),
-            CameraState(
-                wirelessMode = WirelessMode.AP,
-                wifiConnectionStatus = WifiConnectionStatus.PROBING,
-            ),
-            CameraState(
-                wirelessMode = WirelessMode.AP,
+                staConnectionStatus = StaConnectionStatus.FAILED,
+                staConnectionError = "STA failed",
+                usbConnectionError = "USB failed",
                 wifiConnectionStatus = WifiConnectionStatus.RECONNECTING,
             ),
-            CameraState(
-                wirelessMode = WirelessMode.STA,
-                staConnectionStatus = StaConnectionStatus.DISCOVERING,
-            ),
-        ).forEach { state ->
-            assertEquals(
-                ConnectionHapticOutcome.NONE,
-                state.toHomeConnectionUiState().connectionHapticOutcome(),
-            )
-        }
+            source.toHomeConnectionUiState(),
+        )
     }
 
     @Test
@@ -155,91 +99,7 @@ class HomeConnectionPresentationTest {
             initial != CameraState(
                 isConnectedToCamera = true,
                 connectionType = CameraConnectionType.WIFI,
-            ).toHomeConnectionUiState()
-        )
-    }
-
-    @Test
-    fun disconnectedWifiNeverEntersTheSelectedScene() {
-        assertNull(
-            homeSelectedConnection(
-                connected = false,
-                connectionType = CameraConnectionType.WIFI
-            )
-        )
-    }
-
-    @Test
-    fun verifiedWifiEntersTheSelectedScene() {
-        assertEquals(
-            CameraConnectionType.WIFI,
-            homeSelectedConnection(
-                connected = true,
-                connectionType = CameraConnectionType.WIFI
-            )
-        )
-    }
-
-    @Test
-    fun existingUsbPresentationIsPreserved() {
-        assertEquals(
-            CameraConnectionType.USB,
-            homeSelectedConnection(
-                connected = false,
-                connectionType = CameraConnectionType.USB
-            )
-        )
-    }
-
-    @Test
-    fun usbSelectionSuppressesAllWifiFeedback() {
-        assertFalse(shouldShowWifiConnectionFeedback(CameraConnectionType.USB))
-    }
-
-    @Test
-    fun wifiFeedbackRemainsAvailableBeforeAndDuringWifiSelection() {
-        assertTrue(shouldShowWifiConnectionFeedback(null))
-        assertTrue(shouldShowWifiConnectionFeedback(CameraConnectionType.WIFI))
-    }
-
-    @Test
-    fun staStateSuppressesOnlyCameraHotspotFeedback() {
-        assertFalse(
-            shouldShowCameraHotspotFeedback(
-                connectionType = CameraConnectionType.WIFI,
-                isStaConnection = true,
-            )
-        )
-        assertFalse(
-            shouldShowCameraHotspotFeedback(
-                connectionType = null,
-                staStatus = StaConnectionStatus.DISCOVERING,
-            )
-        )
-        assertFalse(
-            shouldShowCameraHotspotFeedback(
-                connectionType = null,
-                wirelessMode = WirelessMode.STA,
-            )
-        )
-        assertTrue(
-            shouldShowCameraHotspotFeedback(
-                connectionType = CameraConnectionType.WIFI,
-                isStaConnection = false,
-                staStatus = StaConnectionStatus.IDLE,
-            )
-        )
-    }
-
-    @Test
-    fun disconnectedFileListKeepsTheSessionTransport() {
-        assertEquals(
-            CameraConnectionType.USB,
-            disconnectedConnectionType(CameraConnectionType.USB)
-        )
-        assertEquals(
-            CameraConnectionType.WIFI,
-            disconnectedConnectionType(CameraConnectionType.WIFI)
+            ).toHomeConnectionUiState(),
         )
     }
 

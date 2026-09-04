@@ -5,49 +5,10 @@ import com.ztransfer.frame.PhotoFramePreset
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.protocol.CameraFileInfo
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NewMediaTransferPolicyTest {
-    @Test
-    fun `catalog reconciliation switches a deleted backup primary to its surviving alias`() {
-        val card1 = CameraFileInfo(
-            handle = 10,
-            size = 42L,
-            fileName = "DSC_0010.JPG",
-            captureDate = "20260827T120000",
-            storageIds = setOf(0x00010001),
-        )
-        val card2 = card1.copy(handle = 20, storageIds = setOf(0x00020001))
-        val published = mergeStorageMembership(card1, card2)
-
-        assertEquals(
-            listOf(card2),
-            reconcilePublishedCameraFiles(
-                publishedFiles = listOf(published),
-                currentHandles = setOf(20),
-                indexedFilesByHandle = mapOf(20 to card2),
-            ),
-        )
-        assertEquals(
-            listOf(card1),
-            reconcilePublishedCameraFiles(
-                publishedFiles = listOf(published),
-                currentHandles = setOf(10),
-                indexedFilesByHandle = mapOf(10 to card1),
-            ),
-        )
-        assertTrue(
-            reconcilePublishedCameraFiles(
-                publishedFiles = listOf(published),
-                currentHandles = emptySet(),
-                indexedFilesByHandle = emptyMap(),
-            ).isEmpty(),
-        )
-    }
-
     @Test
     fun `dated folder uses capture day and stable fallback`() {
         val fallback = LocalDate.of(2026, 3, 21)
@@ -74,14 +35,4 @@ class NewMediaTransferPolicyTest {
         assertNull(task(organized = false).destinationFolderName)
     }
 
-    @Test
-    fun `automatic transfer accepts known photos and videos but not unknown objects`() {
-        fun file(name: String) = CameraFileInfo(1, 1L, name, null)
-
-        assertTrue(isAutoTransferMedia(file("DSC_0001.JPG")))
-        assertTrue(isAutoTransferMedia(file("DSC_0002.NEF")))
-        assertTrue(isAutoTransferMedia(file("DSC_0003.MOV")))
-        assertTrue(isAutoTransferMedia(file("DSC_0004.AVI")))
-        assertFalse(isAutoTransferMedia(file("OBJECT.BIN")))
-    }
 }

@@ -270,13 +270,6 @@ internal fun TransferState.toFileListTransferUiState(): FileListTransferUiState 
         previewHistogramEnabled = previewHistogramEnabled,
     )
 
-internal data class FileListSignalUiState(
-    val rssi: Int?,
-    val connected: Boolean,
-    val connectionType: CameraConnectionType?,
-    val staMode: Boolean,
-)
-
 internal fun CameraState.toFileListSignalUiState(): FileListSignalUiState =
     FileListSignalUiState(
         rssi = wifiRssi,
@@ -316,10 +309,6 @@ internal val ThumbnailGridItem.reuseContentType: String
         is ThumbnailGridItem.BurstCollection -> "burst_collection"
     }
 
-internal fun buildLatestTaskIndexByHandle(tasks: List<TransferTask>): Map<Int, Int> = buildMap {
-    tasks.forEachIndexed { index, task -> put(task.file.handle, index) }
-}
-
 internal fun exportedHandlesForUntransferredFilter(
     files: List<CameraFileInfo>,
     index: ExportedOriginalIndex,
@@ -335,22 +324,8 @@ internal fun exportedHandlesForUntransferredFilter(
     emptySet()
 }
 
-/** 展开后的队列胶囊内容；入口图标由主题按钮独立绘制。 */
-internal enum class PillMode { DONE, PAUSED, GENERATING, COUNTING }
-
 /** Right-bottom queue control and the compact paused pill deliberately share one vector. */
 internal val TransferQueuePauseIcon = Icons.Default.Pause
-
-internal fun queuePillMode(
-    downloadRemaining: Int,
-    generationRemaining: Int,
-    paused: Boolean = false,
-): PillMode = when {
-    paused && downloadRemaining > 0 -> PillMode.PAUSED
-    downloadRemaining > 0 -> PillMode.COUNTING
-    generationRemaining > 0 -> PillMode.GENERATING
-    else -> PillMode.DONE
-}
 
 /**
  * 队列胶囊可安全共用宽度的文本类别。同单位、同整数位数的速度在 tnum 下等宽；
@@ -378,33 +353,6 @@ internal fun queuePillWidthKey(
         speedIntegerDigits = numericPart?.substringBefore('.')?.length ?: 0,
         countDigits = count.coerceAtLeast(0).toString().length,
     )
-}
-
-internal fun queuePillDisplayRemaining(actualRemaining: Int, heldCount: Int): Int {
-    val actual = actualRemaining.coerceAtLeast(0)
-    // The real queue is updated as soon as a card is tapped, while heldCount represents cards
-    // that have not reached the queue pill yet. Keep displaying the number that has actually
-    // landed, including zero. Falling back to the real count at zero makes overlapping flights
-    // jump 2 -> 1 -> 2 as the first and second holds are released independently.
-    return (actual - heldCount.coerceAtLeast(0)).coerceAtLeast(0)
-}
-
-internal fun queuePillAllRemainingTasksAreInFlight(
-    actualRemaining: Int,
-    heldCount: Int,
-): Boolean = actualRemaining > 0 &&
-    heldCount > 0 &&
-    queuePillDisplayRemaining(actualRemaining, heldCount) == 0
-
-internal enum class QueueExecutionControl { START, PAUSE }
-
-internal fun queueExecutionControl(
-    isTransferring: Boolean,
-    waitingCount: Int,
-): QueueExecutionControl? = when {
-    isTransferring -> QueueExecutionControl.PAUSE
-    waitingCount > 0 -> QueueExecutionControl.START
-    else -> null
 }
 
 @Composable
@@ -502,36 +450,6 @@ fun groupFilesByDate(files: List<CameraFileInfo>): List<FileGroup> {
     return groupCameraFilesByDate(files).map { group ->
         FileGroup(date = group.date, files = group.files)
     }
-}
-
-private data class PublishedCameraFileIdentity(
-    val fileName: String,
-    val size: Long,
-    val captureDate: String?,
-)
-
-private fun CameraFileInfo.publishedIdentity() = PublishedCameraFileIdentity(
-    fileName = fileName,
-    size = size,
-    captureDate = captureDate,
-)
-
-/** Dates whose logical camera photos disappeared in the latest authoritative update. */
-internal fun publishedCameraRemovalDates(
-    previous: List<CameraFileInfo>,
-    current: List<CameraFileInfo>,
-): Set<String> {
-    if (previous.isEmpty()) return emptySet()
-    val currentHandles = current.asSequence().mapTo(HashSet(current.size)) { it.handle }
-    val missingHandles = previous.filter { it.handle !in currentHandles }
-    if (missingHandles.isEmpty()) return emptySet()
-    // A dual-card backup can keep the same logical photo under its surviving alias handle. That is
-    // a session identity switch, not a visible deletion, and must not arm a grid exit animation.
-    val currentIdentities = current.asSequence()
-        .mapTo(HashSet(current.size)) { it.publishedIdentity() }
-    return missingHandles.asSequence()
-        .filter { it.publishedIdentity() !in currentIdentities }
-        .mapTo(LinkedHashSet()) { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
 }
 
 // `.value` only seeds the mapped flows; ongoing updates are collected immediately below.
@@ -2096,56 +2014,6 @@ fun FileListScreen(
     }
 }
 
-internal data class QueuePillTaskSummary(
-    val downloadRemaining: Int,
-    val generationRemaining: Int,
-    val activeDownloadTaskId: Long?,
-    val activeProgressTaskId: Long?,
-    val hasActive: Boolean,
-    val hasCancelled: Boolean,
-)
-
-/** 单次遍历生成胶囊所需的低频队列摘要；高频进度重组期间直接复用。 */
-internal fun summarizeQueuePillTasks(tasks: List<TransferTask>): QueuePillTaskSummary {
-    var downloadRemaining = 0
-    var generationRemaining = 0
-    var activeDownloadTaskId: Long? = null
-    var firstGeneratingTaskId: Long? = null
-    var firstWaitingTaskId: Long? = null
-    var hasCancelled = false
-
-    tasks.forEach { task ->
-        when (task.status) {
-            TransferStatus.WAITING -> {
-                downloadRemaining++
-                if (firstWaitingTaskId == null) firstWaitingTaskId = task.taskId
-            }
-            TransferStatus.TRANSFERING -> {
-                downloadRemaining++
-                if (activeDownloadTaskId == null) activeDownloadTaskId = task.taskId
-            }
-            TransferStatus.CANCELLED -> hasCancelled = true
-            TransferStatus.COMPLETED,
-            TransferStatus.FAILED -> Unit
-        }
-        if (task.isGeneratingFrame) {
-            generationRemaining++
-            if (firstGeneratingTaskId == null) firstGeneratingTaskId = task.taskId
-        }
-    }
-
-    return QueuePillTaskSummary(
-        downloadRemaining = downloadRemaining,
-        generationRemaining = generationRemaining,
-        activeDownloadTaskId = activeDownloadTaskId,
-        activeProgressTaskId = activeDownloadTaskId
-            ?: firstGeneratingTaskId
-            ?: firstWaitingTaskId,
-        hasActive = activeDownloadTaskId != null || generationRemaining > 0,
-        hasCancelled = hasCancelled,
-    )
-}
-
 /** 与状态胶囊同材质的顶部队列操作按钮，不跟随可选按钮皮肤。 */
 @Composable
 internal fun QueueExecutionButton(
@@ -2582,14 +2450,6 @@ fun QueuePill(
         }
     }
 }
-
-/**
- * 文件列表只会在建立过相机会话后出现；极端恢复场景拿不到类型时沿用原有 Wi-Fi 兜底。
- * 一旦识别过 USB，本次会话即使掉线也必须持续展示 USB 提示。
- */
-internal fun disconnectedConnectionType(
-    connectionType: CameraConnectionType?
-): CameraConnectionType = connectionType ?: CameraConnectionType.WIFI
 
 internal data class FilterButtonPalette(
     val inactiveIcon: Color,

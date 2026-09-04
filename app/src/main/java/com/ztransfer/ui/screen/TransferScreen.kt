@@ -102,28 +102,6 @@ private enum class TransferCardPillTone { SIZE, SPEED, EFFECT, TRANSFER_DURATION
 
 private enum class TransferCardVisualState { WAITING, TRANSFERRING, GENERATING, COMPLETED, FAILED, CANCELLED }
 
-internal data class TransferQueueActionVisibility(
-    val hasRetryable: Boolean,
-    val hasClearable: Boolean,
-)
-
-internal fun transferQueueActionVisibility(
-    tasks: List<TransferTask>,
-    isTransferring: Boolean,
-    removingTaskIds: Set<Long>,
-    suppressAll: Boolean = false,
-): TransferQueueActionVisibility = TransferQueueActionVisibility(
-    hasRetryable = !suppressAll && !isTransferring && tasks.any { task ->
-        task.taskId !in removingTaskIds &&
-            (task.status == TransferStatus.FAILED || task.status == TransferStatus.CANCELLED)
-    },
-    hasClearable = !suppressAll && tasks.any { task ->
-        task.taskId !in removingTaskIds &&
-            task.status != TransferStatus.TRANSFERING &&
-            !task.isGeneratingFrame
-    },
-)
-
 private data class TransferCameraUiState(
     val isConnectedToCamera: Boolean,
     val connectionType: CameraConnectionType?,

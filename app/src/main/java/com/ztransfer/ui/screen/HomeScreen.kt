@@ -101,18 +101,6 @@ import kotlinx.coroutines.isActive
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** 连接页只观察自身会展示的字段，照片扫描批次不再打断成功动画。 */
-internal data class HomeConnectionUiState(
-    val isConnectedToCamera: Boolean,
-    val connectionType: CameraConnectionType?,
-    val wirelessMode: WirelessMode,
-    val isStaConnection: Boolean,
-    val staConnectionStatus: StaConnectionStatus,
-    val staConnectionError: String?,
-    val usbConnectionError: String?,
-    val wifiConnectionStatus: WifiConnectionStatus,
-)
-
 internal fun CameraState.toHomeConnectionUiState(): HomeConnectionUiState =
     HomeConnectionUiState(
         isConnectedToCamera = isConnectedToCamera,
@@ -124,38 +112,6 @@ internal fun CameraState.toHomeConnectionUiState(): HomeConnectionUiState =
         usbConnectionError = usbConnectionError,
         wifiConnectionStatus = wifiConnectionStatus,
     )
-
-internal enum class ConnectionHapticOutcome {
-    NONE,
-    USB_SUCCESS,
-    AP_SUCCESS,
-    STA_SUCCESS,
-    USB_FAILURE,
-    AP_FAILURE,
-    STA_FAILURE;
-
-    val isFailure: Boolean
-        get() = this == USB_FAILURE || this == AP_FAILURE || this == STA_FAILURE
-}
-
-/**
- * 把同一轮连接中可能变化多次的详细状态折叠为一个结果事件，避免重组或错误细分切换时重复震动。
- */
-internal fun HomeConnectionUiState.connectionHapticOutcome(): ConnectionHapticOutcome = when {
-    isConnectedToCamera && connectionType == CameraConnectionType.USB ->
-        ConnectionHapticOutcome.USB_SUCCESS
-    isConnectedToCamera && connectionType == CameraConnectionType.WIFI && isStaConnection ->
-        ConnectionHapticOutcome.STA_SUCCESS
-    isConnectedToCamera && connectionType == CameraConnectionType.WIFI ->
-        ConnectionHapticOutcome.AP_SUCCESS
-    connectionType == CameraConnectionType.USB && usbConnectionError != null ->
-        ConnectionHapticOutcome.USB_FAILURE
-    wirelessMode == WirelessMode.STA && staConnectionStatus == StaConnectionStatus.FAILED ->
-        ConnectionHapticOutcome.STA_FAILURE
-    wirelessMode == WirelessMode.AP && connectionType != CameraConnectionType.USB &&
-        wifiConnectionStatus in AP_FAILURE_STATUSES -> ConnectionHapticOutcome.AP_FAILURE
-    else -> ConnectionHapticOutcome.NONE
-}
 
 internal fun shouldShowSubscriptionExpiryNotice(isPro: Boolean, daysLeft: Int): Boolean =
     isPro && daysLeft in 0..SUB_ALERT_DAYS
@@ -1040,32 +996,6 @@ internal fun openHotspotSettings(context: android.content.Context) {
             runCatching { context.startActivity(candidate) }.isSuccess
     }
 }
-
-/**
- * 物理链路只是候选证据。无线模式必须等真实相机会话建立后才能进入 hero 场景；
- * 有线部分保留既有的“检测到设备即选中”交互。
- */
-internal fun homeSelectedConnection(
-    connected: Boolean,
-    connectionType: CameraConnectionType?
-): CameraConnectionType? = when {
-    connectionType == CameraConnectionType.USB -> CameraConnectionType.USB
-    connected && connectionType == CameraConnectionType.WIFI -> CameraConnectionType.WIFI
-    else -> null
-}
-
-internal fun shouldShowWifiConnectionFeedback(
-    connectionType: CameraConnectionType?
-): Boolean = connectionType != CameraConnectionType.USB
-
-internal fun shouldShowCameraHotspotFeedback(
-    connectionType: CameraConnectionType?,
-    isStaConnection: Boolean = false,
-    staStatus: StaConnectionStatus = StaConnectionStatus.IDLE,
-    wirelessMode: WirelessMode = WirelessMode.AP,
-): Boolean = shouldShowWifiConnectionFeedback(connectionType) &&
-    wirelessMode == WirelessMode.AP && !isStaConnection &&
-    staStatus == StaConnectionStatus.IDLE
 
 private data class ConnectionCardFeedback(
     val title: String,
@@ -2023,11 +1953,6 @@ internal fun connectionSuccessProgress(elapsedMs: Long): Float {
 // 连接成功后的入场节奏：同一条约 120fps 时钟先驱动图标起飞，随后在图标中心播放
 // 成功光效；完成后直接通知 MainScreen 跳转。相册扫描不等待这条时间线。
 const val CONNECT_CELEBRATE_DELAY_MS = 500L
-private val AP_FAILURE_STATUSES = setOf(
-    WifiConnectionStatus.NOT_FOUND,
-    WifiConnectionStatus.REFUSED,
-    WifiConnectionStatus.FAILED,
-)
 private const val CONNECTION_ATTENTION_FRAME_MS = 8L
 private const val CONNECTION_HERO_DURATION_MS = 620L
 private const val CONNECTION_SUCCESS_DURATION_MS = 760L

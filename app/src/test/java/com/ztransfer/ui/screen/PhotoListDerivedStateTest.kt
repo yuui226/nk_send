@@ -2,8 +2,6 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.viewmodel.ExportedOriginalIndex
-import com.ztransfer.viewmodel.TransferStatus
-import com.ztransfer.viewmodel.TransferTask
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,19 +29,6 @@ class PhotoListDerivedStateTest {
                 enabled = true,
             )
         )
-    }
-
-    @Test
-    fun `latest task index keeps the newest task for each handle`() {
-        val older = TransferTask(file(handle = 3, name = "DSC_0003.JPG"))
-        val other = TransferTask(file(handle = 4, name = "DSC_0004.JPG"))
-        val newer = older.copy(taskId = older.taskId + 100, status = TransferStatus.COMPLETED)
-        val tasks = listOf(older, other, newer)
-
-        val index = buildLatestTaskIndexByHandle(tasks)
-
-        assertEquals(newer, tasks[index.getValue(3)])
-        assertEquals(other, tasks[index.getValue(4)])
     }
 
     @Test

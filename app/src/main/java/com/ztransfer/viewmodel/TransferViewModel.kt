@@ -40,7 +40,6 @@ import com.ztransfer.frame.PHOTO_FRAME_PART_PREFIX
 import com.ztransfer.frame.hasFrameFor
 import com.ztransfer.frame.isCurrentPhotoFrameTempName
 import com.ztransfer.frame.isPhotoFrameOutputName
-import com.ztransfer.frame.isSupportedPhotoFrameSourceExtension
 import com.ztransfer.frame.importPhotoFrameWatermarkImage as storePhotoFrameWatermarkImage
 import com.ztransfer.frame.photoFrameWatermarkImageFile
 import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
@@ -121,57 +120,49 @@ internal class ExistingFileNameIndex<T> {
     }
 }
 
-data class TransferTask(
-    val file: CameraFileInfo,
-    /** 队列任务的进程内唯一标识；同一相机文件可以按不同装饰配置创建多个独立任务。 */
-    override val taskId: Long = transferTaskIds.incrementAndGet(),
-    /** 入队时锁定的边框样式；null 表示该任务不生成边框/水印派生图。 */
-    val framePreset: PhotoFramePreset? = null,
-    /** false 表示保留原照片画布，仅叠加画面内水印。 */
-    val frameBorderRequested: Boolean = true,
-    /** 入队时锁定当前边框的信息显隐与日期时间格式。 */
-    val frameMetadataSettings: PhotoFrameMetadataSettings? = null,
-    /** 与预设同时快照，避免排队期间修改设置改变已入队任务的输出。 */
-    val frameWatermarkRequested: PhotoFrameWatermark = PhotoFrameWatermark(),
-    /** 入队时锁定的滤镜；与边框互相独立，null 表示原片不做颜色处理。 */
-    val photoFilterRequested: PhotoFilterSelection? = null,
-    /** 非空时原图写入传输根目录下的该日期文件夹，效果图再写入其 ZTFrames 子目录。 */
-    val destinationFolderName: String? = null,
-    override val status: TransferStatus = TransferStatus.WAITING,
-    val progress: Float = 0f,
-    val speed: Long = 0,
-    val downloaded: Long = 0,
-    val error: String? = null,
-    val skipped: Boolean = false,  // 目标目录已存在同名文件而跳过
-    // 单文件下载速度（MB/s），完成后填入，显示在卡片上。
-    val downloadMBps: Float = 0f,
-    // 本次传输耗时（毫秒），完成后填入并显示在卡片上；跳过/未传的为 null。
-    val elapsedMs: Long? = null,
-    // 原片已成功落盘后的派生步骤；失败不改变 COMPLETED，原片始终保留。
-    val isGeneratingFrame: Boolean = false,
-    /** 用户看到“生成中”的单调时钟起点；仅在生成期间保留。 */
-    val frameGenerationStartedAtElapsedMs: Long? = null,
-    /** 单次派生从显示“生成中”到结束的用户可感知耗时。 */
-    val frameGenerationElapsedMs: Long? = null,
-) : TransferQueueItem
+private fun nextTransferTaskId(): Long = transferTaskIds.incrementAndGet()
 
-internal fun TransferTask.startFrameGeneration(nowElapsedMs: Long): TransferTask = copy(
-    isGeneratingFrame = true,
-    frameGenerationStartedAtElapsedMs = nowElapsedMs,
-    frameGenerationElapsedMs = null,
+/** Android adapter that preserves the original implicit process-local task-id allocation. */
+internal fun TransferTask(
+    file: CameraFileInfo,
+    framePreset: PhotoFramePreset? = null,
+    frameBorderRequested: Boolean = true,
+    frameMetadataSettings: PhotoFrameMetadataSettings? = null,
+    frameWatermarkRequested: PhotoFrameWatermark = PhotoFrameWatermark(),
+    photoFilterRequested: PhotoFilterSelection? = null,
+    destinationFolderName: String? = null,
+    status: TransferStatus = TransferStatus.WAITING,
+    progress: Float = 0f,
+    speed: Long = 0,
+    downloaded: Long = 0,
+    error: String? = null,
+    skipped: Boolean = false,
+    downloadMBps: Float = 0f,
+    elapsedMs: Long? = null,
+    isGeneratingFrame: Boolean = false,
+    frameGenerationStartedAtElapsedMs: Long? = null,
+    frameGenerationElapsedMs: Long? = null,
+): TransferTask = TransferTask(
+    file = file,
+    taskId = nextTransferTaskId(),
+    framePreset = framePreset,
+    frameBorderRequested = frameBorderRequested,
+    frameMetadataSettings = frameMetadataSettings,
+    frameWatermarkRequested = frameWatermarkRequested,
+    photoFilterRequested = photoFilterRequested,
+    destinationFolderName = destinationFolderName,
+    status = status,
+    progress = progress,
+    speed = speed,
+    downloaded = downloaded,
+    error = error,
+    skipped = skipped,
+    downloadMBps = downloadMBps,
+    elapsedMs = elapsedMs,
+    isGeneratingFrame = isGeneratingFrame,
+    frameGenerationStartedAtElapsedMs = frameGenerationStartedAtElapsedMs,
+    frameGenerationElapsedMs = frameGenerationElapsedMs,
 )
-
-internal fun TransferTask.finishFrameGeneration(nowElapsedMs: Long): TransferTask {
-    if (!isGeneratingFrame) return this
-    val elapsed = frameGenerationStartedAtElapsedMs?.let { startedAt ->
-        (nowElapsedMs - startedAt).coerceAtLeast(0L)
-    }
-    return copy(
-        isGeneratingFrame = false,
-        frameGenerationStartedAtElapsedMs = null,
-        frameGenerationElapsedMs = elapsed,
-    )
-}
 
 /**
  * 当前导出目录中已落盘原片的 O(1) 查询索引，根层与各日期目录独立分桶。内容原地增量更新；[TransferState]
@@ -262,18 +253,6 @@ class ExportedOriginalIndex internal constructor() {
  * 唯一活动下载的高频状态。它与低频 [TransferState.tasks] 分离：协议层约每 200ms 更新时
  * 只替换这个常量大小对象，不再复制整个任务列表，也不会令订阅设置/筛选的页面失效。
  */
-internal fun TransferTask.withActiveProgress(
-    active: ActiveTransferProgress?,
-): TransferTask = if (active?.taskId == taskId && status == TransferStatus.TRANSFERING) {
-    copy(
-        progress = active.fraction,
-        downloaded = active.downloaded,
-        speed = active.bytesPerSecond,
-    )
-} else {
-    this
-}
-
 /** 仅负责低频队列调度；任务历史继续留在 TransferState 供 UI 展示。 */
 internal class PendingTransferQueue {
     private val lock = Any()
@@ -299,23 +278,7 @@ internal class PendingTransferQueue {
     }
 }
 
-internal fun TransferTask.newAttempt(): TransferTask = copy(
-    taskId = transferTaskIds.incrementAndGet(),
-    status = TransferStatus.WAITING,
-    progress = 0f,
-    speed = 0L,
-    downloaded = 0L,
-    error = null,
-    skipped = false,
-    downloadMBps = 0f,
-    elapsedMs = null,
-    isGeneratingFrame = false,
-    frameGenerationStartedAtElapsedMs = null,
-    frameGenerationElapsedMs = null,
-)
-
-private fun CameraFileInfo.autoTransferIdentity(): String =
-    automaticTransferFileIdentity(fileName, size, captureDate)
+internal fun TransferTask.newAttempt(): TransferTask = newAttempt(nextTransferTaskId())
 
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
@@ -442,8 +405,6 @@ data class PhotoFilterCriteria(
     }
 }
 
-internal fun normalizeThumbnailColumns(columns: Int): Int = columns.coerceIn(2, 4)
-
 internal val TransferState.photoFrameWatermark: PhotoFrameWatermark
     get() = PhotoFrameWatermark(
         enabled = photoFrameWatermarkEnabled,
@@ -530,34 +491,18 @@ internal fun createQueueTasks(
     photoFilter: PhotoFilterSelection? = null,
     organizeTransfersByDate: Boolean = false,
     queuedDate: LocalDate = LocalDate.now(),
-): List<TransferTask> = files.asSequence()
-    // 同一次批量点击按相机文件去重；不同点击始终创建独立任务。
-    .distinctBy { it.handle }
-    .map { file ->
-        TransferTask(
-            file = file,
-            framePreset = photoFramePreset.takeIf {
-                shouldGeneratePhotoFrame(photoFrameEnabled, file.extension)
-            },
-            frameBorderRequested = photoFrameBorderEnabled,
-            frameMetadataSettings = photoFrameMetadataSettings,
-            frameWatermarkRequested = photoFrameWatermark,
-            photoFilterRequested = photoFilter.takeIf {
-                isSupportedPhotoFrameSourceExtension(file.extension)
-            },
-            destinationFolderName = transferDestinationFolderName(
-                captureDate = file.captureDate,
-                organizeTransfersByDate = organizeTransfersByDate,
-                fallbackDate = queuedDate,
-            ),
-        )
-    }
-    .toList()
-
-internal const val REMOTE_ENTRY_INTRO_MAX_PLAYS = 6
-
-internal fun isRemoteEntryIntroEligible(playCount: Int): Boolean =
-    playCount.coerceAtLeast(0) < REMOTE_ENTRY_INTRO_MAX_PLAYS
+): List<TransferTask> = createQueueTasks(
+    files = files,
+    photoFrameEnabled = photoFrameEnabled,
+    photoFrameBorderEnabled = photoFrameBorderEnabled,
+    photoFramePreset = photoFramePreset,
+    photoFrameWatermark = photoFrameWatermark,
+    photoFrameMetadataSettings = photoFrameMetadataSettings,
+    photoFilter = photoFilter,
+    organizeTransfersByDate = organizeTransfersByDate,
+    fallbackDayKey = queuedDate.year * 10_000 + queuedDate.monthValue * 100 + queuedDate.dayOfMonth,
+    nextTaskId = ::nextTransferTaskId,
+)
 
 class TransferViewModel(application: Application) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(TransferState())
@@ -1684,12 +1629,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val snapshot = _state.value
         if (!snapshot.autoTransferNewMedia || snapshot.transferDirUri == null) return emptyList()
         if (cameraProvider() == null) return emptyList()
-        val queued = snapshot.tasks.asSequence()
-            .mapTo(HashSet()) { it.file.autoTransferIdentity() }
-        val candidates = files.asSequence()
-            .distinctBy { it.autoTransferIdentity() }
-            .filterNot { it.autoTransferIdentity() in queued }
-            .toList()
+        val candidates = newMediaQueueCandidates(files, snapshot.tasks)
         if (candidates.isNotEmpty()) addToQueue(candidates, cameraProvider)
         return candidates
     }
@@ -2983,11 +2923,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         pendingTransferQueue.withdraw(waitingTaskIds)
         _state.update { state ->
             state.copy(
-                tasks = state.tasks.map {
-                    if (it.status == TransferStatus.WAITING) {
-                        it.copy(status = TransferStatus.CANCELLED, speed = 0)
-                    } else it
-                }
+                tasks = withdrawWaitingTransferTasks(state.tasks),
             )
         }
     }
@@ -3002,11 +2938,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         }
         _state.update { state ->
             state.copy(
-                tasks = state.tasks.map {
-                    if (it.taskId == taskId && it.status == TransferStatus.WAITING) {
-                        it.copy(status = TransferStatus.CANCELLED, speed = 0)
-                    } else it
-                }
+                tasks = withdrawWaitingTransferTasks(state.tasks, taskId),
             )
         }
     }
@@ -3019,11 +2951,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      */
     fun removeCleared() {
         _state.update { state ->
-            val kept = state.tasks.filter {
-                it.status == TransferStatus.TRANSFERING ||
-                    it.status == TransferStatus.WAITING ||
-                    it.isGeneratingFrame
-            }
+            val kept = keepUnclearedTransferTasks(state.tasks)
             if (kept.size == state.tasks.size) {
                 state
             } else {
@@ -3041,12 +2969,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
     fun removeTask(taskId: Long): Boolean {
         var removed = false
         _state.update { state ->
-            val kept = state.tasks.filterNot {
-                it.taskId == taskId &&
-                        it.status != TransferStatus.TRANSFERING &&
-                        it.status != TransferStatus.WAITING &&
-                        !it.isGeneratingFrame
-            }
+            val kept = removeTransferTaskIfTerminal(state.tasks, taskId)
             removed = kept.size != state.tasks.size
             if (removed) {
                 state.withTaskStructure(kept)
@@ -3073,16 +2996,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
             .filter { it.taskId in retryIds }
             .associate { it.taskId to it.newAttempt() }
         _state.update { state ->
-            val updatedTasks = state.tasks.map {
-                if (
-                    it.taskId in retryIds &&
-                    (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED)
-                ) {
-                    attemptsByOldTaskId.getValue(it.taskId)
-                } else {
-                    it
-                }
-            }
+            val updatedTasks = replaceRetryableTransferTasks(state.tasks, attemptsByOldTaskId)
             if (updatedTasks.indices.any { updatedTasks[it].taskId != state.tasks[it].taskId }) {
                 state.withTaskStructure(updatedTasks)
             } else {
@@ -3110,16 +3024,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         val dirUri = snapshot.transferDirUri ?: return
         val attempt = task.newAttempt()
         _state.update { state ->
-            val updatedTasks = state.tasks.map {
-                if (
-                    it.taskId == taskId &&
-                    (it.status == TransferStatus.FAILED || it.status == TransferStatus.CANCELLED)
-                ) {
-                    attempt
-                } else {
-                    it
-                }
-            }
+            val updatedTasks = replaceRetryableTransferTasks(
+                state.tasks,
+                mapOf(taskId to attempt),
+            )
             if (updatedTasks.indices.any { updatedTasks[it].taskId != state.tasks[it].taskId }) {
                 state.withTaskStructure(updatedTasks)
             } else {

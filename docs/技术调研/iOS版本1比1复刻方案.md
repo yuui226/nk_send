@@ -19,19 +19,19 @@ Compose Multiplatform 的 iOS 支持已经稳定，官方也提供了将现有 J
 
 ### 当前实施状态
 
-`research/ios` 分支已经完成第一阶段的最小结构改造：
+`research/ios` 分支已经完成 Windows 侧的 Android 共享化改造：
 
 - 保留原有 `app` Android 应用模块及全部页面、Service、资源和业务流程。
 - 新增单一 `shared` KMP 模块，不继续拆出更多子模块。
-- Android 已实际依赖 `shared`，首个共享模型 `CameraConnectionType` 保持原包名和 API 不变。
+- Android 已实际依赖 `shared`；相机协议、目录/筛选、传输队列、遥控/GPS、EXIF、相框、滤镜、权益及最小 presentation 规则均由 Android 使用同一份共享实现。
 - 新增 `iosApp` Xcode 薄壳，通过官方 Direct Integration 方式构建 `ZTransferShared.framework`。
 - Xcode 工程包含可版本控制的共享 Scheme；当前已具备开始编写 `iosMain` 平台探针并在 M1 模拟器、iPhone 真机运行的工程入口。
 - Kotlin/Compose Compiler 统一为 2.2.21；AGP 8.10.1、Gradle 8.11.1 同步满足 Android 对 Kotlin 2.2 的最低工具链要求，并支持现代 Xcode；现有 Android Compose 依赖未升级。
-- 共享模块测试、Android 全部单元测试和仓库标准 Debug 打包均已通过。
+- shared 350 项与 Android 317 项单元测试、仓库标准 Debug 打包均已通过。
 - `shared` 与 App 的 Android Lint 均已通过；蓝牙状态常量已修正，11 个仅用于派生 Flow 同步首帧的 `StateFlow.value` 读取采用带说明的局部抑制，未改变运行逻辑，也没有新增全局 baseline。
 - 对比改造前后的 Debug APK，合并后的 Android Manifest 除版本号外完全一致。
 
-后续继续遵循“小步迁移”：一次只移动一个有测试保护的纯 Kotlin 单元，不批量调整 Android 目录或运行时结构。
+下一步转到 M1 Mac 执行 `M01`：先验收 Xcode/shared framework 链路，再开始 iOS 平台实现；后续仍遵循小步接入和双端验证。
 
 当前尚未在 `shared` 中启用 Compose Multiplatform UI 依赖。这与官方渐进迁移顺序一致：先完成平台探针和共享业务核心，再逐页迁移 UI。提前启用会改变 Android 当前 Compose 依赖解析结果，增加与第一阶段目标无关的回归面。
 

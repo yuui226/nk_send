@@ -31,15 +31,15 @@ import com.ztransfer.catalog.StorageHandleBatch
 import com.ztransfer.catalog.StorageHandleOrder
 import com.ztransfer.catalog.ThumbnailFillQueue
 import com.ztransfer.catalog.analyzeStaDirectStorageLayout
-import com.ztransfer.catalog.cameraFileLogicalIdentity
 import com.ztransfer.catalog.cameraHandleDelta
-import com.ztransfer.catalog.mergeStorageIds
 import com.ztransfer.catalog.newestFirstHandleOrders
 import com.ztransfer.catalog.objectHandleQueryStorageId
 import com.ztransfer.catalog.prioritizedThumbnailFiles as sharedPrioritizedThumbnailFiles
+import com.ztransfer.catalog.remainingStorageHandleOrders
 import com.ztransfer.catalog.shouldPrefetchThumbnailInBackground
 import com.ztransfer.catalog.shouldRememberThumbnailMiss
 import com.ztransfer.catalog.storageIdsBySlot
+import com.ztransfer.catalog.totalStorageHandleCount
 import com.ztransfer.catalog.usableStorageIds
 import com.ztransfer.connection.StaConnectionStatus
 import com.ztransfer.connection.StaInitiatorIdentity
@@ -129,64 +129,9 @@ internal fun isTransientStaServiceReadinessFailure(error: Throwable?): Boolean =
         error is ConnectException ||
         (error is IOException && error.message?.startsWith("STA album access unavailable") == true)
 
-private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 internal val NIKON_RAW_EXTENSIONS = setOf(".nef", ".nrw")
 internal val TIFF_EXTENSIONS = setOf(".tif", ".tiff")
 private val LARGE_EXIF_HEADER_EXTENSIONS = NIKON_RAW_EXTENSIONS + TIFF_EXTENSIONS
-private val AUTO_TRANSFER_MEDIA_EXTENSIONS = PtpConstants.FORMAT_EXT.values.toSet()
-
-/** 未知 PTP 对象(.bin 等)仍显示在列表，但不会被“照片/视频自动传输”误收。 */
-internal fun isAutoTransferMedia(file: CameraFileInfo): Boolean =
-    file.extension in AUTO_TRANSFER_MEDIA_EXTENSIONS
-
-/** Selects the newest still image deterministically; video covers must never become effect demos. */
-internal fun latestEffectPreviewFile(files: List<CameraFileInfo>): CameraFileInfo? =
-    files.asSequence()
-        .filter { it.extension !in EFFECT_PREVIEW_VIDEO_EXTENSIONS }
-        .maxWithOrNull(compareBy<CameraFileInfo>({ it.captureDate.orEmpty() }, { it.handle }))
-
-private fun CameraFileInfo.logicalIdentity(): String =
-    cameraFileLogicalIdentity(fileName, size, captureDate)
-
-/** 双卡备份文件仍只显示一份，但保留它在两张卡上的完整归属。 */
-internal fun mergeStorageMembership(
-    existing: CameraFileInfo,
-    duplicate: CameraFileInfo,
-): CameraFileInfo {
-    val mergedStorageIds = mergeStorageIds(existing.storageIds, duplicate.storageIds)
-    if (mergedStorageIds === existing.storageIds) return existing
-    return existing.copy(storageIds = mergedStorageIds)
-}
-
-/**
- * Rebuilds only already-published rows after a handle catalog shrinks. Raw aliases are retained for
- * the camera session so deleting one half of a dual-card backup switches to the surviving handle
- * instead of removing the logical photo. Display order is preserved.
- */
-internal fun reconcilePublishedCameraFiles(
-    publishedFiles: List<CameraFileInfo>,
-    currentHandles: Set<Int>,
-    indexedFilesByHandle: Map<Int, CameraFileInfo>,
-): List<CameraFileInfo> {
-    val aliasesByIdentity = LinkedHashMap<String, MutableList<CameraFileInfo>>()
-    indexedFilesByHandle.forEach { (handle, file) ->
-        if (handle in currentHandles) {
-            aliasesByIdentity.getOrPut(file.logicalIdentity()) { ArrayList(1) } += file
-        }
-    }
-    return publishedFiles.mapNotNull { published ->
-        val aliases = aliasesByIdentity[published.logicalIdentity()]
-        if (aliases.isNullOrEmpty()) {
-            published.takeIf { it.handle in currentHandles }
-        } else {
-            val primary = aliases.firstOrNull { it.handle == published.handle } ?: aliases.first()
-            aliases.asSequence()
-                .filterNot { it.handle == primary.handle }
-                .fold(primary, ::mergeStorageMembership)
-        }
-    }
-}
-
 /** 日期范围只改变优先级，不改变最终全量填充集合。范围完成后自然接回全局新→旧。 */
 internal fun prioritizedThumbnailFiles(
     files: List<CameraFileInfo>,
@@ -215,7 +160,7 @@ internal data class FileScanHandleSnapshot(
     fun belongsTo(sessionToken: Any): Boolean = this.sessionToken === sessionToken
 
     val totalHandleCount: Int
-        get() = handleOrders.sumOf { it.newestFirstHandles.size }
+        get() = totalStorageHandleCount(handleOrders)
 
     fun markProcessed(handles: Collection<Int>) {
         synchronized(processedHandles) { processedHandles.addAll(handles) }
@@ -228,11 +173,7 @@ internal data class FileScanHandleSnapshot(
                 addAll(processedHandles)
             }
         }
-        return handleOrders.map { order ->
-            order.copy(
-                newestFirstHandles = order.newestFirstHandles.filterNot { it in skipped }
-            )
-        }
+        return remainingStorageHandleOrders(handleOrders, skipped)
     }
 }
 
@@ -269,31 +210,9 @@ data class CameraState(
     val wifiRssi: Int? = null
 )
 
-/**
- * 从相机文件头（JPEG EXIF）解析的照片参数。所有字段均可为 null——解析不到时静默缺省。
- */
-data class PhotoExif(
-    val aperture: String?,       // "f/2.8"
-    val shutterSpeed: String?,   // "1/250"
-    val iso: String?,            // "400"
-    val focalLength: String?,    // "50mm"
-    val dateTime: String? = null,
-    val lensModel: String? = null,
-    /** Non-zero exposure compensation intent recorded by the camera, e.g. "+0.7 EV". */
-    val exposureCompensation: String? = null,
-    val latitude: Double? = null,
-    val longitude: Double? = null,
-    val altitudeMeters: Double? = null,
-    val address: String? = null,
-)
-
 internal fun formatExposureCompensation(value: Float?): String? {
-    val ev = value?.takeIf { it.isFinite() } ?: return null
-    if (kotlin.math.abs(ev) < 0.05f) return null
-    return if (ev > 0f) {
-        String.format(java.util.Locale.ROOT, "+%.1f EV", ev)
-    } else {
-        String.format(java.util.Locale.ROOT, "%.1f EV", ev)
+    return exposureCompensationText(value) { ev ->
+        String.format(java.util.Locale.ROOT, "%.1f", ev)
     }
 }
 
@@ -410,10 +329,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // 不用会话级 handle 作键，因 handle 跨会话/换卡会复用，否则重连后同一 handle 会把
     // EXIF 参数缓存。null value = 已尝试但失败（负缓存）。
     private val exifCache = HashMap<String, PhotoExif?>()
-
-    /** EXIF 缓存键：与缩略图磁盘缓存同一稳定身份，跨会话/重连命中同一张照片。 */
-    private fun exifKey(file: CameraFileInfo): String =
-        "${file.fileName}_${file.size}_${file.captureDate ?: "0"}"
 
     // 用于连接清理等需在 viewModelScope 取消后仍完成的一次性 IO。
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -1236,9 +1151,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
-
-    private fun effectPreviewKey(file: CameraFileInfo): String =
-        "${file.handle}|${file.fileName}|${file.size}|${file.captureDate.orEmpty()}"
 
     /** Temporarily disables every automatic camera-discovery entry point. */
     fun setConnectionDiscoveryPaused(paused: Boolean) {
@@ -4303,7 +4215,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val BAR_AVG_MAX = 40
         // 视频扩展名：封面黑边兜底裁切按 16:9 画面处理。
         // 注意与 PhotoPreview.kt 顶部的 VIDEO_EXTENSIONS（预览占位分支）保持同步。
-        val VIDEO_EXTENSIONS = EFFECT_PREVIEW_VIDEO_EXTENSIONS
+        val VIDEO_EXTENSIONS = effectPreviewVideoExtensions
         // EXIF 解析支持的图片扩展名——视频/音频等格式不会有 EXIF 头。
         val EXIF_SUPPORTED_EXTENSIONS = setOf(".jpg", ".jpeg", ".nef", ".tif", ".tiff", ".nrw")
     }

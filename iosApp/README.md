@@ -2,7 +2,7 @@
 
 `iosApp` 是 Z传的 iOS 薄壳，和 Android App 共用根目录下的 `shared` Kotlin Multiplatform 模块。
 
-当前阶段只建立可持续演进的工程边界，不迁移 Android 页面，也不改变 Android 的运行流程。`shared` 已由 Android 工程实际依赖，并包含首个共享模型 `CameraConnectionType`。
+Windows 侧的 Android 共享化阶段已经完成：`shared` 已由 Android 工程实际依赖，并承载平台中立的相机协议、文件目录、传输队列、遥控/GPS、EXIF、相框、滤镜、会员规则及最小 presentation state。Android 仍使用原来的 Activity、Compose 页面、Service 与系统适配，运行入口和平台流程没有改变。
 
 ## Mac 首次准备
 
@@ -20,14 +20,14 @@
 
 ## 开始编写 iOS 代码
 
-当前结构已经进入“阶段 1：iOS 技术探针”，首批代码按以下边界落位：
+当前结构已经可以直接开始填充 iOS 实现。Mac 上先完成共享 framework/Xcode 链路验收，再按以下边界落位：
 
 - 跨平台模型、协议和业务规则：`shared/src/commonMain/kotlin`。
-- 使用 Network、CoreBluetooth、CoreLocation、PhotoKit 等 Apple API 的实现：`shared/src/iosMain/kotlin`。
-- Android 对应平台实现：`shared/src/androidMain/kotlin`。
+- 需要由 Kotlin 调用且适合窄接口封装的 Apple 实现：按真实需求放入 `shared/src/iosMain/kotlin`。
+- 只有确实需要 `expect/actual` 的小型 Android 适配才放入 `shared/src/androidMain/kotlin`；现有 Android 系统实现继续留在 `app`。
 - Swift App 生命周期、系统授权跳转和暂时无法共享的原生界面：`iosApp/ZTransfer`。
 
-第一步从 Wi-Fi PTP/IP 连接探针开始，不先迁移整页 UI。Compose Multiplatform UI 在共享协议和状态模型稳定后按页面启用，避免当前阶段改变 Android 已在使用的 Compose 依赖解析结果。
+第一步是 `M01`：确认 Xcode 能构建并导入 `ZTransferShared`、模拟器能启动。随后进行本地网络授权和 Wi-Fi PTP/IP 真机探针；平台 transport 只负责 Network.framework I/O，复用 `shared` 中已经完成的协议 codec 和连接决策。Compose Multiplatform UI 仍按页面逐步启用，单独验证 Android 依赖与页面行为。
 
 仓库包含共享的 `ZTransfer` Scheme。Mac 首次拉取后可先执行无签名的模拟器构建验收：
 
@@ -55,8 +55,8 @@ Xcode 的第一个 Build Phase 会调用：
 
 - `shared/src/commonMain`：只能放 Android 和 iOS 都能编译的代码。
 - `shared/src/commonTest`：共享逻辑测试。
-- `shared/src/androidMain`：Android 系统 API 适配。
-- `shared/src/iosMain`：Apple 系统 API 适配。
+- `shared/src/androidMain`：有真实 `expect/actual` 需求时才建立的 Android 小型适配。
+- `shared/src/iosMain`：有共享 Kotlin 调用方时才建立的 Apple 小型适配。
 - `app`：现有 Android 应用入口和 Android 专属能力。
 - `iosApp`：iOS 应用入口、签名、权限和 Apple 专属配置。
 
