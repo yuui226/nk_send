@@ -162,48 +162,6 @@ internal class CameraIoGate(
     }
 }
 
-internal fun shouldUsePartialObjectDownload(
-    partialObjectSupported: Boolean?,
-    effectiveSize: Long,
-    resumeOffset: Long = 0L,
-    isUsbConnection: Boolean = false,
-    preferHighThroughput: Boolean = false,
-    forcePartial: Boolean = false,
-): Boolean = partialObjectSupported != false &&
-    effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN &&
-    (
-        forcePartial ||
-            !(isUsbConnection || preferHighThroughput) ||
-            resumeOffset > 0L ||
-            effectiveSize > NikonCamera.HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD
-        )
-
-internal fun downloadChunkSize(
-    effectiveSize: Long,
-    isUsbConnection: Boolean = false,
-    preferHighThroughput: Boolean = false,
-): Long =
-    if (isUsbConnection || preferHighThroughput) {
-        NikonCamera.HIGH_THROUGHPUT_CHUNK_SIZE
-    } else if (effectiveSize > NikonCamera.LARGE_FILE_THRESHOLD) {
-        NikonCamera.LARGE_FILE_CHUNK_SIZE
-    } else {
-        NikonCamera.CHUNK_SIZE
-    }
-
-internal fun endToEndBytesPerSecond(
-    transferredBytes: Long,
-    elapsedMs: Long,
-): Long {
-    if (transferredBytes <= 0L || elapsedMs <= 0L) return 0L
-    return (transferredBytes.toDouble() * 1_000.0 / elapsedMs.toDouble())
-        .toLong()
-        .coerceAtLeast(0L)
-}
-
-internal fun transferredBytesThisAttempt(downloaded: Long, resumeOffset: Long): Long =
-    (downloaded - resumeOffset).coerceAtLeast(0L)
-
 internal class PairingCompletedException : Exception("Nikon pairing completed; reconnect required")
 
 internal class UnexpectedStaResponderException(actualResponderGuid: String?) :
@@ -958,12 +916,13 @@ class NikonCamera(private val context: Context) {
         // 每块仍是独立 PTP 事务，块间释放相机通道供当前 FHD / EXIF 使用。
         // 也是断点续传的检查点粒度；旧版本留下的 64MB 对齐半成品仍天然兼容。
         // internal: TransferViewModel 引用此值做续传偏移对齐。
-        const val CHUNK_SIZE = 4L * 1024 * 1024
-        const val HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD = 128L * 1024 * 1024
+        const val CHUNK_SIZE = TRANSFER_RESUME_CHUNK_SIZE
+        const val HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD =
+            TRANSFER_HIGH_THROUGHPUT_FULL_OBJECT_THRESHOLD
         /** USB and the visible transfer screen avoid repeated camera-side PartialObject setup. */
-        const val HIGH_THROUGHPUT_CHUNK_SIZE = 64L * 1024 * 1024
-        const val LARGE_FILE_THRESHOLD = 512L * 1024 * 1024
-        const val LARGE_FILE_CHUNK_SIZE = 32L * 1024 * 1024
+        const val HIGH_THROUGHPUT_CHUNK_SIZE = TRANSFER_HIGH_THROUGHPUT_CHUNK_SIZE
+        const val LARGE_FILE_THRESHOLD = TRANSFER_LARGE_FILE_THRESHOLD
+        const val LARGE_FILE_CHUNK_SIZE = TRANSFER_LARGE_FILE_CHUNK_SIZE
         private const val FHD_DEVICE_BUSY_RETRIES = 2
         private const val FHD_DEVICE_BUSY_RETRY_DELAY_MS = 160L
     }
@@ -3439,13 +3398,14 @@ class NikonCamera(private val context: Context) {
             try {
                 // 对 >4GB 文件（ObjectInfo 报 SIZE_UNKNOWN）用 GetObjectSize 取真实 64 位大小。
                 var effectiveSize = totalSize
-                if (totalSize == PtpConstants.SIZE_UNKNOWN || totalSize <= 0L) {
-                    transferTransaction { getObjectSizeInternal(handle) }?.takeIf { it > 0 }?.let {
-                        effectiveSize = it
+                if (shouldQueryTransferSize(totalSize)) {
+                    val queriedSize = transferTransaction { getObjectSizeInternal(handle) }
+                    effectiveSize = resolvedTransferSize(totalSize, queriedSize)
+                    queriedSize?.takeIf { it > 0L }?.let {
                         log { "DL_SIZE resolved: $totalSize -> $it via GetObjectSize" }
                     }
                 }
-                val sizeKnown = effectiveSize > 0L && effectiveSize != PtpConstants.SIZE_UNKNOWN
+                val sizeKnown = isKnownTransferSize(effectiveSize)
                 val preferHighThroughput = preferHighThroughputAtStart()
                 // 浏览时 Wi-Fi 保持小分块让路；USB 及传输页可见时的 Wi-Fi 使用高吞吐策略。
                 // 此处已经冻结本文件快照，页面切换不会中途换道。
@@ -3474,7 +3434,7 @@ class NikonCamera(private val context: Context) {
                 )
 
                 // 请求了续传却走不了分块：全量只能从 0 填，会写坏已定位的流。拒绝，让调用方重下。
-                if (resumeOffset > 0 && !usePartial) {
+                if (isResumeUnavailable(resumeOffset, usePartial)) {
                     return@withContext Result.failure(ResumeUnavailableException())
                 }
 
@@ -3509,30 +3469,45 @@ class NikonCamera(private val context: Context) {
                                     got,
                                 ),
                             )
-                            // 只有相机明确表示不支持操作码，且流仍在 0，才能安全回退全量。
-                            // 设备忙等瞬时错误直接失败，绝不把当前文件降级成不可插队的整传。
-                            if (first && got == 0L && resumeOffset == 0L &&
-                                resp == PtpConstants.OPERATION_NOT_SUPPORTED
-                            ) {
+                        }
+                        when (
+                            classifyPartialObjectResponse(
+                                responseCode = resp,
+                                isFirstChunk = first,
+                                receivedBytes = got,
+                                resumeOffset = resumeOffset,
+                            )
+                        ) {
+                            PartialObjectResponseAction.FALLBACK_TO_FULL_OBJECT -> {
                                 partialObjectSupported = false
                                 fellBack = true
                                 log { "DL_PARTIAL unsupported, full fallback" }
                                 break
                             }
-                            return@withContext failed(resp)
+
+                            PartialObjectResponseAction.FAIL ->
+                                return@withContext failed(resp)
+
+                            PartialObjectResponseAction.ACCEPT -> Unit
                         }
                         partialObjectSupported = true
                         // 逐块校验：声明长度与实收不符 = 短读，立即失败（不吞不跳）。
-                        if (chunkExpected > 0 && got != chunkExpected) return@withContext incomplete(got, chunkExpected)
+                        if (!isPartialChunkLengthComplete(got, chunkExpected)) {
+                            return@withContext incomplete(got, chunkExpected)
+                        }
                         // OK 但零字节：相机不再推进，避免死循环。
-                        if (got == 0L) return@withContext incomplete(totalDownloaded, effectiveSize)
+                        if (!hasPartialChunkProgress(got)) {
+                            return@withContext incomplete(totalDownloaded, effectiveSize)
+                        }
                         // 按【实收字节】推进，而非请求量——短读也不会跳过未收到的区间。
                         offset += got
                         first = false
                     }
                     if (!fellBack) {
                         // 全文件完整性：分块模式的最终防线（此前只有逐块校验）。
-                        if (totalDownloaded != effectiveSize) return@withContext incomplete(totalDownloaded, effectiveSize)
+                        if (!isPartialDownloadComplete(totalDownloaded, effectiveSize)) {
+                            return@withContext incomplete(totalDownloaded, effectiveSize)
+                        }
                         noteStaDownload(
                             "complete handle=0x%08X bytes=%d".format(handle, totalDownloaded),
                         )
@@ -3556,7 +3531,7 @@ class NikonCamera(private val context: Context) {
                 )
                 if (resp != PtpConstants.RESPONSE_OK) return@withContext failed(resp)
                 // 相机异常提前结束数据阶段：声明大小与实收不符则判残缺。SIZE_UNKNOWN/未声明放行。
-                if (expected > 0 && expected != PtpConstants.SIZE_UNKNOWN && totalDownloaded != expected) {
+                if (!isFullObjectLengthComplete(totalDownloaded, expected)) {
                     return@withContext incomplete(totalDownloaded, expected)
                 }
                 Result.success(buildStats())

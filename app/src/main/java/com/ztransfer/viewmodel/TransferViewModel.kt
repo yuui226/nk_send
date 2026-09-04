@@ -61,10 +61,16 @@ import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.ExistingPartAction
+import com.ztransfer.protocol.FailedPartAction
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.ResumeUnavailableException
+import com.ztransfer.protocol.TransferFailurePresentation
+import com.ztransfer.protocol.classifyTransferFailurePresentation
 import com.ztransfer.protocol.endToEndBytesPerSecond
+import com.ztransfer.protocol.failedPartAction
+import com.ztransfer.protocol.planExistingPart
 import com.ztransfer.service.TransferService
 import com.ztransfer.ui.theme.SkinPreset
 import com.ztransfer.ui.theme.ThemeMode
@@ -325,7 +331,7 @@ internal class PendingTransferQueue {
     }
 }
 
-private fun TransferTask.newAttempt(): TransferTask = copy(
+internal fun TransferTask.newAttempt(): TransferTask = copy(
     taskId = transferTaskIds.incrementAndGet(),
     status = TransferStatus.WAITING,
     progress = 0f,
@@ -751,17 +757,21 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
      * 目录失效单独指认；其余保留自带信息（多为我们自己抛出的已本地化业务文案）。
      */
     private fun friendlyError(e: Throwable?): String {
-        val msg = e?.message ?: return str(R.string.transfer_failed)
-        val connectionLost = e is java.net.SocketException ||
-                e is java.net.SocketTimeoutException ||
-                e is java.io.EOFException ||
-                listOf("connection abort", "connection reset", "broken pipe",
-                    "socket", "econn", "etimedout", "network is unreachable")
-                    .any { msg.contains(it, ignoreCase = true) }
-        return when {
-            connectionLost -> str(R.string.error_camera_connection_lost)
-            e is java.io.FileNotFoundException -> str(R.string.error_dir_invalid)
-            else -> msg
+        val message = e?.message
+        return when (
+            classifyTransferFailurePresentation(
+                message = message,
+                isConnectionException = e is java.net.SocketException ||
+                    e is java.net.SocketTimeoutException ||
+                    e is java.io.EOFException,
+                isDirectoryException = e is java.io.FileNotFoundException,
+            )
+        ) {
+            TransferFailurePresentation.GENERIC -> str(R.string.transfer_failed)
+            TransferFailurePresentation.CONNECTION_LOST ->
+                str(R.string.error_camera_connection_lost)
+            TransferFailurePresentation.DIRECTORY_INVALID -> str(R.string.error_dir_invalid)
+            TransferFailurePresentation.PASSTHROUGH_MESSAGE -> message.orEmpty()
         }
     }
 
@@ -775,8 +785,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         const val TAG = "ZTransfer"
         // 未完成文件的临时名前缀（带前导点，在相册中隐藏）。真正文件名只在下载完整后才出现。
         const val PART_PREFIX = ".nkpart_"
-        // 分块大小引用协议层常量，保证断点续传偏移与分块下载粒度的严格一致。
-        val RESUME_CHUNK_SIZE: Long get() = NikonCamera.CHUNK_SIZE
         const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_play_count"
         const val KEY_MAIN_SETTINGS_HELP_VIEWED = "main_settings_help_viewed"
         const val KEY_PHOTO_EFFECTS_HELP_VIEWED = "photo_effects_help_viewed"
@@ -2113,9 +2121,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                         ?.takeIf { it.token == identityToken(task.file) }
                     if (partFile != null) {
                         val partSize = partFile.size
-                        // task.file.size 对 >4GB 文件是 SIZE_UNKNOWN 哨兵，绝不能拿它当真实大小比较。
-                        val sizeKnown = task.file.size > 0 && task.file.size != PtpConstants.SIZE_UNKNOWN
-                        if (sizeKnown && partSize == task.file.size) {
+                        val partPlan = planExistingPart(
+                            objectSize = task.file.size,
+                            partSize = partSize,
+                        )
+                        if (partPlan.action == ExistingPartAction.FINALIZE_COMPLETE_PART) {
                             // 半成品与完整大小严格相等：上次下载完在改名前崩了，直接改名跳过下载。
                             // 仅在大小【已知】时走此捷径——SIZE_UNKNOWN 下 partSize>=哨兵会把
                             // 4.3GB 的截断视频误判为完整，造成静默数据丢失。
@@ -2152,10 +2162,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 deleteQuietly(partFile.uri)
                                 directoryIndex.removePart(task.file.fileName)
                             }
-                        } else if (partSize >= RESUME_CHUNK_SIZE && (!sizeKnown || partSize < task.file.size)) {
+                        } else if (partPlan.action == ExistingPartAction.RESUME_FROM_PART) {
                             // 半成品够大（≥1 块）且未完整：从块边界续传。大小未知(>4GB)也允许——
                             // 由协议层用 GetObjectSize 解析真实大小后做全文件完整性校验。
-                            resumeOffset = (partSize / RESUME_CHUNK_SIZE) * RESUME_CHUNK_SIZE
+                            resumeOffset = partPlan.resumeOffset
                             fileDocUri = partFile.uri
                             log { "DL_RESUME: ${task.file.fileName} partSize=$partSize resumeOffset=$resumeOffset" }
                         } else {
@@ -2442,7 +2452,10 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 }
                             },
                             onFailure = { e ->
-                                if (e is ResumeUnavailableException) {
+                                if (
+                                    failedPartAction(e is ResumeUnavailableException) ==
+                                    FailedPartAction.DELETE_BEFORE_FRESH_RETRY
+                                ) {
                                     // 走不了续传（相机不支持分块 / >4GB 拿不到真实大小）：删掉半成品，
                                     // 本次标记失败，重试将从头全新下载——绝不用错位的全量数据续写。
                                     deleteQuietly(fileDocUri)

@@ -175,6 +175,73 @@ class TransferStateTest {
     }
 
     @Test
+    fun retryKeepsTheQueuedOutputSnapshotAndResetsEveryRuntimeField() {
+        val metadata = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
+            showModel = false,
+        )
+        val watermark = PhotoFrameWatermark(
+            enabled = true,
+            text = "original snapshot",
+            opacityPercent = 41,
+        )
+        val filter = PhotoFilterSelection(
+            preset = PhotoFilterPreset(
+                id = "retry-snapshot",
+                name = "Retry snapshot",
+                parameters = NcpPhotoFilterParameters(
+                    saturationStep = 1,
+                    hueStep = -1,
+                    toneCurve = IntArray(257) { index -> (index * 0x7fff) / 256 },
+                ),
+            ),
+            intensityPercent = 64,
+        )
+        val failed = TransferTask(
+            file = file(7),
+            taskId = 9_000L,
+            framePreset = PhotoFramePreset.MIST,
+            frameBorderRequested = false,
+            frameMetadataSettings = metadata,
+            frameWatermarkRequested = watermark,
+            photoFilterRequested = filter,
+            destinationFolderName = "ZT2026-08-07",
+            status = TransferStatus.FAILED,
+            progress = 0.73f,
+            speed = 123L,
+            downloaded = 456L,
+            error = "connection reset",
+            skipped = true,
+            downloadMBps = 7.5f,
+            elapsedMs = 8_000L,
+            isGeneratingFrame = true,
+            frameGenerationStartedAtElapsedMs = 9_000L,
+            frameGenerationElapsedMs = 2_000L,
+        )
+
+        val retry = failed.newAttempt()
+
+        assertNotEquals(failed.taskId, retry.taskId)
+        assertEquals(failed.file, retry.file)
+        assertEquals(failed.framePreset, retry.framePreset)
+        assertEquals(failed.frameBorderRequested, retry.frameBorderRequested)
+        assertEquals(failed.frameMetadataSettings, retry.frameMetadataSettings)
+        assertEquals(failed.frameWatermarkRequested, retry.frameWatermarkRequested)
+        assertEquals(failed.photoFilterRequested, retry.photoFilterRequested)
+        assertEquals(failed.destinationFolderName, retry.destinationFolderName)
+        assertEquals(TransferStatus.WAITING, retry.status)
+        assertEquals(0f, retry.progress)
+        assertEquals(0L, retry.speed)
+        assertEquals(0L, retry.downloaded)
+        assertEquals(null, retry.error)
+        assertEquals(false, retry.skipped)
+        assertEquals(0f, retry.downloadMBps)
+        assertEquals(null, retry.elapsedMs)
+        assertEquals(false, retry.isGeneratingFrame)
+        assertEquals(null, retry.frameGenerationStartedAtElapsedMs)
+        assertEquals(null, retry.frameGenerationElapsedMs)
+    }
+
+    @Test
     fun framesAreGeneratedOnlyForSupportedBitmapPhotos() {
         assertEquals(true, shouldGeneratePhotoFrame(enabled = true, extension = ".jpg"))
         assertEquals(true, shouldGeneratePhotoFrame(enabled = true, extension = ".JPEG"))
