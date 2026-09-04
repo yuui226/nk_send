@@ -57,8 +57,7 @@ internal class NikonGpsBleClient(
     private var idChar: BluetoothGattCharacteristic? = null
     private var geoChar: BluetoothGattCharacteristic? = null
     private var descriptorQueue = ArrayDeque<BluetoothGattDescriptor>()
-    private var stage1: GpsPairingPacket? = null
-    private var stage3Sent = false
+    private var pairingState = NikonGpsPairingState()
     private var idQueued = false
     private var controllerName = "ZTransfer"
     private var savedDeviceId: Long? = null
@@ -100,8 +99,7 @@ internal class NikonGpsBleClient(
         idWriteTimeout?.cancel()
         idWriteTimeout = null
         if (gatt != null || scanCallback != null) return
-        stage1 = null
-        stage3Sent = false
+        pairingState = NikonGpsPairingState()
         idQueued = false
         ready = false
         pairingNotified = false
@@ -124,7 +122,7 @@ internal class NikonGpsBleClient(
                     // Once the camera has accepted stage 2 and we sent stage 3, the
                     // handshake can legitimately outlive the short direct-connect
                     // window. Do not tear down an active ID/GPS confirmation write.
-                    if (gatt != null && scanCallback == null && !ready && !stage3Sent) {
+                    if (gatt != null && scanCallback == null && !ready && !pairingState.stage3Sent) {
                         GpsDiagnostics.record("BLE direct connect timeout; fallback scan")
                         directConnectJob = null
                         closeCurrentGatt(suppressCallback = true)
@@ -363,8 +361,9 @@ internal class NikonGpsBleClient(
     private fun enableNextDescriptor(g: BluetoothGatt) {
         val descriptor = descriptorQueue.removeFirstOrNull()
         if (descriptor == null) {
-            val packet = NikonGpsPairingProtocol().newStage1(savedDeviceId, savedNonce)
-            stage1 = packet
+            val decision = NikonGpsPairingProtocol().begin(savedDeviceId, savedNonce)
+            pairingState = decision.state
+            val packet = decision.packetToWrite ?: return
             if (savedDeviceId == null && !pairingNotified) {
                 pairingNotified = true
                 listener.onPairing()
@@ -372,7 +371,7 @@ internal class NikonGpsBleClient(
             pairingTimeout?.cancel()
             pairingTimeout = scope.launch {
                 delay(7_000L)
-                if (stage1 != null && !stage3Sent) {
+                if (pairingState.stage1 != null && !pairingState.stage3Sent) {
                     GpsDiagnostics.record("pairing response timeout savedIdentity=${savedDeviceId != null}")
                     listener.onError(
                         if (savedDeviceId != null) "Camera pairing identity expired"
@@ -380,7 +379,7 @@ internal class NikonGpsBleClient(
                     )
                 }
             }
-            writeCharacteristic(g, pairChar ?: return, packet.encode())
+            writeCharacteristic(g, pairChar ?: return, NikonGpsPairingPacketCodec.encode(packet))
             return
         }
         val enabled = if (descriptor.characteristic.uuid == PAIR_UUID) {
@@ -411,38 +410,51 @@ internal class NikonGpsBleClient(
         }
         if (uuid != PAIR_UUID) return
         val packet = GpsPairingPacket.decode(value) ?: return
-        val first = stage1 ?: return
-        if (packet.stage == 2 && !stage3Sent) {
-            if (savedDeviceId == null && !pairingNotified) {
-                pairingNotified = true
-                listener.onPairing()
-            }
-            pairingTimeout?.cancel()
-            pairingTimeout = null
-            val response = NikonGpsPairingProtocol().stage3For(first, packet)
-            if (response == null) {
-                GpsDiagnostics.record("pairing stage2 salt rejected")
-                listener.onError("Camera pairing rejected")
-                return
-            }
-            stage3Sent = true
-            GpsDiagnostics.record("pairing stage3 sent")
-            writeCharacteristic(gatt ?: return, pairChar ?: return, response.encode())
-            pairingTimeout = scope.launch {
-                delay(7_000L)
-                if (!idQueued) {
-                    GpsDiagnostics.record("pairing stage4 timeout")
-                    listener.onError("Camera pairing handshake timeout")
+        val decision = NikonGpsPairingProtocol().advance(pairingState, packet)
+        when (decision.action) {
+            NikonGpsPairingAction.SEND_STAGE3,
+            NikonGpsPairingAction.REJECT_STAGE2 -> {
+                if (savedDeviceId == null && !pairingNotified) {
+                    pairingNotified = true
+                    listener.onPairing()
+                }
+                pairingTimeout?.cancel()
+                pairingTimeout = null
+                pairingState = decision.state
+                if (decision.action == NikonGpsPairingAction.REJECT_STAGE2) {
+                    GpsDiagnostics.record("pairing stage2 salt rejected")
+                    listener.onError("Camera pairing rejected")
+                    return
+                }
+                val response = decision.packetToWrite ?: return
+                GpsDiagnostics.record("pairing stage3 sent")
+                writeCharacteristic(
+                    gatt ?: return,
+                    pairChar ?: return,
+                    NikonGpsPairingPacketCodec.encode(response),
+                )
+                pairingTimeout = scope.launch {
+                    delay(7_000L)
+                    if (!idQueued) {
+                        GpsDiagnostics.record("pairing stage4 timeout")
+                        listener.onError("Camera pairing handshake timeout")
+                    }
                 }
             }
-        } else if (packet.stage == 4) {
-            pairingTimeout?.cancel()
-            pairingTimeout = null
-            GpsDiagnostics.record("pairing stage4 received")
-            scope.launch {
-                delay(1_500)
-                queueControllerIdIfNeeded()
+
+            NikonGpsPairingAction.ACCEPT_STAGE4 -> {
+                pairingState = decision.state
+                pairingTimeout?.cancel()
+                pairingTimeout = null
+                GpsDiagnostics.record("pairing stage4 received")
+                scope.launch {
+                    delay(1_500)
+                    queueControllerIdIfNeeded()
+                }
             }
+
+            NikonGpsPairingAction.SEND_STAGE1,
+            NikonGpsPairingAction.IGNORE -> Unit
         }
     }
 
@@ -674,7 +686,7 @@ internal class NikonGpsBleClient(
 
     private fun finishClassicPairing() {
         if (classicReceiver == null) return
-        stage1?.let { listener.onPairedIdentity(it.device, it.nonce) }
+        pairingState.stage1?.let { listener.onPairedIdentity(it.device, it.nonce) }
         stopClassicPairing()
         GpsDiagnostics.record("Classic pairing complete; reconnecting BLE")
         listener.onDisconnected()
