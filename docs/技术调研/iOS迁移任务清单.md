@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：PTP 基础协议、对象目录及 AP/STA 纯连接规则已共享，继续迁移遥控协议状态
-- 下一项：`P07` 遥控、实时监看和录像协议状态
+- 当前阶段：PTP、对象目录、AP/STA 规则及遥控协议事实已共享，开始迁移文件浏览纯规则
+- 下一项：`T01` 文件排序、筛选、日期分组和连拍识别
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -63,13 +63,13 @@
 | P04 | DONE | Nikon 属性、能力和对象信息解析 | DeviceInfo、属性描述/标量、ObjectInfo/文件名均以固定二进制样本共享 |
 | P05 | DONE | 存储卡、对象元数据与双卡合并规则 | AUINT32、顺序、别名、去重、双卡归属及 Nikon 文件头元数据均已共享 |
 | P06 | DONE | AP/STA 发现和配对状态规则 | IPv4 扫描策略、配对/档案/连接状态规则已共享；网络扫描与状态发布留在平台层 |
-| P07 | NEXT | 遥控、实时监看和录像协议状态 | 与平台视频渲染分离 |
+| P07 | DONE | 遥控、实时监看和录像协议状态 | Lab 码表、Live View 帧元数据解析和纯录像判定已共享；平台视频渲染/相机 IO 保留 Android |
 
 ### 4. 文件浏览与传输
 
 | ID | 状态 | 任务 | 主要范围 |
 |---|---|---|---|
-| T01 | TODO | 文件排序、筛选、日期分组和连拍识别 | 迁移现有相关单测 |
+| T01 | NEXT | 文件排序、筛选、日期分组和连拍识别 | 迁移现有相关单测 |
 | T02 | TODO | 缩略图调度、优先级和缓存规则 | 存储实现留平台层 |
 | T03 | TODO | 传输任务、队列和暂停/继续状态机 | UI 与 Service 不进入本批次 |
 | T04 | TODO | 重试、错误分类、分块和断点规则 | 文件 IO 通过接口注入 |
@@ -155,6 +155,8 @@
 | 2026-09-04 | P05 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-171031.apk`，SHA-256 `28E0DA9AC6CFFD6BB7790847B0DFBC516DA260D8740AA481E10AB2851A2F50DF`；Manifest 与 P04 相同，共享类均为单一定义，真机 `3B65BV001L500000` 安装启动成功、PID `32068` 且未发现启动崩溃 |
 | 2026-09-04 | P06 | IPv4 路由归属/扫描主机、STA initiator identity、配对门槛、responder 匹配、相机档案选择、AP/STA 状态枚举、偏好恢复、发现保活、会话激活和 3/8/15/30 秒重连退避已迁入 shared；Android NSD/网卡/Socket、SharedPreferences、Throwable 分类、StateFlow/Job/generation 和状态发布保持原位 |
 | 2026-09-04 | P06 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-174118.apk`，SHA-256 `9C50881D3568125EFFD78F49002DE3A70DBEE0F58298AAC930D87DDC8BB8D6F7`；Manifest 与 P05 相同，迁入类型均为单一 DEX 定义且旧包定义为 0；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
+| 2026-09-04 | P07 | Nikon `Lab` 操作/事件/响应/属性码表、Live View 包头与对焦/声音元数据解析、录像禁止条件和应用模式回退/重启判定已迁入 shared；Android Socket/USB/Mutex、命令时序、事件调度、Compose/Bitmap 及 MediaCodec/MediaMuxer 保持原位 |
+| 2026-09-04 | P07 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-180743.apk`，SHA-256 `B1D2BCC2057D07F5C20B5CE34F1519188DFA92E2336FD7B288D5D7C24EC2E7C4`；Manifest 与 P06 相同，9 个迁入类型/文件门面均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
 
 ## 更新约定
 
