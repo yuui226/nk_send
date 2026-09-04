@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：文件排序、筛选、日期分组和连拍识别已共享，继续迁移缩略图调度规则
-- 下一项：`T02` 缩略图调度、优先级和缓存规则
+- 当前阶段：文件浏览与缩略图纯规则已共享，继续迁移传输任务状态机
+- 下一项：`T03` 传输任务、队列和暂停/继续状态机
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -70,8 +70,8 @@
 | ID | 状态 | 任务 | 主要范围 |
 |---|---|---|---|
 | T01 | DONE | 文件排序、筛选、日期分组和连拍识别 | 原文件模型直接实现只读共享边界；排序/筛选/日期/连拍规则及测试已共享 |
-| T02 | NEXT | 缩略图调度、优先级和缓存规则 | 存储实现留平台层 |
-| T03 | TODO | 传输任务、队列和暂停/继续状态机 | UI 与 Service 不进入本批次 |
+| T02 | DONE | 缩略图调度、优先级和缓存规则 | 通用队列、优先级、键材料、身份、过期与负缓存规则已共享；平台存储/解码/IO 保持原位 |
+| T03 | NEXT | 传输任务、队列和暂停/继续状态机 | UI 与 Service 不进入本批次 |
 | T04 | TODO | 重试、错误分类、分块和断点规则 | 文件 IO 通过接口注入 |
 | T05 | TODO | 命名、同名文件、临时文件和完整性规则 | Android 结果保持一致 |
 
@@ -159,6 +159,8 @@
 | 2026-09-04 | P07 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-180743.apk`，SHA-256 `B1D2BCC2057D07F5C20B5CE34F1519188DFA92E2336FD7B288D5D7C24EC2E7C4`；Manifest 与 P06 相同，9 个迁入类型/文件门面均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
 | 2026-09-04 | T01 | 文件扩展名、PTP 日期日键/范围、多卡 head 选择、稳定新旧排序、宽松日期分组、六条件 AND 筛选、双卡选择状态和连拍识别已迁入 shared；Android 原 `NikonCamera.FileInfo` 仅实现最小只读接口，构造/copy/equality 不变，Compose/动画/导出索引/SharedPreferences/`java.time` UI 适配保持原位 |
 | 2026-09-04 | T01 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-183000.apk`，SHA-256 `E4C34ADFE343441BBD5D510E57168D8B1383CE26937C9EFF9F2B2260F7DEEF76`；Manifest 与 P07 相同，9 个共享类型/文件门面及 Android 原 `FileInfo` 均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
+| 2026-09-04 | T02 | 原缩略图填充队列以泛型只读文件边界迁入 shared；日期优先级、重扫 revision、去重、失败重试和新文件插队保持原顺序。缓存键材料、STA 无符号 handle、机身身份归一化、90 天边界以及直连 STA 的负缓存/后台预取规则已共享；Android SHA-256、文件系统、Bitmap、协程和相机 IO 保持原位 |
+| 2026-09-04 | T02 | 迁移前后固定哈希/目录名向量一致；shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-184505.apk`，SHA-256 `675C68963CA7B9C758D7799182A9A970B4D5A7986029043D815CF4694346BDB3`；Manifest 与 T01 完全相同，两项新增共享类在 APK 中各只有一个定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
 
 ## 更新约定
 
