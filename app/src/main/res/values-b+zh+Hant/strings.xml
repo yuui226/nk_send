@@ -462,12 +462,12 @@
     <string name="contact_support">客服</string>
     <string name="purchase_loading">正在建立訂單…</string>
     <string name="purchase_qr_loading">正在產生支付二維碼…</string>
-    <string name="purchase_wechat_title">微信掃碼付款</string>
+    <string name="purchase_wechat_title">微信掃碼付款後，返回 Z傳 自動啟用</string>
     <string name="purchase_annual_title">一年高級版 · 微信掃碼付款</string>
     <string name="purchase_lifetime_title">永久高級版 · 微信掃碼付款</string>
-    <string name="purchase_locked_annual">本單 %1$s · %2$d 天</string>
-    <string name="purchase_locked_lifetime">本單 %1$s · 永久</string>
-    <string name="purchase_scan_hint">請到微信掃相簿中的二維碼付款</string>
+    <string name="purchase_locked_annual">%1$s · %2$d 天高級版</string>
+    <string name="purchase_locked_lifetime">%1$s · 永久高級版</string>
+    <string name="purchase_scan_hint">請儲存到相簿後，用微信掃碼付款</string>
     <string name="purchase_save_qr">儲存到相簿</string>
     <string name="purchase_saved">✓ 已儲存到相簿</string>
     <string name="purchase_save_failed">儲存失敗，請截圖後到微信掃相簿中的二維碼付款</string>

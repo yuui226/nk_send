@@ -466,12 +466,12 @@
     <string name="contact_support">客服</string>
     <string name="purchase_loading">正在创建订单…</string>
     <string name="purchase_qr_loading">正在生成支付二维码…</string>
-    <string name="purchase_wechat_title">微信扫码支付</string>
+    <string name="purchase_wechat_title">微信扫码支付后，回到 Z传 自动激活</string>
     <string name="purchase_annual_title">一年高级版 · 微信扫码支付</string>
     <string name="purchase_lifetime_title">永久高级版 · 微信扫码支付</string>
-    <string name="purchase_locked_annual">本单 %1$s · %2$d 天</string>
-    <string name="purchase_locked_lifetime">本单 %1$s · 永久</string>
-    <string name="purchase_scan_hint">请到微信扫相册中的二维码付款</string>
+    <string name="purchase_locked_annual">%1$s · %2$d 天高级版</string>
+    <string name="purchase_locked_lifetime">%1$s · 永久高级版</string>
+    <string name="purchase_scan_hint">请保存到相册后，用微信扫码支付</string>
     <string name="purchase_save_qr">保存到相册</string>
     <string name="purchase_saved">✓ 已保存到相册</string>
     <string name="purchase_save_failed">保存失败，请截图后到微信扫相册中的二维码付款</string>

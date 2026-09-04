@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -387,23 +388,12 @@ fun PurchaseDialog(
                         .verticalScroll(rememberScrollState())
                         .padding(20.dp)
                 ) {
-                    // ---- 头部:左边说清"付什么、多少钱",右边叉号退出 ----
+                    // ---- 头部:左边说清"多少钱、付完怎么做",右边叉号退出 ----
                     // 钱已经付完就撤掉金额:那时这里是庆祝页,只该说"解锁了",再挂个价签是提醒他刚花了钱。
                     if (!activated) {
                         Row(verticalAlignment = Alignment.Top) {
                             Column(Modifier.weight(1f)) {
                                 if (qr != null && code == null) {
-                                    Text(
-                                        stringResource(
-                                            if (paidProduct == LicenseManager.ProductId.ANNUAL) {
-                                                R.string.purchase_annual_title
-                                            } else {
-                                                R.string.purchase_lifetime_title
-                                            }
-                                        ),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = colors.onSurfaceVariant
-                                    )
                                     if (orderPriceFen > 0) {
                                         Text(
                                             if (paidProduct == LicenseManager.ProductId.ANNUAL) {
@@ -419,11 +409,22 @@ fun PurchaseDialog(
                                                 )
                                             },
                                             style = MaterialTheme.typography.titleLarge,
+                                            fontSize = 20.sp,
+                                            lineHeight = 26.sp,
                                             fontWeight = FontWeight.Bold,
                                             // 与解锁弹窗的定价同一个金色:同一笔钱,视觉接得上
                                             color = colors.accentYellow
                                         )
+                                        Spacer(Modifier.height(4.dp))
                                     }
+                                    Text(
+                                        stringResource(R.string.purchase_wechat_title),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontSize = 14.sp,
+                                        lineHeight = 20.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = colors.onSurfaceVariant
+                                    )
                                 }
                             }
                             IconButton(onClick = close, modifier = Modifier.size(32.dp)) {
@@ -673,23 +674,46 @@ fun PurchaseDialog(
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     val qrSize = (maxWidth - 24.dp).coerceIn(180.dp, 232.dp)
-                                    Box(
-                                        Modifier
-                                            .clip(qrShape)
-                                            .background(Color.White)
-                                            .border(1.dp, colors.glassPanelBorder, qrShape)
-                                            .padding(12.dp)
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
                                     ) {
-                                        Image(
-                                            bitmap = qr!!.asImageBitmap(),
-                                            contentDescription = null,
-                                            // 码是位图，放大用最近邻保持模块边缘锐利。
-                                            filterQuality = FilterQuality.None,
-                                            modifier = Modifier.size(qrSize)
+                                        Box(
+                                            Modifier
+                                                .clip(qrShape)
+                                                .background(Color.White)
+                                                .border(1.dp, colors.glassPanelBorder, qrShape)
+                                                .padding(12.dp)
+                                        ) {
+                                            Image(
+                                                bitmap = qr!!.asImageBitmap(),
+                                                contentDescription = null,
+                                                // 码是位图，放大用最近邻保持模块边缘锐利。
+                                                filterQuality = FilterQuality.None,
+                                                modifier = Modifier.size(qrSize)
+                                            )
+                                        }
+                                        Spacer(Modifier.height(12.dp))
+                                        // 操作提示与二维码图片同宽；窄屏或大字体下自然换行。
+                                        Text(
+                                            stringResource(
+                                                if (saveFailed) R.string.purchase_save_failed
+                                                else R.string.purchase_scan_hint
+                                            ),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontSize = 14.sp,
+                                            lineHeight = 20.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (saveFailed) {
+                                                colors.accentOrange
+                                            } else {
+                                                colors.onBackground
+                                            },
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.width(qrSize),
                                         )
                                     }
                                 }
-                                Spacer(Modifier.height(18.dp))
+                                Spacer(Modifier.height(16.dp))
                                 // 唯一动作
                                 GlassButton(
                                     shape = RoundedCornerShape(14.dp),
@@ -711,24 +735,14 @@ fun PurchaseDialog(
                                             if (saved) R.string.purchase_saved else R.string.purchase_save_qr
                                         ),
                                         style = MaterialTheme.typography.labelLarge,
+                                        fontSize = 16.sp,
+                                        lineHeight = 22.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (saved) colors.statusConnected else colors.accentBlue
                                     )
                                 }
-                                Spacer(Modifier.height(12.dp))
                                 // 存不进相册就让他截图——但码必须还在屏幕上,否则"请改用截图"是句空话。
-                                // 所以保存失败【绝不能】写进 error:那个分支排在码前面,会把码整个顶掉,
-                                // 只留一个"重试"按钮把正在付的单废掉重建(Android 8~9 上没有
-                                // WRITE_EXTERNAL_STORAGE,存相册必失败,那就成了永远付不了款的死循环)。
-                                Text(
-                                    stringResource(
-                                        if (saveFailed) R.string.purchase_save_failed
-                                        else R.string.purchase_scan_hint
-                                    ),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (saveFailed) colors.accentOrange else colors.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
+                                // 保存失败仍只切换二维码下方的提示，不进入会替换二维码的 error 分支。
                             }
 
                             // ---- 建单/画码中 ----

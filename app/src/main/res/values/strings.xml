@@ -466,12 +466,12 @@
     <string name="contact_support">Support</string>
     <string name="purchase_loading">Creating order…</string>
     <string name="purchase_qr_loading">Generating payment QR…</string>
-    <string name="purchase_wechat_title">Pay with WeChat</string>
+    <string name="purchase_wechat_title">After paying with WeChat, return to ZTransfer for automatic activation</string>
     <string name="purchase_annual_title">Annual Pro · Pay with WeChat</string>
     <string name="purchase_lifetime_title">Lifetime Pro · Pay with WeChat</string>
-    <string name="purchase_locked_annual">Order total %1$s · %2$d days</string>
-    <string name="purchase_locked_lifetime">Order total %1$s · Lifetime</string>
-    <string name="purchase_scan_hint">Please scan the QR code from your album in WeChat to pay</string>
+    <string name="purchase_locked_annual">%1$s · %2$d-day Pro</string>
+    <string name="purchase_locked_lifetime">%1$s · Lifetime Pro</string>
+    <string name="purchase_scan_hint">Save to your album, then scan with WeChat to pay</string>
     <string name="purchase_save_qr">Save to album</string>
     <string name="purchase_saved">✓ Saved to album</string>
     <string name="purchase_save_failed">Save failed — screenshot this code, then scan it from your album in WeChat</string>
