@@ -6,7 +6,6 @@ import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import android.util.Log
 import java.net.Inet4Address
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
@@ -252,26 +251,24 @@ internal class PtpIpDiscovery(private val context: Context) {
     }
 
     private fun subnetKey(subnet: Subnet): String {
-        val localIp = ipv4ToLong(subnet.address)
-        val mask = ipv4Mask(subnet.scanPrefixLength)
-        return "${localIp and mask}/${subnet.scanPrefixLength}"
+        val localAddress = checkNotNull(subnet.address.hostAddress)
+        return checkNotNull(
+            ipv4SubnetKey(localAddress, subnet.scanPrefixLength),
+        )
     }
 
-    private fun subnetContains(subnet: Subnet, candidateIp: String): Boolean =
-        ipv4SubnetContains(subnet.address, candidateIp, subnet.routePrefixLength)
+    private fun subnetContains(subnet: Subnet, candidateIp: String): Boolean {
+        val localAddress = subnet.address.hostAddress ?: return false
+        return ipv4SubnetContains(
+            localAddress,
+            candidateIp,
+            subnet.routePrefixLength,
+        )
+    }
 
     private fun hosts(subnet: Subnet): List<String> {
-        val localIp = ipv4ToLong(subnet.address)
-        val mask = ipv4Mask(subnet.scanPrefixLength)
-        val network = localIp and mask
-        val broadcast = network or mask.inv().and(0xFFFFFFFFL)
-        val count = broadcast - network - 1
-        if (count <= 0 || count > MAX_SCAN_HOSTS) return emptyList()
-        return (network + 1 until broadcast)
-            .asSequence()
-            .filter { it != localIp }
-            .map(::longToIpv4)
-            .toList()
+        val localAddress = subnet.address.hostAddress ?: return emptyList()
+        return ipv4ScanHosts(localAddress, subnet.scanPrefixLength)
     }
 
     private suspend fun isPtpPortOpen(ip: String, localAddress: Inet4Address): Boolean =
@@ -288,16 +285,12 @@ internal class PtpIpDiscovery(private val context: Context) {
             }.getOrDefault(false)
         }
 
-    private fun longToIpv4(value: Long): String = listOf(24, 16, 8, 0)
-        .joinToString(".") { shift -> ((value shr shift) and 0xFF).toString() }
-
     private companion object {
         const val TAG = "ZTransfer.StaDiscovery"
         const val MDNS_TIMEOUT_MS = 1_500L
         const val SCAN_CONNECT_TIMEOUT_MS = 450
         const val SCAN_CONCURRENCY = 24
         const val SCAN_BATCH_SIZE = 48
-        const val MAX_SCAN_HOSTS = 254L
         const val MIN_NETWORK_PREFIX = 8
         const val MAX_PREFIX = 30
         val MDNS_SERVICE_TYPES = listOf("_ptp._tcp.", "_nikon._tcp.")
@@ -305,38 +298,3 @@ internal class PtpIpDiscovery(private val context: Context) {
             Regex("(?i)^(rmnet|ccmni|pdp|wwan|tun|tap|v4-rmnet)[a-z0-9_.-]*$")
     }
 }
-
-internal fun effectivePtpScanPrefix(routePrefixLength: Int): Int =
-    routePrefixLength.coerceIn(0, 32).coerceAtLeast(24)
-
-internal fun ipv4SubnetContains(
-    localAddress: Inet4Address,
-    candidateIp: String,
-    prefixLength: Int,
-): Boolean {
-    if (prefixLength !in 0..32) return false
-    val candidate = parseIpv4(candidateIp) ?: return false
-    val localIp = ipv4ToLong(localAddress)
-    val mask = ipv4Mask(prefixLength)
-    return (candidate and mask) == (localIp and mask) && candidate != localIp
-}
-
-private fun parseIpv4(value: String): Long? {
-    val parts = value.split('.')
-    if (parts.size != 4) return null
-    var result = 0L
-    for (part in parts) {
-        val octet = part.toIntOrNull()?.takeIf { it in 0..255 } ?: return null
-        result = (result shl 8) or octet.toLong()
-    }
-    return result
-}
-
-private fun ipv4ToLong(address: InetAddress): Long =
-    address.address.fold(0L) { value, byte ->
-        (value shl 8) or byte.toLong().and(0xFF)
-    }
-
-private fun ipv4Mask(prefixLength: Int): Long =
-    if (prefixLength == 0) 0L
-    else (0xFFFFFFFFL shl (32 - prefixLength)) and 0xFFFFFFFFL
