@@ -62,9 +62,9 @@ object LicenseManager {
     // 免费版限制(集中定义,调整数值只改这里)
     // 传输:每天完成 25 个(完成才计数,入队/跳过不计) + 单文件 ≤400MB;
     // 监看:每天累计 3 分钟。
-    const val FREE_DAILY_TRANSFER_LIMIT = 25
-    const val FREE_MAX_FILE_BYTES = 400L * 1024 * 1024
-    const val FREE_REMOTE_DAILY_MS = 3 * 60_000L
+    const val FREE_DAILY_TRANSFER_LIMIT = com.ztransfer.license.FREE_DAILY_TRANSFER_LIMIT
+    const val FREE_MAX_FILE_BYTES = com.ztransfer.license.FREE_MAX_FILE_BYTES
+    const val FREE_REMOTE_DAILY_MS = com.ztransfer.license.FREE_REMOTE_DAILY_MS
 
     // 软续签周期:有网时每天尝试换一张新通行证(顺带把服务器的"顶替/吊销"同步下来)。
     // 硬过期由服务器写进通行证的 exp(见 verifyToken);到期且续不上就降级。
@@ -333,20 +333,31 @@ object LicenseManager {
         if (prefs.getString("r_date", "") == today()) prefs.getLong("r_used", 0L) else 0L
 
     /** 今日剩余免费传输数;PRO 恒为 Int.MAX_VALUE。也以 [quotaLeft] 流的形式对 UI 暴露。 */
-    fun quotaRemaining(): Int =
-        if (_isPro.value) Int.MAX_VALUE
-        else (FREE_DAILY_TRANSFER_LIMIT - transfersDoneToday()).coerceAtLeast(0)
+    fun quotaRemaining(): Int {
+        val isPro = _isPro.value
+        return dailyTransferQuotaRemaining(
+            isPro = isPro,
+            transfersDoneToday = if (isPro) 0 else transfersDoneToday(),
+        )
+    }
 
     /** 免费版今日完成数是否已达上限(传输队列每个任务开始前检查)。PRO 恒 false。 */
-    fun transferLimitReached(): Boolean =
-        !_isPro.value && transfersDoneToday() >= FREE_DAILY_TRANSFER_LIMIT
+    fun transferLimitReached(): Boolean {
+        val isPro = _isPro.value
+        return hasReachedDailyTransferLimit(
+            isPro = isPro,
+            transfersDoneToday = if (isPro) 0 else transfersDoneToday(),
+        )
+    }
 
     /**
      * 免费版单文件大小是否超限(传输队列每个任务开始前检查)。PRO 恒 false。
      * >4GB 对象的 size 是 0xFFFFFFFF 哨兵,数值上必然超限——恰好一并拦住,无需特判。
      */
-    fun freeSizeLimitExceeded(sizeBytes: Long): Boolean =
-        !_isPro.value && sizeBytes > FREE_MAX_FILE_BYTES
+    fun freeSizeLimitExceeded(sizeBytes: Long): Boolean = exceedsFreeFileSizeLimit(
+        isPro = _isPro.value,
+        sizeBytes = sizeBytes,
+    )
 
     /** 传输完成计数 +1,并推送最新剩余到 [quotaLeft](触发 UI 的临近上限预警)。PRO 空操作。 */
     fun recordTransferDone() {
@@ -356,9 +367,13 @@ object LicenseManager {
     }
 
     /** 免费版今日剩余监看时长(毫秒,每天累计 [FREE_REMOTE_DAILY_MS]);PRO 恒为 Long.MAX_VALUE。 */
-    fun remoteTimeLeftMs(): Long =
-        if (_isPro.value) Long.MAX_VALUE
-        else (FREE_REMOTE_DAILY_MS - remoteUsedTodayMs()).coerceAtLeast(0L)
+    fun remoteTimeLeftMs(): Long {
+        val isPro = _isPro.value
+        return dailyRemoteTimeRemainingMs(
+            isPro = isPro,
+            usedTodayMs = if (isPro) 0L else remoteUsedTodayMs(),
+        )
+    }
 
     /** 累计已用监看时长(监看页计时每秒记账,退出页面即停止;跨天自动换日重记)。PRO 空操作。 */
     fun consumeRemoteTime(ms: Long) {
