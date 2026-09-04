@@ -7,6 +7,39 @@ import kotlin.test.assertTrue
 
 class RemoteMoviePolicyTest {
     @Test
+    fun diagnosticDistinguishesPreparationFailureFromStartResponse() {
+        val diagnostic = RcMovieStartResult(
+            responseCode = PtpConstants.OPERATION_NOT_SUPPORTED,
+            prohibitCondition = (1L shl 14) or (1L shl 18),
+            prohibitExtendedResponse = PtpConstants.OPERATION_NOT_SUPPORTED,
+            applicationModeResponse = PtpConstants.OPERATION_NOT_SUPPORTED,
+            applicationModePropertyResponse = 0x200A,
+            startCommandResponse = null,
+        ).diagnosticSummary()
+
+        assertEquals(
+            "result=0x2005 startOp=not-sent prohibit=0x00044000 " +
+                "preEx=0x2005 appOp=0x2005 appProp=0x200A",
+            diagnostic,
+        )
+
+        assertEquals(
+            "result=0x2005 startOp=0x2005 prohibit=0x100000000",
+            RcMovieStartResult(
+                responseCode = PtpConstants.OPERATION_NOT_SUPPORTED,
+                prohibitCondition = 0x1_0000_0000L,
+            ).diagnosticSummary(),
+        )
+        assertEquals(
+            "result=0x2005 startOp=0x2005 prohibit=0xFFFFFFFFFFFFFFFF",
+            RcMovieStartResult(
+                responseCode = PtpConstants.OPERATION_NOT_SUPPORTED,
+                prohibitCondition = -1L,
+            ).diagnosticSummary(),
+        )
+    }
+
+    @Test
     fun movieStartResultKeepsTheStartResponseDefault() {
         val result = RcMovieStartResult(
             responseCode = Lab.DEVICE_BUSY,
@@ -130,5 +163,51 @@ class RemoteMoviePolicyTest {
         assertFalse(shouldFallbackToApplicationModeProperty(Lab.OK))
         assertFalse(shouldFallbackToApplicationModeProperty(Lab.DEVICE_BUSY))
         assertFalse(shouldFallbackToApplicationModeProperty(Lab.NK_INVALID_STATUS))
+    }
+
+    @Test
+    fun recordingEventsPreserveTheTwoSecondLateStartWindow() {
+        val stoppedAt = 10_000L
+        assertEquals(
+            RcMovieRecordingEvent.STARTED,
+            rcMovieRecordingEvent(Lab.EVT_NK_MOVIE_REC_STARTED),
+        )
+        assertEquals(
+            RcMovieRecordingEvent.FINISHED,
+            rcMovieRecordingEvent(Lab.EVT_NK_MOVIE_REC_COMPLETE),
+        )
+        assertEquals(RcMovieRecordingEvent.OTHER, rcMovieRecordingEvent(Lab.EVT_OBJECT_ADDED))
+
+        assertFalse(
+            rcRecordingAfterMovieEvent(false, Lab.EVT_NK_MOVIE_REC_STARTED, stoppedAt + 2_000L, stoppedAt),
+        )
+        assertTrue(
+            rcRecordingAfterMovieEvent(false, Lab.EVT_NK_MOVIE_REC_STARTED, stoppedAt + 2_001L, stoppedAt),
+        )
+        assertTrue(
+            rcRecordingAfterMovieEvent(true, Lab.EVT_NK_MOVIE_REC_STARTED, stoppedAt + 10L, stoppedAt),
+        )
+        assertFalse(
+            rcRecordingAfterMovieEvent(true, Lab.EVT_NK_MOVIE_REC_INTERRUPTED, stoppedAt, stoppedAt),
+        )
+        assertTrue(rcRecordingAfterMovieEvent(true, Lab.EVT_OBJECT_ADDED, stoppedAt, stoppedAt))
+        assertFalse(rcRecordingAfterMovieEvent(false, Lab.EVT_OBJECT_ADDED, stoppedAt, stoppedAt))
+    }
+
+    @Test
+    fun startAdoptionAndStopFinalizationUseTheExistingCameraSignals() {
+        assertTrue(shouldAdoptMovieRecording(RcMovieStartResult(Lab.OK, null)))
+        assertTrue(
+            shouldAdoptMovieRecording(
+                RcMovieStartResult(Lab.DEVICE_BUSY, 1L shl 10),
+            ),
+        )
+        assertFalse(shouldAdoptMovieRecording(RcMovieStartResult(Lab.DEVICE_BUSY, 0L)))
+        assertFalse(shouldAdoptMovieRecording(null))
+
+        assertTrue(movieStopNeedsFinalizationWait(true, false))
+        assertTrue(movieStopNeedsFinalizationWait(false, true))
+        assertTrue(movieStopNeedsFinalizationWait(true, true))
+        assertFalse(movieStopNeedsFinalizationWait(false, false))
     }
 }

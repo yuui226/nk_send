@@ -9,6 +9,53 @@ data class RcMovieStartResult(
     val startCommandResponse: Int? = responseCode,
 )
 
+enum class RcMovieRecordingEvent { STARTED, FINISHED, OTHER }
+
+const val REMOTE_MOVIE_LATE_START_WINDOW_MS = 2_000L
+
+fun rcMovieRecordingEvent(eventCode: Int): RcMovieRecordingEvent = when (eventCode) {
+    Lab.EVT_NK_MOVIE_REC_STARTED -> RcMovieRecordingEvent.STARTED
+    Lab.EVT_NK_MOVIE_REC_COMPLETE, Lab.EVT_NK_MOVIE_REC_INTERRUPTED ->
+        RcMovieRecordingEvent.FINISHED
+    else -> RcMovieRecordingEvent.OTHER
+}
+
+fun rcRecordingAfterMovieEvent(
+    recording: Boolean,
+    eventCode: Int,
+    eventTimeMs: Long,
+    lastStopCommandAtMs: Long,
+): Boolean = when (rcMovieRecordingEvent(eventCode)) {
+    RcMovieRecordingEvent.STARTED ->
+        if (eventTimeMs - lastStopCommandAtMs > REMOTE_MOVIE_LATE_START_WINDOW_MS) true else recording
+    RcMovieRecordingEvent.FINISHED -> false
+    RcMovieRecordingEvent.OTHER -> recording
+}
+
+fun shouldAdoptMovieRecording(result: RcMovieStartResult?): Boolean =
+    result?.responseCode == Lab.OK || movieProhibitIndicatesRecording(result?.prohibitCondition)
+
+fun movieStopNeedsFinalizationWait(
+    applicationPropertySet: Boolean,
+    applicationOperationSet: Boolean,
+): Boolean = applicationPropertySet || applicationOperationSet
+
+fun RcMovieStartResult.diagnosticSummary(): String = buildString {
+    append("result=").append(responseCode.rcHex4())
+    append(" startOp=")
+    append(startCommandResponse?.rcHex4() ?: "not-sent")
+    prohibitCondition?.let { append(" prohibit=").append(it.rcHex8()) }
+    prohibitExtendedResponse?.let { append(" preEx=").append(it.rcHex4()) }
+    applicationModeResponse?.let { append(" appOp=").append(it.rcHex4()) }
+    applicationModePropertyResponse?.let { append(" appProp=").append(it.rcHex4()) }
+}
+
+private fun Int.rcHex4(): String =
+    "0x" + (this and 0xFFFF).toString(16).uppercase().padStart(4, '0')
+
+private fun Long.rcHex8(): String =
+    "0x" + toULong().toString(16).uppercase().padStart(8, '0')
+
 private const val MOVIE_PROHIBIT_NO_CARD = 1L shl 0
 private const val MOVIE_PROHIBIT_CARD_ERROR = 1L shl 1
 private const val MOVIE_PROHIBIT_CARD_UNFORMATTED = 1L shl 2

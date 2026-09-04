@@ -32,6 +32,109 @@ class RemoteFocusPolicyTest {
     }
 
     @Test
+    fun trackingLifecycleChangesOnlyForConfirmedTerminalResponses() {
+        listOf(
+            Lab.OK,
+            PtpConstants.OPERATION_NOT_SUPPORTED,
+            Lab.NK_INVALID_STATUS,
+        ).forEach { assertTrue(rcEndTrackingClearsActive(it)) }
+        assertFalse(rcEndTrackingClearsActive(Lab.DEVICE_BUSY))
+        assertFalse(rcEndTrackingClearsActive(Lab.ACCESS_DENIED))
+
+        assertEquals(true, rcTrackingSupportAfterStart(null, Lab.OK))
+        assertEquals(false, rcTrackingSupportAfterStart(true, PtpConstants.OPERATION_NOT_SUPPORTED))
+        assertEquals(true, rcTrackingSupportAfterStart(true, Lab.DEVICE_BUSY))
+        assertEquals(false, rcTrackingSupportAfterStart(false, Lab.DEVICE_BUSY))
+        assertEquals(false, rcTrackingSupportAfterStart(false, null))
+        assertNull(rcTrackingSupportAfterStart(null, Lab.NK_INVALID_STATUS))
+        assertNull(rcTrackingSupportAfterStart(null, null))
+    }
+
+    @Test
+    fun tapFocusCompletionPreservesEveryTerminalBranch() = runImmediately {
+        var now = 1_150L
+        val waitedResponses = mutableListOf<Int>()
+        suspend fun complete(start: RcTapFocusStartResult?): RcTapFocusResult = completeTapFocus(
+            endTrackingResponseCode = Lab.OK,
+            start = start,
+            startedAt = 1_000L,
+            elapsedRealtime = { now },
+            waitForStartedAf = { responseCode ->
+                waitedResponses += responseCode
+                RcAfResult(responseCode, polls = 2, elapsedMs = 300L, timedOut = false)
+            },
+        )
+
+        assertEquals(
+            RcTapFocusResult(Lab.OK, null, null, trackingStarted = false, afResult = null),
+            complete(start = null),
+        )
+        assertEquals(
+            RcTapFocusResult(
+                Lab.OK,
+                null,
+                Lab.OK,
+                trackingStarted = true,
+                afResult = RcAfResult(Lab.OK, 2, 300L, timedOut = false),
+            ),
+            complete(RcTapFocusStartResult(null, Lab.OK, Lab.OK)),
+        )
+        assertEquals(
+            RcTapFocusResult(
+                Lab.OK,
+                Lab.DEVICE_BUSY,
+                PtpConstants.OPERATION_NOT_SUPPORTED,
+                trackingStarted = false,
+                afResult = null,
+            ),
+            complete(
+                RcTapFocusStartResult(
+                    Lab.DEVICE_BUSY,
+                    PtpConstants.OPERATION_NOT_SUPPORTED,
+                    null,
+                ),
+            ),
+        )
+        assertEquals(
+            RcTapFocusResult(
+                Lab.OK,
+                Lab.OK,
+                PtpConstants.OPERATION_NOT_SUPPORTED,
+                trackingStarted = false,
+                afResult = RcAfResult(Lab.DEVICE_BUSY, 0, 150L, timedOut = true),
+            ),
+            complete(
+                RcTapFocusStartResult(
+                    Lab.OK,
+                    PtpConstants.OPERATION_NOT_SUPPORTED,
+                    null,
+                ),
+            ),
+        )
+        assertEquals(
+            RcTapFocusResult(
+                Lab.OK,
+                null,
+                Lab.NK_INVALID_STATUS,
+                trackingStarted = false,
+                afResult = null,
+            ),
+            complete(RcTapFocusStartResult(null, Lab.NK_INVALID_STATUS, null)),
+        )
+        assertEquals(
+            RcTapFocusResult(
+                Lab.OK,
+                Lab.OK,
+                null,
+                trackingStarted = false,
+                afResult = RcAfResult(Lab.OK, 2, 300L, timedOut = false),
+            ),
+            complete(RcTapFocusStartResult(Lab.OK, null, Lab.OK)),
+        )
+        assertEquals(listOf(Lab.OK, Lab.OK), waitedResponses)
+    }
+
+    @Test
     fun trackingMotionNeedsThreeFramesAndKeepsTheFloatBoundary() {
         val origin = LiveViewFocusFrame(0.500f, 0.500f, 0.1f, 0.1f)
         val nominalThreshold = LiveViewFocusFrame(0.515f, 0.500f, 0.1f, 0.1f)

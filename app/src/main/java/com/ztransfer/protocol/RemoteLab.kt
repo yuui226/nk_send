@@ -331,11 +331,7 @@ private fun NikonCamera.endSubjectTrackingLocked(deadlineMs: Long): Int? {
     if (!subjectTrackingActive) return null
     sendCmd(Lab.NK_END_TRACKING)
     val response = recvFocusResponse(deadlineMs).first
-    if (
-        response == Lab.OK ||
-        response == PtpConstants.OPERATION_NOT_SUPPORTED ||
-        response == Lab.NK_INVALID_STATUS // 机身侧已经不处于可结束的追踪状态
-    ) {
+    if (rcEndTrackingClearsActive(response)) {
         subjectTrackingActive = false
     }
     return response
@@ -419,75 +415,29 @@ suspend fun NikonCamera.rcFocusAt(
             endRc to startResult
         }
     }
-    if (start == null) {
-        return@withLock RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = null,
-            trackingResponseCode = null,
-            trackingStarted = false,
-            afResult = null
-        )
-    }
-    when (start.trackingResponseCode) {
-        Lab.OK -> {
-            subjectTrackingSupported = true
-            subjectTrackingActive = true
-        }
-        PtpConstants.OPERATION_NOT_SUPPORTED -> subjectTrackingSupported = false
-    }
-    val startRc = start.afStartResponseCode
-    suspend fun waitForStartedAf(): RcAfResult = if (startRc == null) {
-        rcTimedOutAfResult(startedAt, SystemClock.elapsedRealtime())
-    } else {
-        runAfReadyWait(
-            startedAt = startedAt,
-            deadlineMs = deadlineMs,
-            startResponseCode = startRc,
-            elapsedRealtime = SystemClock::elapsedRealtime,
-            command = { code -> focusCommand(code, deadlineMs)?.first },
-            pause = { durationMs -> delay(durationMs) }
-        )
-    }
-    if (start.trackingResponseCode == Lab.OK) {
-        RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = start.moveResponseCode,
+    if (start != null) {
+        subjectTrackingSupported = rcTrackingSupportAfterStart(
+            currentSupport = subjectTrackingSupported,
             trackingResponseCode = start.trackingResponseCode,
-            trackingStarted = true,
-            afResult = waitForStartedAf()
         )
-    } else if (start.moveResponseCode != null && start.moveResponseCode != Lab.OK) {
-        RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = start.moveResponseCode,
-            trackingResponseCode = start.trackingResponseCode,
-            trackingStarted = false,
-            afResult = null
-        )
-    } else if (startRc == null) {
-        RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = start.moveResponseCode,
-            trackingResponseCode = start.trackingResponseCode,
-            trackingStarted = false,
-            afResult = if (
-                start.trackingResponseCode == null ||
-                start.trackingResponseCode == PtpConstants.OPERATION_NOT_SUPPORTED
-            ) {
-                rcTimedOutAfResult(startedAt, SystemClock.elapsedRealtime())
-            } else {
-                null
-            }
-        )
-    } else {
-        RcTapFocusResult(
-            endTrackingResponseCode = endTrackingRc,
-            moveResponseCode = start.moveResponseCode,
-            trackingResponseCode = start.trackingResponseCode,
-            trackingStarted = false,
-            afResult = waitForStartedAf()
-        )
+        if (start.trackingResponseCode == Lab.OK) subjectTrackingActive = true
     }
+    completeTapFocus(
+        endTrackingResponseCode = endTrackingRc,
+        start = start,
+        startedAt = startedAt,
+        elapsedRealtime = SystemClock::elapsedRealtime,
+        waitForStartedAf = { startResponseCode ->
+            runAfReadyWait(
+                startedAt = startedAt,
+                deadlineMs = deadlineMs,
+                startResponseCode = startResponseCode,
+                elapsedRealtime = SystemClock::elapsedRealtime,
+                command = { code -> focusCommand(code, deadlineMs)?.first },
+                pause = { durationMs -> delay(durationMs) },
+            )
+        },
+    )
 }
 
 suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
@@ -510,15 +460,10 @@ suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
 
 /** 发单条命令，DEVICE_BUSY 时退避重试（200ms × 5）。拍摄/录像触发类命令共用。 */
 private suspend fun NikonCamera.cmdBusyRetry(code: Int, vararg params: Int): Int {
-    var rc = labCommand(code, *params).first
-    var tries = 0
-    while (true) {
-        val retryDelay = remoteBusyRetryDelayMs(rc, tries) ?: break
-        delay(retryDelay)
-        rc = labCommand(code, *params).first
-        tries++
-    }
-    return rc
+    return runRemoteBusyCommand(
+        command = { labCommand(code, *params).first },
+        pause = { delay(it) },
+    ).responseCode
 }
 
 /** 触发拍摄（无 AF、存卡）。只负责发命令；完成与新照片经事件（ObjectAdded）通知。 */
@@ -535,16 +480,6 @@ suspend fun NikonCamera.rcGetMovieMode(): Boolean? {
     val (rc, d) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_LV_SELECTOR)
     if (rc != Lab.OK || d == null || d.isEmpty()) return null
     return d[0].toInt() != 0
-}
-
-internal fun RcMovieStartResult.diagnosticSummary(): String = buildString {
-    append("result=").append(hex4(responseCode))
-    append(" startOp=")
-    append(startCommandResponse?.let(::hex4) ?: "not-sent")
-    prohibitCondition?.let { append(" prohibit=").append(hex8(it)) }
-    prohibitExtendedResponse?.let { append(" preEx=").append(hex4(it)) }
-    applicationModeResponse?.let { append(" appOp=").append(hex4(it)) }
-    applicationModePropertyResponse?.let { append(" appProp=").append(hex4(it)) }
 }
 
 /** 开始录像（存卡）。忙则重试；失败时一并返回录像禁止条件供上层决定是否重建 LV。 */
@@ -707,17 +642,15 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
     log("LiveView frames: ${Lab.INTEREST_OPS[frameOperation] ?: hex4(frameOperation)}")
     // 0x2019 忙 / 0xA004 InvalidStatus（上一次 EndLiveView 后相机内部状态未落定时常见）
     // 都值得短暂重试。
-    var rc = labCommand(Lab.NK_START_LIVE_VIEW).first
-    var tries = 0
-    while (true) {
-        val retryDelay = liveViewStartRetryDelayMs(rc, tries) ?: break
-        delay(retryDelay)
-        rc = labCommand(Lab.NK_START_LIVE_VIEW).first
-        tries++
-    }
+    val startResult = runLiveViewStartCommand(
+        command = { labCommand(Lab.NK_START_LIVE_VIEW).first },
+        pause = { delay(it) },
+    )
+    val rc = startResult.responseCode
+    val tries = startResult.completedRetries
     log((if (rc == Lab.OK) "" else "!! ") +
         "StartLiveView(0x9201) resp=${hex4(rc)}${if (tries > 0) " after $tries busy-retries" else ""}")
-    if (rc != Lab.OK) {
+    if (!liveViewSessionAccepted(startResult, readyResult = null)) {
         // 失败才读禁止条件用于诊断——成功路径省掉这条往返，进页更快。
         val (prc, pd) = labCommand(Lab.GET_DEVICE_PROP_VALUE, Lab.PROP_NK_LV_PROHIBIT)
         if (prc == Lab.OK && pd != null && pd.size >= 4) {
@@ -727,18 +660,21 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
     }
 
     val t0 = System.currentTimeMillis()
-    var ready = rc
-    while (System.currentTimeMillis() - t0 < 4000) {
-        ready = labCommand(Lab.NK_DEVICE_READY).first
-        if (ready != Lab.DEVICE_BUSY) break
-        delay(20)   // 相机通常 20-80ms 就绪，20ms 步进能少等半拍
-    }
+    val readyResult = runLiveViewReadyWait(
+        startedAtMs = t0,
+        currentTimeMs = System::currentTimeMillis,
+        command = { labCommand(Lab.NK_DEVICE_READY).first },
+        pause = { delay(it) },
+    )
     // 就绪属正常路径不记日志（StartLiveView 那条已标记会话启动）；没等到才值得留痕。
-    if (ready != Lab.OK) {
-        log("!! DeviceReady(0x90C8) resp=${hex4(ready)} after ${System.currentTimeMillis() - t0}ms")
+    if (readyResult.responseCode != Lab.OK) {
+        log(
+            "!! DeviceReady(0x90C8) resp=${hex4(readyResult.responseCode)} " +
+                "after ${readyResult.elapsedMs}ms"
+        )
     }
     liveViewReadyAtElapsedMs = SystemClock.elapsedRealtime()
-    return true
+    return liveViewSessionAccepted(startResult, readyResult)
 }
 
 suspend fun NikonCamera.labEndLiveView(): Int {

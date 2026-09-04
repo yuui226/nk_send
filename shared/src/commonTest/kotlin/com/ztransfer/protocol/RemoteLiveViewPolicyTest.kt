@@ -1,5 +1,8 @@
 package com.ztransfer.protocol
 
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.startCoroutine
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -156,5 +159,228 @@ class RemoteLiveViewPolicyTest {
         assertTrue(isRemoteMovieCompletionEvent(Lab.EVT_NK_MOVIE_REC_COMPLETE))
         assertTrue(isRemoteMovieCompletionEvent(Lab.EVT_NK_MOVIE_REC_INTERRUPTED))
         assertFalse(isRemoteMovieCompletionEvent(Lab.EVT_NK_MOVIE_REC_STARTED))
+    }
+
+    @Test
+    fun busyAndLiveViewStartRunnersKeepTheSixAttemptCeiling() = runImmediately {
+        var busyCalls = 0
+        var busyElapsed = 0L
+        val busy = runRemoteBusyCommand(
+            command = {
+                busyCalls++
+                Lab.DEVICE_BUSY
+            },
+            pause = { busyElapsed += it },
+        )
+        assertEquals(RemoteCommandRetryResult(Lab.DEVICE_BUSY, 5), busy)
+        assertEquals(6, busyCalls)
+        assertEquals(1_000L, busyElapsed)
+
+        val liveViewResponses = ArrayDeque(
+            listOf(
+                Lab.NK_INVALID_STATUS,
+                Lab.NK_INVALID_STATUS,
+                Lab.NK_INVALID_STATUS,
+                Lab.NK_INVALID_STATUS,
+                Lab.NK_INVALID_STATUS,
+                Lab.OK,
+            ),
+        )
+        var liveViewElapsed = 0L
+        val liveView = runLiveViewStartCommand(
+            command = { liveViewResponses.removeFirst() },
+            pause = { liveViewElapsed += it },
+        )
+        assertEquals(RemoteCommandRetryResult(Lab.OK, 5), liveView)
+        assertEquals(1_500L, liveViewElapsed)
+        assertTrue(liveViewResponses.isEmpty())
+
+        var unsupportedCalls = 0
+        val unsupported = runLiveViewStartCommand(
+            command = {
+                unsupportedCalls++
+                PtpConstants.OPERATION_NOT_SUPPORTED
+            },
+            pause = { error("must not pause") },
+        )
+        assertEquals(RemoteCommandRetryResult(PtpConstants.OPERATION_NOT_SUPPORTED, 0), unsupported)
+        assertEquals(1, unsupportedCalls)
+    }
+
+    @Test
+    fun busyRunnerStopsImmediatelyAfterTheFirstNonBusyResponse() = runImmediately {
+        val responses = ArrayDeque(listOf(Lab.DEVICE_BUSY, Lab.OK, Lab.ACCESS_DENIED))
+        val delays = mutableListOf<Long>()
+
+        val result = runRemoteBusyCommand(
+            command = { responses.removeFirst() },
+            pause = { delays += it },
+        )
+
+        assertEquals(RemoteCommandRetryResult(Lab.OK, completedRetries = 1), result)
+        assertEquals(listOf(200L), delays)
+        assertEquals(listOf(Lab.ACCESS_DENIED), responses.toList())
+    }
+
+    @Test
+    fun liveViewReadyWaitStopsOnAnyNonBusyResponse() = runImmediately {
+        var now = 10_000L
+        val responses = ArrayDeque(listOf(Lab.DEVICE_BUSY, Lab.DEVICE_BUSY, Lab.NK_OUT_OF_FOCUS))
+        val result = runLiveViewReadyWait(
+            startedAtMs = now,
+            currentTimeMs = { now },
+            command = { responses.removeFirst() },
+            pause = { now += it },
+        )
+
+        assertEquals(
+            LiveViewReadyWaitResult(Lab.NK_OUT_OF_FOCUS, polls = 3, elapsedMs = 40L),
+            result,
+        )
+    }
+
+    @Test
+    fun liveViewReadyDeadlinePreservesTheLastBusyOrInitialOk() = runImmediately {
+        var now = 20_000L
+        var polls = 0
+        val busy = runLiveViewReadyWait(
+            startedAtMs = now,
+            currentTimeMs = { now },
+            command = {
+                polls++
+                Lab.DEVICE_BUSY
+            },
+            pause = { now += LIVE_VIEW_READY_TIMEOUT_MS },
+        )
+        assertEquals(
+            LiveViewReadyWaitResult(Lab.DEVICE_BUSY, polls = 1, elapsedMs = 4_000L),
+            busy,
+        )
+        assertEquals(1, polls)
+
+        val expired = runLiveViewReadyWait(
+            startedAtMs = 0L,
+            currentTimeMs = { LIVE_VIEW_READY_TIMEOUT_MS },
+            command = { error("must not poll") },
+            pause = { error("must not pause") },
+        )
+        assertEquals(
+            LiveViewReadyWaitResult(Lab.OK, polls = 0, elapsedMs = 4_000L),
+            expired,
+        )
+
+        assertTrue(
+            liveViewSessionAccepted(
+                RemoteCommandRetryResult(Lab.OK, completedRetries = 5),
+                LiveViewReadyWaitResult(Lab.DEVICE_BUSY, polls = 1, elapsedMs = 4_000L),
+            ),
+        )
+        assertFalse(
+            liveViewSessionAccepted(
+                RemoteCommandRetryResult(Lab.NK_INVALID_STATUS, completedRetries = 5),
+                readyResult = null,
+            ),
+        )
+    }
+
+    @Test
+    fun frameLoopDecisionKeepsBusyStreakAndRestartsOnThirdError() {
+        assertEquals(40L, LIVE_VIEW_BUSY_RETRY_DELAY_MS)
+        assertEquals(300L, LIVE_VIEW_FRAME_ERROR_RETRY_DELAY_MS)
+        assertEquals(2_000L, LIVE_VIEW_SESSION_RESTART_DELAY_MS)
+        assertEquals(3_000L, LIVE_VIEW_START_FAILURE_RETRY_DELAY_MS)
+        assertEquals(
+            LiveViewFramePollDecision(0, null, false),
+            liveViewFramePollDecision(2, LiveViewFramePollOutcome.SUCCESS),
+        )
+        assertEquals(
+            LiveViewFramePollDecision(2, LIVE_VIEW_BUSY_RETRY_DELAY_MS, false),
+            liveViewFramePollDecision(2, LiveViewFramePollOutcome.BUSY),
+        )
+        assertEquals(
+            LiveViewFramePollDecision(2, LIVE_VIEW_FRAME_ERROR_RETRY_DELAY_MS, false),
+            liveViewFramePollDecision(1, LiveViewFramePollOutcome.ERROR),
+        )
+        assertEquals(
+            LiveViewFramePollDecision(3, null, true),
+            liveViewFramePollDecision(2, LiveViewFramePollOutcome.ERROR),
+        )
+        assertTrue(liveViewIsStableAfterSuccessfulFrames(CameraConnectionType.WIFI, 0))
+        assertFalse(liveViewIsStableAfterSuccessfulFrames(CameraConnectionType.USB, 7))
+        assertTrue(liveViewIsStableAfterSuccessfulFrames(CameraConnectionType.USB, 8))
+    }
+
+    @Test
+    fun captureWaiterIsArmedBeforeCommandAndCancelledOnlyOnFailure() = runImmediately {
+        val successTrace = mutableListOf<String>()
+        val success = runRemoteCapture(
+            armConfirmation = {
+                successTrace += "arm"
+                RcPendingCaptureConfirmation(
+                    awaitObjectHandle = {
+                        successTrace += "await"
+                        0xFFFF_FFFEL
+                    },
+                    cancel = { successTrace += "cancel" },
+                )
+            },
+            capture = {
+                successTrace += "capture"
+                Lab.OK
+            },
+        )
+        assertEquals(RcCaptureResult(Lab.OK, 0xFFFF_FFFEL), success)
+        assertEquals(listOf("arm", "capture", "await"), successTrace)
+
+        val timeoutTrace = mutableListOf<String>()
+        val timeout = runRemoteCapture(
+            armConfirmation = {
+                timeoutTrace += "arm"
+                RcPendingCaptureConfirmation(
+                    awaitObjectHandle = {
+                        timeoutTrace += "await"
+                        null
+                    },
+                    cancel = { timeoutTrace += "cancel" },
+                )
+            },
+            capture = {
+                timeoutTrace += "capture"
+                Lab.OK
+            },
+        )
+        assertEquals(RcCaptureResult(Lab.OK, null), timeout)
+        assertEquals(listOf("arm", "capture", "await"), timeoutTrace)
+
+        val failureTrace = mutableListOf<String>()
+        val failure = runRemoteCapture(
+            armConfirmation = {
+                failureTrace += "arm"
+                RcPendingCaptureConfirmation(
+                    awaitObjectHandle = { error("must not await") },
+                    cancel = { failureTrace += "cancel" },
+                )
+            },
+            capture = {
+                failureTrace += "capture"
+                Lab.ACCESS_DENIED
+            },
+        )
+        assertEquals(RcCaptureResult(Lab.ACCESS_DENIED, null), failure)
+        assertEquals(listOf("arm", "capture", "cancel"), failureTrace)
+    }
+
+    private fun <T> runImmediately(block: suspend () -> T): T {
+        var completion: Result<T>? = null
+        block.startCoroutine(
+            object : Continuation<T> {
+                override val context = EmptyCoroutineContext
+
+                override fun resumeWith(result: Result<T>) {
+                    completion = result
+                }
+            },
+        )
+        return completion?.getOrThrow() ?: error("Synchronous fake unexpectedly suspended")
     }
 }

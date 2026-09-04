@@ -109,8 +109,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
-import com.ztransfer.protocol.USB_LIVE_VIEW_STABLE_FRAMES
+import com.ztransfer.protocol.LIVE_VIEW_SESSION_RESTART_DELAY_MS
+import com.ztransfer.protocol.LIVE_VIEW_START_FAILURE_RETRY_DELAY_MS
 import com.ztransfer.protocol.Lab
+import com.ztransfer.protocol.LiveViewFramePollOutcome
 import com.ztransfer.protocol.LiveViewFocusFrame
 import com.ztransfer.protocol.LiveViewFocusJudgement
 import com.ztransfer.protocol.LiveViewMetadata
@@ -119,6 +121,8 @@ import com.ztransfer.protocol.LiveViewSoundLevels
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.RcParam
+import com.ztransfer.protocol.RcMovieRecordingEvent
+import com.ztransfer.protocol.RcPendingCaptureConfirmation
 import com.ztransfer.protocol.coalesceRemoteEvents
 import com.ztransfer.protocol.isRemoteCaptureCompletionEvent
 import com.ztransfer.protocol.isRemoteMovieCompletionEvent
@@ -126,6 +130,8 @@ import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
 import com.ztransfer.protocol.liveViewWarmupRemainingMs
+import com.ztransfer.protocol.liveViewFramePollDecision
+import com.ztransfer.protocol.liveViewIsStableAfterSuccessfulFrames
 import com.ztransfer.protocol.rcAfDriveAndWait
 import com.ztransfer.protocol.rcAngleLevelRoll
 import com.ztransfer.protocol.rcAllExposureProps
@@ -163,7 +169,11 @@ import com.ztransfer.protocol.shouldPollMovieModeDuringLiveViewRecovery
 import com.ztransfer.protocol.shouldPrepareUsbMovieSessionForRecord
 import com.ztransfer.protocol.shouldReturnUsbMovieSessionToStandby
 import com.ztransfer.protocol.movieStartNeedsLiveViewRestart
-import com.ztransfer.protocol.movieProhibitIndicatesRecording
+import com.ztransfer.protocol.movieStopNeedsFinalizationWait
+import com.ztransfer.protocol.rcMovieRecordingEvent
+import com.ztransfer.protocol.rcRecordingAfterMovieEvent
+import com.ztransfer.protocol.runRemoteCapture
+import com.ztransfer.protocol.shouldAdoptMovieRecording
 import com.ztransfer.protocol.diagnosticSummary
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.LocalButtonTexturePalette
@@ -882,7 +892,10 @@ private fun RemoteContent(
                         runCatching { cam.labStartLiveView { devLog(it) } }
                             .getOrDefault(false)
                     }
-                    if (!started) { delay(3000); continue }
+                    if (!started) {
+                        delay(LIVE_VIEW_START_FAILURE_RETRY_DELAY_MS)
+                        continue
+                    }
                     val warmupRemainingMs = liveViewWarmupRemainingMs(
                         connectionType = cam.connectionType,
                         readyAtElapsedMs = cam.liveViewReadyAtElapsedMs,
@@ -894,7 +907,9 @@ private fun RemoteContent(
                     }
                     val requiresUsbStabilization =
                         cam.connectionType == CameraConnectionType.USB
-                    if (!requiresUsbStabilization) liveViewStable = true
+                    if (liveViewIsStableAfterSuccessfulFrames(cam.connectionType, 0)) {
+                        liveViewStable = true
+                    }
                     val stabilizationStartedAt = SystemClock.elapsedRealtime()
                     var startupSuccessfulFrames = 0
                     var startupBusyResponses = 0
@@ -965,10 +980,14 @@ private fun RemoteContent(
                                 error = true
                             )
                             // 非忙失败（掉出 LV / 连接异常）：退避后回外层整体重启
-                            errStreak++
+                            val decision = liveViewFramePollDecision(
+                                previousErrorStreak = errStreak,
+                                outcome = LiveViewFramePollOutcome.ERROR,
+                            )
+                            errStreak = decision.errorStreak
                             devLog("!! LV: ${e.message}")
-                            if (errStreak >= 3) break
-                            delay(300)
+                            if (decision.restartSession) break
+                            delay(checkNotNull(decision.retryDelayMs))
                             continue
                         }
                         val pollElapsedNanos =
@@ -976,16 +995,28 @@ private fun RemoteContent(
                         if (grabbed == null) {
                             recordStartupPoll(elapsedNanos = pollElapsedNanos, busy = true)
                             if (!liveViewStable) startupBusyResponses++
-                            delay(40)
+                            val decision = liveViewFramePollDecision(
+                                previousErrorStreak = errStreak,
+                                outcome = LiveViewFramePollOutcome.BUSY,
+                            )
+                            errStreak = decision.errorStreak
+                            delay(checkNotNull(decision.retryDelayMs))
                             continue
                         }
                         recordStartupPoll(elapsedNanos = pollElapsedNanos, success = true)
-                        errStreak = 0
+                        errStreak = liveViewFramePollDecision(
+                            previousErrorStreak = errStreak,
+                            outcome = LiveViewFramePollOutcome.SUCCESS,
+                        ).errorStreak
                         frameCh.trySend(grabbed)
                         val now = SystemClock.elapsedRealtime()
                         if (!liveViewStable && requiresUsbStabilization) {
                             startupSuccessfulFrames++
-                            if (startupSuccessfulFrames >= USB_LIVE_VIEW_STABLE_FRAMES) {
+                            if (liveViewIsStableAfterSuccessfulFrames(
+                                    cam.connectionType,
+                                    startupSuccessfulFrames,
+                                )
+                            ) {
                                 liveViewStable = true
                                 devLog(
                                     "LV USB stable: frames=$startupSuccessfulFrames " +
@@ -1014,7 +1045,7 @@ private fun RemoteContent(
                         runCatching { cam.labEndLiveView() }
                         subjectTrackingActive = false
                     }
-                    delay(2000)
+                    delay(LIVE_VIEW_SESSION_RESTART_DELAY_MS)
                 }
             } finally {
                 liveViewStable = false
@@ -1366,16 +1397,26 @@ private fun RemoteContent(
             var movieModeRefreshRequested = false
             for (e in events) {
                 eventFlow.emit(e)
-                when (e.first) {
+                when (rcMovieRecordingEvent(e.first)) {
                     // 录像状态以相机事件为准（卡满/过热等相机自行停录也能收到）。
                     // 例外：本地刚（2s 内）发过停止命令时忽略"已开始"——那是上一次开始
                     // 的迟到回声（开始+停止落在同一轮询窗口内），别把 UI 翻回录制中。
                     // 停止方向的事件永远接受：宁可误停（可再按开始），不可卡在录制态。
-                    Lab.EVT_NK_MOVIE_REC_STARTED -> {
-                        if (System.currentTimeMillis() - lastStopCmdAt > 2000) recording = true
+                    RcMovieRecordingEvent.STARTED -> {
+                        recording = rcRecordingAfterMovieEvent(
+                            recording = recording,
+                            eventCode = e.first,
+                            eventTimeMs = System.currentTimeMillis(),
+                            lastStopCommandAtMs = lastStopCmdAt,
+                        )
                     }
-                    Lab.EVT_NK_MOVIE_REC_COMPLETE, Lab.EVT_NK_MOVIE_REC_INTERRUPTED -> {
-                        recording = false
+                    RcMovieRecordingEvent.FINISHED -> {
+                        recording = rcRecordingAfterMovieEvent(
+                            recording = recording,
+                            eventCode = e.first,
+                            eventTimeMs = System.currentTimeMillis(),
+                            lastStopCommandAtMs = lastStopCmdAt,
+                        )
                         // 用户主动停止时 toggleRecord 负责等完成事件并清理；相机因卡满、
                         // 过热等自行停止时事件循环必须接管，不能把应用模式留在机身上。
                         if (!recBusy) {
@@ -1390,7 +1431,7 @@ private fun RemoteContent(
                             }
                         }
                     }
-                    Lab.EVT_DEVICE_PROP_CHANGED -> {
+                    RcMovieRecordingEvent.OTHER -> if (e.first == Lab.EVT_DEVICE_PROP_CHANGED) {
                         val reportedProp = e.second.toInt()
                         val prop = rcCanonicalExposureProp(reportedProp)
                         if (reportedProp == Lab.PROP_BATTERY_LEVEL) refreshBattery()
@@ -1504,18 +1545,27 @@ private fun RemoteContent(
                 haptics.longPress()   // 快门触发反馈（经全局震动设置门控）
                 // 先挂事件等待、再触发拍摄：ObjectAdded 是取走即消费的，
                 // 订阅晚于轮询取走就永远等不到了。
-                val pending = async {
-                    withTimeoutOrNull(12_000) {
-                        eventFlow.first { isRemoteCaptureCompletionEvent(it.first) }.second.toInt()
-                    }
-                }
-                val rc = runCatching { cam.rcCapture() }.getOrDefault(-1)
-                if (rc != Lab.OK) {
-                    pending.cancel()
-                    devLog("!! capture resp=0x%04X".format(rc and 0xFFFF))
+                val result = runRemoteCapture(
+                    armConfirmation = {
+                        val pending = async {
+                            withTimeoutOrNull(12_000) {
+                                eventFlow.first { isRemoteCaptureCompletionEvent(it.first) }
+                                    .second
+                                    .toInt()
+                            }
+                        }
+                        RcPendingCaptureConfirmation(
+                            awaitObjectHandle = { pending.await()?.toLong() },
+                            cancel = { pending.cancel() },
+                        )
+                    },
+                    capture = { runCatching { cam.rcCapture() }.getOrDefault(-1) },
+                )
+                if (result.responseCode != Lab.OK) {
+                    devLog("!! capture resp=0x%04X".format(result.responseCode and 0xFFFF))
                     return@launch
                 }
-                val handle = pending.await()   // 拍摄成功的确认信号
+                val handle = result.objectHandle?.toInt()   // 拍摄成功的确认信号
                 if (handle == null) devLog("!! capture: no ObjectAdded in 12s")
                 else devLog("shot ok: handle=0x%08X".format(handle))
             } finally {
@@ -2008,7 +2058,7 @@ private fun RemoteContent(
                     if (preparedUsbSession) initialLoaded = true
 
                     val rc = result?.responseCode ?: -1
-                    if (rc == Lab.OK || movieProhibitIndicatesRecording(result?.prohibitCondition)) {
+                    if (shouldAdoptMovieRecording(result)) {
                         recording = true
                         if (rc == Lab.OK) {
                             devLog("movie rec started")
@@ -2041,8 +2091,10 @@ private fun RemoteContent(
                     }
                 } else {
                     lastStopCmdAt = System.currentTimeMillis()   // 之后 2s 内的"已开始"事件按迟到回声忽略
-                    val needsFinalizationWait =
-                        cam.remoteMovieApplicationPropSet || cam.remoteMovieApplicationOpSet
+                    val needsFinalizationWait = movieStopNeedsFinalizationWait(
+                        applicationPropertySet = cam.remoteMovieApplicationPropSet,
+                        applicationOperationSet = cam.remoteMovieApplicationOpSet,
+                    )
                     // 仅兼容恢复路径需要等相机写卡完成再退出应用模式。旧机型沿用原
                     // 即时停止路径，不因缺少 Nikon 完成事件而多等 8 秒。
                     val completion = if (needsFinalizationWait) {

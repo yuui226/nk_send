@@ -57,6 +57,80 @@ fun rcFocusModeFromRaw(prop: Int, raw: Long): RcFocusMode? {
     )
 }
 
+fun rcEndTrackingClearsActive(responseCode: Int): Boolean =
+    responseCode == Lab.OK ||
+        responseCode == PtpConstants.OPERATION_NOT_SUPPORTED ||
+        responseCode == Lab.NK_INVALID_STATUS
+
+fun rcTrackingSupportAfterStart(
+    currentSupport: Boolean?,
+    trackingResponseCode: Int?,
+): Boolean? = when (trackingResponseCode) {
+    Lab.OK -> true
+    PtpConstants.OPERATION_NOT_SUPPORTED -> false
+    else -> currentSupport
+}
+
+/** Builds the final tap-focus result after the atomic start segment has released the I/O lock. */
+suspend fun completeTapFocus(
+    endTrackingResponseCode: Int?,
+    start: RcTapFocusStartResult?,
+    startedAt: Long,
+    elapsedRealtime: () -> Long,
+    waitForStartedAf: suspend (startResponseCode: Int) -> RcAfResult,
+): RcTapFocusResult {
+    if (start == null) {
+        return RcTapFocusResult(
+            endTrackingResponseCode = endTrackingResponseCode,
+            moveResponseCode = null,
+            trackingResponseCode = null,
+            trackingStarted = false,
+            afResult = null,
+        )
+    }
+
+    suspend fun waitForAf(): RcAfResult = start.afStartResponseCode?.let { waitForStartedAf(it) }
+        ?: rcTimedOutAfResult(startedAt, elapsedRealtime())
+
+    return when {
+        start.trackingResponseCode == Lab.OK -> RcTapFocusResult(
+            endTrackingResponseCode = endTrackingResponseCode,
+            moveResponseCode = start.moveResponseCode,
+            trackingResponseCode = start.trackingResponseCode,
+            trackingStarted = true,
+            afResult = waitForAf(),
+        )
+        start.moveResponseCode != null && start.moveResponseCode != Lab.OK -> RcTapFocusResult(
+            endTrackingResponseCode = endTrackingResponseCode,
+            moveResponseCode = start.moveResponseCode,
+            trackingResponseCode = start.trackingResponseCode,
+            trackingStarted = false,
+            afResult = null,
+        )
+        start.afStartResponseCode == null -> RcTapFocusResult(
+            endTrackingResponseCode = endTrackingResponseCode,
+            moveResponseCode = start.moveResponseCode,
+            trackingResponseCode = start.trackingResponseCode,
+            trackingStarted = false,
+            afResult = if (
+                start.trackingResponseCode == null ||
+                start.trackingResponseCode == PtpConstants.OPERATION_NOT_SUPPORTED
+            ) {
+                rcTimedOutAfResult(startedAt, elapsedRealtime())
+            } else {
+                null
+            },
+        )
+        else -> RcTapFocusResult(
+            endTrackingResponseCode = endTrackingResponseCode,
+            moveResponseCode = start.moveResponseCode,
+            trackingResponseCode = start.trackingResponseCode,
+            trackingStarted = false,
+            afResult = waitForAf(),
+        )
+    }
+}
+
 fun rcTimedOutAfResult(startedAt: Long, now: Long, polls: Int = 0) = RcAfResult(
     responseCode = Lab.DEVICE_BUSY,
     polls = polls,
