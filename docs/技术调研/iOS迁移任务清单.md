@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：PTP、对象目录、AP/STA 规则及遥控协议事实已共享，开始迁移文件浏览纯规则
-- 下一项：`T01` 文件排序、筛选、日期分组和连拍识别
+- 当前阶段：文件排序、筛选、日期分组和连拍识别已共享，继续迁移缩略图调度规则
+- 下一项：`T02` 缩略图调度、优先级和缓存规则
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -69,8 +69,8 @@
 
 | ID | 状态 | 任务 | 主要范围 |
 |---|---|---|---|
-| T01 | NEXT | 文件排序、筛选、日期分组和连拍识别 | 迁移现有相关单测 |
-| T02 | TODO | 缩略图调度、优先级和缓存规则 | 存储实现留平台层 |
+| T01 | DONE | 文件排序、筛选、日期分组和连拍识别 | 原文件模型直接实现只读共享边界；排序/筛选/日期/连拍规则及测试已共享 |
+| T02 | NEXT | 缩略图调度、优先级和缓存规则 | 存储实现留平台层 |
 | T03 | TODO | 传输任务、队列和暂停/继续状态机 | UI 与 Service 不进入本批次 |
 | T04 | TODO | 重试、错误分类、分块和断点规则 | 文件 IO 通过接口注入 |
 | T05 | TODO | 命名、同名文件、临时文件和完整性规则 | Android 结果保持一致 |
@@ -157,6 +157,8 @@
 | 2026-09-04 | P06 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-174118.apk`，SHA-256 `9C50881D3568125EFFD78F49002DE3A70DBEE0F58298AAC930D87DDC8BB8D6F7`；Manifest 与 P05 相同，迁入类型均为单一 DEX 定义且旧包定义为 0；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
 | 2026-09-04 | P07 | Nikon `Lab` 操作/事件/响应/属性码表、Live View 包头与对焦/声音元数据解析、录像禁止条件和应用模式回退/重启判定已迁入 shared；Android Socket/USB/Mutex、命令时序、事件调度、Compose/Bitmap 及 MediaCodec/MediaMuxer 保持原位 |
 | 2026-09-04 | P07 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-180743.apk`，SHA-256 `B1D2BCC2057D07F5C20B5CE34F1519188DFA92E2336FD7B288D5D7C24EC2E7C4`；Manifest 与 P06 相同，9 个迁入类型/文件门面均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
+| 2026-09-04 | T01 | 文件扩展名、PTP 日期日键/范围、多卡 head 选择、稳定新旧排序、宽松日期分组、六条件 AND 筛选、双卡选择状态和连拍识别已迁入 shared；Android 原 `NikonCamera.FileInfo` 仅实现最小只读接口，构造/copy/equality 不变，Compose/动画/导出索引/SharedPreferences/`java.time` UI 适配保持原位 |
+| 2026-09-04 | T01 | shared 与 Android 全量单测、App/shared Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-183000.apk`，SHA-256 `E4C34ADFE343441BBD5D510E57168D8B1383CE26937C9EFF9F2B2260F7DEEF76`；Manifest 与 P07 相同，9 个共享类型/文件门面及 Android 原 `FileInfo` 均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
 
 ## 更新约定
 
