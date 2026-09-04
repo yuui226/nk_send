@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：协议、浏览传输、遥控调度与通用相机/文件值模型已完成共享，继续迁移格式和日期规则
-- 下一项：`C03` 格式化、坐标、日期和数值规则
+- 当前阶段：格式阈值、坐标规则和日期标签已完成共享，继续收口共享固定样本工具
+- 下一项：`C04` 共享测试工具和固定样本加载
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -50,8 +50,8 @@
 |---|---|---|---|
 | C01 | DONE | 迁移连接方式模型 | `CameraConnectionType` 已由 Android 使用 |
 | C02 | DONE | 迁移通用枚举、错误和相机/文件值模型 | 文件、下载、相机响应、遥控结果及 GPS 地名状态已共享；Android IO 内部状态未扩大 API |
-| C03 | NEXT | 迁移格式化、坐标、日期和数值规则 | 替换或隔离 JVM-only API |
-| C04 | TODO | 迁移共享测试工具和固定样本加载 | 后续协议任务复用 |
+| C03 | DONE | 迁移格式化、坐标、日期和数值规则 | 阈值/单位/坐标/日期标签共享；Locale 与 `LocalDate` 保留平台薄适配 |
+| C04 | NEXT | 迁移共享测试工具和固定样本加载 | 后续协议任务复用 |
 
 ### 3. PTP 与相机协议
 
@@ -173,6 +173,8 @@
 | 2026-09-04 | R02 | 三路只读审查、shared/Android 定向及全量单测、App/shared Lint、标准 Debug 打包均通过；`ZTransfer-debug-1.81-20260904-203223.apk`，SHA-256 `EFDEB52988CBEFAA5D7BED7A4AC4912314AAB22AE5CB34978B24244F69A28741`；Manifest 与 R01 完全相同，12 个抽查共享类型/门面均为单一 DEX 定义，`commonMain/commonTest` 无 Android/JVM 平台导入；真机 `3B65BV001L500000` 安装启动成功、PID `31359`，最近日志无启动崩溃 |
 | 2026-09-04 | C02 | `CameraFileInfo`、公开下载进度/统计、FHD 响应判定、遥控设置结果与 GPS 地名查询状态迁入 shared；字段顺序、默认值、扩展名派生、64 位计数及 `ByteArray` 引用语义保持不变；三个 Android 相机内部结果及 IO 异常继续保持 `internal`，没有为搬运扩大 iOS API |
 | 2026-09-04 | C02 | 三路边界/测试复核、shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-210207.apk`，SHA-256 `8538E3A41FC046E221E4102ED4F4251FD71DEC85E0969D5D76A4F9D54287B6F6`；Manifest 与 R02 完全相同，7 个迁入类型均为单一 DEX 定义且旧嵌套文件/下载类型为 0；本轮无已授权 ADB 设备，安装启动待设备恢复后补验 |
+| 2026-09-04 | C03 | 文件大小/速度/时长的二进制阈值、单位和分钟秒规则，坐标范围/精度/半球/标点，以及日期范围短标签迁入 shared；Android 原函数/API 保持不变并继续用 `Locale.US String.format` 与 `LocalDate` 处理舍入和日历适配，无新依赖、无 UI/状态/IO 改动 |
+| 2026-09-04 | C03 | 迁移前后金样本、两路只读复核、shared/Android 全量单测与 Lint、标准 Debug 打包通过；覆盖阈值两侧、59.999 秒旧显示、`Long.MAX_VALUE`、Java 半入舍入、负零、坐标极值和闰年；`ZTransfer-debug-1.81-20260904-211608.apk`，SHA-256 `EBFCBBEC5F03C4B55A24E146B3D6263CCFDFF9C7BAE871954BDEC3A848C6D111`，Manifest 与 C02 完全相同；本轮无已授权 ADB 设备 |
 
 ## 更新约定
 
