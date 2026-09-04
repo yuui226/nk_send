@@ -146,6 +146,12 @@ internal fun shouldScheduleStaDiscoveryRetry(
     discoveryInProgress: Boolean,
 ): Boolean = reconnectRequested && discoveryInProgress
 
+/** Album access alone is not proof that Nikon finished the computer-profile pairing. */
+internal fun canActivateStaSession(
+    albumAccessValidated: Boolean,
+    pairingConfirmed: Boolean,
+): Boolean = albumAccessValidated && pairingConfirmed
+
 internal fun restoredStaInitiatorIdentity(value: String?): StaInitiatorIdentity =
     runCatching { StaInitiatorIdentity.valueOf(value.orEmpty()) }
         .getOrDefault(StaInitiatorIdentity.PAIRED_COMPUTER)
@@ -1974,7 +1980,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         val localizedContext = com.ztransfer.AppLocale.wrap(getApplication())
         val preferredIdentity = staProfileStore.preferredIdentityFor(ip)
-        val knownPairedResponderGuids = staProfileStore.pairedResponderGuids()
         var candidateKnown = staProfileStore.isKnownCandidate(ip)
         var pairedReachedStorageProbe = false
         var pairingReconnectUsed = false
@@ -1997,7 +2002,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 localAddress = localAddress,
                 identity = preferredIdentity,
                 expectedResponderGuid = expectedResponderGuid,
-                knownPairedResponderGuids = knownPairedResponderGuids,
                 allowPairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
@@ -2031,6 +2035,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
             if (result.isSuccess) {
+                if (!canActivateStaSession(
+                        albumAccessValidated = candidateCamera.staAlbumAccessValidated,
+                        pairingConfirmed = candidateCamera.staPairingConfirmed,
+                    )
+                ) {
+                    staLastFailureMessage = localizedContext.getString(
+                        com.ztransfer.R.string.sta_camera_refused_repair,
+                    )
+                    staConnectingCamera = null
+                    candidateCamera.close()
+                    // A different paired body may previously have used this IP with the album
+                    // identity. Let that successful-but-unconfirmed route fall through to the
+                    // bounded paired-computer attempt instead of retrying the stale route forever.
+                    if (preferredIdentity == StaInitiatorIdentity.ALBUM_EXPLORER) break
+                    return StaCandidateConnectionResult.REJECTED
+                }
                 activateStaCamera(candidateCamera, ip, preferredIdentity)
                 return StaCandidateConnectionResult.CONNECTED
             }
@@ -2090,7 +2110,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 localAddress = localAddress,
                 identity = alternateIdentity,
                 expectedResponderGuid = expectedResponderGuid,
-                knownPairedResponderGuids = knownPairedResponderGuids,
                 allowPairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
                 exploreAlbumAccess = true,
                 forceProfilePairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
@@ -2119,6 +2138,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 return StaCandidateConnectionResult.REJECTED
             }
             if (alternateResult.isSuccess) {
+                if (!canActivateStaSession(
+                        albumAccessValidated = alternateCamera.staAlbumAccessValidated,
+                        pairingConfirmed = alternateCamera.staPairingConfirmed,
+                    )
+                ) {
+                    staLastFailureMessage = localizedContext.getString(
+                        com.ztransfer.R.string.sta_camera_refused_repair,
+                    )
+                    staConnectingCamera = null
+                    alternateCamera.close()
+                    return StaCandidateConnectionResult.REJECTED
+                }
                 activateStaCamera(alternateCamera, ip, alternateIdentity)
                 return StaCandidateConnectionResult.CONNECTED
             }
@@ -2230,8 +2261,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ip: String,
         identity: StaInitiatorIdentity,
     ) {
-        check(candidateCamera.staAlbumAccessValidated) {
-            "STA camera must validate album access before activation"
+        check(
+            canActivateStaSession(
+                albumAccessValidated = candidateCamera.staAlbumAccessValidated,
+                pairingConfirmed = candidateCamera.staPairingConfirmed,
+            ),
+        ) {
+            "STA camera must validate album access and pairing before activation"
         }
         staConnectingCamera = null
         staReconnectAttempt = 0

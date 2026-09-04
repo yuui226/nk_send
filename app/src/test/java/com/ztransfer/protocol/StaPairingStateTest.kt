@@ -39,26 +39,24 @@ class StaPairingStateTest {
     }
 
     @Test
-    fun knownCameraProfileIsNeverForcedBackThroughPairing() {
+    fun confirmedProtocolPairingIsNotForcedBackThroughPairing() {
         assertFalse(
             shouldForceStaProfilePairing(
                 storageResponse = PtpConstants.RESPONSE_OK,
                 forceProfilePairing = true,
                 allowPairing = true,
-                knownCameraProfile = true,
-                protocolPairingMarkerExists = false,
+                protocolPairingMarkerExists = true,
             ),
         )
     }
 
     @Test
-    fun newCameraStillCompletesProfilePairing() {
+    fun missingProtocolPairingMarkerCannotBeBypassedByLocalProfileState() {
         assertTrue(
             shouldForceStaProfilePairing(
                 storageResponse = PtpConstants.RESPONSE_OK,
                 forceProfilePairing = true,
                 allowPairing = true,
-                knownCameraProfile = false,
                 protocolPairingMarkerExists = false,
             ),
         )

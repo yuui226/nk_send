@@ -298,11 +298,10 @@ internal fun shouldForceStaProfilePairing(
     storageResponse: Int,
     forceProfilePairing: Boolean,
     allowPairing: Boolean,
-    knownCameraProfile: Boolean,
     protocolPairingMarkerExists: Boolean,
 ): Boolean = storageResponse == PtpConstants.RESPONSE_OK &&
     forceProfilePairing && allowPairing &&
-    !knownCameraProfile && !protocolPairingMarkerExists
+    !protocolPairingMarkerExists
 
 internal fun isExpectedStaResponder(
     expectedResponderGuid: String?,
@@ -1380,6 +1379,9 @@ class NikonCamera(private val context: Context) {
     /** Stable PTP/IP body identity returned by InitCommandAck; available before DeviceInfo. */
     internal val staResponderGuid: String?
         get() = responderGuid
+    /** True only after this installation has received an OK Nikon pairing result for this body. */
+    internal val staPairingConfirmed: Boolean
+        get() = hasCompletedStaPairing()
     /**
      * 跨连接稳定的机身身份，用于隔离缩略图磁盘缓存。有效的 PTP DeviceInfo 序列号
      * 可统一同一机身的 Wi-Fi/USB 缓存；缺失或为占位值时再用当前链路的物理标识兜底。
@@ -1593,7 +1595,6 @@ class NikonCamera(private val context: Context) {
         localAddress: InetAddress? = null,
         identity: StaInitiatorIdentity = StaInitiatorIdentity.PAIRED_COMPUTER,
         expectedResponderGuid: String? = null,
-        knownPairedResponderGuids: Set<String> = emptySet(),
         allowPairing: Boolean = true,
         exploreAlbumAccess: Boolean = false,
         forceProfilePairing: Boolean = false,
@@ -1670,9 +1671,6 @@ class NikonCamera(private val context: Context) {
                     "responder=UNEXPECTED expected=$expectedResponderGuid actual=$responderGuid"
                 throw UnexpectedStaResponderException(responderGuid)
             }
-            val knownCameraProfile = responderGuid
-                ?.let(knownPairedResponderGuids::contains) == true
-
             evtSocket = newSocket().apply {
                 soTimeout = STA_HANDSHAKE_TIMEOUT_MS
                 connect(InetSocketAddress(ip, PtpConstants.PTP_PORT), CONNECT_TIMEOUT_MS)
@@ -1716,7 +1714,6 @@ class NikonCamera(private val context: Context) {
                 allowPairing = allowPairing,
                 exploreAlbumAccess = exploreAlbumAccess,
                 forceProfilePairing = forceProfilePairing,
-                knownCameraProfile = knownCameraProfile,
                 onConnectingStarted = onConnectingStarted,
                 onPairingStarted = onPairingStarted,
             )
@@ -4177,7 +4174,6 @@ class NikonCamera(private val context: Context) {
         allowPairing: Boolean,
         exploreAlbumAccess: Boolean,
         forceProfilePairing: Boolean,
-        knownCameraProfile: Boolean,
         onConnectingStarted: (() -> Unit)?,
         onPairingStarted: (() -> Unit)?,
     ) {
@@ -4200,7 +4196,6 @@ class NikonCamera(private val context: Context) {
                 storageResponse = storageResponse,
                 forceProfilePairing = forceProfilePairing,
                 allowPairing = allowPairing,
-                knownCameraProfile = knownCameraProfile,
                 protocolPairingMarkerExists = hasCompletedStaPairing(),
             )
         ) {
@@ -4211,7 +4206,6 @@ class NikonCamera(private val context: Context) {
             staDiagnosticLines += "state=FORCED_PROFILE_PAIRING"
             onPairingStarted?.invoke()
             completeInitialPairing()
-            markStaPairingCompleted()
             throw PairingCompletedException()
         }
         // A paired WTU session may expose a real StorageID while GetObjectHandles still contains
@@ -4242,7 +4236,6 @@ class NikonCamera(private val context: Context) {
             staDiagnosticLines += "state=PAIRING_REQUIRED"
             onPairingStarted?.invoke()
             completeInitialPairing()
-            markStaPairingCompleted()
             throw PairingCompletedException()
         }
         // Only now has the camera proved that this session does not require pairing. Publishing
@@ -4410,6 +4403,9 @@ class NikonCamera(private val context: Context) {
                 "Nikon pairing result failed: 0x${resultResponse.toString(16)}",
             )
         }
+        // Persist at the authoritative OK response, before waiting for the optional pacing event.
+        // This closes the process-death window without changing the camera-side protocol sequence.
+        markStaPairingCompleted()
 
         // The OK response is authoritative. The following DeviceInfoChanged event is useful for
         // pacing but is missing on some firmware, so timeout only affects the reconnect delay.

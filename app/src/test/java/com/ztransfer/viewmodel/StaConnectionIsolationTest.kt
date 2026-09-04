@@ -89,6 +89,32 @@ class StaConnectionIsolationTest {
     }
 
     @Test
+    fun albumAccessWithoutConfirmedPairingCannotActivateStaSession() {
+        assertFalse(
+            canActivateStaSession(
+                albumAccessValidated = true,
+                pairingConfirmed = false,
+            ),
+        )
+    }
+
+    @Test
+    fun confirmedPairingStillRequiresValidatedAlbumAccess() {
+        assertFalse(
+            canActivateStaSession(
+                albumAccessValidated = false,
+                pairingConfirmed = true,
+            ),
+        )
+        assertTrue(
+            canActivateStaSession(
+                albumAccessValidated = true,
+                pairingConfirmed = true,
+            ),
+        )
+    }
+
+    @Test
     fun savedStaInitiatorIdentitySurvivesAppRelaunch() {
         assertEquals(
             StaInitiatorIdentity.ALBUM_EXPLORER,

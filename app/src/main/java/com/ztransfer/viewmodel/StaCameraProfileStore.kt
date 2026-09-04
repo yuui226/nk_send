@@ -45,10 +45,10 @@ internal class StaCameraProfileStore(
             preferredIdentity = restoredStaInitiatorIdentity(
                 preferences.getString(profileKey(guid, FIELD_IDENTITY), null),
             ),
-            pairingConfirmed = preferences.getBoolean(
-                profileKey(guid, FIELD_PAIRED),
-                pairingMarkerExists(guid),
-            ),
+            // Route discovery can succeed while the camera is still waiting for pairing. Only the
+            // marker written after NK_PAIRING_RESULT succeeds is authoritative; the profile field
+            // is legacy data and may contain a false positive from an older connection.
+            pairingConfirmed = pairingMarkerExists(guid),
             lastSeenAtMs = preferences.getLong(profileKey(guid, FIELD_LAST_SEEN), 0L),
             deviceModel = preferences.getString(profileKey(guid, FIELD_DEVICE_MODEL), null)
                 ?.trim()
@@ -68,11 +68,7 @@ internal class StaCameraProfileStore(
         .map(StaCameraProfile::responderGuid)
         .toSet()
 
-    fun pairedCameraCount(): Int {
-        val bodyCount = pairedResponderGuids().size
-        val legacySingleCamera = preferences.getBoolean(KEY_REUSABLE_PROFILE, false)
-        return if (bodyCount == 0 && legacySingleCamera) 1 else bodyCount
-    }
+    fun pairedCameraCount(): Int = pairedResponderGuids().size
 
     fun pairedCameraModels(): List<String> = allProfiles()
         .asSequence()
@@ -93,10 +89,6 @@ internal class StaCameraProfileStore(
         preferredStaIdentityForCandidate(
             ip = ip,
             profiles = allProfiles(),
-            legacyLastIp = lastUsedIp(),
-            legacyIdentity = restoredStaInitiatorIdentity(
-                preferences.getString(KEY_LEGACY_LAST_IDENTITY, null),
-            ),
         )
 
     fun isKnownCandidate(ip: String, responderGuid: String? = null): Boolean =
@@ -132,7 +124,6 @@ internal class StaCameraProfileStore(
                 .putString(KEY_LAST_RESPONDER_GUID, guid)
                 .putString(profileKey(guid, FIELD_LAST_IP), ip)
                 .putString(profileKey(guid, FIELD_IDENTITY), identity.name)
-                .putBoolean(profileKey(guid, FIELD_PAIRED), true)
                 .putLong(profileKey(guid, FIELD_LAST_SEEN), nowMs())
             if (normalizedModel != null) {
                 editor.putString(profileKey(guid, FIELD_DEVICE_MODEL), normalizedModel)
@@ -270,10 +261,10 @@ internal fun mostRecentStaProfileForIp(
 internal fun preferredStaIdentityForCandidate(
     ip: String,
     profiles: List<StaCameraProfile>,
-    legacyLastIp: String?,
-    legacyIdentity: StaInitiatorIdentity,
-): StaInitiatorIdentity = mostRecentStaProfileForIp(profiles, ip)?.preferredIdentity
-    ?: legacyIdentity.takeIf { legacyLastIp == ip }
+): StaInitiatorIdentity = mostRecentStaProfileForIp(
+    profiles = profiles.filter(StaCameraProfile::pairingConfirmed),
+    ip = ip,
+)?.preferredIdentity
     ?: StaInitiatorIdentity.PAIRED_COMPUTER
 
 internal fun hasReusableStaProfileUsing(
@@ -287,10 +278,11 @@ internal fun mostRecentlyUsedStaProfile(
     profiles: List<StaCameraProfile>,
     lastUsedIp: String?,
 ): StaCameraProfile? {
+    val confirmedProfiles = profiles.filter(StaCameraProfile::pairingConfirmed)
     if (lastUsedIp != null) {
-        mostRecentStaProfileForIp(profiles, lastUsedIp)?.let { return it }
+        mostRecentStaProfileForIp(confirmedProfiles, lastUsedIp)?.let { return it }
     }
-    return profiles.asSequence()
-        .filter { it.pairingConfirmed && it.lastSeenAtMs > 0L }
+    return confirmedProfiles.asSequence()
+        .filter { it.lastSeenAtMs > 0L }
         .maxByOrNull(StaCameraProfile::lastSeenAtMs)
 }

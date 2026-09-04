@@ -41,8 +41,6 @@ class StaCameraProfileSelectionTest {
             preferredStaIdentityForCandidate(
                 ip = "192.168.50.10",
                 profiles = profiles,
-                legacyLastIp = "192.168.50.11",
-                legacyIdentity = StaInitiatorIdentity.ALBUM_EXPLORER,
             ),
         )
         assertEquals(
@@ -50,8 +48,6 @@ class StaCameraProfileSelectionTest {
             preferredStaIdentityForCandidate(
                 ip = "192.168.50.11",
                 profiles = profiles,
-                legacyLastIp = "192.168.50.11",
-                legacyIdentity = StaInitiatorIdentity.PAIRED_COMPUTER,
             ),
         )
     }
@@ -63,8 +59,48 @@ class StaCameraProfileSelectionTest {
             preferredStaIdentityForCandidate(
                 ip = "192.168.50.99",
                 profiles = emptyList(),
-                legacyLastIp = "192.168.50.10",
-                legacyIdentity = StaInitiatorIdentity.ALBUM_EXPLORER,
+            ),
+        )
+    }
+
+    @Test
+    fun unconfirmedAlbumRouteCannotBypassPairingIdentity() {
+        val unconfirmed = profile(
+            guid = "11111111111111111111111111111111",
+            ip = "192.168.50.10",
+            identity = StaInitiatorIdentity.ALBUM_EXPLORER,
+            seenAt = 20L,
+        ).copy(pairingConfirmed = false)
+
+        assertEquals(
+            StaInitiatorIdentity.PAIRED_COMPUTER,
+            preferredStaIdentityForCandidate(
+                ip = "192.168.50.10",
+                profiles = listOf(unconfirmed),
+            ),
+        )
+    }
+
+    @Test
+    fun olderConfirmedRouteWinsOverNewerUnconfirmedRouteAtSameAddress() {
+        val confirmed = profile(
+            guid = "11111111111111111111111111111111",
+            ip = "192.168.50.10",
+            identity = StaInitiatorIdentity.ALBUM_EXPLORER,
+            seenAt = 10L,
+        )
+        val unconfirmed = profile(
+            guid = "22222222222222222222222222222222",
+            ip = "192.168.50.10",
+            identity = StaInitiatorIdentity.PAIRED_COMPUTER,
+            seenAt = 20L,
+        ).copy(pairingConfirmed = false)
+
+        assertEquals(
+            StaInitiatorIdentity.ALBUM_EXPLORER,
+            preferredStaIdentityForCandidate(
+                ip = "192.168.50.10",
+                profiles = listOf(confirmed, unconfirmed),
             ),
         )
     }
@@ -123,6 +159,23 @@ class StaCameraProfileSelectionTest {
             mostRecentlyUsedStaProfile(
                 profiles = listOf(previous, lastUsed),
                 lastUsedIp = "192.168.50.99",
+            ),
+        )
+    }
+
+    @Test
+    fun unconfirmedLastUsedBodyIsNotRestoredAsExpectedCamera() {
+        val unconfirmed = profile(
+            guid = "11111111111111111111111111111111",
+            ip = "192.168.50.10",
+            identity = StaInitiatorIdentity.ALBUM_EXPLORER,
+            seenAt = 20L,
+        ).copy(pairingConfirmed = false)
+
+        assertNull(
+            mostRecentlyUsedStaProfile(
+                profiles = listOf(unconfirmed),
+                lastUsedIp = unconfirmed.lastIp,
             ),
         )
     }
