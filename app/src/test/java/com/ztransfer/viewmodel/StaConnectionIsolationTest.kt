@@ -1,7 +1,7 @@
 package com.ztransfer.viewmodel
 
 import com.ztransfer.protocol.CameraConnectionType
-import com.ztransfer.protocol.StaInitiatorIdentity
+import com.ztransfer.connection.StaInitiatorIdentity
 import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException

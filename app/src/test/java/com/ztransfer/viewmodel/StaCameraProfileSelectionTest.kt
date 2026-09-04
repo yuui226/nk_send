@@ -1,6 +1,6 @@
 package com.ztransfer.viewmodel
 
-import com.ztransfer.protocol.StaInitiatorIdentity
+import com.ztransfer.connection.StaInitiatorIdentity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

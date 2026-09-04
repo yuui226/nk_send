@@ -1,8 +1,8 @@
 package com.ztransfer.viewmodel
 
 import android.content.SharedPreferences
+import com.ztransfer.connection.StaInitiatorIdentity
 import com.ztransfer.protocol.STA_PAIRING_MARKER_PREFIX
-import com.ztransfer.protocol.StaInitiatorIdentity
 
 /**
  * One ZTransfer installation is one PTP/IP initiator. Cameras remember that shared computer

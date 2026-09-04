@@ -37,6 +37,7 @@ import com.ztransfer.catalog.newestFirstHandleOrders
 import com.ztransfer.catalog.objectHandleQueryStorageId
 import com.ztransfer.catalog.storageIdsBySlot
 import com.ztransfer.catalog.usableStorageIds
+import com.ztransfer.connection.StaInitiatorIdentity
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.protocol.CameraConnectionType
@@ -49,7 +50,6 @@ import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.PtpIpCandidate
 import com.ztransfer.protocol.PtpIpDiscovery
-import com.ztransfer.protocol.StaInitiatorIdentity
 import com.ztransfer.protocol.UnexpectedStaResponderException
 import com.ztransfer.protocol.UsbPtpConnection
 import com.ztransfer.protocol.rcPollEvents

@@ -12,6 +12,11 @@ import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.catalog.isCameraFileHeadPreferred
+import com.ztransfer.connection.StaInitiatorIdentity
+import com.ztransfer.connection.hasUsableStaAlbumStorage
+import com.ztransfer.connection.isExpectedStaResponder
+import com.ztransfer.connection.isStaPairingOnlyOperationSet
+import com.ztransfer.connection.shouldForceStaProfilePairing
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import kotlinx.coroutines.CancellationException
@@ -229,41 +234,10 @@ internal class UnexpectedStaResponderException(actualResponderGuid: String?) :
 internal const val PTPIP_IDENTITY_PREFERENCES = "ptpip_identity"
 internal const val STA_PAIRING_MARKER_PREFIX = "sta_paired_"
 
-internal fun isStaPairingOnlyOperationSet(operations: Set<Int>): Boolean = operations == setOf(
-    PtpConstants.GET_DEVICE_INFO,
-    PtpConstants.OPEN_SESSION,
-    PtpConstants.CLOSE_SESSION,
-    PtpConstants.NK_PAIRING_QUERY,
-    PtpConstants.NK_PAIRING_RESULT,
-)
-
-internal fun shouldForceStaProfilePairing(
-    storageResponse: Int,
-    forceProfilePairing: Boolean,
-    allowPairing: Boolean,
-    protocolPairingMarkerExists: Boolean,
-): Boolean = storageResponse == PtpConstants.RESPONSE_OK &&
-    forceProfilePairing && allowPairing &&
-    !protocolPairingMarkerExists
-
-internal fun isExpectedStaResponder(
-    expectedResponderGuid: String?,
-    actualResponderGuid: String?,
-): Boolean = expectedResponderGuid == null || expectedResponderGuid == actualResponderGuid
-
 /** PTP/IP Event payload: u16 code + u32 transactionId + optional u32 parameters. */
 internal fun parsePtpIpEvent(payload: ByteArray?): Pair<Int, Long>? {
     val event = PtpIpProtocolCodec.decodeEvent(payload) ?: return null
     return event.code to event.firstParameter
-}
-
-internal fun hasUsableStaAlbumStorage(response: Int, storageIds: List<Int>): Boolean =
-    response == PtpConstants.RESPONSE_OK && storageIds.isNotEmpty()
-
-/** STA-only initiator identities. The album identity never replaces the paired computer identity. */
-internal enum class StaInitiatorIdentity {
-    PAIRED_COMPUTER,
-    ALBUM_EXPLORER,
 }
 
 /** File type fallback for paired STA sessions where Nikon denies ObjectInfo. */
