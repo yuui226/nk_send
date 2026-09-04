@@ -7,7 +7,7 @@
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
 - 当前阶段：通用代码盘点完成，开始按原子批次迁移纯 Kotlin 逻辑
-- 下一项：`P02` PTP 基础字节读写与容器 codec
+- 下一项：`P03` PTP/IP 握手和命令/事件包
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -58,8 +58,8 @@
 | ID | 状态 | 任务 | 主要范围 |
 |---|---|---|---|
 | P01 | DONE | PTP/PTP-IP 常量和格式映射 | 纯常量迁入 shared；Android 响应文案留平台层 |
-| P02 | NEXT | PTP 基础字节读写与容器 codec | 固定包头、端序、长度和异常输入样本 |
-| P03 | TODO | PTP/IP 握手和命令/事件包 | 只迁协议，不迁具体 Socket |
+| P02 | DONE | PTP 基础字节读写与容器 codec | 包头、端序、长度边界和异常输入已固定，Socket 流读取仍留 Android |
+| P03 | NEXT | PTP/IP 握手和命令/事件包 | 只迁协议，不迁具体 Socket |
 | P04 | TODO | Nikon 属性、能力和对象信息解析 | 固定二进制样本验证 |
 | P05 | TODO | 存储卡、对象元数据与双卡合并规则 | 顺序、别名、去重保持一致 |
 | P06 | TODO | AP/STA 发现和配对状态规则 | 网络扫描实现留在平台层 |
@@ -145,6 +145,8 @@
 | 2026-09-04 | G04 | App/shared Lint、Debug 打包及真机启动通过；`ZTransfer-debug-1.81-20260904-143655.apk`，SHA-256 `6D9519CAA95A12DE44B6B8B218CC5027BBA19BAD686373570F60E1AF69327203`；Manifest 不变，codec/时间模型均为单一定义 |
 | 2026-09-04 | P01 | PTP/IP 包类型、关键操作/响应码、地址及完整格式映射先由旧实现固定，再迁入 `commonTest`；纯常量源码逐行一致，7 个 Android 翻译调用保持原样 |
 | 2026-09-04 | P01 | shared 20 项测试、Android 协议相关测试、App/shared Lint 通过；`ZTransfer-debug-1.81-20260904-145323.apk`，SHA-256 `5EC71A3B15C8A52682E041EC19C42786C238BDA187C7FFF5F1A36B903CCD3832`；Manifest 不变，真机启动无崩溃 |
+| 2026-09-04 | P02 | PONG、事件包头、高位小端数值和长度上下界固定向量迁入 `commonTest`；Android `PacketReader` 保留原流读取、缓冲复用、本地化异常及空 payload 行为，只复用共享包头 codec |
+| 2026-09-04 | P02 | shared 测试、Android 远程事件/响应回归和 App/shared Lint 通过；`ZTransfer-debug-1.81-20260904-151547.apk`，SHA-256 `2E1DDE62EA5C72874084427520B70B5FFBC407F8B5400669229665DEC62AADCE`；Manifest 不变，真机 PID `24554` 且无启动崩溃，codec 在 APK 中仅一个定义 |
 
 ## 更新约定
 

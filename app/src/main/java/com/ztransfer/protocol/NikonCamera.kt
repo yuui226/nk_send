@@ -4585,10 +4585,7 @@ class NikonCamera(private val context: Context) {
 
     /** 应答 PING。命令通道传 [cmdOutput]，事件通道传其自身输出流（各自独立，无并发冲突）。 */
     private fun sendPong(output: OutputStream?) {
-        val pong = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).apply {
-            putInt(8)
-            putInt(PtpConstants.PONG)
-        }.array()
+        val pong = PtpIpPacketCodec.encode(PtpConstants.PONG)
         output?.write(pong)
         output?.flush()
     }
