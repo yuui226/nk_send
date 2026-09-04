@@ -227,13 +227,6 @@ suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
 suspend fun NikonCamera.rcSetValue(param: RcParam, value: Long): Int =
     labSetProp(param.prop, encodePtpScalar(param.dataType, value))
 
-/** 写入后由机身回读得到的结果，避免把 0x2001 误当成“参数已经采用”。 */
-data class RcSetResult(
-    val responseCode: Int,
-    val actual: RcParam?,
-    val confirmed: Boolean
-)
-
 /**
  * Nikon 某些机型会在当前曝光模式或 Live View 状态下接受 SetDevicePropValue，
  * 却延迟采用甚至保持原值。写后短暂回读，并只在相机报告目标值时确认成功；

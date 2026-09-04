@@ -11,6 +11,13 @@ data class RcParam(
     val values: List<Long>,
 )
 
+/** Camera read-back after a property write; an OK response alone is not confirmation. */
+data class RcSetResult(
+    val responseCode: Int,
+    val actual: RcParam?,
+    val confirmed: Boolean,
+)
+
 /**
  * Platform-neutral presentation rule. Android retains its default-locale `String.format`, while
  * iOS can render [Decimal] with NumberFormatter without duplicating camera-value semantics.

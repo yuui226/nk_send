@@ -3,21 +3,6 @@ package com.ztransfer.gps
 import android.location.Address
 import java.util.Locale
 
-enum class GpsPlaceLookupStatus {
-    IDLE,
-    LOADING,
-    SUCCESS,
-    ERROR,
-}
-
-/** A one-shot lookup always keeps the exact coordinates that the user tapped. */
-data class GpsPlaceLookupState(
-    val latitude: Double? = null,
-    val longitude: Double? = null,
-    val status: GpsPlaceLookupStatus = GpsPlaceLookupStatus.IDLE,
-    val placeName: String? = null,
-)
-
 /** Roughly 100 m cells avoid resolving the same nearby coordinate repeatedly. */
 internal fun gpsPlaceCacheKey(latitude: Double, longitude: Double): String =
     String.format(Locale.US, "%.3f,%.3f", latitude, longitude)

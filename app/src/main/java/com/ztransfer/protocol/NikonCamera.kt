@@ -73,34 +73,6 @@ internal fun selectNewestFileHeadIndex(
 class ResumeUnavailableException : Exception()
 
 /**
- * FHD 能力判断只区分协议明确不支持与可恢复失败。相机忙、handle 失效、空数据以及厂商
- * 临时错误都不能被升级成整场会话不支持，否则后台预取的一次失败会毒化后续大图预览。
- */
-internal enum class FhdResponseDisposition {
-    SUCCESS,
-    TRANSIENT_FAILURE,
-    UNSUPPORTED,
-}
-
-internal fun classifyFhdResponse(
-    responseCode: Int,
-    hasPayload: Boolean,
-): FhdResponseDisposition = when {
-    responseCode == PtpConstants.RESPONSE_OK && hasPayload -> FhdResponseDisposition.SUCCESS
-    responseCode == PtpConstants.OPERATION_NOT_SUPPORTED -> FhdResponseDisposition.UNSUPPORTED
-    else -> FhdResponseDisposition.TRANSIENT_FAILURE
-}
-
-internal fun updateFhdSupport(
-    current: Boolean?,
-    disposition: FhdResponseDisposition,
-): Boolean? = when (disposition) {
-    FhdResponseDisposition.SUCCESS -> true
-    FhdResponseDisposition.UNSUPPORTED -> if (current == true) true else false
-    FhdResponseDisposition.TRANSIENT_FAILURE -> current
-}
-
-/**
  * 单命令通道的轻量调度器。普通命令仍直接使用 [mutex]；交互式大图/EXIF 在排队前
  * 登记，分块传输在每个完整 PTP 事务之间检查登记，让交互请求先取得下一段通道。
  */
