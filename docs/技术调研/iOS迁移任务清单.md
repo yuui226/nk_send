@@ -6,8 +6,8 @@
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：共享固定字节样本工具已收口，继续汇总协议与业务金样本覆盖
-- 下一项：`S02` 冻结协议和业务固定样本
+- 当前阶段：协议与业务迁移金样本已闭环，开始收口平台能力边界
+- 下一项：`S03` 明确平台接口清单
 - Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -41,8 +41,8 @@
 | ID | 状态 | 任务 | 主要范围 |
 |---|---|---|---|
 | S01 | DONE | 列出可共享类型、Android/Java 依赖和迁移顺序 | 已按直接迁移、先拆边界、平台保留三类完成盘点 |
-| S02 | NEXT | 冻结协议和业务固定样本 | PTP 字节、排序结果、队列状态、GPS payload、EXIF/滤镜结果 |
-| S03 | TODO | 明确平台接口清单 | 网络、USB、文件、蓝牙、定位、后台、录像、支付、更新 |
+| S02 | DONE | 冻结协议和业务固定样本 | PTP 字节、排序结果、队列状态、GPS payload、EXIF/滤镜结果均有确定性 oracle |
+| S03 | NEXT | 明确平台接口清单 | 网络、USB、文件、蓝牙、定位、后台、录像、支付、更新 |
 
 ### 2. 纯模型与基础规则
 
@@ -128,6 +128,17 @@
 - 强约束：`internal` 不能跨 `app`/`shared`；不为“方便搬运”公开实现细节，先设计小而稳定的公共 API。
 - 迁移顺序：公开纯模型 → 固定样本与协议 codec → 文件/队列状态机 → ViewModel 用例 → 共享 UI → 双端平台实现。
 
+## S02 固定样本矩阵
+
+| 范围 | 固定内容 | 主要证据 |
+|---|---|---|
+| PTP/PTP-IP | 包头、握手、命令、事件、响应、对象与属性二进制 | `shared` protocol `commonTest` |
+| 文件浏览 | 多卡排序、筛选、日期分组、连拍识别 | `CameraFileRulesTest` 等 `commonTest` |
+| 传输队列 | FIFO、撤回、暂停/继续、重试、断点和完整性 | `Transfer*Test` `commonTest` |
+| GPS | 完整 41 字节 payload、频率、恢复与海拔规则 | `Gps*Test` `commonTest` |
+| EXIF/相框 | 固定标签到完整元数据、DMS/rational 回退和布局规则 | `PhotoFrameExporterTest` |
+| 滤镜 | NCP、NP3 curve、NP3 tonal 的完整 ARGB 输出 | `PhotoFilterRendererTest` |
+
 ## 验证记录
 
 | 日期 | 任务 | 结果/证据 |
@@ -176,6 +187,8 @@
 | 2026-09-04 | C03 | 文件大小/速度/时长的二进制阈值、单位和分钟秒规则，坐标范围/精度/半球/标点，以及日期范围短标签迁入 shared；Android 原函数/API 保持不变并继续用 `Locale.US String.format` 与 `LocalDate` 处理舍入和日历适配，无新依赖、无 UI/状态/IO 改动 |
 | 2026-09-04 | C03 | 迁移前后金样本、两路只读复核、shared/Android 全量单测与 Lint、标准 Debug 打包通过；覆盖阈值两侧、59.999 秒旧显示、`Long.MAX_VALUE`、Java 半入舍入、负零、坐标极值和闰年；`ZTransfer-debug-1.81-20260904-211608.apk`，SHA-256 `EBFCBBEC5F03C4B55A24E146B3D6263CCFDFF9C7BAE871954BDEC3A848C6D111`，Manifest 与 C02 完全相同；本轮无已授权 ADB 设备 |
 | 2026-09-04 | C04 | commonTest 的 6 份 hex 解码与 3 份 Int 字节构造统一为两个 `internal` 固定样本工具；协议 hex 文本逐项比对完全一致，工具覆盖大小写、高位/空字节、非法输入和低 8 位转换；shared 全量测试通过，未新增生产 API、依赖、资源目录或平台/文件 IO，因此沿用 C03 Android 验收结果 |
+| 2026-09-04 | S02 | 六类迁移 oracle 齐全；新增三组 NCP/NP3 完整 ARGB 金向量及固定 EXIF 标签到完整元数据样本，直接复用生产算法，没有复制公式或修改公开 API；两路只读复核均通过 |
+| 2026-09-04 | S02 | shared/Android 全量单测与 Lint、标准 Debug 打包通过；`ZTransfer-debug-1.81-20260904-213525.apk`，SHA-256 `7ADA03F50161AF940873A628CFA6F0F0BE6263515EFB5E289E8EF30113384EC2`；Manifest 与 C03 完全相同；本轮无已授权 ADB 设备 |
 
 ## 更新约定
 
