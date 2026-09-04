@@ -93,10 +93,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
-import java.util.Locale
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
-import java.time.format.ResolverStyle
 
 private val transferTaskIds = AtomicLong(0L)
 private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION = 2
@@ -104,50 +101,26 @@ private const val PHOTO_FRAME_WATERMARK_SIZE_SCALE_VERSION_KEY =
     "photo_frame_watermark_size_scale_version"
 private const val PHOTO_FRAME_METADATA_SETTINGS_KEY = "photo_frame_metadata_settings_v1"
 internal const val PHOTO_FRAME_EXPORT_PARALLELISM = 2
-private val COPY_SUFFIX_REGEX = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
-private val IDENTITY_TOKEN_UNSAFE_CHARS = Regex("[^A-Za-z0-9.]")
 
-internal fun exportedOriginalBaseName(name: String): String = name.replace(COPY_SUFFIX_REGEX, "")
-
-private fun directoryLookupKey(name: String): String =
-    exportedOriginalBaseName(name).lowercase(Locale.ROOT)
-
-internal data class IndexedExistingFile<T>(
-    val displayName: String,
-    val size: Long,
-    val value: T,
-)
-
-/** 纯内存双索引，可用非 Android 值类型做单元测试。 */
+/** Android 继续持有原线程锁；纯索引和值模型由 shared 提供。 */
 internal class ExistingFileNameIndex<T> {
     private val lock = Any()
-    private val byDisplayName = HashMap<String, IndexedExistingFile<T>>()
-    private val byBaseName = HashMap<String, MutableList<IndexedExistingFile<T>>>()
+    private val core = ExistingFileNameIndexCore<T>()
 
     fun add(displayName: String, size: Long, value: T) = synchronized(lock) {
-        val entry = IndexedExistingFile(displayName, size, value)
-        byDisplayName.put(displayName, entry)?.let { previous ->
-            byBaseName[directoryLookupKey(previous.displayName)]?.removeAll {
-                it.displayName == previous.displayName
-            }
-        }
-        byBaseName.getOrPut(directoryLookupKey(displayName)) { ArrayList(1) }.add(entry)
+        core.add(displayName, size, value)
     }
 
     fun containsDisplayName(displayName: String): Boolean = synchronized(lock) {
-        byDisplayName.containsKey(displayName)
+        core.containsDisplayName(displayName)
     }
 
     fun find(fileName: String, fileSize: Long): IndexedExistingFile<T>? = synchronized(lock) {
-        fun sizeMatches(localSize: Long): Boolean =
-            localSize < 0L || fileSize == PtpConstants.SIZE_UNKNOWN || localSize == fileSize
-
-        byDisplayName[fileName]?.takeIf { sizeMatches(it.size) }
-            ?: byBaseName[directoryLookupKey(fileName)]?.firstOrNull { sizeMatches(it.size) }
+        core.find(fileName, fileSize)
     }
 
     fun entries(): List<IndexedExistingFile<T>> = synchronized(lock) {
-        byDisplayName.values.toList()
+        core.entries()
     }
 }
 
@@ -218,8 +191,8 @@ class ExportedOriginalIndex internal constructor() {
         destinationFolderName: String? = null,
         uriString: String? = null,
     ): Boolean {
-        val destinationKey = exportDestinationKey(destinationFolderName)
-        val fileKey = directoryLookupKey(fileName)
+        val destinationKey = transferDestinationLookupKey(destinationFolderName)
+        val fileKey = transferDirectoryLookupKey(fileName)
         val filesBySize = filesByDestination
             .computeIfAbsent(destinationKey) { ConcurrentHashMap() }
             .computeIfAbsent(fileKey) { ConcurrentHashMap() }
@@ -257,19 +230,21 @@ class ExportedOriginalIndex internal constructor() {
         file: NikonCamera.FileInfo,
         destinationFolderName: String? = null,
     ): Boolean {
-        val filesBySize = filesByDestination[exportDestinationKey(destinationFolderName)]
-            ?.get(directoryLookupKey(file.fileName))
+        val filesBySize = filesByDestination[transferDestinationLookupKey(destinationFolderName)]
+            ?.get(transferDirectoryLookupKey(file.fileName))
             ?: return false
         return file.size == PtpConstants.SIZE_UNKNOWN ||
-            filesBySize.keys.any { it < 0L || it == file.size }
+            filesBySize.keys.any { localSize ->
+                matchesExistingFileSize(localSize, file.size)
+            }
     }
 
     internal fun localUriString(
         file: NikonCamera.FileInfo,
         destinationFolderName: String? = null,
     ): String? {
-        val filesBySize = filesByDestination[exportDestinationKey(destinationFolderName)]
-            ?.get(directoryLookupKey(file.fileName))
+        val filesBySize = filesByDestination[transferDestinationLookupKey(destinationFolderName)]
+            ?.get(transferDirectoryLookupKey(file.fileName))
             ?: return null
         return if (file.size == PtpConstants.SIZE_UNKNOWN) {
             filesBySize.values.firstOrNull { it.isNotEmpty() }
@@ -281,11 +256,7 @@ class ExportedOriginalIndex internal constructor() {
         }
     }
 
-    private fun exportDestinationKey(destinationFolderName: String?): String =
-        destinationFolderName?.lowercase(Locale.ROOT) ?: ROOT_EXPORT_DESTINATION
-
     private companion object {
-        const val ROOT_EXPORT_DESTINATION = "\u0000root"
         const val NO_LOCAL_URI = ""
     }
 }
@@ -347,7 +318,7 @@ internal fun TransferTask.newAttempt(): TransferTask = copy(
 )
 
 private fun NikonCamera.FileInfo.autoTransferIdentity(): String =
-    "$fileName|$size|$captureDate"
+    automaticTransferFileIdentity(fileName, size, captureDate)
 
 data class TransferState(
     val tasks: List<TransferTask> = emptyList(),
@@ -592,29 +563,25 @@ internal fun normalizedPhotoFrameWatermarkPreference(
 internal fun shouldGeneratePhotoFrame(enabled: Boolean, extension: String): Boolean =
     enabled && isSupportedPhotoFrameSourceExtension(extension)
 
-private val TRANSFER_CAPTURE_DATE_FORMATTER =
-    DateTimeFormatter.BASIC_ISO_DATE.withResolverStyle(ResolverStyle.STRICT)
-private val DATED_TRANSFER_FOLDER_REGEX = Regex("""ZT\d{4}-\d{2}-\d{2}""")
-
 /** PTP 拍摄时间通常为 yyyyMMdd'T'HHmmss；异常或缺失时固定回退到入队当天。 */
 internal fun transferDateFolderName(
     captureDate: String?,
     fallbackDate: LocalDate = LocalDate.now(),
-): String {
-    val parsed = captureDate
-        ?.take(8)
-        ?.takeIf { it.length == 8 && it.all(Char::isDigit) }
-        ?.let { raw -> runCatching { LocalDate.parse(raw, TRANSFER_CAPTURE_DATE_FORMATTER) }.getOrNull() }
-    return "ZT${parsed ?: fallbackDate}"
-}
+): String = transferDateFolderName(
+    captureDate = captureDate,
+    fallbackDayKey = fallbackDate.year * 10_000 + fallbackDate.monthValue * 100 + fallbackDate.dayOfMonth,
+)
 
 internal fun transferDestinationFolderName(
     captureDate: String?,
     organizeTransfersByDate: Boolean,
     fallbackDate: LocalDate = LocalDate.now(),
 ): String? {
-    if (!organizeTransfersByDate) return null
-    return transferDateFolderName(captureDate, fallbackDate)
+    return transferDestinationFolderName(
+        captureDate = captureDate,
+        organizeTransfersByDate = organizeTransfersByDate,
+        fallbackDayKey = fallbackDate.year * 10_000 + fallbackDate.monthValue * 100 + fallbackDate.dayOfMonth,
+    )
 }
 
 /** 相机文件是否已在当前保存目录中落盘；列表对号、筛选和任务模式必须共用该判定。 */
@@ -783,8 +750,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     private companion object {
         const val TAG = "ZTransfer"
-        // 未完成文件的临时名前缀（带前导点，在相册中隐藏）。真正文件名只在下载完整后才出现。
-        const val PART_PREFIX = ".nkpart_"
         const val KEY_REMOTE_ENTRY_INTRO_PLAY_COUNT = "remote_entry_intro_play_count"
         const val KEY_MAIN_SETTINGS_HELP_VIEWED = "main_settings_help_viewed"
         const val KEY_PHOTO_EFFECTS_HELP_VIEWED = "photo_effects_help_viewed"
@@ -875,11 +840,11 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     /** 文件内容身份令牌：大小+拍摄时间，仅留字母数字与点（内嵌半成品名，不含下划线分隔符）。 */
     private fun identityToken(file: NikonCamera.FileInfo): String =
-        "${file.size}.${file.captureDate ?: "0"}".replace(IDENTITY_TOKEN_UNSAFE_CHARS, "")
+        transferPartIdentityToken(file.size, file.captureDate)
 
     /** 半成品文件名 = 前缀 + 身份令牌 + "_" + 原文件名（原名可含下划线，解析按【首个】下划线切分）。 */
     private fun partFileName(file: NikonCamera.FileInfo): String =
-        PART_PREFIX + identityToken(file) + "_" + file.fileName
+        transferPartFileName(file.fileName, file.size, file.captureDate)
 
     init {
         val dir = prefs.getString("transfer_dir", null)
@@ -1602,7 +1567,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         rootDirectoryUri: Uri,
         name: String,
     ): Uri {
-        require(DATED_TRANSFER_FOLDER_REGEX.matches(name))
+        require(isDatedTransferFolderName(name))
         val key = "${treeUri}|$name"
         datedTransferDirectories[key]?.let { return it }
         return synchronized(datedTransferDirectories) {
@@ -1706,7 +1671,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                 add(null to getDirectoryIndex(uri, deleteParts))
                 childDirectories(uri, rootDirectoryUri)
                     .asSequence()
-                    .filter { DATED_TRANSFER_FOLDER_REGEX.matches(it.first) }
+                    .filter { isDatedTransferFolderName(it.first) }
                     .forEach { (folderName, directoryUri) ->
                         add(folderName to getDirectoryIndex(uri, directoryUri, deleteParts))
                     }
@@ -2135,7 +2100,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                             if (renamed == null) {
                                 // 改名失败：复用已有副本逻辑
                                 for (n in 1..99) {
-                                    val candidate = suffixedName(finalName, n)
+                                    val candidate = suffixedTransferFileName(finalName, n)
                                     if (directoryIndex.containsDisplayName(candidate)) continue
                                     renamed = renameQuietly(partFile.uri, candidate)
                                     if (renamed != null) break
@@ -2207,7 +2172,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 val createdUri = DocumentsContract.createDocument(
                                     contentResolver,
                                     destinationDirectoryUri,
-                                    getMimeType(task.file.fileName),
+                                    transferMimeType(task.file.fileName),
                                     partFileName(task.file)
                                 ) ?: throw Exception(str(R.string.error_create_file))
                                 fileDocUri = createdUri
@@ -2306,7 +2271,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 var renamedUri = if (renameBroken) null else renameQuietly(createdUri, finalName)
                                 if (renamedUri == null && !renameBroken) {
                                     for (n in 1..99) {
-                                        val candidate = suffixedName(finalName, n)
+                                        val candidate = suffixedTransferFileName(finalName, n)
                                         if (directoryIndex.containsDisplayName(candidate)) continue
                                         renamedUri = renameQuietly(createdUri, candidate)
                                         if (renamedUri != null) {
@@ -2320,7 +2285,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     var copyName = finalName
                                     if (directoryIndex.containsDisplayName(copyName)) {
                                         for (n in 1..99) {
-                                            val candidate = suffixedName(finalName, n)
+                                            val candidate = suffixedTransferFileName(finalName, n)
                                             if (!directoryIndex.containsDisplayName(candidate)) {
                                                 copyName = candidate
                                                 break
@@ -2329,7 +2294,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     }
                                     val copied = copyAsFallback(
                                         destinationDirectoryUri, createdUri, copyName,
-                                        getMimeType(finalName), stats.bytes
+                                        transferMimeType(finalName), stats.bytes
                                     )
                                     val copiedUri = copied.getOrNull()
                                     if (copiedUri != null) {
@@ -2558,7 +2523,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * 单次遍历目标目录：
-     * 1) 当 [deleteParts]=true 时删除遗留的半成品（[PART_PREFIX] 开头的临时文件，上次崩溃/被杀留下）；
+     * 1) 当 [deleteParts]=true 时删除遗留的半成品（[TRANSFER_PART_PREFIX] 开头的临时文件，上次崩溃/被杀留下）；
      *    同时删除旧进程遗留的边框临时文件；当前进程会话的边框任务始终保留；
      * 2) 返回完整文件的 显示名->大小/Uri，用于"已存在则跳过"及已传原片的本地派生；
      * 3) 收集半成品文件信息到 parts 映射（原文件名 -> PartInfo），用于断点续传。
@@ -2618,7 +2583,7 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                     )
                                 }
                             }
-                        } else if (name.startsWith(PART_PREFIX)) {
+                        } else if (name.startsWith(TRANSFER_PART_PREFIX)) {
                             if (deleteParts) {
                                 val docId = c.getString(idIdx) ?: continue
                                 try {
@@ -2631,19 +2596,17 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                                 // 续传模式：保留半成品，解析出身份令牌与原文件名（按首个下划线切分）。
                                 val docId = c.getString(idIdx) ?: continue
                                 val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else 0L
-                                val afterPrefix = name.removePrefix(PART_PREFIX)
-                                val sep = afterPrefix.indexOf('_')
-                                if (sep > 0) {
-                                    val token = afterPrefix.substring(0, sep)
-                                    val origName = afterPrefix.substring(sep + 1)
-                                    if (origName.isNotEmpty()) {
-                                        index.addPart(origName, PartInfo(
+                                parseTransferPartFileName(name)?.let { partName ->
+                                    index.addPart(
+                                        partName.originalFileName,
+                                        PartInfo(
                                             uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId),
-                                            size = size, token = token
-                                        ))
-                                    }
+                                            size = size,
+                                            token = partName.identityToken,
+                                        ),
+                                    )
                                 }
-                                // sep<=0：旧格式/异常半成品名，不记录（App 启动 init sweep 会清掉）。
+                                // 旧格式/异常半成品名不记录（App 启动 init sweep 会清掉）。
                             }
                         } else {
                             val size = if (sizeIdx >= 0 && !c.isNull(sizeIdx)) c.getLong(sizeIdx) else -1L
@@ -2745,7 +2708,9 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
                     input.copyTo(output, 1024 * 1024)
                 }
             }
-            if (copiedBytes != expectedBytes) throw Exception(str(R.string.error_copy_incomplete, copiedBytes, expectedBytes))
+            if (!isOriginalFileCopyComplete(copiedBytes, expectedBytes)) {
+                throw Exception(str(R.string.error_copy_incomplete, copiedBytes, expectedBytes))
+            }
             Result.success(created)
         } catch (e: CancellationException) {
             // 取消（App 退出）不吞：清掉半成品后向上传播，维持"取消必须传播"的全局约定。
@@ -2774,12 +2739,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
         } catch (_: Exception) {
             null
         }
-    }
-
-    /** 生成重名副本名："DSC_0001.NEF" + 2 -> "DSC_0001 (2).NEF"；无扩展名则直接追加。 */
-    private fun suffixedName(name: String, n: Int): String {
-        val dot = name.lastIndexOf('.')
-        return if (dot <= 0) "$name ($n)" else "${name.substring(0, dot)} ($n)${name.substring(dot)}"
     }
 
     /** 从相机读取效果图所需的 JPEG 文件头；失败只影响派生图，不回滚已落盘原片。 */
@@ -3104,18 +3063,6 @@ class TransferViewModel(application: Application) : AndroidViewModel(application
 
     private inline fun log(message: () -> String) {
         if (BuildConfig.DEBUG) android.util.Log.d(TAG, message())
-    }
-
-    private fun getMimeType(fileName: String): String {
-        return when {
-            fileName.endsWith(".jpg", true) || fileName.endsWith(".jpeg", true) -> "image/jpeg"
-            fileName.endsWith(".png", true) -> "image/png"
-            fileName.endsWith(".nef", true) -> "image/x-nikon-nef"
-            fileName.endsWith(".mov", true) -> "video/quicktime"
-            fileName.endsWith(".mp4", true) -> "video/mp4"
-            fileName.endsWith(".avi", true) -> "video/x-msvideo"
-            else -> "application/octet-stream"
-        }
     }
 
     /**

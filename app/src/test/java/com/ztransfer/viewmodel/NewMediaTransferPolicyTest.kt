@@ -55,6 +55,7 @@ class NewMediaTransferPolicyTest {
         assertEquals("ZT2026-08-17", transferDateFolderName("20260817T142530", fallback))
         assertEquals("ZT2026-03-21", transferDateFolderName(null, fallback))
         assertEquals("ZT2026-03-21", transferDateFolderName("20260231T120000", fallback))
+        assertEquals("ZT0000-02-29", transferDateFolderName("00000229T120000", fallback))
     }
 
     @Test

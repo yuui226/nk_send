@@ -2,6 +2,7 @@ package com.ztransfer.viewmodel
 
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -17,38 +18,42 @@ class ExistingFileNameIndexTest {
     )
 
     @Test
-    fun exactNameWinsAndNormalizedCopyLookupDoesNotScanHistory() {
-        val index = ExistingFileNameIndex<String>()
-        repeat(10_000) { number ->
-            index.add("OTHER_$number.JPG", number.toLong(), "other-$number")
-        }
-        index.add("DSC_0001 (2).JPG", 100L, "copy")
-        index.add("DSC_0001.JPG", 100L, "exact")
-
-        assertEquals("exact", index.find("DSC_0001.JPG", 100L)?.value)
-        assertEquals("copy", index.find("dsc_0001.jpg", 100L)?.value)
-    }
-
-    @Test
-    fun normalizedLookupStillRequiresTheCorrectKnownSize() {
-        val index = ExistingFileNameIndex<String>()
-        index.add("DSC_0001 (2).JPG", 100L, "copy")
-
-        assertNull(index.find("DSC_0001.JPG", 99L))
-        assertEquals(
-            "copy",
-            index.find("DSC_0001.JPG", PtpConstants.SIZE_UNKNOWN)?.value,
+    fun sharedNameNormalizationMatchesTheRemovedJvmImplementation() {
+        val legacyCopySuffix = Regex(""" \(\d+\)(?=\.[^.]*$|$)""")
+        val names = listOf(
+            "DSC_0001 (2).JPG",
+            "README (3)",
+            "archive.tar (2).gz",
+            "archive (2).tar.gz",
+            "a (1).jpg (2)",
+            "DSC (２).JPG",
+            "a (1)\n",
+            "a (1)\r\n",
+            "Iİıẞ (12).JPG",
         )
+
+        names.forEach { name ->
+            val legacyBaseName = name.replace(legacyCopySuffix, "")
+            assertEquals(legacyBaseName, exportedOriginalBaseName(name))
+            assertEquals(
+                legacyBaseName.lowercase(Locale.ROOT),
+                transferDirectoryLookupKey(name),
+            )
+        }
     }
 
     @Test
-    fun replacingAnEntryRemovesItsStaleSizeFromTheNormalizedBucket() {
+    fun androidIndexAdapterKeepsTheSharedLookupRules() {
         val index = ExistingFileNameIndex<String>()
-        index.add("DSC_0001 (2).JPG", 100L, "old")
-        index.add("DSC_0001 (2).JPG", 120L, "new")
+        index.add("DSC_0001 (2).JPG", 90L, "stale")
+        index.add("DSC_0001 (2).JPG", 100L, "copy")
 
-        assertNull(index.find("DSC_0001.JPG", 100L))
-        assertEquals("new", index.find("DSC_0001.JPG", 120L)?.value)
+        assertEquals("copy", index.find("dsc_0001.jpg", 100L)?.value)
+        assertEquals("copy", index.find("dsc_0001.jpg", PtpConstants.SIZE_UNKNOWN)?.value)
+        assertNull(index.find("dsc_0001.jpg", 90L))
+        assertTrue(index.containsDisplayName("DSC_0001 (2).JPG"))
+        assertFalse(index.containsDisplayName("dsc_0001 (2).jpg"))
+        assertEquals(listOf("copy"), index.entries().map { it.value })
     }
 
     @Test
