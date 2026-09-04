@@ -42,8 +42,8 @@ fun <T : CameraCatalogFile> newestFirstCameraFiles(files: List<T>): List<T> =
 
 /**
  * Preserves the Android list's deliberately loose grouping behavior: only null is unknown, while
- * any non-null value forms a group from its first eight characters. Unknown sorts first because
- * its stable key begins with "zzz" and groups are ordered descending.
+ * any non-null value forms a group from its first eight characters. Unknown sorts before valid
+ * yyyyMMdd keys because its stable key begins with "zzz" and groups are ordered descending.
  */
 fun <T : CameraCatalogFile> groupCameraFilesByDate(files: List<T>): List<CameraDateGroup<T>> {
     val grouped = files.groupBy { it.captureDate?.take(8) ?: UNKNOWN_CAPTURE_DATE_GROUP_KEY }

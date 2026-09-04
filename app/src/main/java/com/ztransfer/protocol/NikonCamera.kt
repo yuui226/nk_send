@@ -13,7 +13,7 @@ import com.ztransfer.BuildConfig
 import com.ztransfer.R
 import com.ztransfer.catalog.CameraCatalogFile
 import com.ztransfer.catalog.cameraFileExtension
-import com.ztransfer.catalog.isCameraFileHeadPreferred
+import com.ztransfer.catalog.selectNewestCameraFileHeadIndex
 import com.ztransfer.connection.StaInitiatorIdentity
 import com.ztransfer.connection.hasUsableStaAlbumStorage
 import com.ztransfer.connection.isExpectedStaResponder
@@ -73,21 +73,7 @@ class CameraRefusedException(message: String) : Exception(message)
  */
 internal fun selectNewestFileHeadIndex(
     heads: List<NikonCamera.FileInfo?>,
-): Int? {
-    var selected = -1
-    heads.forEachIndexed { index, candidate ->
-        if (candidate == null) return@forEachIndexed
-        if (selected < 0) {
-            selected = index
-            return@forEachIndexed
-        }
-        val selectedFile = heads[selected] ?: return@forEachIndexed
-        if (isCameraFileHeadPreferred(candidate.captureDate, selectedFile.captureDate)) {
-            selected = index
-        }
-    }
-    return selected.takeIf { it >= 0 }
-}
+): Int? = selectNewestCameraFileHeadIndex(heads)
 
 /**
  * 续传无法进行：已有半成品，但本次下载走不了分块路径（相机不支持 GetPartialObjectEx，

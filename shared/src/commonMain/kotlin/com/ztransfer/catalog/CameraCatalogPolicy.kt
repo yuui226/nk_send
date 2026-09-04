@@ -53,6 +53,27 @@ fun isCameraFileHeadPreferred(
 }
 
 /**
+ * Selects the next head from per-card streams. Missing entries are skipped; a present file whose
+ * capture date is missing is deliberately released first so it cannot block later rows on that
+ * card. Ties retain input card order.
+ */
+fun <T : CameraCatalogFile> selectNewestCameraFileHeadIndex(heads: List<T?>): Int? {
+    var selected = -1
+    heads.forEachIndexed { index, candidate ->
+        if (candidate == null) return@forEachIndexed
+        if (selected < 0) {
+            selected = index
+            return@forEachIndexed
+        }
+        val selectedFile = heads[selected] ?: return@forEachIndexed
+        if (isCameraFileHeadPreferred(candidate.captureDate, selectedFile.captureDate)) {
+            selected = index
+        }
+    }
+    return selected.takeIf { it >= 0 }
+}
+
+/**
  * Maps PTP StorageIDs to physical card slots. Standard physical and low-word slot identifiers are
  * preferred; non-standard physical groups fill remaining slots in stable signed-ID order.
  */

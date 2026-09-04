@@ -52,6 +52,7 @@ class CameraBrowsePolicyTest {
             file(3, "C.NEF", "20260806T120001", protected = true, storageIds = setOf(22)),
             file(4, "D.JPG", "20260806T120002", protected = false, storageIds = setOf(22)),
             file(5, "E.JPG", null, protected = true, storageIds = setOf(22)),
+            file(6, "F.JPG", "20260806T120003", protected = true, storageIds = setOf(22)),
         )
         val criteria = CameraFileFilter(
             extensions = setOf(".jpg"),
@@ -63,13 +64,55 @@ class CameraBrowsePolicyTest {
         )
 
         assertEquals(
-            listOf(2),
+            listOf(2, 6),
             filterCameraFiles(
                 files = files,
                 criteria = criteria,
-                burstHandles = setOf(2, 3, 4),
+                burstHandles = setOf(2, 3, 4, 6),
                 transferredHandles = setOf(3),
             ).map(File::handle),
+        )
+    }
+
+    @Test
+    fun eachFilterIndependentlyControlsItsOwnRows() {
+        val files = listOf(
+            file(3, "C.NEF", "20260806T120001", protected = true, storageIds = setOf(22)),
+            file(1, "A.JPG", "20260805T120000", protected = true, storageIds = setOf(11)),
+            file(5, "E.JPG", null, protected = true, storageIds = setOf(22)),
+            file(2, "B.JPG", "20260806T120000", protected = true, storageIds = setOf(11, 22)),
+            file(4, "D.JPG", "20260806T120002", protected = false, storageIds = setOf(22)),
+            file(6, "F.JPG", "not-a-date", protected = true, storageIds = setOf(22)),
+        )
+
+        fun filtered(
+            criteria: CameraFileFilter,
+            burstHandles: Set<Int> = emptySet(),
+            transferredHandles: Set<Int> = emptySet(),
+        ) = filterCameraFiles(files, criteria, burstHandles, transferredHandles).map(File::handle)
+
+        assertEquals(listOf(1, 5, 2, 4, 6), filtered(CameraFileFilter(extensions = setOf(".jpg"))))
+        assertEquals(listOf(3, 1, 5, 2, 6), filtered(CameraFileFilter(protectedOnly = true)))
+        assertEquals(
+            listOf(1, 5, 6),
+            filtered(CameraFileFilter(burstOnly = true), burstHandles = setOf(1, 5, 6)),
+        )
+        assertEquals(
+            listOf(3, 5, 2, 6),
+            filtered(CameraFileFilter(untransferredOnly = true), transferredHandles = setOf(1, 4)),
+        )
+        assertEquals(listOf(1, 2), filtered(CameraFileFilter(selectedStorageIds = setOf(11))))
+        assertEquals(
+            listOf(3, 1, 2, 4),
+            filtered(CameraFileFilter(dateRange = CaptureDayRange.between(20260805, 20260806))),
+        )
+        // Burst membership comes from the full camera list; later filters may leave one member.
+        assertEquals(
+            listOf(2),
+            filtered(
+                CameraFileFilter(extensions = setOf(".jpg"), burstOnly = true),
+                burstHandles = setOf(2),
+            ),
         )
     }
 
