@@ -3139,12 +3139,6 @@ class NikonCamera(private val context: Context) {
         )
     }
 
-    data class DownloadProgress(
-        val downloaded: Long,
-        val total: Long,
-        val bytesPerSecond: Long,
-    )
-
     /** 查询 >4GB 文件的真实大小；仅由下载事务在相机通道保护内调用。 */
     private fun getObjectSizeInternal(handle: Int): Long? {
         sendCmd(PtpConstants.NK_GET_OBJECT_SIZE, handle)
@@ -3157,17 +3151,6 @@ class NikonCamera(private val context: Context) {
         log { "GetObjectSize handle=$handle size=$size" }
         return if (size > 0) size else null
     }
-
-    /** 单文件下载完成后的统计；速度由保存层按同一端到端时间范围计算。 */
-    data class DownloadStats(
-        val bytes: Long,
-        /** 本次实际从相机读取的字节数，不包含续传前已经存在的部分。 */
-        val transferredBytes: Long,
-        /** 本文件进入协议下载流程的单调时钟时间戳（包含块间让路时间）。 */
-        val startedAtElapsedMs: Long,
-        /** Fresh downloads retain a bounded JPEG prefix so export can parse camera EXIF directly. */
-        val headerPrefix: ByteArray? = null,
-    )
 
     /**
      * 下载文件到 [output]。[totalSize] 为 ObjectInfo 中的文件大小（0/SIZE_UNKNOWN=未知）；
