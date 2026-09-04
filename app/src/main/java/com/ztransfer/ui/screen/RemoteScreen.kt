@@ -109,6 +109,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ztransfer.R
 import com.ztransfer.license.LicenseManager
 import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.USB_LIVE_VIEW_STABLE_FRAMES
 import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.LiveViewFocusFrame
 import com.ztransfer.protocol.LiveViewFocusJudgement
@@ -118,6 +119,9 @@ import com.ztransfer.protocol.LiveViewSoundLevels
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.RcParam
+import com.ztransfer.protocol.coalesceRemoteEvents
+import com.ztransfer.protocol.isRemoteCaptureCompletionEvent
+import com.ztransfer.protocol.isRemoteMovieCompletionEvent
 import com.ztransfer.protocol.labEndLiveView
 import com.ztransfer.protocol.labGrabFrame
 import com.ztransfer.protocol.labStartLiveView
@@ -155,6 +159,9 @@ import com.ztransfer.protocol.rcSetLvSize
 import com.ztransfer.protocol.rcSetValueVerified
 import com.ztransfer.protocol.rcStartMovieDetailed
 import com.ztransfer.protocol.runLabProbe
+import com.ztransfer.protocol.shouldPollMovieModeDuringLiveViewRecovery
+import com.ztransfer.protocol.shouldPrepareUsbMovieSessionForRecord
+import com.ztransfer.protocol.shouldReturnUsbMovieSessionToStandby
 import com.ztransfer.protocol.movieStartNeedsLiveViewRestart
 import com.ztransfer.protocol.movieProhibitIndicatesRecording
 import com.ztransfer.protocol.diagnosticSummary
@@ -201,7 +208,6 @@ private val MOVIE_EXPOSURE_PROPS = rcExposureProps(movieMode = true)
 private val ALL_EXPOSURE_PROPS = rcAllExposureProps()
 private val ALL_AUTO_ISO_PROPS =
     (rcAutoIsoCandidateProps(false) + rcAutoIsoCandidateProps(true)).distinct()
-private const val USB_LIVE_VIEW_STABLE_FRAMES = 8
 private const val TAP_FOCUS_LOCKED_FEEDBACK_MS = 1800L
 private const val TAP_FOCUS_MARKER_VISIBLE_MS = 3_000L
 private const val TRACKING_CANCEL_EXIT_MS = 220L
@@ -248,43 +254,6 @@ internal fun remoteRotationForDeviceOrientation(orientation: Int): Int? = when (
     in 60..120 -> 2
     in 240..300 -> 1
     else -> null
-}
-
-internal fun shouldPollMovieModeDuringLiveViewRecovery(
-    initialLoaded: Boolean,
-    liveViewStable: Boolean,
-    cameraBusy: Boolean
-): Boolean = initialLoaded && !liveViewStable && !cameraBusy
-
-internal fun shouldPrepareUsbMovieSessionForRecord(
-    connectionType: CameraConnectionType,
-    remoteControlModeSet: Boolean
-): Boolean = connectionType == CameraConnectionType.USB && !remoteControlModeSet
-
-internal fun shouldReturnUsbMovieSessionToStandby(
-    connectionType: CameraConnectionType,
-    remoteControlModeSet: Boolean
-): Boolean = connectionType == CameraConnectionType.USB && remoteControlModeSet
-
-/**
- * A single GetEvent can repeat the same property change many times while Live View starts.
- * The first batch is already covered by the post-start parameter snapshot; steady-state batches
- * are de-duplicated by logical property so redundant descriptors do not compete with frames.
- */
-internal fun coalesceRemoteEvents(
-    events: List<Pair<Int, Long>>,
-    suppressPropertyChanges: Boolean
-): List<Pair<Int, Long>> = buildList {
-    val changedProps = mutableSetOf<Int>()
-    for (event in events) {
-        if (event.first != Lab.EVT_DEVICE_PROP_CHANGED) {
-            add(event)
-            continue
-        }
-        if (suppressPropertyChanges) continue
-        val canonicalProp = rcCanonicalExposureProp(event.second.toInt())
-        if (changedProps.add(canonicalProp)) add(event)
-    }
 }
 
 private data class RemoteLiveFrame(
@@ -1092,9 +1061,7 @@ private fun RemoteContent(
                 val events = runCatching { cam.rcPollEvents() }.getOrDefault(emptyList())
                 for (event in events) {
                     eventFlow.emit(event)
-                    if (event.first == Lab.EVT_NK_MOVIE_REC_COMPLETE ||
-                        event.first == Lab.EVT_NK_MOVIE_REC_INTERRUPTED
-                    ) {
+                    if (isRemoteMovieCompletionEvent(event.first)) {
                         return@withTimeoutOrNull true
                     }
                 }
@@ -1539,9 +1506,7 @@ private fun RemoteContent(
                 // 订阅晚于轮询取走就永远等不到了。
                 val pending = async {
                     withTimeoutOrNull(12_000) {
-                        eventFlow.first {
-                            it.first == Lab.EVT_OBJECT_ADDED || it.first == Lab.EVT_OBJECT_ADDED_SDRAM
-                        }.second.toInt()
+                        eventFlow.first { isRemoteCaptureCompletionEvent(it.first) }.second.toInt()
                     }
                 }
                 val rc = runCatching { cam.rcCapture() }.getOrDefault(-1)
@@ -1774,7 +1739,9 @@ private fun RemoteContent(
                     focusY = tap.focusY
                 )
                 val af = result.afResult
-                if (result.trackingStarted || result.moveResponseCode == Lab.OK) {
+                val trackingResponseCode = result.trackingResponseCode
+                val moveResponseCode = result.moveResponseCode
+                if (result.trackingStarted || moveResponseCode == Lab.OK) {
                     focusAreaPoint = tap.normalized
                 }
                 tapFocusFeedback = if (result.trackingStarted) {
@@ -1803,26 +1770,26 @@ private fun RemoteContent(
                         TapFocusFeedback.FAILED
                     }
                 } else if (
-                    result.trackingResponseCode != null &&
-                    result.trackingResponseCode != PtpConstants.OPERATION_NOT_SUPPORTED
+                    trackingResponseCode != null &&
+                    trackingResponseCode != PtpConstants.OPERATION_NOT_SUPPORTED
                 ) {
-                    if (result.trackingResponseCode == Lab.NK_INVALID_STATUS) {
+                    if (trackingResponseCode == Lab.NK_INVALID_STATUS) {
                         showHint(trackingAreaModeHint)
                     }
                     devLog(
                         "!! StartTracking resp=0x%04X".format(
-                            result.trackingResponseCode and 0xFFFF
+                            trackingResponseCode and 0xFFFF
                         )
                     )
                     TapFocusFeedback.FAILED
-                } else if (result.moveResponseCode == null) {
+                } else if (moveResponseCode == null) {
                     result.endTrackingResponseCode?.let {
                         devLog("!! EndTracking resp=0x%04X".format(it and 0xFFFF))
                     }
                     TapFocusFeedback.FAILED
-                } else if (result.moveResponseCode != Lab.OK) {
+                } else if (moveResponseCode != Lab.OK) {
                     devLog(
-                        "!! ChangeAfArea resp=0x%04X".format(result.moveResponseCode and 0xFFFF)
+                        "!! ChangeAfArea resp=0x%04X".format(moveResponseCode and 0xFFFF)
                     )
                     TapFocusFeedback.FAILED
                 } else if (af == null) {
@@ -2081,10 +2048,7 @@ private fun RemoteContent(
                     val completion = if (needsFinalizationWait) {
                         async(start = CoroutineStart.UNDISPATCHED) {
                             withTimeoutOrNull(8_000) {
-                                eventFlow.first {
-                                    it.first == Lab.EVT_NK_MOVIE_REC_COMPLETE ||
-                                        it.first == Lab.EVT_NK_MOVIE_REC_INTERRUPTED
-                                }
+                                eventFlow.first { isRemoteMovieCompletionEvent(it.first) }
                             }
                         }
                     } else null

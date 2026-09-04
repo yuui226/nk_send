@@ -132,14 +132,6 @@ private fun parsePropDesc(prop: Int, d: ByteArray): String {
         "cur=$curTxt def=$defTxt $form"
 }
 
-/** 在数据里找 JPEG SOI（FF D8 FF）偏移；找不到返回 -1。 */
-private fun findJpegStart(d: ByteArray): Int {
-    for (i in 0 until d.size - 2) {
-        if (d[i] == 0xFF.toByte() && d[i + 1] == 0xD8.toByte() && d[i + 2] == 0xFF.toByte()) return i
-    }
-    return -1
-}
-
 // ============================ 正式遥控页协议支持 ============================
 
 /**
@@ -171,15 +163,6 @@ private fun digitalZoomProbeValues(desc: PtpDevicePropDescriptor): List<Long> {
     }
     return evenlySpaced.distinct()
 }
-
-/** 当前镜头伺服方式。现代 Z 机优先走标准 FocusMode(0x500A)，旧 Nikon
- *  机身回退到厂商属性 0xD161；未知枚举保留原始值供日志定位，不伪造名称。 */
-data class RcFocusMode(
-    val label: String,
-    val manual: Boolean,
-    val prop: Int,
-    val raw: Long
-)
 
 /** 遥控参数 UI 的紧凑读数；tile 已标明 ISO/EV，因此数值中不重复单位。 */
 fun rcFormat(prop: Int, raw: Long): String =
@@ -227,33 +210,16 @@ suspend fun NikonCamera.rcGetAngleLevel(): RcParam? =
     rcGetParam(Lab.PROP_NK_ANGLE_LEVEL)?.takeIf { rcAngleLevelRoll(it) != null }
 
 suspend fun NikonCamera.rcGetFocusMode(): RcFocusMode? {
-    val candidates = intArrayOf(Lab.PROP_FOCUS_MODE, Lab.PROP_NK_AF_MODE)
-    for (prop in candidates) {
+    for (prop in rcFocusModeCandidateProps()) {
         // 对焦模式标签宁缺毋滥：只接受 GetDevicePropValue 成功直读到的当前值。
         // PropDesc 兼容回退在部分机型的失败响应里会带无效默认值 1，曾被误显示成 MF。
         val (valueRc, valueData) = labCommand(Lab.GET_DEVICE_PROP_VALUE, prop)
-        val raw = if (valueRc == Lab.OK && valueData != null &&
-            (valueData.size == 1 || valueData.size == 2 ||
-                valueData.size == 4 || valueData.size == 8)
-        ) {
-            valueData.indices.fold(0L) { acc, i ->
-                acc or ((valueData[i].toLong() and 0xFF) shl (8 * i))
-            }
-        } else continue
-        val label = rcDetailedFormat(prop, raw)
-        // 未确认的厂商枚举不把十六进制原值当成面向用户的模式标签。
-        if (label.startsWith("0x")) continue
-        val result = RcFocusMode(
-            label = label,
-            manual = when (prop) {
-                Lab.PROP_FOCUS_MODE -> raw == 1L
-                Lab.PROP_NK_AF_MODE -> false
-                else -> false
-            },
-            prop = prop,
-            raw = raw
-        )
-        return result
+        val raw = if (valueRc == Lab.OK && valueData != null) {
+            rcDecodeFocusModeRaw(valueData)
+        } else {
+            null
+        } ?: continue
+        rcFocusModeFromRaw(prop, raw)?.let { return it }
     }
     return null
 }
@@ -310,36 +276,6 @@ suspend fun NikonCamera.rcSetValueVerified(param: RcParam, value: Long): RcSetRe
     return RcSetResult(rc, actual, false)
 }
 
-/** AF 驱动后的最终结果，[polls] 是 DeviceReady 查询次数。 */
-data class RcAfResult(
-    val responseCode: Int,
-    val polls: Int,
-    val elapsedMs: Long,
-    val timedOut: Boolean
-)
-
-data class RcTapFocusResult(
-    val endTrackingResponseCode: Int?,
-    /** null 表示直接由 StartTracking(x,y) 接受坐标，或旧追踪未能结束。 */
-    val moveResponseCode: Int?,
-    val trackingResponseCode: Int?,
-    val trackingStarted: Boolean,
-    val afResult: RcAfResult?
-)
-
-internal data class RcTapFocusStartResult(
-    val moveResponseCode: Int?,
-    val trackingResponseCode: Int?,
-    val afStartResponseCode: Int?
-)
-
-private fun timedOutAfResult(startedAt: Long, now: Long, polls: Int = 0) = RcAfResult(
-    responseCode = Lab.DEVICE_BUSY,
-    polls = polls,
-    elapsedMs = now - startedAt,
-    timedOut = true
-)
-
 private fun NikonCamera.recvFocusResponse(deadlineMs: Long): Pair<Int, ByteArray?> {
     val remaining = deadlineMs - SystemClock.elapsedRealtime()
     if (remaining <= 0L) {
@@ -390,62 +326,6 @@ private fun NikonCamera.focusCommandLocked(
     return recvFocusResponse(deadlineMs)
 }
 
-/**
- * 移动 AF 点并启动主体追踪。明确不支持 StartTracking 的机身才回退一次普通 AF。
- * 调用方在整个函数外持有 I/O 锁，确保 80ms 应用窗口内不会被连续的 Live View
- * 取帧插入；普通 AF 回退启动后的就绪轮询仍可释放锁。
- */
-internal suspend fun runTapFocusStart(
-    trackingX: Int,
-    trackingY: Int,
-    focusX: Int,
-    focusY: Int,
-    tryTracking: Boolean,
-    command: suspend (code: Int, params: IntArray) -> Int?,
-    pause: suspend (Long) -> Unit
-): RcTapFocusStartResult {
-    if (tryTracking) {
-        // Z 30 实机探测确认坐标属于 StartTracking 本身：无参调用返回 0x2006，
-        // StartTracking(x,y) 返回 OK，并使增强帧开始携带选中 AF 框。
-        val trackingRc = command(Lab.NK_START_TRACKING, intArrayOf(trackingX, trackingY))
-            ?: return RcTapFocusStartResult(null, Lab.DEVICE_BUSY, null)
-        if (trackingRc == Lab.OK) {
-            // StartTracking 只选中主体并显示追踪框，不会驱动镜头。让机身先采用目标，
-            // 再像普通点按 AF 一样只发送一次 AfDrive；最终状态仍由 DeviceReady 判定。
-            pause(80)
-            return RcTapFocusStartResult(
-                moveResponseCode = null,
-                trackingResponseCode = trackingRc,
-                afStartResponseCode = command(Lab.NK_AF_DRIVE, intArrayOf())
-            )
-        }
-        if (trackingRc != PtpConstants.OPERATION_NOT_SUPPORTED) {
-            return RcTapFocusStartResult(null, trackingRc, null)
-        }
-        // 只有机身明确不支持追踪操作码时才继续走普通点按 AF。InvalidStatus/Busy 等
-        // 状态错误直接上报，避免擅自改变用户预期。
-    }
-
-    val trackingUnsupported = if (tryTracking) {
-        PtpConstants.OPERATION_NOT_SUPPORTED
-    } else {
-        null
-    }
-    val moveRc = command(Lab.NK_CHANGE_AF_AREA, intArrayOf(focusX, focusY))
-        ?: return RcTapFocusStartResult(Lab.DEVICE_BUSY, trackingUnsupported, null)
-    if (moveRc != Lab.OK) {
-        return RcTapFocusStartResult(moveRc, trackingUnsupported, null)
-    }
-
-    // Z 30 / SnapBridge 实抓表明 ChangeAfArea 的新坐标需要约 80ms 才被机身采用。
-    pause(80)
-    return RcTapFocusStartResult(
-        moveResponseCode = moveRc,
-        trackingResponseCode = trackingUnsupported,
-        afStartResponseCode = command(Lab.NK_AF_DRIVE, intArrayOf())
-    )
-}
-
 /** 调用方必须持有 focusMutex -> ioMutex；没有活动追踪时不发送冗余命令。 */
 private fun NikonCamera.endSubjectTrackingLocked(deadlineMs: Long): Int? {
     if (!subjectTrackingActive) return null
@@ -459,63 +339,6 @@ private fun NikonCamera.endSubjectTrackingLocked(deadlineMs: Long): Int? {
         subjectTrackingActive = false
     }
     return response
-}
-
-private suspend fun runAfReadyWait(
-    startedAt: Long,
-    deadlineMs: Long,
-    startResponseCode: Int,
-    elapsedRealtime: () -> Long,
-    command: suspend (Int) -> Int?,
-    pause: suspend (Long) -> Unit
-): RcAfResult {
-    if (startResponseCode != Lab.OK) {
-        return RcAfResult(startResponseCode, 0, elapsedRealtime() - startedAt, false)
-    }
-
-    var polls = 0
-    while (true) {
-        if (elapsedRealtime() >= deadlineMs) {
-            return timedOutAfResult(startedAt, elapsedRealtime(), polls)
-        }
-        val readyRc = command(Lab.NK_DEVICE_READY)
-            ?: return timedOutAfResult(startedAt, elapsedRealtime(), polls)
-        polls++
-        if (readyRc != Lab.DEVICE_BUSY) {
-            return RcAfResult(
-                responseCode = readyRc,
-                polls = polls,
-                elapsedMs = elapsedRealtime() - startedAt,
-                timedOut = false
-            )
-        }
-        if (elapsedRealtime() >= deadlineMs) {
-            return timedOutAfResult(startedAt, elapsedRealtime(), polls)
-        }
-        pause(150)
-    }
-}
-
-internal suspend fun runAfDriveAndWait(
-    startedAt: Long,
-    deadlineMs: Long,
-    elapsedRealtime: () -> Long,
-    command: suspend (Int) -> Int?,
-    pause: suspend (Long) -> Unit
-): RcAfResult {
-    if (elapsedRealtime() >= deadlineMs) {
-        return timedOutAfResult(startedAt, elapsedRealtime())
-    }
-    val startRc = command(Lab.NK_AF_DRIVE)
-        ?: return timedOutAfResult(startedAt, elapsedRealtime())
-    return runAfReadyWait(
-        startedAt = startedAt,
-        deadlineMs = deadlineMs,
-        startResponseCode = startRc,
-        elapsedRealtime = elapsedRealtime,
-        command = command,
-        pause = pause
-    )
 }
 
 private suspend fun NikonCamera.afDriveAndWait(
@@ -614,7 +437,7 @@ suspend fun NikonCamera.rcFocusAt(
     }
     val startRc = start.afStartResponseCode
     suspend fun waitForStartedAf(): RcAfResult = if (startRc == null) {
-        timedOutAfResult(startedAt, SystemClock.elapsedRealtime())
+        rcTimedOutAfResult(startedAt, SystemClock.elapsedRealtime())
     } else {
         runAfReadyWait(
             startedAt = startedAt,
@@ -651,7 +474,7 @@ suspend fun NikonCamera.rcFocusAt(
                 start.trackingResponseCode == null ||
                 start.trackingResponseCode == PtpConstants.OPERATION_NOT_SUPPORTED
             ) {
-                timedOutAfResult(startedAt, SystemClock.elapsedRealtime())
+                rcTimedOutAfResult(startedAt, SystemClock.elapsedRealtime())
             } else {
                 null
             }
@@ -689,8 +512,9 @@ suspend fun NikonCamera.rcPollEvents(): List<Pair<Int, Long>> {
 private suspend fun NikonCamera.cmdBusyRetry(code: Int, vararg params: Int): Int {
     var rc = labCommand(code, *params).first
     var tries = 0
-    while (rc == Lab.DEVICE_BUSY && tries < 5) {
-        delay(200)
+    while (true) {
+        val retryDelay = remoteBusyRetryDelayMs(rc, tries) ?: break
+        delay(retryDelay)
         rc = labCommand(code, *params).first
         tries++
     }
@@ -866,28 +690,10 @@ suspend fun NikonCamera.rcModelName(): String? = deviceModel
 
 // ============================ Live View ============================
 
-/** 竞品 Z30 USB 实抓：DeviceReady 后约 733ms 才开始第一笔取帧。 */
-internal const val USB_LIVE_VIEW_WARMUP_MS = 750L
-
-internal fun liveViewWarmupRemainingMs(
-    connectionType: CameraConnectionType,
-    readyAtElapsedMs: Long,
-    nowElapsedMs: Long
-): Long {
-    if (connectionType != CameraConnectionType.USB || readyAtElapsedMs <= 0L) return 0L
-    return (readyAtElapsedMs + USB_LIVE_VIEW_WARMUP_MS - nowElapsedMs).coerceAtLeast(0L)
-}
-
 /** 复用连接阶段缓存的 DeviceInfo 取帧能力，监看启动时不再重复查询。 */
 private suspend fun NikonCamera.resolveLiveViewImageOperation() {
     if (liveViewImageOperation != null) return
-    val supportsEnhanced = cachedDeviceInfo?.operations
-        ?.contains(Lab.NK_GET_LIVE_VIEW_IMG_EX) == true
-    liveViewImageOperation = if (supportsEnhanced) {
-        Lab.NK_GET_LIVE_VIEW_IMG_EX
-    } else {
-        Lab.NK_GET_LIVE_VIEW_IMG
-    }
+    liveViewImageOperation = preferredLiveViewImageOperation(cachedDeviceInfo?.operations)
 }
 
 /**
@@ -903,8 +709,9 @@ suspend fun NikonCamera.labStartLiveView(log: suspend (String) -> Unit): Boolean
     // 都值得短暂重试。
     var rc = labCommand(Lab.NK_START_LIVE_VIEW).first
     var tries = 0
-    while ((rc == Lab.DEVICE_BUSY || rc == 0xA004) && tries < 5) {
-        delay(300)
+    while (true) {
+        val retryDelay = liveViewStartRetryDelayMs(rc, tries) ?: break
+        delay(retryDelay)
         rc = labCommand(Lab.NK_START_LIVE_VIEW).first
         tries++
     }
@@ -982,23 +789,15 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
 
             var operation = liveViewImageOperation ?: Lab.NK_GET_LIVE_VIEW_IMG
             var (rc, data) = receive(operation)
-            var soi = data?.let(::findJpegStart) ?: -1
-            val enhancedFailure =
-                operation == Lab.NK_GET_LIVE_VIEW_IMG_EX &&
-                (
-                    (rc != Lab.OK && rc != Lab.DEVICE_BUSY && rc != Lab.NK_NOT_LIVE_VIEW) ||
-                        (rc == Lab.OK && soi < 0)
-                    )
-            if (operation == Lab.NK_GET_LIVE_VIEW_IMG_EX && rc == Lab.OK && soi >= 0) {
-                liveViewEnhancedFailureCount = 0
-            } else if (enhancedFailure) {
-                liveViewEnhancedFailureCount = if (rc == PtpConstants.OPERATION_NOT_SUPPORTED) {
-                    2
-                } else {
-                    liveViewEnhancedFailureCount + 1
-                }
-            }
-            if (enhancedFailure && liveViewEnhancedFailureCount >= 2) {
+            var soi = data?.let(::findLiveViewJpegStart) ?: -1
+            val enhancedDecision = liveViewEnhancedFrameDecision(
+                operation = operation,
+                responseCode = rc,
+                jpegFound = soi >= 0,
+                previousFailureCount = liveViewEnhancedFailureCount,
+            )
+            liveViewEnhancedFailureCount = enhancedDecision.failureCount
+            if (enhancedDecision.fallbackToBasic) {
                 // 明确不支持立即降级；其它错误（包括偶发空/坏首帧）连续两次才降级，
                 // 避免支持增强帧的机型因一次传输抖动永久丢失 AF 元数据。
                 operation = Lab.NK_GET_LIVE_VIEW_IMG
@@ -1007,7 +806,7 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
                 val fallback = receive(operation)
                 rc = fallback.first
                 data = fallback.second
-                soi = data?.let(::findJpegStart) ?: -1
+                soi = data?.let(::findLiveViewJpegStart) ?: -1
             }
 
             if (rc == Lab.DEVICE_BUSY) return@withContext null
@@ -1023,14 +822,6 @@ suspend fun NikonCamera.labGrabFrame(): LiveViewPacket? =
             )
         }
     }
-
-internal fun trackingMotionDetected(frames: List<LiveViewFocusFrame>): Boolean {
-    if (frames.size < 3) return false
-    val xRange = frames.maxOf { it.centerX } - frames.minOf { it.centerX }
-    val yRange = frames.maxOf { it.centerY } - frames.minOf { it.centerY }
-    // 小于约 1.5% 画幅的变化可能只是机身框坐标取整/轻微抖动，不能作为追踪成立证据。
-    return xRange >= 0.015f || yRange >= 0.015f
-}
 
 private data class TrackingProbeCapture(
     val packets: List<LiveViewPacket>,

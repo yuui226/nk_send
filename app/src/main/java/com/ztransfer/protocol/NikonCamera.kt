@@ -1318,11 +1318,7 @@ class NikonCamera(private val context: Context) {
                         val drainResponse = recvRespWithPayload().first
 
                         liveViewImageOperation =
-                            if (cachedDeviceInfo?.operations?.contains(0x9428) == true) {
-                                0x9428
-                            } else {
-                                0x9203
-                            }
+                            preferredLiveViewImageOperation(cachedDeviceInfo?.operations)
                         val eventReaderStarted = transport.startEventReader()
 
                         transport.readTimeoutMs = SO_TIMEOUT_MS
