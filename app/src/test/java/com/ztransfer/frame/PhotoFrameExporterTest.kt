@@ -1069,4 +1069,54 @@ class PhotoFrameExporterTest {
         assertTrue(limited.endsWith("📷"))
         assertEquals("line one line two", limitPhotoFrameWatermarkText("line one\nline two"))
     }
+
+    @Test
+    fun fixedExifTagsMapToStableMetadata() {
+        val attributes = mapOf(
+            ExifInterface.TAG_MAKE to "NIKON CORPORATION",
+            ExifInterface.TAG_MODEL to "NIKON Z 8",
+            ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY to "640",
+            ExifInterface.TAG_LENS_MODEL to "  NIKKOR Z 85mm f/1.8 S  ",
+            ExifInterface.TAG_DATETIME_ORIGINAL to "2026:08:10 14:25:36",
+            ExifInterface.TAG_GPS_LATITUDE to "33/1,52/1,8/1",
+            ExifInterface.TAG_GPS_LATITUDE_REF to "S",
+            ExifInterface.TAG_GPS_LONGITUDE to "151/1,12/1,33/1",
+            ExifInterface.TAG_GPS_LONGITUDE_REF to "W",
+            ExifInterface.TAG_GPS_ALTITUDE to "617/5",
+        )
+        val doubles = mapOf(
+            ExifInterface.TAG_F_NUMBER to 4.0,
+            ExifInterface.TAG_EXPOSURE_TIME to (1.0 / 125.0),
+            ExifInterface.TAG_FOCAL_LENGTH to 85.0,
+        )
+        val reader = object : PhotoFrameExifReader {
+            override fun getAttribute(tag: String): String? = attributes[tag]
+
+            override fun getAttributeDouble(tag: String, defaultValue: Double): Double =
+                doubles[tag] ?: defaultValue
+
+            override fun getAttributeInt(tag: String, defaultValue: Int): Int =
+                if (tag == ExifInterface.TAG_GPS_ALTITUDE_REF) 1 else defaultValue
+
+            override val latLong: DoubleArray? = null
+
+            override fun getAltitude(defaultValue: Double): Double = defaultValue
+        }
+
+        val metadata = PhotoFrameExporter.metadataFromExifReader(reader)
+
+        assertEquals("NIKON CORPORATION", metadata.make)
+        assertEquals("NIKON Z 8", metadata.model)
+        assertEquals("f/4", metadata.aperture)
+        assertEquals("1/125", metadata.shutter)
+        assertEquals("ISO640", metadata.iso)
+        assertEquals("85mm", metadata.focalLength)
+        assertEquals("NIKKOR Z 85mm f/1.8 S", metadata.lensModel)
+        assertEquals("2026-08-10 14:25:36", metadata.dateTime)
+        assertEquals(-33.8688888889, metadata.latitude ?: Double.NaN, 0.0000000001)
+        assertEquals(-151.2091666667, metadata.longitude ?: Double.NaN, 0.0000000001)
+        assertEquals(-123.4, metadata.altitudeMeters ?: Double.NaN, 0.0000000001)
+        assertNull(metadata.address)
+    }
+
 }

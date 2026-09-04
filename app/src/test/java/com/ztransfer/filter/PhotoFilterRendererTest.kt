@@ -81,4 +81,104 @@ class PhotoFilterRendererTest {
             PhotoFilterRenderer.exactLookupOutputColor(0x00112233, mapped, true),
         )
     }
+
+    @Test
+    fun ncpAndNp3RenderersMatchFixedArgbVectors() {
+        val source = intArrayOf(
+            0x00112233,
+            0x80112233.toInt(),
+            0xff000000.toInt(),
+            0xffffffff.toInt(),
+            0xff808080.toInt(),
+            0xffff0000.toInt(),
+            0xff00ff00.toInt(),
+            0xff0000ff.toInt(),
+            0xffffc090.toInt(),
+            0xff806070.toInt(),
+        )
+        val toneCurve = IntArray(PHOTO_FILTER_TONE_CURVE_POINT_COUNT) { index ->
+            (index.toLong() * index * PHOTO_FILTER_TONE_CURVE_MAX_VALUE /
+                (PHOTO_FILTER_TONE_CURVE_POINT_COUNT - 1).let { it.toLong() * it }).toInt()
+        }
+        val ncp = PhotoFilterSelection(
+            preset = PhotoFilterPreset(
+                id = "fixed-ncp",
+                name = "Fixed NCP",
+                parameters = NcpPhotoFilterParameters(
+                    saturationStep = 2,
+                    hueStep = -1,
+                    toneCurve = toneCurve,
+                ),
+            ),
+            intensityPercent = 72,
+        )
+        val bands = PHOTO_FILTER_COLOR_BAND_CENTERS.mapIndexed { index, center ->
+            PhotoFilterColorBand(
+                centerDegrees = center,
+                hue = listOf(15, -10, 20, -25, 30, -35, 40, -45)[index],
+                chroma = listOf(20, 30, -20, 40, -30, 50, -40, 10)[index],
+                brightness = listOf(-10, 15, 20, -15, 25, -20, 10, 5)[index],
+            )
+        }
+        val np3WithCurve = PhotoFilterSelection(
+            preset = PhotoFilterPreset(
+                id = "fixed-np3-curve",
+                name = "Fixed NP3 Curve",
+                parameters = Np3PhotoFilterParameters(
+                    contrast = 20,
+                    highlights = -30,
+                    shadows = 25,
+                    whites = 10,
+                    blacks = -15,
+                    saturation = 18,
+                    colorBands = bands,
+                    toneCurve = toneCurve,
+                ),
+            ),
+            intensityPercent = 100,
+        )
+        val np3WithoutCurve = PhotoFilterSelection(
+            preset = PhotoFilterPreset(
+                id = "fixed-np3-tonal",
+                name = "Fixed NP3 Tonal",
+                parameters = Np3PhotoFilterParameters(
+                    contrast = 20,
+                    highlights = -30,
+                    shadows = 25,
+                    whites = 10,
+                    blacks = -15,
+                    saturation = 18,
+                    colorBands = bands,
+                ),
+            ),
+            intensityPercent = 72,
+        )
+
+        assertEquals(
+            "00112233,80050e14,ff000000,ffffffff,ff525252,ffa3000f,ff0fa300," +
+                "ff000fa3,ffff8551,ff503646",
+            PhotoFilterRenderer.renderArgbPixels(source, ncp, preserveAlpha = true).hexVector(),
+        )
+        assertEquals(
+            "00112233,80020508,ff000000,ffffffff,ff404040,ff750900,ff0e7100," +
+                "ff00136c,ffff934c,ff3b2835",
+            PhotoFilterRenderer.renderArgbPixels(
+                source,
+                np3WithCurve,
+                preserveAlpha = true,
+            ).hexVector(),
+        )
+        assertEquals(
+            "00112233,800d2134,ff000000,ffffffff,ff7f7f7f,fff70d00,ff16f300," +
+                "ff001ef1,ffffc094,ff855d76",
+            PhotoFilterRenderer.renderArgbPixels(
+                source,
+                np3WithoutCurve,
+                preserveAlpha = true,
+            ).hexVector(),
+        )
+    }
+
+    private fun IntArray.hexVector(): String =
+        joinToString(",") { value -> value.toUInt().toString(16).padStart(8, '0') }
 }

@@ -476,6 +476,21 @@ object PhotoFilterRenderer {
         }
     }
 
+    /** Bitmap-independent pixel path used to freeze renderer output before moving it to shared. */
+    internal fun renderArgbPixels(
+        source: IntArray,
+        selection: PhotoFilterSelection,
+        preserveAlpha: Boolean,
+    ): IntArray = source.copyOf().also { output ->
+        filterPixelRange(
+            pixels = output,
+            start = 0,
+            end = output.size,
+            compiled = compileFilter(selection, preserveAlpha),
+            isCancelled = { false },
+        )
+    }
+
     private class FilterPixelsAction(
         private val pixels: IntArray,
         private val start: Int,

@@ -517,6 +517,31 @@ internal data class PhotoFrameMetadata(
     val address: String? = null,
 )
 
+internal interface PhotoFrameExifReader {
+    fun getAttribute(tag: String): String?
+    fun getAttributeDouble(tag: String, defaultValue: Double): Double
+    fun getAttributeInt(tag: String, defaultValue: Int): Int
+    val latLong: DoubleArray?
+    fun getAltitude(defaultValue: Double): Double
+}
+
+private class AndroidPhotoFrameExifReader(
+    private val delegate: ExifInterface,
+) : PhotoFrameExifReader {
+    override fun getAttribute(tag: String): String? = delegate.getAttribute(tag)
+
+    override fun getAttributeDouble(tag: String, defaultValue: Double): Double =
+        delegate.getAttributeDouble(tag, defaultValue)
+
+    override fun getAttributeInt(tag: String, defaultValue: Int): Int =
+        delegate.getAttributeInt(tag, defaultValue)
+
+    override val latLong: DoubleArray?
+        get() = delegate.latLong
+
+    override fun getAltitude(defaultValue: Double): Double = delegate.getAltitude(defaultValue)
+}
+
 internal data class FrameTextVisualBounds(
     /** 相对基线的顶部坐标，通常为负数。 */
     val top: Float,
@@ -1474,6 +1499,19 @@ object PhotoFrameExporter {
 
     private fun metadataFrom(
         exif: ExifInterface,
+        context: Context? = null,
+        trace: ((String) -> Unit)? = null,
+    ): PhotoFrameMetadata = metadataFrom(
+        exif = AndroidPhotoFrameExifReader(exif),
+        context = context,
+        trace = trace,
+    )
+
+    internal fun metadataFromExifReader(exif: PhotoFrameExifReader): PhotoFrameMetadata =
+        metadataFrom(exif = exif)
+
+    private fun metadataFrom(
+        exif: PhotoFrameExifReader,
         context: Context? = null,
         trace: ((String) -> Unit)? = null,
     ): PhotoFrameMetadata {
