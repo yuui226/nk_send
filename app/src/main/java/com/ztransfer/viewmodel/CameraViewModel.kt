@@ -37,7 +37,17 @@ import com.ztransfer.catalog.newestFirstHandleOrders
 import com.ztransfer.catalog.objectHandleQueryStorageId
 import com.ztransfer.catalog.storageIdsBySlot
 import com.ztransfer.catalog.usableStorageIds
+import com.ztransfer.connection.StaConnectionStatus
 import com.ztransfer.connection.StaInitiatorIdentity
+import com.ztransfer.connection.WifiConnectionStatus
+import com.ztransfer.connection.WirelessMode
+import com.ztransfer.connection.canActivateStaSession
+import com.ztransfer.connection.restoredStaInitiatorIdentity
+import com.ztransfer.connection.restoredWirelessMode
+import com.ztransfer.connection.shouldKeepStaDiscoveryAlive
+import com.ztransfer.connection.shouldReconnectUsingSta
+import com.ztransfer.connection.shouldScheduleStaDiscoveryRetry
+import com.ztransfer.connection.staReconnectDelayMs
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.protocol.CameraConnectionType
@@ -94,36 +104,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import kotlin.math.roundToInt
 
-enum class WifiConnectionStatus {
-    IDLE,
-    PROBING,
-    NOT_FOUND,
-    REFUSED,
-    FAILED,
-    RECONNECTING
-}
-
-enum class StaConnectionStatus {
-    IDLE,
-    DISCOVERING,
-    PAIRING,
-    CONNECTING,
-    FAILED,
-}
-
-enum class WirelessMode {
-    AP,
-    STA,
-}
-
 private enum class StaCandidateConnectionResult {
     CONNECTED,
     REJECTED,
     UNEXPECTED_CAMERA,
 }
-
-internal fun restoredWirelessMode(value: String?): WirelessMode =
-    runCatching { WirelessMode.valueOf(value.orEmpty()) }.getOrDefault(WirelessMode.STA)
 
 internal fun classifyWifiConnectionFailure(error: Throwable): WifiConnectionStatus = when (error) {
     is CameraRefusedException -> WifiConnectionStatus.REFUSED
@@ -138,34 +123,6 @@ internal fun isTransientStaServiceReadinessFailure(error: Throwable?): Boolean =
     error is SocketTimeoutException ||
         error is ConnectException ||
         (error is IOException && error.message?.startsWith("STA album access unavailable") == true)
-
-/** STA reconnection is selected only for an established STA-origin Wi-Fi session. */
-internal fun shouldReconnectUsingSta(
-    connectionType: CameraConnectionType?,
-    wirelessMode: WirelessMode,
-): Boolean = connectionType == CameraConnectionType.WIFI && wirelessMode == WirelessMode.STA
-
-/** Keeps an already-started STA discovery alive through Nikon's service restart or reconnect. */
-internal fun shouldKeepStaDiscoveryAlive(
-    reconnectRequested: Boolean,
-    hasReusableProfile: Boolean,
-): Boolean = reconnectRequested || hasReusableProfile
-
-/** A reconnect request that overlaps the tail of the previous scan must be retried, not dropped. */
-internal fun shouldScheduleStaDiscoveryRetry(
-    reconnectRequested: Boolean,
-    discoveryInProgress: Boolean,
-): Boolean = reconnectRequested && discoveryInProgress
-
-/** Album access alone is not proof that Nikon finished the computer-profile pairing. */
-internal fun canActivateStaSession(
-    albumAccessValidated: Boolean,
-    pairingConfirmed: Boolean,
-): Boolean = albumAccessValidated && pairingConfirmed
-
-internal fun restoredStaInitiatorIdentity(value: String?): StaInitiatorIdentity =
-    runCatching { StaInitiatorIdentity.valueOf(value.orEmpty()) }
-        .getOrDefault(StaInitiatorIdentity.PAIRED_COMPUTER)
 
 private val EFFECT_PREVIEW_VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 internal val NIKON_RAW_EXTENSIONS = setOf(".nef", ".nrw")
@@ -292,7 +249,7 @@ data class CameraState(
     val isConnectedToCamera: Boolean = false,
     val isConnecting: Boolean = false,
     val connectionType: CameraConnectionType? = null,
-    /** Persisted user choice for wireless discovery; unknown/legacy preferences fall back to AP. */
+    /** Persisted user choice for wireless discovery; unknown/legacy preferences fall back to STA. */
     val wirelessMode: WirelessMode = WirelessMode.STA,
     /** True when the active/most recent Wi-Fi session was reached through STA discovery. */
     val isStaConnection: Boolean = false,
@@ -2211,9 +2168,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _state.value.connectionType == CameraConnectionType.USB
         ) return
         staReconnectJob?.cancel()
-        val delayMs = STA_RECONNECT_DELAYS_MS[
-            staReconnectAttempt.coerceAtMost(STA_RECONNECT_DELAYS_MS.lastIndex)
-        ]
+        val delayMs = staReconnectDelayMs(staReconnectAttempt)
         staReconnectAttempt++
         staReconnectJob = viewModelScope.launch {
             delay(delayMs)
@@ -4327,7 +4282,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val STA_SERVICE_READY_RETRY_DELAY_MS = 1_200L
         const val STA_EXPLORER_RECONNECT_DELAY_MS = 900L
         const val STA_FILE_SCAN_RETRY_DELAY_MS = 750L
-        val STA_RECONNECT_DELAYS_MS = longArrayOf(3_000L, 8_000L, 15_000L, 30_000L)
         private const val CONNECTION_PREFERENCES = "sta_connection"
         private const val WIRELESS_MODE_PREFERENCE = "wireless_mode"
         internal const val FILE_THUMBNAIL_PIPELINE_BATCH_SIZE = 12

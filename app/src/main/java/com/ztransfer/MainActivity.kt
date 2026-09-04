@@ -61,6 +61,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.ztransfer.connection.WirelessMode
 import com.ztransfer.ui.screen.*
 import com.ztransfer.ui.theme.AppTheme
 import com.ztransfer.ui.theme.ZTransferTheme
@@ -77,7 +78,6 @@ import com.ztransfer.viewmodel.PhotoDateRange
 import com.ztransfer.viewmodel.TransferState
 import com.ztransfer.viewmodel.TransferStatus
 import com.ztransfer.viewmodel.TransferViewModel
-import com.ztransfer.viewmodel.WirelessMode
 import com.ztransfer.viewmodel.isTransferredOriginal
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job

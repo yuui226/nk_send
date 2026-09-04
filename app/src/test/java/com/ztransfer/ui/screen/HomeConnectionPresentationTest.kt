@@ -2,9 +2,9 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.viewmodel.CameraState
-import com.ztransfer.viewmodel.StaConnectionStatus
-import com.ztransfer.viewmodel.WirelessMode
-import com.ztransfer.viewmodel.WifiConnectionStatus
+import com.ztransfer.connection.StaConnectionStatus
+import com.ztransfer.connection.WirelessMode
+import com.ztransfer.connection.WifiConnectionStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull

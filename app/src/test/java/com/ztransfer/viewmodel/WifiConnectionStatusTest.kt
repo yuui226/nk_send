@@ -1,5 +1,6 @@
 package com.ztransfer.viewmodel
 
+import com.ztransfer.connection.WifiConnectionStatus
 import com.ztransfer.protocol.CameraRefusedException
 import java.net.ConnectException
 import java.net.SocketTimeoutException

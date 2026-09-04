@@ -82,6 +82,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ztransfer.R
+import com.ztransfer.connection.StaConnectionStatus
+import com.ztransfer.connection.WifiConnectionStatus
+import com.ztransfer.connection.WirelessMode
 import com.ztransfer.gps.NikonGpsService
 import com.ztransfer.gps.GpsViewModel
 import com.ztransfer.license.LicenseManager
@@ -90,10 +93,7 @@ import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.rememberHaptics
 import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.CameraViewModel
-import com.ztransfer.viewmodel.StaConnectionStatus
 import com.ztransfer.viewmodel.TransferViewModel
-import com.ztransfer.viewmodel.WirelessMode
-import com.ztransfer.viewmodel.WifiConnectionStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map

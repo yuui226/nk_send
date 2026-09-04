@@ -8,6 +8,7 @@ import com.ztransfer.connection.mostRecentStaProfileForIp
 import com.ztransfer.connection.mostRecentlyUsedStaProfile
 import com.ztransfer.connection.normalizeResponderGuid
 import com.ztransfer.connection.preferredStaIdentityForCandidate
+import com.ztransfer.connection.restoredStaInitiatorIdentity
 import com.ztransfer.protocol.STA_PAIRING_MARKER_PREFIX
 
 /**
