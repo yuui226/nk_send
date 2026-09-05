@@ -1549,28 +1549,8 @@ private fun PreviewHistogramButton(
     active: Boolean,
     onClick: () -> Unit,
 ) {
-    val colors = AppTheme.colors
-    val description = stringResource(R.string.cd_preview_histogram)
-    GlassButton(
-        onClick = onClick,
-        modifier = Modifier.size(44.dp),
-        shape = CircleShape,
-        contentPadding = PaddingValues(0.dp),
-        active = active,
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .semantics {
-                    contentDescription = description
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            CompositionLocalProvider(LocalContentColor provides colors.accentBlue) {
-                HistogramMark(Modifier.size(20.dp))
-            }
-        }
-    }
+    SharedPreviewHistogramButton(active, onClick,
+        description = { stringResource(R.string.cd_preview_histogram) })
 }
 
 /**

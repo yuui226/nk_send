@@ -14,6 +14,7 @@ from export_exit_extraction import extract_export_exit
 from photo_viewport_extraction import extract_photo_viewport
 from photo_preview_model_extraction import extract_photo_preview_model
 from photo_preview_display_extraction import extract_photo_preview_display
+from histogram_extraction import extract_histogram, extract_histogram_button
 
 FILES = (
     "theme/Type.kt", "theme/Motion.kt", "theme/Color.kt", "screen/ZMark.kt", "screen/BroomMark.kt",
@@ -149,7 +150,16 @@ def main():
     previews = extract_photo_viewport(original(preview_base + "PhotoPreview.kt"), original(preview_base + "PreviewRotationButton.kt"))
     model_android, preview_model = extract_photo_preview_model(previews[0])
     display = extract_photo_preview_display(model_android)
-    previews = (display[0],) + previews[1:]
+    histogram_button_android, histogram_button = extract_histogram_button(display[0])
+    previews = (histogram_button_android,) + previews[1:]
+    monitor = extract_histogram(original(preview_base + "RemoteViewfinderFeatures.kt"))
+    histogram_paths = [preview_base + "RemoteViewfinderFeatures.kt",
+        "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/LuminanceHistogram.kt",
+        "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedHistogram.kt",
+        "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedPreviewHistogramButton.kt"]
+    for path, expected in zip(histogram_paths, (*monitor, histogram_button)):
+        if (root / path).read_text(encoding="utf-8") != expected:
+            raise ValueError("Original histogram analysis/rendering or Android remaining monitor differs: " + path)
     display_paths = ["SharedPhotoPreviewPage.kt", "SharedPhotoPreviewBurst.kt", "SharedPhotoPreviewDetails.kt", "PhotoPreviewDisplayPlatform.kt"]
     for name, expected in zip(display_paths, display[1:]):
         if (root / ("shared/src/commonMain/kotlin/com/ztransfer/ui/screen/" + name)).read_text(encoding="utf-8") != expected:
@@ -167,6 +177,7 @@ def main():
     print("PASS entire original single-photo/zoom/rotation bodies; Android full preview coordinator unchanged beyond shared viewport call")
     print("PASS original preview paging/burst/source-snapshot/queue-intent rules; Android date, URI and IO paths retained")
     print("PASS original preview display/FHD reveal/video placeholder/burst stack/EXIF/navigation/transfer bodies and Android adapters")
+    print("PASS original histogram sampling, linear normalization, plot/icon/button and complete Android remaining monitor/preview")
     android_theme = (root / "app/src/main/java/com/ztransfer/ui/theme/Theme.kt").read_text(encoding="utf-8")
     def window_effect(text):
         block = text[text.index("val view = LocalView.current"):text.index("CompositionLocalProvider(")]

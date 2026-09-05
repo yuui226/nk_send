@@ -4,6 +4,7 @@ import unittest
 from photo_viewport_extraction import extract_photo_viewport
 from photo_preview_model_extraction import extract_photo_preview_model
 from photo_preview_display_extraction import extract_photo_preview_display
+from histogram_extraction import extract_histogram_button
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = 'app/src/main/java/com/ztransfer/ui/screen/'
@@ -19,7 +20,7 @@ class PhotoViewportExtractionTest(unittest.TestCase):
             check=True,capture_output=True,text=True,encoding='utf-8').stdout
         cls.photo = original('PhotoPreview.kt'); cls.rotation = original('PreviewRotationButton.kt')
         cls.expected = extract_photo_viewport(cls.photo,cls.rotation)
-        cls.expected = (extract_photo_preview_display(extract_photo_preview_model(cls.expected[0])[0])[0],) + cls.expected[1:]
+        cls.expected = (extract_histogram_button(extract_photo_preview_display(extract_photo_preview_model(cls.expected[0])[0])[0])[0],) + cls.expected[1:]
 
     def test_entire_android_remainder_and_all_shared_bodies_are_exact(self):
         for path, expected in zip(PATHS,self.expected):
@@ -55,7 +56,7 @@ class PhotoViewportExtractionTest(unittest.TestCase):
             with self.subTest(old=old):
                 try:
                     changed=extract_photo_viewport(self.photo.replace(old,new),self.rotation)
-                    changed=(extract_photo_preview_display(extract_photo_preview_model(changed[0])[0])[0],)+changed[1:]
+                    changed=(extract_histogram_button(extract_photo_preview_display(extract_photo_preview_model(changed[0])[0])[0])[0],)+changed[1:]
                 except ValueError:
                     continue # A changed fixed extraction anchor must fail closed.
                 self.assertNotEqual(self.expected,changed)

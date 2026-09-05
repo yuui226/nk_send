@@ -4,6 +4,7 @@ import unittest
 from photo_viewport_extraction import extract_photo_viewport
 from photo_preview_model_extraction import extract_photo_preview_model
 from photo_preview_display_extraction import extract_photo_preview_display
+from histogram_extraction import extract_histogram_button
 from thumbnail_grid_extraction import section
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -23,6 +24,8 @@ class PhotoPreviewDisplayExtractionTest(unittest.TestCase):
         paths=[BASE+'PhotoPreview.kt']+[SHARED+s for s in ['SharedPhotoPreviewPage.kt','SharedPhotoPreviewBurst.kt',
             'SharedPhotoPreviewDetails.kt','PhotoPreviewDisplayPlatform.kt']]
         for path,body in zip(paths,self.parts):
+            if path == BASE+'PhotoPreview.kt':
+                body = extract_histogram_button(body)[0]
             self.assertEqual(body,(ROOT/path).read_text(encoding='utf-8'),path)
 
     def test_entire_parent_preview_coordinator_changes_only_video_constant_reference(self):
