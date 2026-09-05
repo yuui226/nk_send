@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7A1200000000000000000068 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000069; };
 		7A1200000000000000000066 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000067; };
 		7A1200000000000000000062 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000063; };
 		7A1200000000000000000064 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000065; };
@@ -44,6 +45,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		7A1200000000000000000069 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/PreviewExifReader.swift; sourceTree = "<group>"; };
 		7A1200000000000000000067 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/CameraThumbnailDiskCache.swift; sourceTree = "<group>"; };
 		7A1200000000000000000063 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Configuration/BrowsePreferencesStore.swift; sourceTree = "<group>"; };
 		7A1200000000000000000065 = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Configuration/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -145,6 +147,7 @@
 				7A120000000000000000005B /* SharedUiProbeView.swift */,
 				7A1200000000000000000059 /* PhotoFilterPreviewRenderer.swift */,
 				7A1200000000000000000057 /* PhotoMetadataReader.swift */,
+				7A1200000000000000000069 /* PreviewExifReader.swift */,
 				7A1200000000000000000055 /* BluetoothProbeView.swift */,
 				7A1200000000000000000051 /* NikonGpsGattConnection.swift */,
 				7A1200000000000000000053 /* AppleNikonGpsGattDriver.swift */,
@@ -364,6 +367,7 @@
 				7A120000000000000000005A /* SharedUiProbeView.swift in Sources */,
 				7A1200000000000000000058 /* PhotoFilterPreviewRenderer.swift in Sources */,
 				7A1200000000000000000056 /* PhotoMetadataReader.swift in Sources */,
+				7A1200000000000000000068 /* PreviewExifReader.swift in Sources */,
 				7A1200000000000000000054 /* BluetoothProbeView.swift in Sources */,
 				7A1200000000000000000050 /* NikonGpsGattConnection.swift in Sources */,
 				7A1200000000000000000052 /* AppleNikonGpsGattDriver.swift in Sources */,

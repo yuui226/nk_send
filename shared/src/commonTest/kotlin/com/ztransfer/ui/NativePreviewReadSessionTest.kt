@@ -13,6 +13,10 @@ class NativePreviewReadSessionTest {
         val reads = linkedMapOf<Long, NativeFhdPreviewCompletion>()
         val locals = linkedMapOf<Long, NativeLocalPreviewCompletion>()
         val raws = linkedMapOf<Long, NativeLocalPreviewCompletion>()
+        val exifs = linkedMapOf<Long, NativePreviewExifCompletion>()
+        override fun readLocalExif(sessionId: Long, requestId: Long, source: String, completion: NativePreviewExifCompletion) {
+            exifs[requestId] = completion
+        }
         override fun readLocalRaw(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
             raws[requestId] = completion
         }
@@ -45,6 +49,37 @@ class NativePreviewReadSessionTest {
             for (i in 0..3) bytes[offset+i] = (value ushr (24 - 8*i)).toByte()
         }
         return bytes
+    }
+
+    @Test fun localExifUsesFrozenSourceOfflineAndCannotTriggerImageOrCameraRead() {
+        val p = Platform()
+        val s = NativePreviewReadSession(7, p, { false }, Dispatchers.Unconfined, isFrozenLocalSource = { f, source -> f == file && source == "owned" })
+        assertNull(Pending { s.localExif(file, "other") }.result!!.getOrThrow())
+        val result = Pending { s.localExif(file, "owned") }
+        val exif = com.ztransfer.viewmodel.PhotoExif("f/4", "1/250", "ISO64", null)
+        p.exifs[1]!!.complete(exif); p.exifs[1]!!.complete(null)
+        assertSame(exif, result.result!!.getOrThrow())
+        assertTrue(p.reads.isEmpty()); assertTrue(p.locals.isEmpty()); assertTrue(p.raws.isEmpty())
+        s.close()
+    }
+
+    @Test fun localExifSharesSlotsAndClosedSessionRejectsLateMetadata() {
+        val p = Platform()
+        val s = NativePreviewReadSession(7, p, { true }, Dispatchers.Unconfined, isFrozenLocalSource = { _, _ -> true })
+        val results = List(32) { Pending { s.localExif(file, "owned") } }
+        assertNull(Pending { s.localRaw(file, "owned") }.result!!.getOrThrow())
+        assertNull(Pending { s.fhd(file) }.result!!.getOrThrow())
+        s.close(); p.exifs.values.forEach { it.complete(com.ztransfer.viewmodel.PhotoExif(null, null, "ISO64", null)) }
+        assertTrue(results.all { it.result!!.isFailure }); assertEquals(32, p.cancelled.size)
+    }
+
+    @Test fun localExifDeadlineIsFallbackMissNotPageCancellation() {
+        val p = Platform(); val clock = ManualDeadline()
+        val s = NativePreviewReadSession(7, p, { false }, clock, 30_000, { _, _ -> true })
+        val result = Pending { s.localExif(file, "owned") }
+        assertEquals(1, p.exifs.size); clock.expire()
+        assertNull(result.result!!.getOrThrow()); assertFalse(result.job.isCancelled)
+        assertEquals(listOf(7L to 1L), p.cancelled); s.close()
     }
 
     @Test fun rawReadsUseFrozenOfflineSourceAndNeverOrdinaryDecodeOrFhd() {

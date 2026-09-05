@@ -97,6 +97,35 @@ class PreviewExifPolicyTest {
         assertTrue(calls.single().first.isNaN())
     }
 
+    @Test fun imageIoDecodedCoordinatesKeepDoublePrecisionAndExactUppercaseReferenceRule() {
+        val source = values(PreviewExifTag.GPS_LATITUDE to "31.123456789", PreviewExifTag.GPS_LATITUDE_REF to "S",
+            PreviewExifTag.GPS_LONGITUDE to "121.987654321", PreviewExifTag.GPS_LONGITUDE_REF to "E")
+        source.setImageIoCoordinates(31.123456789, "S", 121.987654321, "E")
+        val exact = assertNotNull(parsePreviewExif(source, formatter))
+        assertEquals(-31.123456789, exact.latitude); assertEquals(121.987654321, exact.longitude)
+        source.setImageIoCoordinates(31.123456789, "s", 121.987654321, "E")
+        assertNull(source.decodedCoordinates())
+        assertEquals(-31.123456789f.toDouble(), assertNotNull(parsePreviewExif(source, formatter)).latitude)
+    }
+
+    @Test fun imageIoMissingReferenceOrOneMissingCoordinateResetsPreferredPair() {
+        val source = values()
+        source.setImageIoCoordinates(1.0, "N", 2.0, "W"); assertNotNull(source.decodedCoordinates())
+        source.setImageIoCoordinates(1.0, null, 2.0, "W"); assertNull(source.decodedCoordinates())
+        source.setImageIoCoordinates(Double.NaN, "N", 2.0, "W"); assertNull(source.decodedCoordinates())
+        source.setImageIoCoordinates(1.0, "north", 2.0, "W"); assertNull(source.decodedCoordinates())
+    }
+
+    @Test fun imageIoAltitudeRequiresReferenceLikeAndroidExifInterface() {
+        val source = values()
+        for ((value, ref) in listOf(123.5 to -1, -1.0 to 0, Double.NaN to 1)) {
+            source.setImageIoAltitude(value, ref); assertTrue(source.altitudeMeters.isNaN())
+        }
+        source.setImageIoAltitude(123.5, 1); assertEquals(-123.5, source.altitudeMeters)
+        source.setImageIoAltitude(123.5, 2); assertEquals(123.5, source.altitudeMeters)
+        source.setImageIoAltitude(0.0, 1); assertNull(assertNotNull(parsePreviewExif(source, formatter)).altitudeMeters)
+    }
+
     @Test fun nativeValuesOwnTheirCoordinateArrayAndUseSameParser() {
         val source = values(PreviewExifTag.PHOTOGRAPHIC_SENSITIVITY to "64")
         source.setDecodedCoordinates(1.25, 2.5)

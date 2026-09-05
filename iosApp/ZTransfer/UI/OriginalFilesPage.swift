@@ -269,6 +269,23 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         }
     }
 
+    func readLocalExif(sessionId: Int64, requestId: Int64, source: String, completion: NativePreviewExifCompletion) {
+        let key = "\(sessionId):\(requestId)"
+        guard !closed, requestId > 0, previewUse?.session == sessionId,
+              previewRequests[key] == nil, previewRequests.count < 32 else { completion.complete(exif: nil); return }
+        previewRequests[key] = Task { [weak self] in
+            guard let self else { completion.complete(exif: nil); return }
+            defer { self.previewRequests.removeValue(forKey: key) }
+            do {
+                try Task.checkCancellation()
+                let exif = try await self.queue.originalExif(locator: source)
+                try Task.checkCancellation()
+                guard !self.closed, self.previewUse?.session == sessionId else { completion.complete(exif: nil); return }
+                completion.complete(exif: exif)
+            } catch { completion.complete(exif: nil) }
+        }
+    }
+
     func endPreviewReads(sessionId: Int64) {
         for (key, request) in previewRequests where key.hasPrefix("\(sessionId):") { request.cancel() }
         guard let use = previewUse, use.session == sessionId else { return }

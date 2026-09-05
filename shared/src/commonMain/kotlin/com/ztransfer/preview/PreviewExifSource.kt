@@ -30,6 +30,22 @@ class NativePreviewExifValues : PreviewExifSource {
     fun setDecodedCoordinates(latitude: Double, longitude: Double) {
         coordinates = doubleArrayOf(latitude, longitude)
     }
+    /** ImageIO has already decoded rational DMS into Double degrees. Keep that precision.
+     * AndroidX 1.3.7 accepts uppercase N/S/E/W only in its preferred decoded pair; other refs
+     * leave the original preview's raw/Float fallback in charge. Missing one invalidates the pair.
+     */
+    fun setImageIoCoordinates(latitude: Double, latitudeReference: String?, longitude: Double, longitudeReference: String?) {
+        val validReferences = setOf("N", "S", "E", "W")
+        coordinates = if (latitudeReference in validReferences && longitudeReference in validReferences &&
+            !latitude.isNaN() && !longitude.isNaN()) {
+            fun signed(value: Double, reference: String?) = if (reference == "S" || reference == "W") -value else value
+            doubleArrayOf(signed(latitude, latitudeReference), signed(longitude, longitudeReference))
+        } else null
+    }
+    /** Match ExifInterface.getAltitude(NaN): an altitude without its reference is not decoded. */
+    fun setImageIoAltitude(value: Double, reference: Int) {
+        altitudeMeters = if (value >= 0.0 && reference >= 0) value * (if (reference == 1) -1 else 1) else Double.NaN
+    }
     override fun attribute(tag: PreviewExifTag): String? = attributes[tag]
     override fun decodedCoordinates(): DoubleArray? = coordinates?.copyOf()
     override fun decodedAltitude(): Double = altitudeMeters

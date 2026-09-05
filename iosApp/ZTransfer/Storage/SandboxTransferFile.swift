@@ -209,6 +209,21 @@ actor CameraOriginalStore {
         return data
     }
 
+    func originalExif(locator: String) async throws -> PhotoExif? {
+        let cancellation = PreviewExifReadCancellation()
+        return try await withTaskCancellationHandler(operation: {
+            try self.withOriginalInput(locator: locator, maximumFileBytes: Int64.max) { input, size in
+                let exif = try PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: size, cancellation: cancellation)
+                var finalState = stat()
+                guard fstat(input.fileDescriptor, &finalState) == 0, finalState.st_size == size else {
+                    throw OriginalIndexError.incompleteMetadata
+                }
+                try Task.checkCancellation()
+                return exif
+            }
+        }, onCancel: { cancellation.cancel() })
+    }
+
     /// Opens once without following directory/leaf links, and closes on every return/throw.
     private func withOriginalInput<T>(locator: String, maximumFileBytes: Int64,
                                       body: (FileHandle, Int64) throws -> T) throws -> T {

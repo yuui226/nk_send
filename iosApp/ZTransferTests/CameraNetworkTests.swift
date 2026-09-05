@@ -2193,6 +2193,122 @@ final class CameraNetworkTests: XCTestCase {
         }
     }
 
+    func testImageIoPreviewMetadataUsesSharedFieldsAndKeepsDecodedCoordinatePrecision() throws {
+        let properties: [String: Any] = [
+            kCGImagePropertyExifDictionary as String: [kCGImagePropertyExifFNumber as String: 2.8,
+                kCGImagePropertyExifExposureTime as String: 0.004, kCGImagePropertyExifExposureBiasValue as String: 2.0 / 3,
+                kCGImagePropertyExifISOSpeedRatings as String: [64, 100], kCGImagePropertyExifLensModel as String: " NIKKOR ",
+                kCGImagePropertyExifDateTimeOriginal as String: "2026:09:05 01:02:03"],
+            kCGImagePropertyGPSDictionary as String: [kCGImagePropertyGPSLatitude as String: 31.123456789,
+                kCGImagePropertyGPSLatitudeRef as String: "S", kCGImagePropertyGPSLongitude as String: 121.987654321,
+                kCGImagePropertyGPSLongitudeRef as String: "E", kCGImagePropertyGPSAltitude as String: 123.5,
+                kCGImagePropertyGPSAltitudeRef as String: 1],
+        ]
+        let result = try XCTUnwrap(PreviewExifReader.metadata(properties, locale: Locale(identifier: "en_US_POSIX")))
+        XCTAssertEqual(result.aperture, "f/2.8"); XCTAssertEqual(result.shutterSpeed, "1/250")
+        XCTAssertEqual(result.exposureCompensation, "+0.7 EV"); XCTAssertEqual(result.iso, "ISO64,100")
+        XCTAssertEqual(result.lensModel, "NIKKOR"); XCTAssertEqual(result.dateTime, "2026:09:05 01:02:03")
+        XCTAssertEqual(result.latitude?.doubleValue, -31.123456789)
+        XCTAssertEqual(result.longitude?.doubleValue, 121.987654321); XCTAssertEqual(result.altitudeMeters?.doubleValue, -123.5)
+    }
+
+    func testImageIoPreviewMetadataRejectsBooleanNumbersAndMissingAltitudeReference() throws {
+        let properties: [String: Any] = [kCGImagePropertyExifDictionary as String: [
+            kCGImagePropertyExifFNumber as String: true, kCGImagePropertyExifISOSpeedRatings as String: [true]],
+            kCGImagePropertyGPSDictionary as String: [kCGImagePropertyGPSAltitude as String: 123.5]]
+        let result = try XCTUnwrap(PreviewExifReader.metadata(properties))
+        XCTAssertNil(result.aperture); XCTAssertNil(result.iso); XCTAssertNil(result.altitudeMeters)
+        let fractional = PreviewExifReader.metadata([kCGImagePropertyGPSDictionary as String: [
+            kCGImagePropertyGPSAltitude as String: 123.5, kCGImagePropertyGPSAltitudeRef as String: 0.5]])
+        XCTAssertNil(fractional?.altitudeMeters)
+    }
+
+    private func previewExifJpegFixture() throws -> Data {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(orientedPreviewFixture(width: 12, height: 8, orientation: 1) as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let output = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil))
+        let exif: [CFString: Any] = [
+            kCGImagePropertyExifFNumber: 4, kCGImagePropertyExifExposureTime: 0.004,
+            kCGImagePropertyExifISOSpeedRatings: [64], kCGImagePropertyExifDateTimeOriginal: "2026:09:05 01:02:03"]
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyExifDictionary: exif] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination)); return output as Data
+    }
+
+    func testLocalExifReadsRealPublishedJpegWithoutMutatingFileOrIndex() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("ORIGINAL.JPG"), jpeg = try previewExifJpegFixture()
+        try jpeg.write(to: url)
+        let store = CameraOriginalStore(root: root)
+        let index = try await store.originals(since: -1, rescan: true)
+        let result = try await store.originalExif(locator: url.absoluteString)
+        XCTAssertEqual(result?.iso, "ISO64"); XCTAssertEqual(result?.dateTime, "2026:09:05 01:02:03")
+        let unchanged = try await store.originals(since: index.revision, rescan: false)
+        XCTAssertEqual(unchanged.revision, index.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: url), jpeg)
+    }
+
+    func testExifProviderActuallyExtractsMetadataAndDoesNotMoveBorrowedDescriptor() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let jpeg = try previewExifJpegFixture(); try jpeg.write(to: url)
+        let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+        try input.seek(toOffset: 17)
+        let result = try PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(jpeg.count),
+            cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(result?.aperture, "f/4"); XCTAssertEqual(result?.shutterSpeed, "1/250")
+        XCTAssertEqual(try input.offset(), 17)
+    }
+
+    func testExifDescriptorReaderOwnsDuplicateAndReadsBeyondTwoGiB() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: nil))
+        let output = try FileHandle(forWritingTo: url)
+        let offset: Int64 = 2_147_483_648 + 4096
+        try output.seek(toOffset: UInt64(offset)); try output.write(contentsOf: Data([7, 8, 9, 10])); try output.close()
+        let input = try FileHandle(forReadingFrom: url)
+        let reader = try PreviewExifFileReader(fileDescriptor: input.fileDescriptor, size: offset + 4, cancellation: PreviewExifReadCancellation())
+        try input.close() // Provider's owned duplicate remains valid.
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let count = bytes.withUnsafeMutableBytes { reader.read(into: $0.baseAddress!, position: offset, count: $0.count) }
+        XCTAssertEqual(count, 4); XCTAssertEqual(bytes, [7, 8, 9, 10]); XCTAssertFalse(reader.failed)
+    }
+
+    func testExifDescriptorReaderCancellationAndTruncationNeverReadInvalidMemory() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data([1, 2, 3, 4]).write(to: url)
+        let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+        let cancellation = PreviewExifReadCancellation()
+        let reader = try PreviewExifFileReader(fileDescriptor: input.fileDescriptor, size: 4, cancellation: cancellation)
+        cancellation.cancel()
+        var bytes = [UInt8](repeating: 0, count: 4)
+        XCTAssertEqual(bytes.withUnsafeMutableBytes { reader.read(into: $0.baseAddress!, position: 0, count: $0.count) }, 0)
+        let active = try PreviewExifFileReader(fileDescriptor: input.fileDescriptor, size: 4, cancellation: PreviewExifReadCancellation())
+        let output = try FileHandle(forWritingTo: url); try output.truncate(atOffset: 0); try output.close()
+        XCTAssertEqual(bytes.withUnsafeMutableBytes { active.read(into: $0.baseAddress!, position: 0, count: $0.count) }, 0)
+        XCTAssertTrue(active.failed)
+    }
+
+    func testLocalExifRejectsUnpublishedOrChangedOriginalAndPropagatesCancellation() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("ORIGINAL.JPG"); try previewExifJpegFixture().write(to: url)
+        let store = CameraOriginalStore(root: root)
+        do { _ = try await store.originalExif(locator: url.absoluteString); XCTFail("Unpublished") } catch {}
+        _ = try await store.originals(since: -1, rescan: true); try Data([1]).write(to: url)
+        do { _ = try await store.originalExif(locator: url.absoluteString); XCTFail("Changed size") } catch {}
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await store.originalExif(locator: "file:///not-owned.JPG")
+        }
+        do { _ = try await task.value; XCTFail("Cancelled") } catch { XCTAssertTrue(error is CancellationError) }
+    }
+
     private func rawIndexFixture(_ ranges: [(UInt32, UInt32)]) -> Data {
         var data = Data(repeating: 0, count: max(128, 8 + ranges.count * 40))
         func u16(_ at: Int, _ value: UInt16) { data[at] = UInt8(truncatingIfNeeded: value); data[at + 1] = UInt8(truncatingIfNeeded: value >> 8) }

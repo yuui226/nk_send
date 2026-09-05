@@ -1,6 +1,7 @@
 package com.ztransfer.ui
 
 import com.ztransfer.protocol.CameraFileInfo
+import com.ztransfer.viewmodel.PhotoExif
 import kotlinx.coroutines.*
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.resume
@@ -24,6 +25,7 @@ internal fun ownedFhdPreviewPng(bytes: ByteArray): NativeFhdPreviewImage? {
 }
 
 interface NativeFhdPreviewCompletion { fun complete(image: NativeFhdPreviewImage?) }
+interface NativePreviewExifCompletion { fun complete(exif: PhotoExif?) }
 
 /** Main/UI-thread calls and completions. This borrows the existing camera, never creates one. */
 interface NativePreviewReadPlatform {
@@ -33,6 +35,9 @@ interface NativePreviewReadPlatform {
         completion.complete(null)
     }
     fun readLocalRaw(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
+        completion.complete(null)
+    }
+    fun readLocalExif(sessionId: Long, requestId: Long, source: String, completion: NativePreviewExifCompletion) {
         completion.complete(null)
     }
     fun cancelPreviewRead(sessionId: Long, requestId: Long)
@@ -85,6 +90,16 @@ class NativePreviewReadSession internal constructor(
         start = { bridge, request, reply ->
             bridge.readLocalRaw(sessionId, request, source, object : NativeLocalPreviewCompletion {
                 override fun complete(image: NativeLocalPreviewImage?) = reply(image)
+            })
+        },
+    )
+
+    @Throws(CancellationException::class)
+    suspend fun localExif(file: CameraFileInfo, source: String): PhotoExif? = read(
+        allowed = { localSource?.invoke(file, source) == true },
+        start = { bridge, request, reply ->
+            bridge.readLocalExif(sessionId, request, source, object : NativePreviewExifCompletion {
+                override fun complete(exif: PhotoExif?) = reply(exif)
             })
         },
     )
