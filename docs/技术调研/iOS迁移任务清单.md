@@ -112,7 +112,7 @@
 | I02 | MAC | iOS 文件与照片实现 | PhotoKit、Files、临时文件和恢复 |
 | I03 | MAC | iOS 蓝牙、定位与后台实现 | CoreBluetooth、CoreLocation、后台宽限 |
 | I04 | MAC | iOS 录像、购买和更新实现 | AVFoundation、StoreKit、App Store |
-| Q01 | DONE | Android 迁移最终多轮回归 | 668 项测试、双模块 Lint、标准 APK、Manifest/DEX 与独立等价审计通过 |
+| Q01 | DONE | Android 迁移最终多轮回归 | 669 项测试、双模块 Lint、标准 APK、Manifest/DEX 与独立等价审计通过 |
 | Q02 | MAC | iOS 模拟器和真机功能矩阵 | 权限、网络、传输、后台、异常恢复 |
 | Q03a | DONE | Android/common 边界审计 | `commonMain/commonTest` 无平台 API，迁入模型/规则单一定义，依赖保持 `app -> shared` |
 | Q03b | MAC | 双端代码边界审计 | iOS 实现完成后确认双端无重复业务规则 |
@@ -221,6 +221,7 @@
 | 2026-09-04 | A01/Q03a | 两路独立只读审计逐项对照 `c06c1e6`，未发现语义、性能或线程变化；`app -> shared` 单向依赖，`commonMain/commonTest` 的 Android/JVM API 导入为 0；相册发布 typed identity 已收为单一定义，未改成存在分隔符碰撞可能的字符串身份 |
 | 2026-09-04 | Q01 | shared 350 项 + app 317 项单测全部通过，双模块 Lint 均通过（各 0 Error；shared 0 issue，app 175 Warning/12 Hint），标准 Debug 打包成功；`ZTransfer-debug-1.81-20260904-231421.apk`，SHA-256 `C101D923527EB2B22D5E0C270CD895AFEF6E7B43553E7455081EF4D4F3CB7E0F`；APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`，7 个抽查迁入模型均为单一 DEX 定义；本轮无已授权 ADB 设备，沿用本分支此前真机安装启动证据 |
 | 2026-09-05 | Q01 复审 | 修复 common metadata 不支持 `putIfAbsent` 的编译阻断，并恢复滤镜色带中心为迁移前的 `FloatArray` 热路径；common metadata 强制编译通过，shared 351 项 + app 317 项单测全部通过，双模块 Lint 各 0 Error。Release APK/AAB 任务图通过，shared/App Release 编译、R8、Lint Vital 和正式签名校验实跑通过；`dist/build.bat` 与混淆规则未被共享化改动，签名配置和 keystore 可用，脚本可继续使用，本轮未生成正式包且未改动 `dist`。标准 Debug 包 `ZTransfer-debug-1.81-20260905-003118.apk`，SHA-256 `BD4C702C9843D1D6FFE3B745DB28FF4AA907691226EF0B840853F6FFF1470B2E`；v2 签名有效，包名/版本为 `com.ztransfer.debug` / `1.81-debug (54)`，APK 内 Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`；用户已对上一最终包真机验证有线与 STA 模式无异常 |
+| 2026-09-05 | Q01 三连接终审 | 以迁移前 `a6b679a` 为基线分别复核 USB、Wi-Fi AP、Wi-Fi STA：连接/配对、命令字节与顺序、事件、重试/保活、锁、文件枚举、缩略图/FHD、下载/断点、队列、遥控及断线恢复未发现迁移语义差异；恢复 Android 在非拉丁默认格式区域下的文件名/日期数字格式，并增加 `ar-EG` 严格等价回归。迁移前基线 506 项、当前 shared 351 + app 318 = 669 项测试均为 0 失败，双模块 Lint 0 Error，common metadata、Release R8/Lint Vital/正式签名校验及标准 Debug 脚本全部通过；`ZTransfer-debug-1.81-20260905-095730.apk`，SHA-256 `63A66B6A2CA02ECC36B698F2E410A0384E2F1DCEA34A4326B4113A28C7A6C5D1`，v2 签名有效，包名/版本为 `com.ztransfer.debug` / `1.81-debug (54)`，Manifest SHA-256 仍为 `1C7620E06744AFF427B45331EA741318EA5A2F6A0D970CE9B5DA616679044A80`，关键 Android/共享类各一个 DEX 定义；用户已真机验证此前最终包的 USB 与 STA，AP 本轮为源码/协议/测试验证 |
 
 ## 更新约定
 

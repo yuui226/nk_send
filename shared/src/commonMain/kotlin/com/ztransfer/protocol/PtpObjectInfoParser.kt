@@ -20,7 +20,11 @@ class PtpObjectInfo internal constructor(
 )
 
 /** Returns null only when the fixed 53-byte ObjectInfo prefix is incomplete. */
-fun parsePtpObjectInfo(handle: Int, data: ByteArray): PtpObjectInfo? {
+fun parsePtpObjectInfo(
+    handle: Int,
+    data: ByteArray,
+    formatPaddedDecimal: (value: Int, width: Int) -> String = ::formatAsciiPaddedDecimal,
+): PtpObjectInfo? {
     if (data.size < 53) return null
     val storageId = data.readInt32LittleEndian(0)
     val format = data.readUInt16LittleEndian(4)
@@ -39,7 +43,12 @@ fun parsePtpObjectInfo(handle: Int, data: ByteArray): PtpObjectInfo? {
         )
     }
 
-    val identity = parseObjectCacheIdentity(handle, PtpConstants.getExt(format), data)
+    val identity = parseObjectCacheIdentity(
+        handle = handle,
+        extension = PtpConstants.getExt(format),
+        data = data,
+        formatPaddedDecimal = formatPaddedDecimal,
+    )
     return PtpObjectInfo(
         handle = handle,
         storageId = storageId,
@@ -58,8 +67,9 @@ internal fun parseObjectCacheIdentity(
     handle: Int,
     extension: String,
     data: ByteArray,
+    formatPaddedDecimal: (value: Int, width: Int) -> String = ::formatAsciiPaddedDecimal,
 ): ParsedObjectCacheIdentity {
-    val fallbackName = "DSC_${(handle and 0xFFFF).toString().padStart(4, '0')}$extension"
+    val fallbackName = "DSC_${formatPaddedDecimal(handle and 0xFFFF, 4)}$extension"
     if (data.size < 53) return ParsedObjectCacheIdentity(fallbackName, null, false)
 
     val nameLength = data[52].toInt() and 0xFF

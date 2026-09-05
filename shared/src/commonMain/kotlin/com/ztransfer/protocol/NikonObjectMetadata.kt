@@ -40,17 +40,21 @@ fun deriveNikonMakerFileInfo(
 fun nikonDefaultCameraFileName(
     fileInfo: NikonMakerFileInfo,
     extension: String,
+    formatPaddedDecimal: (value: Int, width: Int) -> String = ::formatAsciiPaddedDecimal,
 ): String? {
     val normalizedExtension = extension.removePrefix(".").uppercase()
     if (normalizedExtension.lowercase() !in NIKON_CAMERA_MEDIA_EXTENSIONS) return null
-    return "DSC_${fileInfo.fileNumber.zeroPadded(4)}.$normalizedExtension"
+    return "DSC_${formatPaddedDecimal(fileInfo.fileNumber, 4)}.$normalizedExtension"
 }
 
 /**
  * Parses Nikon GetObjectsMetadata(0x9434) capture dates. The payload length is deliberately exact:
  * an unknown firmware layout returns an empty map, while an invalid individual record is skipped.
  */
-fun parseNikonObjectsMetadataCaptureDates(data: ByteArray?): Map<Int, String> {
+fun parseNikonObjectsMetadataCaptureDates(
+    data: ByteArray?,
+    formatPaddedDecimal: (value: Int, width: Int) -> String = ::formatAsciiPaddedDecimal,
+): Map<Int, String> {
     if (data == null || data.size < NIKON_OBJECT_METADATA_HEADER_BYTES) return emptyMap()
     val version = data.readInt32LittleEndian(0)
     val count = data.readInt32LittleEndian(4)
@@ -77,13 +81,13 @@ fun parseNikonObjectsMetadataCaptureDates(data: ByteArray?): Map<Int, String> {
             hour in 0..23 && minute in 0..59 && second in 0..60
         ) {
             result[handle] = buildString(15) {
-                append(year.zeroPadded(4))
-                append(month.zeroPadded(2))
-                append(day.zeroPadded(2))
+                append(formatPaddedDecimal(year, 4))
+                append(formatPaddedDecimal(month, 2))
+                append(formatPaddedDecimal(day, 2))
                 append('T')
-                append(hour.zeroPadded(2))
-                append(minute.zeroPadded(2))
-                append(second.zeroPadded(2))
+                append(formatPaddedDecimal(hour, 2))
+                append(formatPaddedDecimal(minute, 2))
+                append(formatPaddedDecimal(second, 2))
             }
         }
     }
@@ -106,8 +110,8 @@ private fun floorDiv(value: Long, positiveDivisor: Long): Long {
 private fun floorMod(value: Long, positiveDivisor: Long): Long =
     value - floorDiv(value, positiveDivisor) * positiveDivisor
 
-private fun Int.zeroPadded(width: Int): String {
-    val text = toString()
+internal fun formatAsciiPaddedDecimal(value: Int, width: Int): String {
+    val text = value.toString()
     return if (text.startsWith('-')) {
         "-" + text.drop(1).padStart((width - 1).coerceAtLeast(0), '0')
     } else {

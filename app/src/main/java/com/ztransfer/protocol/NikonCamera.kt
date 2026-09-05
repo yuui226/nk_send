@@ -44,9 +44,24 @@ import java.net.Socket
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** Maximum JPEG prefix retained while a fresh file is streamed to disk for EXIF parsing. */
 private const val EXIF_HEADER_CAPTURE_BYTES = 256 * 1024
+
+/** Keeps Android fallback names/dates identical to the pre-KMP default-format-locale behavior. */
+private fun formatCameraMetadataDecimalForAndroid(value: Int, width: Int): String =
+    formatAndroidCameraMetadataDecimal(
+        value = value,
+        width = width,
+        locale = Locale.getDefault(Locale.Category.FORMAT),
+    )
+
+internal fun formatAndroidCameraMetadataDecimal(
+    value: Int,
+    width: Int,
+    locale: Locale,
+): String = String.format(locale, "%0${width}d", value)
 
 /** 写入本地文件失败（非相机连接错误），用于区分"掉线"与"磁盘/存储"问题。 */
 class OutputWriteException(message: String, cause: Throwable) : Exception(message, cause)
@@ -1998,7 +2013,10 @@ class NikonCamera(private val context: Context) {
             sendCmd(PtpConstants.NK_GET_OBJECTS_METADATA, storageId, 0, 0)
             val (response, data) = recvRespWithPayload()
             val dates = if (response == PtpConstants.RESPONSE_OK) {
-                parseNikonObjectsMetadataCaptureDates(data)
+                parseNikonObjectsMetadataCaptureDates(
+                    data,
+                    ::formatCameraMetadataDecimalForAndroid,
+                )
             } else emptyMap()
             staDirectCaptureDates.putAll(dates)
             reports += "0x%08X:%s/%dB/%d".format(
@@ -2075,7 +2093,13 @@ class NikonCamera(private val context: Context) {
         val fileName = staDirectOriginalFileNames[handle]
             ?: fileNumberAnchor
                 ?.let { deriveNikonMakerFileInfo(it, handle) }
-                ?.let { nikonDefaultCameraFileName(it, extension) }
+                ?.let {
+                    nikonDefaultCameraFileName(
+                        it,
+                        extension,
+                        ::formatCameraMetadataDecimalForAndroid,
+                    )
+                }
             ?: return readStaDirectObjectHeaderInternal(
                 handle = handle,
                 preferredFileNumberAnchor = fileNumberAnchor,
@@ -2299,7 +2323,11 @@ class NikonCamera(private val context: Context) {
             deriveNikonMakerFileInfo(anchor, handle)
         }
         val derivedFileName = derivedFileInfo?.let { fileInfo ->
-            nikonDefaultCameraFileName(fileInfo, detectedExtension)
+            nikonDefaultCameraFileName(
+                fileInfo,
+                detectedExtension,
+                ::formatCameraMetadataDecimalForAndroid,
+            )
         }
         val originalFileName = protocolFileName ?: embeddedFileName ?: derivedFileName
         originalFileName?.let { staDirectOriginalFileNames[handle] = it }
@@ -3111,7 +3139,11 @@ class NikonCamera(private val context: Context) {
         if (respCode != PtpConstants.RESPONSE_OK || data == null) {
             return ObjectInfoResult(null, false)
         }
-        val parsed = parsePtpObjectInfo(handle, data) ?: return ObjectInfoResult(null, false)
+        val parsed = parsePtpObjectInfo(
+            handle,
+            data,
+            ::formatCameraMetadataDecimalForAndroid,
+        ) ?: return ObjectInfoResult(null, false)
         // 关联对象（0x3001 = 文件夹）不是文件，一律不收录：常见机型的全量枚举可能不含它，
         // 但换卡/目录滚动时相机新建文件夹会带 ObjectAdded 事件，实时新增路径必须拦住，
         // 否则列表会冒出一个 0 字节的"100NIKON"条目。
