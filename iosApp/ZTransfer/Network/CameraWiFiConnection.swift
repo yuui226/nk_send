@@ -246,11 +246,40 @@ actor CameraWiFiConnection {
         }
     }
 
+    /// Same partial-object command as Android readExifHeader. This standard AP/STA path does
+    /// not infer support or retry Busy; paired STA's recent-header cache remains a separate gate.
+    func exifHeader(handle: Int32, maximumBytes: Int32) async throws -> Data? {
+        try Task.checkCancellation()
+        guard maximumBytes > 0, maximumBytes <= 2 * 1024 * 1024,
+              let values = PtpTransferBridge.shared.partialParameters(handle: handle, offset: 0, count: Int64(maximumBytes)) else {
+            throw CameraStreamError.invalidArgument
+        }
+        try requirePhase(.ready)
+        let parameters = (0..<Int(values.size)).map { values.get(index: Int32($0)) }
+        do {
+            let result = try await previewCommand(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX,
+                parameters: parameters, limit: Int(maximumBytes))
+            guard result.code == PtpConstants.shared.RESPONSE_OK, let data = result.payload, !data.isEmpty else { return nil }
+            return data
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            await abort(error: error)
+            return nil
+        }
+    }
+
     private func previewCommand(operation: Int32, handle: Int32, limit: Int,
+                                admission: (@Sendable () async -> Bool)? = nil) async throws -> PtpIPCommandResult {
+        try await previewCommand(operation: operation, parameters: [handle], limit: limit, admission: admission)
+    }
+
+    private func previewCommand(operation: Int32, parameters: [Int32], limit: Int,
                                 admission: (@Sendable () async -> Bool)? = nil) async throws -> PtpIPCommandResult {
         try requirePhase(.ready)
         do {
-            let result = try await session.execute(operationCode: operation, parameters: [handle], maximumPayloadBytes: limit,
+            let result = try await session.execute(operationCode: operation, parameters: parameters, maximumPayloadBytes: limit,
                                                    backgroundAdmission: admission)
             try requirePhase(.ready)
             return result

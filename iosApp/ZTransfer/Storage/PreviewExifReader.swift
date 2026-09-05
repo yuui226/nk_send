@@ -58,8 +58,32 @@ final class PreviewExifFileReader: PreviewExifByteSource {
     }
 }
 
+/// Immutable, already-bounded camera header; never used for local descriptor reads.
+private final class PreviewExifHeaderReader: PreviewExifByteSource {
+    let data: Data
+    init(_ data: Data) { self.data = data }
+    func read(offset: Int64, count: Int32) -> KotlinByteArray? {
+        guard !Task.isCancelled, offset >= 0, offset <= Int64(data.count), count >= 0,
+              Int64(count) <= Int64(data.count) - offset else { return nil }
+        return NativePreviewExifRationalBridge.shared.bytes(data: data.subdata(in: Int(offset)..<(Int(offset) + Int(count))) as NSData)
+    }
+}
+
 /// ImageIO extraction only. Preview fields, Float/GPS fallback and locale rendering use shared.
 enum PreviewExifReader {
+    static func metadata(header: Data, locale: Locale = .current) throws -> PhotoExif? {
+        try Task.checkCancellation()
+        guard header.count >= 2, header.count <= 2 * 1024 * 1024 else { return nil }
+        let raw = NativePreviewExifRationalBridge.shared.readHeader(source: PreviewExifHeaderReader(header), size: Int64(header.count))
+        try Task.checkCancellation()
+        guard raw.complete || raw.partial else { return nil }
+        let source = CGImageSourceCreateWithData(header as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
+        let properties = source.flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) as? [String: Any] } ?? [:]
+        let result = metadata(properties, locale: locale, rawRationals: raw)
+        try Task.checkCancellation()
+        return result
+    }
+
     static func metadata(fileDescriptor: Int32, size: Int64, cancellation: PreviewExifReadCancellation, locale: Locale = .current) throws -> PhotoExif? {
         try Task.checkCancellation()
         guard !cancellation.isCancelled else { throw CancellationError() }

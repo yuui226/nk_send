@@ -85,10 +85,17 @@ public final class ExifRationalOracle {
         } catch (NumberFormatException invalid) { return null; }
     }
     static void check(byte[] bytes, String description) throws Exception {
+        check(bytes, description, false);
+    }
+    static void checkHeader(byte[] bytes, String description) throws Exception {
+        check(bytes, description, true);
+    }
+    static void check(byte[] bytes, String description, boolean header) throws Exception {
         ExifInterface android = new ExifInterface(new ByteArrayInputStream(bytes));
-        PreviewExifRationalValues actual = PreviewExifRationalReader.INSTANCE.read(
-            (offset, count) -> Arrays.copyOfRange(bytes, Math.toIntExact(offset), Math.toIntExact(offset) + count), bytes.length);
-        if (!actual.getComplete()) throw new AssertionError(description + ": incomplete reader");
+        PreviewExifByteSource source = (offset, count) -> Arrays.copyOfRange(bytes, Math.toIntExact(offset), Math.toIntExact(offset) + count);
+        PreviewExifRationalValues actual = header ? PreviewExifRationalReader.INSTANCE.readHeader(source, bytes.length)
+            : PreviewExifRationalReader.INSTANCE.read(source, bytes.length);
+        if (!actual.getComplete() && !(header && actual.getPartial())) throw new AssertionError(description + ": incomplete reader");
         NativePreviewExifValues expectedValues = new NativePreviewExifValues();
         NativePreviewExifValues actualValues = new NativePreviewExifValues();
         for (int i = 0; i < TAGS.length; i++) {
@@ -114,6 +121,13 @@ public final class ExifRationalOracle {
         }
     }
     public static void main(String[] args) throws Exception {
+        for (boolean little : new boolean[]{true,false}) {
+            byte[] full = tiff(List.of(new Tag(0x829D, 5, 1, 28, 10), new Tag(0x9204, 10, 1, -2, 3)), little);
+            for (byte[] container : new byte[][]{full, jpeg(full)}) {
+                for (int length = 8; length <= container.length; length++)
+                    checkHeader(Arrays.copyOf(container, length), "prefix little=" + little + " length=" + length);
+            }
+        }
         // Put alias-first before APP1s so each newly added gate is independently observed.
         check(jpeg(aliasDirectory(true)), "GPS visits EXIF alias first");
         check(jpeg(aliasDirectory(false)), "EXIF visits GPS alias first");

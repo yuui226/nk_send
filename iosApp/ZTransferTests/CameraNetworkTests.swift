@@ -2306,6 +2306,29 @@ final class CameraNetworkTests: XCTestCase {
         }
     }
 
+    func testCameraExifJpegHeaderDoesNotRequireImageEntropyOrFinalEoi() throws {
+        let jpeg = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: true)
+        let prefix = Data(jpeg.prefix(64)) // Complete APP1, no image scan data.
+        let result = try PreviewExifReader.metadata(header: prefix, locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(result?.exposureCompensation, "+0.1 EV")
+        XCTAssertNil(try PreviewExifReader.metadata(header: Data(repeating: 0, count: 32)))
+        XCTAssertNil(try PreviewExifReader.metadata(header: Data(repeating: 0, count: 2 * 1024 * 1024 + 1)))
+    }
+
+    func testCameraExifTiffPrefixKeepsApertureWhenLaterBiasDataIsMissing() throws {
+        var bytes = [UInt8](repeating: 0, count: 64)
+        func put(_ offset: Int, _ value: UInt32, _ width: Int) {
+            for i in 0..<width { bytes[offset + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) }
+        }
+        put(0, 0x4949, 2); put(2, 42, 2); put(4, 8, 4); put(8, 1, 2)
+        put(10, 0x8769, 2); put(12, 4, 2); put(14, 1, 4); put(18, 26, 4)
+        put(26, 2, 2); put(28, 0x829D, 2); put(30, 5, 2); put(32, 1, 4); put(36, 56, 4)
+        put(40, 0x9204, 2); put(42, 10, 2); put(44, 1, 4); put(48, 72, 4)
+        put(56, 28, 4); put(60, 10, 4)
+        let result = try PreviewExifReader.metadata(header: Data(bytes), locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(result?.aperture, "f/2.8"); XCTAssertNil(result?.exposureCompensation)
+    }
+
     private func previewExifJpegFixture() throws -> Data {
         let source = try XCTUnwrap(CGImageSourceCreateWithData(orientedPreviewFixture(width: 12, height: 8, orientation: 1) as CFData, nil))
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
@@ -2745,6 +2768,78 @@ final class CameraNetworkTests: XCTestCase {
         let state = await camera.snapshot()
         XCTAssertEqual(bytes, Data([1])); XCTAssertNil(missing); XCTAssertEqual(state.phase, .ready)
         await camera.abort()
+    }
+
+    func testExifHeaderUsesSharedPartialParametersForBothOriginalHeaderSizes() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data([1,2]))
+            + response(transaction: 4, payload: Data([3,4])))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        let jpeg = try await camera.exifHeader(handle: 7, maximumBytes: 128 * 1024)
+        let raw = try await camera.exifHeader(handle: 7, maximumBytes: 2 * 1024 * 1024)
+        XCTAssertEqual(jpeg, Data([1,2])); XCTAssertEqual(raw, Data([3,4]))
+        XCTAssertEqual(Array(wire.sent().suffix(2)), [
+            hex("2600000006000000010000003194" + "03000000" + "07000000" + "00000000" + "00000000" + "00000200" + "00000000"),
+            hex("2600000006000000010000003194" + "04000000" + "07000000" + "00000000" + "00000000" + "00002000" + "00000000")])
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .ready)
+        await camera.abort()
+    }
+
+    func testExifHeaderRejectedOrEmptyResponseIsMissWithoutRetryOrConnectionPoison() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, code: 0x2019)
+            + response(transaction: 4, code: 0x2005) + response(transaction: 5, code: 0x2009)
+            + response(transaction: 6) + response(transaction: 7, payload: Data()))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        for _ in 0..<5 {
+            let result = try await camera.exifHeader(handle: 7, maximumBytes: 128 * 1024)
+            XCTAssertNil(result)
+            let state = await camera.snapshot(); XCTAssertEqual(state.phase, .ready)
+        }
+        XCTAssertEqual(wire.sent().count, 8)
+        await camera.abort()
+    }
+
+    func testExifHeaderInvalidLimitNeverUsesWireAndMalformedTransactionClosesOwner() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 99, payload: Data([1])))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        for invalid in [Int32(0), -1, 2 * 1024 * 1024 + 1] {
+            await expect(.invalidArgument) { _ = try await camera.exifHeader(handle: 7, maximumBytes: invalid) }
+        }
+        XCTAssertEqual(wire.sent().count, 3)
+        let result = try await camera.exifHeader(handle: 7, maximumBytes: 128 * 1024)
+        XCTAssertNil(result)
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .closed)
+    }
+
+    func testCancelledExifRequestDoesNotInterruptAnotherActiveCameraTransaction() async throws {
+        let sent = expectation(description: "storage command active")
+        let storageRequest = hex("120000000600000001000000041003000000")
+        let wire = FakeCameraConnection(bytes: apOpeningReplies(), onSend: { if $0 == storageRequest { sent.fulfill() } })
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(repeating: 1, count: 16))
+        let active = Task { try await camera.storageIDs() }
+        await fulfillment(of: [sent], timeout: 1)
+        let cancelled = Task { try await camera.exifHeader(handle: 7, maximumBytes: 128 * 1024) }
+        await Task.yield(); cancelled.cancel()
+        do { _ = try await cancelled.value; XCTFail("Cancellation is not an EXIF cache miss") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        wire.feed(response(transaction: 3, payload: hex("0100000001000100")))
+        let stores = try await active.value
+        XCTAssertEqual(stores, [0x10001]); XCTAssertEqual(wire.sent().count, 4)
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .ready)
+        await camera.abort()
+    }
+
+    func testPreCancelledCameraHeaderParsingThrowsInsteadOfReturningPartialExif() async throws {
+        let jpeg = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: true)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try PreviewExifReader.metadata(header: Data(jpeg.prefix(64)))
+        }
+        do { _ = try await cancelled.value; XCTFail("Expected parsing cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
     }
 
     func testFhdSuccessPreventsLaterUnsupportedResponseFromLatchingOff() async throws {

@@ -19,4 +19,6 @@ object NativePreviewExifRationalBridge {
     }
     fun read(source: PreviewExifByteSource, size: Long): PreviewExifRationalValues =
         PreviewExifRationalReader.read(source, size)
+    fun readHeader(source: PreviewExifByteSource, size: Long): PreviewExifRationalValues =
+        PreviewExifRationalReader.readHeader(source, size)
 }

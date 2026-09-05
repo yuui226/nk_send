@@ -29,6 +29,51 @@ class PreviewExifRationalReaderTest {
     }
     private fun read(data: ByteArray) = PreviewExifRationalReader.read(
         PreviewExifByteSource { offset, count -> data.copyOfRange(offset.toInt(), offset.toInt() + count) }, data.size.toLong())
+    private fun header(data: ByteArray) = PreviewExifRationalReader.readHeader(
+        PreviewExifByteSource { offset, count -> data.copyOfRange(offset.toInt(), offset.toInt() + count) }, data.size.toLong())
+
+    @Test fun cameraPrefixKeepsEarlierValuesWithoutRelaxingLocalFileReads() {
+        val prefix = tiff(listOf(Tag(0x829D, 28, 10), Tag(0x9204, -2, 3, 10))).copyOf(64)
+        val raw = header(prefix); assertFalse(raw.complete); assertTrue(raw.partial)
+        assertEquals("2.8", raw.value(PreviewExifTag.F_NUMBER)); assertNull(raw.value(PreviewExifTag.EXPOSURE_BIAS_VALUE))
+        val strict = read(prefix); assertFalse(strict.complete); assertFalse(strict.partial)
+        val values = NativePreviewExifValues().apply { set(PreviewExifTag.F_NUMBER, "synthetic"); set(PreviewExifTag.LENS_MODEL, "lens") }
+        strict.applyTo(values); assertEquals("synthetic", values.attribute(PreviewExifTag.F_NUMBER))
+        raw.applyTo(values); assertEquals("2.8", values.attribute(PreviewExifTag.F_NUMBER))
+        assertEquals("lens", values.attribute(PreviewExifTag.LENS_MODEL))
+    }
+
+    @Test fun jpegPrefixRetainsOnlyPreviouslyCompleteExifSegments() {
+        val complete = jpeg(tiff(listOf(Tag(0x9204, -2, 3, 10))))
+        val prefix = complete.copyOf(complete.size - 2) + byteArrayOf(-1, -31, 0, 100)
+        val result = header(prefix); assertTrue(result.partial)
+        assertEquals("-2/3", result.value(PreviewExifTag.EXPOSURE_BIAS_VALUE))
+        assertFalse(read(prefix).partial)
+        val truncatedFirst = complete.copyOf(complete.size - 16)
+        assertTrue(header(truncatedFirst).partial)
+        assertNull(header(truncatedFirst).value(PreviewExifTag.EXPOSURE_BIAS_VALUE))
+    }
+
+    @Test fun sourceFailureAndCancellationAreNotAcceptedAsHeaderTruncation() {
+        val data = tiff(listOf(Tag(0x829D, 28, 10), Tag(0x9204, -2, 3, 10)))
+        val result = PreviewExifRationalReader.readHeader(PreviewExifByteSource { offset, count ->
+            if (offset == 72L) null else data.copyOfRange(offset.toInt(), offset.toInt() + count)
+        }, data.size.toLong())
+        assertFalse(result.complete); assertFalse(result.partial); assertNull(result.value(PreviewExifTag.F_NUMBER))
+        val cancelled = IllegalStateException("cancelled")
+        assertSame(cancelled, assertFailsWith<IllegalStateException> {
+            PreviewExifRationalReader.readHeader(PreviewExifByteSource { _, _ -> throw cancelled }, data.size.toLong())
+        })
+    }
+
+    @Test fun headerLimitsAndUnrecognizedSignaturesStayHardFailures() {
+        assertFalse(header(ByteArray(30)).partial)
+        assertFalse(header(byteArrayOf(73)).partial)
+        val result = PreviewExifRationalReader.readHeader(PreviewExifByteSource { offset, count ->
+            if (offset == 0L) byteArrayOf(-1, -40) else ByteArray(count) { -1 }
+        }, Long.MAX_VALUE)
+        assertFalse(result.complete); assertFalse(result.partial)
+    }
 
     private fun joined(vararg segments: ByteArray): ByteArray = byteArrayOf(-1, -40) +
         segments.fold(ByteArray(0)) { all, part -> val framed = jpeg(part); all + framed.copyOfRange(2, framed.size - 2) } + byteArrayOf(-1, -39)

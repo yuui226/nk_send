@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、160个XCTest场景及12项iOS位图Native测试，均待Mac编译/运行；575项共享测试、315项Android测试、157项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第三十八批3m 18s）。按用户定义，Windows可做工作全部结束为100%，当前粗估84%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、167个XCTest场景及12项iOS位图Native测试，均待Mac编译/运行；579项共享测试、315项Android测试、160项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第三十九批3m 8s）。按用户定义，Windows可做工作全部结束为100%，当前粗估85%；不等于iOS成品或真机验收进度。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -52,7 +52,7 @@ Debug页支持手动IP或STA Bonjour候选、AP/STA标准持续会话和显式�
 
 STA-direct、MPF/RAW预览、完整事件/自动入队、共享UI、遥控/完整GPS/效果/权益仍未完成。
 
-照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，160个XCTest也未在Mac运行。
+照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，167个XCTest也未在Mac运行。
 
 ### Mac 一键验收（M1）
 
@@ -190,3 +190,10 @@ PreviewExifPolicy提取Android原Float/字段回退/GPS/日期规则，保留惰
 原分数读取现遍历全部Exif APP1，并按AndroidX保留跨段已访问偏移与属性字节、使用最终字节序转换；补SubIFD/GPS/Interop类型及目录别名访问，避免首段独占或GPS被误读为EXIF。890项共享/Android测试、157项辅助检查、编译/Lint及2,845组实际AndroidX字段/可见值对照通过。33个App Swift/160个XCTest/12项Native位图测试仍待Mac，新增真实重复APP1 JPEG的保留/覆盖用例。
 
 Windows进度仍约84%。正式预览未启用；下一步处理相机截断文件头的部分EXIF结果，再接既有连接的读取和缓存。thumbnail/preview占用选择、RAW嵌入JPEG、异常文件和Apple真实解码差异仍待核验，不把本批对照范围扩大解释为全部EXIF兼容。
+
+
+### 相机EXIF读头与部分输入（第三十九批）
+
+现有CameraWiFiConnection增加EXIF分段读头，复用shared五参数和原串行会话；失败响应不重试，传输异常关闭失效owner，取消抛出。PreviewExifReader增加最多2MiB的不可变头部解析，shared显式保留截断前已读数值；原本地描述符路径保持严格。894项共享/Android测试、160项辅助检查、编译/Lint及3,197组实际AndroidX完整/截断样本对照通过；33个App Swift/167个XCTest/12项Native位图测试仍待Mac。
+
+Windows粗估85%。这两个输入端点还未接成正式预览；下一步将正负EXIF缓存放在跨重连的现有长期所有者上，并接Native读取会话。不能误放在连接级缩略图缓存，也不能将取消写成缓存miss。RAW嵌入JPEG/复杂目录/其它ImageIO字段、配对STA-direct及Apple真机行为继续待验。
