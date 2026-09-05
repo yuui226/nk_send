@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有32个App Swift文件、147个XCTest场景及12项iOS位图Native测试，均待Mac编译/运行；544项共享测试、311项Android测试、144项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第三十四批3m 37s）。按用户定义，Windows可做工作全部结束为100%，当前粗估82%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有32个App Swift文件、150个XCTest场景及12项iOS位图Native测试，均待Mac编译/运行；553项共享测试、315项Android测试、149项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第三十五批3m 20s）。按用户定义，Windows可做工作全部结束为100%，当前粗估83%；不等于iOS成品或真机验收进度。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -52,7 +52,7 @@ Debug页支持手动IP或STA Bonjour候选、AP/STA标准持续会话和显式�
 
 STA-direct、MPF/RAW预览、完整事件/自动入队、共享UI、遥控/完整GPS/效果/权益仍未完成。
 
-照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，147个XCTest也未在Mac运行。
+照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，150个XCTest也未在Mac运行。
 
 ### Mac 一键验收（M1）
 
@@ -164,3 +164,8 @@ Xcode 的第一个 Build Phase 会调用：
 ### 本地RAW真实输入适配（第三十四批）
 
 Native已沿用现有原片所有者，按共享16MiB索引与候选规则安全分段读取；按真实解码像素数选JPEG，等面积不替换，胜者保留完整尺寸与原方向。普通原片和RAW复用同一目录/文件描述符归属校验、预览请求槽与取消；畸形TIFF异常在Kotlin桥内隔离。855项共享/Android测试、144项辅助检查及编译/Lint通过；147个XCTest和12项Native位图测试仍待Mac。正式预览入口尚未启用，EXIF、完整会话与页面上下文仍需继续填充。
+
+
+### 原预览EXIF共享（第三十五批）
+
+PreviewExifPolicy提取Android原Float/字段回退/GPS/日期规则，保留惰性标签读取；Android只更改纯解析委托，不动缓存/相机/本地读取。Native值载体与专用数字适配已写，区别于相框元数据：只有EV使用ROOT，其余随Locale。868项共享/Android测试、149项辅助检查和编译/Lint通过；150个XCTest/12项Native位图测试仍待Mac。ImageIO属性/真实EXIF读头与缓存、正式完整预览会话仍需接入。

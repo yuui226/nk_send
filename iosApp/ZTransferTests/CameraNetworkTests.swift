@@ -2148,6 +2148,51 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertNil(NativePreviewImageBridge.shared.fhdPng(data: Data() as NSData))
     }
 
+    func testPreviewExifUsesSharedOriginalRulesAndSeparateRootExposureCompensation() throws {
+        let values = NativePreviewExifValues()
+        values.set(tag: .fNumber, value: "28/10")
+        values.set(tag: .exposureTime, value: "3/2")
+        values.set(tag: .exposureBiasValue, value: "2/3")
+        values.set(tag: .photographicSensitivity, value: "64")
+        values.set(tag: .focalLength, value: "85")
+        let result = try XCTUnwrap(NativePreviewExifBridge.shared.metadata(values: values,
+            formatter: ApplePreviewExifFormatter(locale: Locale(identifier: "fr_FR"))))
+        XCTAssertEqual(result.aperture, "f/2,8"); XCTAssertEqual(result.shutterSpeed, "1,5s")
+        XCTAssertEqual(result.exposureCompensation, "+0.7 EV"); XCTAssertEqual(result.iso, "ISO64")
+        XCTAssertEqual(result.focalLength, "85mm")
+    }
+
+    func testPreviewExifNativeValuesKeepApexDateAndCoordinateFallbacks() throws {
+        let values = NativePreviewExifValues()
+        values.set(tag: .apertureValue, value: "4")
+        values.set(tag: .exposureTime, value: "1/250")
+        values.set(tag: .datetimeOriginal, value: " ")
+        values.set(tag: .datetimeDigitized, value: " 2026:09:05 01:02:03 ")
+        values.set(tag: .lensModel, value: "  NIKKOR  ")
+        values.set(tag: .gpsLatitude, value: "[31/1,12/1,30/1]")
+        values.set(tag: .gpsLatitudeRef, value: "S")
+        values.set(tag: .gpsLongitude, value: "121.5")
+        values.set(tag: .gpsLongitudeRef, value: "W")
+        values.altitudeMeters = -15.5
+        let result = try XCTUnwrap(NativePreviewExifBridge.shared.metadata(values: values,
+            formatter: ApplePreviewExifFormatter(locale: Locale(identifier: "en_US_POSIX"))))
+        XCTAssertEqual(result.aperture, "f/4"); XCTAssertEqual(result.shutterSpeed, "1/250")
+        XCTAssertEqual(result.dateTime, " 2026:09:05 01:02:03 "); XCTAssertEqual(result.lensModel, "NIKKOR")
+        XCTAssertEqual(try XCTUnwrap(result.latitude).doubleValue, -(31 + 12.0 / 60 + 30.0 / 3600), accuracy: 0.00000001)
+        XCTAssertEqual(try XCTUnwrap(result.longitude).doubleValue, -121.5)
+        XCTAssertEqual(try XCTUnwrap(result.altitudeMeters).doubleValue, -15.5)
+    }
+
+    func testPreviewExifAppleFormatterGoldensKeepHalfUpNonfiniteAndNegativeZero() {
+        let formatter = ApplePreviewExifFormatter(locale: Locale(identifier: "en_US_POSIX"))
+        let cases: [(Float, Int32, String)] = [(2.5, 0, "3"), (-2.5, 0, "-3"),
+            (2.65, 1, "2.7"), (0, 1, "0.0"), (-0.0, 0, "-0"),
+            (.nan, 0, "NaN"), (.infinity, 1, "Infinity"), (-.infinity, 0, "-Infinity")]
+        for (value, digits, expected) in cases {
+            XCTAssertEqual(formatter.fixed(value: value, fractionDigits: digits, rootLocale: false), expected)
+        }
+    }
+
     private func rawIndexFixture(_ ranges: [(UInt32, UInt32)]) -> Data {
         var data = Data(repeating: 0, count: max(128, 8 + ranges.count * 40))
         func u16(_ at: Int, _ value: UInt16) { data[at] = UInt8(truncatingIfNeeded: value); data[at + 1] = UInt8(truncatingIfNeeded: value >> 8) }

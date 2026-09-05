@@ -19,6 +19,29 @@ final class ApplePhotoDecimalFormatter: NSObject, NativePhotoDecimalFormatter {
     }
 }
 
+/// Original preview Float rendering, separate from photo-frame Locale.US formatting.
+/// Branches/reciprocals/APEX/signs are shared; Apple rounding/localized digits need Mac goldens.
+final class ApplePreviewExifFormatter: NSObject, PreviewExifDecimalFormatter {
+    private let locale: Locale
+    init(locale: Locale = .current) { self.locale = locale; super.init() }
+
+    func fixed(value: Float, fractionDigits: Int32, rootLocale: Bool) -> String {
+        // Java Formatter spells these values independently of the default locale.
+        if value.isNaN { return "NaN" }
+        if value.isInfinite { return value < 0 ? "-Infinity" : "Infinity" }
+        let formatter = NumberFormatter()
+        formatter.locale = rootLocale ? Locale(identifier: "en_US_POSIX") : locale
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = false
+        formatter.minimumIntegerDigits = 1
+        formatter.maximumIntegerDigits = 309
+        formatter.minimumFractionDigits = Int(fractionDigits)
+        formatter.maximumFractionDigits = Int(fractionDigits)
+        formatter.roundingMode = .halfUp
+        return formatter.string(from: NSNumber(value: Double(value))) ?? String(value)
+    }
+}
+
 /// Reads ImageIO properties without decoding the full image or modifying the source. This is
 /// metadata extraction, not a RAW decoder, output EXIF writer, or permission to publish coordinates.
 actor PhotoMetadataReader {
