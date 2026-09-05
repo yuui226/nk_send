@@ -117,10 +117,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 // 视频扩展名：无高清封面，预览走"压暗缩略图 + 视频占位"分支。
 // 注意与 CameraViewModel.VIDEO_EXTENSIONS（封面黑边兜底）保持同步。
-private val VIDEO_EXTENSIONS = setOf(".mov", ".mp4")
 private const val PREVIEW_DEFERRED_LOAD_DELAY_MS = 340L
-private const val FHD_REVEAL_DURATION_MS = 300L
-private const val FHD_REVEAL_FRAME_MS = 16L
 private const val FOUR_GIB_BYTES = 4L * 1024L * 1024L * 1024L
 private const val PREVIEW_QUEUE_SWIPE_TRIGGER_DP = 96f
 private const val PREVIEW_QUEUE_FLIGHT_DURATION_MS = 560
@@ -315,7 +312,7 @@ internal fun PhotoPreviewOverlay(
     ) {
         value = null
         if (histogramVisible && histogramSource != null &&
-            currentFile.extension !in VIDEO_EXTENSIONS
+            currentFile.extension !in PREVIEW_VIDEO_EXTENSIONS
         ) {
             value = withContext(Dispatchers.Default) {
                 calculateLuminanceHistogram(histogramSource.asAndroidBitmap())
@@ -622,7 +619,7 @@ internal fun PhotoPreviewOverlay(
         val localUri = sessionLocalOriginalUriFor(file)
         val localPreviewRoute = localOriginalPreviewRoute(file.extension)
         // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
-        if (file.extension in VIDEO_EXTENSIONS) {
+        if (file.extension in PREVIEW_VIDEO_EXTENSIONS) {
             fhdUnavailable[h] = true
             return false
         }
@@ -1091,7 +1088,7 @@ internal fun PhotoPreviewOverlay(
         }
 
         if (histogramVisible && currentFile != null &&
-            currentFile.extension !in VIDEO_EXTENSIONS
+            currentFile.extension !in PREVIEW_VIDEO_EXTENSIONS
         ) {
             previewHistogram?.let { histogram ->
                 HistogramOverlay(
@@ -1342,7 +1339,7 @@ internal fun PhotoPreviewOverlay(
                             },
                         )
                     }
-                    if (current.extension !in VIDEO_EXTENSIONS) {
+                    if (current.extension !in PREVIEW_VIDEO_EXTENSIONS) {
                         PreviewHistogramButton(
                             active = histogramVisible,
                             onClick = {
@@ -1421,30 +1418,8 @@ private fun BurstCollectionPreviewPage(
     stackMotionProgress: () -> Float = { 0f },
     onTap: () -> Unit
 ) {
-    val a11y = stringResource(R.string.burst_collection_a11y, collection.files.size)
-    LaunchedEffect(isCurrent) {
-        if (isCurrent) onZoomedChange(false)
-    }
-
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxSize()
-            .semantics { contentDescription = a11y }
-            .pointerInput(collection.id) {
-                detectTapGestures(onTap = { onTap() })
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        val stackSize = minOf(maxWidth * 0.72f, maxHeight * 0.46f, 360.dp)
-        BurstCollectionStack(
-            files = collection.files,
-            cameraViewModel = cameraViewModel,
-            loadEnabled = loadEnabled,
-            stackSize = stackSize,
-            stackMotionProgress = stackMotionProgress,
-            modifier = Modifier.size(stackSize),
-        )
-    }
+    SharedPreviewBurstPage(collection, remember(cameraViewModel) { AndroidPreviewBurstContent(cameraViewModel) },
+        loadEnabled, isCurrent, onZoomedChange, stackMotionProgress, onTap)
 }
 
 /**
@@ -1459,60 +1434,8 @@ private fun BurstCollectionStack(
     stackMotionProgress: () -> Float = { 0f },
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier = modifier) {
-        val stackFiles = files.take(3).reversed()
-        val stackInset = stackSize * 0.07f + 6.dp
-        val stackSpreadPx = with(LocalDensity.current) { 6.dp.toPx() }
-        stackFiles.forEachIndexed { index, file ->
-            val last = stackFiles.lastIndex
-            val rotation = when (stackFiles.size) {
-                1 -> 0f
-                2 -> if (index == 0) -5f else 3f
-                else -> when (index) {
-                    0 -> -6f
-                    1 -> 5f
-                    else -> 0f
-                }
-            }
-            val x = when {
-                index == last -> 0.dp
-                index % 2 == 0 -> (-12).dp
-                else -> 12.dp
-            }
-            val spreadDirection = when {
-                index == last -> 0f
-                index % 2 == 0 -> -1f
-                else -> 1f
-            }
-            BurstStackPhoto(
-                file = file,
-                cameraViewModel = cameraViewModel,
-                transfersBusy = false,
-                loadEnabled = loadEnabled,
-                showPlaceholderIcon = index == last,
-                modifier = Modifier
-                    .fillMaxSize(0.86f)
-                    .align(Alignment.Center)
-                    .offset(x = x, y = if (index == last) 2.dp else 5.dp)
-                    .graphicsLayer {
-                        val motion = stackMotionProgress().coerceIn(0f, 1f)
-                        rotationZ = rotation
-                        translationX = spreadDirection * stackSpreadPx * motion
-                        val motionScale = 1f + 0.012f * motion
-                        scaleX = motionScale
-                        scaleY = motionScale
-                    }
-            )
-        }
-
-        BurstCollectionBadge(
-            count = files.size,
-            iconSize = 16.dp,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .offset(x = stackInset, y = stackInset)
-        )
-    }
+    SharedPreviewBurstStack(files, remember(cameraViewModel) { AndroidPreviewBurstContent(cameraViewModel) },
+        loadEnabled, stackSize, stackMotionProgress, modifier)
 }
 
 /** 当前合集叠片沿单张预览完全相同的弧线收进队列胶囊。 */
@@ -1605,33 +1528,7 @@ private fun BurstCollectionNavigationButton(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    val colors = AppTheme.colors
-    val description = stringResource(if (expand) R.string.cd_expand else R.string.cd_collapse)
-    GlassButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.size(44.dp),
-        shape = CircleShape,
-        contentPadding = PaddingValues(0.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .semantics { contentDescription = description },
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = if (expand) {
-                    Icons.Default.ChevronRight
-                } else {
-                    Icons.Default.ChevronLeft
-                },
-                contentDescription = null,
-                tint = colors.accentBlue,
-                modifier = Modifier.size(25.dp),
-            )
-        }
-    }
+    SharedPreviewBurstNavigationButton(expand, enabled, onClick, AndroidPreviewPageText)
 }
 
 /**
@@ -1643,57 +1540,7 @@ private fun ExifMetadataBar(
     exif: PhotoExif,
     modifier: Modifier = Modifier
 ) {
-    val colors = AppTheme.colors
-    val parts = listOfNotNull(
-        exif.aperture,
-        exif.shutterSpeed,
-        exif.iso,
-        exif.exposureCompensation,
-        exif.focalLength,
-    )
-    if (parts.isEmpty()) return
-    val text = parts.joinToString("\u2009·\u2009")
-    val textMeasurer = rememberTextMeasurer(cacheSize = 4)
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = colors.glassSurfaceHeavy,
-        shadowElevation = 4.dp,
-        border = BorderStroke(1.dp, colors.glassPanelBorder),
-        modifier = modifier
-    ) {
-        BoxWithConstraints {
-            val horizontalPadding = 14.dp
-            val availableWidthPx = with(LocalDensity.current) {
-                (maxWidth - horizontalPadding * 2).coerceAtLeast(0.dp).roundToPx()
-            }
-            val baseStyle = MaterialTheme.typography.labelLarge
-            val textStyle = remember(text, availableWidthPx, baseStyle) {
-                listOf(
-                    baseStyle,
-                    baseStyle.copy(fontSize = 13.sp, lineHeight = 18.sp),
-                    baseStyle.copy(fontSize = 12.sp, lineHeight = 17.sp),
-                    baseStyle.copy(fontSize = 11.sp, lineHeight = 16.sp),
-                ).firstOrNull { candidate ->
-                    textMeasurer.measure(
-                        text = AnnotatedString(text),
-                        style = candidate,
-                        maxLines = 1,
-                        softWrap = false,
-                    ).size.width <= availableWidthPx
-                } ?: baseStyle.copy(fontSize = 11.sp, lineHeight = 16.sp)
-            }
-            Text(
-                text = text,
-                style = textStyle,
-                color = colors.onBackground,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Clip,
-                modifier = Modifier.padding(horizontal = horizontalPadding, vertical = 10.dp),
-            )
-        }
-    }
+    SharedPreviewExifMetadataBar(exif, modifier)
 }
 
 /** Preview-styled switch around the monitor page's shared histogram icon and analysis overlay. */
@@ -1736,22 +1583,7 @@ private fun TransferQueueButton(
     modifier: Modifier = Modifier,
     buttonSize: Dp = 44.dp
 ) {
-    val colors = AppTheme.colors
-    GlassButton(
-        onClick = onClick,
-        modifier = modifier.size(buttonSize),
-        shape = CircleShape,
-        contentPadding = PaddingValues(0.dp)
-    ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = Icons.Default.Add,
-                contentDescription = stringResource(R.string.cd_transfer),
-                tint = colors.accentBlue,
-                modifier = Modifier.size(buttonSize * 0.5f)
-            )
-        }
-    }
+    SharedPreviewTransferQueueButton(onClick, AndroidPreviewPageText, modifier, buttonSize)
 }
 
 // 普通预览至少允许 4x；本地原图会按实际像素动态提高上限，确保能够查看到 1:1 细节。
@@ -1769,142 +1601,39 @@ private fun PreviewPage(
     onZoomedChange: (Boolean) -> Unit,
     onTap: () -> Unit
 ) {
-    // 预览通常由一个已经显示缩略图的可见格子打开。同步复用同一份内存缓存，确保
-    // overlay 第一帧就有画面；缓存未命中时才异步走磁盘/相机兜底。
-    var thumbnail by remember(file.handle) {
-        mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
-    }
-    // 取过仍为 null → 该文件确实没有缩略图（如部分视频）。
-    var noThumb by remember(file.handle) { mutableStateOf(false) }
-    LaunchedEffect(file.handle, loadEnabled, allowRemoteThumbnailFallback) {
-        if (loadEnabled && thumbnail == null && !noThumb) {
-            val t = cameraViewModel.loadThumbnail(
-                file = file,
-                allowRemote = allowRemoteThumbnailFallback,
-            )
-            if (t != null) thumbnail = t
-            else if (allowRemoteThumbnailFallback) noThumb = true
-        }
-    }
+    SharedPhotoPreviewPage(file = file, images = remember(cameraViewModel) { AndroidPreviewPageImages(cameraViewModel) },
+        text = AndroidPreviewPageText, uptimeMillis = { SystemClock.uptimeMillis() }, fhdBitmap = fhdBitmap,
+        isLoadingFhd = isLoadingFhd, allowRemoteThumbnailFallback = allowRemoteThumbnailFallback,
+        loadEnabled = loadEnabled, rotationDegrees = rotationDegrees, isCurrent = isCurrent,
+        onDisplayBitmapChanged = onDisplayBitmapChanged, onZoomedChange = onZoomedChange, onTap = onTap)
+}
 
-    // FHD 到位后覆盖在缩略图上淡入。缩略图在过渡完成前始终保持不透明，避免两张图
-    // 的有效画面边界略有差异时交叉淡出露出背景，视觉上只发生一次连续的“变清晰”。
-    var fhdAlpha by remember(file.handle) { mutableFloatStateOf(0f) }
-    LaunchedEffect(fhdBitmap) {
-        if (fhdBitmap != null) {
-            if (thumbnail == null) {
-                fhdAlpha = 1f
-            } else {
-                // FHD 是否可见不能依赖 Compose 动画帧时钟：部分设备上该时钟可能不推进，
-                // Animatable 会一直停在 0，造成 FHD 已加载却始终被透明隐藏。
-                fhdAlpha = 0f
-                val startedAt = SystemClock.uptimeMillis()
-                while (isActive) {
-                    val elapsed = SystemClock.uptimeMillis() - startedAt
-                    val linearProgress =
-                        (elapsed.toFloat() / FHD_REVEAL_DURATION_MS).coerceIn(0f, 1f)
-                    fhdAlpha = FastOutSlowInEasing.transform(linearProgress)
-                    if (linearProgress >= 1f) break
-                    delay(FHD_REVEAL_FRAME_MS)
-                }
-            }
-        } else {
-            fhdAlpha = 0f
-        }
-    }
+private class AndroidPreviewPageImages(private val cameraViewModel: CameraViewModel) : PreviewPageImages {
+    override fun cached(handle: Int): ImageBitmap? = cameraViewModel.cachedThumbnail(handle)
+    override suspend fun thumbnail(file: CameraFileInfo, allowRemote: Boolean): ImageBitmap? =
+        cameraViewModel.loadThumbnail(file = file, allowRemote = allowRemote)
+}
 
-    val displayBitmap = fhdBitmap ?: thumbnail
-    LaunchedEffect(displayBitmap, isCurrent) {
-        if (isCurrent) onDisplayBitmapChanged(displayBitmap)
-    }
-    val isVideo = file.extension in VIDEO_EXTENSIONS
-    SharedZoomablePreviewViewport(
-        imageSize = displayBitmap?.let { IntSize(it.width, it.height) },
-        stateKey = file.handle,
-        rotationDegrees = rotationDegrees,
-        isCurrent = isCurrent,
-        zoomEnabled = !isVideo && displayBitmap != null,
-        onZoomedChange = onZoomedChange,
-        onTap = onTap,
-    ) { imageTransform ->
-        val thumb = thumbnail  // 本地变量，delegate 属性无法被编译器 smart cast
-        // 若 FHD 比缩略图先到，直接显示 FHD；不能等待 LaunchedEffect 下一帧再 snap，
-        // 否则仍会产生一帧全透明图片区。
-        val effectiveFhdAlpha = if (thumb == null) 1f else fhdAlpha
-        val anyLoading = isLoadingFhd || (!noThumb && thumbnail == null)
-        when {
-            isVideo -> {
-                // 视频无高清封面：缩略图压暗当背景 + 居中毛玻璃信息卡，明确暂不支持播放，
-                // 同时复用 ObjectInfo 已有的大小与拍摄时间，不为占位页增加相机请求。
-                // 而非把糊掉的小缩略图硬撑满屏当"预览"。
-                if (thumb != null) {
-                    Image(
-                        bitmap = thumb,
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)))
-                val metadata = videoPreviewMetadata(
-                    fileSize = file.size,
-                    captureDate = file.captureDate,
-                    overFourGbLabel = stringResource(R.string.video_size_over_4gb),
-                )
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = Color.Black.copy(alpha = 0.45f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                    ) {
-                        Text(
-                            stringResource(R.string.video_no_preview),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White,
-                        )
-                        if (metadata.isNotEmpty()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = metadata,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Color.White.copy(alpha = 0.76f),
-                                textAlign = TextAlign.Center,
-                            )
-                        }
-                    }
-                }
-            }
-            displayBitmap != null -> {
-                // 图像栈（缩略图淡出 + FHD 淡入）统一套用缩放/平移变换。
-                Box(modifier = imageTransform) {
-                    if (thumb != null && (fhdBitmap == null || effectiveFhdAlpha < 1f)) {
-                        Image(
-                            bitmap = thumb,
-                            contentDescription = file.fileName.takeIf { fhdBitmap == null },
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                    if (fhdBitmap != null) {
-                        Image(
-                            bitmap = fhdBitmap,
-                            contentDescription = file.fileName,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                            alpha = effectiveFhdAlpha
-                        )
-                    }
+private object AndroidPreviewPageText : PreviewPageText {
+    @Composable override fun videoMetadata(file: CameraFileInfo): String = videoPreviewMetadata(
+        fileSize = file.size, captureDate = file.captureDate,
+        overFourGbLabel = stringResource(R.string.video_size_over_4gb),
+    )
+    @Composable override fun videoUnavailable(): String = stringResource(R.string.video_no_preview)
+    @Composable override fun noPreview(): String = stringResource(R.string.no_preview)
+    @Composable override fun navigationDescription(expand: Boolean): String =
+        stringResource(if (expand) R.string.cd_expand else R.string.cd_collapse)
+    @Composable override fun transferDescription(): String = stringResource(R.string.cd_transfer)
+}
 
-                }
-            }
-            anyLoading -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
-            noThumb -> Text(stringResource(R.string.no_preview), color = DarkOnSurfaceVariant)
-            else -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
-        }
+private class AndroidPreviewBurstContent(private val cameraViewModel: CameraViewModel) : PreviewBurstContent {
+    @Composable override fun accessibility(count: Int): String = stringResource(R.string.burst_collection_a11y, count)
+    @Composable override fun Photo(file: CameraFileInfo, loadEnabled: Boolean, showPlaceholderIcon: Boolean, modifier: Modifier) {
+        BurstStackPhoto(file = file, cameraViewModel = cameraViewModel, transfersBusy = false,
+            loadEnabled = loadEnabled, showPlaceholderIcon = showPlaceholderIcon, modifier = modifier)
+    }
+    @Composable override fun Badge(count: Int, iconSize: Dp, modifier: Modifier) {
+        BurstCollectionBadge(count = count, iconSize = iconSize, modifier = modifier)
     }
 }
 
