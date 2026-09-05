@@ -188,4 +188,11 @@ def extract_photo_preview_session(source):
                 'NIKON_RAW_EXTENSIONS', 'TIFF_EXTENSIONS', 'PtpConstants', 'kotlinx.coroutines.flow.StateFlow')):
             imports = replace_once(imports, line, '')
     shared = HEADER + imports + ''.join(constants) + '\n' + shared + ghost
+    # Batch 42: both platform inputs delegate to one local-route rule. Original IO/date/UI stay here.
+    android = replace_once(android, '''internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewRoute = when {
+    extension in NIKON_RAW_EXTENSIONS -> LocalOriginalPreviewRoute.RAW_EMBEDDED_JPEG
+    extension in TIFF_EXTENSIONS -> LocalOriginalPreviewRoute.CAMERA_FHD
+    else -> LocalOriginalPreviewRoute.DIRECT_BITMAP
+}''', '''internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewRoute =
+    originalLocalPreviewRoute(extension)''')
     return android, add_async_preview_enqueue(shared.rstrip() + '\n'), CONTRACT

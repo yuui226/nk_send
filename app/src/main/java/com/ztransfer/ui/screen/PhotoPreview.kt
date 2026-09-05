@@ -121,11 +121,8 @@ import kotlinx.coroutines.flow.StateFlow
 // 注意与 CameraViewModel.VIDEO_EXTENSIONS（封面黑边兜底）保持同步。
 private const val FOUR_GIB_BYTES = 4L * 1024L * 1024L * 1024L
 
-internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewRoute = when {
-    extension in NIKON_RAW_EXTENSIONS -> LocalOriginalPreviewRoute.RAW_EMBEDDED_JPEG
-    extension in TIFF_EXTENSIONS -> LocalOriginalPreviewRoute.CAMERA_FHD
-    else -> LocalOriginalPreviewRoute.DIRECT_BITMAP
-}
+internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewRoute =
+    originalLocalPreviewRoute(extension)
 
 /** PTP DateTime（YYYYMMDDThhmmss…）转为预览页使用的稳定本地格式。 */
 internal fun formatPreviewCaptureDate(raw: String?): String? {

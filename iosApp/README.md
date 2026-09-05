@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、178个XCTest场景及12项iOS位图Native测试，均待Mac编译/运行；590项共享测试、315项Android测试、169项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十一批2m 27s）。按用户定义，Windows可做工作全部结束为100%，当前粗估87%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、178个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；593项共享测试、315项Android测试、173项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十二批3m 26s）。按用户定义，Windows可做工作全部结束为100%，当前粗估87%；不等于iOS成品或真机验收进度。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -210,3 +210,11 @@ Windows粗估85%。这两个输入端点还未接成正式预览；下一步将�
 沿Android真实调度补齐FHD＋EXIF整段交互登记：现有PTP事务通道只让下一下载分块等待，不打断正在发送的数据；普通控制命令仍可执行。原连接负责可嵌套令牌，Native会话和文件页负责注册期限、取消/换页/关闭及迟到令牌释放，没有新建相机或队列。整段括号已备，完整PreviewSessionSource和正式目录入口继续组装，尚未宣称完整预览可用。
 
 Windows：905项共享/Android测试、169项辅助检查、3,197组实际AndroidX样本及编译/Lint通过（2m 27s）；Android产品与打包脚本本批未改。33个App Swift/178个XCTest/12项Native位图测试仍待Mac。粗估87%按Windows可写工作口径，Apple编译/并发/真机验收不包含在通过结果中。
+
+### 完整Native预览源与三语言原文（第四十二批）
+
+NativePreviewSessionSource已实现原共享overlay的全部图片/EXIF/缓存/优先窗口/直方图/时钟输入；工厂借用现有文件模型和网格，冻结打开时来源，关闭只结束自身读取。Android与Native共同调用原本地选图路由，NEF/NRW与TIFF路径不混用；Android仅将该规则改为共享委托，其余预览正文、日期格式和IO保持。
+
+NativePreviewTextCatalog的10条英/简/繁原文已备并与Android资源对照；视频信息格式回调仍是后续接点。完整overlay还未接到目录入口，旋转/直方图偏好及原打开/返回定位编排继续实现，不把平台源已写当完整页面已运行。
+
+Windows908项测试、173项辅助检查、3,197组实际AndroidX样本和编译/Lint通过（3m 26s）；33个App Swift/178个XCTest/17项Native预览与位图测试仍待Mac。当前估计保持87%，Android版本、相机协议、服务和打包脚本未改；未打包、未推送。

@@ -3,6 +3,8 @@ package com.ztransfer.ui
 import com.ztransfer.protocol.CameraFileInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import com.ztransfer.ui.screen.LocalOriginalPreviewRoute
+import com.ztransfer.viewmodel.PhotoExif
 import kotlin.test.*
 
 /** Real Skia decoding and shared grid-cache identity; Mac-only, not a Windows pass. */
@@ -16,6 +18,19 @@ class NativePreviewBitmapsIosTest {
         var data: ByteArray? = png()
         val remotes = mutableListOf<Boolean>()
         var fhdReads = 0; var localReads = 0; var rawReads = 0; var ended = 0
+        var exifReads = 0; var localExifReads = 0
+        var priorityDepth = 0
+        val ordered = mutableListOf<String>()
+        override fun beginPreviewPriority(sessionId: Long, requestId: Long, completion: NativePreviewPriorityCompletion) {
+            priorityDepth++; ordered += "priority"; completion.complete(true)
+        }
+        override fun endPreviewPriority(sessionId: Long, requestId: Long) { priorityDepth--; ordered += "release" }
+        override fun readExif(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativePreviewExifCompletion) {
+            exifReads++; ordered += "exif"; completion.complete(PhotoExif("f/4", null, null, null))
+        }
+        override fun readLocalExif(sessionId: Long, requestId: Long, file: CameraFileInfo, source: String, completion: NativePreviewExifCompletion) {
+            localExifReads++; completion.complete(PhotoExif("f/8", null, null, null))
+        }
         override fun readBrowsePreferences() = NativeBrowsePreferences.defaults()
         override fun saveBrowsePreferences(value: NativeBrowsePreferences) = true
         override fun currentDayKey() = 20260905
@@ -34,7 +49,7 @@ class NativePreviewBitmapsIosTest {
         override fun cancelPreviewRead(sessionId: Long, requestId: Long) {}
         override fun endPreviewReads(sessionId: Long) { ended++ }
         override fun readFhdPreview(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativeFhdPreviewCompletion) {
-            fhdReads++; completion.complete(ownedFhdPreviewPng(png()))
+            fhdReads++; ordered += "fhd"; completion.complete(ownedFhdPreviewPng(png()))
         }
         override fun readLocalBitmap(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
             localReads++; completion.complete(ownedLocalPreviewPng(png()))
@@ -53,6 +68,83 @@ class NativePreviewBitmapsIosTest {
     }
     private fun reads(p: Platform) = NativePreviewReadSession(1, p, { it == file }, Dispatchers.Unconfined,
         isFrozenLocalSource = { f, source -> f == file && source == "frozen" })
+
+    @Test fun sourceFactoryRequiresExistingReadBridgeAndEndsOnlyItsOwnLifetime() {
+        val p = Platform(); val m = model(p); val grid = NativeGridImages(m)
+        assertNull(NativePreviewSessionSource.open(m, grid, listOf(file)))
+        assertEquals(0, p.ended); assertTrue(m.queue.connected.value)
+        assertTrue(m.attachPreviewReads(p))
+        val source = assertNotNull(NativePreviewSessionSource.open(m, grid, listOf(file)))
+        assertNull(source.localSource(file))
+        source.close(); assertEquals(1, p.ended); assertTrue(m.queue.connected.value)
+        m.close(); assertEquals(1, p.ended); grid.close()
+    }
+
+    @Test fun completePlatformSourceBorrowsCacheAndBracketsActualImageAndExifReads() = runBlocking {
+        val p = Platform(); val m = model(p); val grid = NativeGridImages(m)
+        val cached = assertNotNull(grid.thumbnail(file, true))
+        val source = NativePreviewSessionSource(reads(p), grid, m.queue.connected, listOf(file), emptyMap())
+        source.setFhdActive(true)
+        assertSame(cached, source.cached(file.handle)); assertSame(cached, source.thumbnail(file, false))
+        val result = source.withInteractivePreviewPriority {
+            assertEquals(1, p.priorityDepth)
+            assertEquals(2, assertNotNull(source.loadFhdPreview(file)).width)
+            assertEquals("f/4", source.loadExif(file)?.aperture)
+            assertEquals(1, p.priorityDepth)
+            42
+        }
+        assertEquals(42, result); assertEquals(listOf("priority", "fhd", "exif", "release"), p.ordered)
+        assertEquals(0, p.priorityDepth)
+        source.setFhdActive(false); source.close()
+        assertEquals(1, p.ended); assertSame(cached, grid.cached(file)); assertTrue(m.queue.connected.value)
+        assertNull(source.loadFhdPreview(file)); assertNull(source.loadExif(file)); assertNull(source.cached(file.handle))
+        grid.close(); m.close()
+    }
+
+    @Test fun completeSourceKeepsLocalIdentityFrozenAndServesLocalImageAndExifOffline() = runBlocking {
+        val p = Platform(); val m = model(p); val grid = NativeGridImages(m)
+        val locations = mutableMapOf(file to "frozen")
+        val source = NativePreviewSessionSource(reads(p), grid, m.queue.connected, listOf(file), locations)
+        locations[file] = "new"; m.queue.setConnected(false)
+        assertEquals("frozen", source.localSource(file))
+        assertNull(source.localSource(file.copy(size = 999)))
+        assertEquals(2, assertNotNull(source.decodeLocal("frozen", LocalOriginalPreviewRoute.DIRECT_BITMAP)).width)
+        assertEquals("f/8", source.loadLocalExif(file, "frozen")?.aperture)
+        assertNull(source.decodeLocal("new", LocalOriginalPreviewRoute.DIRECT_BITMAP))
+        assertNull(source.loadLocalExif(file.copy(size = 999), "frozen"))
+        assertNull(source.loadLocalExif(file, "new"))
+        assertEquals(1, p.localReads); assertEquals(1, p.localExifReads); assertEquals(0, p.fhdReads)
+        assertTrue(p.ordered.isEmpty())
+        source.close(); assertNull(source.localSource(file)); grid.close(); m.close()
+    }
+
+    @Test fun completeSourceUsesRawReaderButNeverDecodesTiffLocally() = runBlocking {
+        val p = Platform(); val m = model(p); val grid = NativeGridImages(m)
+        val raw = file.copy(handle = 2, fileName = "A.NEF")
+        val tiff = file.copy(handle = 3, fileName = "A.TIFF")
+        val sources = mapOf(raw to "raw", tiff to "tiff")
+        val reads = NativePreviewReadSession(1, p, { true }, Dispatchers.Unconfined,
+            isFrozenLocalSource = { f, locator -> sources[f] == locator })
+        val source = NativePreviewSessionSource(reads, grid, m.queue.connected, listOf(raw, tiff), sources)
+        assertEquals(2, assertNotNull(source.decodeLocal("raw", source.localRoute(raw.extension))).width)
+        assertNull(source.decodeLocal("raw", LocalOriginalPreviewRoute.DIRECT_BITMAP))
+        assertNull(source.decodeLocal("tiff", source.localRoute(tiff.extension)))
+        assertNull(source.decodeLocal("tiff", LocalOriginalPreviewRoute.DIRECT_BITMAP))
+        assertEquals(1, p.rawReads); assertEquals(0, p.localReads); assertEquals(0, p.fhdReads)
+        source.close(); grid.close(); m.close()
+    }
+
+    @Test fun completeSourceHistogramUsesItsActualPixelsAndMonotonicUptime() {
+        val p = Platform(); val m = model(p); val grid = NativeGridImages(m)
+        val source = NativePreviewSessionSource(reads(p), grid, m.queue.connected, listOf(file), emptyMap())
+        val bitmap = assertNotNull(decodeNativePreviewBitmap(png()))
+        val histogram = source.histogram(bitmap)
+        val expected = FloatArray(256).also { it[53] = 1f; it[182] = 1f }
+        assertContentEquals(expected, histogram.bins)
+        val first = source.uptimeMillis(); assertTrue(first >= 0); assertTrue(source.uptimeMillis() >= first)
+        assertTrue(p.ordered.isEmpty()); assertTrue(p.remotes.isEmpty())
+        source.close(); grid.close(); m.close()
+    }
 
     @Test fun realDecodeKeepsPixelsAliveAfterTemporarySkiaImageIsClosed() {
         val bitmap = assertNotNull(decodeNativePreviewBitmap(png(), 2, 1))
