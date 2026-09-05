@@ -85,7 +85,7 @@ class LocalExifWiringTest(unittest.TestCase):
         session = source('shared/src/commonMain/kotlin/com/ztransfer/ui/NativePreviewReadSession.kt')
         local = session.split('suspend fun localExif(', 1)[1].split('private suspend fun', 1)[0]
         self.assertIn('localSource?.invoke(file, source) == true', local)
-        self.assertIn('bridge.readLocalExif(sessionId, request, source', local)
+        self.assertIn('bridge.readLocalExif(sessionId, request, file, source', local)
         self.assertEqual(1, session.count('val request = ++nextRequest'))
         bridge = source('iosApp/ZTransfer/UI/OriginalFilesPage.swift')
         local = bridge.split('func readLocalExif(', 1)[1].split('func endPreviewReads', 1)[0]

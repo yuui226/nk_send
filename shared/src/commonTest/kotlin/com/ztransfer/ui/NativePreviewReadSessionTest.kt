@@ -14,7 +14,11 @@ class NativePreviewReadSessionTest {
         val locals = linkedMapOf<Long, NativeLocalPreviewCompletion>()
         val raws = linkedMapOf<Long, NativeLocalPreviewCompletion>()
         val exifs = linkedMapOf<Long, NativePreviewExifCompletion>()
-        override fun readLocalExif(sessionId: Long, requestId: Long, source: String, completion: NativePreviewExifCompletion) {
+        val remoteExifs = linkedMapOf<Long, NativePreviewExifCompletion>()
+        override fun readExif(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativePreviewExifCompletion) {
+            remoteExifs[requestId] = completion
+        }
+        override fun readLocalExif(sessionId: Long, requestId: Long, file: CameraFileInfo, source: String, completion: NativePreviewExifCompletion) {
             exifs[requestId] = completion
         }
         override fun readLocalRaw(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
@@ -49,6 +53,46 @@ class NativePreviewReadSessionTest {
             for (i in 0..3) bytes[offset+i] = (value ushr (24 - 8*i)).toByte()
         }
         return bytes
+    }
+
+    @Test fun remoteExifCanQueryOfflineCacheButRejectsUnknownOrChangedFiles() {
+        val p = Platform(); var known = true
+        val s = NativePreviewReadSession(7, p, { false }, Dispatchers.Unconfined,
+            isKnownExifFile = { known && it == file })
+        val cached = com.ztransfer.viewmodel.PhotoExif("f/4", null, null, null)
+        assertNull(Pending { s.exif(file.copy(size = 99)) }.result!!.getOrThrow())
+        assertTrue(p.remoteExifs.isEmpty())
+        val first = Pending { s.exif(file) }; p.remoteExifs[1]!!.complete(cached)
+        assertSame(cached, first.result!!.getOrThrow()); assertTrue(p.reads.isEmpty())
+        val late = Pending { s.exif(file) }; known = false
+        p.remoteExifs[2]!!.complete(cached); assertNull(late.result!!.getOrThrow())
+        s.close()
+    }
+
+    @Test fun remoteAndLocalExifShareImageSlotsAndCancelDoesNotCompleteAnotherRequest() {
+        val p = Platform()
+        val s = NativePreviewReadSession(7, p, { true }, Dispatchers.Unconfined, isFrozenLocalSource = { _, _ -> true })
+        val first = Pending { s.exif(file) }; first.job.cancel()
+        val jobs = List(32) { i -> Pending { if (i % 2 == 0) s.exif(file) else s.localExif(file, "owned") } }
+        assertNull(Pending { s.fhd(file) }.result!!.getOrThrow())
+        assertTrue(p.remoteExifs.keys.intersect(p.exifs.keys).isEmpty())
+        p.remoteExifs[1]!!.complete(com.ztransfer.viewmodel.PhotoExif("late", null, null, null))
+        assertTrue(first.result!!.isFailure); assertTrue(jobs.all { it.result == null })
+        s.close(); assertTrue(jobs.all { it.result!!.isFailure })
+        assertEquals(listOf(7L), p.ended)
+    }
+
+    @Test fun remoteExifDeadlineReleasesSlotAndLateReplyCannotPublish() {
+        val p = Platform(); val clock = ManualDeadline()
+        val s = NativePreviewReadSession(7, p, { true }, clock)
+        val first = Pending { s.exif(file) }; clock.expire()
+        assertNull(first.result!!.getOrThrow()); assertFalse(first.job.isCancelled)
+        assertEquals(listOf(7L to 1L), p.cancelled)
+        val next = Pending { s.exif(file) }
+        p.remoteExifs[1]!!.complete(com.ztransfer.viewmodel.PhotoExif("late", null, null, null))
+        assertNull(next.result)
+        p.remoteExifs[2]!!.complete(null); assertNull(next.result!!.getOrThrow())
+        s.close()
     }
 
     @Test fun localExifUsesFrozenSourceOfflineAndCannotTriggerImageOrCameraRead() {

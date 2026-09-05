@@ -49,6 +49,7 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published private(set) var scanningCatalog = false
     @Published private(set) var catalogStatus = ""
     private var previewStore: CameraPreviewStore?
+    private let exifCache = NativePreviewExifCache()
     private let imageDecoder = PreviewImageDecoder()
     private let filterRenderer = PhotoFilterPreviewRenderer()
     private var previewTask: Task<Void, Never>?
@@ -344,7 +345,7 @@ final class CameraHandshakeProbe: ObservableObject {
         queuePage?.close(); queuePage = nil
         filesPage?.close()
         let page = OriginalFilesPageBridge(connectionID: connection.connectionID, catalog: catalog,
-            queue: queue, previews: previews, stationMode: connection.stationMode)
+            queue: queue, previews: previews, exifSource: connection, exifCache: exifCache, stationMode: connection.stationMode)
         filesPage = page
         Task {
             let snapshot = await queue.snapshot()

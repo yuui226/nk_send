@@ -34,7 +34,182 @@ import XCTest
     func complete(acceptedCount: Int32) { count = acceptedCount }
 }
 
+@MainActor private final class PreviewExifCompletionProbe: NSObject, NativePreviewExifCompletion {
+    let done: XCTestExpectation
+    private(set) var value: PhotoExif?
+    private(set) var count = 0
+    init(_ done: XCTestExpectation) { self.done = done; super.init(); done.assertForOverFulfill = true }
+    func complete(exif: PhotoExif?) { value = exif; count += 1; done.fulfill() }
+}
+
+private actor FakeExifSource: CameraExifSource {
+    enum Reply: Sendable { case bytes(Data), missing, failure }
+    let reply: Reply
+    let holdFirst: Bool
+    let onRequest: (() -> Void)?
+    private var calls: [(Int32, Int32)] = []
+    private var held: CheckedContinuation<Void, Never>?
+    init(_ reply: Reply, holdFirst: Bool = false, onRequest: (() -> Void)? = nil) {
+        self.reply = reply; self.holdFirst = holdFirst; self.onRequest = onRequest
+    }
+    func exifHeader(handle: Int32, maximumBytes: Int32) async throws -> Data? {
+        calls.append((handle, maximumBytes))
+        if holdFirst && calls.count == 1 { await withCheckedContinuation { held = $0; onRequest?() } }
+        else if calls.count == 1 { onRequest?() }
+        try Task.checkCancellation()
+        switch reply { case .bytes(let data): return data; case .missing: return nil; case .failure: throw CameraStreamError.timedOut }
+    }
+    func requests() -> [(Int32, Int32)] { calls }
+    func release() { held?.resume(); held = nil }
+}
+
 final class CameraNetworkTests: XCTestCase {
+    @MainActor private func exifPage(_ cache: NativePreviewExifCache, source: CameraExifSource, root: URL,
+                                     handle: Int32 = 7, name: String = "sample.JPG", size: Int = 7)
+        throws -> (page: OriginalFilesPageBridge, file: CameraFileInfo, queue: CameraOriginalQueue) {
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let page = OriginalFilesPageBridge(connectionID: camera.connectionID,
+            catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
+            previews: CameraPreviewStore(source: camera), exifSource: source, exifCache: cache, stationMode: true)
+        var bytes = Data(repeating: 0, count: 52)
+        bytes[0] = 1; bytes[2] = 1; bytes[4] = 1; bytes[5] = 0x38
+        for i in 0..<4 { bytes[8 + i] = UInt8(truncatingIfNeeded: size >> (8 * i)) }
+        bytes.append(UInt8(name.utf16.count + 1))
+        for unit in name.utf16 { bytes.append(UInt8(unit & 255)); bytes.append(UInt8(unit >> 8)) }
+        bytes.append(contentsOf: [0,0,0])
+        let info = try XCTUnwrap(PtpIPChannel.objectInfo(handle: handle, payload: bytes))
+        let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file
+        page.setConnected(true)
+        let catalog = CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 0, storageIDs: [0x10001],
+            files: [file], objectInfos: [handle: info], totalHandles: 1, metadataComplete: true, changedWhileScanning: false)
+        XCTAssertTrue(page.acceptCatalog(catalog, sequence: page.model.beginScan()))
+        page.beginPreviewReads(sessionId: 1)
+        return (page, file, queue)
+    }
+
+    @MainActor func testExifCacheSurvivesPageAndConnectionReplacementAndServesLocalOffline() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = NativePreviewExifCache()
+        let data = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: true)
+        let firstSource = FakeExifSource(.bytes(data))
+        let first = try exifPage(cache, source: firstSource, root: root)
+        let done = PreviewExifCompletionProbe(expectation(description: "remote EXIF"))
+        first.page.readExif(sessionId: 1, requestId: 1, file: first.file, completion: done)
+        await fulfillment(of: [done.done], timeout: 3)
+        XCTAssertEqual(done.value?.exposureCompensation, "+0.1 EV"); XCTAssertEqual(done.count, 1)
+        let calls = await firstSource.requests(); XCTAssertEqual(calls.count, 1); XCTAssertEqual(calls.first?.1, 128 * 1024)
+        first.page.close()
+        let secondSource = FakeExifSource(.failure)
+        let second = try exifPage(cache, source: secondSource, root: root, handle: 9)
+        defer { second.page.close() }
+        second.page.setConnected(false)
+        let local = PreviewExifCompletionProbe(expectation(description: "local cached EXIF"))
+        second.page.readLocalExif(sessionId: 1, requestId: 1, file: second.file, source: "file:///not-opened/sample.JPG", completion: local)
+        await fulfillment(of: [local.done], timeout: 1)
+        XCTAssertEqual(local.value?.exposureCompensation, "+0.1 EV")
+        let offline = PreviewExifCompletionProbe(expectation(description: "offline cached EXIF"))
+        second.page.readExif(sessionId: 1, requestId: 2, file: second.file, completion: offline)
+        await fulfillment(of: [offline.done], timeout: 1)
+        XCTAssertEqual(offline.value?.exposureCompensation, "+0.1 EV")
+        let laterCalls = await secondSource.requests(); XCTAssertTrue(laterCalls.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testExifNegativeCacheDistinguishesFailedAttemptAndSuppressesLocalRetry() async throws {
+        for reply in [FakeExifSource.Reply.missing, .failure] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let cache = NativePreviewExifCache(), source = FakeExifSource(reply)
+            let context = try exifPage(cache, source: source, root: root)
+            defer { context.page.close() }
+            XCTAssertNil(cache.cached(file: context.file))
+            let remote = PreviewExifCompletionProbe(expectation(description: "negative remote"))
+            context.page.readExif(sessionId: 1, requestId: 1, file: context.file, completion: remote)
+            await fulfillment(of: [remote.done], timeout: 3)
+            XCTAssertNil(try XCTUnwrap(cache.cached(file: context.file)).value)
+            let local = PreviewExifCompletionProbe(expectation(description: "negative local"))
+            context.page.readLocalExif(sessionId: 1, requestId: 2, file: context.file, source: "file:///not-opened/sample.JPG", completion: local)
+            await fulfillment(of: [local.done], timeout: 1)
+            XCTAssertNil(local.value)
+            let calls = await source.requests(); XCTAssertEqual(calls.count, 1)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+        }
+    }
+
+    @MainActor func testOfflineExifMissIsNotCachedButUnsupportedFormatIsCachedWithoutIo() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = NativePreviewExifCache(), source = FakeExifSource(.missing)
+        let context = try exifPage(cache, source: source, root: root)
+        defer { context.page.close() }
+        context.page.setConnected(false)
+        let offline = PreviewExifCompletionProbe(expectation(description: "offline miss"))
+        context.page.readExif(sessionId: 1, requestId: 1, file: context.file, completion: offline)
+        await fulfillment(of: [offline.done], timeout: 1)
+        XCTAssertNil(cache.cached(file: context.file))
+        let noCalls = await source.requests(); XCTAssertTrue(noCalls.isEmpty)
+        context.page.setConnected(true)
+        let retry = PreviewExifCompletionProbe(expectation(description: "connected attempt"))
+        context.page.readExif(sessionId: 1, requestId: 2, file: context.file, completion: retry)
+        await fulfillment(of: [retry.done], timeout: 3)
+        XCTAssertNotNil(cache.cached(file: context.file))
+        let unsupportedSource = FakeExifSource(.failure)
+        let video = try exifPage(cache, source: unsupportedSource, root: root, name: "sample.MOV")
+        defer { video.page.close() }
+        video.page.setConnected(false)
+        let unsupported = PreviewExifCompletionProbe(expectation(description: "unsupported"))
+        video.page.readExif(sessionId: 1, requestId: 1, file: video.file, completion: unsupported)
+        await fulfillment(of: [unsupported.done], timeout: 1)
+        XCTAssertNil(try XCTUnwrap(cache.cached(file: video.file)).value)
+        let videoCalls = await unsupportedSource.requests(); XCTAssertTrue(videoCalls.isEmpty)
+    }
+
+    @MainActor func testCancelledExifRequestDoesNotCreateNegativeEntryAndCanRetry() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let began = expectation(description: "EXIF source held")
+        let data = try rawBiasJpegFixture(numerator: -2, denominator: 3, little: true)
+        let source = FakeExifSource(.bytes(data), holdFirst: true, onRequest: { began.fulfill() })
+        let cache = NativePreviewExifCache(), context = try exifPage(cache, source: source, root: root)
+        defer { context.page.close() }
+        let first = PreviewExifCompletionProbe(expectation(description: "cancelled result"))
+        context.page.readExif(sessionId: 1, requestId: 1, file: context.file, completion: first)
+        await fulfillment(of: [began], timeout: 3)
+        context.page.cancelPreviewRead(sessionId: 1, requestId: 1)
+        await source.release()
+        await fulfillment(of: [first.done], timeout: 3)
+        XCTAssertNil(cache.cached(file: context.file))
+        let next = PreviewExifCompletionProbe(expectation(description: "retry result"))
+        context.page.readExif(sessionId: 1, requestId: 2, file: context.file, completion: next)
+        await fulfillment(of: [next.done], timeout: 3)
+        XCTAssertEqual(next.value?.exposureCompensation, "-0.7 EV")
+        let calls = await source.requests(); XCTAssertEqual(calls.count, 2)
+    }
+
+    @MainActor func testLocalExifPopulatesSameCacheBeforeRemoteRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let data = try previewExifJpegFixture(), url = root.appendingPathComponent("sample.JPG")
+        try data.write(to: url)
+        let cache = NativePreviewExifCache(), source = FakeExifSource(.failure)
+        let context = try exifPage(cache, source: source, root: root, size: data.count)
+        defer { context.page.close() }
+        _ = try await context.queue.originals(since: -1, rescan: true)
+        let local = PreviewExifCompletionProbe(expectation(description: "local EXIF"))
+        context.page.readLocalExif(sessionId: 1, requestId: 1, file: context.file, source: url.absoluteString, completion: local)
+        await fulfillment(of: [local.done], timeout: 3)
+        XCTAssertEqual(local.value?.aperture, "f/4")
+        let remote = PreviewExifCompletionProbe(expectation(description: "same cached metadata"))
+        context.page.readExif(sessionId: 1, requestId: 2, file: context.file, completion: remote)
+        await fulfillment(of: [remote.done], timeout: 1)
+        XCTAssertEqual(remote.value?.aperture, "f/4")
+        let calls = await source.requests(); XCTAssertTrue(calls.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: url), data)
+    }
+
     private func fillCatalog(_ id: UUID, handles: [Int32], dated: Bool = false,
                              complete: Bool = true, changed: Bool = false) throws -> CameraCatalogSnapshot {
         let queue = NativeOriginalTransferQueue()
@@ -588,7 +763,7 @@ final class CameraNetworkTests: XCTestCase {
         let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
         let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
             catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
-            previews: CameraPreviewStore(source: camera), stationMode: true)
+            previews: CameraPreviewStore(source: camera), exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true)
         bridge.setConnected(true)
         let info = try sampleInfo(7)
         let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file
@@ -720,7 +895,7 @@ final class CameraNetworkTests: XCTestCase {
         let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
         let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
             catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
-            previews: CameraPreviewStore(source: camera), stationMode: true)
+            previews: CameraPreviewStore(source: camera), exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true)
         bridge.setConnected(true)
         let info = try sampleInfo(7)
         let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file
@@ -742,7 +917,7 @@ final class CameraNetworkTests: XCTestCase {
         let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
         let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
             catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
-            previews: CameraPreviewStore(source: camera), stationMode: true)
+            previews: CameraPreviewStore(source: camera), exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true)
         bridge.setConnected(true)
         let info = try sampleInfo(7)
         let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file

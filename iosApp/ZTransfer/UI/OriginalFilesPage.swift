@@ -12,6 +12,8 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private let catalog: CameraCatalog
     private let queue: CameraOriginalQueue
     private let previews: CameraPreviewStore
+    private let exifSource: CameraExifSource
+    private let exifCache: NativePreviewExifCache
     private let decoder = PreviewImageDecoder()
     private let preferences: BrowsePreferencesStore
     private var refreshTask: Task<Void, Never>?
@@ -32,9 +34,11 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private var closed = false
     private(set) lazy var model = NativeFilesPageModel(connectionId: connectionID.uuidString, queue: queuePage.model, platform: self)
 
-    init(connectionID: UUID, catalog: CameraCatalog, queue: CameraOriginalQueue, previews: CameraPreviewStore, stationMode: Bool,
+    init(connectionID: UUID, catalog: CameraCatalog, queue: CameraOriginalQueue, previews: CameraPreviewStore,
+         exifSource: CameraExifSource, exifCache: NativePreviewExifCache, stationMode: Bool,
          preferences: BrowsePreferencesStore? = nil) {
         self.connectionID = connectionID; self.catalog = catalog; self.queue = queue; self.previews = previews
+        self.exifSource = exifSource; self.exifCache = exifCache
         self.preferences = preferences ?? BrowsePreferencesStore()
         queuePage = OriginalQueuePageBridge(connectionID: connectionID, queue: queue, previews: previews, stationMode: stationMode)
         super.init()
@@ -269,10 +273,52 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         }
     }
 
-    func readLocalExif(sessionId: Int64, requestId: Int64, source: String, completion: NativePreviewExifCompletion) {
+    func readExif(sessionId: Int64, requestId: Int64, file: CameraFileInfo, completion: NativePreviewExifCompletion) {
+        let key = "\(sessionId):\(requestId)"
+        guard !closed, requestId > 0, previewUse?.session == sessionId,
+              filesByHandle[file.handle] == file, previewRequests[key] == nil, previewRequests.count < 32 else {
+            completion.complete(exif: nil); return
+        }
+        if let cached = exifCache.cached(file: file) { completion.complete(exif: cached.value); return }
+        let maximum = NativePreviewExifPolicy.shared.headerBytes(file: file)
+        if maximum == 0 { exifCache.remember(file: file, exif: nil); completion.complete(exif: nil); return }
+        // An unavailable camera is not a failed attempt, and must not poison the stable key.
+        guard connected, let use = previewUse else { completion.complete(exif: nil); return }
+        previewRequests[key] = Task { [weak self] in
+            guard let self else { completion.complete(exif: nil); return }
+            defer { self.previewRequests.removeValue(forKey: key) }
+            do {
+                _ = await use.task.value
+                try Task.checkCancellation()
+                guard !self.closed, self.connected, self.previewUse?.session == sessionId,
+                      self.filesByHandle[file.handle] == file else { completion.complete(exif: nil); return }
+                let data = try await self.exifSource.exifHeader(handle: file.handle, maximumBytes: maximum)
+                try Task.checkCancellation()
+                let exif: PhotoExif?
+                if let data { exif = try await self.decoder.exifMetadata(data) } else { exif = nil }
+                try Task.checkCancellation()
+                guard !self.closed, self.previewUse?.session == sessionId,
+                      self.filesByHandle[file.handle] == file else { completion.complete(exif: nil); return }
+                self.exifCache.remember(file: file, exif: exif)
+                completion.complete(exif: exif)
+            } catch {
+                if !Task.isCancelled, !(error is CancellationError), !self.closed,
+                   self.previewUse?.session == sessionId, self.filesByHandle[file.handle] == file {
+                    self.exifCache.remember(file: file, exif: nil)
+                }
+                completion.complete(exif: nil)
+            }
+        }
+    }
+
+    func readLocalExif(sessionId: Int64, requestId: Int64, file: CameraFileInfo, source: String, completion: NativePreviewExifCompletion) {
         let key = "\(sessionId):\(requestId)"
         guard !closed, requestId > 0, previewUse?.session == sessionId,
               previewRequests[key] == nil, previewRequests.count < 32 else { completion.complete(exif: nil); return }
+        if let cached = exifCache.cached(file: file) { completion.complete(exif: cached.value); return }
+        if NativePreviewExifPolicy.shared.headerBytes(file: file) == 0 {
+            exifCache.remember(file: file, exif: nil); completion.complete(exif: nil); return
+        }
         previewRequests[key] = Task { [weak self] in
             guard let self else { completion.complete(exif: nil); return }
             defer { self.previewRequests.removeValue(forKey: key) }
@@ -281,8 +327,14 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
                 let exif = try await self.queue.originalExif(locator: source)
                 try Task.checkCancellation()
                 guard !self.closed, self.previewUse?.session == sessionId else { completion.complete(exif: nil); return }
+                self.exifCache.remember(file: file, exif: exif)
                 completion.complete(exif: exif)
-            } catch { completion.complete(exif: nil) }
+            } catch {
+                if !Task.isCancelled, !(error is CancellationError), !self.closed, self.previewUse?.session == sessionId {
+                    self.exifCache.remember(file: file, exif: nil)
+                }
+                completion.complete(exif: nil)
+            }
         }
     }
 

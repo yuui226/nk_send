@@ -37,7 +37,10 @@ interface NativePreviewReadPlatform {
     fun readLocalRaw(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
         completion.complete(null)
     }
-    fun readLocalExif(sessionId: Long, requestId: Long, source: String, completion: NativePreviewExifCompletion) {
+    fun readLocalExif(sessionId: Long, requestId: Long, file: CameraFileInfo, source: String, completion: NativePreviewExifCompletion) {
+        completion.complete(null)
+    }
+    fun readExif(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativePreviewExifCompletion) {
         completion.complete(null)
     }
     fun cancelPreviewRead(sessionId: Long, requestId: Long)
@@ -52,11 +55,13 @@ class NativePreviewReadSession internal constructor(
     private val uiContext: CoroutineContext = Dispatchers.Main.immediate,
     private val timeoutMillis: Long = 30_000L,
     isFrozenLocalSource: (CameraFileInfo, String) -> Boolean = { _, _ -> false },
+    isKnownExifFile: (CameraFileInfo) -> Boolean = isCurrentFile,
 ) {
     private var closed = false
     private var owner: NativePreviewReadPlatform? = platform
     private var currentFile: ((CameraFileInfo) -> Boolean)? = isCurrentFile
     private var localSource: ((CameraFileInfo, String) -> Boolean)? = isFrozenLocalSource
+    private var knownExifFile: ((CameraFileInfo) -> Boolean)? = isKnownExifFile
     private var nextRequest = 0L
     private val pending = HashMap<Long, CancellableContinuation<*>>()
 
@@ -98,7 +103,18 @@ class NativePreviewReadSession internal constructor(
     suspend fun localExif(file: CameraFileInfo, source: String): PhotoExif? = read(
         allowed = { localSource?.invoke(file, source) == true },
         start = { bridge, request, reply ->
-            bridge.readLocalExif(sessionId, request, source, object : NativePreviewExifCompletion {
+            bridge.readLocalExif(sessionId, request, file, source, object : NativePreviewExifCompletion {
+                override fun complete(exif: PhotoExif?) = reply(exif)
+            })
+        },
+    )
+
+    /** May return cached metadata offline; the platform must not start an offline wire request. */
+    @Throws(CancellationException::class)
+    suspend fun exif(file: CameraFileInfo): PhotoExif? = read(
+        allowed = { knownExifFile?.invoke(file) == true },
+        start = { bridge, request, reply ->
+            bridge.readExif(sessionId, request, file, object : NativePreviewExifCompletion {
                 override fun complete(exif: PhotoExif?) = reply(exif)
             })
         },
@@ -139,7 +155,7 @@ class NativePreviewReadSession internal constructor(
     fun close() {
         if (closed) return
         closed = true
-        val bridge = owner; owner = null; currentFile = null; localSource = null
+        val bridge = owner; owner = null; currentFile = null; localSource = null; knownExifFile = null
         pending.values.toList().forEach { it.cancel() }
         pending.clear()
         bridge?.endPreviewReads(sessionId)

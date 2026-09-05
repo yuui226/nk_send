@@ -146,6 +146,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         return NativePreviewReadSession(++nextPreviewSession, owner,
             isCurrentFile = { file -> !closed && queue.connected.value && currentFiles[file.handle] == file },
             isFrozenLocalSource = { file, source -> !closed && frozenSources[file] == source },
+            isKnownExifFile = { file -> !closed && currentFiles[file.handle] == file },
         ).also { previewReads = it }
     }
 

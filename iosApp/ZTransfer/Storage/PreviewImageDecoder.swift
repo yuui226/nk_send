@@ -8,6 +8,10 @@ enum PreviewImageError: Error { case invalidImage, invalidSize }
 /// Decodes away from the main actor. Bounded thumbnails/FHD are separate from full-size originals.
 /// Encoded files are not modified. This does not replace the original RAW/MPF/video extraction rules.
 actor PreviewImageDecoder {
+    func exifMetadata(_ header: Data) throws -> PhotoExif? {
+        try PreviewExifReader.metadata(header: header)
+    }
+
     /// Bounds-only candidate probe, equivalent to Android inJustDecodeBounds; no RAW render.
     nonisolated static func rawPreviewPixels(_ data: Data) throws -> Int64 {
         try Task.checkCancellation()
