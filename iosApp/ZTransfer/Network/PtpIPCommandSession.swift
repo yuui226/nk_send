@@ -31,6 +31,7 @@ struct PtpIPStreamResult {
 actor PtpIPCommandSession {
     private struct Waiter {
         let id: UUID
+        let transferSlice: Bool
         let continuation: CheckedContinuation<Void, Error>
     }
     private let stream: CameraTCPStream
@@ -38,6 +39,7 @@ actor PtpIPCommandSession {
     private var lastTransactionId: Int32
     private var busy = false
     private var waiters: [Waiter] = []
+    private var interactiveUses = Set<UUID>()
     private var terminalError: Error?
 
     init(stream: CameraTCPStream, initialTransactionId: Int32) {
@@ -140,7 +142,13 @@ actor PtpIPCommandSession {
               (0...0xFFFF).contains(operationCode), parameters.count <= 5 else {
             throw CameraStreamError.invalidArgument
         }
-        try await acquire(requireIdle: false)
+        while true {
+            try await acquire(requireIdle: false, transferSlice: true)
+            // The resumed slice rechecks on this actor, with no further suspension before TID
+            // assignment. A window may have opened while it was resuming from the FIFO.
+            if interactiveUses.isEmpty { break }
+            release()
+        }
         defer { release() }
         try Task.checkCancellation()
         if let terminalError { throw terminalError }
@@ -211,7 +219,26 @@ actor PtpIPCommandSession {
 
     func isClosed() -> Bool { terminalError != nil }
 
-    private func acquire(requireIdle: Bool) async throws {
+    /// A priority window does not hold the socket. Ordinary commands remain FIFO; only the
+    /// next download slice waits, including the gap between current-page FHD and EXIF.
+    func beginInteractivePreview() throws -> UUID {
+        try Task.checkCancellation()
+        if let terminalError { throw terminalError }
+        let token = UUID()
+        interactiveUses.insert(token)
+        return token
+    }
+
+    func endInteractivePreview(_ token: UUID) {
+        guard interactiveUses.remove(token) != nil else { return }
+        if !busy { release() }
+    }
+
+    #if DEBUG
+    func pendingTransferSliceCount() -> Int { waiters.filter(\.transferSlice).count }
+    #endif
+
+    private func acquire(requireIdle: Bool, transferSlice: Bool = false) async throws {
         try Task.checkCancellation()
         let id = UUID()
         try await withTaskCancellationHandler(operation: {
@@ -222,11 +249,11 @@ actor PtpIPCommandSession {
                     continuation.resume(throwing: CancellationError())
                 } else if let terminalError {
                     continuation.resume(throwing: terminalError)
-                } else if busy {
+                } else if busy || (transferSlice && !interactiveUses.isEmpty) {
                     if requireIdle {
                         continuation.resume(throwing: CameraStreamError.operationInProgress)
                     } else {
-                        waiters.append(Waiter(id: id, continuation: continuation))
+                        waiters.append(Waiter(id: id, transferSlice: transferSlice, continuation: continuation))
                     }
                 } else {
                     busy = true
@@ -242,8 +269,10 @@ actor PtpIPCommandSession {
     }
 
     private func release() {
-        if terminalError == nil, !waiters.isEmpty {
-            waiters.removeFirst().continuation.resume()
+        if terminalError == nil,
+           let index = waiters.firstIndex(where: { !$0.transferSlice || interactiveUses.isEmpty }) {
+            busy = true
+            waiters.remove(at: index).continuation.resume()
         } else {
             busy = false
         }
@@ -252,6 +281,7 @@ actor PtpIPCommandSession {
     private func terminate(_ error: Error) {
         guard terminalError == nil else { return }
         terminalError = error
+        interactiveUses.removeAll()
         stream.close()
         let pending = waiters
         waiters.removeAll()

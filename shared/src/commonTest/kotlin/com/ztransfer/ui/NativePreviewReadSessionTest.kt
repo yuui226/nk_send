@@ -15,6 +15,12 @@ class NativePreviewReadSessionTest {
         val raws = linkedMapOf<Long, NativeLocalPreviewCompletion>()
         val exifs = linkedMapOf<Long, NativePreviewExifCompletion>()
         val remoteExifs = linkedMapOf<Long, NativePreviewExifCompletion>()
+        val priorities = linkedMapOf<Long, NativePreviewPriorityCompletion>()
+        val releasedPriorities = mutableListOf<Pair<Long, Long>>()
+        override fun beginPreviewPriority(sessionId: Long, requestId: Long, completion: NativePreviewPriorityCompletion) {
+            priorities[requestId] = completion
+        }
+        override fun endPreviewPriority(sessionId: Long, requestId: Long) { releasedPriorities += sessionId to requestId }
         override fun readExif(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativePreviewExifCompletion) {
             remoteExifs[requestId] = completion
         }
@@ -53,6 +59,66 @@ class NativePreviewReadSessionTest {
             for (i in 0..3) bytes[offset+i] = (value ushr (24 - 8*i)).toByte()
         }
         return bytes
+    }
+
+    @Test fun onePriorityWindowCoversBothCurrentPageReadsAndReturnsTheirResult() {
+        val p = Platform(); val s = session(p)
+        val task = Pending { s.withInteractivePriority { s.fhd(file); s.exif(file); 42 } }
+        assertTrue(p.reads.isEmpty()); assertTrue(p.remoteExifs.isEmpty())
+        p.priorities[1]!!.complete(true)
+        assertEquals(setOf(2L), p.reads.keys); assertTrue(p.releasedPriorities.isEmpty())
+        p.reads[2]!!.complete(null)
+        assertEquals(setOf(3L), p.remoteExifs.keys); assertTrue(p.releasedPriorities.isEmpty())
+        p.remoteExifs[3]!!.complete(null)
+        assertEquals(42, task.result!!.getOrThrow())
+        assertEquals(listOf(7L to 1L), p.releasedPriorities)
+        p.priorities[1]!!.complete(true); assertEquals(1, p.releasedPriorities.size)
+        s.close()
+    }
+
+    @Test fun deniedOrExpiredPriorityNeverRunsAnUnprioritizedBlockAndReleasesLateLease() {
+        for (expire in listOf(false, true)) {
+            val p = Platform(); val clock = ManualDeadline()
+            val s = NativePreviewReadSession(7, p, { true }, clock)
+            var entered = false
+            val task = Pending { s.withInteractivePriority { entered = true } }
+            if (expire) clock.expire() else p.priorities[1]!!.complete(false)
+            assertTrue(task.result!!.exceptionOrNull() is CancellationException); assertFalse(entered)
+            p.priorities[1]!!.complete(true); assertFalse(entered)
+            assertEquals(listOf(7L to 1L), p.releasedPriorities)
+            assertEquals(if (expire) listOf(7L to 1L) else emptyList(), p.cancelled)
+            s.close()
+        }
+    }
+
+    @Test fun priorityReleaseRunsForFailureAndCancellationDuringItsFhdRead() {
+        for (cancel in listOf(false, true)) {
+            val p = Platform(); val s = session(p)
+            val failure = IllegalStateException("fixture")
+            val task = Pending { s.withInteractivePriority { if (cancel) s.fhd(file) else throw failure } }
+            p.priorities[1]!!.complete(true)
+            if (cancel) task.job.cancel()
+            if (cancel) assertTrue(task.result!!.exceptionOrNull() is CancellationException)
+            else {
+                // JVM coroutine stack recovery can copy the exception and retain its cause.
+                val actual = assertIs<IllegalStateException>(task.result!!.exceptionOrNull())
+                assertEquals(failure.message, actual.message)
+                assertSame(failure, generateSequence<Throwable>(actual) { it.cause }.last())
+            }
+            assertEquals(listOf(7L to 1L), p.releasedPriorities)
+            assertEquals(if (cancel) listOf(7L to 2L) else emptyList(), p.cancelled)
+            assertTrue(p.ended.isEmpty()); s.close()
+        }
+    }
+
+    @Test fun closingWhilePriorityRegistrationIsPendingRejectsLateGrantAndNewWindows() {
+        val p = Platform(); val s = session(p); var entered = false
+        val first = Pending { s.withInteractivePriority { entered = true } }
+        s.close(); p.priorities[1]!!.complete(true)
+        assertFalse(entered); assertTrue(first.result!!.isFailure)
+        assertEquals(listOf(7L), p.ended); assertEquals(listOf(7L to 1L), p.releasedPriorities)
+        assertTrue(Pending { s.withInteractivePriority { entered = true } }.result!!.isFailure)
+        assertFalse(entered); assertEquals(1, p.priorities.size)
     }
 
     @Test fun remoteExifCanQueryOfflineCacheButRejectsUnknownOrChangedFiles() {

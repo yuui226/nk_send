@@ -2,6 +2,7 @@
 from pathlib import Path
 import subprocess
 import unittest
+from preview_priority_wiring import without_priority_connection
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = '42f4678'
@@ -18,7 +19,7 @@ def baseline(path):
 class RemoteExifWiringTest(unittest.TestCase):
     def test_whole_connection_only_adds_exif_and_generalizes_existing_preview_parameters(self):
         path = 'iosApp/ZTransfer/Network/CameraWiFiConnection.swift'
-        text = current(path)
+        text = without_priority_connection(current(path))
         start = text.index('    /// Same partial-object command as Android readExifHeader.')
         end = text.index('    private func previewCommand(operation: Int32, parameters:', start)
         text = text[:start] + text[end:]

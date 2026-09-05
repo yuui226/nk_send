@@ -6,9 +6,9 @@
 
 - Android 功能基线：`55876fa`，1.81 / 54；用户已验证此前包的 USB、STA。
 - 已有：共享协议/模型/规则、Xcode薄壳及Apple侧标准连接→目录→原片下载→沙盒保存/系统分享/图库导入的源码链路；不是已运行的成品。
-- 已有网络/传输/保存/GPS/照片适配源码；CMP原组件/完整队列正文/完整缩略图网格已共享，Android真实接入；iOS真实原片队列已接同一正文，完整标准目录/缩略图/入队已接同一网格，可从Debug连接页打开验收；沙盒真实原片索引/已保存徽标已接，原筛选结果/日期/存储卡及未传输退场已接；列数/连拍合并和持久筛选已接；完整预览/其余设置及Files provider索引仍待接。真实机身隔离的缩略图磁盘缓存/完整目录清理和连接级后台填充/日期优先/传输让路已接。原单图预览/缩放手势/旋转按钮已共享且Android实际调用，iOS真实图片探针已接；分页/连拍/来源快照和上滑意图纯规则已共享；原单页/FHD渐显/连拍堆叠/EXIF信息条和操作按钮已共享；原预览/遥控共用直方图统计、绘制、图标及预览开关已共享；完整分页/FHD/EXIF/邻页预取与取消/连拍切换/入队飞行协调器已迁SharedPhotoPreviewOverlay并由Android调用；Native真实FHD独立读取/取消/整页占用及保留原方向的1920解码已写；原协调器已提供可选异步真实入队确认（Android同步默认不变）；本地普通图片原尺寸读取/来源冻结/离线及统一取消已写；Native实际位图解码/网格预览共用缓存及只读磁盘缩略图适配已写；RAW索引纯解析已提为两端单实现且Android委托；Native本地RAW安全分段读取/按原像素规则选图及独立取消已写；原预览EXIF纯解析/格式化已共享并由Android调用，Native值载体与数字适配已写；Native本地EXIF随机读取/真实ImageIO属性及取消已写；原始RATIONAL数值源已接并通过真实AndroidX字节样本对照；多段EXIF/跨段字节序与SubIFD/GPS/互操作指针已补；其余目录边界及Apple运行仍待补验；相机EXIF读头命令与部分头解析已写；跨重连正负缓存及Native EXIF读取会话已接；完整PreviewSessionSource/页面状态与正式入口仍待接。共33个App Swift文件、172个XCTest场景，全部Apple源码仍待首次Mac编译。
-- Windows最近实跑：586项shared + 315项Android测试0失败/错误/跳过；common metadata、Android Debug/Release编译与双模块Lint通过（第四十批BUILD SUCCESSFUL in 2m 57s）。165项辅助脚本、原组件/完整队列/网格/筛选日期与弹层/未传输退场/触感波形/三语言原文对照及结构检查通过。Android Lint为0 errors/179 warnings/11 hints，shared无issue。NikonCamera仅纯RAW解析/日期入口改为共享委托，PhotoFrameExporter仅原RAW候选/像素优先/包络规则接shared；ViewModel仅纯EXIF解析委托到shared，完整源码守卫确认缓存/读取/调度未改；连接收发/服务/GPS和打包脚本未改。
-- 用户进度口径（2026-09-05）：每完成一批报告大概百分比；100%仅表示Windows上可做的工作全部完成，不表示iOS成品或真机验收100%。当前估计86%；检查点30%→34%（Files/GPS基础）→35%（元数据）→36%（滤镜预览）→38%（共享UI基础）→40%（共享材质/按钮）→42%（拨轮/帮助/触感等）→43%（队列展示）→44%（完整队列正文）→45%（原片队列页面接口）→47%（真实队列页面接线）→48%（真实AP/STA状态控件）→49%（原版队列操作按钮）→51%（完整原缩略图网格共享）→54%（iOS真实目录/缩略图/整组入队接线）→55%（完整原筛选/日期编辑/弹层共享及Native日历文案准备）→57%（沙盒真实原片索引/增量同步/已保存徽标）→60%（真实筛选/原退场协调器/空卡与本地日期接线）→62%（浏览偏好保存恢复/实际默认值校准）→64%（真实缩略图磁盘缓存/机身隔离/完整目录清理）→67%（连接级后台填充/日期优先/通道准入与暂停恢复）→69%（原单图预览/缩放/旋转共享与真实图片入口）→70%（预览分页/连拍/来源快照/上滑规则与原测试共享）→72%（原预览单页/连拍堆叠/EXIF信息条与操作按钮共享）→73%（预览/遥控共用直方图统计与绘制共享）→76%（完整分页/高清EXIF/预取取消/连拍与入队飞行协调器共享）→77%（Native真实FHD读取会话/取消/方向及图片桥接）→78%（原预览可选真实异步入队确认与取消/部分接受处理）→79%（本地原片原尺寸读取/来源冻结/文件归属与超时回退）→80%（Native真实位图/同一网格缓存与只读磁盘缩略图）→81%（RAW索引纯解析单实现及Android差分回归）→82%（Native本地RAW安全分段读取/原像素选图及统一取消）→83%（原预览EXIF纯语义共享及Native数字适配）→84%（Native本地EXIF安全随机读取/真实属性与取消）→85%（相机读头命令及截断EXIF输入适配）→86%（跨重连正负缓存、本地共用和远程EXIF会话接线）。按功能覆盖粗估，不按文件数或测试数换算；仍有可写任务，不提前宣称Windows收口。
+- 已有网络/传输/保存/GPS/照片适配源码；CMP原组件/完整队列正文/完整缩略图网格已共享，Android真实接入；iOS真实原片队列已接同一正文，完整标准目录/缩略图/入队已接同一网格，可从Debug连接页打开验收；沙盒真实原片索引/已保存徽标已接，原筛选结果/日期/存储卡及未传输退场已接；列数/连拍合并和持久筛选已接；完整预览/其余设置及Files provider索引仍待接。真实机身隔离的缩略图磁盘缓存/完整目录清理和连接级后台填充/日期优先/传输让路已接。原单图预览/缩放手势/旋转按钮已共享且Android实际调用，iOS真实图片探针已接；分页/连拍/来源快照和上滑意图纯规则已共享；原单页/FHD渐显/连拍堆叠/EXIF信息条和操作按钮已共享；原预览/遥控共用直方图统计、绘制、图标及预览开关已共享；完整分页/FHD/EXIF/邻页预取与取消/连拍切换/入队飞行协调器已迁SharedPhotoPreviewOverlay并由Android调用；Native真实FHD独立读取/取消/整页占用及保留原方向的1920解码已写；原协调器已提供可选异步真实入队确认（Android同步默认不变）；本地普通图片原尺寸读取/来源冻结/离线及统一取消已写；Native实际位图解码/网格预览共用缓存及只读磁盘缩略图适配已写；RAW索引纯解析已提为两端单实现且Android委托；Native本地RAW安全分段读取/按原像素规则选图及独立取消已写；原预览EXIF纯解析/格式化已共享并由Android调用，Native值载体与数字适配已写；Native本地EXIF随机读取/真实ImageIO属性及取消已写；原始RATIONAL数值源已接并通过真实AndroidX字节样本对照；多段EXIF/跨段字节序与SubIFD/GPS/互操作指针已补；其余目录边界及Apple运行仍待补验；相机EXIF读头命令与部分头解析已写；跨重连正负缓存及Native EXIF读取会话已接；当前页FHD+EXIF优先窗口/传输分块让路及取消释放已写；完整PreviewSessionSource/页面状态与正式入口仍待接。共33个App Swift文件、178个XCTest场景，全部Apple源码仍待首次Mac编译。
+- Windows最近实跑：590项shared + 315项Android测试0失败/错误/跳过；common metadata、Android Debug/Release编译与双模块Lint通过（第四十一批BUILD SUCCESSFUL in 2m 27s）。169项辅助脚本、原组件/完整队列/网格/筛选日期与弹层/未传输退场/触感波形/三语言原文对照及结构检查通过。Android Lint为0 errors/179 warnings/11 hints，shared无issue。NikonCamera仅纯RAW解析/日期入口改为共享委托，PhotoFrameExporter仅原RAW候选/像素优先/包络规则接shared；ViewModel仅纯EXIF解析委托到shared，完整源码守卫确认缓存/读取/调度未改；连接收发/服务/GPS和打包脚本未改。
+- 用户进度口径（2026-09-05）：每完成一批报告大概百分比；100%仅表示Windows上可做的工作全部完成，不表示iOS成品或真机验收100%。当前估计87%；检查点30%→34%（Files/GPS基础）→35%（元数据）→36%（滤镜预览）→38%（共享UI基础）→40%（共享材质/按钮）→42%（拨轮/帮助/触感等）→43%（队列展示）→44%（完整队列正文）→45%（原片队列页面接口）→47%（真实队列页面接线）→48%（真实AP/STA状态控件）→49%（原版队列操作按钮）→51%（完整原缩略图网格共享）→54%（iOS真实目录/缩略图/整组入队接线）→55%（完整原筛选/日期编辑/弹层共享及Native日历文案准备）→57%（沙盒真实原片索引/增量同步/已保存徽标）→60%（真实筛选/原退场协调器/空卡与本地日期接线）→62%（浏览偏好保存恢复/实际默认值校准）→64%（真实缩略图磁盘缓存/机身隔离/完整目录清理）→67%（连接级后台填充/日期优先/通道准入与暂停恢复）→69%（原单图预览/缩放/旋转共享与真实图片入口）→70%（预览分页/连拍/来源快照/上滑规则与原测试共享）→72%（原预览单页/连拍堆叠/EXIF信息条与操作按钮共享）→73%（预览/遥控共用直方图统计与绘制共享）→76%（完整分页/高清EXIF/预取取消/连拍与入队飞行协调器共享）→77%（Native真实FHD读取会话/取消/方向及图片桥接）→78%（原预览可选真实异步入队确认与取消/部分接受处理）→79%（本地原片原尺寸读取/来源冻结/文件归属与超时回退）→80%（Native真实位图/同一网格缓存与只读磁盘缩略图）→81%（RAW索引纯解析单实现及Android差分回归）→82%（Native本地RAW安全分段读取/原像素选图及统一取消）→83%（原预览EXIF纯语义共享及Native数字适配）→84%（Native本地EXIF安全随机读取/真实属性与取消）→85%（相机读头命令及截断EXIF输入适配）→86%（跨重连正负缓存、本地共用和远程EXIF会话接线）→87%（完整预览优先窗口/分块让路及跨桥接释放）。按功能覆盖粗估，不按文件数或测试数换算；仍有可写任务，不提前宣称Windows收口。
 - Mac验收入口仍是 `python3 iosApp/scripts/verify_on_mac.py`，但按用户要求不再作为继续写Windows源码的停止条件。共享产品UI、STA-direct/MPF与RAW预览、自动事件/恢复、遥控/GPS/效果/权益等仍未完成，不能将本批写完当作Windows工作全部完成。
 - Windows 可以编写/静态检查 iOS 文件、运行 common/Android 回归；不能将这些结果记作 Swift 编译、模拟器、真机通过。
 - 本表不计算代码行数进度。仅“实现完成 + 所需验收通过”计完成；能握手不等于能浏览/传输，首个传输闭环不等于全功能完成。
@@ -50,7 +50,7 @@
 | ID | 实现 | 验收 | 范围 / 完成点 |
 |---|---|---|---|
 | IOS-B01 | NEXT | Mac待验 | 已写 Apple Silicon 一键验收脚本及环境/模拟器选择；framework 真机/模拟器导出、Swift 类型/集合/异常桥接、取消与持有关系仍须实际编译检查 |
-| IOS-B02 | WRITTEN | Mac待验 | XCTest target/Scheme已有157个网络/会话/流式传输/目录/队列/保存/预览/Files/定位/蓝牙/元数据/滤镜/Compose控制器场景待执行；Mac脚本串行执行Native commonTest/XCTest/Release编译并保留日志与xcresult |
+| IOS-B02 | WRITTEN | Mac待验 | XCTest target/Scheme已有178个网络/会话/流式传输/目录/队列/保存/预览/Files/定位/蓝牙/元数据/滤镜/Compose控制器场景待执行；Mac脚本串行执行Native commonTest/XCTest/Release编译并保留日志与xcresult |
 | IOS-B03 | TODO | 真机待验 | Info.plist/entitlement 按真实使用声明；本地网络、照片、蓝牙、定位、麦克风允许/拒绝/撤销、设置恢复 |
 | IOS-B04 | TODO | 待验 | 诊断日志/导出/隐私脱敏；记录阶段/错误/机型；不得把超时直接等同于拒绝授权 |
 
@@ -63,7 +63,7 @@
 | IOS-N03 | NEXT | Mac待验/真机待验 | CameraWiFiConnection单代持有、AP ACK会话号/首TID1/AlreadyOpen/DeviceInfo容错、事件/CloseSession/取消释放已接Debug；待热点授权引导、正式共享UI及真机验收 |
 | IOS-N04 | NEXT | Mac待验/真机待验 | 已写稳定identity、预期responder、TID0/OpenSession(1)/0x941C/Storage成功直达、显式配对及权威ACK落盘；待完整历史档案/删除、多身份与STA-direct兼容 |
 | IOS-N05 | NEXT | Mac待验/真机待验 | 已写两类Bonjour服务候选、8秒有界扫描/停止/迟到回调隔离、选中服务接现有STA连接；待历史IP、真实接口路由/受控子网回退、跨服务物理机身去重；未执行任何Windows网络扫描 |
-| IOS-N06 | NEXT | Mac待验/真机待验 | 已写串行控制/data-out/原片流式事务、限额/TID匹配、双通道PING、下载全程抑制保活、单代事件revision。取消采用关闭流而非可恢复排空；完整事件消费/重连/切网尚未实现 |
+| IOS-N06 | NEXT | Mac待验/真机待验 | 已写串行控制/data-out/原片流式事务、限额/TID匹配、双通道PING、下载全程抑制保活、单代事件revision；新增预览优先窗口只暂停下一传输事务，不打断在途数据。取消采用关闭流而非可恢复排空；完整事件消费/重连/切网尚未实现 |
 
 ### D：浏览与预览（关联 V01/U04）
 
@@ -73,7 +73,7 @@
 | IOS-D02 | NEXT | Mac待验/真机待验 | 原网格/连拍稳定键已共享并接iOS真实目录。原筛选弹层/日期编辑/多条件控件已共享且Android调用，Native日历与三语言适配已写；沙盒真实原片索引/原网格已保存徽标已接；真实类型/保护/连拍/存储卡/日期/未传输筛选及原退场已接；列数/连拍及筛选持久偏好已接；待选择/全选/跨卡选择；首次索引未就绪禁用未传输选项 |
 | IOS-D03 | NEXT | Mac待验/真机待验 | 已写标准GetThumb/AP FHD共享能力/Busy策略、同键合并、32MiB/256项会话缓存、内存释放、方向/尺寸有界解码；已接共享网格可见项读取/有界重试和32MiB解码缓存；已接真实机身隔离磁盘缓存/90天过期与完整目录清理，系统清缓存可重建；完整扫描后已接共享ThumbnailFillQueue后台补图/日期优先/执行态让路/失败事件唤醒；待扫描批次交错填充、完整预览/遥控页生命周期门控、裁黑边、STA MPF/RAW/视频嵌入预览 |
 | IOS-D04 | TODO | 真机待验 | 相机新增/删除/属性事件、扫描与事件去重、稳定列表发布、自动入队；复用 FileScanHandle/CameraFilePublication/CameraCatalogPolicy |
-| IOS-D05 | NEXT | Mac待验/真机待验 | 原单图/缩放/旋转和单页/连拍/EXIF信息条已共享，Native真实单图探针已接；直方图统计/绘制/图标/预览开关已共享，Native位图读取待验。完整分页/FHD/EXIF/邻页预取取消/连拍返回/入队飞行协调器已共享且Android接入；Native FHD独立读取/取消与前台令牌已写，借用原相机所有者；异步接受确认/取消/部分接受接点已写并通过真实模型测试；普通本地原片原尺寸/离线读取与真实索引归属已写；Native真实位图与同一网格缓存适配已写；RAW索引及原候选/选图规则已共享并由Android调用，Native本地RAW安全分段读取/真实选图/取消适配已写；原预览EXIF Float/GPS/字段回退与格式化已共享，Native值载体/数字适配已写；Native本地EXIF已接安全随机读取/实际属性/取消；原始RATIONAL覆盖已写，单EXIF目录金样与真实AndroidX对照通过；多段EXIF/跨段字节序与目录别名已通过实际库对照；相机读头命令/截断头部分数值已写；跨重连正负缓存/本地共用/远程会话已接；NEXT组装完整预览平台源、偏好、页面状态与正式入口、RAW降级、横屏和已有选择/分享/删除能力；不将探针算成完整产品预览 |
+| IOS-D05 | NEXT | Mac待验/真机待验 | 原单图/缩放/旋转和单页/连拍/EXIF信息条已共享，Native真实单图探针已接；直方图统计/绘制/图标/预览开关已共享，Native位图读取待验。完整分页/FHD/EXIF/邻页预取取消/连拍返回/入队飞行协调器已共享且Android接入；Native FHD独立读取/取消与前台令牌已写，借用原相机所有者；异步接受确认/取消/部分接受接点已写并通过真实模型测试；普通本地原片原尺寸/离线读取与真实索引归属已写；Native真实位图与同一网格缓存适配已写；RAW索引及原候选/选图规则已共享并由Android调用，Native本地RAW安全分段读取/真实选图/取消适配已写；原预览EXIF Float/GPS/字段回退与格式化已共享，Native值载体/数字适配已写；Native本地EXIF已接安全随机读取/实际属性/取消；原始RATIONAL覆盖已写，单EXIF目录金样与真实AndroidX对照通过；多段EXIF/跨段字节序与目录别名已通过实际库对照；相机读头命令/截断头部分数值已写；跨重连正负缓存/本地共用/远程会话已接；整段FHD+EXIF交互优先窗口、分块让路和页面取消释放已写；NEXT组装完整预览平台源、偏好、页面状态与正式入口、RAW降级、横屏和已有选择/分享/删除能力；不将探针算成完整产品预览 |
 
 ### T/S：传输、持久化与后台（关联 I02/I03/V02）
 
@@ -659,3 +659,15 @@
 - common metadata、Android Debug/Release编译及双模块Lint BUILD SUCCESSFUL in 2m 57s（112 tasks，34 executed/78 up-to-date），构建已退出。app仍0 errors/179 warnings/11 hints、shared无issue；两种Manifest摘要不变，app/dist/dist-debug本批零差异，MainActivity/服务/GPS/打包路径对照55876fa不变。不打APK、不推送。
 - 当前读取输入与缓存已真实接线，但完整PreviewSessionSource/旋转和直方图偏好/文本/本地路由/返回定位/正式入口仍待组装；不能将输入接齐当预览页面成品。IOS-D05仍NEXT；thumbnail/preview目录占用、RAW嵌入JPEG、其它ImageIO字段与Apple实际解码/交互边界继续保留验收要求。配对STA-direct、自动事件/恢复、完整其它UI/遥控/GPS/效果/权益等Windows任务仍开放。
 - 本批验证后本地提交；ccccc01为前一检查点。用户调研MD已在19eb7a9保存且原文未改，无遗漏未跟踪MD；Windows粗估86%不是iOS成品或真机验收百分比。
+
+## 第四十一批记录：完整预览交互窗口与传输分块让路（Windows约87%）
+
+- 接完整PreviewSessionSource时核对到一项真实缺口：Android CameraIoGate.withInteractivePriority在当前页FHD和EXIF之间保持交互登记，withTransferSlice在锁前等待且拿锁后复查；iOS原来只有整页后台缩略图抑制，普通事务FIFO仍会让下一下载分块插入。先补该必要调度，不把空优先级函数接到共享协调器，也不修改Android现有gate。
+- PtpIPCommandSession在原完整事务FIFO中增加可嵌套UUID交互登记。只有executeStreaming下一事务等待登记清空，普通控制/元数据仍按可执行请求顺序运行；已发送的数据块不会被抢占。流式调用从等待恢复后，在相同actor、无进一步挂起的位置复查，再分配TID/发送；等待取消不关闭其它事务，不消耗TID。重复/外来释放无效，最后登记退出唤醒下载，关闭owner清理登记并唤醒所有等待者。没有第二个socket或并行PTP通道，原收包/流式sink/保活/事件实现不变。
+- CameraWiFiConnection向借用者提供begin/endInteractivePreview，同时为实际FHD和EXIF调用登记独立窗口；成功、失败和取消都等待释放。外层整页当前照片窗口可覆盖FHD→EXIF间隙，内层实际请求即便由合并缓存任务持有也能按自身生命周期释放。CameraExifSource仅增加窄优先级接口，仍由原连接实现，不增加服务owner。
+- NativePreviewReadSession.withInteractivePriority用现有UI上下文、单调请求ID、32个待回调槽及30秒注册期限等待授权；拒绝/超时不执行无优先级替代块，成功才进入原协调器的FHD+EXIF块。finally在NonCancellable+UI上下文释放；取消等待也调用原cancelPreviewRead。OriginalFilesPageBridge持有每会话的有限令牌任务，结束/更换会话、取消注册和关闭页面均释放；即使平台在取消后才返回令牌，也会释放而不污染下一会话。完整源和入口尚未调用该括号，仍是下一组装步骤。
+- 新增4项common测试：同一窗口覆盖两种读取及结果传回、拒绝/确定性超时/迟到授权不执行块、错误和读取中取消释放、关闭时待注册及新调用拒绝。首轮唯一失败为异常对象assertSame：JVM协程堆栈恢复复制异常；改为核验类型、消息和cause链末端原对象，不修改产品代码绕过测试。第二轮590 shared+315 app=905项，0失败/错误/跳过。
+- 新增6项Apple测试源码：FHD/EXIF间下载等待与嵌套登记、正在发送的块不被打断、等待取消不耗TID且通道可用、关闭唤醒等待、页面令牌准确释放、换页后迟到旧令牌不影响新令牌。当前33个App Swift/178个XCTest/12项Native位图测试仍待Mac编译运行；源码中的调度测试不能作为Apple并发已验收的证据。
+- 新增4项Python守卫，169项全部PASS。相对c7cb39e整份连接/页面仅允许上述窗口接线；原FIFO文件仅登记/选择等待者/流式准入改变，整个普通execute和流式收发正文保持。旧批次全文件守卫只先剥离本批明确新增内容，再做原基线比较；EXIF、本地读取和原完整共享UI守卫继续PASS。3,197组实际AndroidX数值/截断样本继续PASS，Xcode结构PASS。
+- 第二轮common metadata、Android Debug/Release编译及双模块Lint：BUILD SUCCESSFUL in 2m 27s（112 tasks，10 executed/102 up-to-date）。构建已退出；app仍0 errors/179 warnings/11 hints，shared无issue；debug/release Manifest摘要保持DF0F0F7C…/6EA659D8…；本批app、dist、dist-debug零差异。不打APK、不推送。
+- 下一步继续组装Native PreviewSessionSource、语言/偏好和真实目录打开/返回定位。发现localOriginalPreviewRoute仍是Android三分支薄适配，需要在接Native时核对RAW/TIFF扩展集合，不把TIFF误接本地普通解码。仍保留IOS-D05的目录占用、RAW嵌入JPEG元数据、其它ImageIO字段和Apple实际验证门槛；STA-direct、事件/可恢复排空、其它产品页面等Windows工作继续开放。c7cb39e为前检查点，本批验证后提交。

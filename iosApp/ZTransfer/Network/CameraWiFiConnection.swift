@@ -230,6 +230,12 @@ actor CameraWiFiConnection {
     /// Standard AP camera-generated FHD only. Paired STA uses a different capability/fallback path;
     /// until its MPF/partial-read flow is integrated, return nil so callers use the real thumbnail.
     func fhdPicture(handle: Int32, retryDeviceBusy: Bool = true) async throws -> Data? {
+        try await withInteractivePreviewPriority {
+            try await self.readFhdPicture(handle: handle, retryDeviceBusy: retryDeviceBusy)
+        }
+    }
+
+    private func readFhdPicture(handle: Int32, retryDeviceBusy: Bool) async throws -> Data? {
         try requirePhase(.ready)
         if stationMode || previewPolicy.disabled { return nil }
         var remaining = retryDeviceBusy ? previewPolicy.busyRetries : 0
@@ -249,6 +255,12 @@ actor CameraWiFiConnection {
     /// Same partial-object command as Android readExifHeader. This standard AP/STA path does
     /// not infer support or retry Busy; paired STA's recent-header cache remains a separate gate.
     func exifHeader(handle: Int32, maximumBytes: Int32) async throws -> Data? {
+        try await withInteractivePreviewPriority {
+            try await self.readExifHeader(handle: handle, maximumBytes: maximumBytes)
+        }
+    }
+
+    private func readExifHeader(handle: Int32, maximumBytes: Int32) async throws -> Data? {
         try Task.checkCancellation()
         guard maximumBytes > 0, maximumBytes <= 2 * 1024 * 1024,
               let values = PtpTransferBridge.shared.partialParameters(handle: handle, offset: 0, count: Int64(maximumBytes)) else {
@@ -267,6 +279,36 @@ actor CameraWiFiConnection {
             if Task.isCancelled { throw CancellationError() }
             await abort(error: error)
             return nil
+        }
+    }
+
+    /// Borrow the same command owner's window; no second socket, gate or queue is created.
+    func beginInteractivePreview() async throws -> UUID {
+        try requirePhase(.ready)
+        let token = try await session.beginInteractivePreview()
+        do {
+            try Task.checkCancellation()
+            try requirePhase(.ready)
+            return token
+        } catch {
+            await session.endInteractivePreview(token)
+            throw error
+        }
+    }
+
+    func endInteractivePreview(_ token: UUID) async {
+        await session.endInteractivePreview(token)
+    }
+
+    private func withInteractivePreviewPriority<T>(_ block: () async throws -> T) async throws -> T {
+        let token = try await beginInteractivePreview()
+        do {
+            let result = try await block()
+            await endInteractivePreview(token)
+            return result
+        } catch {
+            await endInteractivePreview(token)
+            throw error
         }
     }
 

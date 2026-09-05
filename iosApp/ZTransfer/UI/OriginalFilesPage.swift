@@ -25,6 +25,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private var commands: [UUID: Task<Void, Never>] = [:]
     private var images: [UUID: Task<Void, Never>] = [:]
     private var previewRequests: [String: Task<Void, Never>] = [:]
+    private var previewPriorities: [String: Task<UUID?, Never>] = [:]
     private var previewUse: (session: Int64, task: Task<UUID, Never>)?
     private var lastPreviewSession: Int64 = 0
     private var filesByHandle: [Int32: CameraFileInfo] = [:]
@@ -212,6 +213,39 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         previewUse = (sessionId, Task { await previews.beginForegroundUse() })
     }
 
+    func beginPreviewPriority(sessionId: Int64, requestId: Int64, completion: NativePreviewPriorityCompletion) {
+        let key = "\(sessionId):\(requestId)"
+        guard !closed, connected, requestId > 0, previewUse?.session == sessionId,
+              previewPriorities[key] == nil, previewPriorities.count < 32 else {
+            completion.complete(granted: false); return
+        }
+        let source = exifSource
+        previewPriorities[key] = Task { [weak self] in
+            do {
+                let token = try await source.beginInteractivePreview()
+                guard let self, !self.closed, self.connected, !Task.isCancelled,
+                      self.previewUse?.session == sessionId else {
+                    await source.endInteractivePreview(token)
+                    completion.complete(granted: false); return nil
+                }
+                completion.complete(granted: true)
+                return token
+            } catch { completion.complete(granted: false); return nil }
+        }
+    }
+
+    func endPreviewPriority(sessionId: Int64, requestId: Int64) {
+        endPreviewPriority(key: "\(sessionId):\(requestId)")
+    }
+
+    private func endPreviewPriority(key: String) {
+        guard let task = previewPriorities.removeValue(forKey: key) else { return }
+        task.cancel()
+        let source = exifSource
+        // Also release a token whose acquisition completed after cancellation or page replacement.
+        Task { if let token = await task.value { await source.endInteractivePreview(token) } }
+    }
+
     func readFhdPreview(sessionId: Int64, requestId: Int64, file: CameraFileInfo, completion: NativeFhdPreviewCompletion) {
         let key = "\(sessionId):\(requestId)"
         guard !closed, connected, requestId > 0, previewUse?.session == sessionId,
@@ -236,6 +270,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     }
 
     func cancelPreviewRead(sessionId: Int64, requestId: Int64) {
+        endPreviewPriority(sessionId: sessionId, requestId: requestId)
         previewRequests["\(sessionId):\(requestId)"]?.cancel()
         // Keep the slot until the task finishes; a shared in-flight frame is drained, not cancelled globally.
     }
@@ -339,6 +374,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     }
 
     func endPreviewReads(sessionId: Int64) {
+        for key in Array(previewPriorities.keys) where key.hasPrefix("\(sessionId):") { endPreviewPriority(key: key) }
         for (key, request) in previewRequests where key.hasPrefix("\(sessionId):") { request.cancel() }
         guard let use = previewUse, use.session == sessionId else { return }
         previewUse = nil

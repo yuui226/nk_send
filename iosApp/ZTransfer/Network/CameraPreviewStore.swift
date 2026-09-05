@@ -4,6 +4,8 @@ import ZTransferShared
 /// Borrowed transport only; EXIF result lifetime belongs to the workspace, not this connection.
 protocol CameraExifSource: AnyObject {
     func exifHeader(handle: Int32, maximumBytes: Int32) async throws -> Data?
+    func beginInteractivePreview() async throws -> UUID
+    func endInteractivePreview(_ token: UUID) async
 }
 extension CameraWiFiConnection: CameraExifSource {}
 

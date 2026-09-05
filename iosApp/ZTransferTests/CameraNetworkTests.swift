@@ -42,7 +42,33 @@ import XCTest
     func complete(exif: PhotoExif?) { value = exif; count += 1; done.fulfill() }
 }
 
+@MainActor private final class PreviewPriorityCompletionProbe: NSObject, NativePreviewPriorityCompletion {
+    let done: XCTestExpectation
+    private(set) var granted: Bool?
+    init(_ done: XCTestExpectation) { self.done = done; super.init(); done.assertForOverFulfill = true }
+    func complete(granted: Bool) { self.granted = granted; done.fulfill() }
+}
+
 private actor FakeExifSource: CameraExifSource {
+    private var priorityTokens = Set<UUID>()
+    private(set) var priorityReleases = 0
+    private var priorityBegan: (() -> Void)?
+    private var heldPriority: CheckedContinuation<Void, Never>?
+    func holdNextPriority(_ began: @escaping () -> Void) { priorityBegan = began }
+    func releaseHeldPriority() { heldPriority?.resume(); heldPriority = nil }
+    func beginInteractivePreview() async throws -> UUID {
+        try Task.checkCancellation()
+        if let began = priorityBegan {
+            priorityBegan = nil
+            await withCheckedContinuation { heldPriority = $0; began() }
+            // Deliberately returns a late token even after cancellation: the bridge must release it.
+        }
+        let token = UUID(); priorityTokens.insert(token); return token
+    }
+    func endInteractivePreview(_ token: UUID) {
+        if priorityTokens.remove(token) != nil { priorityReleases += 1 }
+    }
+    func priorityCount() -> Int { priorityTokens.count }
     enum Reply: Sendable { case bytes(Data), missing, failure }
     let reply: Reply
     let holdFirst: Bool
@@ -64,6 +90,150 @@ private actor FakeExifSource: CameraExifSource {
 }
 
 final class CameraNetworkTests: XCTestCase {
+    private func waitUntil(_ description: String, _ condition: () async -> Bool) async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if await condition() { return }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTFail(description)
+        throw CameraStreamError.timedOut
+    }
+
+    func testInteractiveWindowKeepsDownloadBetweenTransactionsUntilFhdAndExifFinish() async throws {
+        let wire = FakeCameraConnection(bytes: response(transaction: 1) + response(transaction: 2)
+            + response(transaction: 3) + response(transaction: 4))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let window = try await session.beginInteractivePreview()
+        let download = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in } }
+        try await waitUntil("download is parked without owning the socket") { await session.pendingTransferSliceCount() == 1 }
+        XCTAssertTrue(wire.sent().isEmpty)
+        let nested = try await session.beginInteractivePreview()
+        _ = try await session.execute(operationCode: 0x9428, parameters: [7])
+        await session.endInteractivePreview(nested)
+        // Ordinary metadata remains eligible. Only transfer slices yield, not the whole camera.
+        _ = try await session.execute(operationCode: 0x1004)
+        _ = try await session.execute(operationCode: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX, parameters: [7, 0, 0, 131072, 0])
+        XCTAssertEqual(wire.sent().count, 3)
+        let pending = await session.pendingTransferSliceCount(); XCTAssertEqual(pending, 1)
+        await session.endInteractivePreview(UUID()) // Foreign/duplicate releases cannot open the window.
+        await session.endInteractivePreview(nested)
+        XCTAssertEqual(wire.sent().count, 3)
+        await session.endInteractivePreview(window)
+        let result = try await download.value; XCTAssertEqual(result.code, 0x2001)
+        XCTAssertEqual(wire.sent().last, hex("16000000060000000100000009100400000007000000"))
+    }
+
+    func testPriorityNeverInterruptsAnAlreadyStartedStreamingTransaction() async throws {
+        let received = expectation(description: "first complete slice owns the wire")
+        received.assertForOverFulfill = false
+        let wire = FakeCameraConnection(onReceive: { received.fulfill() })
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let active = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7], idleTimeout: 3) { _ in } }
+        await fulfillment(of: [received], timeout: 1)
+        let token = try await session.beginInteractivePreview()
+        let next = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [8]) { _ in } }
+        try await waitUntil("next slice queued behind active data") { await session.pendingTransferSliceCount() == 1 }
+        XCTAssertEqual(wire.sent().count, 1)
+        wire.feed(response(transaction: 1) + response(transaction: 2) + response(transaction: 3))
+        let completed = try await active.value; XCTAssertEqual(completed.code, 0x2001)
+        _ = try await session.execute(operationCode: 0x9428, parameters: [9])
+        XCTAssertEqual(wire.sent().count, 2)
+        await session.endInteractivePreview(token)
+        _ = try await next.value
+        XCTAssertEqual(wire.sent().last, hex("16000000060000000100000009100300000008000000"))
+    }
+
+    func testCancellingAPriorityParkedSliceConsumesNoTidAndDoesNotCloseTheConnection() async throws {
+        let wire = FakeCameraConnection(bytes: response(transaction: 1))
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let token = try await session.beginInteractivePreview()
+        let waiting = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in } }
+        try await waitUntil("slice waits for priority") { await session.pendingTransferSliceCount() == 1 }
+        waiting.cancel()
+        do { _ = try await waiting.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertTrue(wire.sent().isEmpty)
+        let closed = await session.isClosed(); XCTAssertFalse(closed)
+        await session.endInteractivePreview(token)
+        _ = try await session.execute(operationCode: 0x1004)
+        XCTAssertEqual(wire.sent(), [hex("120000000600000001000000041001000000")])
+    }
+
+    func testClosingSessionWakesPriorityParkedSlicesAndRejectsNewWindows() async throws {
+        let wire = FakeCameraConnection()
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let token = try await session.beginInteractivePreview()
+        let waiting = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in } }
+        try await waitUntil("slice parked before close") { await session.pendingTransferSliceCount() == 1 }
+        await session.close()
+        do { _ = try await waiting.value; XCTFail("Closed owner must wake its waiter") }
+        catch { XCTAssertEqual(error as? CameraStreamError, .closed) }
+        await session.endInteractivePreview(token)
+        do { _ = try await session.beginInteractivePreview(); XCTFail("Closed owner cannot issue tokens") }
+        catch { XCTAssertEqual(error as? CameraStreamError, .closed) }
+        XCTAssertTrue(wire.sent().isEmpty)
+    }
+
+    @MainActor func testPagePriorityWindowUsesBorrowedOwnerAndReleasesExactlyOnce() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FakeExifSource(.missing)
+        let page = try exifPage(NativePreviewExifCache(), source: source, root: root).page
+        defer { page.close() }
+        let reply = PreviewPriorityCompletionProbe(expectation(description: "priority granted"))
+        page.beginPreviewPriority(sessionId: 1, requestId: 1, completion: reply)
+        await fulfillment(of: [reply.done], timeout: 1)
+        XCTAssertEqual(reply.granted, true)
+        let count = await source.priorityCount(); XCTAssertEqual(count, 1)
+        page.endPreviewPriority(sessionId: 1, requestId: 1)
+        page.endPreviewPriority(sessionId: 1, requestId: 1)
+        try await waitUntil("one release acknowledged") { await source.priorityReleases == 1 }
+        let next = PreviewPriorityCompletionProbe(expectation(description: "second priority"))
+        page.beginPreviewPriority(sessionId: 1, requestId: 2, completion: next)
+        await fulfillment(of: [next.done], timeout: 1)
+        page.endPreviewReads(sessionId: 1)
+        try await waitUntil("overlay close releases remaining window") { await source.priorityReleases == 2 }
+        let remaining = await source.priorityCount(); XCTAssertEqual(remaining, 0)
+    }
+
+    @MainActor func testLatePriorityTokenIsReleasedAfterPageSessionReplacement() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = FakeExifSource(.missing)
+        let began = expectation(description: "priority registration held")
+        await source.holdNextPriority { began.fulfill() }
+        let page = try exifPage(NativePreviewExifCache(), source: source, root: root).page
+        defer { page.close() }
+        let old = PreviewPriorityCompletionProbe(expectation(description: "old grant rejected"))
+        page.beginPreviewPriority(sessionId: 1, requestId: 1, completion: old)
+        await fulfillment(of: [began], timeout: 1)
+        page.beginPreviewReads(sessionId: 2)
+        let fresh = PreviewPriorityCompletionProbe(expectation(description: "new grant"))
+        page.beginPreviewPriority(sessionId: 2, requestId: 1, completion: fresh)
+        await fulfillment(of: [fresh.done], timeout: 1)
+        XCTAssertEqual(fresh.granted, true)
+        await source.releaseHeldPriority()
+        await fulfillment(of: [old.done], timeout: 1)
+        XCTAssertEqual(old.granted, false)
+        try await waitUntil("late old token released") { await source.priorityReleases == 1 }
+        let count = await source.priorityCount(); XCTAssertEqual(count, 1)
+        page.close()
+        try await waitUntil("new token released on page close") { await source.priorityCount() == 0 }
+    }
+
     @MainActor private func exifPage(_ cache: NativePreviewExifCache, source: CameraExifSource, root: URL,
                                      handle: Int32 = 7, name: String = "sample.JPG", size: Int = 7)
         throws -> (page: OriginalFilesPageBridge, file: CameraFileInfo, queue: CameraOriginalQueue) {

@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、172个XCTest场景及12项iOS位图Native测试，均待Mac编译/运行；586项共享测试、315项Android测试、165项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十批2m 57s）。按用户定义，Windows可做工作全部结束为100%，当前粗估86%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、178个XCTest场景及12项iOS位图Native测试，均待Mac编译/运行；590项共享测试、315项Android测试、169项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十一批2m 27s）。按用户定义，Windows可做工作全部结束为100%，当前粗估87%；不等于iOS成品或真机验收进度。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -52,7 +52,7 @@ Debug页支持手动IP或STA Bonjour候选、AP/STA标准持续会话和显式�
 
 STA-direct、MPF/RAW预览、完整事件/自动入队、共享UI、遥控/完整GPS/效果/权益仍未完成。
 
-照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，172个XCTest也未在Mac运行。
+照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，178个XCTest也未在Mac运行。
 
 ### Mac 一键验收（M1）
 
@@ -204,3 +204,9 @@ Windows粗估85%。这两个输入端点还未接成正式预览；下一步将�
 现有长期所有者持有shared稳定结果缓存，显式借给文件页；不属于单次连接或缩略图缓存，不在关闭页面时丢弃。远程和本地共用原exifKey/正负缓存，未连相机不负缓存、取消不写miss；实际远程路径已借用原连接读头及已有解码actor。Native EXIF与图片共用32槽、超时和取消，离线可读缓存，但仍校验完整文件身份。
 
 901项共享/Android测试、165项辅助检查、3,197组实际库对照及编译/Lint通过；33个App Swift/172个XCTest/12项Native位图测试仍待Mac。Windows粗估86%；完整预览平台源/页面状态、偏好、返回定位和正式入口仍需组装，读取接通不等于完整页面成品。复杂RAW/EXIF、其它产品UI和配对STA-direct等任务继续开放。
+
+### 当前页预览优先窗口（第四十一批）
+
+沿Android真实调度补齐FHD＋EXIF整段交互登记：现有PTP事务通道只让下一下载分块等待，不打断正在发送的数据；普通控制命令仍可执行。原连接负责可嵌套令牌，Native会话和文件页负责注册期限、取消/换页/关闭及迟到令牌释放，没有新建相机或队列。整段括号已备，完整PreviewSessionSource和正式目录入口继续组装，尚未宣称完整预览可用。
+
+Windows：905项共享/Android测试、169项辅助检查、3,197组实际AndroidX样本及编译/Lint通过（2m 27s）；Android产品与打包脚本本批未改。33个App Swift/178个XCTest/12项Native位图测试仍待Mac。粗估87%按Windows可写工作口径，Apple编译/并发/真机验收不包含在通过结果中。

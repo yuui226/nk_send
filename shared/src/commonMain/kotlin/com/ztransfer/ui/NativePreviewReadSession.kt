@@ -26,10 +26,15 @@ internal fun ownedFhdPreviewPng(bytes: ByteArray): NativeFhdPreviewImage? {
 
 interface NativeFhdPreviewCompletion { fun complete(image: NativeFhdPreviewImage?) }
 interface NativePreviewExifCompletion { fun complete(exif: PhotoExif?) }
+interface NativePreviewPriorityCompletion { fun complete(granted: Boolean) }
 
 /** Main/UI-thread calls and completions. This borrows the existing camera, never creates one. */
 interface NativePreviewReadPlatform {
     fun beginPreviewReads(sessionId: Long)
+    fun beginPreviewPriority(sessionId: Long, requestId: Long, completion: NativePreviewPriorityCompletion) {
+        completion.complete(false)
+    }
+    fun endPreviewPriority(sessionId: Long, requestId: Long) {}
     fun readFhdPreview(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativeFhdPreviewCompletion)
     fun readLocalBitmap(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
         completion.complete(null)
@@ -66,6 +71,26 @@ class NativePreviewReadSession internal constructor(
     private val pending = HashMap<Long, CancellableContinuation<*>>()
 
     init { platform.beginPreviewReads(sessionId) }
+
+    /** One current-page FHD + EXIF window. Never execute an unprioritized fallback on denial. */
+    internal suspend fun <T> withInteractivePriority(block: suspend () -> T): T = withContext(uiContext) {
+        val bridge = owner ?: throw CancellationException("Preview closed")
+        var leaseRequest: Long? = null
+        try {
+            val granted = read<Boolean>(allowed = { true }) { platform, request, reply ->
+                leaseRequest = request
+                platform.beginPreviewPriority(sessionId, request, object : NativePreviewPriorityCompletion {
+                    override fun complete(granted: Boolean) = reply(granted)
+                })
+            }
+            if (granted != true) throw CancellationException("Preview priority unavailable")
+            block()
+        } finally {
+            withContext(NonCancellable + uiContext) {
+                leaseRequest?.let { bridge.endPreviewPriority(sessionId, it) }
+            }
+        }
+    }
 
     @Throws(CancellationException::class)
     suspend fun fhd(file: CameraFileInfo): NativeFhdPreviewImage? = read(
