@@ -2223,6 +2223,64 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertNil(fractional?.altitudeMeters)
     }
 
+    /// Inject bytes rather than asking ImageIO to re-encode (and possibly reduce) a fraction.
+    private func rawBiasJpegFixture(numerator: Int32, denominator: Int32, little: Bool) throws -> Data {
+        var tiff = [UInt8](repeating: 0, count: 52)
+        func put(_ offset: Int, _ value: UInt32, _ width: Int) {
+            for i in 0..<width { tiff[offset + i] = UInt8(truncatingIfNeeded: value >> ((little ? i : width - i - 1) * 8)) }
+        }
+        tiff[0] = little ? 73 : 77; tiff[1] = tiff[0]
+        put(2, 42, 2); put(4, 8, 4); put(8, 1, 2)
+        put(10, 0x8769, 2); put(12, 4, 2); put(14, 1, 4); put(18, 26, 4)
+        put(26, 1, 2); put(28, 0x9204, 2); put(30, 10, 2); put(32, 1, 4); put(36, 44, 4)
+        put(44, UInt32(bitPattern: numerator), 4); put(48, UInt32(bitPattern: denominator), 4)
+        let original = [UInt8](try orientedPreviewFixture(width: 12, height: 8, orientation: 1))
+        var output = Data([0xFF, 0xD8, 0xFF, 0xE1, 0, 60, 69, 120, 105, 102, 0, 0])
+        output.append(contentsOf: tiff)
+        var position = 2
+        while position + 4 <= original.count {
+            XCTAssertEqual(original[position], 0xFF)
+            let marker = original[position + 1]
+            if marker == 0xDA || marker == 0xD9 { output.append(contentsOf: original[position...]); return output }
+            let length = Int(original[position + 2]) * 256 + Int(original[position + 3])
+            guard length >= 2, position + length + 2 <= original.count else { throw PreviewImageError.invalidImage }
+            let isExif = marker == 0xE1 && length >= 8 && Array(original[(position + 4)..<(position + 10)]) == [69, 120, 105, 102, 0, 0]
+            if !isExif { output.append(contentsOf: original[position..<(position + length + 2)]) }
+            position += length + 2
+        }
+        throw PreviewImageError.invalidImage
+    }
+
+    func testRealJpegRawBiasPreservesAndroidFloatBoundaryForBothEndianOrders() throws {
+        for little in [true, false] {
+            let jpeg = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: little)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: url) }
+            try jpeg.write(to: url)
+            let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+            let source = try XCTUnwrap(CGImageSourceCreateWithData(jpeg as CFData, nil))
+            let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any])
+            XCTAssertNil(PreviewExifReader.metadata(properties)?.exposureCompensation)
+            let result = try PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(jpeg.count),
+                cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX"))
+            XCTAssertEqual(result?.exposureCompensation, "+0.1 EV")
+            XCTAssertEqual(try input.offset(), 0)
+        }
+    }
+
+    func testRealJpegRawSignedAndZeroDenominatorUseOriginalNormalization() throws {
+        for (numerator, denominator, expected) in [(Int32(-2), Int32(3), "-0.7 EV" as String?), (Int32(99), Int32(0), nil)] {
+            let jpeg = try rawBiasJpegFixture(numerator: numerator, denominator: denominator, little: true)
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: url) }
+            try jpeg.write(to: url)
+            let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+            let result = try XCTUnwrap(PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(jpeg.count),
+                cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX")))
+            XCTAssertEqual(result.exposureCompensation, expected)
+        }
+    }
+
     private func previewExifJpegFixture() throws -> Data {
         let source = try XCTUnwrap(CGImageSourceCreateWithData(orientedPreviewFixture(width: 12, height: 8, orientation: 1) as CFData, nil))
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))

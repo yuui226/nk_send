@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、157个XCTest场景及12项iOS位图Native测试，均待Mac编译/运行；559项共享测试、315项Android测试、155项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第三十六批3m 8s）。按用户定义，Windows可做工作全部结束为100%，当前粗估84%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、159个XCTest场景及12项iOS位图Native测试，均待Mac编译/运行；572项共享测试、315项Android测试、157项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第三十七批2m 22s）。按用户定义，Windows可做工作全部结束为100%，当前粗估84%；不等于iOS成品或真机验收进度。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -52,7 +52,7 @@ Debug页支持手动IP或STA Bonjour候选、AP/STA标准持续会话和显式�
 
 STA-direct、MPF/RAW预览、完整事件/自动入队、共享UI、遥控/完整GPS/效果/权益仍未完成。
 
-照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，157个XCTest也未在Mac运行。
+照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，159个XCTest也未在Mac运行。
 
 ### Mac 一键验收（M1）
 
@@ -176,3 +176,10 @@ PreviewExifPolicy提取Android原Float/字段回退/GPS/日期规则，保留惰
 已有原片所有者经安全描述符→dup/pread随机访问→ImageIO真实属性→shared原预览规则返回PhotoExif；不会整文件载入、重新打开任意路径或固定截断本地RAW元数据。读取与原会话共用冻结来源/槽/取消，GPS保留已解码Double精度与原引用规则。874项共享/Android测试、155项辅助检查与编译/Lint通过；157个XCTest/12项Native位图测试仍待Mac。
 
 正式预览仍未启用：已锁定ImageIO小数化与原RATIONAL的Float运算在36293949/725879001处会影响0.05EV显隐，下一批须补原始分数来源覆盖，不能把本批视作EXIF完全等价。相机文件头、稳定缓存和完整页面会话也仍待接。
+
+
+### 原始EXIF分数覆盖与真实库对照（第三十七批）
+
+本地描述符读取现补入原始五项RATIONAL：光圈/曝光时间按Android兼容Double属性，其余保留分数后交给shared Float计算，零分母归一化和正负值规则不改。887项共享/Android测试、157项辅助检查及编译/Lint通过；额外运行 `python iosApp/scripts/check_exif_rational_oracle.py`，实际AndroidX 1.3.7库与编译shared在2,024组TIFF/JPEG样本上的数值和预览结果一致。该命令使用既有JDK/Android SDK/Gradle缓存和临时测试目录，不修改Android工程。
+
+33个App Swift/159个XCTest/12项Native位图测试仍待Mac。新增Apple测试以真实JPEG原始字节覆盖0.05EV临界、负分数和零分母，尚未运行。多Exif APP1/复杂目录遍历、异常文件部分结果和ImageIO其余属性等价仍需继续处理；正式预览入口未启用，相机文件头/缓存/完整会话仍未接完。Windows粗估保持84%，不因单次兼容性补强上调。

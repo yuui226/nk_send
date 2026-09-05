@@ -13,7 +13,7 @@ final class PreviewExifReadCancellation: @unchecked Sendable {
 }
 
 /// Owns a duplicate of an already-validated descriptor, never reopens a URL or maps a whole RAW.
-final class PreviewExifFileReader {
+final class PreviewExifFileReader: PreviewExifByteSource {
     private let descriptor: Int32
     private let size: Int64
     private let cancellation: PreviewExifReadCancellation
@@ -31,6 +31,17 @@ final class PreviewExifFileReader {
     }
     deinit { _ = Darwin.close(descriptor) }
     private func fail() { lock.lock(); readFailure = true; lock.unlock() }
+
+    func read(offset: Int64, count: Int32) -> KotlinByteArray? {
+        guard count >= 0, count <= PreviewExifRationalReader.shared.maximumReadBytes else { return nil }
+        if count == 0 { return NativePreviewExifRationalBridge.shared.bytes(data: NSData()) }
+        var data = Data(count: Int(count))
+        let loaded = data.withUnsafeMutableBytes { buffer in
+            read(into: buffer.baseAddress!, position: offset, count: buffer.count)
+        }
+        guard loaded == Int(count) else { return nil }
+        return NativePreviewExifRationalBridge.shared.bytes(data: data as NSData)
+    }
 
     func read(into buffer: UnsafeMutableRawPointer, position: Int64, count: Int) -> Int {
         guard !cancellation.isCancelled, !failed, position >= 0, position <= size, count > 0 else { return 0 }
@@ -54,6 +65,9 @@ enum PreviewExifReader {
         guard !cancellation.isCancelled else { throw CancellationError() }
         guard size > 0 else { throw PreviewImageError.invalidImage }
         let reader = try PreviewExifFileReader(fileDescriptor: fileDescriptor, size: size, cancellation: cancellation)
+        let rationals = NativePreviewExifRationalBridge.shared.read(source: reader, size: size)
+        if cancellation.isCancelled { throw CancellationError() }
+        guard rationals.complete else { throw PreviewImageError.invalidImage }
         let info = Unmanaged.passRetained(reader).toOpaque()
         var callbacks = CGDataProviderDirectCallbacks(version: 0, getBytePointer: nil, releaseBytePointer: nil,
             getBytesAtPosition: { info, buffer, position, count in
@@ -70,7 +84,7 @@ enum PreviewExifReader {
         if let source = CGImageSourceCreateWithDataProvider(provider, [kCGImageSourceShouldCache: false] as CFDictionary),
            CGImageSourceGetCount(source) > 0,
            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] {
-            result = metadata(properties, locale: locale)
+            result = metadata(properties, locale: locale, rawRationals: rationals)
         } else { result = nil }
         if cancellation.isCancelled { throw CancellationError() }
         if reader.failed { throw OriginalIndexError.incompleteMetadata }
@@ -78,7 +92,8 @@ enum PreviewExifReader {
         return result
     }
 
-    static func metadata(_ properties: [String: Any], locale: Locale = .current) -> PhotoExif? {
+    /// Dictionary-only calls are property-mapping probes, not evidence of raw numeric parity.
+    static func metadata(_ properties: [String: Any], locale: Locale = .current, rawRationals: PreviewExifRationalValues? = nil) -> PhotoExif? {
         let tiff = properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any] ?? [:]
         let exif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
         let gps = properties[kCGImagePropertyGPSDictionary as String] as? [String: Any] ?? [:]
@@ -116,6 +131,7 @@ enum PreviewExifReader {
         values.setImageIoAltitude(value: number(gps, kCGImagePropertyGPSAltitude),
             reference: altitudeRef.isFinite && altitudeRef >= 0 && altitudeRef <= Double(Int32.max) &&
                 altitudeRef.rounded(.towardZero) == altitudeRef ? Int32(altitudeRef) : -1)
+        rawRationals?.applyTo(values: values)
         return NativePreviewExifBridge.shared.metadata(values: values, formatter: ApplePreviewExifFormatter(locale: locale))
     }
 }
