@@ -12,4 +12,10 @@ protocol OriginalFilesReading: Actor {
 
 extension CameraOriginalQueue: OriginalFilesReading {}
 extension CameraOriginalStore: OriginalFilesReading {}
-extension ProviderOriginalStore: OriginalFilesReading {}
+/// Publication is optional for a queue run; platform grants and byte verification remain in its owner.
+protocol OriginalFilesDestination: OriginalFilesReading {
+    func validateSelection() async throws
+    func publish(_ saved: SavedCameraFile, originalName: String?, folder: String?) async throws -> SavedCameraFile
+}
+
+extension ProviderOriginalStore: OriginalFilesDestination {}

@@ -1,5 +1,6 @@
 """Real shared-page source binding and unchanged ownership; Apple behavior remains Mac-pending."""
 from pathlib import Path
+from queue_destination_wiring import previous_destination_source
 import subprocess
 import unittest
 from original_source_wiring import without_original_source_page, without_original_source_probe, without_selection_validation
@@ -9,7 +10,7 @@ BASE = '3118b6a'
 PAGE = 'iosApp/ZTransfer/UI/OriginalFilesPage.swift'
 PROBE = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
 
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return previous_destination_source(path, (ROOT / path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', BASE + ':' + path], cwd=ROOT).decode('utf-8')
 
 class OriginalSourceWiringTest(unittest.TestCase):

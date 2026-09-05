@@ -39,6 +39,8 @@ actor CameraOriginalQueue {
     private let core = NativeOriginalTransferQueue()
     private let camera: CameraWiFiConnection
     private let store: CameraOriginalStore
+    private var destination: OriginalFilesDestination?
+    private var stagedFiles: [Int64: SavedCameraFile] = [:]
     private var worker: Task<Void, Never>?
     private var savedFiles: [Int64: SavedCameraFile] = [:]
     private var historyRevision: UInt64 = 0
@@ -54,6 +56,18 @@ actor CameraOriginalQueue {
     }
 
     deinit { worker?.cancel(); notifications.finish() }
+
+    /// No live run rebinding. An idle/waiting queue uses the explicitly selected root on its next run,
+    /// just as Android snapshots the root at processQueue start. Folder/name stay in shared tasks.
+    @discardableResult
+    func configureDestination(_ value: OriginalFilesDestination?) async throws -> Bool {
+        guard worker == nil, !core.running else { return false }
+        if let value { try await value.validateSelection() }
+        try Task.checkCancellation()
+        guard worker == nil, !core.running else { return false } // Admission may have started while validating.
+        destination = value
+        return true
+    }
 
     @discardableResult
     func enqueue(_ info: PtpObjectInfo, byDate: Bool, dayKey: Int32, deferred: Bool) -> Int64? {
@@ -97,6 +111,7 @@ actor CameraOriginalQueue {
         if removed {
             // Only release the queue's lookup; never delete the user's completed original.
             savedFiles.removeValue(forKey: taskID)
+            stagedFiles.removeValue(forKey: taskID)
             publish()
         }
         return removed
@@ -105,23 +120,36 @@ actor CameraOriginalQueue {
         core.clearTerminal()
         let retained = Set((0..<Int(core.count)).compactMap { core.taskAt(index: Int32($0))?.taskId })
         savedFiles = savedFiles.filter { retained.contains($0.key) }
+        stagedFiles = stagedFiles.filter { retained.contains($0.key) }
         publish()
     }
     func retry(_ taskID: Int64) {
-        _ = core.retry(taskId: taskID)
+        if let attempt = core.retry(taskId: taskID), let staged = stagedFiles.removeValue(forKey: taskID) {
+            stagedFiles[attempt.taskId] = staged
+        }
         publish()
         if !core.paused { start() }
     }
     @discardableResult
     func retryFailed(excluding taskIDs: Set<Int64>) -> Int32 {
+        let before = (0..<Int(core.count)).compactMap { core.taskAt(index: Int32($0)) }
         let count = core.retryFailed(excludedTaskIds: Set(taskIDs.map { KotlinLong(value: $0) }))
         if count > 0 {
+            // The shared reducer replaces retries in-place; only carry IO context to its new IDs.
+            // Do not reproduce its eligibility, exclusions, FIFO ordering or task creation in Swift.
+            for (index, previous) in before.enumerated() {
+                if let attempt = core.taskAt(index: Int32(index)), attempt.taskId != previous.taskId,
+                   attempt.file == previous.file, attempt.destinationFolderName == previous.destinationFolderName,
+                   let staged = stagedFiles.removeValue(forKey: previous.taskId) {
+                    stagedFiles[attempt.taskId] = staged
+                }
+            }
             publish()
             if !core.paused { start() }
         }
         return count
     }
-    func savedFile(_ taskID: Int64) -> SavedCameraFile? { savedFiles[taskID] }
+    func savedFile(_ taskID: Int64) -> SavedCameraFile? { savedFiles[taskID] ?? stagedFiles[taskID] }
 
     func originals(since revision: Int64, rescan: Bool) async throws -> OriginalIndexUpdate {
         try await store.originals(since: revision, rescan: rescan)
@@ -170,10 +198,24 @@ actor CameraOriginalQueue {
         do {
             try Task.checkCancellation()
             let id = task.taskId
-            let saved = try await store.download(camera: camera, task: task) { [weak self] progress in
-                Task { await self?.receivedProgress(taskID: id, progress: progress) }
+            let target = destination // configureDestination cannot change this while the worker exists.
+            if let target { try await target.validateSelection() }
+            let saved: SavedCameraFile
+            if target != nil, let retained = stagedFiles[id] {
+                saved = retained // Only a completed app original; the publisher rechecks size and SHA256.
+            } else {
+                saved = try await store.download(camera: camera, task: task) { [weak self] progress in
+                    Task { await self?.receivedProgress(taskID: id, progress: progress) }
+                }
             }
+            if let target {
+                stagedFiles[id] = saved // Retain before awaiting the provider; failure is retryable without another download.
+                _ = try await target.publish(saved, originalName: task.file.fileName, folder: task.destinationFolderName)
+            }
+            // No cancellation check after a successful final publication. Sharing still uses the app-owned
+            // original, never an external URL after its security scope has ended.
             savedFiles[task.taskId] = saved
+            stagedFiles.removeValue(forKey: task.taskId)
             completedOriginalRevision &+= 1
             core.completed(taskId: task.taskId, bytes: saved.bytes,
                            elapsedMs: Int64((ProcessInfo.processInfo.systemUptime - began) * 1000))

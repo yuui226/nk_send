@@ -1,5 +1,6 @@
 """Only batch-48 index/selection additions, removed before older entire-file comparisons."""
 from original_source_wiring import without_original_source_probe
+from queue_destination_wiring import without_destination_probe
 
 def remove_once(value, text):
     assert value.count(text) == 1, text
@@ -42,6 +43,7 @@ struct ExportDirectorySelection: Sendable, Equatable {
     return value[:start] + value[end:]
 
 def without_provider_index_probe(value):
+    value = without_destination_probe(value)
     value = without_original_source_probe(value)
     for addition in (
         '    private var providerOriginals: ProviderOriginalStore?\n',

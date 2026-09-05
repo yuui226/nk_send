@@ -123,7 +123,7 @@ actor ProviderOriginalStore {
         try await directory.withDirectory(selection: selection) { _ in () }
     }
 
-    func publish(_ saved: SavedCameraFile, folder: String? = nil) async throws -> SavedCameraFile {
+    func publish(_ saved: SavedCameraFile, originalName: String? = nil, folder: String? = nil) async throws -> SavedCameraFile {
         try Task.checkCancellation()
         let selection = try await boundSelection()
         let control = ProviderPublicationControl(coordinator: coordinatorFactory())
@@ -132,7 +132,7 @@ actor ProviderOriginalStore {
                 try control.check()
                 return try control.coordinator.copy(source: saved.url, directory: granted) { input, output in
                     let result = try Self.copyVerified(saved, coordinatedSource: input, coordinatedDirectory: output,
-                        folder: folder, checkCancellation: control.check)
+                        originalName: originalName, folder: folder, checkCancellation: control.check)
                     // Canonicalize metadata inside the grant/accessor; later indexing performs no filesystem IO.
                     return SavedCameraFile(url: result.url.standardizedFileURL.resolvingSymlinksInPath(),
                         bytes: result.bytes, sha256: result.sha256)
@@ -233,9 +233,9 @@ actor ProviderOriginalStore {
     /// All filesystem operations here run inside BOTH the grant and coordinated accessor.
     /// Internal seam supports real filesystem tests without granting access to a user's provider.
     static func copyVerified(_ saved: SavedCameraFile, coordinatedSource source: URL, coordinatedDirectory root: URL,
-                             folder: String?, checkCancellation: () throws -> Void) throws -> SavedCameraFile {
+                             originalName: String? = nil, folder: String?, checkCancellation: () throws -> Void) throws -> SavedCameraFile {
         try checkCancellation()
-        let name = saved.url.lastPathComponent
+        let name = originalName ?? saved.url.lastPathComponent
         guard source.isFileURL, root.isFileURL, saved.bytes >= 0, SandboxTransferFile.safeComponent(name),
               !SandboxTransferFile.isPrivatePartName(name) else {
             throw ProviderPublicationError.unsafePath

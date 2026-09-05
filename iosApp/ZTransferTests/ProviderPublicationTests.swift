@@ -7,6 +7,28 @@ import ZTransferShared
 
 /// Apple filesystem/coordinator tests. Registered for Mac, never counted as Windows execution.
 final class ProviderPublicationTests: XCTestCase {
+    func testExplicitCameraNameUsesTargetCollisionRulesWithoutRenamingSandboxOriginal() async throws {
+        let area = try PublicationArea()
+        let originalName = "camera.NEF", existing = area.target.appendingPathComponent("camera.NEF")
+        try Data([8]).write(to: existing)
+        let result = try await area.publisher().publish(area.saved, originalName: originalName)
+        XCTAssertEqual(result.url.lastPathComponent, PtpTransferBridge.shared.copyName(name: originalName, number: 1))
+        XCTAssertEqual(try Data(contentsOf: existing), Data([8]))
+        XCTAssertEqual(try Data(contentsOf: result.url), area.bytes)
+        XCTAssertEqual(try Data(contentsOf: area.saved.url), area.bytes)
+    }
+
+    func testExplicitCameraNameCannotBypassSafeComponentOrPrivatePartChecks() async throws {
+        let area = try PublicationArea()
+        let part = PtpTransferBridge.shared.partName(name: "source.JPG", size: 4, captureDate: nil)
+        for name in ["", "..", "bad/name.JPG", "bad\\name.JPG", part] {
+            do { _ = try await area.publisher().publish(area.saved, originalName: name); XCTFail("Unsafe name") }
+            catch { guard case ProviderPublicationError.unsafePath = error else { return XCTFail("\(error)") } }
+        }
+        XCTAssertEqual(try area.children(), [])
+        XCTAssertEqual(try Data(contentsOf: area.saved.url), area.bytes)
+    }
+
     func testSelectionPreparationBindsGrantWithoutScanningOrCoordinatingContent() async throws {
         let area = try PublicationArea()
         let coordinator = PublicationCoordinator(), store = area.publisher(coordinator)

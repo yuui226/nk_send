@@ -1,5 +1,6 @@
 """Guard the single reader implementation and lexical IO ownership; not Apple execution evidence."""
 from pathlib import Path
+from queue_destination_wiring import previous_destination_source
 import subprocess
 import unittest
 from original_reader_wiring import READER, SANDBOX, restore_sandbox_reader
@@ -9,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BASE = '381364e'
 PROVIDER = 'iosApp/ZTransfer/Storage/ProviderOriginalStore.swift'
 
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return previous_destination_source(path, (ROOT / path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', BASE + ':' + path], cwd=ROOT).decode('utf-8')
 
 class ProviderContentWiringTest(unittest.TestCase):

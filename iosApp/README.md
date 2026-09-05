@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有37个App Swift文件、234个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；第46批在Windows通过622项共享测试、317项Android测试及common metadata/Android Debug与Release编译/双模块Lint（3m 44s）；第50批通过222项辅助脚本检查。按用户定义，Windows可做工作全部结束为100%，当前粗估90%；不等于iOS成品或真机验收进度。第50批仅Apple页面来源接线/测试/脚本变更，本批运行222项脚本及结构/源码守卫；939项Kotlin/Android与Lint沿用第46批，没有重复构建。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有37个App Swift文件、242个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；第46批在Windows通过622项共享测试、317项Android测试及common metadata/Android Debug与Release编译/双模块Lint（3m 44s）；第51批通过230项辅助脚本检查。按用户定义，Windows可做工作全部结束为100%，当前粗估90%；不等于iOS成品或真机验收进度。第51批仅Apple队列发布/重试/测试/脚本变更，本批运行230项脚本及结构/源码守卫；939项Kotlin/Android与Lint沿用第46批，没有重复构建。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -48,15 +48,15 @@ Debug页支持手动IP或STA Bonjour候选、AP/STA标准持续会话和显式�
 
 `PtpIPCommandSession` 为metadata/data-out/流式文件提供同一完整事务FIFO；文件每块至多64KiB，检查TID并读完最终响应。`CameraWiFiConnection`（原APCameraConnection）持有双通道/连接代次、STA初始化、下载全程保活抑制。`CameraCatalog`调用shared逐卡倒序/逐头归并/双卡备份规则。`CameraOriginalQueue`调用已有shared队列和reducer。`CameraPreviewStore`合并同键请求、区分临时失败和确定无图，编码缓存上限32MiB/256项。
 
-`Storage`只负责Apple文件和媒体系统：本次独占临时文件、关闭后无覆盖发布、SHA256、addOnly PhotoKit、方向修正及受限输出尺寸解码、系统复制导出及Files目录书签。目录授权不代表队列下载已改写到provider；完整原片的手动provider协调发布已写，provider元数据索引及已有文件读取已写，共享页索引与三种读取已按固定来源接线，自动目标/持久断点恢复或完整图库相册管理仍未完成。原片队列已接真实字节进度/速度及迟到隔离。
+`Storage`只负责Apple文件和媒体系统：本次独占临时文件、关闭后无覆盖发布、SHA256、addOnly PhotoKit、方向修正及受限输出尺寸解码、系统复制导出及Files目录书签。单独选择目录授权不改变队列目标；显式启用后队列先下载沙盒再校验发布到provider；完整原片的手动provider协调发布已写，provider元数据索引及已有文件读取已写，共享页索引与三种读取已按固定来源接线，显式队列目录发布已接，但目标已有原片复用/正式偏好、持久断点恢复或完整图库相册管理仍未完成。原片队列已接真实字节进度/速度及迟到隔离。
 
-`Storage/ProviderOriginalStore`在既有目录授权作用域内使用NSFileCoordinator读源/写目标；64KiB复制、源SHA256与目标回读验证后按shared同名规则发布，不覆盖已有文件。取消只尝试清理本次part，原片保留；不会声称云端已同步。Debug已保存原片或取出队列结果后，可点“写入已选目录”/“按拍摄日期写入已选目录”作真实验收。发布用例与新增11项索引/授权用例均待Mac。该store首次操作绑定授权，后续换授权/忘记会拒绝旧对象；同一书签目录移动则重扫。已复用原根/日期桶/私有part/链接规则并接发布增量和真实索引检查按钮；失败/取消保留旧结果，读取缓存也不绕过授权和实际根路径检查。第49批普通原片/RAW/EXIF读取已在授权与单文件协调内复用从沙盒提取的IndexedOriginalReader；三路均验证冻结索引条目与实际路径、不重定向旧来源，协调等待/分段/EXIF支持同一取消链路。新增10项Apple待验读取用例，沙盒默认读取算法与旧版本整文件对照通过。第50批通过只读OriginalFilesReading接口把索引/已保存与三种读取接入同一共享文件页；默认仍借原队列沙盒，Debug新增“打开共享文件浏览（已选原片目录）”，先固定授权、失败不回退。切目录关闭旧页并取消旧读取，重开新model，不将旧来源结果混入新页。此入口仅改变浏览来源，新下载仍写沙盒；自动发布/日期偏好及正式目录设置仍须继续。原索引根桶查找规则未变，未开启日期整理时不跨日期桶匹配。新增9项接线/生命周期/授权准备Apple测试待Mac。
+`Storage/ProviderOriginalStore`在既有目录授权作用域内使用NSFileCoordinator读源/写目标；64KiB复制、源SHA256与目标回读验证后按shared同名规则发布，不覆盖已有文件。取消只尝试清理本次part，原片保留；不会声称云端已同步。Debug已保存原片或取出队列结果后，可点“写入已选目录”/“按拍摄日期写入已选目录”作真实验收。发布用例与新增11项索引/授权用例均待Mac。该store首次操作绑定授权，后续换授权/忘记会拒绝旧对象；同一书签目录移动则重扫。已复用原根/日期桶/私有part/链接规则并接发布增量和真实索引检查按钮；失败/取消保留旧结果，读取缓存也不绕过授权和实际根路径检查。第49批普通原片/RAW/EXIF读取已在授权与单文件协调内复用从沙盒提取的IndexedOriginalReader；三路均验证冻结索引条目与实际路径、不重定向旧来源，协调等待/分段/EXIF支持同一取消链路。新增10项Apple待验读取用例，沙盒默认读取算法与旧版本整文件对照通过。第51批通过只读OriginalFilesReading接口把索引/已保存与三种读取接入同一共享文件页；默认仍借原队列沙盒，Debug新增“打开共享文件浏览（已选原片目录）”，先固定授权、失败不回退。切目录关闭旧页并取消旧读取，重开新model，不将旧来源结果混入新页。该只读入口本身不改变保存目标；第51批另加“队列保存到所选目录/切回应用沙盒”，只有显式启用才在完整沙盒下载后按任务原名/日期桶向同一provider发布，校验完成后任务才完成。运行中不允许切换目标；失败保留完整原片供shared新ID重试使用，不重复下载。分享仍使用app-owned源文件，原片不因清理队列而删除。此配置仅本连接有效；目标已有原片复用、日期偏好和正式目录设置仍须继续。原索引根桶查找规则未变，未开启日期整理时不跨日期桶匹配。新增9项接线/生命周期/授权准备Apple测试待Mac。
 
 `GPS`已有前台CoreLocation/GEO共享编码、SecRandom/CommonCrypto配对primitive及共享四阶段适配、可注入的GATT FIFO和CoreBluetooth扫描/连接/顺序订阅。Debug定位仅本地检查编码，蓝牙页只连接/订阅，不向相机发送身份或坐标。GATT就绪不表示GPS认证或OS配对成功；完整认证调度/身份保存/写坐标与恢复仍待接线。
 
 STA-direct、MPF/RAW预览、完整事件/自动入队、共享UI、遥控/完整GPS/效果/权益仍未完成。
 
-照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，234个XCTest也未在Mac运行。
+照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，242个XCTest也未在Mac运行。
 
 ### Mac 一键验收（M1）
 

@@ -1,11 +1,12 @@
 from pathlib import Path
+from queue_destination_wiring import previous_destination_source
 import unittest
 
 
 class OriginalIndexWiringTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls): cls.root = Path(__file__).resolve().parents[2]
-    def read(self, name): return (self.root/name).read_text(encoding='utf-8')
+    def read(self, name): return previous_destination_source(name, (self.root/name).read_text(encoding='utf-8'))
 
     def test_same_store_records_only_after_real_commit_before_completion(self):
         store = self.read('iosApp/ZTransfer/Storage/SandboxTransferFile.swift')

@@ -68,6 +68,8 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published private(set) var exportStatus = ""
     private var directoryTask: Task<Void, Never>?
     private var providerOriginals: ProviderOriginalStore?
+    private var transferDestination: ProviderOriginalStore?
+    @Published private(set) var savesToSelectedDirectory = false
     @Published private(set) var metadataStatus = ""
     @Published private(set) var readingMetadata = false
     private let metadataReader = PhotoMetadataReader()
@@ -94,11 +96,20 @@ final class CameraHandshakeProbe: ObservableObject {
 
     func useDirectory(_ selection: URL? = nil, forget: Bool = false) {
         guard !directoryBusy else { return }
+        guard transferDestination == nil || (selection == nil && !forget) else {
+            directoryStatus = "请等当前队列结束并切回应用沙盒，再改选或忘记目录授权；不会改写在途任务的目录。"
+            return
+        }
         filesPage?.close(); filesPage = nil // No frozen preview/index survives a grant change or refresh.
         directoryBusy = true
         directoryTask = Task {
             defer { directoryBusy = false; directoryTask = nil }
             do {
+                if let transferDestination {
+                    try await transferDestination.validateSelection() // A bound destination check must not refresh its bookmark.
+                    directoryStatus = "当前保存目录授权有效；队列会在副本校验发布后才完成任务。"
+                    return
+                }
                 let store = try ScopedDirectoryStore.applicationStore()
                 if forget {
                     try await store.forget()
@@ -385,6 +396,32 @@ final class CameraHandshakeProbe: ObservableObject {
         }
     }
     func startQueue() { if let queue = originalQueue, !downloading { Task { await queue.start() } } }
+    func configureQueueDirectory(_ enabled: Bool) {
+        guard !directoryBusy, let queue = originalQueue else { return }
+        directoryBusy = true
+        directoryTask = Task {
+            defer { directoryBusy = false; directoryTask = nil }
+            do {
+                let target: ProviderOriginalStore?
+                if enabled { target = try providerStore() } else { target = nil }
+                guard try await queue.configureDestination(target) else {
+                    directoryStatus = "当前队列仍在执行，请传完当前并暂停后再切换保存目标。"
+                    return
+                }
+                // The configuration is committed. Mirror it even if cancellation arrives just afterwards.
+                guard originalQueue === queue else { return }
+                transferDestination = target; savesToSelectedDirectory = enabled
+                workspaceNavigation &+= 1
+                filesPage?.close(); filesPage = nil
+                directoryStatus = enabled
+                    ? "队列已使用所选目录：下载后校验发布才完成，应用内原片保留；已有待传任务使用此目标。"
+                    : "队列已切回应用沙盒；所选目录中的已有文件不变。"
+            } catch {
+                if !Task.isCancelled { directoryStatus = "保存目标未改变：\(error.localizedDescription)" }
+            }
+        }
+    }
+
     func openSharedProviderFiles() {
         guard canOpenSharedWorkspace, !scanningCatalog, !directoryBusy, let connection = apConnection else { return }
         let navigation = workspaceNavigation
@@ -397,7 +434,9 @@ final class CameraHandshakeProbe: ObservableObject {
                 try Task.checkCancellation()
                 guard canOpenSharedWorkspace, !scanningCatalog, workspaceNavigation == navigation,
                       apConnection?.connectionID == connection.connectionID else { return }
-                directoryStatus = "文件页的已保存标记与本地预览使用所选目录；新下载仍写入应用沙盒，自动目录目标尚未接入。"
+                directoryStatus = savesToSelectedDirectory
+                    ? "文件页与队列使用同一所选目录；任务在副本校验发布后完成。"
+                    : "文件页仅查看所选目录；当前新下载仍写应用沙盒。可先启用队列保存到所选目录。"
                 openSharedFiles(originals: source)
             } catch {
                 if !Task.isCancelled { directoryStatus = "所选目录无法打开：\(error.localizedDescription)" }
@@ -411,7 +450,7 @@ final class CameraHandshakeProbe: ObservableObject {
         queuePage?.close(); queuePage = nil
         filesPage?.close()
         let page = OriginalFilesPageBridge(connectionID: connection.connectionID, catalog: catalog,
-            queue: queue, previews: previews, exifSource: connection, exifCache: exifCache, stationMode: connection.stationMode, originals: originals)
+            queue: queue, previews: previews, exifSource: connection, exifCache: exifCache, stationMode: connection.stationMode, originals: originals ?? transferDestination)
         filesPage = page
         Task {
             let snapshot = await queue.snapshot()
@@ -478,6 +517,7 @@ final class CameraHandshakeProbe: ObservableObject {
         let connection = CameraWiFiConnection(command: command, event: event, stationMode: stationMode)
         let previews = CameraPreviewStore(source: connection, connectionID: connection.connectionID)
         let queue = CameraOriginalQueue(camera: connection, store: try CameraOriginalStore.applicationStore())
+        transferDestination = nil; savesToSelectedDirectory = false // Debug target choice is connection-local, not persisted settings.
         originalQueue = queue
         queueObserver = Task {
             for await snapshot in queue.updates {
@@ -497,6 +537,7 @@ final class CameraHandshakeProbe: ObservableObject {
             catalogTask?.cancel(); catalog = nil
             previewTask?.cancel(); previewStore = nil; previewImage = nil; previewPNG = nil
             apConnection = nil; originalQueue = nil; queueObserver?.cancel(); queueObserver = nil
+            transferDestination = nil; savesToSelectedDirectory = false
         }
         do {
             let profiles: StationProfileStore?
@@ -736,7 +777,13 @@ struct CameraHandshakeProbeView: View {
                 .disabled(!probe.canOpenSharedWorkspace || probe.scanningCatalog)
             Button("打开共享文件浏览（已选原片目录）") { probe.openSharedProviderFiles() }
                 .disabled(!probe.canOpenSharedWorkspace || probe.scanningCatalog || probe.directoryBusy)
-            Text("已选目录入口只改变已保存识别与本地预览；下载队列当前仍写入应用沙盒。")
+            HStack {
+                Button("队列保存到所选目录") { probe.configureQueueDirectory(true) }
+                Button("队列切回应用沙盒") { probe.configureQueueDirectory(false) }
+            }.font(.caption).disabled(!probe.canOpenSharedWorkspace || probe.directoryBusy || probe.queueSnapshot?.running == true)
+            Text(probe.savesToSelectedDirectory
+                ? "队列：所选目录。副本校验发布后才完成，应用内原片保留。"
+                : "队列：应用沙盒。已选目录入口目前只用于已有文件识别与预览。")
                 .font(.caption)
             Button("打开共享队列（真实任务）") { probe.openSharedQueue() }
                 .disabled(!probe.canOpenSharedWorkspace)
