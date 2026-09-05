@@ -196,6 +196,71 @@ private actor FakeExifSource: CameraExifSource {
 }
 
 final class CameraNetworkTests: XCTestCase {
+    @MainActor func testTransferPreferenceDefaultAndRoundTripDoNotTouchBrowsePreferences() throws {
+        let suite = "transfer-preferences-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = TransferPreferencesStore(defaults: defaults)
+        let value = try XCTUnwrap(store.read())
+        XCTAssertFalse(value.organizeByDate); XCTAssertFalse(value.deferStart)
+        XCTAssertNil(defaults.object(forKey: TransferPreferencesStore.key))
+        defaults.set(Data([8, 9]), forKey: BrowsePreferencesStore.key)
+        XCTAssertTrue(store.save(NativeTransferPreferences(organizeByDate: true, deferStart: true)))
+        let reopened = try XCTUnwrap(TransferPreferencesStore(defaults: defaults).read())
+        XCTAssertTrue(reopened.organizeByDate); XCTAssertTrue(reopened.deferStart)
+        XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), Data([8, 9]))
+    }
+
+    @MainActor func testTransferPreferencesPreserveCorruptFutureAndWrongTypeDocuments() throws {
+        let suite = "transfer-invalid-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = TransferPreferencesStore(defaults: defaults)
+        for data in [Data("broken".utf8), Data(repeating: 0, count: 4097),
+                     Data(#"{"version":2,"organizeByDate":true,"deferStart":false}"#.utf8),
+                     Data(#"{"version":1,"organizeByDate":"true","deferStart":false}"#.utf8)] {
+            defaults.set(data, forKey: TransferPreferencesStore.key)
+            XCTAssertNil(store.read())
+            XCTAssertFalse(store.save(NativeTransferPreferences(organizeByDate: false, deferStart: false)))
+            XCTAssertEqual(defaults.data(forKey: TransferPreferencesStore.key), data)
+        }
+        defaults.set("unexpected", forKey: TransferPreferencesStore.key)
+        XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeTransferPreferences.companion.defaults()))
+        XCTAssertEqual(defaults.string(forKey: TransferPreferencesStore.key), "unexpected")
+    }
+
+    @MainActor func testRealFilesEnqueueUsesRestoredDateAndDeferredOptionsBeforeAcknowledgement() async throws {
+        let suite = "transfer-page-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let transfer = TransferPreferencesStore(defaults: defaults)
+        XCTAssertTrue(transfer.save(NativeTransferPreferences(organizeByDate: true, deferStart: true)))
+        let wire = FakeCameraConnection(bytes: Data()), camera = stationCamera(command: wire)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
+            catalog: CameraCatalog(source: camera, stationMode: true), queue: queue, previews: CameraPreviewStore(source: camera),
+            exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true, transferPreferences: transfer)
+        defer { bridge.close() }
+        bridge.setConnected(true)
+        let info = try sampleInfo(7, captureDate: "20260102T123456")
+        let file = try XCTUnwrap(NativeOriginalTransferQueue().enqueue(info: info, byDate: false, dayKey: 0)).file
+        let sequence = bridge.model.beginScan()
+        let snapshot = CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 1, storageIDs: [0x10001],
+            files: [file], objectInfos: [7: info], totalHandles: 1, metadataComplete: true, changedWhileScanning: false)
+        XCTAssertTrue(bridge.acceptCatalog(snapshot, sequence: sequence))
+        let completion = FilesEnqueueCompletionProbe(), handles = KotlinIntArray(size: 1)
+        handles.set(index: 0, value: 7)
+        bridge.enqueue(handles: handles, scanSequence: sequence, completion: completion)
+        try await waitUntil("shared file admission acknowledged") { await MainActor.run { completion.count != nil } }
+        XCTAssertEqual(completion.count, 1)
+        let state = await queue.snapshot()
+        XCTAssertEqual(state.rows.first?.destinationFolderName, "ZT2026-01-02")
+        XCTAssertEqual(state.rows.first?.status, "WAITING"); XCTAssertFalse(state.running)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
     @MainActor func testPhotoInteractionLegacyDefaultAndRoundTripPreserveOtherPreferences() throws {
         let suite = "ZTransferTests.interaction.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

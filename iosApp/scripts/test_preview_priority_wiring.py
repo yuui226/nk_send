@@ -1,5 +1,6 @@
 """Exact unaffected-source guards, not execution of the Swift FIFO or Apple UI."""
 from pathlib import Path
+from transfer_preferences_wiring import previous_transfer_source
 import subprocess
 import unittest
 from preview_priority_wiring import without_priority_connection, without_priority_page
@@ -9,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BASE = 'c7cb39e'
 
 
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return previous_transfer_source(path, (ROOT / path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', f'{BASE}:{path}'], cwd=ROOT).decode('utf-8')
 
 

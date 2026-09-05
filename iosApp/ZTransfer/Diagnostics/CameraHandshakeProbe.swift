@@ -380,7 +380,10 @@ final class CameraHandshakeProbe: ObservableObject {
     func enqueueSample(_ index: Int) {
         guard let queue = originalQueue, sampleObjects.indices.contains(index) else { return }
         let info = sampleObjects[index]
-        Task { await queue.enqueue(info, byDate: false, dayKey: 0, deferred: true) }
+        let transfer = filesPage?.model.currentTransferPreferences()
+            ?? TransferPreferencesStore().read() ?? NativeTransferPreferences.companion.defaults()
+        let dayKey = OriginalFilesPageBridge.localDayKey(at: Date(), timeZone: .current)
+        Task { await queue.enqueue(info, byDate: transfer.organizeByDate, dayKey: dayKey, deferred: transfer.deferStart) }
     }
     func openSharedQueue() {
         guard running, !downloading, let queue = originalQueue, let connection = apConnection,

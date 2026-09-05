@@ -44,6 +44,15 @@ internal fun NativeOriginalFilesPage(
     val layout by model.layout.collectAsState()
     val previewOptions by model.previewOptions.collectAsState()
     val preferencesFailed by model.preferencesFailed.collectAsState()
+    val transferPreferences by model.transferPreferences.collectAsState()
+    val transferPreferencesFailed by model.transferPreferencesFailed.collectAsState()
+    // Invalid/missing capture dates use today's bucket. Re-evaluate even across an idle midnight.
+    val lookupDayKey by produceState(0, model, transferPreferences.organizeByDate) {
+        if (transferPreferences.organizeByDate) while (true) {
+            value = model.currentDayKey()
+            delay(60_000)
+        }
+    }
     val appearanceState by appearance.state.collectAsState()
     val tasks by model.queue.state.collectAsState()
     val connected by model.queue.connected.collectAsState()
@@ -101,7 +110,7 @@ internal fun NativeOriginalFilesPage(
     val storageSlots = remember(state.storageIds) { storageFilterSlots(storageIdsBySlot(state.storageIds).keys) }
     val suggestedDate = remember(state.files) { latestCaptureDayKey(state.files.asSequence().map { it.captureDate }) }
     val filterActive = criteria != SharedPhotoFilterCriteria<CaptureDayRange>()
-    val exportedHandles = remember(state.files, originals.revision, criteria.untransferredOnly) { model.transferredHandlesForFilter() }
+    val exportedHandles = remember(state.files, originals.revision, criteria.untransferredOnly, transferPreferences.organizeByDate, lookupDayKey) { model.transferredHandlesForFilter() }
     val exportExit = rememberExportExitState(tasks.tasks, criteria.untransferredOnly && originals.ready, exportedHandles)
     val groups = remember(state.groups, state.files, state.storageIds, criteria, burstIDs, exportExit.filteredHandles) {
         if (!filterActive) state.groups else groupCameraFilesByDate(nativeFilteredCameraFiles(state.files, state.storageIds, criteria,
@@ -198,7 +207,7 @@ internal fun NativeOriginalFilesPage(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
             if (originals.failed) Text(text.indexFailed, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
-            if (preferencesFailed || appearanceState.preferencesFailed) Text(text.preferencesFailed, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall,
+            if (preferencesFailed || transferPreferencesFailed || appearanceState.preferencesFailed) Text(text.preferencesFailed, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
             if (!originals.ready) Text(text.indexPending, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
@@ -229,7 +238,7 @@ internal fun NativeOriginalFilesPage(
                     columns = columns, isLoading = state.scanning, transfersBusy = tasks.isTransferring,
                     allowRemoteThumbnails = connected && preview == null, collapsedDates = dates, thumbnails = thumbnails, text = text,
                     // Current original-only defaults save in the root bucket; future date preferences must share this rule.
-                    isTransferred = { file -> remember(file, originals.revision) { model.isTransferred(file) } },
+                    isTransferred = { file -> remember(file, originals.revision, transferPreferences.organizeByDate, lookupDayKey) { model.isTransferred(file) } },
                     onTransferGroup = { files, _ -> scope.launch(start = CoroutineStart.UNDISPATCHED) { model.enqueue(files) } },
                     onTapFile = { file -> scope.launch(start = CoroutineStart.UNDISPATCHED) { model.enqueue(listOf(file)) } },
                     onPreview = { file, rect -> requestPreview(file, rect) },

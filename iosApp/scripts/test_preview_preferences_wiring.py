@@ -1,5 +1,6 @@
 """Whole-file preservation and preference contracts, not UserDefaults/Swift execution."""
 from pathlib import Path
+from transfer_preferences_wiring import previous_transfer_source
 import subprocess
 import unittest
 from preview_preferences_wiring import without_preview_options_model
@@ -9,7 +10,7 @@ from photo_settings_wiring import without_photo_interaction_store
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return previous_transfer_source(path, (ROOT / path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', '122cdf2:' + path], cwd=ROOT).decode('utf-8')
 
 

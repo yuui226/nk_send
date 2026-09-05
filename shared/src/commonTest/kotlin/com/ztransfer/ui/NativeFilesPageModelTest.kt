@@ -8,6 +8,76 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun transferPreferencesRestoreAndPersistIndependentlyOfBrowseAndCatalog() {
+        val p = Platform(); val m = model(p)
+        m.finishScan(m.beginScan(), snapshot())
+        val catalog = m.state.value; val browse = p.preferences
+        assertEquals(NativeTransferPreferences.defaults(), m.currentTransferPreferences())
+        m.setOrganizeByDate(true); m.setDeferStart(true)
+        assertEquals(NativeTransferPreferences(true, true), p.transfers)
+        assertEquals(2, p.transferWrites)
+        assertEquals(catalog, m.state.value); assertSame(browse, p.preferences)
+        m.changeLayout(4, false)
+        assertEquals(NativeTransferPreferences(true, true), model(p).currentTransferPreferences())
+        m.setOrganizeByDate(true); m.setDeferStart(true)
+        assertEquals(2, p.transferWrites)
+        m.close(); m.setOrganizeByDate(false); m.setDeferStart(false)
+        assertEquals(2, p.transferWrites)
+    }
+
+    @Test fun transferPreferenceFailureDoesNotDiscardLiveSelectionOrGetClearedByBrowseSave() {
+        val p = Platform().also { it.transfers = null; it.transferSaveSucceeds = false }
+        val m = model(p)
+        assertTrue(m.transferPreferencesFailed.value)
+        assertEquals(NativeTransferPreferences.defaults(), m.currentTransferPreferences())
+        m.setOrganizeByDate(true)
+        assertTrue(m.currentTransferPreferences().organizeByDate)
+        assertTrue(m.transferPreferencesFailed.value)
+        m.changeLayout(4, false)
+        assertFalse(m.preferencesFailed.value)
+        assertTrue(m.transferPreferencesFailed.value)
+        assertNull(p.transfers)
+    }
+
+    @Test fun savedBadgeFilterAndPreviewAllUseTheSameSelectedDateBucket() {
+        val m = model(); m.finishScan(m.beginScan(), snapshot())
+        val file = m.state.value.files.first()
+        assertTrue(m.publishOriginals(NativeOriginalIndexUpdate(1, -1, true).also {
+            it.add(file.fileName, file.size, null, "root")
+            it.add(file.fileName, file.size, "ZT2026-09-05", "dated")
+        }))
+        assertEquals("root", m.localOriginalSource(file))
+        m.setOrganizeByDate(true)
+        assertEquals("dated", m.localOriginalSource(file)); assertTrue(m.isTransferred(file))
+        assertTrue(m.changeFilters(SharedPhotoFilterCriteria(untransferredOnly = true)))
+        assertEquals(setOf(file.handle), m.transferredHandlesForFilter())
+        assertTrue(m.publishOriginals(NativeOriginalIndexUpdate(2, -1, true).also {
+            it.add(file.fileName, file.size, null, "root-only")
+        }))
+        assertFalse(m.isTransferred(file)); assertNull(m.localOriginalSource(file))
+        assertTrue(m.transferredHandlesForFilter().isEmpty())
+        m.setOrganizeByDate(false)
+        assertEquals("root-only", m.localOriginalSource(file)); assertTrue(m.isTransferred(file))
+    }
+
+    @Test fun missingCaptureDateFollowsLiveLocalDayButAnAdmittedTaskKeepsItsOldBucket() {
+        val p = Platform(); val m = model(p); m.setOrganizeByDate(true)
+        val file = CameraFileInfo(7, 3, "UNKNOWN.JPG", null)
+        assertTrue(m.publishOriginals(NativeOriginalIndexUpdate(1, -1, true).also {
+            it.add(file.fileName, file.size, "ZT2026-09-05", "first")
+            it.add(file.fileName, file.size, "ZT2026-09-06", "second")
+        }))
+        assertEquals("first", m.localOriginalSource(file))
+        val info = com.ztransfer.protocol.PtpObjectInfo(7, 1, 0x3801, 3, "UNKNOWN.JPG", null, false, false, true)
+        val queue = com.ztransfer.viewmodel.NativeOriginalTransferQueue()
+        val admitted = assertNotNull(queue.enqueue(info, m.currentTransferPreferences().organizeByDate, p.dayKey))
+        p.dayKey = 20260906
+        assertEquals("second", m.localOriginalSource(file))
+        assertEquals("ZT2026-09-05", admitted.destinationFolderName)
+        m.setOrganizeByDate(false)
+        assertNull(m.localOriginalSource(file)); assertEquals("ZT2026-09-05", queue.taskAt(0)?.destinationFolderName)
+    }
+
     @Test fun photoInteractionSurvivesLayoutFilterAndPreviewWritesAndReopensWithoutChangingCatalog() {
         val p = Platform(); val m = model(p); m.finishScan(m.beginScan(), snapshot())
         val catalog = m.state.value
@@ -298,6 +368,15 @@ class NativeFilesPageModelTest {
     }
 
     private class Platform : NativeFilesPagePlatform, NativeQueuePagePlatform {
+        var transfers: NativeTransferPreferences? = NativeTransferPreferences.defaults()
+        var transferWrites = 0
+        var transferSaveSucceeds = true
+        override fun readTransferPreferences() = transfers
+        override fun saveTransferPreferences(value: NativeTransferPreferences): Boolean {
+            transferWrites++
+            if (transferSaveSucceeds) transfers = value
+            return transferSaveSucceeds
+        }
         override fun previewDateText(year: Int, month: Int, day: Int) = "${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}"
         override fun previewTimeText(hour: Int, minute: Int, second: Int) = "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')}"
         var preferences: NativeBrowsePreferences? = NativeBrowsePreferences.defaults()

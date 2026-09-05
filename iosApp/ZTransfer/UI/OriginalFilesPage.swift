@@ -17,6 +17,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private let exifCache: NativePreviewExifCache
     private let decoder = PreviewImageDecoder()
     private let preferences: BrowsePreferencesStore
+    private let transferPreferences: TransferPreferencesStore
     private var refreshTask: Task<Void, Never>?
     private(set) var originalIndexTask: Task<Void, Never>?
     private var needsOriginalUpdate = false
@@ -38,11 +39,13 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
 
     init(connectionID: UUID, catalog: CameraCatalog, queue: CameraOriginalQueue, previews: CameraPreviewStore,
          exifSource: CameraExifSource, exifCache: NativePreviewExifCache, stationMode: Bool,
-         preferences: BrowsePreferencesStore? = nil, originals: OriginalFilesReading? = nil) {
+         preferences: BrowsePreferencesStore? = nil, originals: OriginalFilesReading? = nil,
+         transferPreferences: TransferPreferencesStore? = nil) {
         self.connectionID = connectionID; self.catalog = catalog; self.queue = queue; self.previews = previews
         self.exifSource = exifSource; self.exifCache = exifCache
         self.originals = originals ?? queue // One immutable source for the entire page/preview lifetime.
         self.preferences = preferences ?? BrowsePreferencesStore()
+        self.transferPreferences = transferPreferences ?? TransferPreferencesStore()
         queuePage = OriginalQueuePageBridge(connectionID: connectionID, queue: queue, previews: previews, stationMode: stationMode)
         super.init()
         precondition(model.attachPreviewReads(platform: self))
@@ -69,6 +72,14 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         let value = preferences.read()
         relayPriority(value ?? NativeBrowsePreferences.companion.defaults())
         return value
+    }
+    func readTransferPreferences() -> NativeTransferPreferences? {
+        guard !closed else { return nil }
+        return transferPreferences.read()
+    }
+    func saveTransferPreferences(value: NativeTransferPreferences) -> Bool {
+        guard !closed else { return false }
+        return transferPreferences.save(value)
     }
     func saveBrowsePreferences(value: NativeBrowsePreferences) -> Bool {
         guard !closed else { return false }
@@ -175,14 +186,15 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         let infos = selected.compactMap { infosByHandle[$0] }
         guard !selected.isEmpty, Set(selected).count == selected.count,
               files.count == selected.count, infos.count == selected.count else { completion.complete(acceptedCount: 0); return }
+        let transfer = model.currentTransferPreferences(), dayKey = currentDayKey() // Freeze at admission, before any suspension.
         let token = UUID()
         commands[token] = Task { [weak self] in
             guard let self else { completion.complete(acceptedCount: 0); return }
             var accepted: Int32 = 0
             defer { self.commands.removeValue(forKey: token); completion.complete(acceptedCount: accepted) }
             guard !self.closed, !Task.isCancelled, self.connected else { return }
-            // Android defaults: no date subdirectory, no deferred start. Preference persistence is a later task.
-            accepted = Int32(await self.queue.enqueueCatalog(infos, files: files, byDate: false, dayKey: 0, deferred: false))
+            accepted = Int32(await self.queue.enqueueCatalog(infos, files: files,
+                byDate: transfer.organizeByDate, dayKey: dayKey, deferred: transfer.deferStart))
             let snapshot = await self.queue.snapshot()
             guard !self.closed, !Task.isCancelled else { return }
             self.queuePage.publish(snapshot) // Real post-operation state before acknowledgement.

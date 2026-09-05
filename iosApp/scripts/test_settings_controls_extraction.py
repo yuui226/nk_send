@@ -5,9 +5,10 @@ import unittest
 import settings_controls_extraction as migration
 import settings_text_catalog
 from photo_settings_wiring import without_photo_interaction_model, without_photo_interaction_store
+from transfer_preferences_wiring import previous_transfer_source
 
 ROOT = Path(__file__).resolve().parents[2]
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return previous_transfer_source(path, (ROOT / path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', migration.BASELINE + ':' + path], cwd=ROOT).decode('utf-8')
 
 class SettingsControlsExtractionTest(unittest.TestCase):

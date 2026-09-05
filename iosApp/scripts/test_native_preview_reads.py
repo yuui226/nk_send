@@ -1,12 +1,13 @@
 """Native preview source wiring guards, not Swift compilation or runtime evidence."""
 from pathlib import Path
+from transfer_preferences_wiring import previous_transfer_source
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def source(path):
-    return (ROOT / path).read_text(encoding="utf-8")
+    return previous_transfer_source(path, (ROOT / path).read_text(encoding="utf-8"))
 
 
 class NativePreviewReadWiringTest(unittest.TestCase):

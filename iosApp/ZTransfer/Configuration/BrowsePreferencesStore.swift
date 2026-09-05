@@ -1,6 +1,33 @@
 import Foundation
 import ZTransferShared
 
+/// Independent app-private options; never stores a provider URL/bookmark or camera/queue identity.
+@MainActor
+final class TransferPreferencesStore {
+    static let key = "ztransfer.transfer.preferences"
+    private let defaults: UserDefaults
+    private struct Document: Codable {
+        let version: Int
+        let organizeByDate: Bool
+        let deferStart: Bool
+    }
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    func read() -> NativeTransferPreferences? {
+        guard let raw = defaults.object(forKey: Self.key) else { return NativeTransferPreferences.companion.defaults() }
+        guard let data = raw as? Data, data.count <= 4096,
+              let document = try? JSONDecoder().decode(Document.self, from: data), document.version == 1 else { return nil }
+        return NativeTransferPreferences(organizeByDate: document.organizeByDate, deferStart: document.deferStart)
+    }
+    @discardableResult
+    func save(_ value: NativeTransferPreferences) -> Bool {
+        guard read() != nil else { return false } // Preserve corrupt/future bytes across downgrades.
+        let document = Document(version: 1, organizeByDate: value.organizeByDate, deferStart: value.deferStart)
+        guard let data = try? JSONEncoder().encode(document), data.count <= 4096 else { return false }
+        defaults.set(data, forKey: Self.key)
+        return defaults.data(forKey: Self.key) == data // Store acknowledgement, not fsync.
+    }
+}
+
 /// One app-private, versioned value. No camera IDs, credentials, bookmarks or task state.
 /// MainActor serialization matches the shared UI boundary; UserDefaults handles disk scheduling.
 @MainActor

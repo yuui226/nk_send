@@ -21,6 +21,7 @@ import com.ztransfer.ui.theme.AppTheme
 internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: NativeBrowseLayout,
     text: NativeSettingsPageText, anchor: Rect, appearance: NativeAppearanceModel, onDismiss: () -> Unit) {
     val appearanceState by appearance.state.collectAsState()
+    val transfers by model.transferPreferences.collectAsState()
     val openingAnchor = remember { anchor }
     val density = LocalDensity.current
     val panelTop = with(density) { openingAnchor.bottom.toDp() } + 8.dp
@@ -42,6 +43,18 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
                 onColumns = { model.changeLayout(it, model.layout.value.collapseBursts) },
                 onCollapseBursts = { model.changeLayout(model.layout.value.columns, it) },
                 onTapToPreview = model::setTapToPreview)
+            Spacer(Modifier.height(14.dp))
+            // Only connected options until atomic directory selection / automatic events are integrated.
+            SharedSettingsCard {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    SharedBooleanSettingsWheel(label = text.label(SettingsTextKey.organize_transfers_by_date),
+                        checked = transfers.organizeByDate, onCheckedChange = model::setOrganizeByDate,
+                        hapticsEnabled = appearanceState.hapticsEnabled, modifier = Modifier.weight(1f), text = text)
+                    SharedBooleanSettingsWheel(label = text.label(SettingsTextKey.defer_transfer_start),
+                        checked = transfers.deferStart, onCheckedChange = model::setDeferStart,
+                        hapticsEnabled = appearanceState.hapticsEnabled, modifier = Modifier.weight(1f), text = text)
+                }
+            }
             Spacer(Modifier.height(14.dp))
             SharedAppearanceSettingsCard(appearanceState.theme, appearanceState.language, "system", appearanceState.skin,
                 appearanceState.hapticsEnabled, appearanceState.keepScreenOn, text,

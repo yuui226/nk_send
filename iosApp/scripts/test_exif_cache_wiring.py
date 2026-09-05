@@ -1,5 +1,6 @@
 """EXIF cache ownership/source guards; Swift actor execution still requires Mac."""
 from pathlib import Path
+from transfer_preferences_wiring import previous_transfer_source
 import re
 import subprocess
 import unittest
@@ -12,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[2]
 BASE = 'ccccc01'
 
 
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path):
+    value = (ROOT / path).read_text(encoding='utf-8')
+    return value if path.endswith('/CameraHandshakeProbe.swift') else previous_transfer_source(path, value)
 def before(path): return subprocess.check_output(['git', 'show', f'{BASE}:{path}'], cwd=ROOT).decode('utf-8')
 
 

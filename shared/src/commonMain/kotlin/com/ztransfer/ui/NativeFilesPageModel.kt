@@ -20,6 +20,8 @@ interface NativeFilesThumbnailCompletion { fun complete(encodedImage: ByteArray?
 
 /** UI-thread boundary. The platform owns scanning, camera I/O and the existing queue actor. */
 interface NativeFilesPagePlatform {
+    fun readTransferPreferences(): NativeTransferPreferences? = NativeTransferPreferences.defaults()
+    fun saveTransferPreferences(value: NativeTransferPreferences): Boolean = false
     fun readBrowsePreferences(): NativeBrowsePreferences?
     fun saveBrowsePreferences(value: NativeBrowsePreferences): Boolean
     fun currentDayKey(): Int
@@ -92,6 +94,20 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     private val mutableFilters = MutableStateFlow(initialPreferences.criteria())
     internal val filters = mutableFilters.asStateFlow()
     private var lastDayKey = checkNotNull(this.platform).currentDayKey()
+    private val restoredTransfers = checkNotNull(this.platform).readTransferPreferences()
+    private val mutableTransfers = MutableStateFlow(restoredTransfers ?: NativeTransferPreferences.defaults())
+    internal val transferPreferences = mutableTransfers.asStateFlow()
+    private val mutableTransferPreferencesFailed = MutableStateFlow(restoredTransfers == null)
+    internal val transferPreferencesFailed = mutableTransferPreferencesFailed.asStateFlow()
+
+    fun currentTransferPreferences(): NativeTransferPreferences = mutableTransfers.value
+    internal fun setOrganizeByDate(value: Boolean) = changeTransfers(mutableTransfers.value.copy(organizeByDate = value))
+    internal fun setDeferStart(value: Boolean) = changeTransfers(mutableTransfers.value.copy(deferStart = value))
+    private fun changeTransfers(value: NativeTransferPreferences) {
+        if (closed || value == mutableTransfers.value) return
+        mutableTransfers.value = value
+        mutableTransferPreferencesFailed.value = platform?.saveTransferPreferences(value) != true
+    }
 
     internal fun previewMetadata(file: CameraFileInfo, overFourGbLabel: String): String {
         val owner = platform ?: return ""
@@ -164,7 +180,8 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     fun originalsRefreshFailed() {
         if (!closed) mutableOriginals.value = mutableOriginals.value.copy(refreshing = false, failed = true)
     }
-    internal fun isTransferred(file: CameraFileInfo): Boolean = originalIndex.contains(file, folder = null)
+    internal fun isTransferred(file: CameraFileInfo): Boolean = originalIndex.contains(file,
+        folder = mutableTransfers.value.destinationFolder(file, currentDayKey()))
 
     fun attachPreviewReads(platform: NativePreviewReadPlatform): Boolean {
         if (closed || (previewPlatform != null && previewPlatform !== platform)) return false
@@ -184,7 +201,8 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         ).also { previewReads = it }
     }
 
-    internal fun localOriginalSource(file: CameraFileInfo): String? = originalIndex.localLocator(file, folder = null)
+    internal fun localOriginalSource(file: CameraFileInfo): String? = originalIndex.localLocator(file,
+        folder = mutableTransfers.value.destinationFolder(file, currentDayKey()))
 
     fun beginScan(): Long {
         if (closed || !queue.connected.value || mutableState.value.scanning || mutableState.value.enqueueing) return 0

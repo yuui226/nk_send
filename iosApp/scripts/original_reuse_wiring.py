@@ -11,6 +11,8 @@ CHANGES['iosApp/ZTransfer/Storage/OriginalFilesReading.swift'] = [('extension Ca
 
 
 def previous_reuse_source(path, value):
+    from transfer_preferences_wiring import previous_transfer_source
+    value = previous_transfer_source(path, value)
     for new, old in CHANGES.get(path, ()):
         assert value.count(new) == 1, (path, new)
         value = value.replace(new, old, 1)

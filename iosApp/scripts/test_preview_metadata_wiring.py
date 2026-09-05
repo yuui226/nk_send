@@ -1,11 +1,12 @@
 """Frozen Android oracle and exact adapter edits; not Apple execution or gesture proof."""
 from pathlib import Path
+from transfer_preferences_wiring import previous_transfer_source
 import subprocess
 import unittest
 from preview_metadata_wiring import ORIGINAL_DATE, ORIGINAL_VIDEO, restore_preview_metadata, without_metadata_model, without_metadata_page
 
 ROOT = Path(__file__).resolve().parents[2]
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return previous_transfer_source(path, (ROOT / path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', 'd7f3b2c:' + path], cwd=ROOT).decode('utf-8')
 
 class PreviewMetadataWiringTest(unittest.TestCase):

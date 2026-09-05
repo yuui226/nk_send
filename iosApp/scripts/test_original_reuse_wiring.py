@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import unittest
 from original_reuse_wiring import CHANGES, previous_reuse_source
+from transfer_preferences_wiring import previous_transfer_source
 
 ROOT = Path(__file__).resolve().parents[2]
 QUEUE = 'iosApp/ZTransfer/Network/CameraOriginalQueue.swift'
@@ -11,14 +12,14 @@ PROVIDER = 'iosApp/ZTransfer/Storage/ProviderOriginalStore.swift'
 SANDBOX = 'iosApp/ZTransfer/Storage/SandboxTransferFile.swift'
 PROBE = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
 
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return previous_transfer_source(path, (ROOT / path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', 'd54f2d8:' + path], cwd=ROOT).decode('utf-8')
 
 class OriginalReuseWiringTest(unittest.TestCase):
     def test_entire_previous_sources_restore_after_only_enumerated_additions(self):
         self.assertEqual(8, len(CHANGES))
         for path in CHANGES:
-            self.assertEqual(before(path), previous_reuse_source(path, read(path)))
+            self.assertEqual(before(path), previous_reuse_source(path, (ROOT / path).read_text(encoding='utf-8')))
 
     def test_lookup_uses_one_shared_index_per_run_and_no_second_matching_algorithm(self):
         value = read(QUEUE)
