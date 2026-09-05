@@ -11,16 +11,17 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private let connectionID: UUID
     private let catalog: CameraCatalog
     private let queue: CameraOriginalQueue
+    private let originals: OriginalFilesReading
     private let previews: CameraPreviewStore
     private let exifSource: CameraExifSource
     private let exifCache: NativePreviewExifCache
     private let decoder = PreviewImageDecoder()
     private let preferences: BrowsePreferencesStore
     private var refreshTask: Task<Void, Never>?
-    private var originalIndexTask: Task<Void, Never>?
+    private(set) var originalIndexTask: Task<Void, Never>?
     private var needsOriginalUpdate = false
     private var needsOriginalRescan = false
-    private var originalRevision: Int64 = -1
+    private(set) var originalRevision: Int64 = -1
     private var completedOriginalRevision: UInt64?
     private var commands: [UUID: Task<Void, Never>] = [:]
     private var images: [UUID: Task<Void, Never>] = [:]
@@ -37,9 +38,10 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
 
     init(connectionID: UUID, catalog: CameraCatalog, queue: CameraOriginalQueue, previews: CameraPreviewStore,
          exifSource: CameraExifSource, exifCache: NativePreviewExifCache, stationMode: Bool,
-         preferences: BrowsePreferencesStore? = nil) {
+         preferences: BrowsePreferencesStore? = nil, originals: OriginalFilesReading? = nil) {
         self.connectionID = connectionID; self.catalog = catalog; self.queue = queue; self.previews = previews
         self.exifSource = exifSource; self.exifCache = exifCache
+        self.originals = originals ?? queue // One immutable source for the entire page/preview lifetime.
         self.preferences = preferences ?? BrowsePreferencesStore()
         queuePage = OriginalQueuePageBridge(connectionID: connectionID, queue: queue, previews: previews, stationMode: stationMode)
         super.init()
@@ -121,7 +123,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
                 let rescan = self.needsOriginalRescan
                 self.needsOriginalUpdate = false; self.needsOriginalRescan = false
                 do {
-                    let result = try await self.queue.originals(since: self.originalRevision, rescan: rescan)
+                    let result = try await self.originals.originals(since: self.originalRevision, rescan: rescan)
                     guard !self.closed, !Task.isCancelled else { return }
                     let update = NativeOriginalIndexUpdate(revision: result.revision,
                         baseRevision: result.baseRevision, fullSnapshot: result.fullSnapshot)
@@ -303,8 +305,8 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
             do {
                 try Task.checkCancellation()
                 let data: Data?
-                if embeddedRaw { data = try await self.queue.originalRawPreviewData(locator: source) }
-                else { data = try await self.queue.originalData(locator: source) }
+                if embeddedRaw { data = try await self.originals.originalRawPreviewData(locator: source) }
+                else { data = try await self.originals.originalData(locator: source) }
                 guard let data else { completion.complete(image: nil); return }
                 try Task.checkCancellation()
                 let png = try await self.decoder.originalBitmapPNG(data)
@@ -366,7 +368,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
             defer { self.previewRequests.removeValue(forKey: key) }
             do {
                 try Task.checkCancellation()
-                let exif = try await self.queue.originalExif(locator: source)
+                let exif = try await self.originals.originalExif(locator: source)
                 try Task.checkCancellation()
                 guard !self.closed, self.previewUse?.session == sessionId else { completion.complete(exif: nil); return }
                 self.exifCache.remember(file: file, exif: exif)

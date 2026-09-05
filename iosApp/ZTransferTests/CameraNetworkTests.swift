@@ -55,6 +55,67 @@ import XCTest
     func complete(granted: Bool) { self.granted = granted; done.fulfill() }
 }
 
+@MainActor private final class LocalImageCompletionProbe: NSObject, NativeLocalPreviewCompletion {
+    let done: XCTestExpectation
+    private(set) var value: NativeLocalPreviewImage?
+    private(set) var count = 0
+    init(_ done: XCTestExpectation) { self.done = done; super.init(); done.assertForOverFulfill = true }
+    func complete(image: NativeLocalPreviewImage?) { value = image; count += 1; done.fulfill() }
+}
+
+/// Deliberately returns held results even after cancellation, exercising the page's stale-result guard.
+private actor PageOriginalSource: OriginalFilesReading {
+    let entry: OriginalIndexEntry
+    let bytes: Data
+    private var calls: [String] = []
+    private var began: [String: XCTestExpectation] = [:]
+    private var held: [String: CheckedContinuation<Void, Never>] = [:]
+    init(url: URL, bytes: Data) {
+        self.bytes = bytes
+        entry = OriginalIndexEntry(name: url.lastPathComponent, size: Int64(bytes.count), folder: nil, url: url)
+    }
+    func hold(_ operation: String, began: XCTestExpectation) { self.began[operation] = began }
+    func release(_ operation: String) { held.removeValue(forKey: operation)?.resume() }
+    func requests() -> [String] { calls }
+    private func enter(_ operation: String) async {
+        calls.append(operation)
+        if let signal = began.removeValue(forKey: operation) {
+            await withCheckedContinuation { held[operation] = $0; signal.fulfill() }
+        }
+    }
+    func originals(since revision: Int64, rescan: Bool) async throws -> OriginalIndexUpdate {
+        await enter("index")
+        return OriginalIndexUpdate(revision: 1, baseRevision: revision, fullSnapshot: true, entries: [entry])
+    }
+    func originalData(locator: String) async throws -> Data {
+        await enter("data")
+        guard locator == entry.url.absoluteString else { throw OriginalIndexError.unsafeRoot }
+        return bytes
+    }
+    func originalRawPreviewData(locator: String) async throws -> Data? {
+        await enter("raw")
+        guard locator == entry.url.absoluteString else { throw OriginalIndexError.unsafeRoot }
+        return bytes // Already-extracted JPEG fixture; actual RAW IO has provider filesystem tests.
+    }
+    func originalExif(locator: String) async throws -> PhotoExif? {
+        let result = try PreviewExifReader.metadata(header: bytes)
+        await enter("exif")
+        guard locator == entry.url.absoluteString else { throw OriginalIndexError.unsafeRoot }
+        return result
+    }
+}
+
+private final class PageDirectoryGrant: ExportDirectoryAccess {
+    let root: URL
+    var starts = 0, stops = 0
+    init(_ root: URL) { self.root = root }
+    func start(_ url: URL) -> Bool { starts += 1; return true }
+    func stop(_ url: URL) { stops += 1 }
+    func isDirectory(_ url: URL) throws -> Bool { try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true }
+    func bookmark(_ url: URL) -> Data { Data([1]) }
+    func resolve(_ bookmark: Data) -> ResolvedExportDirectory { ResolvedExportDirectory(url: root, stale: false) }
+}
+
 private actor FakeExifSource: CameraExifSource {
     private var priorityTokens = Set<UUID>()
     private(set) var priorityReleases = 0
@@ -297,13 +358,14 @@ final class CameraNetworkTests: XCTestCase {
     }
 
     @MainActor private func exifPage(_ cache: NativePreviewExifCache, source: CameraExifSource, root: URL,
-                                     handle: Int32 = 7, name: String = "sample.JPG", size: Int = 7)
+                                     handle: Int32 = 7, name: String = "sample.JPG", size: Int = 7,
+                                     originals: OriginalFilesReading? = nil)
         throws -> (page: OriginalFilesPageBridge, file: CameraFileInfo, queue: CameraOriginalQueue) {
         let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
         let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
         let page = OriginalFilesPageBridge(connectionID: camera.connectionID,
             catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
-            previews: CameraPreviewStore(source: camera), exifSource: source, exifCache: cache, stationMode: true)
+            previews: CameraPreviewStore(source: camera), exifSource: source, exifCache: cache, stationMode: true, originals: originals)
         var bytes = Data(repeating: 0, count: 52)
         bytes[0] = 1; bytes[2] = 1; bytes[4] = 1; bytes[5] = 0x38
         for i in 0..<4 { bytes[8 + i] = UInt8(truncatingIfNeeded: size >> (8 * i)) }
@@ -318,6 +380,164 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertTrue(page.acceptCatalog(catalog, sequence: page.model.beginScan()))
         page.beginPreviewReads(sessionId: 1)
         return (page, file, queue)
+    }
+
+    @MainActor func testProviderIndexDrivesFrozenSharedPreviewAndRealCoordinatedBitmapExifOffline() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let providerRoot = root.appendingPathComponent("provider", isDirectory: true)
+        try FileManager.default.createDirectory(at: providerRoot, withIntermediateDirectories: true)
+        let data = try previewExifJpegFixture(), url = providerRoot.appendingPathComponent("sample.JPG")
+        try data.write(to: url)
+        let bookmark = root.appendingPathComponent("grant")
+        try Data([1]).write(to: bookmark)
+        let grant = PageDirectoryGrant(providerRoot)
+        let provider = ProviderOriginalStore(directory: ScopedDirectoryStore(bookmarkFile: bookmark, access: grant))
+        try await provider.validateSelection()
+        let remote = FakeExifSource(.failure)
+        let context = try exifPage(NativePreviewExifCache(), source: remote, root: root.appendingPathComponent("sandbox"),
+            size: data.count, originals: provider)
+        defer { context.page.close() }
+        context.page.publishQueue(await context.queue.snapshot())
+        let refresh = try XCTUnwrap(context.page.originalIndexTask)
+        await refresh.value
+        XCTAssertGreaterThanOrEqual(context.page.originalRevision, 0)
+        context.page.setConnected(false)
+        let reads = try XCTUnwrap(context.page.model.beginPreviewReads())
+        let locator = url.standardizedFileURL.resolvingSymlinksInPath().absoluteString
+        let image = try await reads.localBitmap(file: context.file, source: locator)
+        XCTAssertEqual(image?.width, 12); XCTAssertEqual(image?.height, 8)
+        let exif = try await reads.localExif(file: context.file, source: locator)
+        XCTAssertEqual(exif?.iso, "ISO64"); XCTAssertEqual(exif?.dateTime, "2026:09:05 01:02:03")
+        let wrongSource = try await reads.localBitmap(file: context.file, source: root.appendingPathComponent("sandbox/sample.JPG").absoluteString)
+        XCTAssertNil(wrongSource)
+        let calls = await remote.requests(); XCTAssertTrue(calls.isEmpty)
+        let queue = await context.queue.snapshot(); XCTAssertTrue(queue.rows.isEmpty); XCTAssertFalse(queue.running)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("sandbox").path))
+        XCTAssertEqual(try Data(contentsOf: url), data); XCTAssertEqual(grant.starts, grant.stops)
+    }
+
+    @MainActor func testAllLocalPreviewRoutesUseInjectedSourceWithoutReadingQueueSandbox() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = root.appendingPathComponent("selected/sample.JPG"), data = try previewExifJpegFixture()
+        let source = PageOriginalSource(url: url, bytes: data), remote = FakeExifSource(.failure)
+        let cache = NativePreviewExifCache()
+        let context = try exifPage(cache, source: remote, root: root.appendingPathComponent("sandbox"), size: data.count, originals: source)
+        defer { context.page.close() }
+        context.page.setConnected(false)
+        let bitmap = LocalImageCompletionProbe(expectation(description: "selected bitmap"))
+        context.page.readLocalBitmap(sessionId: 1, requestId: 1, source: url.absoluteString, completion: bitmap)
+        await fulfillment(of: [bitmap.done], timeout: 3)
+        let raw = LocalImageCompletionProbe(expectation(description: "selected raw slice"))
+        context.page.readLocalRaw(sessionId: 1, requestId: 2, source: url.absoluteString, completion: raw)
+        await fulfillment(of: [raw.done], timeout: 3)
+        let exif = PreviewExifCompletionProbe(expectation(description: "selected exif"))
+        context.page.readLocalExif(sessionId: 1, requestId: 3, file: context.file, source: url.absoluteString, completion: exif)
+        await fulfillment(of: [exif.done], timeout: 3)
+        XCTAssertEqual(bitmap.value?.width, 12); XCTAssertEqual(raw.value?.width, 12)
+        XCTAssertEqual(exif.value?.iso, "ISO64")
+        let calls = await source.requests(); XCTAssertEqual(calls, ["data", "raw", "exif"])
+        let remoteCalls = await remote.requests(); XCTAssertTrue(remoteCalls.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testClosedPageCannotPublishLateIndexIntoReplacementWithSameRevision() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let data = try previewExifJpegFixture()
+        let firstSource = PageOriginalSource(url: root.appendingPathComponent("first/sample.JPG"), bytes: data)
+        let secondSource = PageOriginalSource(url: root.appendingPathComponent("second/sample.JPG"), bytes: data)
+        let began = expectation(description: "old index held")
+        await firstSource.hold("index", began: began)
+        let old = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root,
+            size: data.count, originals: firstSource)
+        old.page.publishQueue(await old.queue.snapshot())
+        let oldRefresh = try XCTUnwrap(old.page.originalIndexTask)
+        await fulfillment(of: [began], timeout: 3)
+        old.page.close()
+        let next = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root,
+            size: data.count, originals: secondSource)
+        defer { next.page.close() }
+        next.page.publishQueue(await next.queue.snapshot())
+        let newRefresh = try XCTUnwrap(next.page.originalIndexTask)
+        await newRefresh.value
+        await firstSource.release("index"); await oldRefresh.value
+        XCTAssertEqual(old.page.originalRevision, -1); XCTAssertEqual(next.page.originalRevision, 1)
+        let reads = try XCTUnwrap(next.page.model.beginPreviewReads())
+        let rejected = try await reads.localBitmap(file: next.file, source: root.appendingPathComponent("first/sample.JPG").absoluteString)
+        XCTAssertNil(rejected)
+        let accepted = try await reads.localBitmap(file: next.file, source: root.appendingPathComponent("second/sample.JPG").absoluteString)
+        XCTAssertEqual(accepted?.width, 12)
+        let calls = await secondSource.requests(); XCTAssertEqual(calls, ["index", "data"])
+    }
+
+    @MainActor func testClosedPageDropsLateLocalBitmapAndDoesNotCancelNewPageRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = root.appendingPathComponent("sample.JPG"), data = try previewExifJpegFixture()
+        let source = PageOriginalSource(url: url, bytes: data)
+        let began = expectation(description: "old bitmap held")
+        await source.hold("data", began: began)
+        let old = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root, originals: source)
+        let completion = LocalImageCompletionProbe(expectation(description: "old bitmap rejected"))
+        old.page.readLocalBitmap(sessionId: 1, requestId: 1, source: url.absoluteString, completion: completion)
+        await fulfillment(of: [began], timeout: 3)
+        old.page.close()
+        let next = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root, originals: source)
+        defer { next.page.close() }
+        let accepted = LocalImageCompletionProbe(expectation(description: "new bitmap"))
+        next.page.readLocalBitmap(sessionId: 1, requestId: 1, source: url.absoluteString, completion: accepted)
+        await fulfillment(of: [accepted.done], timeout: 3)
+        await source.release("data")
+        await fulfillment(of: [completion.done], timeout: 3)
+        XCTAssertNil(completion.value); XCTAssertEqual(completion.count, 1)
+        XCTAssertEqual(accepted.value?.width, 12); XCTAssertEqual(accepted.count, 1)
+    }
+
+    @MainActor func testClosedPageLateLocalExifCannotPoisonSharedCache() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = root.appendingPathComponent("sample.JPG"), data = try previewExifJpegFixture()
+        let source = PageOriginalSource(url: url, bytes: data), cache = NativePreviewExifCache()
+        let began = expectation(description: "old exif held")
+        await source.hold("exif", began: began)
+        let context = try exifPage(cache, source: FakeExifSource(.failure), root: root, originals: source)
+        let completion = PreviewExifCompletionProbe(expectation(description: "old exif rejected"))
+        context.page.readLocalExif(sessionId: 1, requestId: 1, file: context.file, source: url.absoluteString, completion: completion)
+        await fulfillment(of: [began], timeout: 3)
+        context.page.close()
+        await source.release("exif")
+        await fulfillment(of: [completion.done], timeout: 3)
+        XCTAssertNil(completion.value); XCTAssertNil(cache.cached(file: context.file)); XCTAssertEqual(completion.count, 1)
+    }
+
+    @MainActor func testIndexSourceStillUsesLowFrequencyQueueRevisionNotProgressSamples() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let source = PageOriginalSource(url: root.appendingPathComponent("sample.JPG"), bytes: Data([1]))
+        let context = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root, originals: source)
+        defer { context.page.close() }
+        let snapshot = await context.queue.snapshot()
+        context.page.publishQueue(snapshot)
+        let refresh = try XCTUnwrap(context.page.originalIndexTask)
+        await refresh.value
+        for _ in 0..<20 { context.page.publishQueue(snapshot) }
+        XCTAssertNil(context.page.originalIndexTask)
+        let calls = await source.requests(); XCTAssertEqual(calls, ["index"])
+    }
+
+    @MainActor func testDefaultFilesSourceRemainsQueueSandbox() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let data = try previewExifJpegFixture(), url = root.appendingPathComponent("sample.JPG")
+        try data.write(to: url)
+        let context = try exifPage(NativePreviewExifCache(), source: FakeExifSource(.failure), root: root, size: data.count)
+        defer { context.page.close() }
+        context.page.publishQueue(await context.queue.snapshot())
+        let refresh = try XCTUnwrap(context.page.originalIndexTask)
+        await refresh.value
+        context.page.setConnected(false)
+        let reads = try XCTUnwrap(context.page.model.beginPreviewReads())
+        let image = try await reads.localBitmap(file: context.file, source: url.standardizedFileURL.resolvingSymlinksInPath().absoluteString)
+        XCTAssertEqual(image?.width, 12)
+        let state = await context.queue.snapshot(); XCTAssertFalse(state.running); XCTAssertTrue(state.rows.isEmpty)
     }
 
     @MainActor func testExifCacheSurvivesPageAndConnectionReplacementAndServesLocalOffline() async throws {

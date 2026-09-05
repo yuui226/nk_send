@@ -117,6 +117,12 @@ actor ProviderOriginalStore {
         self.directory = directory; self.coordinatorFactory = coordinatorFactory ?? { AppleProviderFileCoordinator() }
     }
 
+    /// Bind before a page or future transfer attempt starts, without scanning or materializing images.
+    func validateSelection() async throws {
+        let selection = try await boundSelection()
+        try await directory.withDirectory(selection: selection) { _ in () }
+    }
+
     func publish(_ saved: SavedCameraFile, folder: String? = nil) async throws -> SavedCameraFile {
         try Task.checkCancellation()
         let selection = try await boundSelection()

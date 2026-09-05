@@ -38,6 +38,7 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published private(set) var queueSnapshot: OriginalQueueSnapshot?
     @Published var queuePage: OriginalQueuePageBridge?
     @Published var filesPage: OriginalFilesPageBridge?
+    private var workspaceNavigation: UInt64 = 0
     var canOpenSharedWorkspace: Bool {
         running && !downloading && originalQueue != nil && apConnection != nil && previewStore != nil && catalog != nil
     }
@@ -93,6 +94,7 @@ final class CameraHandshakeProbe: ObservableObject {
 
     func useDirectory(_ selection: URL? = nil, forget: Bool = false) {
         guard !directoryBusy else { return }
+        filesPage?.close(); filesPage = nil // No frozen preview/index survives a grant change or refresh.
         directoryBusy = true
         directoryTask = Task {
             defer { directoryBusy = false; directoryTask = nil }
@@ -369,6 +371,7 @@ final class CameraHandshakeProbe: ObservableObject {
     func openSharedQueue() {
         guard running, !downloading, let queue = originalQueue, let connection = apConnection,
               let previews = previewStore else { return }
+        workspaceNavigation &+= 1
         queuePage?.close()
         filesPage?.close(); filesPage = nil
         let page = OriginalQueuePageBridge(connectionID: connection.connectionID, queue: queue, previews: previews, stationMode: connection.stationMode)
@@ -382,13 +385,33 @@ final class CameraHandshakeProbe: ObservableObject {
         }
     }
     func startQueue() { if let queue = originalQueue, !downloading { Task { await queue.start() } } }
-    func openSharedFiles() {
+    func openSharedProviderFiles() {
+        guard canOpenSharedWorkspace, !scanningCatalog, !directoryBusy, let connection = apConnection else { return }
+        let navigation = workspaceNavigation
+        directoryBusy = true
+        directoryTask = Task {
+            defer { directoryBusy = false; directoryTask = nil }
+            do {
+                let source = try providerStore()
+                try await source.validateSelection() // Freeze the grant before publishing a page, without a double scan.
+                try Task.checkCancellation()
+                guard canOpenSharedWorkspace, !scanningCatalog, workspaceNavigation == navigation,
+                      apConnection?.connectionID == connection.connectionID else { return }
+                directoryStatus = "文件页的已保存标记与本地预览使用所选目录；新下载仍写入应用沙盒，自动目录目标尚未接入。"
+                openSharedFiles(originals: source)
+            } catch {
+                if !Task.isCancelled { directoryStatus = "所选目录无法打开：\(error.localizedDescription)" }
+            }
+        }
+    }
+    func openSharedFiles(originals: OriginalFilesReading? = nil) {
         guard running, !downloading, !scanningCatalog, let queue = originalQueue, let connection = apConnection,
               let catalog, let previews = previewStore else { return }
+        workspaceNavigation &+= 1
         queuePage?.close(); queuePage = nil
         filesPage?.close()
         let page = OriginalFilesPageBridge(connectionID: connection.connectionID, catalog: catalog,
-            queue: queue, previews: previews, exifSource: connection, exifCache: exifCache, stationMode: connection.stationMode)
+            queue: queue, previews: previews, exifSource: connection, exifCache: exifCache, stationMode: connection.stationMode, originals: originals)
         filesPage = page
         Task {
             let snapshot = await queue.snapshot()
@@ -711,6 +734,10 @@ struct CameraHandshakeProbeView: View {
             if !probe.photoImportStatus.isEmpty { Text(probe.photoImportStatus).font(.caption) }
             Button("打开共享文件浏览（真实目录）") { probe.openSharedFiles() }
                 .disabled(!probe.canOpenSharedWorkspace || probe.scanningCatalog)
+            Button("打开共享文件浏览（已选原片目录）") { probe.openSharedProviderFiles() }
+                .disabled(!probe.canOpenSharedWorkspace || probe.scanningCatalog || probe.directoryBusy)
+            Text("已选目录入口只改变已保存识别与本地预览；下载队列当前仍写入应用沙盒。")
+                .font(.caption)
             Button("打开共享队列（真实任务）") { probe.openSharedQueue() }
                 .disabled(!probe.canOpenSharedWorkspace)
             if let queue = probe.queueSnapshot {

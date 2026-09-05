@@ -20,7 +20,7 @@ class OriginalIndexWiringTest(unittest.TestCase):
     def test_page_uses_completed_revision_and_existing_single_observer(self):
         bridge = self.read('iosApp/ZTransfer/UI/OriginalFilesPage.swift')
         self.assertIn('value.completedOriginalRevision > completedOriginalRevision!', bridge)
-        self.assertIn('try await self.queue.originals(since: self.originalRevision, rescan: rescan)', bridge)
+        self.assertIn('try await self.originals.originals(since: self.originalRevision, rescan: rescan)', bridge)
         self.assertIn('originalIndexTask?.cancel()', bridge)
         self.assertNotIn('for await', bridge)
         page = self.read('shared/src/commonMain/kotlin/com/ztransfer/ui/NativeOriginalFilesPage.kt')

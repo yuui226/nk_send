@@ -66,7 +66,7 @@ class ExifCacheWiringTest(unittest.TestCase):
         self.assertLess(remote.index('if maximum == 0'), remote.index('guard connected, let use'))
         self.assertEqual(1, remote.count('self.exifSource.exifHeader('))
         self.assertIn('self.decoder.exifMetadata(data)', remote)
-        self.assertLess(local.index('exifCache.cached(file: file)'), local.index('self.queue.originalExif('))
+        self.assertLess(local.index('exifCache.cached(file: file)'), local.index('self.originals.originalExif('))
         for body in (remote, local):
             self.assertIn('if !Task.isCancelled, !(error is CancellationError)', body)
             self.assertIn('self.previewUse?.session == sessionId', body)

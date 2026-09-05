@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import unittest
 from original_reader_wiring import READER, SANDBOX, restore_sandbox_reader
+from original_source_wiring import without_original_source_page, without_original_source_probe
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = '381364e'
@@ -82,10 +83,13 @@ class ProviderContentWiringTest(unittest.TestCase):
                      'iosApp/ZTransfer/Storage/PreviewImageDecoder.swift', 'iosApp/ZTransfer/Storage/OriginalFileIndex.swift',
                      'app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt',
                      'shared/src/commonMain/kotlin/com/ztransfer/ui/NativeFilesPageModel.kt'):
-            self.assertEqual(before(path), read(path))
+            normalize = without_original_source_page if path.endswith('OriginalFilesPage.swift') else (
+                without_original_source_probe if path.endswith('CameraHandshakeProbe.swift') else lambda value: value)
+            self.assertEqual(before(path), normalize(read(path)))
 
     def test_apple_tests_do_not_place_await_in_xctest_synchronous_autoclosures(self):
         for path in (ROOT / 'iosApp/ZTransferTests').rglob('*.swift'):
-            self.assertNotRegex(path.read_text(encoding='utf-8'), r'XCT\w+\([^\n]*\bawait\b')
+            for number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                self.assertNotRegex(line, r'XCT\w+\([^\n]*\bawait\b', f'{path.name}:{number}')
 
 if __name__ == '__main__': unittest.main()

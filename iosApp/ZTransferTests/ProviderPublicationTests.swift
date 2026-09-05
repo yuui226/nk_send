@@ -7,6 +7,30 @@ import ZTransferShared
 
 /// Apple filesystem/coordinator tests. Registered for Mac, never counted as Windows execution.
 final class ProviderPublicationTests: XCTestCase {
+    func testSelectionPreparationBindsGrantWithoutScanningOrCoordinatingContent() async throws {
+        let area = try PublicationArea()
+        let coordinator = PublicationCoordinator(), store = area.publisher(coordinator)
+        try await store.validateSelection()
+        XCTAssertEqual(coordinator.calls, 0)
+        XCTAssertEqual(area.access.starts, 1); XCTAssertEqual(area.access.stops, 1)
+        XCTAssertEqual(try area.children(), [])
+        try await area.store.select(area.target) // A newly persisted grant, even at the same path.
+        do { try await store.validateSelection(); XCTFail("Already bound to earlier selection") }
+        catch { guard case ExportDirectoryError.selectionChanged = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(coordinator.calls, 0)
+    }
+
+    func testSelectionPreparationMissingGrantDoesNotCreateDirectoryOrBookmark() async throws {
+        let area = try PublicationArea()
+        try await area.store.forget()
+        let coordinator = PublicationCoordinator(), store = area.publisher(coordinator)
+        do { try await store.validateSelection(); XCTFail("Missing grant") }
+        catch { guard case ExportDirectoryError.missing = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(coordinator.calls, 0); XCTAssertEqual(area.access.starts, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: area.bookmark.path))
+        XCTAssertEqual(try area.children(), [])
+    }
+
     func testRealCoordinatedContentReadUsesIndexedDateEntryWithoutChangingIndexOrSource() async throws {
         let area = try PublicationArea()
         let store = ProviderOriginalStore(directory: area.store)

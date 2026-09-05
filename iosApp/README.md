@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有36个App Swift文件、225个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；第46批在Windows通过622项共享测试、317项Android测试及common metadata/Android Debug与Release编译/双模块Lint（3m 44s）；第49批通过215项辅助脚本检查。按用户定义，Windows可做工作全部结束为100%，当前粗估89%；不等于iOS成品或真机验收进度。第49批仅Apple读取适配/测试/脚本变更，本批运行215项脚本及结构/源码守卫；939项Kotlin/Android与Lint沿用第46批，没有重复构建。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有37个App Swift文件、234个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；第46批在Windows通过622项共享测试、317项Android测试及common metadata/Android Debug与Release编译/双模块Lint（3m 44s）；第50批通过222项辅助脚本检查。按用户定义，Windows可做工作全部结束为100%，当前粗估90%；不等于iOS成品或真机验收进度。第50批仅Apple页面来源接线/测试/脚本变更，本批运行222项脚本及结构/源码守卫；939项Kotlin/Android与Lint沿用第46批，没有重复构建。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -36,7 +36,7 @@ Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主�
 
 `Configuration/BrowsePreferencesStore`仅持有应用私有版本化浏览偏好；列数2～4、默认3列/开启连拍合并来自Android实际恢复值及shared校验。未知版本/损坏数据保留并提示，卡槽不落盘。点击预览字段已按可选v1值保存，旧数据默认关闭；模型其它设置变更保留该字段，三语两行手势说明与Android编译资源对照。新增UserDefaults隐私理由声明已登记到资源，完整应用/依赖隐私审计仍是发布门槛。
 
-真实沙盒原片索引由既有CameraOriginalStore actor持有：根目录与原日期桶扫描、失败/取消保留、完成保存后增量记录和1024条有界日志；页面通过原唯一队列观察者按完成计数更新，原网格已保存徽标调用共享文件名/大小匹配。清空队列不清索引或原片，重新打开store可重新扫描磁盘。仅排除应用私有临时文件，保留合法点开头原片；不跟随符号链接。所有Apple文件系统行为仍待Mac，预览返回定位已接；Files provider索引的共享页面绑定与完整工作区尚未完成。
+真实沙盒原片索引由既有CameraOriginalStore actor持有：根目录与原日期桶扫描、失败/取消保留、完成保存后增量记录和1024条有界日志；页面通过原唯一队列观察者按完成计数更新，原网格已保存徽标调用共享文件名/大小匹配。清空队列不清索引或原片，重新打开store可重新扫描磁盘。仅排除应用私有临时文件，保留合法点开头原片；不跟随符号链接。所有Apple文件系统行为仍待Mac，预览返回定位已接；Files provider索引也已按页面固定来源接线，完整工作区仍未完成。
 
 真实缩略图磁盘缓存已接入同一CameraPreviewStore：复用共享机身身份/文件键/90天规则，完整无事件竞争目录才清理旧缓存；未知机身仅按连接隔离，迟到/断线请求不能重新写入已移除结果。缓存损坏/链接/系统清缓存处理和8项新增Apple测试源码待Mac验证。同一连接级owner已接原共享ThumbnailFillQueue：完整扫描后补图、日期优先、执行中传输/前台占用让路、失败等真实变化重试；FIFO拿锁后再判准入，不占TID、不取消在途帧。磁盘写失败停止后台，关页不停止；完整预览前台门控已接；扫描批次交错填充、遥控页门控和裁黑边仍待接。
 
@@ -48,15 +48,15 @@ Debug页支持手动IP或STA Bonjour候选、AP/STA标准持续会话和显式�
 
 `PtpIPCommandSession` 为metadata/data-out/流式文件提供同一完整事务FIFO；文件每块至多64KiB，检查TID并读完最终响应。`CameraWiFiConnection`（原APCameraConnection）持有双通道/连接代次、STA初始化、下载全程保活抑制。`CameraCatalog`调用shared逐卡倒序/逐头归并/双卡备份规则。`CameraOriginalQueue`调用已有shared队列和reducer。`CameraPreviewStore`合并同键请求、区分临时失败和确定无图，编码缓存上限32MiB/256项。
 
-`Storage`只负责Apple文件和媒体系统：本次独占临时文件、关闭后无覆盖发布、SHA256、addOnly PhotoKit、方向修正及受限输出尺寸解码、系统复制导出及Files目录书签。目录授权不代表队列下载已改写到provider；完整原片的手动provider协调发布已写，provider元数据索引及已有文件读取已写，自动目标/共享页索引与读取路由、持久断点恢复或完整图库相册管理仍未完成。原片队列已接真实字节进度/速度及迟到隔离。
+`Storage`只负责Apple文件和媒体系统：本次独占临时文件、关闭后无覆盖发布、SHA256、addOnly PhotoKit、方向修正及受限输出尺寸解码、系统复制导出及Files目录书签。目录授权不代表队列下载已改写到provider；完整原片的手动provider协调发布已写，provider元数据索引及已有文件读取已写，共享页索引与三种读取已按固定来源接线，自动目标/持久断点恢复或完整图库相册管理仍未完成。原片队列已接真实字节进度/速度及迟到隔离。
 
-`Storage/ProviderOriginalStore`在既有目录授权作用域内使用NSFileCoordinator读源/写目标；64KiB复制、源SHA256与目标回读验证后按shared同名规则发布，不覆盖已有文件。取消只尝试清理本次part，原片保留；不会声称云端已同步。Debug已保存原片或取出队列结果后，可点“写入已选目录”/“按拍摄日期写入已选目录”作真实验收。发布用例与新增11项索引/授权用例均待Mac。该store首次操作绑定授权，后续换授权/忘记会拒绝旧对象；同一书签目录移动则重扫。已复用原根/日期桶/私有part/链接规则并接发布增量和真实索引检查按钮；失败/取消保留旧结果，读取缓存也不绕过授权和实际根路径检查。第49批普通原片/RAW/EXIF读取已在授权与单文件协调内复用从沙盒提取的IndexedOriginalReader；三路均验证冻结索引条目与实际路径、不重定向旧来源，协调等待/分段/EXIF支持同一取消链路。新增10项Apple待验读取用例，沙盒默认读取算法与旧版本整文件对照通过。原片队列仍以沙盒为默认目标，共享页索引绑定/已有文件预览路由/自动发布及正式目录设置仍须继续。
+`Storage/ProviderOriginalStore`在既有目录授权作用域内使用NSFileCoordinator读源/写目标；64KiB复制、源SHA256与目标回读验证后按shared同名规则发布，不覆盖已有文件。取消只尝试清理本次part，原片保留；不会声称云端已同步。Debug已保存原片或取出队列结果后，可点“写入已选目录”/“按拍摄日期写入已选目录”作真实验收。发布用例与新增11项索引/授权用例均待Mac。该store首次操作绑定授权，后续换授权/忘记会拒绝旧对象；同一书签目录移动则重扫。已复用原根/日期桶/私有part/链接规则并接发布增量和真实索引检查按钮；失败/取消保留旧结果，读取缓存也不绕过授权和实际根路径检查。第49批普通原片/RAW/EXIF读取已在授权与单文件协调内复用从沙盒提取的IndexedOriginalReader；三路均验证冻结索引条目与实际路径、不重定向旧来源，协调等待/分段/EXIF支持同一取消链路。新增10项Apple待验读取用例，沙盒默认读取算法与旧版本整文件对照通过。第50批通过只读OriginalFilesReading接口把索引/已保存与三种读取接入同一共享文件页；默认仍借原队列沙盒，Debug新增“打开共享文件浏览（已选原片目录）”，先固定授权、失败不回退。切目录关闭旧页并取消旧读取，重开新model，不将旧来源结果混入新页。此入口仅改变浏览来源，新下载仍写沙盒；自动发布/日期偏好及正式目录设置仍须继续。原索引根桶查找规则未变，未开启日期整理时不跨日期桶匹配。新增9项接线/生命周期/授权准备Apple测试待Mac。
 
 `GPS`已有前台CoreLocation/GEO共享编码、SecRandom/CommonCrypto配对primitive及共享四阶段适配、可注入的GATT FIFO和CoreBluetooth扫描/连接/顺序订阅。Debug定位仅本地检查编码，蓝牙页只连接/订阅，不向相机发送身份或坐标。GATT就绪不表示GPS认证或OS配对成功；完整认证调度/身份保存/写坐标与恢复仍待接线。
 
 STA-direct、MPF/RAW预览、完整事件/自动入队、共享UI、遥控/完整GPS/效果/权益仍未完成。
 
-照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，225个XCTest也未在Mac运行。
+照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，234个XCTest也未在Mac运行。
 
 ### Mac 一键验收（M1）
 

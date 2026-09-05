@@ -1,5 +1,6 @@
 """Reverse only the enumerated Swift reader extraction to retain historical whole-source guards."""
 from pathlib import Path
+from original_source_wiring import without_original_source_page
 
 ROOT = Path(__file__).resolve().parents[2]
 READER = 'iosApp/ZTransfer/Storage/IndexedOriginalReader.swift'
@@ -75,4 +76,6 @@ def restore_sandbox_reader(sandbox, reader=None):
 
 def historical_source(path):
     value = (ROOT / path).read_text(encoding='utf-8')
+    if path == 'iosApp/ZTransfer/UI/OriginalFilesPage.swift':
+        return without_original_source_page(value)
     return restore_sandbox_reader(value) if path == SANDBOX else value
