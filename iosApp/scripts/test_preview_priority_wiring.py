@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import unittest
 from preview_priority_wiring import without_priority_connection, without_priority_page
+from preview_metadata_wiring import without_metadata_page
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = 'c7cb39e'
@@ -16,7 +17,7 @@ class PreviewPriorityWiringTest(unittest.TestCase):
     def test_connection_and_page_only_add_priority_registration_and_release(self):
         for path, normalize in (
             ('iosApp/ZTransfer/Network/CameraWiFiConnection.swift', without_priority_connection),
-            ('iosApp/ZTransfer/UI/OriginalFilesPage.swift', without_priority_page),
+            ('iosApp/ZTransfer/UI/OriginalFilesPage.swift', lambda value: without_priority_page(without_metadata_page(value))),
         ):
             self.assertEqual(before(path), normalize(read(path)))
 

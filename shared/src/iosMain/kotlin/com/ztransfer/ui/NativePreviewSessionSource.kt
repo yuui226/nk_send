@@ -15,7 +15,7 @@ internal class NativePreviewSessionSource(
     connection: StateFlow<Boolean>,
     files: List<CameraFileInfo>,
     localSources: Map<CameraFileInfo, String>,
-) : PreviewSessionSource<String> {
+) : NativePreviewPageSource {
     private var closed by mutableStateOf(false)
     private var connection: StateFlow<Boolean>? = connection
     private val images = grid.preview(reads, files)
@@ -34,7 +34,7 @@ internal class NativePreviewSessionSource(
 
     override fun localRoute(extension: String): LocalOriginalPreviewRoute = originalLocalPreviewRoute(extension)
 
-    fun localSource(file: CameraFileInfo): String? = if (closed) null else sources[file]
+    override fun localSource(file: CameraFileInfo): String? = if (closed) null else sources[file]
 
     override suspend fun decodeLocal(source: String, route: LocalOriginalPreviewRoute): ImageBitmap? {
         val file = filesBySource[source] ?: return null
@@ -62,7 +62,7 @@ internal class NativePreviewSessionSource(
     override fun histogram(bitmap: ImageBitmap): LuminanceHistogram = calculateImageLuminanceHistogram(bitmap)
     override fun uptimeMillis(): Long = (NSProcessInfo.processInfo.systemUptime * 1000.0).toLong()
 
-    fun close() {
+    override fun close() {
         if (closed) return
         closed = true
         connection = null; sources = emptyMap(); filesBySource = emptyMap(); filesByHandle = emptyMap()

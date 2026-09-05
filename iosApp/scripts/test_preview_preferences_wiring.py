@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import unittest
 from preview_preferences_wiring import without_preview_options_model
+from preview_metadata_wiring import without_metadata_model
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -15,7 +16,7 @@ class PreviewPreferencesWiringTest(unittest.TestCase):
     def test_model_only_adds_preview_options_and_includes_them_in_existing_save(self):
         path = 'shared/src/commonMain/kotlin/com/ztransfer/ui/NativeFilesPageModel.kt'
         value = read(path)
-        self.assertEqual(before(path), without_preview_options_model(value))
+        self.assertEqual(before(path), without_preview_options_model(without_metadata_model(value)))
         setters = value.split('internal fun setPreviewRotationQuarterTurns(', 1)[1].split('private fun persistPreferences(', 1)[0]
         self.assertEqual(2, setters.count('if (closed) return'))
         self.assertEqual(2, setters.count('persistPreferences()'))

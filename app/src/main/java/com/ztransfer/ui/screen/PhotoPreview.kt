@@ -125,35 +125,17 @@ internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewR
     originalLocalPreviewRoute(extension)
 
 /** PTP DateTime（YYYYMMDDThhmmss…）转为预览页使用的稳定本地格式。 */
-internal fun formatPreviewCaptureDate(raw: String?): String? {
-    if (raw == null || raw.length < 8 || !raw.take(8).all(Char::isDigit)) return null
-    val year = raw.substring(0, 4).toInt()
-    val month = raw.substring(4, 6).toInt()
-    val day = raw.substring(6, 8).toInt()
-    runCatching { java.time.LocalDate.of(year, month, day) }.getOrNull() ?: return null
-    val date = "%04d-%02d-%02d".format(year, month, day)
-    if (raw.length < 15 || raw[8] != 'T' || !raw.substring(9, 15).all(Char::isDigit)) {
-        return date
-    }
-    val hour = raw.substring(9, 11).toInt()
-    val minute = raw.substring(11, 13).toInt()
-    val second = raw.substring(13, 15).toInt()
-    runCatching { java.time.LocalTime.of(hour, minute, second) }.getOrNull() ?: return date
-    return "$date %02d:%02d:%02d".format(hour, minute, second)
-}
+internal fun formatPreviewCaptureDate(raw: String?): String? = previewCaptureDateText(raw,
+    dateText = { year, month, day -> "%04d-%02d-%02d".format(year, month, day) },
+    timeText = { hour, minute, second -> "%02d:%02d:%02d".format(hour, minute, second) },
+)
 
 internal fun videoPreviewMetadata(
     fileSize: Long,
     captureDate: String?,
     overFourGbLabel: String,
-): String = listOfNotNull(
-    when {
-        fileSize == PtpConstants.SIZE_UNKNOWN || fileSize > FOUR_GIB_BYTES -> overFourGbLabel
-        fileSize > 0L -> formatFileSize(fileSize)
-        else -> null
-    },
-    formatPreviewCaptureDate(captureDate),
-).joinToString("  ·  ")
+): String = previewVideoMetadataText(fileSize, captureDate, overFourGbLabel,
+    sizeText = ::formatFileSize, captureText = ::formatPreviewCaptureDate)
 
 /**
  * 全屏预览层：普通页显示缓存缩略图的**未裁切**（Fit）完整画面；折叠连拍在分页中

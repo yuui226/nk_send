@@ -3,6 +3,7 @@ from thumbnail_grid_extraction import section
 from transfer_card_extraction import replace_once
 from photo_preview_display_extraction import wrapper
 from preview_async_enqueue_wiring import add_async_preview_enqueue
+from preview_metadata_wiring import delegate_preview_metadata
 
 HEADER = '''@file:OptIn(kotlin.experimental.ExperimentalObjCRefinement::class)
 
@@ -195,4 +196,4 @@ def extract_photo_preview_session(source):
     else -> LocalOriginalPreviewRoute.DIRECT_BITMAP
 }''', '''internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewRoute =
     originalLocalPreviewRoute(extension)''')
-    return android, add_async_preview_enqueue(shared.rstrip() + '\n'), CONTRACT
+    return delegate_preview_metadata(android), add_async_preview_enqueue(shared.rstrip() + '\n'), CONTRACT

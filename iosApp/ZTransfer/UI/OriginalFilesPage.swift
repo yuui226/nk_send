@@ -46,6 +46,13 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         precondition(model.attachPreviewReads(platform: self))
     }
 
+    func previewDateText(year: Int32, month: Int32, day: Int32) -> String {
+        ApplePreviewDateText.date(year: year, month: month, day: day)
+    }
+    func previewTimeText(hour: Int32, minute: Int32, second: Int32) -> String {
+        ApplePreviewDateText.time(hour: hour, minute: minute, second: second)
+    }
+
     func publishQueue(_ value: OriginalQueueSnapshot) {
         guard !closed, value.connectionID == connectionID else { return }
         queuePage.publish(value)

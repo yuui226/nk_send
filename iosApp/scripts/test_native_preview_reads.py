@@ -80,7 +80,10 @@ class NativePreviewReadWiringTest(unittest.TestCase):
         self.assertIn("currentFiles[file.handle] == file", model)
         close = model.split("fun close()", 1)[1]
         self.assertLess(close.index("previewReads?.close()"), close.index("owner?.cancelRequests()"))
-        # Deliberately leave the product entry pending until EXIF/local/real enqueue are wired too.
+        # EXIF/local/real enqueue now feed the original overlay through one native source.
         page = source("shared/src/commonMain/kotlin/com/ztransfer/ui/NativeOriginalFilesPage.kt")
-        self.assertIn("onPreview = { _, _ -> model.previewPending() }", page)
-        self.assertIn("onPreviewBurst = { _, _, _ -> model.previewPending() }", page)
+        self.assertIn("onPreview = { file, rect -> requestPreview(file, rect) }", page)
+        self.assertIn("requestPreview(it, rect, id)", page)
+        self.assertIn("SharedPhotoPreviewOverlay(", page)
+        self.assertIn("onTransferAsync = model::enqueue", page)
+        self.assertIn("localOriginalUriFor = opening.source::localSource", page)

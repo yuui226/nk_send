@@ -42,6 +42,29 @@ final class ApplePreviewExifFormatter: NSObject, PreviewExifDecimalFormatter {
     }
 }
 
+/// Gregorian field rendering only. Validation/time fallback lives in shared, not Calendar/Date.
+enum ApplePreviewDateText {
+    static func date(year: Int32, month: Int32, day: Int32, locale: Locale = .current) -> String {
+        parts([year, month, day], widths: [4, 2, 2], separator: "-", locale: locale)
+    }
+    static func time(hour: Int32, minute: Int32, second: Int32, locale: Locale = .current) -> String {
+        parts([hour, minute, second], widths: [2, 2, 2], separator: ":", locale: locale)
+    }
+    private static func parts(_ values: [Int32], widths: [Int], separator: String, locale: Locale) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = locale
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = false
+        formatter.minimumFractionDigits = 0; formatter.maximumFractionDigits = 0
+        formatter.maximumIntegerDigits = 309
+        formatter.positivePrefix = ""; formatter.positiveSuffix = ""
+        return zip(values, widths).map { value, width in
+            formatter.minimumIntegerDigits = width
+            return formatter.string(from: NSNumber(value: value)) ?? String(format: "%0*d", width, value)
+        }.joined(separator: separator)
+    }
+}
+
 /// Reads ImageIO properties without decoding the full image or modifying the source. This is
 /// metadata extraction, not a RAW decoder, output EXIF writer, or permission to publish coordinates.
 actor PhotoMetadataReader {

@@ -3,6 +3,7 @@ from pathlib import Path
 import re
 import subprocess
 import unittest
+from preview_metadata_wiring import restore_preview_metadata
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,7 +24,7 @@ class NativePreviewSourceWiringTest(unittest.TestCase):
         new = '''internal fun localOriginalPreviewRoute(extension: String): LocalOriginalPreviewRoute =
     originalLocalPreviewRoute(extension)'''
         self.assertEqual(1, original.count(old))
-        self.assertEqual(original.replace(old, new), read(path))
+        self.assertEqual(original.replace(old, new), restore_preview_metadata(read(path)))
         viewmodel = read('app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt')
         route = read('shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedPreviewLocalRoute.kt')
         for original_name, case in (('NIKON_RAW_EXTENSIONS', 'RAW_EMBEDDED_JPEG'), ('TIFF_EXTENSIONS', 'CAMERA_FHD')):
@@ -48,7 +49,8 @@ class NativePreviewSourceWiringTest(unittest.TestCase):
 
     def test_complete_native_source_delegates_all_io_priority_and_histogram_without_new_owners(self):
         text = read('shared/src/iosMain/kotlin/com/ztransfer/ui/NativePreviewSessionSource.kt')
-        for expected in ('PreviewSessionSource<String>', 'grid.preview(reads, files)', 'originalLocalPreviewRoute(extension)',
+        self.assertIn('PreviewSessionSource<String>', read('shared/src/commonMain/kotlin/com/ztransfer/ui/NativePreviewPageSource.kt'))
+        for expected in ('NativePreviewPageSource', 'grid.preview(reads, files)', 'originalLocalPreviewRoute(extension)',
                          'images.local(file, source)', 'images.localRaw(file, source)', 'LocalOriginalPreviewRoute.CAMERA_FHD -> null',
                          'images.fhd(file)', 'images.cached(handle)', 'images.thumbnail(file, allowRemote)',
                          'reads.localExif(file, source)', 'reads.exif(file)', 'reads.withInteractivePriority(block)',

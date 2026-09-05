@@ -15,6 +15,8 @@ class NativePreviewBitmapsIosTest {
         0,0,0,14,73,68,65,84,120,-100,99,-8,-49,-64,-16,31,4,1,16,-8,3,-3,78,-107,-63,111,0,0,0,0,73,69,78,68,-82,66,96,-126)
 
     private inner class Platform : NativeFilesPagePlatform, NativeQueuePagePlatform, NativePreviewReadPlatform {
+        override fun previewDateText(year: Int, month: Int, day: Int) = "${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}"
+        override fun previewTimeText(hour: Int, minute: Int, second: Int) = "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')}"
         var data: ByteArray? = png()
         val remotes = mutableListOf<Boolean>()
         var fhdReads = 0; var localReads = 0; var rawReads = 0; var ended = 0

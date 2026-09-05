@@ -8,6 +8,16 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun previewMetadataUsesSharedValidationPlatformFieldsAndClosesWithoutMoreWork() {
+        val p = Platform(); val m = model(p)
+        val file = CameraFileInfo(1, 4294967295L, "VIDEO.MOV", "00000229T000001")
+        assertEquals("large  ·  0000-02-29 00:00:01", m.previewMetadata(file, "large"))
+        assertEquals("2026-09-05", m.previewMetadata(file.copy(size = 0, captureDate = "20260905T240000"), "large"))
+        assertEquals("", m.previewMetadata(file.copy(size = 0, captureDate = "20260229"), "large"))
+        assertEquals(0, p.writes); assertNull(p.enqueueResult); assertNull(p.imageResult)
+        m.close(); assertEquals("", m.previewMetadata(file, "large"))
+    }
+
     @Test fun previewOptionsRestoreAndSaveTogetherWithFiltersWithoutResettingEachOther() {
         val p = Platform().also { it.preferences = NativeBrowsePreferences(4, false, listOf(".jpg"), true, false, false, 20260101, 20261231, -1, true) }
         val m = model(p)
@@ -250,6 +260,8 @@ class NativeFilesPageModelTest {
     }
 
     private class Platform : NativeFilesPagePlatform, NativeQueuePagePlatform {
+        override fun previewDateText(year: Int, month: Int, day: Int) = "${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}"
+        override fun previewTimeText(hour: Int, minute: Int, second: Int) = "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}:${second.toString().padStart(2, '0')}"
         var preferences: NativeBrowsePreferences? = NativeBrowsePreferences.defaults()
         var saveSucceeds = true
         var writes = 0

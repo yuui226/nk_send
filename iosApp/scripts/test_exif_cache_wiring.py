@@ -5,6 +5,7 @@ import subprocess
 import unittest
 from preview_priority_wiring import without_priority_page
 from preview_preferences_wiring import without_preview_options_model
+from preview_metadata_wiring import without_metadata_model, without_metadata_page
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = 'ccccc01'
@@ -44,7 +45,7 @@ class ExifCacheWiringTest(unittest.TestCase):
 
     def test_page_only_changes_exif_paths_and_explicit_borrowed_dependencies(self):
         path = 'iosApp/ZTransfer/UI/OriginalFilesPage.swift'
-        current, original = without_priority_page(read(path)), before(path)
+        current, original = without_priority_page(without_metadata_page(read(path))), before(path)
         value = current.replace('    private let exifSource: CameraExifSource\n', '').replace('    private let exifCache: NativePreviewExifCache\n', '')
         value = value.replace('previews: CameraPreviewStore,\n         exifSource: CameraExifSource, exifCache: NativePreviewExifCache, stationMode: Bool,',
                               'previews: CameraPreviewStore, stationMode: Bool,')
@@ -75,7 +76,7 @@ class ExifCacheWiringTest(unittest.TestCase):
     def test_offline_cache_query_keeps_full_identity_and_uses_existing_decoder_actor(self):
         path = 'shared/src/commonMain/kotlin/com/ztransfer/ui/NativeFilesPageModel.kt'
         line = '            isKnownExifFile = { file -> !closed && currentFiles[file.handle] == file },\n'
-        value = without_preview_options_model(read(path)); self.assertIn(line, value)
+        value = without_preview_options_model(without_metadata_model(read(path))); self.assertIn(line, value)
         self.assertEqual(before(path), value.replace(line, ''))
         path = 'iosApp/ZTransfer/Storage/PreviewImageDecoder.swift'
         addition = '    func exifMetadata(_ header: Data) throws -> PhotoExif? {\n        try PreviewExifReader.metadata(header: header)\n    }\n\n'

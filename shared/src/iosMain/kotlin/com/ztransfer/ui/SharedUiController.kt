@@ -51,6 +51,8 @@ object SharedUiController {
                 val queueText = NativeQueueTextCatalog.forLanguage(languageTag)
                 NativeOriginalFilesPage(model, NativeFilesTextCatalog.forLanguage(languageTag), queueText,
                     NativeFilterTextCatalog.forLanguage(languageTag), images, onBack,
+                    previewText = NativePreviewTextCatalog.forLanguage(languageTag, model::previewMetadata),
+                    openPreview = { files -> NativePreviewSessionSource.open(model, images, files) },
                     queuePage = { back ->
                         NativeOriginalQueuePage(model.queue, queueText,
                             elapsedRealtimeMs = { (NSProcessInfo.processInfo.systemUptime * 1000.0).toLong() },

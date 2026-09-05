@@ -90,6 +90,22 @@ private actor FakeExifSource: CameraExifSource {
 }
 
 final class CameraNetworkTests: XCTestCase {
+    func testPreviewDateFieldsKeepGregorianYearAndPaddingWithoutCalendarConversion() {
+        for tag in ["en_US_POSIX", "de_DE", "zh_CN", "th_TH"] {
+            let locale = Locale(identifier: tag)
+            XCTAssertEqual(ApplePreviewDateText.date(year: 0, month: 2, day: 29, locale: locale), "0000-02-29", tag)
+            XCTAssertEqual(ApplePreviewDateText.date(year: 2026, month: 9, day: 5, locale: locale), "2026-09-05", tag)
+            XCTAssertEqual(ApplePreviewDateText.time(hour: 0, minute: 1, second: 9, locale: locale), "00:01:09", tag)
+            XCTAssertEqual(ApplePreviewDateText.time(hour: 23, minute: 59, second: 59, locale: locale), "23:59:59", tag)
+        }
+    }
+
+    func testPreviewDateArabicDigitsMatchAndroidFormatterGolden() {
+        let locale = Locale(identifier: "ar_EG")
+        XCTAssertEqual(ApplePreviewDateText.date(year: 2026, month: 9, day: 5, locale: locale), "٢٠٢٦-٠٩-٠٥")
+        XCTAssertEqual(ApplePreviewDateText.time(hour: 0, minute: 1, second: 9, locale: locale), "٠٠:٠١:٠٩")
+    }
+
     private func waitUntil(_ description: String, _ condition: () async -> Bool) async throws {
         let deadline = ProcessInfo.processInfo.systemUptime + 2
         while ProcessInfo.processInfo.systemUptime < deadline {

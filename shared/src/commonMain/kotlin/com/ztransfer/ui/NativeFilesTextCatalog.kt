@@ -65,7 +65,7 @@ internal object NativeFilesTextCatalog {
         preferencesFailed = "Browse preferences could not be read or saved. Changes apply only to this page; existing stored data was retained.",
         indexFailed = "Could not read the saved-original index. Previous results were retained; refresh to retry.",
         indexPending = "Saved-original index is not ready; the Pending filter is temporarily unavailable.",
-        refresh = "Refresh", queue = "Queue", integrationStatus = "Original-file browser: full preview and the complete settings page are still being connected.",
+        refresh = "Refresh", queue = "Queue", integrationStatus = "Shared preview is connected for Mac validation; the complete workspace and settings are still being connected.",
         notices = listOf(
             "Refresh failed; the previous list was retained.",
             "Some metadata could not be read; the previous list was retained.",
@@ -73,7 +73,7 @@ internal object NativeFilesTextCatalog {
             "Invalid catalog result; the previous list was retained.",
             "Could not add these files. Check the queue before retrying.",
             "Some files were added. Check the queue before retrying.",
-            "Full preview is not yet connected to this shared page.",
+            "Preview is not ready. Reopen the file page and try again.",
         ),
     )
 
@@ -95,7 +95,7 @@ internal object NativeFilesTextCatalog {
         preferencesFailed = "浏览偏好读取或保存失败，本次改动仅在当前页面生效；原存储数据已保留。",
         indexFailed = "未能读取已保存原片索引，已保留上次结果；可刷新重试。",
         indexPending = "已保存原片索引尚未就绪，暂不能使用“未传输”筛选。",
-        refresh = "刷新", queue = "队列", integrationStatus = "原片浏览接线中：完整预览和完整设置页尚未接入。",
+        refresh = "刷新", queue = "队列", integrationStatus = "共享预览已接入，待 Mac 验证；完整工作区和设置页仍在接线中。",
         notices = listOf(
             "刷新失败，已保留原列表。",
             "部分元数据读取失败，已保留原列表。",
@@ -103,7 +103,7 @@ internal object NativeFilesTextCatalog {
             "目录结果无效，已保留原列表。",
             "未能加入这些文件，请查看队列后再重试。",
             "部分文件已加入，请查看队列后再重试。",
-            "完整预览尚未接入此共享页面。",
+            "预览尚未就绪，请重新打开文件页重试。",
         ),
     )
 
@@ -125,7 +125,7 @@ internal object NativeFilesTextCatalog {
         preferencesFailed = "瀏覽偏好讀取或儲存失敗，本次變更僅在目前頁面生效；原儲存資料已保留。",
         indexFailed = "未能讀取已儲存原片索引，已保留上次結果；可重新整理重試。",
         indexPending = "已儲存原片索引尚未就緒，暫不能使用「未傳輸」篩選。",
-        refresh = "重新整理", queue = "佇列", integrationStatus = "原片瀏覽串接中：完整預覽和完整設定頁尚未接入。",
+        refresh = "重新整理", queue = "佇列", integrationStatus = "共用預覽已接入，待 Mac 驗證；完整工作區和設定頁仍在串接中。",
         notices = listOf(
             "重新整理失敗，已保留原列表。",
             "部分中繼資料讀取失敗，已保留原列表。",
@@ -133,7 +133,7 @@ internal object NativeFilesTextCatalog {
             "目錄結果無效，已保留原列表。",
             "未能加入這些檔案，請查看佇列後再重試。",
             "部分檔案已加入，請查看佇列後再重試。",
-            "完整預覽尚未接入此共用頁面。",
+            "預覽尚未就緒，請重新開啟檔案頁重試。",
         ),
     )
 }

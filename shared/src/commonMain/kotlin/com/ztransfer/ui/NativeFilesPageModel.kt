@@ -23,6 +23,8 @@ interface NativeFilesPagePlatform {
     fun readBrowsePreferences(): NativeBrowsePreferences?
     fun saveBrowsePreferences(value: NativeBrowsePreferences): Boolean
     fun currentDayKey(): Int
+    fun previewDateText(year: Int, month: Int, day: Int): String
+    fun previewTimeText(hour: Int, minute: Int, second: Int): String
     fun refresh()
     fun enqueue(handles: IntArray, scanSequence: Long, completion: NativeFilesEnqueueCompletion)
     fun thumbnail(file: CameraFileInfo, allowRemote: Boolean, completion: NativeFilesThumbnailCompletion)
@@ -90,6 +92,13 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     private val mutableFilters = MutableStateFlow(initialPreferences.criteria())
     internal val filters = mutableFilters.asStateFlow()
     private var lastDayKey = checkNotNull(this.platform).currentDayKey()
+
+    internal fun previewMetadata(file: CameraFileInfo, overFourGbLabel: String): String {
+        val owner = platform ?: return ""
+        return previewVideoMetadataText(file.size, file.captureDate, overFourGbLabel,
+            sizeText = { com.ztransfer.format.formatFileSizeText(it, queue::fixed) },
+            captureText = { previewCaptureDateText(it, owner::previewDateText, owner::previewTimeText) })
+    }
 
     internal fun currentDayKey(): Int = platform?.currentDayKey()?.also { lastDayKey = it } ?: lastDayKey
     internal fun changeFilters(next: SharedPhotoFilterCriteria<CaptureDayRange>): Boolean {
