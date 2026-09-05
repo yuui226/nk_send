@@ -66,6 +66,7 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published private(set) var directoryBusy = false
     @Published private(set) var exportStatus = ""
     private var directoryTask: Task<Void, Never>?
+    private var providerOriginals: ProviderOriginalStore?
     @Published private(set) var metadataStatus = ""
     @Published private(set) var readingMetadata = false
     private let metadataReader = PhotoMetadataReader()
@@ -99,17 +100,39 @@ final class CameraHandshakeProbe: ObservableObject {
                 let store = try ScopedDirectoryStore.applicationStore()
                 if forget {
                     try await store.forget()
+                    providerOriginals = nil
                     directoryStatus = "已忘记应用保存的目录授权；未删除外部目录或任何文件。"
                 } else {
                     if let selection { try await store.select(selection) }
                     let name = try await store.displayName()
+                    providerOriginals = nil // A select/stale-bookmark refresh establishes a new binding.
                     directoryStatus = "目录授权可用：\(name)。当前下载仍先存沙盒；选择目录不代表已把传输写入该位置。"
                 }
             } catch { directoryStatus = error.localizedDescription }
         }
     }
 
-    /// Actual provider publication probe; does not yet redirect queue downloads or provider indexes.
+    private func providerStore() throws -> ProviderOriginalStore {
+        if let providerOriginals { return providerOriginals }
+        let value = ProviderOriginalStore(directory: try ScopedDirectoryStore.applicationStore())
+        providerOriginals = value
+        return value
+    }
+
+    func inspectProviderOriginals() {
+        guard !directoryBusy else { return }
+        directoryBusy = true
+        directoryTask = Task {
+            defer { directoryBusy = false; directoryTask = nil }
+            do {
+                let snapshot = try await providerStore().originals(since: -1, rescan: true)
+                let dated = snapshot.entries.filter { $0.folder != nil }.count
+                directoryStatus = "目标目录索引：\(snapshot.entries.count) 个原片条目，其中日期目录 \(dated) 个；仅检查名称与大小，尚未接入共享文件页。"
+            } catch { directoryStatus = Task.isCancelled ? "目录索引检查已取消；旧索引保留。" : error.localizedDescription }
+        }
+    }
+
+    /// Actual provider publication probe; queue targets and shared-page indexes are still separate work.
     func publishSavedToDirectory(byDate: Bool) {
         guard !directoryBusy, let saved = savedOriginal, saved.url == savedURL else { return }
         let folder = PtpTransferBridge.shared.destinationFolder(captureDate: savedCaptureDate, byDate: byDate,
@@ -119,8 +142,7 @@ final class CameraHandshakeProbe: ObservableObject {
         directoryTask = Task {
             defer { directoryBusy = false; directoryTask = nil }
             do {
-                let directory = try ScopedDirectoryStore.applicationStore()
-                let result = try await ProviderOriginalPublisher(directory: directory).publish(saved, folder: folder)
+                let result = try await providerStore().publish(saved, folder: folder)
                 directoryStatus = "已写入 \(result.url.lastPathComponent)，\(result.bytes) 字节，校验一致；应用内原片保留。云端同步由文件服务处理。"
             } catch {
                 directoryStatus = Task.isCancelled ? "已取消外部目录写入；应用内原片保留。" : error.localizedDescription
@@ -682,6 +704,7 @@ struct CameraHandshakeProbeView: View {
             HStack {
                 Button("选择导出目录授权") { documentRequest = ProbeDocumentRequest(purpose: .chooseDirectory) }
                 Button("检查已存目录") { probe.useDirectory() }
+                Button("检查目标原片索引") { probe.inspectProviderOriginals() }
                 Button("忘记目录授权") { probe.useDirectory(forget: true) }
             }.font(.caption).disabled(probe.directoryBusy)
             if !probe.directoryStatus.isEmpty { Text(probe.directoryStatus).font(.caption) }

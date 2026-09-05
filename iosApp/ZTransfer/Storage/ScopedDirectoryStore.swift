@@ -5,6 +5,11 @@ struct ResolvedExportDirectory {
     let stale: Bool
 }
 
+/// Opaque bytes, not a path or an active security scope. Never log or export the bookmark.
+struct ExportDirectorySelection: Sendable, Equatable {
+    fileprivate let bookmark: Data
+}
+
 protocol ExportDirectoryAccess {
     func start(_ url: URL) -> Bool
     func stop(_ url: URL)
@@ -28,13 +33,14 @@ private final class AppleExportDirectoryAccess: ExportDirectoryAccess {
 }
 
 enum ExportDirectoryError: Error, LocalizedError {
-    case missing, invalidBookmark, permissionLost, notDirectory
+    case missing, invalidBookmark, permissionLost, notDirectory, selectionChanged
     var errorDescription: String? {
         switch self {
         case .missing: return "请先通过系统文件选择器选择导出目录。"
         case .invalidBookmark: return "保存的目录授权无法读取，请重新选择目录；原文件未删除。"
         case .permissionLost: return "目录访问权限已不可用，请重新选择；原文件仍保留。"
         case .notDirectory: return "所选位置不是可访问的文件目录。"
+        case .selectionChanged: return "保存目录授权已变化，请重新打开当前目录；不会改写到另一个位置。"
         }
     }
 }
@@ -78,6 +84,28 @@ actor ScopedDirectoryStore {
         defer { access.stop(resolved.url) }
         guard try access.isDirectory(resolved.url) else { throw ExportDirectoryError.notDirectory }
         if resolved.stale { try persist(access.bookmark(resolved.url)) }
+        try Task.checkCancellation()
+        return try operation(resolved.url)
+    }
+
+    /// Freeze the selected grant. Later operations must reject a new/forgotten grant rather than redirect.
+    func selection() throws -> ExportDirectorySelection {
+        try Task.checkCancellation()
+        guard FileManager.default.fileExists(atPath: bookmarkFile.path) else { throw ExportDirectoryError.missing }
+        let size = try bookmarkFile.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard (1...1_048_576).contains(size) else { throw ExportDirectoryError.invalidBookmark }
+        let data = try Data(contentsOf: bookmarkFile)
+        guard (1...1_048_576).contains(data.count) else { throw ExportDirectoryError.invalidBookmark }
+        return ExportDirectorySelection(bookmark: data)
+    }
+
+    func withDirectory<T>(selection expected: ExportDirectorySelection, _ operation: (URL) throws -> T) throws -> T {
+        guard try selection() == expected else { throw ExportDirectoryError.selectionChanged }
+        let resolved = try access.resolve(expected.bookmark)
+        guard resolved.url.isFileURL, access.start(resolved.url) else { throw ExportDirectoryError.permissionLost }
+        defer { access.stop(resolved.url) }
+        guard try access.isDirectory(resolved.url) else { throw ExportDirectoryError.notDirectory }
+        // A pinned operation must not rewrite a newer grant. The ordinary owner can refresh stale data.
         try Task.checkCancellation()
         return try operation(resolved.url)
     }

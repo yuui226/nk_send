@@ -1,4 +1,5 @@
 """Exact batch-47 diagnostic additions, not a replacement camera/queue baseline."""
+from provider_index_wiring import without_provider_index_probe
 
 PROBE_METHOD = '''    /// Actual provider publication probe; does not yet redirect queue downloads or provider indexes.
     func publishSavedToDirectory(byDate: Bool) {
@@ -22,6 +23,7 @@ PROBE_METHOD = '''    /// Actual provider publication probe; does not yet redire
 '''
 
 def without_provider_publication_probe(value):
+    value = without_provider_index_probe(value)
     for addition in (
         '    private var savedOriginal: SavedCameraFile?\n    private var savedCaptureDate: String?\n',
         PROBE_METHOD,

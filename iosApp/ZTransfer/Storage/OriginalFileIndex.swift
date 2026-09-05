@@ -20,7 +20,7 @@ enum OriginalIndexError: Error, LocalizedError {
     var errorDescription: String? { "无法完整读取本地原片目录；已保留上次索引。" }
 }
 
-/// Accessed only by CameraOriginalStore's actor. No second observer, worker or persistent database.
+/// Each instance belongs to one store/operation. No second observer, worker or persistent database.
 /// A bounded journal lets the visible page consume actual completed files without rescanning disk.
 final class OriginalFileIndexCache {
     private var entries: [URL: OriginalIndexEntry] = [:]
@@ -32,8 +32,9 @@ final class OriginalFileIndexCache {
     /// Exact previously published locator only. Naming/copy-suffix matching stays in shared.
     func entry(at url: URL) -> OriginalIndexEntry? { entries[url] }
 
-    func scan(root: URL) throws {
-        try Task.checkCancellation()
+    func scan(root: URL, missingRootIsEmpty: Bool = true,
+              checkCancellation: () throws -> Void = { try Task.checkCancellation() }) throws {
+        try checkCancellation()
         guard root.isFileURL else { throw OriginalIndexError.unsafeRoot }
         let keys: Set<URLResourceKey> = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
         let rootValues: URLResourceValues
@@ -44,7 +45,7 @@ final class OriginalFileIndexCache {
         }
         catch {
             let failure = error as NSError
-            if failure.domain == NSCocoaErrorDomain &&
+            if missingRootIsEmpty && failure.domain == NSCocoaErrorDomain &&
                 (failure.code == NSFileReadNoSuchFileError || failure.code == NSFileNoSuchFileError) {
                 publishFull([:]); return // A genuinely absent app-managed root is empty, not an I/O failure.
             }
@@ -56,7 +57,7 @@ final class OriginalFileIndexCache {
         func scanFolder(_ directory: URL, folder: String?, allowDateDirectories: Bool) throws {
             let children = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey], options: [])
             for child in children {
-                try Task.checkCancellation()
+                try checkCancellation()
                 let name = child.lastPathComponent
                 // Exclude only app-private parts, not legitimate original names that start with a dot.
                 if SandboxTransferFile.isPrivatePartName(name) { continue }
@@ -86,13 +87,20 @@ final class OriginalFileIndexCache {
             }
         }
         try scanFolder(canonicalRoot, folder: nil, allowDateDirectories: true)
-        try Task.checkCancellation()
+        try checkCancellation()
         publishFull(candidate) // Only a complete scan may replace the previous filesystem snapshot.
     }
 
-    func record(_ saved: SavedCameraFile, folder: String?) {
+    /// Accept a completed scan produced by an operation-local cache, on this instance's owning actor.
+    func replaceEntries(_ values: [OriginalIndexEntry]) {
+        var candidate: [URL: OriginalIndexEntry] = [:]
+        for entry in values { candidate[entry.url] = entry }
+        publishFull(candidate)
+    }
+
+    func record(_ saved: SavedCameraFile, folder: String?, canonicalURL: URL? = nil) {
         let entry = OriginalIndexEntry(name: saved.url.lastPathComponent, size: saved.bytes, folder: folder,
-                                      url: saved.url.standardizedFileURL.resolvingSymlinksInPath())
+                                      url: canonicalURL ?? saved.url.standardizedFileURL.resolvingSymlinksInPath())
         guard entries[entry.url] != entry else { return }
         entries[entry.url] = entry
         revision += 1

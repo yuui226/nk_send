@@ -5,10 +5,11 @@ import tempfile
 import unittest
 from check_structure import count_test_methods
 from provider_publication_wiring import without_provider_publication_probe
+from provider_index_wiring import without_directory_selection, without_provider_index_cache
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = '23b893e'
-PUBLISHER = 'iosApp/ZTransfer/Storage/ProviderOriginalPublisher.swift'
+PUBLISHER = 'iosApp/ZTransfer/Storage/ProviderOriginalStore.swift'
 PROBE = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
 def read(path): return (ROOT / path).read_text(encoding='utf-8')
 def before(path): return subprocess.check_output(['git', 'show', BASE + ':' + path], cwd=ROOT).decode('utf-8')
@@ -28,11 +29,13 @@ class ProviderPublicationWiringTest(unittest.TestCase):
             'shared/src/commonMain/kotlin/com/ztransfer/ui/NativeFilesPageModel.kt',
             'app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt',
         ):
-            self.assertEqual(before(path), read(path))
+            normalize = without_directory_selection if path.endswith('ScopedDirectoryStore.swift') else (
+                without_provider_index_cache if path.endswith('OriginalFileIndex.swift') else lambda value: value)
+            self.assertEqual(before(path), normalize(read(path)))
 
     def test_scope_contains_coordinator_and_all_io_uses_accessor_supplied_urls(self):
         value = read(PUBLISHER)
-        self.assertIn('try await directory.withDirectory { granted in', value)
+        self.assertIn('try await directory.withDirectory(selection: selection) { granted in', value)
         self.assertIn('copy(source: saved.url, directory: granted) { input, output in', value)
         self.assertIn('coordinatedSource: input, coordinatedDirectory: output', value)
         self.assertIn('coordinate(readingItemAt: source, options: [], writingItemAt: directory, options: []', value)

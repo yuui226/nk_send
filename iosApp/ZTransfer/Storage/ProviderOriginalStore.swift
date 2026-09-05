@@ -15,9 +15,16 @@ enum ProviderPublicationError: Error, LocalizedError {
     }
 }
 
+/// Nil entries is a validated cache hit; a changed coordinated root always requires a full scan.
+struct ProviderIndexScan: Sendable {
+    let root: URL
+    let entries: [OriginalIndexEntry]?
+}
+
 /// A fresh coordinator per operation; cancel is the only method allowed from another thread.
 protocol ProviderFileCoordinating: AnyObject, Sendable {
     func copy(source: URL, directory: URL, accessor: (URL, URL) throws -> SavedCameraFile) throws -> SavedCameraFile
+    func read(directory: URL, accessor: (URL) throws -> ProviderIndexScan) throws -> ProviderIndexScan
     func cancel()
 }
 
@@ -26,6 +33,31 @@ private final class AppleProviderFileCoordinator: ProviderFileCoordinating, @unc
     private var active: NSFileCoordinator?
     private var cancelled = false
     func copy(source: URL, directory: URL, accessor: (URL, URL) throws -> SavedCameraFile) throws -> SavedCameraFile {
+        try withCoordinator { coordinator in
+            var result: Result<SavedCameraFile, Error>?
+            var failure: NSError?
+            coordinator.coordinate(readingItemAt: source, options: [], writingItemAt: directory, options: [], error: &failure) { input, output in
+                result = Result { try accessor(input, output) } // Use the URLs supplied by coordination, not the old paths.
+            }
+            if let result { return try result.get() }
+            if let failure { throw failure }
+            throw ProviderPublicationError.coordinationFailed
+        }
+    }
+    func read(directory: URL, accessor: (URL) throws -> ProviderIndexScan) throws -> ProviderIndexScan {
+        try withCoordinator { coordinator in
+            var result: Result<ProviderIndexScan, Error>?
+            var failure: NSError?
+            // This reads directory entries/metadata, not image bytes or a zipped upload snapshot.
+            coordinator.coordinate(readingItemAt: directory, options: [.withoutChanges], error: &failure) { url in
+                result = Result { try accessor(url) }
+            }
+            if let result { return try result.get() }
+            if let failure { throw failure }
+            throw ProviderPublicationError.coordinationFailed
+        }
+    }
+    private func withCoordinator<T>(_ operation: (NSFileCoordinator) throws -> T) throws -> T {
         // Actors may resume on another thread. Create/use on this synchronous operation's thread.
         let coordinator = NSFileCoordinator(filePresenter: nil)
         lock.lock()
@@ -33,14 +65,7 @@ private final class AppleProviderFileCoordinator: ProviderFileCoordinating, @unc
         active = coordinator
         lock.unlock()
         defer { lock.lock(); active = nil; lock.unlock() }
-        var result: Result<SavedCameraFile, Error>?
-        var failure: NSError?
-        coordinator.coordinate(readingItemAt: source, options: [], writingItemAt: directory, options: [], error: &failure) { input, output in
-            result = Result { try accessor(input, output) } // Use the URLs supplied by coordination, not the old paths.
-        }
-        if let result { return try result.get() }
-        if let failure { throw failure }
-        throw ProviderPublicationError.coordinationFailed
+        return try operation(coordinator)
     }
     func cancel() {
         lock.lock(); cancelled = true; let current = active; lock.unlock()
@@ -65,27 +90,81 @@ private final class ProviderPublicationControl: @unchecked Sendable {
     }
 }
 
-/// Publish only an already completed app-managed original. No network transaction is held while
+/// One immutable directory selection, one index and publisher. No network transaction is held while
 /// a provider materializes content or grants coordination. No ongoing permission/cloud-sync claim.
-actor ProviderOriginalPublisher {
+actor ProviderOriginalStore {
     private let directory: ScopedDirectoryStore
     private let coordinatorFactory: () -> ProviderFileCoordinating
+    private var selection: ExportDirectorySelection?
+    private let originalIndex = OriginalFileIndexCache()
+    private var indexedRoot: URL?
+    private var indexGeneration: UInt64 = 0
     init(directory: ScopedDirectoryStore, coordinatorFactory: (() -> ProviderFileCoordinating)? = nil) {
         self.directory = directory; self.coordinatorFactory = coordinatorFactory ?? { AppleProviderFileCoordinator() }
     }
 
     func publish(_ saved: SavedCameraFile, folder: String? = nil) async throws -> SavedCameraFile {
         try Task.checkCancellation()
+        let selection = try await boundSelection()
         let control = ProviderPublicationControl(coordinator: coordinatorFactory())
-        return try await withTaskCancellationHandler(operation: {
-            try await directory.withDirectory { granted in
+        let published = try await withTaskCancellationHandler(operation: {
+            try await directory.withDirectory(selection: selection) { granted in
                 try control.check()
                 return try control.coordinator.copy(source: saved.url, directory: granted) { input, output in
-                    try Self.copyVerified(saved, coordinatedSource: input, coordinatedDirectory: output,
+                    let result = try Self.copyVerified(saved, coordinatedSource: input, coordinatedDirectory: output,
                         folder: folder, checkCancellation: control.check)
+                    // Canonicalize metadata inside the grant/accessor; later indexing performs no filesystem IO.
+                    return SavedCameraFile(url: result.url.standardizedFileURL.resolvingSymlinksInPath(),
+                        bytes: result.bytes, sha256: result.sha256)
                 }
             }
         }, onCancel: { control.cancel() })
+        indexGeneration &+= 1 // A scan started before publication cannot erase this completed file.
+        originalIndex.record(published, folder: folder, canonicalURL: published.url)
+        return published
+    }
+
+    func originals(since revision: Int64, rescan: Bool) async throws -> OriginalIndexUpdate {
+        try Task.checkCancellation()
+        let selection = try await boundSelection()
+        let needsScan = rescan || !originalIndex.ready
+        let previousRoot = indexedRoot
+        indexGeneration &+= 1
+        let generation = indexGeneration
+        let control = ProviderPublicationControl(coordinator: coordinatorFactory())
+        let candidate = try await withTaskCancellationHandler(operation: {
+            try await directory.withDirectory(selection: selection) { granted in
+                try control.check()
+                return try control.coordinator.read(directory: granted) { root in
+                    let canonicalRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+                    try control.check()
+                    // Bookmark identity may survive a provider move. Do not return old path locators.
+                    if !needsScan && canonicalRoot == previousRoot {
+                        return ProviderIndexScan(root: canonicalRoot, entries: nil)
+                    }
+                    // This cache never escapes the accessor. Do not mutate the actor-owned cache across await.
+                    let scanned = OriginalFileIndexCache()
+                    try scanned.scan(root: root, missingRootIsEmpty: false, checkCancellation: control.check)
+                    return ProviderIndexScan(root: canonicalRoot, entries: scanned.update(since: -1).entries)
+                }
+            }
+        }, onCancel: { control.cancel() })
+        try Task.checkCancellation()
+        guard generation == indexGeneration else { throw CancellationError() }
+        if let entries = candidate.entries {
+            originalIndex.replaceEntries(entries)
+            indexedRoot = candidate.root
+        }
+        return originalIndex.update(since: revision)
+    }
+
+    private func boundSelection() async throws -> ExportDirectorySelection {
+        if let selection { return selection }
+        let candidate = try await directory.selection()
+        // Reentrant first callers must all keep the first established binding, never switch silently.
+        let bound = selection ?? candidate
+        selection = bound
+        return bound
     }
 
     /// All filesystem operations here run inside BOTH the grant and coordinated accessor.
