@@ -3032,6 +3032,126 @@ final class CameraNetworkTests: XCTestCase {
         await camera.abort()
     }
 
+    @MainActor func testDestinationDefaultsAndExplicitSandboxNeverReadOrInferAProviderGrant() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = OriginalDestinationPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.read(), .sandbox)
+        for explicit in [false, true] {
+            if explicit { XCTAssertTrue(preferences.save(.sandbox)) }
+            let restored = try await preferences.restore { XCTFail("Sandbox choice must not access a remembered grant"); throw CameraStreamError.closed }
+            XCTAssertNil(restored.destination); XCTAssertNil(restored.provider); XCTAssertNil(restored.failure)
+            XCTAssertEqual(restored.selected, .sandbox)
+            if !explicit { XCTAssertNil(defaults.object(forKey: OriginalDestinationPreferences.key)) }
+        }
+        XCTAssertTrue(preferences.save(.provider))
+        XCTAssertEqual(OriginalDestinationPreferences(defaults: defaults).read(), .provider)
+        XCTAssertNil(defaults.object(forKey: TransferPreferencesStore.key))
+        XCTAssertNil(defaults.object(forKey: BrowsePreferencesStore.key))
+    }
+
+    @MainActor func testInvalidDestinationPreferencesPreserveBytesAndRestoreAnExplicitErrorInsteadOfSandbox() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = OriginalDestinationPreferences(defaults: defaults)
+        let documents: [Any] = ["provider", Data(), Data(repeating: 1, count: 1025),
+            Data("{\"version\":2,\"target\":\"provider\"}".utf8),
+            Data("{\"version\":1,\"target\":\"unknown\"}".utf8),
+            Data("{\"version\":1,\"target\":true}".utf8)]
+        for document in documents {
+            defaults.set(document, forKey: OriginalDestinationPreferences.key)
+            XCTAssertNil(preferences.read()); XCTAssertFalse(preferences.save(.sandbox)); XCTAssertFalse(preferences.save(.provider))
+            let restored = try await preferences.restore { XCTFail("Invalid preference must not infer a directory"); throw CameraStreamError.closed }
+            XCTAssertNil(restored.selected); XCTAssertNil(restored.provider); XCTAssertNotNil(restored.failure)
+            let blocked = try XCTUnwrap(restored.destination)
+            do { try await blocked.validateSelection(); XCTFail("Unavailable target must reject execution") } catch {}
+            do { _ = try await blocked.originals(since: -1, rescan: true); XCTFail("Not an empty index") } catch {}
+            do { _ = try await blocked.originalData(locator: "old"); XCTFail("Not sandbox data") } catch {}
+            do { _ = try await blocked.originalRawPreviewData(locator: "old"); XCTFail("Not a RAW miss") } catch {}
+            do { _ = try await blocked.originalExif(locator: "old"); XCTFail("Not an EXIF miss") } catch {}
+            if let bytes = document as? Data { XCTAssertEqual(defaults.data(forKey: OriginalDestinationPreferences.key), bytes) }
+            else { XCTAssertEqual(defaults.string(forKey: OriginalDestinationPreferences.key), "provider") }
+        }
+    }
+
+    @MainActor func testRestoredProviderIsFreshPerConnectionAndQueueUsesItBeforeAnyCameraIO() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("provider"), bookmark = root.appendingPathComponent("grant")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data("ABC".utf8).write(to: target.appendingPathComponent("sample.JPG"))
+        try Data([1]).write(to: bookmark)
+        let grant = PageDirectoryGrant(target), directory = ScopedDirectoryStore(bookmarkFile: bookmark, access: grant)
+        let preferences = OriginalDestinationPreferences(defaults: defaults); XCTAssertTrue(preferences.save(.provider))
+        let first = try await preferences.restore { directory }, second = try await preferences.restore { directory }
+        let firstProvider = try XCTUnwrap(first.provider), secondProvider = try XCTUnwrap(second.provider)
+        XCTAssertFalse(firstProvider === secondProvider); XCTAssertNil(first.failure); XCTAssertEqual(first.selected, .provider)
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire), sandbox = root.appendingPathComponent("app")
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: sandbox), destination: first.destination)
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("restored existing file") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let snapshot = await queue.snapshot(); XCTAssertTrue(try XCTUnwrap(snapshot.rows.first).skipped)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path))
+        XCTAssertEqual(grant.starts, grant.stops)
+        try await directory.forget()
+        do { try await firstProvider.validateSelection(); XCTFail("Restored owner must not outlive its grant") } catch {}
+    }
+
+    @MainActor func testMissingRestoredGrantFailsBeforeNetworkAndCanBeExplicitlyReplacedAndRetried() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("provider"), bookmark = root.appendingPathComponent("missing-grant")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data("ABC".utf8).write(to: target.appendingPathComponent("sample.JPG"))
+        let directory = ScopedDirectoryStore(bookmarkFile: bookmark, access: PageDirectoryGrant(target))
+        let preferences = OriginalDestinationPreferences(defaults: defaults); XCTAssertTrue(preferences.save(.provider))
+        let restored = try await preferences.restore { directory }
+        XCTAssertNotNil(restored.failure); XCTAssertEqual(restored.selected, .provider); XCTAssertNil(restored.provider)
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire), sandbox = root.appendingPathComponent("app")
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: sandbox), destination: restored.destination)
+        let taskID = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false), id = try XCTUnwrap(taskID)
+        try await waitUntil("failed closed") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "FAILED" }
+        let failed = await queue.snapshot(); XCTAssertNotNil(failed.rows.first?.error)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path))
+        XCTAssertEqual(preferences.read(), .provider); XCTAssertFalse(FileManager.default.fileExists(atPath: bookmark.path))
+        let change = try await ProviderDirectoryChange.prepare(target, directory: directory)
+        let applied = try await queue.configureDestination(change); XCTAssertTrue(applied)
+        _ = await queue.retry(id); await queue.start()
+        try await waitUntil("explicit directory recovery") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let recovered = await queue.snapshot(); XCTAssertTrue(try XCTUnwrap(recovered.rows.first).skipped)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path))
+    }
+
+    @MainActor func testRestorationCancellationIsNotConvertedIntoARecoverableDestinationFailure() async throws {
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = OriginalDestinationPreferences(defaults: defaults)
+        for provider in [false, true] {
+            XCTAssertTrue(preferences.save(provider ? .provider : .sandbox))
+            let operation = Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return try await preferences.restore { XCTFail("Cancelled restore must not touch a grant"); throw CameraStreamError.closed }
+            }
+            do { _ = try await operation.value; XCTFail("Cancelled") } catch { XCTAssertTrue(error is CancellationError) }
+            XCTAssertEqual(preferences.read(), provider ? .provider : .sandbox)
+        }
+        XCTAssertTrue(preferences.save(.provider))
+        let duringFactory = Task {
+            try await preferences.restore {
+                withUnsafeCurrentTask { $0?.cancel() }
+                throw CameraStreamError.closed
+            }
+        }
+        do { _ = try await duringFactory.value; XCTFail("Cancellation after selection still escapes") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        do { _ = try await preferences.restore { throw CancellationError() }; XCTFail("Explicit cancellation must also escape") }
+        catch { XCTAssertTrue(error is CancellationError) }
+    }
+
     func testRealPreparedDirectoryBecomesQueueTargetAndServesExistingOriginalWithoutNetwork() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

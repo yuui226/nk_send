@@ -8,6 +8,27 @@ import ZTransferShared
 
 /// Apple filesystem/coordinator tests. Registered for Mac, never counted as Windows execution.
 final class ProviderPublicationTests: XCTestCase {
+    @MainActor func testRevokedSavedDestinationCannotRestoreAsSandboxOrMutateItsGrant() async throws {
+        let area = try PublicationArea(), previous = try Data(contentsOf: area.bookmark)
+        let suite = "destination-test-\(UUID().uuidString)", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = OriginalDestinationPreferences(defaults: defaults); XCTAssertTrue(preferences.save(.provider))
+        area.access.allowed = false
+        let restored = try await preferences.restore { area.store }
+        XCTAssertEqual(restored.selected, .provider); XCTAssertNotNil(restored.failure); XCTAssertNil(restored.provider)
+        let blocked = try XCTUnwrap(restored.destination)
+        do { _ = try await blocked.publish(area.saved, originalName: nil, folder: nil); XCTFail("Revoked target must reject publication") } catch {}
+        let output = try SandboxTransferFile(directory: area.root.appendingPathComponent("share"), name: "copy.JPG",
+            declaredSize: Int64(area.bytes.count), captureDate: nil)
+        defer { output.discard() }
+        do { _ = try await blocked.copyOriginal(ExistingOriginalReference(name: "DSC_0001.JPG", size: Int64(area.bytes.count), locator: "old"), to: output); XCTFail("Revoked target must reject sharing") } catch {}
+        XCTAssertEqual(try Data(contentsOf: area.bookmark), previous)
+        XCTAssertEqual(try Data(contentsOf: area.saved.url), area.bytes); XCTAssertTrue(try area.children().isEmpty)
+        area.access.allowed = true
+        let recovered = try await preferences.restore { area.store }
+        XCTAssertNil(recovered.failure); XCTAssertNotNil(recovered.provider)
+    }
+
     func testPreparedDirectoryDoesNotChangeAuthorityUntilCommitAndBindsTheExactNewProvider() async throws {
         let area = try PublicationArea(), old = area.publisher()
         let saved = try await old.publish(area.saved)

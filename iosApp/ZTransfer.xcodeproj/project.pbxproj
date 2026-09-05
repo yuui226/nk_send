@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7A1200000000000000000074 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000075; };
 		7A1200000000000000000072 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000073; };
 		7A1200000000000000000070 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000071; };
 		7A120000000000000000006E = {isa = PBXBuildFile; fileRef = 7A120000000000000000006F; };
@@ -50,6 +51,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		7A1200000000000000000075 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Configuration/OriginalDestinationPreferences.swift; sourceTree = "<group>"; };
 		7A1200000000000000000073 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/OriginalFilesReading.swift; sourceTree = "<group>"; };
 		7A1200000000000000000071 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/IndexedOriginalReader.swift; sourceTree = "<group>"; };
 		7A120000000000000000006F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPublicationTests.swift; sourceTree = "<group>"; };
@@ -151,6 +153,7 @@
 				7A120000000000000000005F /* OriginalFilesPage.swift */,
 				7A1200000000000000000061 /* OriginalFileIndex.swift */,
 				7A1200000000000000000063 /* BrowsePreferencesStore.swift */,
+				7A1200000000000000000075 /* OriginalDestinationPreferences.swift */,
 				7A120000000000000000006B /* AppAppearanceSettings.swift */,
 				7A120000000000000000006D /* ProviderOriginalStore.swift */,
 				7A1200000000000000000071 /* IndexedOriginalReader.swift */,
@@ -376,6 +379,7 @@
 				7A120000000000000000005E /* OriginalFilesPage.swift */,
 				7A1200000000000000000060 /* OriginalFileIndex.swift */,
 				7A1200000000000000000062 /* BrowsePreferencesStore.swift */,
+				7A1200000000000000000074 /* OriginalDestinationPreferences.swift */,
 				7A1200000000000000000066 /* CameraThumbnailDiskCache.swift */,
 				7A120000000000000000005C /* OriginalQueuePage.swift */,
 				7A120000000000000000005A /* SharedUiProbeView.swift in Sources */,

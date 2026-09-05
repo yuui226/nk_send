@@ -8,6 +8,8 @@ CHANGES['iosApp/ZTransfer/Storage/ScopedDirectoryStore.swift'] = [('struct Expor
 
 
 def previous_directory_change_source(path, value):
+    from destination_restore_wiring import previous_restore_source
+    value = previous_restore_source(path, value)
     for new, old in CHANGES.get(path, ()):
         assert value.count(new) == 1, (path, new)
         value = value.replace(new, old, 1)

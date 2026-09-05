@@ -69,8 +69,16 @@ final class CameraHandshakeProbe: ObservableObject {
     private var directoryTask: Task<Void, Never>?
     private var queueShareTask: Task<Void, Never>?
     private var providerOriginals: ProviderOriginalStore?
-    private var transferDestination: ProviderOriginalStore?
+    private var transferDestination: OriginalFilesDestination?
+    private let destinationPreferences = OriginalDestinationPreferences()
+    @Published private(set) var queueDestinationError: String?
     @Published private(set) var savesToSelectedDirectory = false
+    var queueDestinationSummary: String {
+        if let queueDestinationError { return queueDestinationError }
+        return savesToSelectedDirectory
+            ? "队列：所选目录。副本校验发布后才完成，应用内原片保留。"
+            : "队列：应用沙盒。选择目录授权本身不会改变保存目标。"
+    }
     @Published private(set) var metadataStatus = ""
     @Published private(set) var readingMetadata = false
     private let metadataReader = PhotoMetadataReader()
@@ -144,12 +152,15 @@ final class CameraHandshakeProbe: ObservableObject {
                     return
                 }
                 // Commit returned successfully. Cancellation afterwards cannot undo that fact.
+                let remembered = destinationPreferences.save(.provider)
                 guard originalQueue === queue else { return }
                 providerOriginals = change.provider; transferDestination = change.provider
+                queueDestinationError = nil
                 savesToSelectedDirectory = true
                 workspaceNavigation &+= 1
                 filesPage?.close(); filesPage = nil
                 directoryStatus = "已切换到 \(change.displayName)；原目录文件保留，后续执行使用新目标。"
+                    + (remembered ? "" : " 本次目标已生效，但偏好保存失败；下次连接可能需重选。")
             } catch {
                 if !Task.isCancelled, originalQueue === queue {
                     directoryStatus = "保存目标未改变：\(error.localizedDescription)"
@@ -225,7 +236,7 @@ final class CameraHandshakeProbe: ObservableObject {
     func start(host: String, stationMode: Bool, persistentAP: Bool = false,
                allowPairing: Bool = false, forcePairing: Bool = false, expectedResponder: String? = nil,
                service: CameraBonjourService? = nil) {
-        guard !running, !downloading else { return }
+        guard !running, !downloading, !directoryBusy else { return }
         stopDiscovery()
         running = true
         samples = []
@@ -448,13 +459,16 @@ final class CameraHandshakeProbe: ObservableObject {
                     return
                 }
                 // The configuration is committed. Mirror it even if cancellation arrives just afterwards.
+                let remembered = destinationPreferences.save(enabled ? .provider : .sandbox)
                 guard originalQueue === queue else { return }
                 transferDestination = target; savesToSelectedDirectory = enabled
+                queueDestinationError = nil
                 workspaceNavigation &+= 1
                 filesPage?.close(); filesPage = nil
                 directoryStatus = enabled
                     ? "队列已使用所选目录：下载后校验发布才完成，应用内原片保留；已有待传任务使用此目标。"
                     : "队列已切回应用沙盒；所选目录中的已有文件不变。"
+                if !remembered { directoryStatus += " 本次目标已生效，但偏好保存失败；下次连接可能需重选。" }
             } catch {
                 if !Task.isCancelled { directoryStatus = "保存目标未改变：\(error.localizedDescription)" }
             }
@@ -564,8 +578,16 @@ final class CameraHandshakeProbe: ObservableObject {
         }
         let connection = CameraWiFiConnection(command: command, event: event, stationMode: stationMode)
         let previews = CameraPreviewStore(source: connection, connectionID: connection.connectionID)
-        let queue = CameraOriginalQueue(camera: connection, store: try CameraOriginalStore.applicationStore())
-        transferDestination = nil; savesToSelectedDirectory = false // Debug target choice is connection-local, not persisted settings.
+        directoryBusy = true
+        let restored: RestoredOriginalDestination
+        do { restored = try await destinationPreferences.restore() }
+        catch { directoryBusy = false; throw error }
+        directoryBusy = false
+        try Task.checkCancellation()
+        let queue = CameraOriginalQueue(camera: connection, store: try CameraOriginalStore.applicationStore(), destination: restored.destination)
+        providerOriginals = restored.provider; transferDestination = restored.destination
+        savesToSelectedDirectory = restored.selected == .provider; queueDestinationError = restored.failure
+        directoryStatus = restored.failure ?? (savesToSelectedDirectory ? "已恢复所选目录保存目标。" : "队列使用应用沙盒。")
         originalQueue = queue
         queueObserver = Task {
             for await snapshot in queue.updates {
@@ -586,6 +608,7 @@ final class CameraHandshakeProbe: ObservableObject {
             previewTask?.cancel(); previewStore = nil; previewImage = nil; previewPNG = nil
             apConnection = nil; originalQueue = nil; queueObserver?.cancel(); queueObserver = nil
             transferDestination = nil; savesToSelectedDirectory = false
+            queueDestinationError = nil
         }
         do {
             let profiles: StationProfileStore?
@@ -829,9 +852,7 @@ struct CameraHandshakeProbeView: View {
                 Button("队列保存到所选目录") { probe.configureQueueDirectory(true) }
                 Button("队列切回应用沙盒") { probe.configureQueueDirectory(false) }
             }.font(.caption).disabled(!probe.canOpenSharedWorkspace || probe.directoryBusy || probe.queueSnapshot?.running == true)
-            Text(probe.savesToSelectedDirectory
-                ? "队列：所选目录。副本校验发布后才完成，应用内原片保留。"
-                : "队列：应用沙盒。已选目录入口目前只用于已有文件识别与预览。")
+            Text(probe.queueDestinationSummary)
                 .font(.caption)
             Button("打开共享队列（真实任务）") { probe.openSharedQueue() }
                 .disabled(!probe.canOpenSharedWorkspace)

@@ -53,9 +53,10 @@ actor CameraOriginalQueue {
     private var completedOriginalRevision: UInt64 = 0
     private var sequence: UInt64 = 0
 
-    init(camera: CameraWiFiConnection, store: CameraOriginalStore) {
+    init(camera: CameraWiFiConnection, store: CameraOriginalStore, destination: OriginalFilesDestination? = nil) {
         self.camera = camera
         self.store = store
+        self.destination = destination // Restored before admission; runNext still validates before any IO.
         var continuation: AsyncStream<OriginalQueueSnapshot>.Continuation!
         updates = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation = $0 }
         notifications = continuation

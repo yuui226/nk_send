@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import unittest
 from directory_change_wiring import CHANGES, previous_directory_change_source
+from destination_restore_wiring import previous_restore_source
 
 ROOT = Path(__file__).resolve().parents[2]
 GRANT = 'iosApp/ZTransfer/Storage/ScopedDirectoryStore.swift'
@@ -11,7 +12,7 @@ CONTRACT = 'iosApp/ZTransfer/Storage/OriginalFilesReading.swift'
 PROVIDER = 'iosApp/ZTransfer/Storage/ProviderOriginalStore.swift'
 PROBE = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
 
-def read(path): return (ROOT/path).read_text(encoding='utf-8')
+def read(path): return previous_restore_source(path, (ROOT/path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', 'fadbbcd:' + path], cwd=ROOT).decode('utf-8')
 def between(value, start, end): return value.split(start, 1)[1].split(end, 1)[0]
 
@@ -19,7 +20,7 @@ class DirectoryChangeWiringTest(unittest.TestCase):
     def test_all_five_previous_sources_restore_exactly(self):
         self.assertEqual({GRANT, QUEUE, CONTRACT, PROVIDER, PROBE}, set(CHANGES))
         for path in CHANGES:
-            self.assertEqual(before(path), previous_directory_change_source(path, read(path)))
+            self.assertEqual(before(path), previous_directory_change_source(path, (ROOT/path).read_text(encoding='utf-8')))
 
     def test_preparation_is_non_publishing_and_provider_is_prebound(self):
         value = between(read(GRANT), '    func prepareSelection(', '    /// Compare-and-replace')
@@ -88,6 +89,6 @@ class DirectoryChangeWiringTest(unittest.TestCase):
                                (QUEUE, 'revision == destinationRevision', 'true'),
                                (PROVIDER, 'self.selection = selection', 'self.selection = nil')):
             with self.assertRaises(AssertionError):
-                previous_directory_change_source(path, read(path).replace(old, new))
-        changed = read(QUEUE).replace('let target = destination //', 'let target: OriginalFilesDestination? = nil //')
+                previous_directory_change_source(path, (ROOT/path).read_text(encoding='utf-8').replace(old, new))
+        changed = (ROOT/QUEUE).read_text(encoding='utf-8').replace('let target = destination //', 'let target: OriginalFilesDestination? = nil //')
         self.assertNotEqual(before(QUEUE), previous_directory_change_source(QUEUE, changed))
