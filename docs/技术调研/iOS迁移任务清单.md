@@ -2,13 +2,15 @@
 
 > 给后续实现过程使用的轻量执行账本。架构结论见 [iOS版本1比1复刻方案](./iOS版本1比1复刻方案.md)。
 
+> iOS 成品开发逐项执行 [iOS实现任务清单](./iOS实现任务清单.md)；本表保留 Android 共享化历史与总里程碑。
+
 ## 当前状态
 
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
-- 当前阶段：Android 可复用核心与最小 presentation 规则共享化已完成（Windows 阶段 100%）
-- 下一项：`M01`，在 M1 Mac 上验收 Xcode/shared framework 链路
-- Mac 最近检查点：`M01`，在第一批真实共享协议完成后执行
+- 当前阶段：Android 共享化已完成；iOS 实现已开始，完整共享 UI 与 iOS 功能尚未完成
+- 下一项：继续[iOS实现任务清单](./iOS实现任务清单.md)；共享基础UI/材质/控件/触感和完整队列正文已接，iOS真实原片队列已接共享正文及主线程结果回传；470项shared+316项app测试通过；122个XCTest与2项iOS位图测试待Mac。Windows可做工作粗估69%（100%=Win可做全部完成，不等于iOS验收）；共享连接控件/队列操作按钮已接，完整原缩略图网格已共享并由Android使用，iOS真实目录/缩略图/整组入队已接同一网格；完整原筛选/日期编辑与弹层已共享，Native日历/文案已备；真实沙盒原片索引/增量更新及原网格已保存徽标已接；真实组合筛选与原未传输退场已接；浏览偏好已保存恢复；真实机身隔离缩略图磁盘缓存/完整目录清理已接；完整扫描后连接级后台填充/日期优先/执行态让路已接；原单图/缩放/旋转已共享并接Native真实图探针；继续完整分页预览/扫描批次填充/其余设置/完整工作区及其它正式页面，不提前收口
+- Mac 最近检查点：`M01/M02`；Windows 静态检查不替代 Apple 编译/真机验收
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
 
@@ -108,10 +110,10 @@
 | ID | 状态 | 任务 | 完成点 |
 |---|---|---|---|
 | A01 | DONE | 收口 Android 平台实现 | USB、Service、MediaStore、Socket、BLE、Bitmap、Locale/时钟/锁均只在 Android 层 |
-| I01 | MAC | iOS 网络实现 | `NWConnection`、热点引导、AP/STA 发现 |
-| I02 | MAC | iOS 文件与照片实现 | PhotoKit、Files、临时文件和恢复 |
-| I03 | MAC | iOS 蓝牙、定位与后台实现 | CoreBluetooth、CoreLocation、后台宽限 |
-| I04 | MAC | iOS 录像、购买和更新实现 | AVFoundation、StoreKit、App Store |
+| I01 | NEXT | iOS 网络实现 | 详见 IOS-N01–N06；已写TCP/共享codec/串行事务/AP持续会话/保活及原始枚举诊断，34项XCTest与Mac编译/真机待验 |
+| I02 | TODO | iOS 文件与照片实现 | 详见 IOS-D/T/S/E；PhotoKit、Files、临时文件、效果导出和恢复，最终需Mac/真机 |
+| I03 | TODO | iOS 蓝牙、定位与后台实现 | 详见 IOS-G/S04；CoreBluetooth、CoreLocation、后台宽限，最终需真机 |
+| I04 | TODO | iOS 录像、购买和更新实现 | 详见 IOS-R/L；AVFoundation、StoreKit、服务端权益、App Store，最终需Mac/账户配置 |
 | Q01 | DONE | Android 迁移最终多轮回归 | 669 项测试、双模块 Lint、标准 APK、Manifest/DEX 与独立等价审计通过 |
 | Q02 | MAC | iOS 模拟器和真机功能矩阵 | 权限、网络、传输、后台、异常恢复 |
 | Q03a | DONE | Android/common 边界审计 | `commonMain/commonTest` 无平台 API，迁入模型/规则单一定义，依赖保持 `app -> shared` |

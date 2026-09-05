@@ -2,6 +2,8 @@
 
 实施进度与下一项任务见 [iOS迁移任务清单](./iOS迁移任务清单.md)。
 
+iOS 全功能实现与验收子任务见 [iOS实现任务清单](./iOS实现任务清单.md)。首批网络适配和 Debug 握手探针已开始编写，尚待 Mac 编译/真机验证；现有 SwiftUI 诊断页不是最终产品 UI。
+
 ## 一、目标与结论
 
 目标是在尽量保持 Z传 Android 版功能、视觉和业务规则一致的前提下，实现 iOS 版本，并避免今后维护两套完全独立的代码。
@@ -27,7 +29,7 @@ Compose Multiplatform 的 iOS 支持已经稳定，官方也提供了将现有 J
 - 新增 `iosApp` Xcode 薄壳，通过官方 Direct Integration 方式构建 `ZTransferShared.framework`。
 - Xcode 工程包含可版本控制的共享 Scheme；当前已具备开始编写 `iosMain` 平台探针并在 M1 模拟器、iPhone 真机运行的工程入口。
 - Kotlin/Compose Compiler 统一为 2.2.21；AGP 8.10.1、Gradle 8.11.1 同步满足 Android 对 Kotlin 2.2 的最低工具链要求，并支持现代 Xcode；现有 Android Compose 依赖未升级。
-- shared 350 项与 Android 317 项单元测试、仓库标准 Debug 打包均已通过。
+- Android 共享化终审时 shared 351 项与 Android 318 项单元测试、仓库标准 Debug 打包均已通过；不代表新增 iOS 测试已经执行。
 - `shared` 与 App 的 Android Lint 均已通过；蓝牙状态常量已修正，11 个仅用于派生 Flow 同步首帧的 `StateFlow.value` 读取采用带说明的局部抑制，未改变运行逻辑，也没有新增全局 baseline。
 - 对比改造前后的 Debug APK，合并后的 Android Manifest 除版本号外完全一致。
 

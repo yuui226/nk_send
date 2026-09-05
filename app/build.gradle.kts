@@ -8,6 +8,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.compose")
 }
 
 // 发布签名从 keystore.properties 读取（该文件不入库）。缺失时回退到 debug 签名，
@@ -103,15 +104,13 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     implementation("androidx.activity:activity-compose:1.8.2")
 
-    implementation(platform("androidx.compose:compose-bom:2023.10.01"))
-    // 1.7 起 LazyGrid 的 animateItem 原生同时处理插入、移除和重排；仅定向覆盖
-    // Foundation，避免旧 animateItemPlacement 在大量网格变更时产生离屏钳制。
-    implementation("androidx.compose.foundation:foundation:1.7.6")
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
+    // Both modules resolve the same Compose release. Android still uses Google's AndroidX
+    // artifacts through Gradle metadata; Foundation retains native LazyGrid.animateItem support.
+    implementation(compose.foundation)
+    implementation(compose.ui)
+    implementation("androidx.compose.ui:ui-tooling-preview:1.8.2")
+    implementation(compose.material3)
+    implementation(compose.materialIconsExtended)
 
     implementation("androidx.navigation:navigation-compose:2.7.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
@@ -122,8 +121,10 @@ dependencies {
     // 只用 core（纯 Java 编码器,约 500KB,不含安卓摄像头扫码那套）。
     implementation("com.google.zxing:core:3.5.3")
 
-    debugImplementation("androidx.compose.ui:ui-tooling")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    debugImplementation(compose.uiTooling)
+    // Tooling has an old optional Material fallback; keep it aligned without adding it to Release.
+    debugImplementation(compose.material)
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.8.2")
     testImplementation("junit:junit:4.13.2")
 }
 

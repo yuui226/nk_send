@@ -3,6 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("org.jetbrains.kotlin.multiplatform")
     id("com.android.library")
+    id("org.jetbrains.compose")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 group = "com.ztransfer"
@@ -26,6 +28,14 @@ kotlin {
     }
 
     sourceSets {
+        commonMain.dependencies {
+            api(compose.runtime)
+            api(compose.foundation)
+            api(compose.ui)
+            api(compose.material3)
+            implementation(compose.materialIconsExtended)
+            implementation(compose.components.resources)
+        }
         commonTest.dependencies {
             implementation(kotlin("test"))
         }

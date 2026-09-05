@@ -1,0 +1,223 @@
+import Foundation
+import SwiftUI
+import UIKit
+import ZTransferShared
+
+/// A page adapter, not another camera/queue owner. The diagnostic/session owner forwards its ONE queue observer.
+@MainActor
+final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, NativeFilesPagePlatform {
+    let id = UUID()
+    let queuePage: OriginalQueuePageBridge
+    private let connectionID: UUID
+    private let catalog: CameraCatalog
+    private let queue: CameraOriginalQueue
+    private let previews: CameraPreviewStore
+    private let decoder = PreviewImageDecoder()
+    private let preferences: BrowsePreferencesStore
+    private var refreshTask: Task<Void, Never>?
+    private var originalIndexTask: Task<Void, Never>?
+    private var needsOriginalUpdate = false
+    private var needsOriginalRescan = false
+    private var originalRevision: Int64 = -1
+    private var completedOriginalRevision: UInt64?
+    private var commands: [UUID: Task<Void, Never>] = [:]
+    private var images: [UUID: Task<Void, Never>] = [:]
+    private var filesByHandle: [Int32: CameraFileInfo] = [:]
+    private var infosByHandle: [Int32: PtpObjectInfo] = [:]
+    private var scanSequence: Int64 = 0
+    private var connected = false
+    private var closed = false
+    private(set) lazy var model = NativeFilesPageModel(connectionId: connectionID.uuidString, queue: queuePage.model, platform: self)
+
+    init(connectionID: UUID, catalog: CameraCatalog, queue: CameraOriginalQueue, previews: CameraPreviewStore, stationMode: Bool,
+         preferences: BrowsePreferencesStore? = nil) {
+        self.connectionID = connectionID; self.catalog = catalog; self.queue = queue; self.previews = previews
+        self.preferences = preferences ?? BrowsePreferencesStore()
+        queuePage = OriginalQueuePageBridge(connectionID: connectionID, queue: queue, previews: previews, stationMode: stationMode)
+        super.init()
+    }
+
+    func publishQueue(_ value: OriginalQueueSnapshot) {
+        guard !closed, value.connectionID == connectionID else { return }
+        queuePage.publish(value)
+        if completedOriginalRevision == nil || value.completedOriginalRevision > completedOriginalRevision! {
+            completedOriginalRevision = value.completedOriginalRevision
+            refreshOriginals(rescan: originalRevision < 0)
+        }
+    }
+    func setConnected(_ value: Bool) { if !closed { connected = value; queuePage.setConnected(value) } }
+    func readBrowsePreferences() -> NativeBrowsePreferences? {
+        guard !closed else { return nil }
+        let value = preferences.read()
+        relayPriority(value ?? NativeBrowsePreferences.companion.defaults())
+        return value
+    }
+    func saveBrowsePreferences(value: NativeBrowsePreferences) -> Bool {
+        guard !closed else { return false }
+        relayPriority(value) // A failed disk save does not revoke the current page's actual date selection.
+        return preferences.save(value)
+    }
+    private func relayPriority(_ value: NativeBrowsePreferences) {
+        let first = value.startDay, last = value.endDay
+        let revision = BrowsePreferencesStore.nextUpdateRevision()
+        let previews = previews
+        Task { await previews.setPriorityRange(startDay: first, endDay: last, revision: revision) }
+    }
+    func currentDayKey() -> Int32 { Self.localDayKey(at: Date(), timeZone: .current) }
+    nonisolated static func localDayKey(at date: Date, timeZone: TimeZone) -> Int32 {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let day = calendar.dateComponents([.year, .month, .day], from: date)
+        guard let year = day.year, (1...9999).contains(year), let month = day.month, let date = day.day else { return 0 }
+        return Int32(year * 10000 + month * 100 + date)
+    }
+
+    func refresh() {
+        guard !closed, connected, refreshTask == nil else { return }
+        let sequence = model.beginScan()
+        guard sequence > 0 else { return }
+        refreshOriginals(rescan: true)
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.refreshTask = nil }
+            do {
+                let snapshot = try await self.catalog.refresh()
+                guard !self.closed, !Task.isCancelled else { return }
+                _ = self.acceptCatalog(snapshot, sequence: sequence)
+            } catch {
+                guard !self.closed else { return }
+                _ = self.model.finishScan(sequence: sequence, snapshot: nil)
+            }
+        }
+    }
+
+    /// Low-frequency completed-file revisions only. Never enumerates disk for 200 ms progress samples.
+    private func refreshOriginals(rescan: Bool) {
+        guard !closed else { return }
+        needsOriginalUpdate = true
+        needsOriginalRescan = needsOriginalRescan || rescan
+        guard originalIndexTask == nil else { return }
+        model.beginOriginalsRefresh()
+        originalIndexTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.originalIndexTask = nil }
+            while self.needsOriginalUpdate && !self.closed && !Task.isCancelled {
+                let rescan = self.needsOriginalRescan
+                self.needsOriginalUpdate = false; self.needsOriginalRescan = false
+                do {
+                    let result = try await self.queue.originals(since: self.originalRevision, rescan: rescan)
+                    guard !self.closed, !Task.isCancelled else { return }
+                    let update = NativeOriginalIndexUpdate(revision: result.revision,
+                        baseRevision: result.baseRevision, fullSnapshot: result.fullSnapshot)
+                    for row in result.entries {
+                        if !update.add(name: row.name, size: row.size, folder: row.folder, locator: row.url.absoluteString) { break }
+                    }
+                    guard self.model.publishOriginals(update: update) else {
+                        self.model.originalsRefreshFailed(); return
+                    }
+                    self.originalRevision = result.revision
+                } catch {
+                    guard !self.closed, !Task.isCancelled else { return }
+                    self.model.originalsRefreshFailed()
+                    // No automatic retry loop on a broken directory. Manual refresh retries a full scan.
+                    self.needsOriginalUpdate = false; self.needsOriginalRescan = false
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func acceptCatalog(_ value: CameraCatalogSnapshot, sequence: Int64) -> Bool {
+        guard !closed else { return false }
+        let snapshot = NativeFilesPageSnapshot(connectionId: value.connectionID.uuidString,
+            metadataComplete: value.metadataComplete, changedWhileScanning: value.changedWhileScanning)
+        let cameraStores = KotlinIntArray(size: Int32(value.storageIDs.count))
+        for (index, store) in value.storageIDs.enumerated() { cameraStores.set(index: Int32(index), value: store) }
+        snapshot.setStorageIds(values: cameraStores) // Include empty cards, not just stores represented by a photo.
+        for file in value.files {
+            let storageIDs = file.storageIds.map { $0.int32Value }
+            let stores = KotlinIntArray(size: Int32(storageIDs.count))
+            for (index, store) in storageIDs.enumerated() { stores.set(index: Int32(index), value: store) }
+            if !snapshot.addFile(handle: file.handle, size: file.size, name: file.fileName, captureDate: file.captureDate,
+                isProtected: file.isProtected, storageIds: stores) { break }
+        }
+        guard model.finishScan(sequence: sequence, snapshot: snapshot) else { return false }
+        scanSequence = sequence
+        filesByHandle = Dictionary(uniqueKeysWithValues: value.files.map { ($0.handle, $0) })
+        infosByHandle = value.objectInfos
+        return true
+    }
+
+    func enqueue(handles: KotlinIntArray, scanSequence: Int64, completion: NativeFilesEnqueueCompletion) {
+        guard !closed, connected, self.scanSequence == scanSequence, commands.isEmpty else {
+            completion.complete(acceptedCount: 0); return
+        }
+        let selected = (0..<Int(handles.size)).map { handles.get(index: Int32($0)) }
+        let files = selected.compactMap { filesByHandle[$0] }
+        let infos = selected.compactMap { infosByHandle[$0] }
+        guard !selected.isEmpty, Set(selected).count == selected.count,
+              files.count == selected.count, infos.count == selected.count else { completion.complete(acceptedCount: 0); return }
+        let token = UUID()
+        commands[token] = Task { [weak self] in
+            guard let self else { completion.complete(acceptedCount: 0); return }
+            var accepted: Int32 = 0
+            defer { self.commands.removeValue(forKey: token); completion.complete(acceptedCount: accepted) }
+            guard !self.closed, !Task.isCancelled, self.connected else { return }
+            // Android defaults: no date subdirectory, no deferred start. Preference persistence is a later task.
+            accepted = Int32(await self.queue.enqueueCatalog(infos, files: files, byDate: false, dayKey: 0, deferred: false))
+            let snapshot = await self.queue.snapshot()
+            guard !self.closed, !Task.isCancelled else { return }
+            self.queuePage.publish(snapshot) // Real post-operation state before acknowledgement.
+        }
+    }
+
+    func thumbnail(file: CameraFileInfo, completion: NativeFilesThumbnailCompletion) {
+        guard !closed, connected, let info = infosByHandle[file.handle],
+              info.fileName == file.fileName, info.size == file.size, info.captureDate == file.captureDate else {
+            completion.complete(encodedImage: nil, retryable: false); return
+        }
+        guard images.count < 32 else { completion.complete(encodedImage: nil, retryable: true); return }
+        let token = UUID()
+        images[token] = Task { [weak self] in
+            guard let self else { completion.complete(encodedImage: nil, retryable: false); return }
+            defer { self.images.removeValue(forKey: token) }
+            do {
+                guard !Task.isCancelled, let data = try await self.previews.thumbnail(info: info) else {
+                    completion.complete(encodedImage: nil, retryable: false); return
+                }
+                let png = try await self.decoder.gridThumbnailPNG(data)
+                guard !self.closed, !Task.isCancelled else { completion.complete(encodedImage: nil, retryable: false); return }
+                let bytes = KotlinByteArray(size: Int32(png.count))
+                for (index, value) in png.enumerated() { bytes.set(index: Int32(index), value: Int8(bitPattern: value)) }
+                completion.complete(encodedImage: bytes, retryable: false)
+            } catch { completion.complete(encodedImage: nil, retryable: !self.closed && !Task.isCancelled) }
+        }
+    }
+
+    func cancelRequests() {
+        guard !closed else { return }
+        closed = true; refreshTask?.cancel(); refreshTask = nil
+        originalIndexTask?.cancel(); originalIndexTask = nil
+        needsOriginalUpdate = false; needsOriginalRescan = false
+        commands.values.forEach { $0.cancel() }; commands.removeAll()
+        images.values.forEach { $0.cancel() }; images.removeAll()
+        filesByHandle.removeAll(); infosByHandle.removeAll()
+    }
+    func close() { model.close() }
+}
+
+struct OriginalFilesPage: UIViewControllerRepresentable {
+    let bridge: OriginalFilesPageBridge
+    @Environment(\.dismiss) private var dismiss
+    func makeCoordinator() -> OriginalFilesPageBridge { bridge }
+    func makeUIViewController(context: Context) -> UIViewController {
+        let controller = SharedUiController.shared.originalFiles(model: bridge.model,
+            languageTag: Locale.preferredLanguages.first ?? "en", onBack: {
+                bridge.close(); dismiss(); return KotlinUnit()
+            })
+        bridge.queuePage.presenter = controller
+        return controller
+    }
+    func updateUIViewController(_ controller: UIViewController, context: Context) {}
+    static func dismantleUIViewController(_ controller: UIViewController, coordinator: OriginalFilesPageBridge) { coordinator.close() }
+}
