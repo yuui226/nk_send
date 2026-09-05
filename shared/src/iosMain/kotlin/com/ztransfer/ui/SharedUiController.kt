@@ -8,12 +8,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.ui.screen.QueueThumbnailContent
-import com.ztransfer.ui.screen.ThumbnailGridImageSource
 import com.ztransfer.ui.theme.SharedZTransferTheme
 import org.jetbrains.skia.Image
 import platform.Foundation.NSProcessInfo
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.usePinned
 import platform.Foundation.NSData
@@ -48,7 +46,7 @@ object SharedUiController {
     fun originalFiles(model: NativeFilesPageModel, languageTag: String, onBack: () -> Unit): UIViewController =
         ComposeUIViewController {
             val images = remember(model) { NativeGridImages(model) }
-            DisposableEffect(images) { onDispose { images.clear() } }
+            DisposableEffect(images) { onDispose { images.close() } }
             SharedZTransferTheme {
                 val queueText = NativeQueueTextCatalog.forLanguage(languageTag)
                 NativeOriginalFilesPage(model, NativeFilesTextCatalog.forLanguage(languageTag), queueText,
@@ -71,50 +69,6 @@ object SharedUiController {
                     thumbnail = { file, retryNudge, modifier -> OriginalQueueThumbnail(model, file, retryNudge, modifier) })
             }
         }
-}
-
-/** Decoded UI cache is page-bound; the connection's encoded cache remains in CameraPreviewStore. */
-private class NativeGridImages(private val model: NativeFilesPageModel) : ThumbnailGridImageSource {
-    private val cache = LinkedHashMap<CameraFileInfo, ImageBitmap>()
-    private var bytes = 0L
-    fun clear() { cache.clear(); bytes = 0L }
-    private fun cached(file: CameraFileInfo): ImageBitmap? = cache.remove(file)?.also { cache[file] = it }
-    private fun store(file: CameraFileInfo, image: ImageBitmap) {
-        val cost = image.width.toLong() * image.height * 4L
-        if (cost > 32L * 1024 * 1024) return
-        cache.remove(file)?.let { bytes -= it.width.toLong() * it.height * 4L }
-        while (cache.isNotEmpty() && (cache.size >= 128 || bytes + cost > 32L * 1024 * 1024)) {
-            val first = cache.entries.first()
-            bytes -= first.value.width.toLong() * first.value.height * 4L
-            cache.remove(first.key)
-        }
-        cache[file] = image; bytes += cost
-    }
-    @Composable override fun photo(file: CameraFileInfo, transfersBusy: Boolean, allowRemoteThumbnail: Boolean): ImageBitmap? =
-        image(file, transfersBusy, true, allowRemoteThumbnail)
-    @Composable override fun stack(file: CameraFileInfo, transfersBusy: Boolean, loadEnabled: Boolean, allowRemoteThumbnail: Boolean): ImageBitmap? =
-        image(file, transfersBusy, loadEnabled, allowRemoteThumbnail)
-    @Composable private fun image(file: CameraFileInfo, busy: Boolean, enabled: Boolean, remote: Boolean): ImageBitmap? {
-        var bitmap by remember(file) { mutableStateOf(cached(file)) }
-        LaunchedEffect(file, busy, enabled, remote) {
-            if (enabled && remote && bitmap == null) {
-                repeat(8) { attempt ->
-                    try {
-                        val result = model.thumbnail(file)
-                        result.bytes?.let { encoded ->
-                            val image = Image.makeFromEncoded(encoded)
-                            try { bitmap = image.toComposeImageBitmap() } finally { image.close() }
-                            bitmap?.let { store(file, it) }
-                        }
-                        if (bitmap != null || !result.retryable) return@LaunchedEffect
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { return@LaunchedEffect }
-                    delay((250L * (attempt + 1)).coerceAtMost(2000L))
-                }
-            }
-        }
-        return bitmap
-    }
 }
 
 @Composable

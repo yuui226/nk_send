@@ -175,8 +175,8 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         }
     }
 
-    func thumbnail(file: CameraFileInfo, completion: NativeFilesThumbnailCompletion) {
-        guard !closed, connected, let info = infosByHandle[file.handle],
+    func thumbnail(file: CameraFileInfo, allowRemote: Bool, completion: NativeFilesThumbnailCompletion) {
+        guard !closed, (!allowRemote || connected), let info = infosByHandle[file.handle],
               info.fileName == file.fileName, info.size == file.size, info.captureDate == file.captureDate else {
             completion.complete(encodedImage: nil, retryable: false); return
         }
@@ -186,15 +186,17 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
             guard let self else { completion.complete(encodedImage: nil, retryable: false); return }
             defer { self.images.removeValue(forKey: token) }
             do {
-                guard !Task.isCancelled, let data = try await self.previews.thumbnail(info: info) else {
+                guard !Task.isCancelled, let data = try await self.previews.thumbnail(info: info, allowRemote: allowRemote) else {
                     completion.complete(encodedImage: nil, retryable: false); return
                 }
                 let png = try await self.decoder.gridThumbnailPNG(data)
-                guard !self.closed, !Task.isCancelled else { completion.complete(encodedImage: nil, retryable: false); return }
+                guard !self.closed, !Task.isCancelled, self.filesByHandle[file.handle] == file else {
+                    completion.complete(encodedImage: nil, retryable: false); return
+                }
                 let bytes = KotlinByteArray(size: Int32(png.count))
                 for (index, value) in png.enumerated() { bytes.set(index: Int32(index), value: Int8(bitPattern: value)) }
                 completion.complete(encodedImage: bytes, retryable: false)
-            } catch { completion.complete(encodedImage: nil, retryable: !self.closed && !Task.isCancelled) }
+            } catch { completion.complete(encodedImage: nil, retryable: allowRemote && !self.closed && !Task.isCancelled) }
         }
     }
 

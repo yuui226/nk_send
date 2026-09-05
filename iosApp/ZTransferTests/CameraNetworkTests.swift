@@ -416,6 +416,45 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertEqual(count.thumb, 1)
     }
 
+    func testPreviewLocalThumbnailReadsDiskOfflineWithoutAnotherCameraRequest() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = try thumbnailFixture()
+        let source = FakePreviewSource(thumbs: [.bytes(bytes)])
+        let store = CameraPreviewStore(source: source)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "body")
+        let info = try sampleInfo(1)
+        _ = try await store.thumbnail(info: info)
+        await store.clearForMemoryPressure(); await store.setConnected(false)
+        let disk = try await store.thumbnail(info: info, allowRemote: false)
+        XCTAssertEqual(disk, bytes)
+        let memory = await store.cachedThumbnail(info: info); XCTAssertEqual(memory, bytes)
+        let count = await source.counts(); XCTAssertEqual(count.thumb, 1)
+    }
+
+    func testPreviewLocalThumbnailMissNeverNegativeCachesOrStartsNetwork() async throws {
+        let source = FakePreviewSource(thumbs: [.bytes(try thumbnailFixture())])
+        let store = CameraPreviewStore(source: source); let info = try sampleInfo(1)
+        let local = try await store.thumbnail(info: info, allowRemote: false)
+        XCTAssertNil(local)
+        let before = await source.counts(); XCTAssertEqual(before.thumb, 0)
+        let remote = try await store.thumbnail(info: info)
+        XCTAssertNotNil(remote)
+        let after = await source.counts(); XCTAssertEqual(after.thumb, 1)
+    }
+
+    func testPreviewLocalThumbnailHonorsReconciledCatalogDeletion() async throws {
+        let id = UUID(); let source = FakePreviewSource(thumbs: [.bytes(try thumbnailFixture())])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        let info = try sampleInfo(1); _ = try await store.thumbnail(info: info)
+        let empty = CameraCatalogSnapshot(connectionID: id, revision: 0, storageIDs: [], files: [], objectInfos: [:],
+            totalHandles: 0, metadataComplete: true, changedWhileScanning: false)
+        _ = await store.reconcile(empty)
+        let missing = try await store.thumbnail(info: info, allowRemote: false)
+        XCTAssertNil(missing)
+        let count = await source.counts(); XCTAssertEqual(count.thumb, 1)
+    }
+
     func testPreviewReconcileRejectsPartialRacedAndWrongConnectionCatalogs() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

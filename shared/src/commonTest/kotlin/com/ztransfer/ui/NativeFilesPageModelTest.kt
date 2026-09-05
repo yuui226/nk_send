@@ -227,7 +227,10 @@ class NativeFilesPageModelTest {
         override fun enqueue(handles: IntArray, scanSequence: Long, completion: NativeFilesEnqueueCompletion) {
             requested = handles; sequence = scanSequence; enqueueResult = completion
         }
-        override fun thumbnail(file: CameraFileInfo, completion: NativeFilesThumbnailCompletion) { imageResult = completion }
+        var thumbnailRemote: Boolean? = null
+        override fun thumbnail(file: CameraFileInfo, allowRemote: Boolean, completion: NativeFilesThumbnailCompletion) {
+            thumbnailRemote = allowRemote; imageResult = completion
+        }
         override fun cancelRequests() { cancelled++ }
         override fun showConnectionHelp() { connectionHelp++ }
         override fun completedSpeed(value: Float) = ""
@@ -337,5 +340,40 @@ class NativeFilesPageModelTest {
         assertTrue(pending.result!!.getOrThrow().retryable)
         val oversized = start { m.thumbnail(file) }; p.imageResult!!.complete(ByteArray(4 * 1024 * 1024 + 1), false)
         assertNull(oversized.result!!.getOrThrow().bytes)
+    }
+
+    @Test fun localThumbnailRequestCanReadDiskOfflineAndDoesNotEscalateToRemote() {
+        val p = Platform(); val m = model(p); m.finishScan(m.beginScan(), snapshot())
+        val file = m.state.value.files.first(); m.queue.setConnected(false)
+        val rejected = start { m.thumbnail(file) }
+        assertNull(rejected.result!!.getOrThrow().bytes); assertNull(p.thumbnailRemote)
+        val local = start { m.thumbnail(file, allowRemote = false) }
+        assertEquals(false, p.thumbnailRemote); assertNull(local.result)
+        p.imageResult!!.complete(byteArrayOf(1), false)
+        assertContentEquals(byteArrayOf(1), local.result!!.getOrThrow().bytes)
+        m.close()
+    }
+
+    @Test fun localThumbnailStillRejectsWrongIdentityAndCloseIgnoresLateImage() {
+        val p = Platform(); val m = model(p); m.finishScan(m.beginScan(), snapshot())
+        val file = m.state.value.files.first()
+        assertNull(start { m.thumbnail(file.copy(size = file.size + 1), false) }.result!!.getOrThrow().bytes)
+        assertNull(p.thumbnailRemote)
+        val pending = start { m.thumbnail(file, false) }
+        m.close(); p.imageResult!!.complete(byteArrayOf(1), false)
+        assertTrue(pending.result!!.isFailure)
+    }
+
+    @Test fun thumbnailFinishingAfterCatalogIdentityChangedCannotPublishForOldFile() {
+        val p = Platform(); val m = model(p); m.finishScan(m.beginScan(), snapshot())
+        val file = m.state.value.files.first()
+        val pending = start { m.thumbnail(file, false) }
+        val replaced = NativeFilesPageSnapshot("camera", true, false)
+        replaced.addFile(file.handle, file.size + 1, file.fileName, file.captureDate, false, intArrayOf())
+        assertTrue(m.finishScan(m.beginScan(), replaced))
+        p.imageResult!!.complete(byteArrayOf(1), true)
+        val result = pending.result!!.getOrThrow()
+        assertNull(result.bytes); assertFalse(result.retryable)
+        m.close()
     }
 }

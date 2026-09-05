@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlin.coroutines.resume
 
@@ -24,7 +25,7 @@ interface NativeFilesPagePlatform {
     fun currentDayKey(): Int
     fun refresh()
     fun enqueue(handles: IntArray, scanSequence: Long, completion: NativeFilesEnqueueCompletion)
-    fun thumbnail(file: CameraFileInfo, completion: NativeFilesThumbnailCompletion)
+    fun thumbnail(file: CameraFileInfo, allowRemote: Boolean, completion: NativeFilesThumbnailCompletion)
     fun cancelRequests()
 }
 
@@ -226,22 +227,23 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         }
     }
 
-    internal suspend fun thumbnail(file: CameraFileInfo): NativeFilesImageResult {
+    internal suspend fun thumbnail(file: CameraFileInfo, allowRemote: Boolean = true): NativeFilesImageResult {
         val owner = platform ?: throw CancellationException("Files page closed")
-        if (!queue.connected.value || currentFiles[file.handle] != file) return NativeFilesImageResult(null, false)
+        if ((allowRemote && !queue.connected.value) || currentFiles[file.handle] != file) return NativeFilesImageResult(null, false)
         var pending: CancellableContinuation<NativeFilesImageResult>? = null
         return try {
-            withTimeout(15_000L) {
+            withTimeoutOrNull(15_000L) {
                 suspendCancellableCoroutine { continuation ->
                     pending = continuation; images += continuation
-                    owner.thumbnail(file, object : NativeFilesThumbnailCompletion {
+                    owner.thumbnail(file, allowRemote, object : NativeFilesThumbnailCompletion {
                         override fun complete(encodedImage: ByteArray?, retryable: Boolean) {
-                            if (!closed && continuation.isActive) continuation.resume(NativeFilesImageResult(
-                                encodedImage?.takeIf { it.size <= 4 * 1024 * 1024 }, retryable))
+                            if (!closed && continuation.isActive) continuation.resume(
+                                if (currentFiles[file.handle] != file) NativeFilesImageResult(null, false)
+                                else NativeFilesImageResult(encodedImage?.takeIf { it.size <= 4 * 1024 * 1024 }, retryable))
                         }
                     })
                 }
-            }
+            } ?: NativeFilesImageResult(null, allowRemote)
         } finally { pending?.let(images::remove) }
     }
 

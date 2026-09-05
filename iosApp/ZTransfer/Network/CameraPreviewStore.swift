@@ -213,7 +213,24 @@ actor CameraPreviewStore {
         fill.clear(); catalogInfos.removeAll(); foregroundUses.removeAll(); scanToken = nil; catalogReady = false
     }
 
-    func thumbnail(info: PtpObjectInfo) async throws -> Data? { try await load(info: info, fhd: false) }
+    func thumbnail(info: PtpObjectInfo, allowRemote: Bool = true) async throws -> Data? {
+        if !allowRemote { return try localThumbnail(info: info) }
+        return try await load(info: info, fhd: false)
+    }
+
+    /// Memory then disk only; never waits for a pending remote frame or negative-caches a local miss.
+    private func localThumbnail(info: PtpObjectInfo) throws -> Data? {
+        try Task.checkCancellation()
+        guard !closed, !info.isAssociation else { return nil }
+        let identity = info.identityComplete ? policy.thumbnailKey(info: info) : "incomplete:\(info.handle):\(info.size)"
+        guard allowedThumbnailKeys?.contains(identity) != false else { return nil }
+        let key = "thumb:\(identity)"
+        if let value = cache[key] { access &+= 1; value.lastUsed = access; return value.data }
+        guard info.identityComplete, let data = try? disk?.read(key: identity) else { return nil }
+        try Task.checkCancellation()
+        store(data, key: key)
+        return data
+    }
     /// Product preview asks for FHD and EXIF before permitting thumbnail fallback. Do not call preview().
     func fhd(info: PtpObjectInfo) async throws -> Data? {
         let use = beginForegroundUse()
