@@ -30,6 +30,53 @@ class PreviewExifRationalReaderTest {
     private fun read(data: ByteArray) = PreviewExifRationalReader.read(
         PreviewExifByteSource { offset, count -> data.copyOfRange(offset.toInt(), offset.toInt() + count) }, data.size.toLong())
 
+    private fun joined(vararg segments: ByteArray): ByteArray = byteArrayOf(-1, -40) +
+        segments.fold(ByteArray(0)) { all, part -> val framed = jpeg(part); all + framed.copyOfRange(2, framed.size - 2) } + byteArrayOf(-1, -39)
+
+    private fun shifted(source: ByteArray, little: Boolean, distance: Int): ByteArray {
+        val out = ByteArray(source.size + distance)
+        source.copyInto(out, 0, 0, 26); source.copyInto(out, 26 + distance, 26)
+        fun put(at: Int, value: Int) = repeat(4) { i -> out[at + i] = (value ushr ((if (little) i else 3 - i) * 8)).toByte() }
+        put(18, 26 + distance); put(36 + distance, 44 + distance) // One-tag fixture.
+        return out
+    }
+
+    @Test fun laterExifSegmentsPreserveVisitedOffsetsButCanOverrideFromNewDirectories() {
+        val first = tiff(listOf(Tag(0x9204, 36_293_949, 725_879_001, 10)))
+        val second = tiff(listOf(Tag(0x9204, -2, 3, 10)))
+        assertEquals("36293949/725879001", read(joined(first, second)).value(PreviewExifTag.EXPOSURE_BIAS_VALUE))
+        assertEquals("-2/3", read(joined(first, shifted(second, true, 64))).value(PreviewExifTag.EXPOSURE_BIAS_VALUE))
+        val third = tiff(listOf(Tag(0x9204, 5, 2, 10)))
+        assertEquals("5/2", read(joined(first, shifted(second, true, 64), shifted(third, true, 128))).value(PreviewExifTag.EXPOSURE_BIAS_VALUE))
+    }
+
+    @Test fun finalSegmentByteOrderAlsoAppliesToRetainedEarlierAttributeBytes() {
+        fun swapped(value: Int): Int = ((value and 255) shl 24) or ((value and 0xFF00) shl 8) or
+            ((value ushr 8) and 0xFF00) or ((value ushr 24) and 255)
+        val first = tiff(listOf(Tag(0x9204, 36_293_949, 725_879_001, 10)))
+        val second = tiff(listOf(Tag(0x9204, -2, 3, 10)), little = false)
+        assertEquals("${swapped(36_293_949)}/${swapped(725_879_001)}",
+            read(joined(first, second)).value(PreviewExifTag.EXPOSURE_BIAS_VALUE))
+        assertEquals("-2/3", read(joined(first, shifted(second, false, 64))).value(PreviewExifTag.EXPOSURE_BIAS_VALUE))
+    }
+
+    @Test fun gpsDirectoryVisitCannotBeReinterpretedAsExifAtSameOffset() {
+        for (gpsFirst in listOf(true, false)) {
+            val original = tiff(listOf(Tag(0x9204, -2, 3, 10)))
+            val out = ByteArray(original.size + 12)
+            original.copyInto(out, 0, 0, 10); original.copyInto(out, 38, 26)
+            fun put(at: Int, value: Int, width: Int) = repeat(width) { out[at + it] = (value ushr (it * 8)).toByte() }
+            put(8, 2, 2)
+            val pointers = if (gpsFirst) listOf(0x8825, 0x8769) else listOf(0x8769, 0x8825)
+            pointers.forEachIndexed { i, tag ->
+                val at = 10 + i * 12; put(at, tag, 2); put(at + 2, 4, 2); put(at + 4, 1, 4); put(at + 8, 38, 4)
+            }
+            put(48, 56, 4)
+            val result = read(jpeg(out)); assertTrue(result.complete)
+            assertEquals(if (gpsFirst) null else "-2/3", result.value(PreviewExifTag.EXPOSURE_BIAS_VALUE))
+        }
+    }
+
     @Test fun bothEndianTiffAndJpegKeepRawAndCompatibilityTagRepresentations() {
         val tags = listOf(Tag(0x829D, 28, 10), Tag(0x829A, 1, 250), Tag(0x9202, 4, 1),
             Tag(0x9204, -2, 3, 10), Tag(0x920A, 85, 1))

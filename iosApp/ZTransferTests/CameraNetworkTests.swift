@@ -2281,6 +2281,31 @@ final class CameraNetworkTests: XCTestCase {
         }
     }
 
+    func testRealJpegMultipleExifSegmentsRetainVisitedOrOverrideNewDirectory() throws {
+        let original = try rawBiasJpegFixture(numerator: 36_293_949, denominator: 725_879_001, little: true)
+        let other = try rawBiasJpegFixture(numerator: -2, denominator: 3, little: true)
+        for distance in [0, 64] {
+            var tiff = [UInt8](repeating: 0, count: 52 + distance)
+            tiff.replaceSubrange(0..<26, with: other[12..<38])
+            tiff.replaceSubrange((26 + distance)..<(52 + distance), with: other[38..<64])
+            func put(_ at: Int, _ value: UInt32) {
+                for i in 0..<4 { tiff[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) }
+            }
+            put(18, UInt32(26 + distance)); put(36 + distance, UInt32(44 + distance))
+            var jpeg = Data(original.prefix(64))
+            jpeg.append(contentsOf: [0xFF, 0xE1, 0, UInt8(tiff.count + 8), 69, 120, 105, 102, 0, 0])
+            jpeg.append(contentsOf: tiff); jpeg.append(original.dropFirst(64))
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: url) }
+            try jpeg.write(to: url)
+            let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+            let result = try PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(jpeg.count),
+                cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX"))
+            XCTAssertEqual(result?.exposureCompensation, distance == 0 ? "+0.1 EV" : "-0.7 EV")
+            XCTAssertEqual(try input.offset(), 0)
+        }
+    }
+
     private func previewExifJpegFixture() throws -> Data {
         let source = try XCTUnwrap(CGImageSourceCreateWithData(orientedPreviewFixture(width: 12, height: 8, orientation: 1) as CFData, nil))
         let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
