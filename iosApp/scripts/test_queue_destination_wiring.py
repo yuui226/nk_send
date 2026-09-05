@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import unittest
 from queue_destination_wiring import previous_destination_source, without_destination_queue, without_destination_provider
+from original_reuse_wiring import previous_reuse_source
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = '5921001'
@@ -24,13 +25,13 @@ EXISTING_COMPLETION = '''    /** Android's plain-original DL_SKIP branch: no dow
     }
 
 '''
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return previous_reuse_source(path, (ROOT / path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', BASE + ':' + path], cwd=ROOT).decode('utf-8')
 
 class QueueDestinationWiringTest(unittest.TestCase):
     def test_entire_previous_implementations_preserved_outside_explicit_deltas(self):
         for path in (QUEUE, PROVIDER, PROBE, 'iosApp/ZTransfer/Storage/OriginalFilesReading.swift'):
-            self.assertEqual(before(path), previous_destination_source(path, read(path)))
+            self.assertEqual(before(path), previous_destination_source(path, (ROOT / path).read_text(encoding='utf-8')))
 
     def test_complete_status_is_after_publication_not_download_and_share_result_is_app_owned(self):
         value = read(QUEUE).split('private func runNext()', 1)[1].split('private func finished()', 1)[0]

@@ -144,7 +144,12 @@ private actor QueueDestinationProbe: OriginalFilesDestination {
         if fail { throw ProviderPublicationError.coordinationFailed }
         return saved // Lifecycle seam only. The real publisher's bytes/hash/paths have filesystem tests.
     }
-    func originals(since revision: Int64, rescan: Bool) throws -> OriginalIndexUpdate { throw OriginalIndexError.unsafeRoot }
+    func originals(since revision: Int64, rescan: Bool) throws -> OriginalIndexUpdate {
+        OriginalIndexUpdate(revision: 0, baseRevision: revision, fullSnapshot: revision < 0, entries: [])
+    }
+    func copyOriginal(_ reference: ExistingOriginalReference, to output: SandboxTransferFile) throws -> Int64 {
+        throw OriginalIndexError.unsafeRoot // This publication-only seam deliberately has no existing files.
+    }
     func originalData(locator: String) throws -> Data { throw OriginalIndexError.unsafeRoot }
     func originalRawPreviewData(locator: String) throws -> Data? { throw OriginalIndexError.unsafeRoot }
     func originalExif(locator: String) throws -> PhotoExif? { throw OriginalIndexError.unsafeRoot }
@@ -2759,7 +2764,7 @@ final class CameraNetworkTests: XCTestCase {
         }
     }
 
-    func testOriginalQueueSavesTwoManualExportsInFIFOOrder() async throws {
+    func testOriginalQueueManualDuplicatesReuseFirstExportInFIFOOrder() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()
@@ -2788,17 +2793,22 @@ final class CameraNetworkTests: XCTestCase {
         await fulfillment(of: [completed], timeout: 3)
         await queue.stop()
         let firstFile = await queue.savedFile(first)
-        let secondFile = await queue.savedFile(second)
+        let secondFile = try await queue.prepareSavedFile(second)
         let firstURL = try XCTUnwrap(firstFile?.url)
         let secondURL = try XCTUnwrap(secondFile?.url)
         XCTAssertEqual(try Data(contentsOf: firstURL), Data("ABC".utf8))
-        XCTAssertEqual(try Data(contentsOf: secondURL), Data("DEF".utf8))
-        XCTAssertEqual(secondURL.lastPathComponent, "sample (1).JPG")
+        XCTAssertEqual(try Data(contentsOf: secondURL), Data("ABC".utf8))
+        XCTAssertEqual(secondURL.lastPathComponent, "sample.JPG")
+        XCTAssertEqual(secondURL.deletingLastPathComponent().lastPathComponent, "Shared Originals")
         let savedSnapshot = await queue.snapshot()
         XCTAssertEqual(savedSnapshot.completedOriginalRevision, 2)
         let originalIndex = try await queue.originals(since: -1, rescan: true)
-        XCTAssertEqual(originalIndex.entries.count, 2)
-        XCTAssertTrue(savedSnapshot.rows.allSatisfy { $0.elapsedMs != nil && $0.downloadMBps >= 0 })
+        XCTAssertEqual(originalIndex.entries.count, 1)
+        XCTAssertFalse(savedSnapshot.rows[0].skipped)
+        XCTAssertNotNil(savedSnapshot.rows[0].elapsedMs)
+        XCTAssertTrue(savedSnapshot.rows[1].skipped)
+        XCTAssertNil(savedSnapshot.rows[1].elapsedMs)
+        XCTAssertEqual(savedSnapshot.rows[1].downloadMBps, 0)
         let removedHistory = await queue.removeTask(first)
         XCTAssertTrue(removedHistory)
         XCTAssertEqual(try Data(contentsOf: firstURL), Data("ABC".utf8)) // removing a card never deletes its export
@@ -2807,6 +2817,98 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertEqual(retainedIndex.entries, originalIndex.entries)
         let emptyHistory = await queue.snapshot()
         XCTAssertTrue(emptyHistory.rows.isEmpty); XCTAssertEqual(emptyHistory.completedOriginalRevision, 2)
+        await camera.abort()
+    }
+
+    func testExistingProviderCopyIsSkippedOfflineAndSharedOnDemandFromTheSameDateBucket() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("provider"), sandbox = root.appendingPathComponent("app")
+        let folder = "ZT2026-01-02", date = target.appendingPathComponent(folder)
+        try FileManager.default.createDirectory(at: date, withIntermediateDirectories: true)
+        let original = date.appendingPathComponent("SAMPLE (2).jpg")
+        try Data("ABC".utf8).write(to: original)
+        try Data("BAD".utf8).write(to: target.appendingPathComponent("sample.JPG"))
+        let bookmark = root.appendingPathComponent("grant"); try Data([1]).write(to: bookmark)
+        let grant = PageDirectoryGrant(target)
+        let destination = ProviderOriginalStore(directory: ScopedDirectoryStore(bookmarkFile: bookmark, access: grant))
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: sandbox))
+        _ = try await queue.configureDestination(destination)
+        let taskID = await queue.enqueue(try sampleInfo(3, captureDate: "20260102T123456"), byDate: true, dayKey: 0, deferred: false)
+        let id = try XCTUnwrap(taskID)
+        try await waitUntil("existing original completed without connecting") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let state = await queue.snapshot()
+        XCTAssertTrue(try XCTUnwrap(state.rows.first).skipped)
+        XCTAssertEqual(state.rows.first?.downloaded, 3); XCTAssertNil(state.rows.first?.elapsedMs)
+        XCTAssertTrue(wire.sent().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path)) // No eager duplicate, even for sharing.
+        let saved = try await queue.prepareSavedFile(id)
+        let result = try XCTUnwrap(saved)
+        XCTAssertEqual(try Data(contentsOf: result.url), Data("ABC".utf8))
+        XCTAssertEqual(result.url.lastPathComponent, "SAMPLE (2).jpg")
+        XCTAssertEqual(result.url.deletingLastPathComponent().lastPathComponent, "Shared Originals")
+        let again = try await queue.prepareSavedFile(id)
+        XCTAssertEqual(again?.url, result.url)
+        XCTAssertEqual(try Data(contentsOf: original), Data("ABC".utf8))
+        XCTAssertEqual(grant.starts, grant.stops); XCTAssertTrue(wire.sent().isEmpty)
+        await queue.clearTerminal()
+        let cleared = try await queue.prepareSavedFile(id); XCTAssertNil(cleared)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: original.path))
+    }
+
+    func testExistingFileWithWrongSizeStillDownloadsAndNeverOverwritesIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data([9]).write(to: root.appendingPathComponent("sample.JPG"))
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let id = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("different size downloaded") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let state = await queue.snapshot(); XCTAssertFalse(try XCTUnwrap(state.rows.first).skipped)
+        let actualID = try XCTUnwrap(id)
+        let actual = await queue.savedFile(actualID)
+        XCTAssertEqual(actual?.url.lastPathComponent, "sample (1).JPG")
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("sample.JPG")), Data([9]))
+        await camera.abort()
+    }
+
+    func testDeletedExistingOriginalFailsSharingWithoutChangingCompletedTaskOrFetchingCamera() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let original = root.appendingPathComponent("sample.JPG"); try Data("ABC".utf8).write(to: original)
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let taskID = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        let id = try XCTUnwrap(taskID)
+        try await waitUntil("existing task finished") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        try FileManager.default.removeItem(at: original)
+        do { _ = try await queue.prepareSavedFile(id); XCTFail("Deleted original") } catch {}
+        let state = await queue.snapshot()
+        XCTAssertEqual(state.rows.first?.status, "COMPLETED"); XCTAssertEqual(state.rows.first?.skipped, true)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("Shared Originals").path), [])
+        XCTAssertTrue(wire.sent().isEmpty)
+    }
+
+    func testNextQueueRunRescansRemovedOriginalInsteadOfReusingAnOldLookup() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let original = root.appendingPathComponent("sample.JPG"); try Data("OLD".utf8).write(to: original)
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("NEW".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("first run finished") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        try FileManager.default.removeItem(at: original)
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("second run downloaded") { let s = await queue.snapshot(); return !s.running && s.rows.count == 2 && s.rows.last?.status == "COMPLETED" }
+        let state = await queue.snapshot()
+        XCTAssertTrue(state.rows[0].skipped); XCTAssertFalse(state.rows[1].skipped)
+        XCTAssertEqual(try Data(contentsOf: original), Data("NEW".utf8))
         await camera.abort()
     }
 

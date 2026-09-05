@@ -3,12 +3,13 @@ from pathlib import Path
 import subprocess
 import unittest
 from appearance_wiring import without_appearance_page
+from original_reuse_wiring import previous_reuse_source
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = 'ac79211'
 UI = 'shared/src/commonMain/kotlin/com/ztransfer/ui/'
 
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return previous_reuse_source(path, (ROOT / path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', BASE + ':' + path], cwd=ROOT).decode('utf-8')
 def replace_once(value, old, new):
     assert value.count(old) == 1, old

@@ -67,6 +67,7 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published private(set) var directoryBusy = false
     @Published private(set) var exportStatus = ""
     private var directoryTask: Task<Void, Never>?
+    private var queueShareTask: Task<Void, Never>?
     private var providerOriginals: ProviderOriginalStore?
     private var transferDestination: ProviderOriginalStore?
     @Published private(set) var savesToSelectedDirectory = false
@@ -264,6 +265,7 @@ final class CameraHandshakeProbe: ObservableObject {
         stopDiscovery()
         downloadTask?.cancel(); photoImportTask?.cancel(); catalogTask?.cancel()
         directoryTask?.cancel()
+        queueShareTask?.cancel()
         metadataTask?.cancel()
         previewTask?.cancel(); queueObserver?.cancel(); task?.cancel()
     }
@@ -360,6 +362,7 @@ final class CameraHandshakeProbe: ObservableObject {
     }
 
     func disconnect() {
+        queueShareTask?.cancel()
         downloadTask?.cancel()
         guard let connection = apConnection else { cancel(); return }
         guard closingTask == nil else { return }
@@ -466,11 +469,20 @@ final class CameraHandshakeProbe: ObservableObject {
     func retryQueueTask(_ id: Int64) { if !downloading, let queue = originalQueue { Task { await queue.retry(id) } } }
     func clearQueueHistory() { if let queue = originalQueue { Task { await queue.clearTerminal() } } }
     func shareQueueTask(_ id: Int64) {
+        queueShareTask?.cancel()
         if let queue = originalQueue {
-            Task {
-                let captureDate = (await queue.snapshot()).rows.first { $0.id == id }?.captureDate
-                if let saved = await queue.savedFile(id) {
+            savedURL = nil; savedOriginal = nil; savedCaptureDate = nil
+            queueShareTask = Task {
+                do {
+                    let captureDate = (await queue.snapshot()).rows.first { $0.id == id }?.captureDate
+                    guard let saved = try await queue.prepareSavedFile(id), !Task.isCancelled,
+                          originalQueue === queue else { return }
+                    let state = await queue.snapshot()
+                    guard !Task.isCancelled, originalQueue === queue, state.rows.contains(where: { $0.id == id }) else { return }
                     savedURL = saved.url; savedOriginal = saved; savedCaptureDate = captureDate
+                } catch {
+                    guard !Task.isCancelled, originalQueue === queue else { return }
+                    directoryStatus = "准备原片分享失败：\(error.localizedDescription)"
                 }
             }
         }

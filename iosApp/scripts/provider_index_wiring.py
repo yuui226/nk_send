@@ -43,6 +43,8 @@ struct ExportDirectorySelection: Sendable, Equatable {
     return value[:start] + value[end:]
 
 def without_provider_index_probe(value):
+    from original_reuse_wiring import previous_reuse_source
+    value = previous_reuse_source('iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift', value)
     value = without_destination_probe(value)
     value = without_original_source_probe(value)
     for addition in (

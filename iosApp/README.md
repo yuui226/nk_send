@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前37个App Swift文件、242个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行。第52批新增shared原片命中元数据/跳过状态接口：Windows实际629项共享+317项Android=946项测试及common metadata/Android Debug编译通过（BUILD SUCCESSFUL in 1m 18s），232项脚本与结构/原UI守卫通过；Release/Lint/Manifest仍沿用第46批，不是本批重新验证。Swift队列已有原片复用/安全分享仍待接。Windows可做全部结束为100%，当前粗估90%，不等于iOS成品或真机验收进度；无APK/无推送。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前37个App Swift文件、251个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行。第53批已将shared目标原片查找/跳过状态接实际队列和原共享页面，并增加同一授权来源到app-owned副本的按需流式分享；正式目录/日期/自动入队/延后开始偏好仍待接。Windows实际630项共享+317项Android=947项测试及common metadata/Android Debug编译通过（BUILD SUCCESSFUL in 35s），241项脚本与结构/原UI守卫通过；Release/Lint/Manifest仍沿用第46批，不是本批重新验证。Windows可做全部结束为100%，当前粗估91%，不等于iOS成品或真机验收进度；无APK/无推送。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 

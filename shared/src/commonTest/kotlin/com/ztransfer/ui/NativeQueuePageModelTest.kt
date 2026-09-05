@@ -41,6 +41,22 @@ class NativeQueuePageModelTest {
                 status, bytes, bytes / 1024f, 128, null, null, 0f))
         }
 
+    @Test fun skippedOriginalFlagReachesTheOriginalQueueTaskWithoutInventingTiming() {
+        val model = NativeQueuePageModel("camera", Platform())
+        val input = NativeQueuePageSnapshot("camera", 1, 1, false, false)
+        assertTrue(input.addOriginal(1, 7, 3, "DSC.JPG", null, false, intArrayOf(), null,
+            "COMPLETED", 3, 1f, 0, null, null, 0f, skipped = true))
+        assertTrue(model.publish(input))
+        val task = model.state.value.tasks.single()
+        assertTrue(task.skipped)
+        assertEquals(TransferStatus.COMPLETED, task.status)
+        assertEquals(3L, task.downloaded)
+        assertEquals(0L, task.speed)
+        assertEquals(0f, task.downloadMBps)
+        assertNull(task.elapsedMs)
+        assertNull(model.activeProgress.value)
+    }
+
     @Test fun atomicSnapshotPreservesMetadataAndRejectsOldConnectionOrSequence() {
         val model = NativeQueuePageModel("camera", Platform())
         val input = snapshot(sequence = 3)

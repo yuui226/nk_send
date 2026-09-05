@@ -53,6 +53,8 @@ final class IndexedOriginalReader {
 def restore_sandbox_reader(sandbox, reader=None):
     if reader is None:
         reader = (ROOT / READER).read_text(encoding='utf-8')
+        from original_reuse_wiring import previous_reuse_source
+        reader = previous_reuse_source(READER, reader)
     if not reader.startswith(READER_PREFIX) or not reader.endswith('\n}\n') or sandbox.count(WRAPPERS) != 1:
         raise ValueError('Reader ownership or delegation changed outside enumerated extraction')
     methods = reader[len(READER_PREFIX):-2]

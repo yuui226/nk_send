@@ -7,6 +7,103 @@ import ZTransferShared
 
 /// Apple filesystem/coordinator tests. Registered for Mac, never counted as Windows execution.
 final class ProviderPublicationTests: XCTestCase {
+    func testExistingOriginalStreamsIntoAppShareWithoutChangingProviderOrItsIndex() async throws {
+        for bytes in [Data(), Data((0..<200_000).map { UInt8(truncatingIfNeeded: $0) })] {
+            let area = try PublicationArea(bytes: bytes), coordinator = PublicationCoordinator()
+            let publisher = area.publisher(coordinator)
+            let original = try await publisher.publish(area.saved)
+            let index = try await publisher.originals(since: -1, rescan: true)
+            let app = CameraOriginalStore(root: area.root.appendingPathComponent("app"))
+            let output = try await app.makeShareFile(name: original.url.lastPathComponent, size: original.bytes)
+            coordinator.onBegin = { XCTAssertGreaterThan(area.access.starts, area.access.stops) }
+            let reference = ExistingOriginalReference(name: original.url.lastPathComponent, size: original.bytes, locator: original.url.absoluteString)
+            let count = try await publisher.copyOriginal(reference, to: output)
+            XCTAssertEqual(area.access.starts, area.access.stops) // Provider grant ended before app publication.
+            let shared = try output.commit(expectedBytes: count)
+            XCTAssertEqual(shared.bytes, original.bytes); XCTAssertEqual(shared.sha256, original.sha256)
+            XCTAssertEqual(try Data(contentsOf: shared.url), bytes)
+            XCTAssertEqual(try Data(contentsOf: original.url), bytes)
+            let unchanged = try await publisher.originals(since: index.revision, rescan: false)
+            XCTAssertEqual(unchanged.revision, index.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+            let appIndex = try await app.originals(since: -1, rescan: true)
+            XCTAssertTrue(appIndex.entries.isEmpty) // Shares cannot become accidental transfer matches.
+        }
+    }
+
+    func testExistingShareRejectsChangedMetadataEvenAfterIndexRescan() async throws {
+        let area = try PublicationArea(bytes: Data("ABC".utf8)), publisher = area.publisher()
+        let original = try await publisher.publish(area.saved)
+        _ = try await publisher.originals(since: -1, rescan: true)
+        let reference = ExistingOriginalReference(name: original.url.lastPathComponent, size: original.bytes, locator: original.url.absoluteString)
+        try Data("changed size".utf8).write(to: original.url)
+        _ = try await publisher.originals(since: -1, rescan: true)
+        let app = CameraOriginalStore(root: area.root.appendingPathComponent("app"))
+        let output = try await app.makeShareFile(name: reference.name, size: reference.size)
+        do { _ = try await publisher.copyOriginal(reference, to: output); XCTFail("Frozen size changed") }
+        catch { guard case OriginalIndexError.incompleteMetadata = error else { return XCTFail("\(error)") } }
+        output.discard()
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: area.root.appendingPathComponent("app/Shared Originals").path), [])
+        XCTAssertEqual(try Data(contentsOf: original.url), Data("changed size".utf8))
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
+    func testRevokedGrantCannotMaterializeAnExistingOriginalForSharing() async throws {
+        let area = try PublicationArea(bytes: Data("ABC".utf8)), publisher = area.publisher()
+        let original = try await publisher.publish(area.saved)
+        _ = try await publisher.originals(since: -1, rescan: true)
+        let app = CameraOriginalStore(root: area.root.appendingPathComponent("app"))
+        let output = try await app.makeShareFile(name: original.url.lastPathComponent, size: original.bytes)
+        area.access.allowed = false
+        let reference = ExistingOriginalReference(name: original.url.lastPathComponent, size: original.bytes, locator: original.url.absoluteString)
+        do { _ = try await publisher.copyOriginal(reference, to: output); XCTFail("Missing grant") }
+        catch { guard case ExportDirectoryError.permissionLost = error else { return XCTFail("\(error)") } }
+        output.discard()
+        XCTAssertEqual(try Data(contentsOf: original.url), area.bytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: area.root.appendingPathComponent("app/Shared Originals").path), [])
+    }
+
+    func testCancelledExistingShareCoordinationDoesNotPublishOrDeleteAnOriginal() async throws {
+        let area = try PublicationArea(bytes: Data("ABC".utf8)), coordinator = PublicationCoordinator()
+        let publisher = area.publisher(coordinator), original = try await publisher.publish(area.saved)
+        _ = try await publisher.originals(since: -1, rescan: true)
+        let app = CameraOriginalStore(root: area.root.appendingPathComponent("app"))
+        let output = try await app.makeShareFile(name: original.url.lastPathComponent, size: original.bytes)
+        let began = expectation(description: "share content coordination blocked")
+        coordinator.blockedContents = WaitingPublicationCoordinator(began)
+        let reference = ExistingOriginalReference(name: original.url.lastPathComponent, size: original.bytes, locator: original.url.absoluteString)
+        let copy = Task {
+            do {
+                let count = try await publisher.copyOriginal(reference, to: output)
+                try Task.checkCancellation()
+                return try output.commit(expectedBytes: count)
+            } catch { output.discard(); throw error }
+        }
+        await fulfillment(of: [began], timeout: 3)
+        copy.cancel()
+        do { _ = try await copy.value; XCTFail("Cancelled share") } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertEqual(area.access.starts, area.access.stops)
+        XCTAssertEqual(try Data(contentsOf: original.url), area.bytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: area.root.appendingPathComponent("app/Shared Originals").path), [])
+    }
+
+    func testExistingShareUsesTheSameNoFollowDescriptorBoundaryAndCancellationFlag() throws {
+        let area = try PublicationArea(bytes: Data("ABC".utf8))
+        let root = area.saved.url.deletingLastPathComponent()
+        let entry = OriginalIndexEntry(name: area.saved.url.lastPathComponent, size: area.saved.bytes, folder: nil, url: area.saved.url)
+        let reference = ExistingOriginalReference(name: entry.name, size: entry.size, locator: entry.url.absoluteString)
+        let output = try SandboxTransferFile(directory: area.root.appendingPathComponent("shares"), name: entry.name, declaredSize: entry.size, captureDate: nil)
+        defer { output.discard() }
+        let cancellation = PreviewExifReadCancellation(); cancellation.cancel()
+        XCTAssertThrowsError(try IndexedOriginalReader(root: root, entry: entry, cancellation: cancellation).copyOriginal(reference, to: output)) {
+            XCTAssertTrue($0 is CancellationError)
+        }
+        let outside = area.root.appendingPathComponent("outside.JPG"); try area.bytes.write(to: outside)
+        try FileManager.default.removeItem(at: entry.url)
+        try FileManager.default.createSymbolicLink(at: entry.url, withDestinationURL: outside)
+        XCTAssertThrowsError(try IndexedOriginalReader(root: root, entry: entry).copyOriginal(reference, to: output))
+        XCTAssertEqual(try Data(contentsOf: outside), area.bytes)
+    }
+
     func testExplicitCameraNameUsesTargetCollisionRulesWithoutRenamingSandboxOriginal() async throws {
         let area = try PublicationArea()
         let originalName = "camera.NEF", existing = area.target.appendingPathComponent("camera.NEF")

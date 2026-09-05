@@ -190,6 +190,10 @@ actor ProviderOriginalStore {
         try await withReader(locator: locator) { try $0.originalExif(locator: locator) }
     }
 
+    func copyOriginal(_ reference: ExistingOriginalReference, to output: SandboxTransferFile) async throws -> Int64 {
+        try await withReader(locator: reference.locator) { try $0.copyOriginal(reference, to: output) }
+    }
+
     /// Capture immutable metadata on this actor; file checks/reads/descriptor closes stay inside the
     /// grant AND file accessor. Root identity is checked within the grant before coordination.
     /// A frozen preview locator is never silently redirected.

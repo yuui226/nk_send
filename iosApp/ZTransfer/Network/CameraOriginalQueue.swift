@@ -11,6 +11,7 @@ struct OriginalQueueRow: Sendable {
     let storageIDs: [Int32]
     let destinationFolderName: String?
     let status: String
+    let skipped: Bool
     let downloaded: Int64
     let fraction: Float
     let bytesPerSecond: Int64
@@ -41,6 +42,8 @@ actor CameraOriginalQueue {
     private let store: CameraOriginalStore
     private var destination: OriginalFilesDestination?
     private var stagedFiles: [Int64: SavedCameraFile] = [:]
+    private var originalLookup = NativeOriginalFileIndex()
+    private var reusedFiles: [Int64: (source: OriginalFilesReusing, reference: ExistingOriginalReference)] = [:]
     private var worker: Task<Void, Never>?
     private var savedFiles: [Int64: SavedCameraFile] = [:]
     private var historyRevision: UInt64 = 0
@@ -94,6 +97,7 @@ actor CameraOriginalQueue {
 
     func start() {
         guard worker == nil, core.start() else { return }
+        originalLookup = NativeOriginalFileIndex() // Rescan once per run, then consume the owner's bounded deltas.
         publish()
         worker = Task { [weak self] in
             // Retain the owner only during one bounded file operation, not while idle.
@@ -112,6 +116,7 @@ actor CameraOriginalQueue {
             // Only release the queue's lookup; never delete the user's completed original.
             savedFiles.removeValue(forKey: taskID)
             stagedFiles.removeValue(forKey: taskID)
+            reusedFiles.removeValue(forKey: taskID)
             publish()
         }
         return removed
@@ -121,6 +126,7 @@ actor CameraOriginalQueue {
         let retained = Set((0..<Int(core.count)).compactMap { core.taskAt(index: Int32($0))?.taskId })
         savedFiles = savedFiles.filter { retained.contains($0.key) }
         stagedFiles = stagedFiles.filter { retained.contains($0.key) }
+        reusedFiles = reusedFiles.filter { retained.contains($0.key) }
         publish()
     }
     func retry(_ taskID: Int64) {
@@ -150,6 +156,39 @@ actor CameraOriginalQueue {
         return count
     }
     func savedFile(_ taskID: Int64) -> SavedCameraFile? { savedFiles[taskID] ?? stagedFiles[taskID] }
+
+    /// Existing provider originals are copied on demand; never hand a scoped URL to ShareLink.
+    func prepareSavedFile(_ taskID: Int64) async throws -> SavedCameraFile? {
+        if let saved = savedFile(taskID) { return saved }
+        guard let reused = reusedFiles[taskID] else { return nil }
+        let output = try await store.makeShareFile(name: reused.reference.name, size: reused.reference.size)
+        do {
+            let bytes = try await reused.source.copyOriginal(reused.reference, to: output)
+            guard bytes == reused.reference.size else { throw OriginalIndexError.incompleteMetadata }
+            try Task.checkCancellation()
+            let saved = try output.commit(expectedBytes: bytes)
+            // Removal/clear may run while a provider is materializing bytes. Do not resurrect history.
+            if reusedFiles[taskID]?.reference == reused.reference { savedFiles[taskID] = saved }
+            return saved
+        } catch {
+            output.discard() // Only this private part. Never delete the original or a committed share.
+            throw error
+        }
+    }
+
+    private func existingOriginal(for task: TransferTask, source: OriginalFilesReusing) async throws -> ExistingOriginalReference? {
+        let value = try await source.originals(since: originalLookup.revision, rescan: !originalLookup.hasSnapshot)
+        try Task.checkCancellation()
+        let update = NativeOriginalIndexUpdate(revision: value.revision, baseRevision: value.baseRevision, fullSnapshot: value.fullSnapshot)
+        for entry in value.entries {
+            guard update.add(name: entry.name, size: entry.size, folder: entry.folder, locator: entry.url.absoluteString) else {
+                throw OriginalIndexError.incompleteMetadata
+            }
+        }
+        guard originalLookup.apply(update: update) else { throw OriginalIndexError.incompleteMetadata }
+        guard let match = originalLookup.find(file: task.file, folder: task.destinationFolderName) else { return nil }
+        return ExistingOriginalReference(name: match.name, size: match.size, locator: match.locator)
+    }
 
     func originals(since revision: Int64, rescan: Bool) async throws -> OriginalIndexUpdate {
         try await store.originals(since: revision, rescan: rescan)
@@ -182,7 +221,7 @@ actor CameraOriginalQueue {
                                     handle: task.file.handle, size: task.file.size,
                                     captureDate: task.file.captureDate, isProtected: task.file.isProtected,
                                     storageIDs: task.file.storageIds.map { $0.int32Value },
-                                    destinationFolderName: task.destinationFolderName, status: task.status.name,
+                                    destinationFolderName: task.destinationFolderName, status: task.status.name, skipped: task.skipped,
                                     downloaded: task.downloaded, fraction: task.progress, bytesPerSecond: task.speed,
                                     error: task.error, elapsedMs: task.elapsedMs?.int64Value, downloadMBps: task.downloadMBps)
         }
@@ -200,6 +239,17 @@ actor CameraOriginalQueue {
             let id = task.taskId
             let target = destination // configureDestination cannot change this while the worker exists.
             if let target { try await target.validateSelection() }
+            let source: OriginalFilesReusing
+            if let target { source = target } else { source = store }
+            if let existing = try await existingOriginal(for: task, source: source) {
+                try Task.checkCancellation()
+                reusedFiles[id] = (source, existing)
+                stagedFiles.removeValue(forKey: id) // Full original stays on disk, but sharing follows the matched target.
+                core.completedExisting(taskId: id, bytes: existing.size)
+                completedOriginalRevision &+= 1
+                publish()
+                return !Task.isCancelled
+            }
             let saved: SavedCameraFile
             if target != nil, let retained = stagedFiles[id] {
                 saved = retained // Only a completed app original; the publisher rechecks size and SHA256.

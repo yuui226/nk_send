@@ -33,6 +33,8 @@ def without_destination_contract(value):
     return value
 
 def previous_destination_source(path, value):
+    from original_reuse_wiring import previous_reuse_source
+    value = previous_reuse_source(path, value)
     normalizers = {
         'iosApp/ZTransfer/Network/CameraOriginalQueue.swift': without_destination_queue,
         'iosApp/ZTransfer/Storage/ProviderOriginalStore.swift': without_destination_provider,

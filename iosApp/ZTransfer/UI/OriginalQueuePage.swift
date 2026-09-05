@@ -46,7 +46,7 @@ final class OriginalQueuePageBridge: NSObject, ObservableObject, Identifiable, N
                 captureDate: row.captureDate, isProtected: row.isProtected, storageIds: stores,
                 destinationFolderName: row.destinationFolderName, status: row.status, downloaded: row.downloaded,
                 fraction: row.fraction, bytesPerSecond: row.bytesPerSecond, error: row.error,
-                elapsedMs: row.elapsedMs.map { KotlinLong(value: $0) }, downloadMBps: row.downloadMBps) else { return }
+                elapsedMs: row.elapsedMs.map { KotlinLong(value: $0) }, downloadMBps: row.downloadMBps, skipped: row.skipped) else { return }
         }
         _ = model.publish(snapshot: snapshot)
     }

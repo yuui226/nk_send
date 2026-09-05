@@ -162,6 +162,16 @@ actor CameraOriginalStore {
         }, onCancel: { cancellation.cancel() })
     }
 
+    func copyOriginal(_ reference: ExistingOriginalReference, to output: SandboxTransferFile) throws -> Int64 {
+        try reader(locator: reference.locator).copyOriginal(reference, to: output)
+    }
+
+    /// Sharing an existing original must not create another indexed/exported original or a date bucket.
+    func makeShareFile(name: String, size: Int64) throws -> SandboxTransferFile {
+        try SandboxTransferFile(directory: root.appendingPathComponent("Shared Originals", isDirectory: true),
+                                name: name, declaredSize: size, captureDate: nil)
+    }
+
     static func applicationStore() throws -> CameraOriginalStore {
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                  appropriateFor: nil, create: true)

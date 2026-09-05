@@ -42,7 +42,7 @@ class NativeQueuePageSnapshot(
         taskId: Long, handle: Int, size: Long, name: String, captureDate: String?,
         isProtected: Boolean, storageIds: IntArray, destinationFolderName: String?,
         status: String, downloaded: Long, fraction: Float, bytesPerSecond: Long,
-        error: String?, elapsedMs: Long?, downloadMBps: Float,
+        error: String?, elapsedMs: Long?, downloadMBps: Float, skipped: Boolean = false,
     ): Boolean {
         val state = TransferStatus.entries.firstOrNull { it.name == status }
         if (taskId <= 0 || !ids.add(taskId) || state == null || !fraction.isFinite() ||
@@ -54,7 +54,7 @@ class NativeQueuePageSnapshot(
             file = CameraFileInfo(handle, size, name, captureDate, isProtected, storageIds.toSet()),
             taskId = taskId, destinationFolderName = destinationFolderName, status = state,
             downloaded = downloaded, progress = fraction, speed = bytesPerSecond,
-            error = error, elapsedMs = elapsedMs, downloadMBps = downloadMBps,
+            error = error, elapsedMs = elapsedMs, downloadMBps = downloadMBps, skipped = skipped,
         )
         return true
     }

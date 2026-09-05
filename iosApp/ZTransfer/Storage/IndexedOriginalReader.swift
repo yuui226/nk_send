@@ -96,14 +96,40 @@ final class IndexedOriginalReader {
         }
     }
 
+    /// Stream to an app-owned private part while the caller still owns the provider scope/accessor.
+    /// The caller commits only AFTER this method and coordination return successfully.
+    func copyOriginal(_ reference: ExistingOriginalReference, to output: SandboxTransferFile) throws -> Int64 {
+        guard entry?.name == reference.name, entry?.size == reference.size else {
+            throw OriginalIndexError.incompleteMetadata
+        }
+        return try withOriginalInput(locator: reference.locator, maximumFileBytes: Int64.max, allowEmpty: true) { input, size in
+            var remaining = size
+            while remaining > 0 {
+                try checkCancellation()
+                let chunk = try input.read(upToCount: Int(min(remaining, 64 * 1024))) ?? Data()
+                guard !chunk.isEmpty else { throw OriginalIndexError.incompleteMetadata }
+                try output.write(chunk)
+                remaining -= Int64(chunk.count)
+            }
+            var finalState = stat()
+            guard (try input.read(upToCount: 1) ?? Data()).isEmpty,
+                  fstat(input.fileDescriptor, &finalState) == 0, finalState.st_size == size else {
+                throw OriginalIndexError.incompleteMetadata
+            }
+            try checkCancellation()
+            return size
+        }
+    }
+
     /// Opens once without following directory/leaf links, and closes on every return/throw.
     private func withOriginalInput<T>(locator: String, maximumFileBytes: Int64,
+                                      allowEmpty: Bool = false,
                                       body: (FileHandle, Int64) throws -> T) throws -> T {
         try checkCancellation()
         guard let url = URL(string: locator), url.isFileURL,
               url.host == nil || url.host == "", url.query == nil, url.fragment == nil,
               let entry = entry, entry.url.absoluteString == locator,
-              entry.size > 0, entry.size <= maximumFileBytes,
+              (entry.size > 0 || (allowEmpty && entry.size == 0)), entry.size <= maximumFileBytes,
               SandboxTransferFile.safeComponent(entry.name),
               !SandboxTransferFile.isPrivatePartName(entry.name) else { throw OriginalIndexError.unsafeRoot }
         let canonicalRoot = root.standardizedFileURL.resolvingSymlinksInPath()
