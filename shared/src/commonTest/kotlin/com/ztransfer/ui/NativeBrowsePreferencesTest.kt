@@ -3,6 +3,14 @@ package com.ztransfer.ui
 import kotlin.test.*
 
 class NativeBrowsePreferencesTest {
+    @Test fun previewDefaultsAndBoundaryRotationMatchOriginalNormalizedQuarterTurns() {
+        val defaults = NativeBrowsePreferences.defaults()
+        assertEquals(0, defaults.previewRotationQuarterTurns); assertFalse(defaults.previewHistogramEnabled)
+        for ((value, expected) in listOf(Int.MIN_VALUE to 0, -9 to 3, -4 to 0, -1 to 3, 0 to 0, 3 to 3, 4 to 0, Int.MAX_VALUE to 3)) {
+            val prefs = NativeBrowsePreferences(3, true, null, false, false, false, 0, 0, value, true)
+            assertEquals(expected, prefs.previewRotationQuarterTurns); assertTrue(prefs.previewHistogramEnabled)
+        }
+    }
     @Test fun actualRestoredDefaultsAndColumnLimitsUseOriginalPolicy() {
         val defaults = NativeBrowsePreferences.defaults()
         assertEquals(3, defaults.columns)

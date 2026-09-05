@@ -6,8 +6,8 @@
 
 - Android 功能基线：`55876fa`，1.81 / 54；用户已验证此前包的 USB、STA。
 - 已有：共享协议/模型/规则、Xcode薄壳及Apple侧标准连接→目录→原片下载→沙盒保存/系统分享/图库导入的源码链路；不是已运行的成品。
-- 已有网络/传输/保存/GPS/照片适配源码；CMP原组件/完整队列正文/完整缩略图网格已共享，Android真实接入；iOS真实原片队列已接同一正文，完整标准目录/缩略图/入队已接同一网格，可从Debug连接页打开验收；沙盒真实原片索引/已保存徽标已接，原筛选结果/日期/存储卡及未传输退场已接；列数/连拍合并和持久筛选已接；完整预览/其余设置及Files provider索引仍待接。真实机身隔离的缩略图磁盘缓存/完整目录清理和连接级后台填充/日期优先/传输让路已接。原单图预览/缩放手势/旋转按钮已共享且Android实际调用，iOS真实图片探针已接；分页/连拍/来源快照和上滑意图纯规则已共享；原单页/FHD渐显/连拍堆叠/EXIF信息条和操作按钮已共享；原预览/遥控共用直方图统计、绘制、图标及预览开关已共享；完整分页/FHD/EXIF/邻页预取与取消/连拍切换/入队飞行协调器已迁SharedPhotoPreviewOverlay并由Android调用；Native真实FHD独立读取/取消/整页占用及保留原方向的1920解码已写；原协调器已提供可选异步真实入队确认（Android同步默认不变）；本地普通图片原尺寸读取/来源冻结/离线及统一取消已写；Native实际位图解码/网格预览共用缓存及只读磁盘缩略图适配已写；RAW索引纯解析已提为两端单实现且Android委托；Native本地RAW安全分段读取/按原像素规则选图及独立取消已写；原预览EXIF纯解析/格式化已共享并由Android调用，Native值载体与数字适配已写；Native本地EXIF随机读取/真实ImageIO属性及取消已写；原始RATIONAL数值源已接并通过真实AndroidX字节样本对照；多段EXIF/跨段字节序与SubIFD/GPS/互操作指针已补；其余目录边界及Apple运行仍待补验；相机EXIF读头命令与部分头解析已写；跨重连正负缓存及Native EXIF读取会话已接；当前页FHD+EXIF优先窗口/传输分块让路及取消释放已写；完整NativePreviewSessionSource及三语原文适配已写，本地路由已两端共用；视频日期格式/页面状态与正式入口仍待接。共33个App Swift文件、178个XCTest场景，全部Apple源码仍待首次Mac编译。
-- Windows最近实跑：593项shared + 315项Android测试0失败/错误/跳过；common metadata、Android Debug/Release编译与双模块Lint通过（第四十二批BUILD SUCCESSFUL in 3m 26s）。173项辅助脚本、原组件/完整队列/网格/筛选日期与弹层/未传输退场/触感波形/三语言原文对照及结构检查通过。Android Lint为0 errors/179 warnings/11 hints，shared无issue。NikonCamera仅纯RAW解析/日期入口改为共享委托，PhotoFrameExporter仅原RAW候选/像素优先/包络规则接shared；ViewModel仅纯EXIF解析委托到shared，完整源码守卫确认缓存/读取/调度未改；连接收发/服务/GPS和打包脚本未改。
+- 已有网络/传输/保存/GPS/照片适配源码；CMP原组件/完整队列正文/完整缩略图网格已共享，Android真实接入；iOS真实原片队列已接同一正文，完整标准目录/缩略图/入队已接同一网格，可从Debug连接页打开验收；沙盒真实原片索引/已保存徽标已接，原筛选结果/日期/存储卡及未传输退场已接；列数/连拍合并和持久筛选已接；完整预览/其余设置及Files provider索引仍待接。真实机身隔离的缩略图磁盘缓存/完整目录清理和连接级后台填充/日期优先/传输让路已接。原单图预览/缩放手势/旋转按钮已共享且Android实际调用，iOS真实图片探针已接；分页/连拍/来源快照和上滑意图纯规则已共享；原单页/FHD渐显/连拍堆叠/EXIF信息条和操作按钮已共享；原预览/遥控共用直方图统计、绘制、图标及预览开关已共享；完整分页/FHD/EXIF/邻页预取与取消/连拍切换/入队飞行协调器已迁SharedPhotoPreviewOverlay并由Android调用；Native真实FHD独立读取/取消/整页占用及保留原方向的1920解码已写；原协调器已提供可选异步真实入队确认（Android同步默认不变）；本地普通图片原尺寸读取/来源冻结/离线及统一取消已写；Native实际位图解码/网格预览共用缓存及只读磁盘缩略图适配已写；RAW索引纯解析已提为两端单实现且Android委托；Native本地RAW安全分段读取/按原像素规则选图及独立取消已写；原预览EXIF纯解析/格式化已共享并由Android调用，Native值载体与数字适配已写；Native本地EXIF随机读取/真实ImageIO属性及取消已写；原始RATIONAL数值源已接并通过真实AndroidX字节样本对照；多段EXIF/跨段字节序与SubIFD/GPS/互操作指针已补；其余目录边界及Apple运行仍待补验；相机EXIF读头命令与部分头解析已写；跨重连正负缓存及Native EXIF读取会话已接；当前页FHD+EXIF优先窗口/传输分块让路及取消释放已写；完整NativePreviewSessionSource及三语原文适配已写，本地路由已两端共用；旋转/直方图已接现有浏览偏好和模型、旧v1数据可兼容恢复；视频日期格式/页面状态与正式入口仍待接。共33个App Swift文件、181个XCTest场景，全部Apple源码仍待首次Mac编译。
+- Windows最近实跑：596项shared + 315项Android测试0失败/错误/跳过；common metadata、Android Debug/Release编译与双模块Lint通过（第四十三批BUILD SUCCESSFUL in 3m 12s）。176项辅助脚本、原组件/完整队列/网格/筛选日期与弹层/未传输退场/触感波形/三语言原文对照及结构检查通过。Android Lint为0 errors/179 warnings/11 hints，shared无issue。NikonCamera仅纯RAW解析/日期入口改为共享委托，PhotoFrameExporter仅原RAW候选/像素优先/包络规则接shared；ViewModel仅纯EXIF解析委托到shared，完整源码守卫确认缓存/读取/调度未改；连接收发/服务/GPS和打包脚本未改。
 - 用户进度口径（2026-09-05）：每完成一批报告大概百分比；100%仅表示Windows上可做的工作全部完成，不表示iOS成品或真机验收100%。当前估计87%；检查点30%→34%（Files/GPS基础）→35%（元数据）→36%（滤镜预览）→38%（共享UI基础）→40%（共享材质/按钮）→42%（拨轮/帮助/触感等）→43%（队列展示）→44%（完整队列正文）→45%（原片队列页面接口）→47%（真实队列页面接线）→48%（真实AP/STA状态控件）→49%（原版队列操作按钮）→51%（完整原缩略图网格共享）→54%（iOS真实目录/缩略图/整组入队接线）→55%（完整原筛选/日期编辑/弹层共享及Native日历文案准备）→57%（沙盒真实原片索引/增量同步/已保存徽标）→60%（真实筛选/原退场协调器/空卡与本地日期接线）→62%（浏览偏好保存恢复/实际默认值校准）→64%（真实缩略图磁盘缓存/机身隔离/完整目录清理）→67%（连接级后台填充/日期优先/通道准入与暂停恢复）→69%（原单图预览/缩放/旋转共享与真实图片入口）→70%（预览分页/连拍/来源快照/上滑规则与原测试共享）→72%（原预览单页/连拍堆叠/EXIF信息条与操作按钮共享）→73%（预览/遥控共用直方图统计与绘制共享）→76%（完整分页/高清EXIF/预取取消/连拍与入队飞行协调器共享）→77%（Native真实FHD读取会话/取消/方向及图片桥接）→78%（原预览可选真实异步入队确认与取消/部分接受处理）→79%（本地原片原尺寸读取/来源冻结/文件归属与超时回退）→80%（Native真实位图/同一网格缓存与只读磁盘缩略图）→81%（RAW索引纯解析单实现及Android差分回归）→82%（Native本地RAW安全分段读取/原像素选图及统一取消）→83%（原预览EXIF纯语义共享及Native数字适配）→84%（Native本地EXIF安全随机读取/真实属性与取消）→85%（相机读头命令及截断EXIF输入适配）→86%（跨重连正负缓存、本地共用和远程EXIF会话接线）→87%（完整预览优先窗口/分块让路及跨桥接释放）。按功能覆盖粗估，不按文件数或测试数换算；仍有可写任务，不提前宣称Windows收口。
 - Mac验收入口仍是 `python3 iosApp/scripts/verify_on_mac.py`，但按用户要求不再作为继续写Windows源码的停止条件。共享产品UI、STA-direct/MPF与RAW预览、自动事件/恢复、遥控/GPS/效果/权益等仍未完成，不能将本批写完当作Windows工作全部完成。
 - Windows 可以编写/静态检查 iOS 文件、运行 common/Android 回归；不能将这些结果记作 Swift 编译、模拟器、真机通过。
@@ -50,7 +50,7 @@
 | ID | 实现 | 验收 | 范围 / 完成点 |
 |---|---|---|---|
 | IOS-B01 | NEXT | Mac待验 | 已写 Apple Silicon 一键验收脚本及环境/模拟器选择；framework 真机/模拟器导出、Swift 类型/集合/异常桥接、取消与持有关系仍须实际编译检查 |
-| IOS-B02 | WRITTEN | Mac待验 | XCTest target/Scheme已有178个网络/会话/流式传输/目录/队列/保存/预览/Files/定位/蓝牙/元数据/滤镜/Compose控制器场景待执行；Mac脚本串行执行Native commonTest/XCTest/Release编译并保留日志与xcresult |
+| IOS-B02 | WRITTEN | Mac待验 | XCTest target/Scheme已有181个网络/会话/流式传输/目录/队列/保存/预览/Files/定位/蓝牙/元数据/滤镜/Compose控制器场景待执行；Mac脚本串行执行Native commonTest/XCTest/Release编译并保留日志与xcresult |
 | IOS-B03 | TODO | 真机待验 | Info.plist/entitlement 按真实使用声明；本地网络、照片、蓝牙、定位、麦克风允许/拒绝/撤销、设置恢复 |
 | IOS-B04 | TODO | 待验 | 诊断日志/导出/隐私脱敏；记录阶段/错误/机型；不得把超时直接等同于拒绝授权 |
 
@@ -73,7 +73,7 @@
 | IOS-D02 | NEXT | Mac待验/真机待验 | 原网格/连拍稳定键已共享并接iOS真实目录。原筛选弹层/日期编辑/多条件控件已共享且Android调用，Native日历与三语言适配已写；沙盒真实原片索引/原网格已保存徽标已接；真实类型/保护/连拍/存储卡/日期/未传输筛选及原退场已接；列数/连拍及筛选持久偏好已接；待选择/全选/跨卡选择；首次索引未就绪禁用未传输选项 |
 | IOS-D03 | NEXT | Mac待验/真机待验 | 已写标准GetThumb/AP FHD共享能力/Busy策略、同键合并、32MiB/256项会话缓存、内存释放、方向/尺寸有界解码；已接共享网格可见项读取/有界重试和32MiB解码缓存；已接真实机身隔离磁盘缓存/90天过期与完整目录清理，系统清缓存可重建；完整扫描后已接共享ThumbnailFillQueue后台补图/日期优先/执行态让路/失败事件唤醒；待扫描批次交错填充、完整预览/遥控页生命周期门控、裁黑边、STA MPF/RAW/视频嵌入预览 |
 | IOS-D04 | TODO | 真机待验 | 相机新增/删除/属性事件、扫描与事件去重、稳定列表发布、自动入队；复用 FileScanHandle/CameraFilePublication/CameraCatalogPolicy |
-| IOS-D05 | NEXT | Mac待验/真机待验 | 原单图/缩放/旋转和单页/连拍/EXIF信息条已共享，Native真实单图探针已接；直方图统计/绘制/图标/预览开关已共享，Native位图读取待验。完整分页/FHD/EXIF/邻页预取取消/连拍返回/入队飞行协调器已共享且Android接入；Native FHD独立读取/取消与前台令牌已写，借用原相机所有者；异步接受确认/取消/部分接受接点已写并通过真实模型测试；普通本地原片原尺寸/离线读取与真实索引归属已写；Native真实位图与同一网格缓存适配已写；RAW索引及原候选/选图规则已共享并由Android调用，Native本地RAW安全分段读取/真实选图/取消适配已写；原预览EXIF Float/GPS/字段回退与格式化已共享，Native值载体/数字适配已写；Native本地EXIF已接安全随机读取/实际属性/取消；原始RATIONAL覆盖已写，单EXIF目录金样与真实AndroidX对照通过；多段EXIF/跨段字节序与目录别名已通过实际库对照；相机读头命令/截断头部分数值已写；跨重连正负缓存/本地共用/远程会话已接；整段FHD+EXIF交互优先窗口、分块让路和页面取消释放已写；完整NativePreviewSessionSource/三语原文及两端同源本地路由已写；NEXT视频信息格式、偏好、页面状态与正式入口、RAW降级、横屏和已有选择/分享/删除能力；不将探针算成完整产品预览 |
+| IOS-D05 | NEXT | Mac待验/真机待验 | 原单图/缩放/旋转和单页/连拍/EXIF信息条已共享，Native真实单图探针已接；直方图统计/绘制/图标/预览开关已共享，Native位图读取待验。完整分页/FHD/EXIF/邻页预取取消/连拍返回/入队飞行协调器已共享且Android接入；Native FHD独立读取/取消与前台令牌已写，借用原相机所有者；异步接受确认/取消/部分接受接点已写并通过真实模型测试；普通本地原片原尺寸/离线读取与真实索引归属已写；Native真实位图与同一网格缓存适配已写；RAW索引及原候选/选图规则已共享并由Android调用，Native本地RAW安全分段读取/真实选图/取消适配已写；原预览EXIF Float/GPS/字段回退与格式化已共享，Native值载体/数字适配已写；Native本地EXIF已接安全随机读取/实际属性/取消；原始RATIONAL覆盖已写，单EXIF目录金样与真实AndroidX对照通过；多段EXIF/跨段字节序与目录别名已通过实际库对照；相机读头命令/截断头部分数值已写；跨重连正负缓存/本地共用/远程会话已接；整段FHD+EXIF交互优先窗口、分块让路和页面取消释放已写；完整NativePreviewSessionSource/三语原文及两端同源本地路由已写；旋转/直方图偏好存储与模型已写；NEXT视频信息格式、偏好控件绑定、页面状态与正式入口、RAW降级、横屏和已有选择/分享/删除能力；不将探针算成完整产品预览 |
 
 ### T/S：传输、持久化与后台（关联 I02/I03/V02）
 
@@ -88,7 +88,7 @@
 | IOS-S02 | NEXT | Mac待验/真机待验 | PhotoKit addOnly照片/视频导入已接；拒绝/不支持/失败均保留沙盒原片，提交后等真实结果不误报取消；不声明已管理Z传相册，不自动请求读图库 |
 | IOS-S03 | NEXT | Mac待验/真机待验 | Debug ShareLink及系统asCopy文件导出已接，保留沙盒源文件、只报告picker实际结果；相框水印资源导入/正式共享入口仍待实现 |
 | IOS-S04 | TODO | 真机待验 | scene 生命周期、后台宽限/expiration、网络安全停机、断点落盘、返回恢复、常亮策略；不假设后台任务能无限执行 |
-| IOS-S05 | NEXT | Mac待验 | 已接UserDefaults应用私有版本化浏览偏好（列数/连拍/类型/保护/连拍/未传输/日期），复用shared校验，未知版本/损坏数据保留；卡槽不落盘。待其余设置、进程内跨页卡槽、相机档案/检查点/授权身份与Keychain职责及升级迁移；不拷贝Android私有存储格式 |
+| IOS-S05 | NEXT | Mac待验 | 已接UserDefaults应用私有版本化浏览偏好（列数/连拍/类型/保护/连拍/未传输/日期），复用shared校验，未知版本/损坏数据保留；卡槽不落盘。预览旋转/直方图已用可选字段兼容旧v1数据并接入当前文件模型。待其余设置、进程内跨页卡槽、相机档案/检查点/授权身份与Keychain职责及升级迁移；不拷贝Android私有存储格式 |
 
 ### U：共享产品 UI（关联 U01–U05）
 
@@ -682,3 +682,13 @@
 - 新增4项Python守卫，总173项PASS；整个Android预览文件仅路由委托，原共享协调器和所有原UI守卫继续PASS。3,197组实际AndroidX字节对照、Xcode结构PASS。Gradle BUILD SUCCESSFUL in 3m 26s（112 tasks，38 executed/74 up-to-date）；common metadata、Android Debug/Release编译和双模块Lint通过，app0 errors/179 warnings/11 hints，shared无issue。Manifest摘要不变，版本/相机协议/服务/GPS/打包脚本本批未改；无APK、无推送。
 - 平台源和文案已写，但SharedUiController/NativeOriginalFilesPage尚未实际打开完整overlay，previewPending仍保留。本批不提高87%估计。NEXT视频信息格式回调、旋转/直方图偏好、原目录快照构建、打开/返回定位与实际入口；要沿原FileListScreen的后台构建快照、来源身份检查、连拍不提前展开、关闭时黑幕下定位及未传输筛除后淡出语义。不能以组件可构造替代产品预览验收。
 - IOS-D05的EXIF目录占用/RAW嵌入元数据/其它ImageIO一致性及Apple实跑门槛继续开放；STA-direct、事件恢复和其它产品功能仍须继续。a174602为前检查点，本批验证后本地提交。
+
+## 第四十三批记录：预览旋转与直方图偏好（Windows约87%）
+
+- NativeBrowsePreferences增加旋转/直方图字段，沿原previewFloorMod归一化到0..3；默认0/false，对照Android TransferViewModel真实恢复/保存值。保留旧八参数构造器转发默认值，新的十参数构造器供实际保存恢复，避免旧Swift调用点被迫整体改动；导出重载仍须Mac编译验证。
+- NativeFilesPageModel使用独立只读previewOptions状态流供现有共享overlay输入；两个setter只更新预览偏好并调用原persistPreferences。保存时一起带上布局、筛选和预览字段，互相不清空；失败保留当前页状态并通过原preferencesFailed提示。关闭后不接受写入，改变开关/方向不结束或重开读取会话、不动相机/队列/原片索引。
+- BrowsePreferencesStore继续同一个UserDefaults键和v1文档，两新字段为可选，旧v1缺字段读为0/false且读取不写回。保存写入共享归一化结果；损坏、新字段错误类型/超出Int32、未来版本仍拒绝保存并保留原数据。未增加设置服务、存储文件、权限或隐私声明。
+- 新增3项common测试：默认值/正负及极值归一化、预览/布局/筛选交错保存与重新打开、存储失败/读取会话不重建/关闭后禁止写入。596 shared+315 app=911项，0失败/错误/跳过。新增3项Apple测试源码：旧文档无写读取并升级、非法新字段保护、极值读写和旧导出构造器可调用；181个XCTest及17项Native预览/位图测试仍待Mac。
+- 新增3项Python守卫，总176项PASS。整份文件模型除预览状态/setter/保存字段外与122cdf2一致，整份Swift store只增加可选字段和读写映射；旧EXIF整文件守卫先剥离本批明确新增项后继续原基线比较。原UI、Xcode结构及3,197组实际AndroidX样本PASS。
+- Gradle BUILD SUCCESSFUL in 3m 12s（112 tasks，34 executed/78 up-to-date）：common metadata、Android Debug/Release编译、测试与双模块Lint通过。app0 errors/179 warnings/11 hints、shared无issue；Manifest摘要保持。app/dist/dist-debug本批零差异，版本/服务/协议/GPS不变；无APK、无推送。
+- 本批是偏好存储/状态准备，完整预览入口仍未打开，进度保持87%。NEXT视频大小/日期格式平台适配，再将已有源、文案、偏好直接接原共享overlay与目录页打开/返回定位；不以读取接口或偏好就绪替代完整产品页。原EXIF/STA-direct/事件恢复及其它Windows可写任务继续开放。122cdf2为前检查点，本批验证后提交。

@@ -82,6 +82,9 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     private val initialPreferences = restoredPreferences ?: NativeBrowsePreferences.defaults()
     private val mutableLayout = MutableStateFlow(NativeBrowseLayout(initialPreferences.columns, initialPreferences.collapseBursts))
     internal val layout = mutableLayout.asStateFlow()
+    private val mutablePreviewOptions = MutableStateFlow(NativePreviewOptions(
+        initialPreferences.previewRotationQuarterTurns, initialPreferences.previewHistogramEnabled))
+    internal val previewOptions = mutablePreviewOptions.asStateFlow()
     private val mutablePreferencesFailed = MutableStateFlow(restoredPreferences == null)
     internal val preferencesFailed = mutablePreferencesFailed.asStateFlow()
     private val mutableFilters = MutableStateFlow(initialPreferences.criteria())
@@ -109,12 +112,27 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         mutableLayout.value = next
         persistPreferences()
     }
+    internal fun setPreviewRotationQuarterTurns(turns: Int) {
+        if (closed) return
+        val next = mutablePreviewOptions.value.copy(rotationQuarterTurns = previewFloorMod(turns, 4))
+        if (next == mutablePreviewOptions.value) return
+        mutablePreviewOptions.value = next
+        persistPreferences()
+    }
+    internal fun setPreviewHistogramEnabled(enabled: Boolean) {
+        if (closed) return
+        val next = mutablePreviewOptions.value.copy(histogramEnabled = enabled)
+        if (next == mutablePreviewOptions.value) return
+        mutablePreviewOptions.value = next
+        persistPreferences()
+    }
     private fun persistPreferences() {
         val layout = mutableLayout.value
         val filter = mutableFilters.value
         val value = NativeBrowsePreferences(layout.columns, layout.collapseBursts, filter.extensions?.toList(),
             filter.protectedOnly, filter.burstOnly, filter.untransferredOnly,
-            filter.dateRange?.startDayKey ?: 0, filter.dateRange?.endInclusiveDayKey ?: 0)
+            filter.dateRange?.startDayKey ?: 0, filter.dateRange?.endInclusiveDayKey ?: 0,
+            mutablePreviewOptions.value.rotationQuarterTurns, mutablePreviewOptions.value.histogramEnabled)
         mutablePreferencesFailed.value = platform?.saveBrowsePreferences(value) != true
     }
     internal fun transferredHandlesForFilter(): Set<Int> = if (mutableFilters.value.untransferredOnly) {

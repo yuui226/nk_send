@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、178个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；593项共享测试、315项Android测试、173项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十二批3m 26s）。按用户定义，Windows可做工作全部结束为100%，当前粗估87%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、181个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；596项共享测试、315项Android测试、176项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十三批3m 12s）。按用户定义，Windows可做工作全部结束为100%，当前粗估87%；不等于iOS成品或真机验收进度。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -52,7 +52,7 @@ Debug页支持手动IP或STA Bonjour候选、AP/STA标准持续会话和显式�
 
 STA-direct、MPF/RAW预览、完整事件/自动入队、共享UI、遥控/完整GPS/效果/权益仍未完成。
 
-照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，178个XCTest也未在Mac运行。
+照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，181个XCTest也未在Mac运行。
 
 ### Mac 一键验收（M1）
 
@@ -218,3 +218,9 @@ NativePreviewSessionSource已实现原共享overlay的全部图片/EXIF/缓存/�
 NativePreviewTextCatalog的10条英/简/繁原文已备并与Android资源对照；视频信息格式回调仍是后续接点。完整overlay还未接到目录入口，旋转/直方图偏好及原打开/返回定位编排继续实现，不把平台源已写当完整页面已运行。
 
 Windows908项测试、173项辅助检查、3,197组实际AndroidX样本和编译/Lint通过（3m 26s）；33个App Swift/178个XCTest/17项Native预览与位图测试仍待Mac。当前估计保持87%，Android版本、相机协议、服务和打包脚本未改；未打包、未推送。
+
+### 预览偏好保存恢复（第四十三批）
+
+旋转方向和直方图已接现有NativeBrowsePreferences、文件模型及同一个UserDefaults文档。按安卓原值默认0/关闭，正负方向归一化为0..3；旧v1数据无需写回即可恢复默认，新字段损坏仍保留原数据。切换预览偏好不重建读取会话，布局/筛选/预览互相保存不重置；完整页面控件绑定仍待接。
+
+Windows911项共享/Android测试、176项辅助检查、实际AndroidX样本及编译/Lint通过（3m 12s）。181个XCTest和17项Native预览/位图测试仍待Mac；本批Android代码与打包脚本未改，进度保持约87%。

@@ -864,6 +864,67 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertFalse(reopened)
     }
 
+    @MainActor func testLegacyBrowseDocumentRestoresPreviewDefaultsWithoutRewritingThenSavesBothOptions() throws {
+        let suite = "ZTransferTests.preview.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let legacy = Data(#"{"version":1,"columns":4,"collapseBursts":false,"extensions":[".jpg"],"protectedOnly":true,"burstOnly":false,"untransferredOnly":false,"startDay":20260101,"endDay":20261231}"#.utf8)
+        defaults.set(legacy, forKey: BrowsePreferencesStore.key)
+        let store = BrowsePreferencesStore(defaults: defaults)
+        let old = try XCTUnwrap(store.read())
+        XCTAssertEqual(old.previewRotationQuarterTurns, 0); XCTAssertFalse(old.previewHistogramEnabled)
+        XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), legacy)
+        let edited = NativeBrowsePreferences(columns: old.columns, collapseBursts: old.collapseBursts,
+            extensions: old.extensions, protectedOnly: old.protectedOnly, burstOnly: old.burstOnly,
+            untransferredOnly: old.untransferredOnly, startDay: old.startDay, endDay: old.endDay,
+            previewRotationQuarterTurns: -5, previewHistogramEnabled: true)
+        XCTAssertTrue(store.save(edited))
+        let restored = try XCTUnwrap(BrowsePreferencesStore(defaults: defaults).read())
+        XCTAssertEqual(restored.previewRotationQuarterTurns, 3); XCTAssertTrue(restored.previewHistogramEnabled)
+        XCTAssertEqual(restored.columns, 4); XCTAssertFalse(restored.collapseBursts)
+        XCTAssertEqual(restored.extensions, [".jpg"]); XCTAssertTrue(restored.protectedOnly)
+        XCTAssertEqual(restored.startDay, 20260101); XCTAssertEqual(restored.endDay, 20261231)
+    }
+
+    @MainActor func testMalformedNewPreviewFieldsPreserveExistingDocumentInsteadOfResettingPreferences() throws {
+        let suite = "ZTransferTests.preview.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = BrowsePreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.save(NativeBrowsePreferences.companion.defaults()))
+        let valid = try XCTUnwrap(defaults.data(forKey: BrowsePreferencesStore.key))
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: valid) as? [String: Any])
+        let invalid: [(String, Any)] = [("previewRotationQuarterTurns", "3"),
+            ("previewRotationQuarterTurns", 2_147_483_648), ("previewRotationQuarterTurns", 1.5),
+            ("previewHistogramEnabled", "true"), ("previewHistogramEnabled", 1)]
+        for (key, value) in invalid {
+            var document = fields; document[key] = value
+            let raw = try JSONSerialization.data(withJSONObject: document)
+            defaults.set(raw, forKey: BrowsePreferencesStore.key)
+            XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeBrowsePreferences.companion.defaults()))
+            XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), raw)
+        }
+    }
+
+    @MainActor func testPreviewPreferenceBoundaryValuesRoundTripThroughSharedNormalization() throws {
+        let suite = "ZTransferTests.preview.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = BrowsePreferencesStore(defaults: defaults)
+        for (input, expected) in [(Int32.min, Int32(0)), (-1, 3), (4, 0), (Int32.max, 3)] {
+            let value = NativeBrowsePreferences(columns: 3, collapseBursts: true, extensions: nil,
+                protectedOnly: false, burstOnly: false, untransferredOnly: false, startDay: 0, endDay: 0,
+                previewRotationQuarterTurns: input, previewHistogramEnabled: true)
+            XCTAssertTrue(store.save(value))
+            let restored = try XCTUnwrap(store.read())
+            XCTAssertEqual(restored.previewRotationQuarterTurns, expected); XCTAssertTrue(restored.previewHistogramEnabled)
+        }
+        // The original exported initializer remains callable and keeps its documented defaults.
+        let oldInitializer = NativeBrowsePreferences(columns: 3, collapseBursts: true, extensions: nil,
+            protectedOnly: false, burstOnly: false, untransferredOnly: false, startDay: 0, endDay: 0)
+        XCTAssertEqual(oldInitializer.previewRotationQuarterTurns, 0); XCTAssertFalse(oldInitializer.previewHistogramEnabled)
+    }
+
     @MainActor func testBrowsePreferencesDefaultReadDoesNotWriteAndRoundTripUsesSharedNormalization() throws {
         let suite = "ZTransferTests.browse.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

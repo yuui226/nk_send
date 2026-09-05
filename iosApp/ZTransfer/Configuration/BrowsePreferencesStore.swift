@@ -20,6 +20,9 @@ final class BrowsePreferencesStore {
         var untransferredOnly: Bool
         var startDay: Int32
         var endDay: Int32
+        // Optional additions to v1: existing installs restore the original 0 / false values.
+        var previewRotationQuarterTurns: Int32?
+        var previewHistogramEnabled: Bool?
     }
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
@@ -31,7 +34,9 @@ final class BrowsePreferencesStore {
         // Normalization/date validation live in shared; slot selection is deliberately absent.
         return NativeBrowsePreferences(columns: document.columns, collapseBursts: document.collapseBursts,
             extensions: document.extensions, protectedOnly: document.protectedOnly, burstOnly: document.burstOnly,
-            untransferredOnly: document.untransferredOnly, startDay: document.startDay, endDay: document.endDay)
+            untransferredOnly: document.untransferredOnly, startDay: document.startDay, endDay: document.endDay,
+            previewRotationQuarterTurns: document.previewRotationQuarterTurns ?? 0,
+            previewHistogramEnabled: document.previewHistogramEnabled ?? false)
     }
 
     @discardableResult
@@ -40,7 +45,8 @@ final class BrowsePreferencesStore {
         guard read() != nil else { return false }
         let document = Document(version: 1, columns: value.columns, collapseBursts: value.collapseBursts,
             extensions: value.extensions, protectedOnly: value.protectedOnly, burstOnly: value.burstOnly,
-            untransferredOnly: value.untransferredOnly, startDay: value.startDay, endDay: value.endDay)
+            untransferredOnly: value.untransferredOnly, startDay: value.startDay, endDay: value.endDay,
+            previewRotationQuarterTurns: value.previewRotationQuarterTurns, previewHistogramEnabled: value.previewHistogramEnabled)
         guard let data = try? JSONEncoder().encode(document), data.count <= 64 * 1024 else { return false }
         defaults.set(data, forKey: Self.key)
         return defaults.data(forKey: Self.key) == data // Acknowledges the defaults store, not a disk fsync.

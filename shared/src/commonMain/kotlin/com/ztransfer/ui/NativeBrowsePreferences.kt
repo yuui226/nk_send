@@ -2,6 +2,7 @@ package com.ztransfer.ui
 
 import com.ztransfer.catalog.CaptureDayRange
 import com.ztransfer.ui.screen.SharedPhotoFilterCriteria
+import com.ztransfer.ui.screen.previewFloorMod
 import com.ztransfer.viewmodel.normalizeThumbnailColumns
 
 /** Plain Apple persistence boundary. No camera slot, task, identity or secret is persisted here. */
@@ -9,7 +10,14 @@ class NativeBrowsePreferences(
     columns: Int, val collapseBursts: Boolean, extensions: List<String>?,
     val protectedOnly: Boolean, val burstOnly: Boolean, val untransferredOnly: Boolean,
     startDay: Int, endDay: Int,
+    previewRotationQuarterTurns: Int, val previewHistogramEnabled: Boolean,
 ) {
+    /** Preserve the existing eight-field Apple initializer and its original defaults. */
+    constructor(columns: Int, collapseBursts: Boolean, extensions: List<String>?,
+        protectedOnly: Boolean, burstOnly: Boolean, untransferredOnly: Boolean, startDay: Int, endDay: Int,
+    ) : this(columns, collapseBursts, extensions, protectedOnly, burstOnly, untransferredOnly, startDay, endDay, 0, false)
+
+    val previewRotationQuarterTurns: Int = previewFloorMod(previewRotationQuarterTurns, 4)
     val columns: Int = normalizeThumbnailColumns(columns)
     val extensions: List<String>? = extensions?.distinct()?.toList()
     private val range = try {
@@ -28,3 +36,4 @@ class NativeBrowsePreferences(
 }
 
 internal data class NativeBrowseLayout(val columns: Int = 3, val collapseBursts: Boolean = true)
+internal data class NativePreviewOptions(val rotationQuarterTurns: Int = 0, val histogramEnabled: Boolean = false)

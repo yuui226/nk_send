@@ -8,6 +8,50 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun previewOptionsRestoreAndSaveTogetherWithFiltersWithoutResettingEachOther() {
+        val p = Platform().also { it.preferences = NativeBrowsePreferences(4, false, listOf(".jpg"), true, false, false, 20260101, 20261231, -1, true) }
+        val m = model(p)
+        assertEquals(NativePreviewOptions(3, true), m.previewOptions.value)
+        assertEquals(0, p.writes)
+        m.setPreviewRotationQuarterTurns(5)
+        assertEquals(NativePreviewOptions(1, true), m.previewOptions.value)
+        assertEquals(4, p.preferences!!.columns); assertEquals(listOf(".jpg"), p.preferences!!.extensions)
+        assertTrue(p.preferences!!.protectedOnly); assertEquals(20260101, p.preferences!!.startDay)
+        m.changeLayout(2, true); m.changeFilters(m.filters.value.copy(burstOnly = true))
+        assertEquals(1, p.preferences!!.previewRotationQuarterTurns); assertTrue(p.preferences!!.previewHistogramEnabled)
+        m.setPreviewHistogramEnabled(false)
+        assertEquals(2, p.preferences!!.columns); assertTrue(p.preferences!!.collapseBursts); assertTrue(p.preferences!!.burstOnly)
+        val reopened = model(p)
+        assertEquals(NativePreviewOptions(1, false), reopened.previewOptions.value)
+        assertEquals(4, p.writes)
+        m.setPreviewRotationQuarterTurns(1); m.setPreviewHistogramEnabled(false)
+        assertEquals(4, p.writes)
+        m.close(); reopened.close()
+    }
+
+    @Test fun previewPreferenceFailuresRemainVisibleAndDoNotCancelExistingPreviewReads() {
+        val p = Platform().also { it.preferences = null; it.saveSucceeds = false }
+        val m = model(p); var ended = 0
+        val preview = object : NativePreviewReadPlatform {
+            override fun beginPreviewReads(sessionId: Long) {}
+            override fun endPreviewReads(sessionId: Long) { ended++ }
+            override fun cancelPreviewRead(sessionId: Long, requestId: Long) {}
+            override fun readFhdPreview(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativeFhdPreviewCompletion) {}
+        }
+        assertEquals(NativePreviewOptions(), m.previewOptions.value); assertTrue(m.preferencesFailed.value)
+        m.attachPreviewReads(preview); assertNotNull(m.beginPreviewReads())
+        m.setPreviewRotationQuarterTurns(-2); m.setPreviewHistogramEnabled(true)
+        assertEquals(NativePreviewOptions(2, true), m.previewOptions.value)
+        assertTrue(m.preferencesFailed.value); assertNull(p.preferences)
+        assertEquals(0, ended); assertTrue(m.queue.connected.value)
+        p.saveSucceeds = true; m.setPreviewRotationQuarterTurns(-1)
+        assertFalse(m.preferencesFailed.value); assertTrue(p.preferences!!.previewHistogramEnabled)
+        assertEquals(3, p.preferences!!.previewRotationQuarterTurns)
+        val writes = p.writes
+        m.close(); m.setPreviewHistogramEnabled(false); m.setPreviewRotationQuarterTurns(0)
+        assertEquals(writes, p.writes); assertEquals(1, ended)
+        assertEquals(3, p.preferences!!.previewRotationQuarterTurns); assertTrue(p.preferences!!.previewHistogramEnabled)
+    }
     @Test fun previewAdmissionUsesRealFilesModelResultAndKeepsPartialNoticeWithoutFullGroupFlight() {
         val p = Platform(); val m = model(p); m.finishScan(m.beginScan(), snapshot())
         val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
