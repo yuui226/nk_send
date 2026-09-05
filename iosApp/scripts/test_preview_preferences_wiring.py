@@ -4,6 +4,7 @@ import subprocess
 import unittest
 from preview_preferences_wiring import without_preview_options_model
 from preview_metadata_wiring import without_metadata_model
+from photo_settings_wiring import without_photo_interaction_store
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -36,7 +37,7 @@ class PreviewPreferencesWiringTest(unittest.TestCase):
 
     def test_store_only_adds_optional_v1_fields_and_original_storage_guards_remain(self):
         path = 'iosApp/ZTransfer/Configuration/BrowsePreferencesStore.swift'
-        value = read(path)
+        value = without_photo_interaction_store(read(path))
         addition = '''        // Optional additions to v1: existing installs restore the original 0 / false values.
         var previewRotationQuarterTurns: Int32?
         var previewHistogramEnabled: Bool?

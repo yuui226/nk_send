@@ -52,6 +52,7 @@ object SharedUiController {
                 NativeOriginalFilesPage(model, NativeFilesTextCatalog.forLanguage(languageTag), queueText,
                     NativeFilterTextCatalog.forLanguage(languageTag), images, onBack,
                     previewText = NativePreviewTextCatalog.forLanguage(languageTag, model::previewMetadata),
+                    settingsText = NativeSettingsTextCatalog.forLanguage(languageTag),
                     openPreview = { files -> NativePreviewSessionSource.open(model, images, files) },
                     queuePage = { back ->
                         NativeOriginalQueuePage(model.queue, queueText,

@@ -1,4 +1,5 @@
 """Exact original preview metadata extraction; Android keeps its platform decimal renderers."""
+from photo_settings_wiring import without_photo_interaction_model
 
 ORIGINAL_DATE = 'internal fun formatPreviewCaptureDate(raw: String?): String? {\n    if (raw == null || raw.length < 8 || !raw.take(8).all(Char::isDigit)) return null\n    val year = raw.substring(0, 4).toInt()\n    val month = raw.substring(4, 6).toInt()\n    val day = raw.substring(6, 8).toInt()\n    runCatching { java.time.LocalDate.of(year, month, day) }.getOrNull() ?: return null\n    val date = "%04d-%02d-%02d".format(year, month, day)\n    if (raw.length < 15 || raw[8] != \'T\' || !raw.substring(9, 15).all(Char::isDigit)) {\n        return date\n    }\n    val hour = raw.substring(9, 11).toInt()\n    val minute = raw.substring(11, 13).toInt()\n    val second = raw.substring(13, 15).toInt()\n    runCatching { java.time.LocalTime.of(hour, minute, second) }.getOrNull() ?: return date\n    return "$date %02d:%02d:%02d".format(hour, minute, second)\n}\n'
 
@@ -49,6 +50,7 @@ def remove_once(value, addition):
 
 
 def without_metadata_model(value):
+    value = without_photo_interaction_model(value)
     return remove_once(remove_once(value, MODEL_FIELDS), MODEL_FORMAT)
 
 

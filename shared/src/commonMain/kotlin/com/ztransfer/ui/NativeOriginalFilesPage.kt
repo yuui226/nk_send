@@ -33,6 +33,7 @@ internal fun NativeOriginalFilesPage(
     filterText: NativeFilterText,
     thumbnails: ThumbnailGridImageSource, onBack: () -> Unit,
     previewText: PreviewSessionText,
+    settingsText: NativeSettingsPageText,
     openPreview: (List<CameraFileInfo>) -> NativePreviewPageSource?,
     queuePage: @Composable (onBack: () -> Unit) -> Unit,
 ) {
@@ -52,6 +53,8 @@ internal fun NativeOriginalFilesPage(
     var returnHandle by remember(model) { mutableStateOf<Int?>(null) }
     var returnNonce by remember(model) { mutableIntStateOf(0) }
     var queueBounds by remember(model) { mutableStateOf<Rect?>(null) }
+    var settingsAnchor by remember(model) { mutableStateOf<Rect?>(null) }
+    var openedSettingsAnchor by remember(model) { mutableStateOf<Rect?>(null) }
     val haptics = rememberHaptics(true)
     val density = LocalDensity.current
     DisposableEffect(model) {
@@ -174,13 +177,11 @@ internal fun NativeOriginalFilesPage(
                 GlassButton(onClick = { closePreview(); showQueue = true },
                     modifier = Modifier.onGloballyPositioned { queueBounds = it.boundsInRoot() }) { Text(text.queue) }
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                GlassButton(onClick = { model.changeLayout(if (columns == 4) 2 else columns + 1, collapseBursts) }) { Text("${text.columns}: $columns") }
-                Spacer(Modifier.width(8.dp))
-                Text(text.collapseBursts, style = MaterialTheme.typography.bodySmall)
-                Switch(checked = collapseBursts, onCheckedChange = { model.changeLayout(columns, it) })
-            }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GlassButton(onClick = { closePreview(); openedSettingsAnchor = settingsAnchor },
+                    modifier = Modifier.onGloballyPositioned { settingsAnchor = it.boundsInRoot() }) {
+                    Text(settingsText.title)
+                }
                 GlassButton(onClick = { openedFilterAnchor = filterAnchor }, enabled = state.hasSnapshot, active = filterActive,
                     modifier = Modifier.onGloballyPositioned { filterAnchor = it.boundsInRoot() }) {
                     FilterMark(Modifier.size(18.dp), color = colors.accentBlue)
@@ -231,7 +232,7 @@ internal fun NativeOriginalFilesPage(
                     onTapFile = { file -> scope.launch(start = CoroutineStart.UNDISPATCHED) { model.enqueue(listOf(file)) } },
                     onPreview = { file, rect -> requestPreview(file, rect) },
                     onPreviewBurst = { id, files, rect -> files.firstOrNull()?.let { requestPreview(it, rect, id) } },
-                    tapToPreview = false, cellBoundsRegistry = bounds, burstBoundsRegistry = burstBounds,
+                    tapToPreview = layout.tapToPreview, cellBoundsRegistry = bounds, burstBoundsRegistry = burstBounds,
                     burstHandles = burstIDs.keys, burstIdByHandle = burstIDs, collapseBurstPhotos = collapseBursts,
                     expandedBursts = expanded, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 32.dp),
                     gridState = grid, modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -273,6 +274,9 @@ internal fun NativeOriginalFilesPage(
                     },
                 )
             }
+        }
+        openedSettingsAnchor?.let { frozenAnchor ->
+            NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor) { openedSettingsAnchor = null }
         }
         openedFilterAnchor?.let { frozenAnchor ->
             SharedFilterOverlay(

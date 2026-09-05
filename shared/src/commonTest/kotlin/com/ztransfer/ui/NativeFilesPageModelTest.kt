@@ -8,6 +8,44 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun photoInteractionSurvivesLayoutFilterAndPreviewWritesAndReopensWithoutChangingCatalog() {
+        val p = Platform(); val m = model(p); m.finishScan(m.beginScan(), snapshot())
+        val catalog = m.state.value
+        assertFalse(m.layout.value.tapToPreview)
+        m.setTapToPreview(true); m.changeLayout(4, false)
+        m.changeFilters(m.filters.value.copy(protectedOnly = true))
+        m.setPreviewRotationQuarterTurns(2); m.setPreviewHistogramEnabled(true)
+        assertEquals(catalog, m.state.value); assertTrue(m.layout.value.tapToPreview)
+        val reopened = model(p)
+        assertEquals(NativeBrowseLayout(4, false, true), reopened.layout.value)
+        assertTrue(reopened.filters.value.protectedOnly)
+        assertEquals(NativePreviewOptions(2, true), reopened.previewOptions.value)
+        val writes = p.writes
+        m.setTapToPreview(true); assertEquals(writes, p.writes)
+        m.setTapToPreview(false); assertFalse(p.preferences!!.tapToPreview)
+        assertEquals(4, p.preferences!!.columns); assertFalse(p.preferences!!.collapseBursts)
+        m.close(); m.setTapToPreview(true); assertFalse(p.preferences!!.tapToPreview)
+        reopened.close()
+    }
+
+    @Test fun failedInteractionSaveIsVisibleWithoutEndingActiveReadsAndCanBeRetriedByChangingValue() {
+        val p = Platform().also { it.saveSucceeds = false }; val m = model(p)
+        var ended = 0
+        m.attachPreviewReads(object : NativePreviewReadPlatform {
+            override fun beginPreviewReads(sessionId: Long) {}
+            override fun endPreviewReads(sessionId: Long) { ended++ }
+            override fun cancelPreviewRead(sessionId: Long, requestId: Long) {}
+            override fun readFhdPreview(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativeFhdPreviewCompletion) {}
+        })
+        assertNotNull(m.beginPreviewReads())
+        m.setTapToPreview(true)
+        assertTrue(m.layout.value.tapToPreview); assertTrue(m.preferencesFailed.value)
+        assertFalse(p.preferences!!.tapToPreview); assertEquals(0, ended)
+        p.saveSucceeds = true; m.setTapToPreview(false)
+        assertFalse(m.preferencesFailed.value); assertEquals(0, ended)
+        m.close(); assertEquals(1, ended)
+    }
+
     @Test fun previewMetadataUsesSharedValidationPlatformFieldsAndClosesWithoutMoreWork() {
         val p = Platform(); val m = model(p)
         val file = CameraFileInfo(1, 4294967295L, "VIDEO.MOV", "00000229T000001")

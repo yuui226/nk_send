@@ -23,6 +23,7 @@ final class BrowsePreferencesStore {
         // Optional additions to v1: existing installs restore the original 0 / false values.
         var previewRotationQuarterTurns: Int32?
         var previewHistogramEnabled: Bool?
+        var tapToPreview: Bool?
     }
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
@@ -36,7 +37,7 @@ final class BrowsePreferencesStore {
             extensions: document.extensions, protectedOnly: document.protectedOnly, burstOnly: document.burstOnly,
             untransferredOnly: document.untransferredOnly, startDay: document.startDay, endDay: document.endDay,
             previewRotationQuarterTurns: document.previewRotationQuarterTurns ?? 0,
-            previewHistogramEnabled: document.previewHistogramEnabled ?? false)
+            previewHistogramEnabled: document.previewHistogramEnabled ?? false, tapToPreview: document.tapToPreview ?? false)
     }
 
     @discardableResult
@@ -46,7 +47,7 @@ final class BrowsePreferencesStore {
         let document = Document(version: 1, columns: value.columns, collapseBursts: value.collapseBursts,
             extensions: value.extensions, protectedOnly: value.protectedOnly, burstOnly: value.burstOnly,
             untransferredOnly: value.untransferredOnly, startDay: value.startDay, endDay: value.endDay,
-            previewRotationQuarterTurns: value.previewRotationQuarterTurns, previewHistogramEnabled: value.previewHistogramEnabled)
+            previewRotationQuarterTurns: value.previewRotationQuarterTurns, previewHistogramEnabled: value.previewHistogramEnabled, tapToPreview: value.tapToPreview)
         guard let data = try? JSONEncoder().encode(document), data.count <= 64 * 1024 else { return false }
         defaults.set(data, forKey: Self.key)
         return defaults.data(forKey: Self.key) == data // Acknowledges the defaults store, not a disk fsync.

@@ -3,6 +3,15 @@ package com.ztransfer.ui
 import kotlin.test.*
 
 class NativeBrowsePreferencesTest {
+    @Test fun legacyConstructorsKeepOriginalInteractionDefaultAndNewFieldDoesNotChangeOtherNormalization() {
+        assertFalse(NativeBrowsePreferences.defaults().tapToPreview)
+        assertFalse(NativeBrowsePreferences(3, true, null, false, false, false, 0, 0, -1, true).tapToPreview)
+        val prefs = NativeBrowsePreferences(100, false, listOf(".jpg"), true, false, false, 0, 0, -1, true, true)
+        assertTrue(prefs.tapToPreview); assertEquals(4, prefs.columns)
+        assertEquals(3, prefs.previewRotationQuarterTurns); assertTrue(prefs.previewHistogramEnabled)
+        assertEquals(listOf(".jpg"), prefs.extensions); assertTrue(prefs.protectedOnly)
+    }
+
     @Test fun previewDefaultsAndBoundaryRotationMatchOriginalNormalizedQuarterTurns() {
         val defaults = NativeBrowsePreferences.defaults()
         assertEquals(0, defaults.previewRotationQuarterTurns); assertFalse(defaults.previewHistogramEnabled)

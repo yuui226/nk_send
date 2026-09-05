@@ -21,10 +21,12 @@ class FilesPageWiringTest(unittest.TestCase):
         self.assertIn('val layout by model.layout.collectAsState()', s)
         self.assertIn('val columns = layout.columns', s)
         self.assertIn('val collapseBursts = layout.collapseBursts', s)
-        self.assertIn('if (columns == 4) 2 else columns + 1', s)
+        controls=(root/'shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedSettingsControls.kt').read_text(encoding='utf-8')
+        self.assertIn('PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)', controls)
+        self.assertIn('NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor)', s)
         self.assertIn('LaunchedEffect(collapseBursts, state.bursts)', s)
         self.assertIn('} else emptySet()', s)
-        self.assertIn('tapToPreview = false', s)
+        self.assertIn('tapToPreview = layout.tapToPreview', s)
 
     def test_files_entry_is_not_hidden_until_the_first_queue_task(self):
         root=Path(__file__).resolve().parents[2]

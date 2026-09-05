@@ -10,8 +10,15 @@ class NativeBrowsePreferences(
     columns: Int, val collapseBursts: Boolean, extensions: List<String>?,
     val protectedOnly: Boolean, val burstOnly: Boolean, val untransferredOnly: Boolean,
     startDay: Int, endDay: Int,
-    previewRotationQuarterTurns: Int, val previewHistogramEnabled: Boolean,
+    previewRotationQuarterTurns: Int, val previewHistogramEnabled: Boolean, val tapToPreview: Boolean,
 ) {
+    /** Keep both existing Apple initializers callable while v1 gains an optional interaction field. */
+    constructor(columns: Int, collapseBursts: Boolean, extensions: List<String>?,
+        protectedOnly: Boolean, burstOnly: Boolean, untransferredOnly: Boolean, startDay: Int, endDay: Int,
+        previewRotationQuarterTurns: Int, previewHistogramEnabled: Boolean,
+    ) : this(columns, collapseBursts, extensions, protectedOnly, burstOnly, untransferredOnly,
+        startDay, endDay, previewRotationQuarterTurns, previewHistogramEnabled, false)
+
     /** Preserve the existing eight-field Apple initializer and its original defaults. */
     constructor(columns: Int, collapseBursts: Boolean, extensions: List<String>?,
         protectedOnly: Boolean, burstOnly: Boolean, untransferredOnly: Boolean, startDay: Int, endDay: Int,
@@ -35,5 +42,5 @@ class NativeBrowsePreferences(
     }
 }
 
-internal data class NativeBrowseLayout(val columns: Int = 3, val collapseBursts: Boolean = true)
+internal data class NativeBrowseLayout(val columns: Int = 3, val collapseBursts: Boolean = true, val tapToPreview: Boolean = false)
 internal data class NativePreviewOptions(val rotationQuarterTurns: Int = 0, val histogramEnabled: Boolean = false)

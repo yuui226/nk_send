@@ -90,6 +90,46 @@ private actor FakeExifSource: CameraExifSource {
 }
 
 final class CameraNetworkTests: XCTestCase {
+    @MainActor func testPhotoInteractionLegacyDefaultAndRoundTripPreserveOtherPreferences() throws {
+        let suite = "ZTransferTests.interaction.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let legacy = Data(#"{"version":1,"columns":4,"collapseBursts":false,"protectedOnly":true,"burstOnly":false,"untransferredOnly":false,"startDay":20260101,"endDay":20261231,"previewRotationQuarterTurns":3,"previewHistogramEnabled":true}"#.utf8)
+        defaults.set(legacy, forKey: BrowsePreferencesStore.key)
+        let store = BrowsePreferencesStore(defaults: defaults)
+        let old = try XCTUnwrap(store.read())
+        XCTAssertFalse(old.tapToPreview); XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), legacy)
+        let edited = NativeBrowsePreferences(columns: old.columns, collapseBursts: old.collapseBursts,
+            extensions: old.extensions, protectedOnly: old.protectedOnly, burstOnly: old.burstOnly,
+            untransferredOnly: old.untransferredOnly, startDay: old.startDay, endDay: old.endDay,
+            previewRotationQuarterTurns: old.previewRotationQuarterTurns, previewHistogramEnabled: old.previewHistogramEnabled,
+            tapToPreview: true)
+        XCTAssertTrue(store.save(edited))
+        let restored = try XCTUnwrap(BrowsePreferencesStore(defaults: defaults).read())
+        XCTAssertTrue(restored.tapToPreview); XCTAssertEqual(restored.columns, 4); XCTAssertFalse(restored.collapseBursts)
+        XCTAssertTrue(restored.protectedOnly); XCTAssertEqual(restored.startDay, 20260101)
+        XCTAssertEqual(restored.endDay, 20261231); XCTAssertEqual(restored.previewRotationQuarterTurns, 3)
+        XCTAssertTrue(restored.previewHistogramEnabled)
+    }
+
+    @MainActor func testMalformedPhotoInteractionFieldIsNeverSilentlyOverwritten() throws {
+        let suite = "ZTransferTests.interaction.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = BrowsePreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.save(NativeBrowsePreferences.companion.defaults()))
+        let saved = try XCTUnwrap(defaults.data(forKey: BrowsePreferencesStore.key))
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        let invalidValues: [Any] = ["true", 1, [1], ["wrong": true]]
+        for invalid in invalidValues {
+            var value = fields; value["tapToPreview"] = invalid
+            let data = try JSONSerialization.data(withJSONObject: value)
+            defaults.set(data, forKey: BrowsePreferencesStore.key)
+            XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeBrowsePreferences.companion.defaults()))
+            XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key), data)
+        }
+    }
+
     func testPreviewDateFieldsKeepGregorianYearAndPaddingWithoutCalendarConversion() {
         for tag in ["en_US_POSIX", "de_DE", "zh_CN", "th_TH"] {
             let locale = Locale(identifier: tag)
