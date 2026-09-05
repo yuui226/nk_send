@@ -10,6 +10,14 @@ struct ExportDirectorySelection: Sendable, Equatable {
     fileprivate let bookmark: Data
 }
 
+/// Prepared authority only. Preparation never rewrites the current selection.
+struct PreparedExportDirectorySelection: Sendable {
+    fileprivate let owner: UUID
+    fileprivate let previous: Data?
+    let selection: ExportDirectorySelection
+    let displayName: String
+}
+
 protocol ExportDirectoryAccess {
     func start(_ url: URL) -> Bool
     func stop(_ url: URL)
@@ -49,6 +57,9 @@ enum ExportDirectoryError: Error, LocalizedError {
 /// Access is lexical and balanced on every return/throw. Provider IO must additionally coordinate
 /// reads/writes; this grant store is not the full external-directory download executor.
 actor ScopedDirectoryStore {
+    // All instances may point at the same app-private bookmark. No await occurs under this lock.
+    private static let bookmarkLock = NSLock()
+    private let identity = UUID()
     private let bookmarkFile: URL
     private let access: ExportDirectoryAccess
 
@@ -72,18 +83,47 @@ actor ScopedDirectoryStore {
         try persist(data)
     }
 
+    func prepareSelection(_ url: URL) throws -> PreparedExportDirectorySelection {
+        try Task.checkCancellation()
+        let previous = try withBookmarkLock { try readBookmarkLocked() }
+        guard url.isFileURL, access.start(url) else { throw ExportDirectoryError.permissionLost }
+        defer { access.stop(url) }
+        guard try access.isDirectory(url) else { throw ExportDirectoryError.notDirectory }
+        let data = try access.bookmark(url)
+        guard (1...1_048_576).contains(data.count) else { throw ExportDirectoryError.invalidBookmark }
+        let name = try validateCandidate(data)
+        return PreparedExportDirectorySelection(owner: identity, previous: previous,
+            selection: ExportDirectorySelection(bookmark: data), displayName: name)
+    }
+
+    /// Compare-and-replace under the same process-wide lock used by select/forget/stale refresh.
+    /// No cancellation check or fallible work after the atomic write has succeeded.
+    func commitSelection(_ prepared: PreparedExportDirectorySelection) throws {
+        guard prepared.owner == identity else { throw ExportDirectoryError.selectionChanged }
+        _ = try validateCandidate(prepared.selection.bookmark)
+        try replaceBookmark(expected: prepared.previous, with: prepared.selection.bookmark)
+    }
+
+    private func validateCandidate(_ data: Data) throws -> String {
+        try Task.checkCancellation()
+        let resolved = try access.resolve(data)
+        guard resolved.url.isFileURL, access.start(resolved.url) else { throw ExportDirectoryError.permissionLost }
+        defer { access.stop(resolved.url) }
+        guard try access.isDirectory(resolved.url) else { throw ExportDirectoryError.notDirectory }
+        try Task.checkCancellation()
+        return resolved.url.lastPathComponent
+    }
+
     /// Operation cannot escape the URL and assume continued access. A future async provider executor
     /// must own its own grant lifetime rather than retaining this URL after the closure returns.
     func withDirectory<T>(_ operation: (URL) throws -> T) throws -> T {
         try Task.checkCancellation()
-        guard FileManager.default.fileExists(atPath: bookmarkFile.path) else { throw ExportDirectoryError.missing }
-        let size = try bookmarkFile.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard (1...1_048_576).contains(size) else { throw ExportDirectoryError.invalidBookmark }
-        let resolved = try access.resolve(Data(contentsOf: bookmarkFile))
+        let selected = try selection()
+        let resolved = try access.resolve(selected.bookmark)
         guard resolved.url.isFileURL, access.start(resolved.url) else { throw ExportDirectoryError.permissionLost }
         defer { access.stop(resolved.url) }
         guard try access.isDirectory(resolved.url) else { throw ExportDirectoryError.notDirectory }
-        if resolved.stale { try persist(access.bookmark(resolved.url)) }
+        if resolved.stale { try replaceBookmark(expected: selected.bookmark, with: access.bookmark(resolved.url)) }
         try Task.checkCancellation()
         return try operation(resolved.url)
     }
@@ -91,11 +131,8 @@ actor ScopedDirectoryStore {
     /// Freeze the selected grant. Later operations must reject a new/forgotten grant rather than redirect.
     func selection() throws -> ExportDirectorySelection {
         try Task.checkCancellation()
-        guard FileManager.default.fileExists(atPath: bookmarkFile.path) else { throw ExportDirectoryError.missing }
-        let size = try bookmarkFile.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard (1...1_048_576).contains(size) else { throw ExportDirectoryError.invalidBookmark }
-        let data = try Data(contentsOf: bookmarkFile)
-        guard (1...1_048_576).contains(data.count) else { throw ExportDirectoryError.invalidBookmark }
+        guard let data = try withBookmarkLock({ try readBookmarkLocked() }) else { throw ExportDirectoryError.missing }
+        guard !data.isEmpty else { throw ExportDirectoryError.invalidBookmark }
         return ExportDirectorySelection(bookmark: data)
     }
 
@@ -114,10 +151,46 @@ actor ScopedDirectoryStore {
 
     /// Forget only the app's one known bookmark, never the selected directory or its contents.
     func forget() throws {
-        if FileManager.default.fileExists(atPath: bookmarkFile.path) { try FileManager.default.removeItem(at: bookmarkFile) }
+        try withBookmarkLock {
+            if FileManager.default.fileExists(atPath: bookmarkFile.path) { try FileManager.default.removeItem(at: bookmarkFile) }
+        }
     }
 
     private func persist(_ data: Data) throws {
+        try withBookmarkLock { try writeBookmarkLocked(data) }
+    }
+
+    private func replaceBookmark(expected: Data?, with data: Data) throws {
+        try withBookmarkLock {
+            guard try readBookmarkLocked() == expected else { throw ExportDirectoryError.selectionChanged }
+            try Task.checkCancellation()
+            try writeBookmarkLocked(data)
+        }
+    }
+
+    private func withBookmarkLock<T>(_ body: () throws -> T) rethrows -> T {
+        Self.bookmarkLock.lock()
+        defer { Self.bookmarkLock.unlock() }
+        return try body()
+    }
+
+    /// A malformed empty old value can be replaced explicitly, but it is not a usable selection.
+    private func readBookmarkLocked() throws -> Data? {
+        guard FileManager.default.fileExists(atPath: bookmarkFile.path) else { return nil }
+        let size = try bookmarkFile.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard (0...1_048_576).contains(size) else { throw ExportDirectoryError.invalidBookmark }
+        let input = try FileHandle(forReadingFrom: bookmarkFile)
+        defer { try? input.close() }
+        var data = Data()
+        while true {
+            let chunk = try input.read(upToCount: min(64 * 1024, 1_048_577 - data.count)) ?? Data()
+            if chunk.isEmpty { return data }
+            data.append(chunk)
+            guard data.count <= 1_048_576 else { throw ExportDirectoryError.invalidBookmark }
+        }
+    }
+
+    private func writeBookmarkLocked(_ data: Data) throws {
         guard bookmarkFile.isFileURL, (1...1_048_576).contains(data.count) else { throw ExportDirectoryError.invalidBookmark }
         try FileManager.default.createDirectory(at: bookmarkFile.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: bookmarkFile, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])

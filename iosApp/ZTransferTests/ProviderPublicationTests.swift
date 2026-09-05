@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import CoreGraphics
 import ImageIO
 import XCTest
@@ -7,6 +8,118 @@ import ZTransferShared
 
 /// Apple filesystem/coordinator tests. Registered for Mac, never counted as Windows execution.
 final class ProviderPublicationTests: XCTestCase {
+    func testPreparedDirectoryDoesNotChangeAuthorityUntilCommitAndBindsTheExactNewProvider() async throws {
+        let area = try PublicationArea(), old = area.publisher()
+        let saved = try await old.publish(area.saved)
+        let next = area.root.appendingPathComponent("next"); try FileManager.default.createDirectory(at: next, withIntermediateDirectories: false)
+        try Data([3]).write(to: next.appendingPathComponent("NEXT.JPG"))
+        let previous = try Data(contentsOf: area.bookmark)
+        let change = try await ProviderDirectoryChange.prepare(next, directory: area.store)
+        XCTAssertEqual(change.displayName, "next"); XCTAssertEqual(try Data(contentsOf: area.bookmark), previous)
+        try await old.validateSelection()
+        do { try await change.provider.validateSelection(); XCTFail("Candidate is not committed") }
+        catch { guard case ExportDirectoryError.selectionChanged = error else { return XCTFail("\(error)") } }
+        try await change.commit()
+        try await change.provider.validateSelection()
+        let index = try await change.provider.originals(since: -1, rescan: true)
+        XCTAssertEqual(index.entries.map(\.name), ["NEXT.JPG"])
+        do { try await old.validateSelection(); XCTFail("Old actor must not redirect") }
+        catch { guard case ExportDirectoryError.selectionChanged = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(try Data(contentsOf: saved.url), area.bytes)
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
+    func testPreparedDirectoryCannotOverwriteASelectionCommittedByAnotherStoreInstance() async throws {
+        let area = try PublicationArea()
+        let next = area.root.appendingPathComponent("next"), newer = area.root.appendingPathComponent("newer")
+        try FileManager.default.createDirectory(at: next, withIntermediateDirectories: false)
+        try FileManager.default.createDirectory(at: newer, withIntermediateDirectories: false)
+        let prepared = try await area.store.prepareSelection(next)
+        let other = ScopedDirectoryStore(bookmarkFile: area.bookmark, access: area.access)
+        try await other.select(newer)
+        let winning = try Data(contentsOf: area.bookmark)
+        do { try await area.store.commitSelection(prepared); XCTFail("Stale compare-and-replace") }
+        catch { guard case ExportDirectoryError.selectionChanged = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(try Data(contentsOf: area.bookmark), winning)
+        let name = try await other.displayName(); XCTAssertEqual(name, "newer")
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
+    func testPreparedDirectoryIsOwnedByItsPreparingStoreAndCannotResurrectForgottenAuthority() async throws {
+        let area = try PublicationArea()
+        let prepared = try await area.store.prepareSelection(area.target)
+        let other = ScopedDirectoryStore(bookmarkFile: area.bookmark, access: area.access)
+        let previous = try Data(contentsOf: area.bookmark), starts = area.access.starts
+        do { try await other.commitSelection(prepared); XCTFail("Wrong store owner") }
+        catch { guard case ExportDirectoryError.selectionChanged = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(area.access.starts, starts); XCTAssertEqual(try Data(contentsOf: area.bookmark), previous)
+        try await other.forget()
+        do { try await area.store.commitSelection(prepared); XCTFail("Forgotten since preparation") }
+        catch { guard case ExportDirectoryError.selectionChanged = error else { return XCTFail("\(error)") } }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: area.bookmark.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: area.target.path))
+    }
+
+    func testPreparedDirectoryCanCommitFirstSelectionOrExplicitlyRepairAnEmptyOldDocument() async throws {
+        for empty in [false, true] {
+            let area = try PublicationArea()
+            if empty { try Data().write(to: area.bookmark) } else { try FileManager.default.removeItem(at: area.bookmark) }
+            let prepared = try await area.store.prepareSelection(area.target)
+            if empty { XCTAssertEqual(try Data(contentsOf: area.bookmark), Data()) }
+            else { XCTAssertFalse(FileManager.default.fileExists(atPath: area.bookmark.path)) }
+            try await area.store.commitSelection(prepared)
+            let name = try await area.store.displayName(); XCTAssertEqual(name, "provider")
+            XCTAssertEqual(area.access.starts, area.access.stops)
+        }
+    }
+
+    func testCancelledOrRevokedPreparedDirectoryNeverReplacesOldBookmark() async throws {
+        for revoked in [false, true] {
+            let area = try PublicationArea()
+            let prepared = try await area.store.prepareSelection(area.target)
+            let old = try Data(contentsOf: area.bookmark)
+            if revoked { area.access.allowed = false }
+            let operation = Task {
+                if !revoked { withUnsafeCurrentTask { $0?.cancel() } }
+                try await area.store.commitSelection(prepared)
+            }
+            do { try await operation.value; XCTFail("Must fail before writing") }
+            catch {
+                if revoked { guard case ExportDirectoryError.permissionLost = error else { return XCTFail("\(error)") } }
+                else { XCTAssertTrue(error is CancellationError) }
+            }
+            XCTAssertEqual(try Data(contentsOf: area.bookmark), old)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: area.target.path))
+        }
+    }
+
+    func testLateStaleBookmarkRefreshCannotOverwriteANewerValidSelection() async throws {
+        let area = try PublicationArea()
+        let next = area.root.appendingPathComponent("newer"); try FileManager.default.createDirectory(at: next, withIntermediateDirectories: false)
+        let newer = area.access.bookmark(next)
+        area.access.stale = true
+        // Simulate a competing writer after the old bookmark was resolved, before its refresh commits.
+        area.access.onBookmark = { XCTAssertNoThrow(try newer.write(to: area.bookmark, options: .atomic)) }
+        do { _ = try await area.store.displayName(); XCTFail("Late refresh must be rejected") }
+        catch { guard case ExportDirectoryError.selectionChanged = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(try Data(contentsOf: area.bookmark), newer)
+        area.access.onBookmark = nil; area.access.stale = false
+        let name = try await area.store.displayName(); XCTAssertEqual(name, "newer")
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
+    func testFailedAtomicBookmarkWriteKeepsPreviousSelectionAndUserFiles() async throws {
+        guard geteuid() != 0 else { throw XCTSkip("Root bypasses the filesystem permission failure under test") }
+        let area = try PublicationArea(), prepared = try await area.store.prepareSelection(area.target)
+        let previous = try Data(contentsOf: area.bookmark)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: area.root.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: area.root.path) }
+        do { try await area.store.commitSelection(prepared); XCTFail("Atomic write needs a writable parent") } catch {}
+        XCTAssertEqual(try Data(contentsOf: area.bookmark), previous)
+        XCTAssertEqual(try Data(contentsOf: area.saved.url), area.bytes)
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
     func testExistingOriginalStreamsIntoAppShareWithoutChangingProviderOrItsIndex() async throws {
         for bytes in [Data(), Data((0..<200_000).map { UInt8(truncatingIfNeeded: $0) })] {
             let area = try PublicationArea(bytes: bytes), coordinator = PublicationCoordinator()
@@ -708,6 +821,7 @@ private final class PublicationArea {
 /// Configuration is fixed before awaited calls; counters read only after the operation completes.
 private final class PublicationGrant: ExportDirectoryAccess {
     let url: URL
+    var onBookmark: (() -> Void)?
     var allowed = true, stale = false, starts = 0, stops = 0
     private var version: UInt8 = 1
     private var urls: [Data: URL]
@@ -715,7 +829,7 @@ private final class PublicationGrant: ExportDirectoryAccess {
     func start(_ url: URL) -> Bool { starts += 1; return allowed }
     func stop(_ url: URL) { stops += 1 }
     func isDirectory(_ url: URL) -> Bool { true }
-    func bookmark(_ url: URL) -> Data { version += 1; let data = Data([version]); urls[data] = url; return data }
+    func bookmark(_ url: URL) -> Data { onBookmark?(); version += 1; let data = Data([version]); urls[data] = url; return data }
     func resolve(_ bookmark: Data) throws -> ResolvedExportDirectory {
         guard let url = urls[bookmark] else { throw ExportDirectoryError.invalidBookmark }
         return ResolvedExportDirectory(url: url, stale: stale)

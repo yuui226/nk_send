@@ -41,6 +41,9 @@ actor CameraOriginalQueue {
     private let camera: CameraWiFiConnection
     private let store: CameraOriginalStore
     private var destination: OriginalFilesDestination?
+    private var destinationRevision: UInt64 = 0
+    private var changingDestination = false
+    private var startAfterDestinationChange = false
     private var stagedFiles: [Int64: SavedCameraFile] = [:]
     private var originalLookup = NativeOriginalFileIndex()
     private var reusedFiles: [Int64: (source: OriginalFilesReusing, reference: ExistingOriginalReference)] = [:]
@@ -64,11 +67,32 @@ actor CameraOriginalQueue {
     /// just as Android snapshots the root at processQueue start. Folder/name stay in shared tasks.
     @discardableResult
     func configureDestination(_ value: OriginalFilesDestination?) async throws -> Bool {
-        guard worker == nil, !core.running else { return false }
+        guard worker == nil, !core.running, !changingDestination else { return false }
+        let revision = destinationRevision
         if let value { try await value.validateSelection() }
         try Task.checkCancellation()
-        guard worker == nil, !core.running else { return false } // Admission may have started while validating.
+        guard worker == nil, !core.running, !changingDestination, revision == destinationRevision else { return false }
         destination = value
+        destinationRevision &+= 1
+        return true
+    }
+
+    /// Fence only execution, not admission. A queued start resumes once with the committed target
+    /// (or the unchanged old target on failure). A later pause/stop withdraws that queued start.
+    @discardableResult
+    func configureDestination(_ change: OriginalDestinationChange) async throws -> Bool {
+        guard worker == nil, !core.running, !changingDestination else { return false }
+        changingDestination = true
+        defer {
+            changingDestination = false
+            let shouldStart = startAfterDestinationChange
+            startAfterDestinationChange = false
+            if shouldStart { start() }
+        }
+        try Task.checkCancellation()
+        try await change.commit()
+        destination = change.destination // No await, validation or cancellation check after commit.
+        destinationRevision &+= 1
         return true
     }
 
@@ -96,6 +120,7 @@ actor CameraOriginalQueue {
     }
 
     func start() {
+        if changingDestination { startAfterDestinationChange = true; return }
         guard worker == nil, core.start() else { return }
         originalLookup = NativeOriginalFileIndex() // Rescan once per run, then consume the owner's bounded deltas.
         publish()
@@ -106,7 +131,7 @@ actor CameraOriginalQueue {
         }
     }
 
-    func pauseAfterCurrent() { core.pauseAfterCurrent(); publish() }
+    func pauseAfterCurrent() { startAfterDestinationChange = false; core.pauseAfterCurrent(); publish() }
     func withdraw(_ taskID: Int64) { core.withdraw(taskId: taskID); publish() }
     func withdrawPending() { core.withdrawPending(); publish() }
     @discardableResult
@@ -208,6 +233,7 @@ actor CameraOriginalQueue {
 
     /// Cancels the current network operation; pending tasks stay waiting for an explicit start.
     func stop() async {
+        startAfterDestinationChange = false
         core.pauseAfterCurrent()
         let active = worker
         active?.cancel()

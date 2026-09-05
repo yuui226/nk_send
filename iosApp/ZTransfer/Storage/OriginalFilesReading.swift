@@ -32,3 +32,25 @@ protocol OriginalFilesDestination: OriginalFilesReusing {
 }
 
 extension ProviderOriginalStore: OriginalFilesDestination {}
+
+/// Commit must throw before publication or return normally after it; no fallible post-commit work.
+protocol OriginalDestinationChange: Sendable {
+    var destination: OriginalFilesDestination { get }
+    func commit() async throws
+}
+
+struct ProviderDirectoryChange: OriginalDestinationChange {
+    let provider: ProviderOriginalStore
+    var destination: OriginalFilesDestination { provider }
+    let displayName: String
+    private let directory: ScopedDirectoryStore
+    private let prepared: PreparedExportDirectorySelection
+
+    static func prepare(_ url: URL, directory: ScopedDirectoryStore) async throws -> ProviderDirectoryChange {
+        let prepared = try await directory.prepareSelection(url)
+        let destination = ProviderOriginalStore(directory: directory, selection: prepared.selection)
+        return ProviderDirectoryChange(provider: destination, displayName: prepared.displayName, directory: directory, prepared: prepared)
+    }
+
+    func commit() async throws { try await directory.commitSelection(prepared) }
+}

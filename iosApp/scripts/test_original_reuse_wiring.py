@@ -107,8 +107,8 @@ class OriginalReuseWiringTest(unittest.TestCase):
                                (READER, 'allowEmpty: Bool = false', 'allowEmpty: Bool = true'),
                                (PROVIDER, 'try $0.copyOriginal(reference, to: output)', 'Int64(0)')):
             with self.assertRaises(AssertionError):
-                previous_reuse_source(path, read(path).replace(old, new))
-        value = read(QUEUE).replace('core.pauseAfterCurrent(); publish()', 'publish()')
+                previous_reuse_source(path, (ROOT/path).read_text(encoding='utf-8').replace(old, new))
+        value = (ROOT/QUEUE).read_text(encoding='utf-8').replace('core.finishRun()', 'core.pauseAfterCurrent()')
         self.assertNotEqual(before(QUEUE), previous_reuse_source(QUEUE, value))
 
     def test_android_and_shared_match_and_execution_rules_are_not_rewritten(self):

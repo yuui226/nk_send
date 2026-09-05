@@ -9,6 +9,8 @@ CHANGES['shared/src/commonMain/kotlin/com/ztransfer/ui/NativeFilesPageModel.kt']
 
 
 def previous_transfer_source(path, value):
+    from directory_change_wiring import previous_directory_change_source
+    value = previous_directory_change_source(path, value)
     for new, old in CHANGES.get(path, ()):
         assert value.count(new) == 1, (path, new)
         value = value.replace(new, old, 1)

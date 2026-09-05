@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import unittest
 from transfer_preferences_wiring import CHANGES, previous_transfer_source
+from directory_change_wiring import previous_directory_change_source
 
 ROOT = Path(__file__).resolve().parents[2]
 MODEL = 'shared/src/commonMain/kotlin/com/ztransfer/ui/NativeFilesPageModel.kt'
@@ -11,14 +12,14 @@ BRIDGE = 'iosApp/ZTransfer/UI/OriginalFilesPage.swift'
 STORE = 'iosApp/ZTransfer/Configuration/BrowsePreferencesStore.swift'
 PROBE = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
 
-def read(path): return (ROOT/path).read_text(encoding='utf-8')
+def read(path): return previous_directory_change_source(path, (ROOT/path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', '73ba6cd:' + path], cwd=ROOT).decode('utf-8')
 
 class TransferPreferencesWiringTest(unittest.TestCase):
     def test_whole_previous_consumers_restore_outside_the_enumerated_changes(self):
         self.assertEqual(6, len(CHANGES))
         for path in CHANGES:
-            self.assertEqual(before(path), previous_transfer_source(path, read(path)))
+            self.assertEqual(before(path), previous_transfer_source(path, (ROOT/path).read_text(encoding='utf-8')))
 
     def test_default_options_and_destination_policy_are_the_existing_android_rules(self):
         android = read('app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt')

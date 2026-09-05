@@ -97,6 +97,10 @@ final class CameraHandshakeProbe: ObservableObject {
 
     func useDirectory(_ selection: URL? = nil, forget: Bool = false) {
         guard !directoryBusy else { return }
+        if let selection, !forget, transferDestination != nil {
+            selectQueueDirectory(selection)
+            return
+        }
         guard transferDestination == nil || (selection == nil && !forget) else {
             directoryStatus = "请等当前队列结束并切回应用沙盒，再改选或忘记目录授权；不会改写在途任务的目录。"
             return
@@ -123,6 +127,34 @@ final class CameraHandshakeProbe: ObservableObject {
                     directoryStatus = "目录授权可用：\(name)。当前下载仍先存沙盒；选择目录不代表已把传输写入该位置。"
                 }
             } catch { directoryStatus = error.localizedDescription }
+        }
+    }
+
+    /// Prepare without invalidating the current grant, then commit behind the queue's execution fence.
+    func selectQueueDirectory(_ selection: URL) {
+        guard !directoryBusy, let queue = originalQueue else { return }
+        directoryBusy = true
+        directoryTask = Task {
+            defer { directoryBusy = false; directoryTask = nil }
+            do {
+                let directory = try ScopedDirectoryStore.applicationStore()
+                let change = try await ProviderDirectoryChange.prepare(selection, directory: directory)
+                guard try await queue.configureDestination(change) else {
+                    directoryStatus = "当前队列仍在执行，请完成当前并暂停后重选；目录授权和保存目标均未改变。"
+                    return
+                }
+                // Commit returned successfully. Cancellation afterwards cannot undo that fact.
+                guard originalQueue === queue else { return }
+                providerOriginals = change.provider; transferDestination = change.provider
+                savesToSelectedDirectory = true
+                workspaceNavigation &+= 1
+                filesPage?.close(); filesPage = nil
+                directoryStatus = "已切换到 \(change.displayName)；原目录文件保留，后续执行使用新目标。"
+            } catch {
+                if !Task.isCancelled, originalQueue === queue {
+                    directoryStatus = "保存目标未改变：\(error.localizedDescription)"
+                }
+            }
         }
     }
 
@@ -363,6 +395,7 @@ final class CameraHandshakeProbe: ObservableObject {
 
     func disconnect() {
         queueShareTask?.cancel()
+        directoryTask?.cancel()
         downloadTask?.cancel()
         guard let connection = apConnection else { cancel(); return }
         guard closingTask == nil else { return }

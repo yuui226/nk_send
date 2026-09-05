@@ -113,8 +113,10 @@ actor ProviderOriginalStore {
     private let originalIndex = OriginalFileIndexCache()
     private var indexedRoot: URL?
     private var indexGeneration: UInt64 = 0
-    init(directory: ScopedDirectoryStore, coordinatorFactory: (() -> ProviderFileCoordinating)? = nil) {
+    init(directory: ScopedDirectoryStore, coordinatorFactory: (() -> ProviderFileCoordinating)? = nil,
+         selection: ExportDirectorySelection? = nil) {
         self.directory = directory; self.coordinatorFactory = coordinatorFactory ?? { AppleProviderFileCoordinator() }
+        self.selection = selection
     }
 
     /// Bind before a page or future transfer attempt starts, without scanning or materializing images.

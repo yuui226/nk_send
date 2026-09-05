@@ -122,6 +122,10 @@ private actor QueueDestinationProbe: OriginalFilesDestination {
     private var held: CheckedContinuation<Void, Never>?
     private var publications: [(SavedCameraFile, String?, String?)] = []
     private var validationCount = 0
+    private var validationWaiting: XCTestExpectation?
+    private var validationHeld: CheckedContinuation<Void, Never>?
+    func holdValidation(_ began: XCTestExpectation) { validationWaiting = began }
+    func releaseValidation() { validationHeld?.resume(); validationHeld = nil }
     func failures(_ value: Bool) { fail = value }
     func denied(_ value: Bool) { deny = value }
     func hold(_ began: XCTestExpectation, finishAfterCancellation: Bool = false) {
@@ -130,8 +134,12 @@ private actor QueueDestinationProbe: OriginalFilesDestination {
     func release() { held?.resume(); held = nil }
     func calls() -> [(SavedCameraFile, String?, String?)] { publications }
     func validations() -> Int { validationCount }
-    func validateSelection() throws {
+    func validateSelection() async throws {
         validationCount += 1
+        if let waiting = validationWaiting {
+            validationWaiting = nil
+            await withCheckedContinuation { validationHeld = $0; waiting.fulfill() }
+        }
         if deny { throw ExportDirectoryError.permissionLost }
     }
     func publish(_ saved: SavedCameraFile, originalName: String?, folder: String?) async throws -> SavedCameraFile {
@@ -153,6 +161,28 @@ private actor QueueDestinationProbe: OriginalFilesDestination {
     func originalData(locator: String) throws -> Data { throw OriginalIndexError.unsafeRoot }
     func originalRawPreviewData(locator: String) throws -> Data? { throw OriginalIndexError.unsafeRoot }
     func originalExif(locator: String) throws -> PhotoExif? { throw OriginalIndexError.unsafeRoot }
+}
+
+private actor DestinationChangeProbe: OriginalDestinationChange {
+    nonisolated let destination: OriginalFilesDestination
+    private let began: XCTestExpectation?
+    private let fail: Bool
+    private let commitDespiteCancellation: Bool
+    private var held: CheckedContinuation<Void, Never>?
+    private var count = 0
+    init(_ destination: OriginalFilesDestination, began: XCTestExpectation? = nil,
+         fail: Bool = false, commitDespiteCancellation: Bool = false) {
+        self.destination = destination; self.began = began; self.fail = fail
+        self.commitDespiteCancellation = commitDespiteCancellation
+    }
+    func commits() -> Int { count }
+    func release() { held?.resume(); held = nil }
+    func commit() async throws {
+        count += 1
+        if let began { await withCheckedContinuation { held = $0; began.fulfill() } }
+        if !commitDespiteCancellation { try Task.checkCancellation() }
+        if fail { throw ExportDirectoryError.permissionLost }
+    }
 }
 
 private actor FakeExifSource: CameraExifSource {
@@ -2883,6 +2913,152 @@ final class CameraNetworkTests: XCTestCase {
         let emptyHistory = await queue.snapshot()
         XCTAssertTrue(emptyHistory.rows.isEmpty); XCTAssertEqual(emptyHistory.completedOriginalRevision, 2)
         await camera.abort()
+    }
+
+    func testDestinationCommitFencesNewAdmissionAndStartsExactlyOnceWithSuccessOrOldTargetOnFailure() async throws {
+        for fail in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+            let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+            let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+            let old = QueueDestinationProbe(), next = QueueDestinationProbe()
+            _ = try await queue.configureDestination(old)
+            let began = expectation(description: "destination commit held")
+            let change = DestinationChangeProbe(next, began: began, fail: fail)
+            let configuring = Task { try await queue.configureDestination(change) }
+            await fulfillment(of: [began], timeout: 3)
+            let count = wire.sent().count
+            _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+            await queue.start() // Repeated explicit start still results in one worker.
+            let during = await queue.snapshot()
+            XCTAssertFalse(during.running); XCTAssertEqual(during.rows.first?.status, "WAITING")
+            XCTAssertEqual(wire.sent().count, count); XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+            let rejected = try await queue.configureDestination(QueueDestinationProbe()); XCTAssertFalse(rejected)
+            await change.release()
+            do { let applied = try await configuring.value; XCTAssertFalse(fail); XCTAssertTrue(applied) }
+            catch { XCTAssertTrue(fail) }
+            try await waitUntil("admitted task finished") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+            let oldCalls = await old.calls(), newCalls = await next.calls()
+            XCTAssertEqual(oldCalls.count, fail ? 1 : 0); XCTAssertEqual(newCalls.count, fail ? 0 : 1)
+            await camera.abort()
+        }
+    }
+
+    func testPauseAndStopDuringDestinationCommitWithdrawTheQueuedStartWithoutDroppingTasks() async throws {
+        for stop in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+            let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+            let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+            let began = expectation(description: "paused configuration held"), change = DestinationChangeProbe(target, began: began)
+            let configuring = Task { try await queue.configureDestination(change) }
+            await fulfillment(of: [began], timeout: 3)
+            _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+            if stop { await queue.stop() } else { await queue.pauseAfterCurrent() }
+            let count = wire.sent().count
+            await change.release(); let applied = try await configuring.value; XCTAssertTrue(applied)
+            let paused = await queue.snapshot()
+            XCTAssertFalse(paused.running); XCTAssertTrue(paused.paused); XCTAssertEqual(paused.rows.first?.status, "WAITING")
+            XCTAssertEqual(wire.sent().count, count)
+            await queue.start()
+            try await waitUntil("resumed new target") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+            let calls = await target.calls(); XCTAssertEqual(calls.count, 1)
+            await camera.abort()
+        }
+    }
+
+    func testDestinationCancellationBeforeCommitKeepsOldTargetButAfterCommitCannotUndoIt() async throws {
+        for committed in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+            let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+            let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+            let old = QueueDestinationProbe(), next = QueueDestinationProbe(); _ = try await queue.configureDestination(old)
+            let began = expectation(description: "cancel configuration held")
+            let change = DestinationChangeProbe(next, began: began, commitDespiteCancellation: committed)
+            let configuring = Task { try await queue.configureDestination(change) }
+            await fulfillment(of: [began], timeout: 3)
+            await queue.pauseAfterCurrent()
+            _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: true)
+            await queue.start() // An explicit start after pause must resume, even while commit is suspended.
+            configuring.cancel(); await change.release()
+            do { let applied = try await configuring.value; XCTAssertTrue(committed); XCTAssertTrue(applied) }
+            catch { XCTAssertFalse(committed); XCTAssertTrue(error is CancellationError) }
+            try await waitUntil("cancellation boundary target used") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+            let oldCalls = await old.calls(), newCalls = await next.calls()
+            XCTAssertEqual(oldCalls.count, committed ? 0 : 1); XCTAssertEqual(newCalls.count, committed ? 1 : 0)
+            await camera.abort()
+        }
+    }
+
+    func testStaleDestinationValidationCannotOverrideAnInterveningCommittedChange() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let stale = QueueDestinationProbe(), next = QueueDestinationProbe(), began = expectation(description: "old validation held")
+        await stale.holdValidation(began)
+        let validating = Task { try await queue.configureDestination(stale) }
+        await fulfillment(of: [began], timeout: 3)
+        let applied = try await queue.configureDestination(DestinationChangeProbe(next)); XCTAssertTrue(applied)
+        await stale.releaseValidation()
+        let oldApplied = try await validating.value; XCTAssertFalse(oldApplied)
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        try await waitUntil("only new target used") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let oldCalls = await stale.calls(), newCalls = await next.calls()
+        XCTAssertTrue(oldCalls.isEmpty); XCTAssertEqual(newCalls.count, 1)
+        await camera.abort()
+    }
+
+    func testDestinationChangeIsRejectedWithoutCommittingWhileAnOriginalIsPublishing() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8))))
+        _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+        let began = expectation(description: "active original held"); await target.hold(began)
+        _ = try await queue.configureDestination(target)
+        _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        await fulfillment(of: [began], timeout: 3)
+        let change = DestinationChangeProbe(QueueDestinationProbe())
+        let applied = try await queue.configureDestination(change); XCTAssertFalse(applied)
+        let commits = await change.commits(); XCTAssertEqual(commits, 0)
+        await target.release()
+        try await waitUntil("old publication finished") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        await camera.abort()
+    }
+
+    func testRealPreparedDirectoryBecomesQueueTargetAndServesExistingOriginalWithoutNetwork() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("provider"), sandbox = root.appendingPathComponent("app")
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let original = target.appendingPathComponent("sample.JPG"), bookmark = root.appendingPathComponent("grant")
+        try Data("ABC".utf8).write(to: original)
+        let grant = PageDirectoryGrant(target), directory = ScopedDirectoryStore(bookmarkFile: bookmark, access: grant)
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: sandbox)), old = QueueDestinationProbe()
+        _ = try await queue.configureDestination(old)
+        let change = try await ProviderDirectoryChange.prepare(target, directory: directory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: bookmark.path))
+        let applied = try await queue.configureDestination(change); XCTAssertTrue(applied)
+        XCTAssertEqual(try Data(contentsOf: bookmark), Data([1]))
+        let taskID = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+        let id = try XCTUnwrap(taskID)
+        try await waitUntil("prepared provider selected by real queue") {
+            let state = await queue.snapshot(); return !state.running && state.rows.first?.status == "COMPLETED"
+        }
+        let state = await queue.snapshot(), calls = await old.calls()
+        XCTAssertTrue(try XCTUnwrap(state.rows.first).skipped); XCTAssertTrue(calls.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.path))
+        let shared = try await queue.prepareSavedFile(id), saved = try XCTUnwrap(shared)
+        XCTAssertEqual(try Data(contentsOf: saved.url), Data("ABC".utf8))
+        XCTAssertEqual(try Data(contentsOf: original), Data("ABC".utf8))
+        XCTAssertEqual(grant.starts, grant.stops); XCTAssertTrue(wire.sent().isEmpty)
     }
 
     func testExistingProviderCopyIsSkippedOfflineAndSharedOnDemandFromTheSameDateBucket() async throws {
