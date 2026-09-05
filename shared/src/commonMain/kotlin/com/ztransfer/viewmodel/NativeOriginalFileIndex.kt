@@ -21,8 +21,11 @@ class NativeOriginalIndexUpdate(val revision: Long, val baseRevision: Long, val 
     internal fun validatedEntries(): List<NativeOriginalIndexEntry>? = if (valid) entries.toList() else null
 }
 
-/** Single UI owner. Same compiled lookup/copy-suffix/size rules used by Android directory indexes. */
-internal class NativeOriginalFileIndex {
+/** Metadata only; a locator never grants access to the underlying platform file. */
+data class NativeOriginalMatch(val name: String, val size: Long, val locator: String)
+
+/** Single owner (UI or IO actor). Same lookup/copy-suffix/size rules as Android directory indexes. */
+class NativeOriginalFileIndex {
     private var buckets = HashMap<String, ExistingFileNameIndexCore<String>>()
     var revision: Long = -1L
         private set
@@ -47,7 +50,13 @@ internal class NativeOriginalFileIndex {
 
     fun contains(file: CameraFileInfo, folder: String?): Boolean = localLocator(file, folder) != null
     fun localLocator(file: CameraFileInfo, folder: String?): String? =
-        buckets[transferDestinationLookupKey(folder)]?.find(file.fileName, file.size)?.value
+        find(file, folder)?.locator
+
+    /** Return the selected LOCAL name/size, not the requested camera name/unknown-size sentinel. */
+    fun find(file: CameraFileInfo, folder: String?): NativeOriginalMatch? =
+        buckets[transferDestinationLookupKey(folder)]?.find(file.fileName, file.size)?.let {
+            NativeOriginalMatch(it.displayName, it.size, it.value)
+        }
 }
 
 /** Expose existing directory classification to Swift; calendar validity deliberately is not added. */

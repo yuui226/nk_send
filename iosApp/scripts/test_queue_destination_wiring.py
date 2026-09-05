@@ -9,6 +9,21 @@ BASE = '5921001'
 QUEUE = 'iosApp/ZTransfer/Network/CameraOriginalQueue.swift'
 PROVIDER = 'iosApp/ZTransfer/Storage/ProviderOriginalStore.swift'
 PROBE = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
+
+# Batch 52 adds only the existing-original completion adapter. Keep the full previous
+# reducer comparison: stripping this exact reviewed addition must restore the baseline.
+EXISTING_COMPLETION = '''    /** Android's plain-original DL_SKIP branch: no download duration/speed or effect generation. */
+    fun completedExisting(taskId: Long, bytes: Long) {
+        if (activeId != taskId || bytes < 0) return
+        tasks = tasks.map { task ->
+            if (task.taskId == taskId) task.copy(status = TransferStatus.COMPLETED, skipped = true,
+                progress = 1f, downloaded = bytes, speed = 0L) else task
+        }
+        activeId = null
+        activeProgress = null
+    }
+
+'''
 def read(path): return (ROOT / path).read_text(encoding='utf-8')
 def before(path): return subprocess.check_output(['git', 'show', BASE + ':' + path], cwd=ROOT).decode('utf-8')
 
@@ -45,6 +60,42 @@ class QueueDestinationWiringTest(unittest.TestCase):
         self.assertNotIn('nextId', value)
         for path in ('shared/src/commonMain/kotlin/com/ztransfer/viewmodel/NativeOriginalTransferQueue.kt',
                      'shared/src/commonMain/kotlin/com/ztransfer/viewmodel/TransferTaskPolicy.kt'):
+            current = read(path)
+            if path.endswith('/NativeOriginalTransferQueue.kt'):
+                self.assertEqual(1, current.count(EXISTING_COMPLETION))
+                current = current.replace(EXISTING_COMPLETION, '', 1)
+            self.assertEqual(before(path), current)
+
+    def test_existing_lookup_only_exposes_matched_metadata_from_the_original_kernel(self):
+        path = 'shared/src/commonMain/kotlin/com/ztransfer/viewmodel/NativeOriginalFileIndex.kt'
+        current = read(path)
+        replacements = (
+            (
+                '/** Metadata only; a locator never grants access to the underlying platform file. */\n'
+                'data class NativeOriginalMatch(val name: String, val size: Long, val locator: String)\n\n'
+                '/** Single owner (UI or IO actor). Same lookup/copy-suffix/size rules as Android directory indexes. */\n'
+                'class NativeOriginalFileIndex {',
+                '/** Single UI owner. Same compiled lookup/copy-suffix/size rules used by Android directory indexes. */\n'
+                'internal class NativeOriginalFileIndex {',
+            ),
+            (
+                '        find(file, folder)?.locator\n\n'
+                '    /** Return the selected LOCAL name/size, not the requested camera name/unknown-size sentinel. */\n'
+                '    fun find(file: CameraFileInfo, folder: String?): NativeOriginalMatch? =\n'
+                '        buckets[transferDestinationLookupKey(folder)]?.find(file.fileName, file.size)?.let {\n'
+                '            NativeOriginalMatch(it.displayName, it.size, it.value)\n'
+                '        }',
+                '        buckets[transferDestinationLookupKey(folder)]?.find(file.fileName, file.size)?.value',
+            ),
+        )
+        for new, old in replacements:
+            self.assertEqual(1, current.count(new))
+            current = current.replace(new, old, 1)
+        self.assertEqual(before(path), current)
+
+    def test_android_existing_file_rules_and_plain_skip_branch_are_unchanged(self):
+        for path in ('app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt',
+                     'shared/src/commonMain/kotlin/com/ztransfer/viewmodel/TransferFilePolicy.kt'):
             self.assertEqual(before(path), read(path))
 
     def test_retained_original_lookup_cleanup_never_deletes_files(self):

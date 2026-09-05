@@ -95,6 +95,17 @@ class NativeOriginalTransferQueue {
         activeProgress = null
     }
 
+    /** Android's plain-original DL_SKIP branch: no download duration/speed or effect generation. */
+    fun completedExisting(taskId: Long, bytes: Long) {
+        if (activeId != taskId || bytes < 0) return
+        tasks = tasks.map { task ->
+            if (task.taskId == taskId) task.copy(status = TransferStatus.COMPLETED, skipped = true,
+                progress = 1f, downloaded = bytes, speed = 0L) else task
+        }
+        activeId = null
+        activeProgress = null
+    }
+
     fun failed(taskId: Long, message: String?, cancelled: Boolean) {
         if (activeId != taskId) return
         tasks = tasks.map { task ->
