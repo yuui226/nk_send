@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有32个App Swift文件、139个XCTest场景及11项iOS位图Native测试，均待Mac编译/运行；526项共享测试、307项Android测试、135项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第三十二批最终4m 54s）。按用户定义，Windows可做工作全部结束为100%，当前粗估80%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有32个App Swift文件、139个XCTest场景及11项iOS位图Native测试，均待Mac编译/运行；536项共享测试、311项Android测试、139项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第三十三批3m 26s）。按用户定义，Windows可做工作全部结束为100%，当前粗估81%；不等于iOS成品或真机验收进度。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -154,3 +154,8 @@ Xcode 的第一个 Build Phase 会调用：
 ### 实际位图与共享缩略图缓存（第三十二批）
 
 真实网格使用的NativeGridImages现提供预览适配：同一份32MiB/128项缓存，关闭预览不清父缓存；FHD/本地PNG真正解码为Compose ImageBitmap并释放临时Skia Image。禁止触网时仍能读取内存/磁盘缓存，不发或等待相机请求，本地未命中不影响后续远程尝试。833项共享/Android测试、135项辅助检查和编译/Lint通过；新增Native实际解码用例后共11项Native位图测试、139个XCTest仍待Mac。完整预览入口与EXIF/RAW/页面状态仍待整合。
+
+
+### RAW索引解析共享（第三十三批）
+
+原Android TIFF/JPEG索引与日期纯解析现位于shared/preview/NefPreviewMetadata；Android保留原入口委托，连接收发与本地按解码像素数选图完全未动。新增8,256组字节差分样本及完整源码守卫，847项共享/Android测试、139项辅助检查与编译/Lint通过。旧解析面对损坏极端偏移仍可能抛异常；Native桥接必须在Kotlin侧隔离失败。Native RAW安全分段读取/实际选图仍待接，不表示已能在iOS打开RAW，Apple目标尚未编译。
