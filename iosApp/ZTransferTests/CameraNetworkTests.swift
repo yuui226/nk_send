@@ -7,6 +7,12 @@ import ZTransferShared
 import XCTest
 @testable import ZTransfer
 
+@MainActor private final class AppearancePlatformProbe: NSObject, NativeAppearancePlatform {
+    func readAppearance() -> NativeAppearancePreferences? { NativeAppearancePreferences.companion.defaults() }
+    func saveAppearance(value: NativeAppearancePreferences) -> Bool { true }
+    func setScreenAwake(enabled: Bool) { XCTFail("Controller creation must not own app idle state") }
+}
+
 @MainActor private final class FakeGpsGattDriver: NikonGpsGattDriver {
     var eventHandler: ((GpsGattDriverEvent) -> Void)?
     var onWrite: (() -> Void)?
@@ -981,6 +987,92 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertEqual(oldInitializer.previewRotationQuarterTurns, 0); XCTAssertFalse(oldInitializer.previewHistogramEnabled)
     }
 
+    @MainActor func testAppearanceStoreDefaultsRoundTripAndBrowseIsolation() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AppearancePreferencesStore(defaults: defaults)
+        let first = try XCTUnwrap(store.read())
+        XCTAssertEqual(first.themeName, "SYSTEM"); XCTAssertEqual(first.skinName, "FROSTED_GLASS")
+        XCTAssertEqual(first.appLanguage, "system"); XCTAssertTrue(first.hapticsEnabled); XCTAssertTrue(first.keepScreenOn)
+        XCTAssertNil(defaults.object(forKey: AppearancePreferencesStore.key))
+        XCTAssertTrue(store.save(NativeAppearancePreferences(themeName: "DARK", appLanguage: "zh-Hant",
+            skinName: "WOOD", hapticsEnabled: false, keepScreenOn: false)))
+        let data = defaults.data(forKey: AppearancePreferencesStore.key)
+        XCTAssertTrue(BrowsePreferencesStore(defaults: defaults).save(NativeBrowsePreferences.companion.defaults()))
+        XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key), data)
+        let restored = try XCTUnwrap(store.read())
+        XCTAssertEqual(restored.themeName, "DARK"); XCTAssertEqual(restored.skinName, "WOOD")
+        XCTAssertEqual(restored.appLanguage, "zh-Hant"); XCTAssertFalse(restored.hapticsEnabled); XCTAssertFalse(restored.keepScreenOn)
+    }
+
+    @MainActor func testAppearanceStorePreservesFutureCorruptWrongTypeAndOversizedData() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AppearancePreferencesStore(defaults: defaults)
+        let invalid: [Any] = ["not data", Data("broken".utf8), Data("{\"version\":2}".utf8),
+            Data("{\"version\":1,\"hapticsEnabled\":\"wrong type\"}".utf8), Data(repeating: 0, count: 16 * 1024 + 1)]
+        for raw in invalid {
+            defaults.set(raw, forKey: AppearancePreferencesStore.key)
+            XCTAssertNil(store.read()); XCTAssertFalse(store.save(NativeAppearancePreferences.companion.defaults()))
+            if let data = raw as? Data { XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key), data) }
+            else { XCTAssertEqual(defaults.string(forKey: AppearancePreferencesStore.key), raw as? String) }
+        }
+    }
+
+    @MainActor func testAppearanceAppOwnerRestoresLegacySkinAndDoesNotChangeNumericLocale() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Data("{\"version\":1,\"skinName\":\"unknown\",\"themeName\":\"DARK\"}".utf8), forKey: AppearancePreferencesStore.key)
+        let owner = AppAppearanceSettings(defaults: defaults, notifications: NotificationCenter(), systemLanguage: { "en" },
+            screenAwake: { _ in XCTFail("Not started") }, isApplicationActive: { false })
+        defer { owner.close() }
+        XCTAssertEqual(owner.themeName, "DARK")
+        XCTAssertEqual(owner.model.currentPreferences().skinName, "TITANIUM")
+        XCTAssertEqual(AppearancePreferencesStore(defaults: defaults).read()?.skinName, "TITANIUM")
+        let locale = Locale.current.identifier
+        owner.model.setLanguage(tag: "zh-Hans")
+        XCTAssertEqual(Locale.current.identifier, locale)
+    }
+
+    @MainActor func testAppearanceOwnerReleasesIdleSynchronouslyAcrossLifecycleAndClose() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let center = NotificationCenter()
+        var awake: [Bool] = []
+        let owner = AppAppearanceSettings(defaults: defaults, notifications: center, systemLanguage: { "en" },
+            screenAwake: { awake.append($0) }, isApplicationActive: { true })
+        defer { owner.close() }
+        owner.start(); owner.start()
+        XCTAssertEqual(awake, [true])
+        center.post(name: UIApplication.willResignActiveNotification, object: nil)
+        XCTAssertEqual(awake, [true, false])
+        center.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        owner.model.setKeepScreenOn(enabled: false); owner.model.setKeepScreenOn(enabled: true)
+        owner.close(); owner.close()
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        XCTAssertEqual(awake, [true, false, true, false, true, false])
+    }
+
+    @MainActor func testAppearanceSaveFailureKeepsLiveShellAndPreservesOriginalDocument() throws {
+        let suite = "appearance-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let data = Data("{\"version\":99}".utf8)
+        defaults.set(data, forKey: AppearancePreferencesStore.key)
+        let owner = AppAppearanceSettings(defaults: defaults, notifications: NotificationCenter(), systemLanguage: { "en" },
+            screenAwake: { _ in }, isApplicationActive: { false })
+        defer { owner.close() }
+        owner.model.setThemeName(name: "LIGHT")
+        XCTAssertEqual(owner.themeName, "LIGHT")
+        XCTAssertEqual(owner.model.currentPreferences().themeName, "LIGHT")
+        XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key), data)
+    }
+
     @MainActor func testBrowsePreferencesDefaultReadDoesNotWriteAndRoundTripUsesSharedNormalization() throws {
         let suite = "ZTransferTests.browse.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -1061,7 +1153,9 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertTrue(originals.fullSnapshot); XCTAssertTrue(originals.entries.isEmpty)
         XCTAssertTrue(bridge.model.publishOriginals(update: NativeOriginalIndexUpdate(revision: originals.revision,
             baseRevision: originals.baseRevision, fullSnapshot: originals.fullSnapshot)))
-        let controller = SharedUiController.shared.originalFiles(model: bridge.model, languageTag: "en", onBack: { KotlinUnit() })
+        let appearance = NativeAppearanceModel(platform: AppearancePlatformProbe(), systemLanguageTag: "en")
+        defer { appearance.close() }
+        let controller = SharedUiController.shared.originalFiles(model: bridge.model, appearance: appearance, onBack: { KotlinUnit() })
         controller.loadViewIfNeeded(); XCTAssertNotNil(controller.view)
         bridge.close()
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
@@ -1189,7 +1283,9 @@ final class CameraNetworkTests: XCTestCase {
         let snapshot = CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 0, storageIDs: [0x10001],
             files: [file], objectInfos: [7: info], totalHandles: 1, metadataComplete: true, changedWhileScanning: false)
         XCTAssertTrue(bridge.acceptCatalog(snapshot, sequence: bridge.model.beginScan()))
-        let controller = SharedUiController.shared.originalFiles(model: bridge.model, languageTag: "zh-Hant", onBack: { KotlinUnit() })
+        let appearance = NativeAppearanceModel(platform: AppearancePlatformProbe(), systemLanguageTag: "zh-Hant")
+        defer { appearance.close() }
+        let controller = SharedUiController.shared.originalFiles(model: bridge.model, appearance: appearance, onBack: { KotlinUnit() })
         controller.loadViewIfNeeded()
         XCTAssertNotNil(controller.view)
         let before = await queue.snapshot()
@@ -1248,7 +1344,9 @@ final class CameraNetworkTests: XCTestCase {
             previews: CameraPreviewStore(source: camera), stationMode: camera.stationMode)
         XCTAssertTrue(bridge.model.stationMode)
         bridge.setConnected(true)
-        let controller = SharedUiController.shared.originalQueue(model: bridge.model, languageTag: "en", onBack: { KotlinUnit() })
+        let appearance = NativeAppearanceModel(platform: AppearancePlatformProbe(), systemLanguageTag: "en")
+        defer { appearance.close() }
+        let controller = SharedUiController.shared.originalQueue(model: bridge.model, appearance: appearance, onBack: { KotlinUnit() })
         controller.loadViewIfNeeded()
         XCTAssertNotNil(controller.view)
         bridge.close()
@@ -1261,7 +1359,9 @@ final class CameraNetworkTests: XCTestCase {
         _ = await queue.enqueue(try sampleInfo(7), byDate: false, dayKey: 0, deferred: true)
         let bridge = OriginalQueuePageBridge(connectionID: camera.connectionID, queue: queue, previews: CameraPreviewStore(source: camera))
         bridge.publish(await queue.snapshot())
-        let controller = SharedUiController.shared.originalQueue(model: bridge.model, languageTag: "zh-Hans", onBack: { KotlinUnit() })
+        let appearance = NativeAppearanceModel(platform: AppearancePlatformProbe(), systemLanguageTag: "zh-Hans")
+        defer { appearance.close() }
+        let controller = SharedUiController.shared.originalQueue(model: bridge.model, appearance: appearance, onBack: { KotlinUnit() })
         controller.loadViewIfNeeded()
         XCTAssertNotNil(controller.view)
         let state = await queue.snapshot()

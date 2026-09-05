@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 
 struct ContentView: View {
+    @ObservedObject private var appearance = AppAppearanceSettings.shared
     #if DEBUG
     @State private var showSharedComponents = false
     #endif
@@ -39,6 +40,8 @@ struct ContentView: View {
             }
             .padding(24)
         }
+        .preferredColorScheme(appearance.colorScheme)
+        .onAppear { appearance.start() }
     }
 }
 

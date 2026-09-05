@@ -148,7 +148,7 @@ struct OriginalQueuePage: UIViewControllerRepresentable {
     func makeCoordinator() -> OriginalQueuePageBridge { bridge }
     func makeUIViewController(context: Context) -> UIViewController {
         let controller = SharedUiController.shared.originalQueue(model: bridge.model,
-            languageTag: Locale.preferredLanguages.first ?? "en", onBack: {
+            appearance: AppAppearanceSettings.shared.model, onBack: {
                 bridge.close(); dismiss()
                 return KotlinUnit()
             })

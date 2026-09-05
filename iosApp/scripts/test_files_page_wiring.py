@@ -23,7 +23,7 @@ class FilesPageWiringTest(unittest.TestCase):
         self.assertIn('val collapseBursts = layout.collapseBursts', s)
         controls=(root/'shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedSettingsControls.kt').read_text(encoding='utf-8')
         self.assertIn('PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)', controls)
-        self.assertIn('NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor)', s)
+        self.assertIn('NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor, appearance)', s)
         self.assertIn('LaunchedEffect(collapseBursts, state.bursts)', s)
         self.assertIn('} else emptySet()', s)
         self.assertIn('tapToPreview = layout.tapToPreview', s)

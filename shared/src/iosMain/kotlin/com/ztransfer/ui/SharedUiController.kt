@@ -43,16 +43,19 @@ object SharedUiController {
         }
     }
 
-    fun originalFiles(model: NativeFilesPageModel, languageTag: String, onBack: () -> Unit): UIViewController =
+    fun originalFiles(model: NativeFilesPageModel, appearance: NativeAppearanceModel, onBack: () -> Unit): UIViewController =
         ComposeUIViewController {
             val images = remember(model) { NativeGridImages(model) }
             DisposableEffect(images) { onDispose { images.close() } }
-            SharedZTransferTheme {
+            val appearanceState by appearance.state.collectAsState()
+            val languageTag = appearanceState.resolvedLanguage
+            NativeAppTheme(appearanceState) {
                 val queueText = NativeQueueTextCatalog.forLanguage(languageTag)
                 NativeOriginalFilesPage(model, NativeFilesTextCatalog.forLanguage(languageTag), queueText,
                     NativeFilterTextCatalog.forLanguage(languageTag), images, onBack,
                     previewText = NativePreviewTextCatalog.forLanguage(languageTag, model::previewMetadata),
                     settingsText = NativeSettingsTextCatalog.forLanguage(languageTag),
+                    appearance = appearance,
                     openPreview = { files -> NativePreviewSessionSource.open(model, images, files) },
                     queuePage = { back ->
                         NativeOriginalQueuePage(model.queue, queueText,
@@ -63,9 +66,11 @@ object SharedUiController {
             }
         }
 
-    fun originalQueue(model: NativeQueuePageModel, languageTag: String, onBack: () -> Unit): UIViewController =
+    fun originalQueue(model: NativeQueuePageModel, appearance: NativeAppearanceModel, onBack: () -> Unit): UIViewController =
         ComposeUIViewController {
-            SharedZTransferTheme {
+            val appearanceState by appearance.state.collectAsState()
+            val languageTag = appearanceState.resolvedLanguage
+            NativeAppTheme(appearanceState) {
                 NativeOriginalQueuePage(model, NativeQueueTextCatalog.forLanguage(languageTag),
                     elapsedRealtimeMs = { (NSProcessInfo.processInfo.systemUptime * 1000.0).toLong() },
                     onBack = onBack,

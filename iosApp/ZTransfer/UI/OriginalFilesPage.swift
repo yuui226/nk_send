@@ -409,7 +409,7 @@ struct OriginalFilesPage: UIViewControllerRepresentable {
     func makeCoordinator() -> OriginalFilesPageBridge { bridge }
     func makeUIViewController(context: Context) -> UIViewController {
         let controller = SharedUiController.shared.originalFiles(model: bridge.model,
-            languageTag: Locale.preferredLanguages.first ?? "en", onBack: {
+            appearance: AppAppearanceSettings.shared.model, onBack: {
                 bridge.close(); dismiss(); return KotlinUnit()
             })
         bridge.queuePage.presenter = controller

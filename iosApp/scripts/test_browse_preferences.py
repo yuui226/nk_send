@@ -33,7 +33,7 @@ class BrowsePreferencesWiringTest(unittest.TestCase):
         self.assertIn('if (criteria.untransferredOnly && !originals.ready)', page)
         self.assertIn('rememberExportExitState(tasks.tasks, criteria.untransferredOnly && originals.ready, exportedHandles)', page)
         self.assertEqual({'english', 'simplified', 'traditional'}, set(PREFERENCES_FAILURE))
-        self.assertIn('if (preferencesFailed) Text(text.preferencesFailed', page)
+        self.assertIn('if (preferencesFailed || appearanceState.preferencesFailed) Text(text.preferencesFailed', page)
 
     def test_privacy_reason_is_registered_in_app_resources_exactly_once(self):
         manifest = plistlib.loads((ROOT/'iosApp/ZTransfer/Configuration/PrivacyInfo.xcprivacy').read_bytes())

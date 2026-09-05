@@ -34,6 +34,7 @@ internal fun NativeOriginalFilesPage(
     thumbnails: ThumbnailGridImageSource, onBack: () -> Unit,
     previewText: PreviewSessionText,
     settingsText: NativeSettingsPageText,
+    appearance: NativeAppearanceModel,
     openPreview: (List<CameraFileInfo>) -> NativePreviewPageSource?,
     queuePage: @Composable (onBack: () -> Unit) -> Unit,
 ) {
@@ -43,6 +44,7 @@ internal fun NativeOriginalFilesPage(
     val layout by model.layout.collectAsState()
     val previewOptions by model.previewOptions.collectAsState()
     val preferencesFailed by model.preferencesFailed.collectAsState()
+    val appearanceState by appearance.state.collectAsState()
     val tasks by model.queue.state.collectAsState()
     val connected by model.queue.connected.collectAsState()
     val colors = AppTheme.colors
@@ -55,7 +57,7 @@ internal fun NativeOriginalFilesPage(
     var queueBounds by remember(model) { mutableStateOf<Rect?>(null) }
     var settingsAnchor by remember(model) { mutableStateOf<Rect?>(null) }
     var openedSettingsAnchor by remember(model) { mutableStateOf<Rect?>(null) }
-    val haptics = rememberHaptics(true)
+    val haptics = rememberHaptics(appearanceState.hapticsEnabled)
     val density = LocalDensity.current
     DisposableEffect(model) {
         onDispose { previewBuildJob?.cancel(); preview?.source?.close() }
@@ -196,7 +198,7 @@ internal fun NativeOriginalFilesPage(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
             if (originals.failed) Text(text.indexFailed, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
-            if (preferencesFailed) Text(text.preferencesFailed, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall,
+            if (preferencesFailed || appearanceState.preferencesFailed) Text(text.preferencesFailed, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
             if (!originals.ready) Text(text.indexPending, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
@@ -250,7 +252,7 @@ internal fun NativeOriginalFilesPage(
                     anchorRect = opening.anchor.takeIf { opening.identity === previewIdentity },
                     session = opening.source, text = previewText, burstContent = burstContent,
                     backHandler = { _, _ -> }, // iOS has no Android hardware Back; original tap/gesture close remains.
-                    hapticsEnabled = true, transfersBusy = tasks.isTransferring,
+                    hapticsEnabled = appearanceState.hapticsEnabled, transfersBusy = tasks.isTransferring,
                     initialRotationQuarterTurns = previewOptions.rotationQuarterTurns,
                     histogramVisible = previewOptions.histogramEnabled, burstHandles = burstIDs.keys,
                     queueTaskFor = { file -> taskIndex[file.handle]?.let(tasks.tasks::getOrNull)?.takeIf { it.file.handle == file.handle } },
@@ -276,13 +278,13 @@ internal fun NativeOriginalFilesPage(
             }
         }
         openedSettingsAnchor?.let { frozenAnchor ->
-            NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor) { openedSettingsAnchor = null }
+            NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor, appearance) { openedSettingsAnchor = null }
         }
         openedFilterAnchor?.let { frozenAnchor ->
             SharedFilterOverlay(
                 anchorBounds = frozenAnchor, calendar = filterCalendar, text = filterText, screenWidth = screenWidth,
                 availableExts = availableExts, current = criteria, storageSlots = storageSlots,
-                suggestedDate = suggestedDate, hapticsEnabled = true,
+                suggestedDate = suggestedDate, hapticsEnabled = appearanceState.hapticsEnabled,
                 untransferredEnabled = originals.ready,
                 onChange = { next ->
                     if (model.changeFilters(next)) {

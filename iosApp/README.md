@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有33个App Swift文件、185个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；612项共享测试、317项Android测试、186项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十五批3m 26s）。按用户定义，Windows可做工作全部结束为100%，当前粗估89%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有34个App Swift文件、190个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；622项共享测试、317项Android测试、193项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十六批3m 44s）。按用户定义，Windows可做工作全部结束为100%，当前粗估89%；不等于iOS成品或真机验收进度。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -31,6 +31,8 @@ Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主�
 完整原筛选弹层、日期编辑/松手提交拨轮与通用AnchorPopup已共享，Android真实调用且保留原Java日历、语言资源、屏宽及返回键。Native已接真实目录多条件筛选、空卡、本地Gregorian日期与同源原片索引；两端共用原未传输退场协调器。首次索引未就绪禁用未传输选项；列数/连拍合并/点击行为及筛选已保存恢复，照片列表设置使用原共享拨轮，恢复未传输时等待索引就绪；后台日期优先已接，预览已接同一完整共享overlay，仍待其余设置与Apple验收。没有复制第二套产品筛选页。
 
 原分页/连拍展开返回/来源会话快照/上滑意图规则已共享，9项原测试随之迁到common；原预览单页/FHD渐显/连拍堆叠/EXIF信息条和导航/入队按钮已共享并由Android调用；预览/遥控共用的直方图统计、绘制、图标及预览开关也已共享，Android保持原像素读取与调度，Native位图读取已有待Mac用例；完整分页/FHD/EXIF/邻页预读取消/连拍切换/入队飞行协调器已迁SharedPhotoPreviewOverlay，Android原入口实际调用；URI/图片解码/资源文案/生命周期进度等仅保留平台适配，Native真实预览源与目录入口已接，Apple待验。原单图预览/缩放手势/旋转按钮已共享：Android完整列表预览与单图预览使用同一个viewport，保留原双指/双击/旋转/关闭和动画参数。Debug真实相机或滤镜预览后可点“检查原版单图缩放/旋转（真实预览）”；PNG由ImageIO归一化、限2048边/20MiB，经NSData批量复制接共享组件，打开时冻结图片，内存警告/切后台释放。仍待Mac编译与手势/截图/性能验证；单图探针仍独立保留；第四十四批已在真实目录页接通完整overlay，真实FHD/EXIF、本地原尺寸读取、异步入队确认及返回定位都使用既有输入链路；这不等于Apple编译或实际UI验收通过。
+
+`Configuration/AppAppearanceSettings`统一持有主题/语言/按钮皮肤/触感/常亮的独立版本化偏好；文件页与队列页借用同一共享model，实时应用原主题、纹理palette和三语文案，不重建连接、预览源或传输队列。文件/筛选/完整预览触感已接开关，队列操作触感仍待U05。常亮仅前台启用，失去焦点/后台同步释放，关闭一个页面不关闭应用owner。首次默认磨砂、未知旧皮肤回退钛金属；坏/未来文档保留并提示。Apple编译、实际渲染和生命周期均待Mac；不是完整正式设置页已完成。
 
 `Configuration/BrowsePreferencesStore`仅持有应用私有版本化浏览偏好；列数2～4、默认3列/开启连拍合并来自Android实际恢复值及shared校验。未知版本/损坏数据保留并提示，卡槽不落盘。点击预览字段已按可选v1值保存，旧数据默认关闭；模型其它设置变更保留该字段，三语两行手势说明与Android编译资源对照。新增UserDefaults隐私理由声明已登记到资源，完整应用/依赖隐私审计仍是发布门槛。
 
@@ -52,7 +54,7 @@ Debug页支持手动IP或STA Bonjour候选、AP/STA标准持续会话和显式�
 
 STA-direct、MPF/RAW预览、完整事件/自动入队、共享UI、遥控/完整GPS/效果/权益仍未完成。
 
-照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，185个XCTest也未在Mac运行。
+照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，190个XCTest也未在Mac运行。
 
 ### Mac 一键验收（M1）
 

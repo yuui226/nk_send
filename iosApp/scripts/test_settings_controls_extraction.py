@@ -45,12 +45,13 @@ class SettingsControlsExtractionTest(unittest.TestCase):
     def test_actual_native_page_consumes_setting_and_uses_original_card_not_duplicate_controls(self):
         page = read('shared/src/commonMain/kotlin/com/ztransfer/ui/NativeOriginalFilesPage.kt')
         self.assertIn('tapToPreview = layout.tapToPreview', page)
-        self.assertIn('NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor)', page)
+        self.assertIn('NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor, appearance)', page)
         host = read('shared/src/commonMain/kotlin/com/ztransfer/ui/NativePhotoSettingsOverlay.kt')
         self.assertIn('SharedPhotoListSettingsCard(', host)
         self.assertIn('onTapToPreview = model::setTapToPreview', host)
         self.assertIn('val openingAnchor = remember { anchor }', host)
         self.assertNotIn('SharedTransferDirectorySettingsCard(', host)  # No unconnected directory controls.
-        self.assertNotIn('SharedAppearanceSettingsCard(', host)  # Appearance owner still pending.
+        self.assertIn('SharedAppearanceSettingsCard(', host)  # Real app-wide owner, not inert controls.
+        self.assertIn('onKeepScreenOn = appearance::setKeepScreenOn', host)
 
 if __name__ == '__main__': unittest.main()

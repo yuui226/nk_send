@@ -19,7 +19,8 @@ import com.ztransfer.ui.theme.AppTheme
 /** Temporary settings host: only working preferences appear; the full workspace remains pending. */
 @Composable
 internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: NativeBrowseLayout,
-    text: NativeSettingsPageText, anchor: Rect, onDismiss: () -> Unit) {
+    text: NativeSettingsPageText, anchor: Rect, appearance: NativeAppearanceModel, onDismiss: () -> Unit) {
+    val appearanceState by appearance.state.collectAsState()
     val openingAnchor = remember { anchor }
     val density = LocalDensity.current
     val panelTop = with(density) { openingAnchor.bottom.toDp() } + 8.dp
@@ -37,10 +38,16 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
                 }
             }
             Spacer(Modifier.height(14.dp))
-            SharedPhotoListSettingsCard(layout.columns, layout.collapseBursts, layout.tapToPreview, true, text,
+            SharedPhotoListSettingsCard(layout.columns, layout.collapseBursts, layout.tapToPreview, appearanceState.hapticsEnabled, text,
                 onColumns = { model.changeLayout(it, model.layout.value.collapseBursts) },
                 onCollapseBursts = { model.changeLayout(model.layout.value.columns, it) },
                 onTapToPreview = model::setTapToPreview)
+            Spacer(Modifier.height(14.dp))
+            SharedAppearanceSettingsCard(appearanceState.theme, appearanceState.language, "system", appearanceState.skin,
+                appearanceState.hapticsEnabled, appearanceState.keepScreenOn, text,
+                onTheme = { appearance.setThemeName(it.name) }, onLanguage = appearance::setLanguage,
+                onSkin = { appearance.setSkinName(it.name) }, onHaptics = appearance::setHapticsEnabled,
+                onKeepScreenOn = appearance::setKeepScreenOn, close = close)
         }
     }
 }
