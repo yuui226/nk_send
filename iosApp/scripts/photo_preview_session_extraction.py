@@ -2,6 +2,7 @@
 from thumbnail_grid_extraction import section
 from transfer_card_extraction import replace_once
 from photo_preview_display_extraction import wrapper
+from preview_async_enqueue_wiring import add_async_preview_enqueue
 
 HEADER = '''@file:OptIn(kotlin.experimental.ExperimentalObjCRefinement::class)
 
@@ -187,4 +188,4 @@ def extract_photo_preview_session(source):
                 'NIKON_RAW_EXTENSIONS', 'TIFF_EXTENSIONS', 'PtpConstants', 'kotlinx.coroutines.flow.StateFlow')):
             imports = replace_once(imports, line, '')
     shared = HEADER + imports + ''.join(constants) + '\n' + shared + ghost
-    return android, shared.rstrip() + '\n', CONTRACT
+    return android, add_async_preview_enqueue(shared.rstrip() + '\n'), CONTRACT

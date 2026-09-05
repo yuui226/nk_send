@@ -141,6 +141,8 @@ fun <Source : Any> SharedPhotoPreviewOverlay(
     onTransfer: (CameraFileInfo) -> Boolean = { false },
     // 合集页整组入队；动画在本层复用当前合集叠片，不借用被遮住的列表坐标。
     onTransferBurst: (List<CameraFileInfo>) -> Boolean = { false },
+    // Native queue admission is asynchronous. Null preserves the original synchronous Android path.
+    onTransferAsync: (suspend (List<CameraFileInfo>) -> Int)? = null,
     // 预览内主动展开/收起合集时同步底层列表，关闭预览后两处状态一致。
     onBurstExpandedChange: (String, Boolean) -> Unit = { _, _ -> },
     // 每次旋转后回传归一化方向，父层写入全局偏好。
@@ -242,6 +244,18 @@ fun <Source : Any> SharedPhotoPreviewOverlay(
     val queueThrowApexPx = with(density) { 132.dp.toPx() }
     val currentOnTransfer by rememberUpdatedState(onTransfer)
     val currentOnTransferBurst by rememberUpdatedState(onTransferBurst)
+    val currentOnTransferAsync by rememberUpdatedState(onTransferAsync)
+    val asyncQueueAcceptance = remember(onTransferAsync != null) {
+        if (onTransferAsync != null) PreviewQueueAcceptance() else null
+    }
+    if (asyncQueueAcceptance != null) {
+        DisposableEffect(asyncQueueAcceptance) {
+            onDispose { asyncQueueAcceptance.close() }
+        }
+        DisposableEffect(asyncQueueAcceptance, currentItem?.key, closing) {
+            onDispose { asyncQueueAcceptance.cancel() }
+        }
+    }
     val currentQueueTargetBounds by rememberUpdatedState(queueTargetBounds)
     val currentOnQueueFlightCaught by rememberUpdatedState(onQueueFlightCaught)
     val histogramSource = currentHandle?.let(displayedBitmaps::get)
@@ -371,11 +385,39 @@ fun <Source : Any> SharedPhotoPreviewOverlay(
         }
     }
 
+    fun awaitPreviewQueueAcceptance(
+        files: List<CameraFileInfo>, bitmap: ImageBitmap?, rotation: Float,
+        burstFiles: List<CameraFileInfo>? = null,
+    ) {
+        val enqueue = currentOnTransferAsync ?: return
+        val gate = asyncQueueAcceptance ?: return
+        if (queueAnimating || closing || burstTransitionBusy) return
+        val key = previewItems.getOrNull(pagerState.currentPage)?.key ?: return
+        // Do not hold an upward drag indefinitely while waiting for the real queue acknowledgement.
+        queueGestureActive = false
+        settleQueuePhoto()
+        gate.request(previewScope, files,
+            isCurrent = {
+                !closing && !queueAnimating && !burstTransitionBusy &&
+                    previewItems.getOrNull(pagerState.currentPage)?.key == key
+            },
+            enqueue = enqueue,
+            onAccepted = {
+                // Already confirmed by the real queue, not an optimistic success or a second enqueue.
+                startPreviewQueueFlight(bitmap, rotation, burstFiles) { true }
+            },
+        )
+    }
+
     fun enqueueFromPreview(file: CameraFileInfo) {
         // FHD 已经在屏幕上时直接复用；否则复用打开预览所用的缓存缩略图。
         // 先挂载 alpha=0 的影子并预留两帧，再开始飞行，避免首次绘制纹理闪现。
         val bitmap = highResolutionBitmaps[file.handle]
             ?: session.cached(file.handle)
+        if (currentOnTransferAsync != null) {
+            awaitPreviewQueueAcceptance(listOf(file), bitmap, rotationDegrees)
+            return
+        }
         startPreviewQueueFlight(bitmap, rotationDegrees) {
             currentOnTransfer(file)
         }
@@ -383,6 +425,10 @@ fun <Source : Any> SharedPhotoPreviewOverlay(
 
     fun enqueueBurstFromPreview(collection: PhotoPreviewItem.BurstCollection) {
         if (collection.files.isEmpty()) return
+        if (currentOnTransferAsync != null) {
+            awaitPreviewQueueAcceptance(collection.files, null, 0f, collection.files)
+            return
+        }
         startPreviewQueueFlight(
             bitmap = null,
             rotation = 0f,

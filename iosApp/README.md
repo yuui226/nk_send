@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有32个App Swift文件、128个XCTest场景及5项iOS位图Native测试，均待Mac编译/运行；507项共享测试、307项Android测试、121项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第二十九批3m 11s）。按用户定义，Windows可做工作全部结束为100%，当前粗估77%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有32个App Swift文件、128个XCTest场景及5项iOS位图Native测试，均待Mac编译/运行；518项共享测试、307项Android测试、125项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第三十批3m 20s）。按用户定义，Windows可做工作全部结束为100%，当前粗估78%；不等于iOS成品或真机验收进度。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -139,3 +139,8 @@ Xcode 的第一个 Build Phase 会调用：
 ### 正式预览读取准备（第二十九批）
 
 现有OriginalFilesPageBridge已绑定NativePreviewReadSession：借用现有相机/缓存，独立页代次与请求取消、32槽限额、前台令牌配对；FHD只取高清、不抢EXIF之后才允许的缩略图兜底。正式FHD采用1920长边、保留相机像素方向，经NSData一次有界复制到共享图片载体；原诊断/网格方向处理不变。原片来源沿用真实索引，但本地全尺寸读取、EXIF、正式图片适配、异步入队确认和产品预览入口仍待接，不能把读取接口当完整预览已完成。新增6项XCTest仅已写，Swift/Native互操作、ImageIO方向/像素与生命周期仍待Mac验证。
+
+
+### 预览真实入队确认（第三十批）
+
+原共享预览新增可选异步入队接点，只有实际接受整个请求后才复用原飞行动画；等待中的重复点击不重复入队，部分接受保持真实队列与原提示，翻页/关闭后迟到结果不播放旧页动画。Android不传该接点，仍走原同步分支。825项共享/Android测试、125项脚本及编译/Lint在Windows通过；Native正式预览入口仍须与EXIF/本地原片及图片适配一起接通，不把接口准备算成成品页面。

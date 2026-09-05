@@ -8,6 +8,35 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun previewAdmissionUsesRealFilesModelResultAndKeepsPartialNoticeWithoutFullGroupFlight() {
+        val p = Platform(); val m = model(p); m.finishScan(m.beginScan(), snapshot())
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        val gate = com.ztransfer.ui.screen.PreviewQueueAcceptance()
+        var flights = 0
+        assertTrue(gate.request(scope, m.state.value.files, { true }, m::enqueue) { flights++ })
+        assertTrue(m.state.value.enqueueing); assertEquals(0, flights)
+        p.enqueueResult!!.complete(2)
+        assertEquals(NativeFilesNotice.PARTIAL_ENQUEUE, m.state.value.notice)
+        assertFalse(m.state.value.enqueueing); assertEquals(0, flights)
+        assertTrue(gate.request(scope, m.state.value.files, { true }, m::enqueue) { flights++ })
+        p.enqueueResult!!.complete(3)
+        assertEquals(1, flights); assertEquals(NativeFilesNotice.NONE, m.state.value.notice)
+        gate.close(); m.close()
+    }
+
+    @Test fun closingOnlyPreviewCancelsItsWaiterButNeverStopsParentQueueOrAcceptsLateFlight() {
+        val p = Platform(); val m = model(p); m.finishScan(m.beginScan(), snapshot())
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        val gate = com.ztransfer.ui.screen.PreviewQueueAcceptance()
+        var flights = 0
+        gate.request(scope, m.state.value.files, { true }, m::enqueue) { flights++ }
+        val late = p.enqueueResult!!
+        gate.close(); late.complete(3)
+        assertEquals(0, flights); assertFalse(m.state.value.enqueueing)
+        assertEquals(0, p.cancelled); assertTrue(m.queue.connected.value)
+        m.close()
+    }
+
     @Test fun previewSessionsHaveDistinctLifetimesWithoutClosingTheirParentQueue() {
         val events = mutableListOf<String>()
         val preview = object : NativePreviewReadPlatform {
