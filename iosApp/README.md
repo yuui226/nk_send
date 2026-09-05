@@ -20,7 +20,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 开始编写 iOS 代码
 
-完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有34个App Swift文件、190个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；622项共享测试、317项Android测试、193项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十六批3m 44s）。按用户定义，Windows可做工作全部结束为100%，当前粗估89%；不等于iOS成品或真机验收进度。
+完整实现账本见 [iOS实现任务清单](../docs/技术调研/iOS实现任务清单.md)。当前有35个App Swift文件、204个XCTest场景及17项iOS预览/位图Native测试，均待Mac编译/运行；622项共享测试、317项Android测试、200项辅助脚本及common metadata/Android Debug与Release编译/双模块Lint已在Windows通过（第四十六批3m 44s）。按用户定义，Windows可做工作全部结束为100%，当前粗估89%；不等于iOS成品或真机验收进度。第47批仅Apple/脚本变更，本批运行200项脚本及结构/源码守卫；939项Kotlin/Android与Lint沿用第46批，没有重复构建。
 
 Debug新增“检查共享Compose组件”：UIKit容器显示commonMain的主题、图标、进度、材质按钮、连接卡片、拨轮、帮助提示与烟花，并提供触感验收按钮，不复制SwiftUI产品页面。颜色/字号/动画/几何有原样源码检查；Android依赖升级的差异与未验收默认样式见任务清单。Android位图/触感适配已随组件移至shared/androidMain，原行为保留；系统栏仍在app，不把探针当正式完整UI。
 
@@ -48,13 +48,15 @@ Debug页支持手动IP或STA Bonjour候选、AP/STA标准持续会话和显式�
 
 `PtpIPCommandSession` 为metadata/data-out/流式文件提供同一完整事务FIFO；文件每块至多64KiB，检查TID并读完最终响应。`CameraWiFiConnection`（原APCameraConnection）持有双通道/连接代次、STA初始化、下载全程保活抑制。`CameraCatalog`调用shared逐卡倒序/逐头归并/双卡备份规则。`CameraOriginalQueue`调用已有shared队列和reducer。`CameraPreviewStore`合并同键请求、区分临时失败和确定无图，编码缓存上限32MiB/256项。
 
-`Storage`只负责Apple文件和媒体系统：本次独占临时文件、关闭后无覆盖发布、SHA256、addOnly PhotoKit、方向修正及受限输出尺寸解码、系统复制导出及Files目录书签。目录授权不代表下载已改写到provider；尚无provider协调IO、持久断点恢复或完整图库相册管理。原片队列已接真实字节进度/速度及迟到隔离。
+`Storage`只负责Apple文件和媒体系统：本次独占临时文件、关闭后无覆盖发布、SHA256、addOnly PhotoKit、方向修正及受限输出尺寸解码、系统复制导出及Files目录书签。目录授权不代表队列下载已改写到provider；完整原片的手动provider协调发布已写，自动目标/索引、持久断点恢复或完整图库相册管理仍未完成。原片队列已接真实字节进度/速度及迟到隔离。
+
+`Storage/ProviderOriginalPublisher`在既有目录授权作用域内使用NSFileCoordinator读源/写目标；64KiB复制、源SHA256与目标回读验证后按shared同名规则发布，不覆盖已有文件。取消只尝试清理本次part，原片保留；不会声称云端已同步。Debug已保存原片或取出队列结果后，可点“写入已选目录”/“按拍摄日期写入已选目录”作真实验收。14个新增Apple文件/取消/授权用例待Mac；原片队列仍以沙盒为默认目标，provider索引/已有文件预览/自动发布及正式目录设置仍须继续。
 
 `GPS`已有前台CoreLocation/GEO共享编码、SecRandom/CommonCrypto配对primitive及共享四阶段适配、可注入的GATT FIFO和CoreBluetooth扫描/连接/顺序订阅。Debug定位仅本地检查编码，蓝牙页只连接/订阅，不向相机发送身份或坐标。GATT就绪不表示GPS认证或OS配对成功；完整认证调度/身份保存/写坐标与恢复仍待接线。
 
 STA-direct、MPF/RAW预览、完整事件/自动入队、共享UI、遥控/完整GPS/效果/权益仍未完成。
 
-照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，190个XCTest也未在Mac运行。
+照片适配已有`PhotoMetadataReader`（ImageIO属性→共享EXIF/显示规则）及`PhotoFilterPreviewRenderer`（4MP sRGB/alpha转换→4096像素分块调用共享内核）。Debug可读取已下载照片元数据、查看首个内置滤镜80%预览；不会改原片或导出效果成片。原尺寸成片/相框水印、完整色彩/透明边缘对照与性能验收仍未完成，204个XCTest也未在Mac运行。
 
 ### Mac 一键验收（M1）
 

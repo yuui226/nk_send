@@ -7,6 +7,11 @@ import re
 import xml.etree.ElementTree as ET
 
 
+def count_test_methods(directory):
+    return sum(len(re.findall(r"func (test\w+)\(", path.read_text(encoding="utf-8")))
+               for path in directory.rglob("*.swift"))
+
+
 class OpenStepParser:
     """Parse the text plist subset used by this project, including quoted build settings."""
     token = re.compile(r'\s+|/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|[{}()=;,]|[^\s{}()=;,"]+', re.S)
@@ -135,9 +140,8 @@ def main():
     task_path = root.parent / "docs/技术调研/iOS实现任务清单.md"
     tasks = re.findall(r"^\| (IOS-[A-Z]\d+) \|", task_path.read_text(encoding="utf-8"), re.M)
     check(len(tasks) == len(set(tasks)), "Duplicate iOS task ID")
-    test_source = (root / "ZTransferTests/CameraNetworkTests.swift").read_text(encoding="utf-8")
-    tests = re.findall(r"func (test\w+)\(", test_source)
-    print(f"PASS Xcode references, framework order and XCTest scheme; {len(tests)} test methods present (NOT RUN)")
+    tests = count_test_methods(root / "ZTransferTests")
+    print(f"PASS Xcode references, framework order and XCTest scheme; {tests} test methods present (NOT RUN)")
     print(f"PASS task IDs: {len(tasks)} unique implementation/acceptance tasks")
     print("Swift compilation, Kotlin/Native export names and device behavior still require Mac verification.")
 

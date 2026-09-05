@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		7A120000000000000000006E = {isa = PBXBuildFile; fileRef = 7A120000000000000000006F; };
+		7A120000000000000000006C = {isa = PBXBuildFile; fileRef = 7A120000000000000000006D; };
 		7A120000000000000000006A = {isa = PBXBuildFile; fileRef = 7A120000000000000000006B; };
 		7A1200000000000000000068 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000069; };
 		7A1200000000000000000066 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000067; };
@@ -46,6 +48,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		7A120000000000000000006F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPublicationTests.swift; sourceTree = "<group>"; };
+		7A120000000000000000006D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/ProviderOriginalPublisher.swift; sourceTree = "<group>"; };
 		7A120000000000000000006B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Configuration/AppAppearanceSettings.swift; sourceTree = "<group>"; };
 		7A1200000000000000000069 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/PreviewExifReader.swift; sourceTree = "<group>"; };
 		7A1200000000000000000067 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/CameraThumbnailDiskCache.swift; sourceTree = "<group>"; };
@@ -144,6 +148,7 @@
 				7A1200000000000000000061 /* OriginalFileIndex.swift */,
 				7A1200000000000000000063 /* BrowsePreferencesStore.swift */,
 				7A120000000000000000006B /* AppAppearanceSettings.swift */,
+				7A120000000000000000006D /* ProviderOriginalPublisher.swift */,
 				7A1200000000000000000067 /* CameraThumbnailDiskCache.swift */,
 				7A1200000000000000000065 /* PrivacyInfo.xcprivacy */,
 				7A120000000000000000005D /* OriginalQueuePage.swift */,
@@ -164,7 +169,7 @@
 /* iOS network tests: built by the shared scheme against the real application/framework. */
 		7A1200000000000000000021 /* ZTransferTests */ = {
 			isa = PBXGroup;
-			children = (7A1200000000000000000014,);
+			children = (7A1200000000000000000014, 7A120000000000000000006F,);
 			path = ZTransferTests;
 			sourceTree = "<group>";
 		};
@@ -194,7 +199,7 @@
 		7A1200000000000000000031 = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (7A1200000000000000000004,);
+			files = (7A1200000000000000000004, 7A120000000000000000006E,);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		7A1200000000000000000032 = {
@@ -372,6 +377,7 @@
 				7A1200000000000000000056 /* PhotoMetadataReader.swift in Sources */,
 				7A1200000000000000000068 /* PreviewExifReader.swift in Sources */,
 				7A120000000000000000006A /* AppAppearanceSettings.swift in Sources */,
+				7A120000000000000000006C /* ProviderOriginalPublisher.swift in Sources */,
 				7A1200000000000000000054 /* BluetoothProbeView.swift in Sources */,
 				7A1200000000000000000050 /* NikonGpsGattConnection.swift in Sources */,
 				7A1200000000000000000052 /* AppleNikonGpsGattDriver.swift in Sources */,

@@ -6,6 +6,7 @@ import unittest
 from preview_priority_wiring import without_priority_page
 from preview_preferences_wiring import without_preview_options_model
 from preview_metadata_wiring import without_metadata_model, without_metadata_page
+from provider_publication_wiring import without_provider_publication_probe
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = 'ccccc01'
@@ -34,7 +35,7 @@ class ExifCacheWiringTest(unittest.TestCase):
         path = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
         value = read(path)
         self.assertEqual(1, value.count('NativePreviewExifCache()'))
-        normalized = value.replace('    private let exifCache = NativePreviewExifCache()\n', '')
+        normalized = without_provider_publication_probe(value).replace('    private let exifCache = NativePreviewExifCache()\n', '')
         normalized = normalized.replace('previews: previews, exifSource: connection, exifCache: exifCache, stationMode:', 'previews: previews, stationMode:')
         self.assertEqual(before(path), normalized)
         path = 'iosApp/ZTransfer/Network/CameraPreviewStore.swift'

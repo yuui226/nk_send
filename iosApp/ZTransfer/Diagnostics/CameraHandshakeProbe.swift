@@ -26,6 +26,8 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published private(set) var downloading = false
     @Published private(set) var downloadStatus = ""
     @Published private(set) var savedURL: URL?
+    private var savedOriginal: SavedCameraFile?
+    private var savedCaptureDate: String?
     @Published private(set) var importingPhoto = false
     @Published private(set) var photoImportStatus = ""
     private let photoImporter = PhotoLibraryImporter()
@@ -107,6 +109,25 @@ final class CameraHandshakeProbe: ObservableObject {
         }
     }
 
+    /// Actual provider publication probe; does not yet redirect queue downloads or provider indexes.
+    func publishSavedToDirectory(byDate: Bool) {
+        guard !directoryBusy, let saved = savedOriginal, saved.url == savedURL else { return }
+        let folder = PtpTransferBridge.shared.destinationFolder(captureDate: savedCaptureDate, byDate: byDate,
+            dayKey: OriginalFilesPageBridge.localDayKey(at: Date(), timeZone: .current))
+        directoryBusy = true
+        directoryStatus = "正在向已选目录写入校验副本…"
+        directoryTask = Task {
+            defer { directoryBusy = false; directoryTask = nil }
+            do {
+                let directory = try ScopedDirectoryStore.applicationStore()
+                let result = try await ProviderOriginalPublisher(directory: directory).publish(saved, folder: folder)
+                directoryStatus = "已写入 \(result.url.lastPathComponent)，\(result.bytes) 字节，校验一致；应用内原片保留。云端同步由文件服务处理。"
+            } catch {
+                directoryStatus = Task.isCancelled ? "已取消外部目录写入；应用内原片保留。" : error.localizedDescription
+            }
+        }
+    }
+
     func exported(_ urls: [URL]?) {
         exportStatus = urls?.first.map { "系统已返回导出文件：\($0.lastPathComponent)。应用内原片保留；云端同步由文件服务管理。" }
             ?? "已取消系统导出；应用内原片保留。"
@@ -142,7 +163,7 @@ final class CameraHandshakeProbe: ObservableObject {
         samples = []
         sampleObjects = []
         downloadStatus = ""
-        savedURL = nil
+        savedURL = nil; savedOriginal = nil; savedCaptureDate = nil
         metadataStatus = ""; metadataTask?.cancel()
         queueSnapshot = nil
         status = "正在检查命令与事件通道…"
@@ -362,7 +383,12 @@ final class CameraHandshakeProbe: ObservableObject {
     func clearQueueHistory() { if let queue = originalQueue { Task { await queue.clearTerminal() } } }
     func shareQueueTask(_ id: Int64) {
         if let queue = originalQueue {
-            Task { if let saved = await queue.savedFile(id) { savedURL = saved.url } }
+            Task {
+                let captureDate = (await queue.snapshot()).rows.first { $0.id == id }?.captureDate
+                if let saved = await queue.savedFile(id) {
+                    savedURL = saved.url; savedOriginal = saved; savedCaptureDate = captureDate
+                }
+            }
         }
     }
 
@@ -372,7 +398,7 @@ final class CameraHandshakeProbe: ObservableObject {
         downloading = true
         let attempt = UUID()
         downloadAttempt = attempt
-        savedURL = nil
+        savedURL = nil; savedOriginal = nil; savedCaptureDate = nil
         downloadStatus = "正在下载 \(info.fileName ?? "原文件")…"
         downloadTask = Task {
             let foreground = await previews.beginForegroundUse()
@@ -385,7 +411,7 @@ final class CameraHandshakeProbe: ObservableObject {
                         self.downloadStatus = "已写入 \(progress.downloaded) 字节 / \(progress.total > 0 ? String(progress.total) : "未知总长")，\(progress.bytesPerSecond) B/s"
                     }
                 }
-                savedURL = saved.url
+                savedURL = saved.url; savedOriginal = saved; savedCaptureDate = info.captureDate
                 downloadStatus = "已保存 \(saved.url.lastPathComponent)，\(saved.bytes) 字节。SHA-256：\(saved.sha256)"
             } catch {
                 downloadStatus = Task.isCancelled ? "下载已取消；未发布不完整文件。" : error.localizedDescription
@@ -646,6 +672,10 @@ struct CameraHandshakeProbeView: View {
                     Button("读取照片元数据") { probe.inspectSavedMetadata() }.disabled(probe.readingMetadata)
                     Button("共享滤镜预览（首个预设）") { probe.previewSavedFilter() }.disabled(probe.loadingPreview)
                 }
+                HStack {
+                    Button("写入已选目录") { probe.publishSavedToDirectory(byDate: false) }
+                    Button("按拍摄日期写入已选目录") { probe.publishSavedToDirectory(byDate: true) }
+                }.font(.caption).disabled(probe.directoryBusy)
             }
             if !probe.exportStatus.isEmpty { Text(probe.exportStatus).font(.caption) }
             if !probe.metadataStatus.isEmpty { Text(probe.metadataStatus).font(.caption) }
