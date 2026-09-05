@@ -131,6 +131,10 @@ actor CameraOriginalQueue {
         try await store.originalData(locator: locator)
     }
 
+    func originalRawPreviewData(locator: String) async throws -> Data? {
+        try await store.originalRawPreviewData(locator: locator)
+    }
+
     /// Cancels the current network operation; pending tasks stay waiting for an explicit start.
     func stop() async {
         core.pauseAfterCurrent()

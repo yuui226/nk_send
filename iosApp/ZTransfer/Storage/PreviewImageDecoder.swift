@@ -1,12 +1,27 @@
 import Foundation
 import CoreGraphics
 import ImageIO
+import ZTransferShared
 
 enum PreviewImageError: Error { case invalidImage, invalidSize }
 
 /// Decodes away from the main actor. Bounded thumbnails/FHD are separate from full-size originals.
 /// Encoded files are not modified. This does not replace the original RAW/MPF/video extraction rules.
 actor PreviewImageDecoder {
+    /// Bounds-only candidate probe, equivalent to Android inJustDecodeBounds; no RAW render.
+    nonisolated static func rawPreviewPixels(_ data: Data) throws -> Int64 {
+        try Task.checkCancellation()
+        guard NativeRawPreviewBridge.shared.isCompleteJpeg(data: data as NSData),
+              let source = CGImageSourceCreateWithData(data as CFData,
+                  [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight] as? NSNumber,
+              (1...Int64(Int32.max)).contains(width.int64Value),
+              (1...Int64(Int32.max)).contains(height.int64Value) else { return -1 }
+        return LocalRawPreviewPolicy.shared.pixelCount(width: width.int32Value, height: height.int32Value)
+    }
+
     /// DIRECT_BITMAP route only: full resolution, no EXIF transform, no thumbnail API.
     /// RAW embedded-JPEG selection and TIFF's camera fallback are separate routes.
     func originalBitmapPNG(_ data: Data) throws -> Data {

@@ -32,6 +32,9 @@ interface NativePreviewReadPlatform {
     fun readLocalBitmap(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
         completion.complete(null)
     }
+    fun readLocalRaw(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
+        completion.complete(null)
+    }
     fun cancelPreviewRead(sessionId: Long, requestId: Long)
     fun endPreviewReads(sessionId: Long)
 }
@@ -70,6 +73,17 @@ class NativePreviewReadSession internal constructor(
         allowed = { localSource?.invoke(file, source) == true },
         start = { bridge, request, reply ->
             bridge.readLocalBitmap(sessionId, request, source, object : NativeLocalPreviewCompletion {
+                override fun complete(image: NativeLocalPreviewImage?) = reply(image)
+            })
+        },
+    )
+
+    /** Same frozen source and cancellation budget, but never decode the RAW container directly. */
+    @Throws(CancellationException::class)
+    suspend fun localRaw(file: CameraFileInfo, source: String): NativeLocalPreviewImage? = read(
+        allowed = { localSource?.invoke(file, source) == true },
+        start = { bridge, request, reply ->
+            bridge.readLocalRaw(sessionId, request, source, object : NativeLocalPreviewCompletion {
                 override fun complete(image: NativeLocalPreviewImage?) = reply(image)
             })
         },

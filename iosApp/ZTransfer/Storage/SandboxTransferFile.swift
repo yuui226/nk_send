@@ -144,11 +144,79 @@ actor CameraOriginalStore {
     /// Read only an indexed app-owned original. Never accepts arbitrary file/provider URLs.
     /// No network access or index rescan on a preview request; deletion/size change fails locally.
     func originalData(locator: String) throws -> Data {
+        try withOriginalInput(locator: locator, maximumFileBytes: Int64(Int32.max)) { input, size in
+            var data = Data()
+            var remaining = size
+            while remaining > 0 {
+                try Task.checkCancellation()
+                let chunk = try input.read(upToCount: Int(min(remaining, 64 * 1024))) ?? Data()
+                guard !chunk.isEmpty else { throw OriginalIndexError.incompleteMetadata }
+                data.append(chunk); remaining -= Int64(chunk.count)
+            }
+            guard (try input.read(upToCount: 1) ?? Data()).isEmpty else { throw OriginalIndexError.incompleteMetadata }
+            try Task.checkCancellation()
+            return data
+        }
+    }
+
+    /// Same indexed owner/descriptor checks, but only bounded slices of a potentially large RAW.
+    func originalRawPreviewData(locator: String) throws -> Data? {
+        try withOriginalInput(locator: locator, maximumFileBytes: Int64.max) { input, size in
+            let prefixCount = Int(min(size, Int64(LocalRawPreviewPolicy.shared.indexPrefixBytes)))
+            let prefix = try readOriginalRange(input, offset: 0, count: prefixCount, size: size)
+            let references = NativeRawPreviewBridge.shared.candidates(data: prefix as NSData)
+            var bestBytes: Data?
+            var bestPixels: Int64 = -1
+            for reference in references {
+                try Task.checkCancellation()
+                let offset = reference.offset, length = Int64(reference.length)
+                // Invalid/out-of-file candidates are misses, not permission to read another file.
+                guard offset >= 0, length > 0, offset <= size, length <= size - offset else { continue }
+                let bytes: Data
+                if offset + length <= Int64(prefix.count) {
+                    bytes = prefix.subdata(in: Int(offset)..<Int(offset + length))
+                } else {
+                    bytes = try readOriginalRange(input, offset: offset, count: Int(length), size: size)
+                }
+                let pixels = try PreviewImageDecoder.rawPreviewPixels(bytes)
+                if LocalRawPreviewPolicy.shared.isBetter(pixelCount: pixels, previous: bestPixels) {
+                    bestPixels = pixels; bestBytes = bytes
+                }
+            }
+            var finalState = stat()
+            guard fstat(input.fileDescriptor, &finalState) == 0, finalState.st_size == size else {
+                throw OriginalIndexError.incompleteMetadata
+            }
+            try Task.checkCancellation()
+            return bestBytes
+        }
+    }
+
+    private func readOriginalRange(_ input: FileHandle, offset: Int64, count: Int, size: Int64) throws -> Data {
+        try Task.checkCancellation()
+        guard offset >= 0, count >= 0, offset <= size, Int64(count) <= size - offset else {
+            throw OriginalIndexError.incompleteMetadata
+        }
+        try input.seek(toOffset: UInt64(offset))
+        var data = Data(), remaining = count
+        while remaining > 0 {
+            try Task.checkCancellation()
+            let chunk = try input.read(upToCount: min(remaining, 64 * 1024)) ?? Data()
+            guard !chunk.isEmpty else { throw OriginalIndexError.incompleteMetadata }
+            data.append(chunk); remaining -= chunk.count
+        }
+        try Task.checkCancellation()
+        return data
+    }
+
+    /// Opens once without following directory/leaf links, and closes on every return/throw.
+    private func withOriginalInput<T>(locator: String, maximumFileBytes: Int64,
+                                      body: (FileHandle, Int64) throws -> T) throws -> T {
         try Task.checkCancellation()
         guard let url = URL(string: locator), url.isFileURL,
               url.host == nil || url.host == "", url.query == nil, url.fragment == nil,
               let entry = originalIndex.entry(at: url), entry.url.absoluteString == locator,
-              entry.size > 0, entry.size <= Int64(Int32.max),
+              entry.size > 0, entry.size <= maximumFileBytes,
               SandboxTransferFile.safeComponent(entry.name),
               !SandboxTransferFile.isPrivatePartName(entry.name) else { throw OriginalIndexError.unsafeRoot }
         let canonicalRoot = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -182,17 +250,7 @@ actor CameraOriginalStore {
         var opened = stat()
         guard fstat(fileFD, &opened) == 0, opened.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
               opened.st_size == entry.size else { throw OriginalIndexError.incompleteMetadata }
-        var data = Data()
-        var remaining = entry.size
-        while remaining > 0 {
-            try Task.checkCancellation()
-            let chunk = try input.read(upToCount: Int(min(remaining, 64 * 1024))) ?? Data()
-            guard !chunk.isEmpty else { throw OriginalIndexError.incompleteMetadata }
-            data.append(chunk); remaining -= Int64(chunk.count)
-        }
-        guard (try input.read(upToCount: 1) ?? Data()).isEmpty else { throw OriginalIndexError.incompleteMetadata }
-        try Task.checkCancellation()
-        return data
+        return try body(input, entry.size)
     }
 
     static func applicationStore() throws -> CameraOriginalStore {

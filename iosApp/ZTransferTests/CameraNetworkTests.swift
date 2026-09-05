@@ -2148,6 +2148,147 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertNil(NativePreviewImageBridge.shared.fhdPng(data: Data() as NSData))
     }
 
+    private func rawIndexFixture(_ ranges: [(UInt32, UInt32)]) -> Data {
+        var data = Data(repeating: 0, count: max(128, 8 + ranges.count * 40))
+        func u16(_ at: Int, _ value: UInt16) { data[at] = UInt8(truncatingIfNeeded: value); data[at + 1] = UInt8(truncatingIfNeeded: value >> 8) }
+        func u32(_ at: Int, _ value: UInt32) { for i in 0..<4 { data[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        data[0] = 73; data[1] = 73; u16(2, 42); u32(4, 8)
+        for (i, range) in ranges.enumerated() {
+            let at = 8 + i * 40; u16(at, 2)
+            u16(at + 2, 0x0201); u16(at + 4, 4); u32(at + 6, 1); u32(at + 10, range.0)
+            u16(at + 14, 0x0202); u16(at + 16, 4); u32(at + 18, 1); u32(at + 22, range.1)
+            if i + 1 < ranges.count { u32(at + 26, UInt32(at + 40)) }
+        }
+        return data
+    }
+
+    private func writeRawFixture(root: URL, bodies: [(UInt32, Data)], ranges: [(UInt32, UInt32)]? = nil,
+                                 size: UInt64? = nil, header: Data? = nil) throws -> URL {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("ORIGINAL.NEF")
+        XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: nil))
+        let output = try FileHandle(forWritingTo: url); defer { try? output.close() }
+        let index = header ?? rawIndexFixture(ranges ?? bodies.map { ($0.0, UInt32($0.1.count)) })
+        try output.write(contentsOf: index)
+        for (offset, bytes) in bodies { try output.seek(toOffset: UInt64(offset)); try output.write(contentsOf: bytes) }
+        if let size { try output.truncate(atOffset: size) } // Sparse fixture, not a multi-GB allocation.
+        return url
+    }
+
+    private func padJpegFixture(_ jpeg: Data, minimumBytes: Int = 60_000) -> Data {
+        // Legal COM segment makes a lower-resolution JPEG larger in encoded bytes.
+        var result = Data(jpeg.prefix(2))
+        repeat {
+            result.append(contentsOf: [0xff, 0xfe, 0xea, 0x62])
+            result.append(Data(repeating: 65, count: 60_000))
+        } while result.count + jpeg.count - 2 <= minimumBytes
+        result.append(jpeg.dropFirst(2))
+        return result
+    }
+
+    func testRawPreviewSelectsDecodedPixelsNotEncodedSizeAndKeepsFullOrientation() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let large = try orientedPreviewFixture(width: 3000, height: 1500, orientation: 6)
+        let small = padJpegFixture(try orientedPreviewFixture(width: 20, height: 10, orientation: 1), minimumBytes: large.count)
+        XCTAssertGreaterThan(small.count, large.count)
+        let url = try writeRawFixture(root: root, bodies: [(4096, small), (UInt32(8192 + small.count), large)])
+        let store = CameraOriginalStore(root: root); let index = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, large)
+        let png = try await PreviewImageDecoder().originalBitmapPNG(XCTUnwrap(actual))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 3000); XCTAssertEqual(image.height, 1500)
+        let unchanged = try await store.originals(since: index.revision, rescan: false)
+        XCTAssertEqual(unchanged.revision, index.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+    }
+
+    func testRawPreviewReadsIndexedJpegBeyondPrefixAndTwoGiBWithoutReadingWholeRaw() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let jpeg = try orientedPreviewFixture(width: 40, height: 30, orientation: 1)
+        let offset: UInt32 = 2_147_483_648 + 4096
+        let url = try writeRawFixture(root: root, bodies: [(offset, jpeg)], size: UInt64(offset) + UInt64(jpeg.count))
+        let store = CameraOriginalStore(root: root); _ = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, jpeg)
+        do { _ = try await store.originalData(locator: url.absoluteString); XCTFail("Ordinary bitmap retains its existing full-read size bound") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        let fileSize = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        XCTAssertEqual(fileSize, Int(offset) + jpeg.count)
+    }
+
+    func testRawPreviewCanUseScannedJpegWithoutTiffDirectory() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let jpeg = try orientedPreviewFixture(width: 60, height: 40, orientation: 1)
+        let url = try writeRawFixture(root: root, bodies: [(1024, jpeg)], header: Data(repeating: 0, count: 128))
+        let store = CameraOriginalStore(root: root); _ = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, jpeg)
+    }
+
+    func testRawPreviewEqualPixelAreaKeepsFirstCandidateInOriginalIndexOrder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = padJpegFixture(try orientedPreviewFixture(width: 60, height: 40, orientation: 1))
+        let second = try orientedPreviewFixture(width: 40, height: 60, orientation: 1)
+        let url = try writeRawFixture(root: root, bodies: [(4096, first), (100_000, second)])
+        let store = CameraOriginalStore(root: root); _ = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, first)
+    }
+
+    func testRawPreviewSkipsOutOfFileAndUndecodableCandidates() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let jpeg = try orientedPreviewFixture(width: 40, height: 30, orientation: 1)
+        let url = try writeRawFixture(root: root, bodies: [(4096, Data([0xff, 0xd8, 0xff, 0xd9])), (8192, jpeg)],
+            ranges: [(UInt32.max, 100_000), (4096, 4), (8192, UInt32(jpeg.count))])
+        let store = CameraOriginalStore(root: root); _ = try await store.originals(since: -1, rescan: true)
+        let actual = try await store.originalRawPreviewData(locator: url.absoluteString)
+        XCTAssertEqual(actual, jpeg)
+    }
+
+    func testRawPreviewUsesExactIndexAndRejectsChangedSizeOrSymlink() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let jpeg = try orientedPreviewFixture(width: 40, height: 30, orientation: 1)
+        let url = try writeRawFixture(root: root, bodies: [(4096, jpeg)])
+        let store = CameraOriginalStore(root: root)
+        do { _ = try await store.originalRawPreviewData(locator: url.absoluteString); XCTFail("Unpublished locator") } catch {}
+        _ = try await store.originals(since: -1, rescan: true)
+        let before = try Data(contentsOf: url)
+        try Data([1]).write(to: url)
+        do { _ = try await store.originalRawPreviewData(locator: url.absoluteString); XCTFail("Changed size") } catch {}
+        try before.write(to: url)
+        let moved = root.appendingPathComponent("MOVED.NEF"); try FileManager.default.moveItem(at: url, to: moved)
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: moved)
+        do { _ = try await store.originalRawPreviewData(locator: url.absoluteString); XCTFail("Symlink") } catch {}
+    }
+
+    func testRawPreviewCancellationPrecedesFileAccess() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = CameraOriginalStore(root: root)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await store.originalRawPreviewData(locator: "file:///not-owned.NEF")
+        }
+        do { _ = try await task.value; XCTFail("Cancelled") } catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testRawNativeBridgeContainsMalformedTiffExceptionsAndChecksJpegEnvelope() throws {
+        var header = rawIndexFixture([])
+        header[4] = 0xff; header[5] = 0xff; header[6] = 0xff; header[7] = 0x7f
+        XCTAssertTrue(NativeRawPreviewBridge.shared.candidates(data: header as NSData).isEmpty)
+        XCTAssertTrue(NativeRawPreviewBridge.shared.candidates(data: Data(repeating: 0, count: 16 * 1024 * 1024 + 1) as NSData).isEmpty)
+        XCTAssertTrue(NativeRawPreviewBridge.shared.isCompleteJpeg(data: Data([0xff, 0xd8, 0xff, 0xd9]) as NSData))
+        XCTAssertFalse(NativeRawPreviewBridge.shared.isCompleteJpeg(data: Data([0xff, 0xd8, 0xff, 0xd9, 0]) as NSData))
+        XCTAssertFalse(NativeRawPreviewBridge.shared.isCompleteJpeg(data: Data() as NSData))
+    }
+
     private func orientedPreviewFixture(width: Int, height: Int, orientation: Int) throws -> Data {
         let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
             bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))

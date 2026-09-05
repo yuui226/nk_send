@@ -36,8 +36,7 @@ import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
 import com.ztransfer.protocol.NefPreviewReference
-import com.ztransfer.protocol.largestEmbeddedJpegRange
-import com.ztransfer.protocol.parseNefHeaderMetadata
+import com.ztransfer.preview.LocalRawPreviewPolicy
 import com.ztransfer.util.applyExifOrientation
 import java.io.ByteArrayInputStream
 import java.io.BufferedInputStream
@@ -63,7 +62,7 @@ internal const val PHOTO_FRAME_JPEG_QUALITY = 100
 internal const val PHOTO_FRAME_REGION_TARGET_PIXELS = 4 * 1024 * 1024
 private val PHOTO_FRAME_SESSION_PREFIX =
     "$PHOTO_FRAME_PART_PREFIX${UUID.randomUUID().toString().take(8)}_"
-private const val LOCAL_RAW_PREVIEW_INDEX_BYTES = 16 * 1024 * 1024
+private const val LOCAL_RAW_PREVIEW_INDEX_BYTES = LocalRawPreviewPolicy.indexPrefixBytes
 private val COLOR_ARCHIVE_FALLBACK_PALETTE = intArrayOf(
     0xFF262F12.toInt(),
     0xFF697B6C.toInt(),
@@ -719,10 +718,7 @@ object PhotoFrameExporter {
         sourceUri: Uri,
     ): Bitmap? {
         val prefix = readRawPreviewIndexPrefix(resolver, sourceUri) ?: return null
-        val references = buildList {
-            addAll(parseNefHeaderMetadata(prefix).previews)
-            largestEmbeddedJpegRange(prefix)?.let(::add)
-        }.distinct()
+        val references = LocalRawPreviewPolicy.candidates(prefix)
 
         var bestBytes: ByteArray? = null
         var bestPixels = -1L
@@ -731,9 +727,8 @@ object PhotoFrameExporter {
                 ?: return@forEach
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@forEach
-            val pixels = bounds.outWidth.toLong() * bounds.outHeight.toLong()
-            if (pixels > bestPixels) {
+            val pixels = LocalRawPreviewPolicy.pixelCount(bounds.outWidth, bounds.outHeight)
+            if (LocalRawPreviewPolicy.isBetter(pixels, bestPixels)) {
                 bestPixels = pixels
                 bestBytes = bytes
             }
@@ -801,11 +796,7 @@ object PhotoFrameExporter {
                 result
             } ?: return null
         }
-        return bytes.takeIf {
-            it.size >= 4 &&
-                it[0] == 0xFF.toByte() && it[1] == 0xD8.toByte() &&
-                it[it.lastIndex - 1] == 0xFF.toByte() && it[it.lastIndex] == 0xD9.toByte()
-        }
+        return bytes.takeIf(LocalRawPreviewPolicy::isCompleteJpeg)
     }
 
     private fun InputStream.skipFully(byteCount: Long): Boolean {

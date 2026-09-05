@@ -237,6 +237,15 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     }
 
     func readLocalBitmap(sessionId: Int64, requestId: Int64, source: String, completion: NativeLocalPreviewCompletion) {
+        readLocalPreview(sessionId: sessionId, requestId: requestId, source: source, embeddedRaw: false, completion: completion)
+    }
+
+    func readLocalRaw(sessionId: Int64, requestId: Int64, source: String, completion: NativeLocalPreviewCompletion) {
+        readLocalPreview(sessionId: sessionId, requestId: requestId, source: source, embeddedRaw: true, completion: completion)
+    }
+
+    private func readLocalPreview(sessionId: Int64, requestId: Int64, source: String,
+                                  embeddedRaw: Bool, completion: NativeLocalPreviewCompletion) {
         let key = "\(sessionId):\(requestId)"
         guard !closed, requestId > 0, previewUse?.session == sessionId,
               previewRequests[key] == nil, previewRequests.count < 32 else { completion.complete(image: nil); return }
@@ -247,7 +256,10 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
             defer { self.previewRequests.removeValue(forKey: key) }
             do {
                 try Task.checkCancellation()
-                let data = try await self.queue.originalData(locator: source)
+                let data: Data?
+                if embeddedRaw { data = try await self.queue.originalRawPreviewData(locator: source) }
+                else { data = try await self.queue.originalData(locator: source) }
+                guard let data else { completion.complete(image: nil); return }
                 try Task.checkCancellation()
                 let png = try await self.decoder.originalBitmapPNG(data)
                 try Task.checkCancellation()

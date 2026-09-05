@@ -15,7 +15,7 @@ class NativePreviewBitmapsIosTest {
     private inner class Platform : NativeFilesPagePlatform, NativeQueuePagePlatform, NativePreviewReadPlatform {
         var data: ByteArray? = png()
         val remotes = mutableListOf<Boolean>()
-        var fhdReads = 0; var localReads = 0; var ended = 0
+        var fhdReads = 0; var localReads = 0; var rawReads = 0; var ended = 0
         override fun readBrowsePreferences() = NativeBrowsePreferences.defaults()
         override fun saveBrowsePreferences(value: NativeBrowsePreferences) = true
         override fun currentDayKey() = 20260905
@@ -38,6 +38,9 @@ class NativePreviewBitmapsIosTest {
         }
         override fun readLocalBitmap(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
             localReads++; completion.complete(ownedLocalPreviewPng(png()))
+        }
+        override fun readLocalRaw(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
+            rawReads++; completion.complete(ownedLocalPreviewPng(png()))
         }
     }
     private fun model(p: Platform): NativeFilesPageModel {
@@ -91,6 +94,18 @@ class NativePreviewBitmapsIosTest {
         assertNull(preview.fhd(file.copy(fileName = "OTHER.JPG")))
         assertTrue(p.remotes.isEmpty()); assertEquals(0, p.fhdReads)
         preview.close(); grid.close(); m.close()
+    }
+
+    @Test fun rawUsesItsOwnReaderThenRealBitmapDecodeAndFrozenIdentity() = runBlocking {
+        val p = Platform(); val m = model(p); val grid = NativeGridImages(m)
+        val preview = grid.preview(reads(p), listOf(file))
+        assertEquals(2, assertNotNull(preview.localRaw(file, "frozen")).width)
+        assertNull(preview.localRaw(file.copy(size = 13), "frozen"))
+        assertNull(preview.localRaw(file, "wrong"))
+        assertEquals(1, p.rawReads); assertEquals(0, p.localReads); assertEquals(0, p.fhdReads)
+        assertNull(grid.cached(file)); preview.close()
+        assertNull(preview.localRaw(file, "frozen")); assertEquals(1, p.rawReads)
+        grid.close(); m.close()
     }
 
     @Test fun fhdAndLocalReallyDecodeWithoutCreatingAnotherThumbnailCache() = runBlocking {

@@ -34,7 +34,9 @@ class LocalPreviewWiringTest(unittest.TestCase):
 
     def test_local_bridge_shares_slots_but_does_not_require_connection_or_touch_camera(self):
         bridge = source('iosApp/ZTransfer/UI/OriginalFilesPage.swift')
-        read = bridge.split('func readLocalBitmap(', 1)[1].split('\n    func ', 1)[0]
+        self.assertIn('source: source, embeddedRaw: false, completion: completion)', bridge)
+        self.assertIn('source: source, embeddedRaw: true, completion: completion)', bridge)
+        read = bridge.split('private func readLocalPreview(', 1)[1].split('\n    func ', 1)[0]
         self.assertIn('previewRequests.count < 32', read)
         self.assertIn('previewUse?.session == sessionId', read)
         self.assertIn('self.queue.originalData(locator: source)', read)

@@ -12,6 +12,10 @@ class NativePreviewReadSessionTest {
         val cancelled = mutableListOf<Pair<Long, Long>>()
         val reads = linkedMapOf<Long, NativeFhdPreviewCompletion>()
         val locals = linkedMapOf<Long, NativeLocalPreviewCompletion>()
+        val raws = linkedMapOf<Long, NativeLocalPreviewCompletion>()
+        override fun readLocalRaw(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
+            raws[requestId] = completion
+        }
         override fun readLocalBitmap(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
             locals[requestId] = completion
         }
@@ -41,6 +45,41 @@ class NativePreviewReadSessionTest {
             for (i in 0..3) bytes[offset+i] = (value ushr (24 - 8*i)).toByte()
         }
         return bytes
+    }
+
+    @Test fun rawReadsUseFrozenOfflineSourceAndNeverOrdinaryDecodeOrFhd() {
+        val p = Platform()
+        val s = NativePreviewReadSession(7, p, { false }, Dispatchers.Unconfined,
+            isFrozenLocalSource = { f, source -> f == file && source == "owned" })
+        assertNull(Pending { s.localRaw(file, "wrong") }.result!!.getOrThrow())
+        val result = Pending { s.localRaw(file, "owned") }
+        val image = ownedLocalPreviewPng(png(6000, 4000))
+        p.raws[1]!!.complete(image)
+        assertSame(image, result.result!!.getOrThrow())
+        assertTrue(p.locals.isEmpty()); assertTrue(p.reads.isEmpty())
+        s.close()
+    }
+
+    @Test fun rawAndOtherRequestsShareSlotsAndCancellationRejectsLateRawReply() {
+        val p = Platform()
+        val s = NativePreviewReadSession(7, p, { true }, Dispatchers.Unconfined, isFrozenLocalSource = { _, _ -> true })
+        val first = Pending { s.localRaw(file, "owned") }; first.job.cancel()
+        assertEquals(listOf(7L to 1L), p.cancelled)
+        val pending = List(32) { i -> Pending { if (i % 2 == 0) s.localRaw(file, "owned") else s.localBitmap(file, "owned") } }
+        assertNull(Pending { s.fhd(file) }.result!!.getOrThrow())
+        p.raws[1]!!.complete(ownedLocalPreviewPng(png()))
+        assertTrue(first.result!!.isFailure); assertTrue(pending.all { it.result == null })
+        s.close(); assertTrue(pending.all { it.result!!.isFailure })
+    }
+
+    @Test fun rawDeadlineIsMissAndReleasesItsSlot() {
+        val p = Platform(); val clock = ManualDeadline()
+        val s = NativePreviewReadSession(7, p, { false }, clock, 30_000, { _, _ -> true })
+        val result = Pending { s.localRaw(file, "owned") }
+        assertEquals(1, p.raws.size); clock.expire()
+        assertNull(result.result!!.getOrThrow()); assertFalse(result.job.isCancelled)
+        assertEquals(listOf(7L to 1L), p.cancelled)
+        s.close()
     }
 
     @Test fun synchronousAndDuplicateRepliesAreSafeAndDoNotCancelSuccess() {

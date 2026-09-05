@@ -59,6 +59,15 @@ internal class NativePreviewBitmaps(
         return bitmap.takeIf { current(file) }
     }
 
+    suspend fun localRaw(file: CameraFileInfo, source: String): ImageBitmap? {
+        if (!current(file)) return null
+        val image = reads.localRaw(file, source) ?: return null
+        val bitmap = withContext(Dispatchers.Default) {
+            decodeNativePreviewBitmap(image.encoded, image.width, image.height)
+        }
+        return bitmap.takeIf { current(file) }
+    }
+
     fun close() {
         owner = null; filesByHandle = emptyMap()
         reads.close() // Never clear the parent grid cache or close its queue/camera.
