@@ -46,16 +46,16 @@ class NativePreviewReadWiringTest(unittest.TestCase):
                          "if (!completed) bridge.cancelPreviewRead(sessionId, request)",
                          "owner = null; currentFile = null"):
             self.assertIn(required, session)
-        self.assertLess(session.index("pending[request] = continuation"), session.index("bridge.readFhdPreview("))
+        self.assertLess(session.index("pending[request] = continuation"), session.index("start(bridge, request)"))
 
     def test_bridge_waits_for_paired_foreground_use_and_retains_cancelled_slots_until_drained(self):
         bridge = source("iosApp/ZTransfer/UI/OriginalFilesPage.swift")
-        read = bridge.split("func readFhdPreview", 1)[1].split("func cancelPreviewRead", 1)[0]
+        read = bridge.split("func readFhdPreview", 1)[1].split("\n    func ", 1)[0]
         self.assertLess(read.index("await use.task.value"), read.index("self.previews.fhd(info: info)"))
         self.assertEqual(2, read.count("filesByHandle[file.handle] == file"))
         self.assertIn("defer { self.previewRequests.removeValue(forKey: key) }", read)
         self.assertIn("previewRequests.count < 32", read)
-        cancel = bridge.split("func cancelPreviewRead", 1)[1].split("func endPreviewReads", 1)[0]
+        cancel = bridge.split("func cancelPreviewRead", 1)[1].split("\n    func ", 1)[0]
         self.assertIn("?.cancel()", cancel)
         self.assertNotIn("removeValue", cancel)
         end = bridge.split("func endPreviewReads", 1)[1].split("func cancelRequests", 1)[0]
@@ -66,6 +66,7 @@ class NativePreviewReadWiringTest(unittest.TestCase):
 
     def test_image_boundary_bulk_copies_once_and_checks_length_before_allocation(self):
         bridge = source("shared/src/iosMain/kotlin/com/ztransfer/ui/NativePreviewImageBridge.kt")
+        bridge = bridge.split("fun fhdPng(", 1)[1]
         self.assertLess(bridge.index("data.length < 33uL"), bridge.index("ByteArray("))
         self.assertEqual(1, bridge.count("memcpy("))
         self.assertIn("return ownedFhdPreviewPng(bytes)", bridge)

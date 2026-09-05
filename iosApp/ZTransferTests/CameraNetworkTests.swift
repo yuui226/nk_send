@@ -2122,6 +2122,131 @@ final class CameraNetworkTests: XCTestCase {
         return data as Data
     }
 
+    func testLocalPreviewReadsOnlyAnAlreadyPublishedIndexWithoutRescanningOrMutatingIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("ORIGINAL.JPG")
+        let bytes = Data(repeating: 37, count: 150_123) // More than two read chunks.
+        try bytes.write(to: url)
+        let store = CameraOriginalStore(root: root)
+        do { _ = try await store.originalData(locator: url.absoluteString); XCTFail("No published locator yet") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        let index = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(index.entries.first?.url.absoluteString)
+        let actual = try await store.originalData(locator: locator)
+        XCTAssertEqual(actual, bytes)
+        let unchanged = try await store.originals(since: index.revision, rescan: false)
+        XCTAssertEqual(unchanged.revision, index.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+    }
+
+    func testLocalPreviewRejectsExternalAliasesPrivatePartsAndNonFileLocators() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("A.JPG")
+        try Data([1, 2, 3]).write(to: file)
+        let part = root.appendingPathComponent(".nkpart_hidden.JPG")
+        try Data([1, 2, 3]).write(to: part)
+        let store = CameraOriginalStore(root: root)
+        let snapshot = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(snapshot.entries.first?.url.absoluteString)
+        for invalid in ["https://example.invalid/A.JPG", "file:///etc/passwd", locator + "?q=1",
+                        locator + "#fragment", part.absoluteString, root.appendingPathComponent("missing.JPG").absoluteString] {
+            do { _ = try await store.originalData(locator: invalid); XCTFail("Unowned locator: \(invalid)") }
+            catch { XCTAssertTrue(error is OriginalIndexError) }
+        }
+    }
+
+    func testLocalPreviewFailsOnDeletedOrChangedLengthWithoutChangingItsOldIndex() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("A.JPG")
+        try Data([1, 2, 3]).write(to: file)
+        let store = CameraOriginalStore(root: root)
+        let index = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(index.entries.first?.url.absoluteString)
+        try Data([1, 2, 3, 4]).write(to: file)
+        do { _ = try await store.originalData(locator: locator); XCTFail("Changed length") } catch {}
+        try FileManager.default.removeItem(at: file)
+        do { _ = try await store.originalData(locator: locator); XCTFail("Deleted file") } catch {}
+        let unchanged = try await store.originals(since: index.revision, rescan: false)
+        XCTAssertEqual(index.revision, unchanged.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+    }
+
+    func testLocalPreviewCannotFollowAnIndexedLeafReplacedByASymlink() async throws {
+        let area = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = area.appendingPathComponent("originals")
+        defer { try? FileManager.default.removeItem(at: area) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let file = root.appendingPathComponent("A.JPG")
+        let outside = area.appendingPathComponent("outside.JPG")
+        try Data([1, 2, 3]).write(to: file); try Data([9, 9, 9]).write(to: outside)
+        let store = CameraOriginalStore(root: root)
+        let index = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(index.entries.first?.url.absoluteString)
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: outside)
+        do { _ = try await store.originalData(locator: locator); XCTFail("Followed a symlink") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        XCTAssertEqual(try Data(contentsOf: outside), Data([9, 9, 9]))
+    }
+
+    func testLocalPreviewSupportsIndexedDateBucketButRejectsReplacementDirectorySymlink() async throws {
+        let area = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = area.appendingPathComponent("originals")
+        let folder = root.appendingPathComponent("ZT2026-09-05")
+        defer { try? FileManager.default.removeItem(at: area) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: folder.appendingPathComponent("A.JPG"))
+        let store = CameraOriginalStore(root: root)
+        let index = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(index.entries.first?.url.absoluteString)
+        let data = try await store.originalData(locator: locator); XCTAssertEqual(data, Data([1, 2, 3]))
+        let moved = area.appendingPathComponent("moved")
+        try FileManager.default.moveItem(at: folder, to: moved)
+        try FileManager.default.createSymbolicLink(at: folder, withDestinationURL: moved)
+        do { _ = try await store.originalData(locator: locator); XCTFail("Followed a replaced directory") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+    }
+
+    func testLocalPreviewReadHonorsCancellationBeforeAccessingStorage() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = CameraOriginalStore(root: root)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await store.originalData(locator: "file:///not-owned.JPG")
+        }
+        do { _ = try await task.value; XCTFail("Cancelled reader must fail") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testLocalBitmapPreservesOriginalResolutionAndCameraPixelOrientation() async throws {
+        let jpeg = try orientedPreviewFixture(width: 3000, height: 1500, orientation: 6)
+        let decoder = PreviewImageDecoder()
+        let png = try await decoder.originalBitmapPNG(jpeg)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(png as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 3000); XCTAssertEqual(image.height, 1500)
+        let diagnostic = try await decoder.decode(jpeg)
+        XCTAssertEqual(diagnostic.width, 1024); XCTAssertEqual(diagnostic.height, 2048)
+    }
+
+    @MainActor func testLocalBitmapBulkBridgeDoesNotApplyCameraFhdOrProbeLimits() async throws {
+        let jpeg = try orientedPreviewFixture(width: 3000, height: 1500, orientation: 6)
+        let png = try await PreviewImageDecoder().originalBitmapPNG(jpeg)
+        let local = try XCTUnwrap(NativePreviewImageBridge.shared.localPng(data: png as NSData))
+        XCTAssertEqual(local.width, 3000); XCTAssertEqual(local.height, 1500)
+        XCTAssertNil(NativePreviewImageBridge.shared.fhdPng(data: png as NSData))
+        var corrupt = png; corrupt[16] = 0xff
+        XCTAssertNil(NativePreviewImageBridge.shared.localPng(data: corrupt as NSData))
+        do { _ = try await PreviewImageDecoder().originalBitmapPNG(Data([1, 2, 3])); XCTFail("Malformed image") }
+        catch { XCTAssertTrue(error is PreviewImageError) }
+    }
+
     func testPreviewConfirmedMissIsCachedUntilMemoryClear() async throws {
         let source = FakePreviewSource(thumbs: [.missing, .bytes(Data([2]))])
         let store = CameraPreviewStore(source: source)

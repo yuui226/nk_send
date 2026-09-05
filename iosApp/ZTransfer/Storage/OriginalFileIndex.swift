@@ -29,6 +29,9 @@ final class OriginalFileIndexCache {
     private var fullRevision: Int64 = 0
     private(set) var ready = false
 
+    /// Exact previously published locator only. Naming/copy-suffix matching stays in shared.
+    func entry(at url: URL) -> OriginalIndexEntry? { entries[url] }
+
     func scan(root: URL) throws {
         try Task.checkCancellation()
         guard root.isFileURL else { throw OriginalIndexError.unsafeRoot }

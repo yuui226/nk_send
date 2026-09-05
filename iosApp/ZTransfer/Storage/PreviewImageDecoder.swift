@@ -4,9 +4,23 @@ import ImageIO
 
 enum PreviewImageError: Error { case invalidImage, invalidSize }
 
-/// Decodes away from the main actor, with a fixed output bound and embedded orientation transform.
-/// Encoded files are not modified. This does not replace shared RAW/MPF/video preview extraction.
+/// Decodes away from the main actor. Bounded thumbnails/FHD are separate from full-size originals.
+/// Encoded files are not modified. This does not replace the original RAW/MPF/video extraction rules.
 actor PreviewImageDecoder {
+    /// DIRECT_BITMAP route only: full resolution, no EXIF transform, no thumbnail API.
+    /// RAW embedded-JPEG selection and TIFF's camera fallback are separate routes.
+    func originalBitmapPNG(_ data: Data) throws -> Data {
+        try Task.checkCancellation()
+        guard !data.isEmpty,
+              let source = CGImageSourceCreateWithData(data as CFData,
+                  [kCGImageSourceShouldCache: false] as CFDictionary),
+              CGImageSourceGetCount(source) > 0,
+              let image = CGImageSourceCreateImageAtIndex(source, 0,
+                  [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { throw PreviewImageError.invalidImage }
+        // Encoding without source metadata strips orientation while preserving the decoded pixel grid.
+        return try encodePNG(image, maximumBytes: Int(Int32.max))
+    }
+
     /// Bounded, orientation-normalized bytes for the Compose bitmap boundary. Work stays off UI.
     func queueThumbnailPNG(_ data: Data) throws -> Data {
         try thumbnailPNG(data, maximumPixelSize: 128, maximumBytes: 1_048_576)

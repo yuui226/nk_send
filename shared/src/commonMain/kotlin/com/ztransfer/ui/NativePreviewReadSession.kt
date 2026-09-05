@@ -29,6 +29,9 @@ interface NativeFhdPreviewCompletion { fun complete(image: NativeFhdPreviewImage
 interface NativePreviewReadPlatform {
     fun beginPreviewReads(sessionId: Long)
     fun readFhdPreview(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativeFhdPreviewCompletion)
+    fun readLocalBitmap(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
+        completion.complete(null)
+    }
     fun cancelPreviewRead(sessionId: Long, requestId: Long)
     fun endPreviewReads(sessionId: Long)
 }
@@ -40,34 +43,58 @@ class NativePreviewReadSession internal constructor(
     isCurrentFile: (CameraFileInfo) -> Boolean,
     private val uiContext: CoroutineContext = Dispatchers.Main.immediate,
     private val timeoutMillis: Long = 30_000L,
+    isFrozenLocalSource: (CameraFileInfo, String) -> Boolean = { _, _ -> false },
 ) {
     private var closed = false
     private var owner: NativePreviewReadPlatform? = platform
     private var currentFile: ((CameraFileInfo) -> Boolean)? = isCurrentFile
+    private var localSource: ((CameraFileInfo, String) -> Boolean)? = isFrozenLocalSource
     private var nextRequest = 0L
-    private val pending = HashMap<Long, CancellableContinuation<NativeFhdPreviewImage?>>()
+    private val pending = HashMap<Long, CancellableContinuation<*>>()
 
     init { platform.beginPreviewReads(sessionId) }
 
     @Throws(CancellationException::class)
-    suspend fun fhd(file: CameraFileInfo): NativeFhdPreviewImage? = withContext(uiContext) {
+    suspend fun fhd(file: CameraFileInfo): NativeFhdPreviewImage? = read(
+        allowed = { currentFile?.invoke(file) == true },
+        start = { bridge, request, reply ->
+            bridge.readFhdPreview(sessionId, request, file, object : NativeFhdPreviewCompletion {
+                override fun complete(image: NativeFhdPreviewImage?) = reply(image)
+            })
+        },
+    )
+
+    /** Uses the opening snapshot; disconnects and newly completed originals cannot hot-swap it. */
+    @Throws(CancellationException::class)
+    suspend fun localBitmap(file: CameraFileInfo, source: String): NativeLocalPreviewImage? = read(
+        allowed = { localSource?.invoke(file, source) == true },
+        start = { bridge, request, reply ->
+            bridge.readLocalBitmap(sessionId, request, source, object : NativeLocalPreviewCompletion {
+                override fun complete(image: NativeLocalPreviewImage?) = reply(image)
+            })
+        },
+    )
+
+    private suspend fun <T> read(
+        allowed: () -> Boolean,
+        start: (NativePreviewReadPlatform, Long, (T?) -> Unit) -> Unit,
+    ): T? = withContext(uiContext) {
         val bridge = owner ?: return@withContext null
-        if (closed || currentFile?.invoke(file) != true || pending.size >= 32 || nextRequest == Long.MAX_VALUE) return@withContext null
+        if (closed || !allowed() || pending.size >= 32 || nextRequest == Long.MAX_VALUE) return@withContext null
         val request = ++nextRequest
         var completed = false
         try {
-            withTimeout(timeoutMillis) {
-                suspendCancellableCoroutine { continuation ->
+            // A read deadline is a miss, not a page cancellation. Parent cancellation still escapes.
+            withTimeoutOrNull(timeoutMillis) {
+                suspendCancellableCoroutine<T?> { continuation ->
                     pending[request] = continuation
-                    bridge.readFhdPreview(sessionId, request, file, object : NativeFhdPreviewCompletion {
-                        override fun complete(image: NativeFhdPreviewImage?) {
-                            if (!closed && pending[request] === continuation && continuation.isActive) {
-                                completed = true
-                                pending.remove(request)
-                                continuation.resume(image.takeIf { currentFile?.invoke(file) == true })
-                            }
+                    start(bridge, request) { image ->
+                        if (!closed && pending[request] === continuation && continuation.isActive) {
+                            completed = true
+                            pending.remove(request)
+                            continuation.resume(image.takeIf { allowed() })
                         }
-                    })
+                    }
                 }
             }
         } finally {
@@ -83,7 +110,7 @@ class NativePreviewReadSession internal constructor(
     fun close() {
         if (closed) return
         closed = true
-        val bridge = owner; owner = null; currentFile = null
+        val bridge = owner; owner = null; currentFile = null; localSource = null
         pending.values.toList().forEach { it.cancel() }
         pending.clear()
         bridge?.endPreviewReads(sessionId)

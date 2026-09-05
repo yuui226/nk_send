@@ -234,6 +234,27 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         // Keep the slot until the task finishes; a shared in-flight frame is drained, not cancelled globally.
     }
 
+    func readLocalBitmap(sessionId: Int64, requestId: Int64, source: String, completion: NativeLocalPreviewCompletion) {
+        let key = "\(sessionId):\(requestId)"
+        guard !closed, requestId > 0, previewUse?.session == sessionId,
+              previewRequests[key] == nil, previewRequests.count < 32 else { completion.complete(image: nil); return }
+        // Local originals remain readable offline. The shared opening snapshot authorizes the locator;
+        // the existing file owner independently verifies its indexed URL and current filesystem entry.
+        previewRequests[key] = Task { [weak self] in
+            guard let self else { completion.complete(image: nil); return }
+            defer { self.previewRequests.removeValue(forKey: key) }
+            do {
+                try Task.checkCancellation()
+                let data = try await self.queue.originalData(locator: source)
+                try Task.checkCancellation()
+                let png = try await self.decoder.originalBitmapPNG(data)
+                try Task.checkCancellation()
+                guard !self.closed, self.previewUse?.session == sessionId else { completion.complete(image: nil); return }
+                completion.complete(image: NativePreviewImageBridge.shared.localPng(data: png as NSData))
+            } catch { completion.complete(image: nil) }
+        }
+    }
+
     func endPreviewReads(sessionId: Int64) {
         for (key, request) in previewRequests where key.hasPrefix("\(sessionId):") { request.cancel() }
         guard let use = previewUse, use.session == sessionId else { return }

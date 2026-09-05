@@ -11,6 +11,10 @@ class NativePreviewReadSessionTest {
         val ended = mutableListOf<Long>()
         val cancelled = mutableListOf<Pair<Long, Long>>()
         val reads = linkedMapOf<Long, NativeFhdPreviewCompletion>()
+        val locals = linkedMapOf<Long, NativeLocalPreviewCompletion>()
+        override fun readLocalBitmap(sessionId: Long, requestId: Long, source: String, completion: NativeLocalPreviewCompletion) {
+            locals[requestId] = completion
+        }
         var immediate: NativeFhdPreviewImage? = null
         override fun beginPreviewReads(sessionId: Long) { started += sessionId }
         override fun readFhdPreview(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativeFhdPreviewCompletion) {
@@ -96,7 +100,7 @@ class NativePreviewReadSessionTest {
     @Test fun deadlineCancellationCannotLeaveAnUnreleasedRequest() {
         val p = Platform(); val session = session(p, timeout = 0L)
         val read = Pending { session.fhd(file) }
-        assertTrue(read.result!!.exceptionOrNull() is TimeoutCancellationException)
+        assertNull(read.result!!.getOrThrow()); assertFalse(read.job.isCancelled)
         assertTrue(p.reads.isEmpty()); assertEquals(listOf(7L to 1L), p.cancelled)
         session.close()
     }
@@ -113,5 +117,87 @@ class NativePreviewReadSessionTest {
         assertNull(ownedFhdPreviewPng(png().copyOf(32)))
         assertNull(ownedFhdPreviewPng(png().also { it[12] = 0 }))
         assertNull(ownedFhdPreviewPng(png().copyOf(SINGLE_PHOTO_MAX_BYTES + 1)))
+    }
+
+    @Test fun frozenLocalSourceWorksOfflineButUnfrozenOrWrongFileSourceNeverIssuesIo() {
+        val p = Platform()
+        val s = NativePreviewReadSession(7, p, { false }, Dispatchers.Unconfined,
+            isFrozenLocalSource = { f, source -> f == file && source == "file:///owned/A.JPG" })
+        assertNull(Pending { s.fhd(file) }.result!!.getOrThrow()); assertTrue(p.reads.isEmpty())
+        assertNull(Pending { s.localBitmap(file, "file:///other/A.JPG") }.result!!.getOrThrow())
+        assertNull(Pending { s.localBitmap(file.copy(handle = 2), "file:///owned/A.JPG") }.result!!.getOrThrow())
+        assertTrue(p.locals.isEmpty())
+        val result = Pending { s.localBitmap(file, "file:///owned/A.JPG") }
+        val image = ownedLocalPreviewPng(png(8000, 6000))
+        p.locals[1]!!.complete(image); p.locals[1]!!.complete(null)
+        assertSame(image, result.result!!.getOrThrow())
+        s.close()
+    }
+
+    @OptIn(InternalCoroutinesApi::class)
+    private class ManualDeadline : CoroutineDispatcher(), Delay {
+        val deadlines = mutableListOf<Runnable>()
+        override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = block.run()
+        override fun scheduleResumeAfterDelay(timeMillis: Long, continuation: CancellableContinuation<Unit>) {
+            error("This fixture only advances read deadlines, not UI animation delays")
+        }
+        override fun invokeOnTimeout(timeMillis: Long, block: Runnable, context: kotlin.coroutines.CoroutineContext): DisposableHandle {
+            deadlines += block
+            return object : DisposableHandle { override fun dispose() { deadlines.remove(block) } }
+        }
+        fun expire() { deadlines.toList().forEach { it.run() } }
+    }
+
+    @Test fun admittedReadDeadlineReleasesPlatformSlotAndReturnsMissSoFallbackCanContinue() {
+        for (local in listOf(false, true)) {
+            val clock = ManualDeadline(); val p = Platform()
+            val s = NativePreviewReadSession(7, p, { true }, clock, 30_000L, { _, _ -> true })
+            val result = Pending { if (local) s.localBitmap(file, "frozen") else s.fhd(file) }
+            assertNull(result.result); assertEquals(1, p.reads.size + p.locals.size)
+            assertEquals(1, clock.deadlines.size)
+            clock.expire()
+            assertNull(result.result!!.getOrThrow()); assertFalse(result.job.isCancelled)
+            assertEquals(listOf(7L to 1L), p.cancelled); assertTrue(clock.deadlines.isEmpty())
+            p.reads[1]?.complete(ownedFhdPreviewPng(png()))
+            p.locals[1]?.complete(ownedLocalPreviewPng(png()))
+            assertNull(result.result!!.getOrThrow())
+            val next = Pending { s.fhd(file) }; p.reads[2]!!.complete(null)
+            assertNull(next.result!!.getOrThrow()); assertTrue(p.ended.isEmpty())
+            s.close()
+        }
+    }
+
+    @Test fun localAndFhdShareOneRequestIdSpaceAndCombinedPendingLimit() {
+        val p = Platform()
+        val s = NativePreviewReadSession(7, p, { true }, Dispatchers.Unconfined, isFrozenLocalSource = { _, _ -> true })
+        val jobs = List(32) { i -> Pending { if (i % 2 == 0) s.fhd(file) else s.localBitmap(file, "frozen") } }
+        assertNull(Pending { s.localBitmap(file, "frozen") }.result!!.getOrThrow())
+        assertEquals(16, p.reads.size); assertEquals(16, p.locals.size)
+        assertTrue(p.reads.keys.intersect(p.locals.keys).isEmpty())
+        s.close(); assertTrue(jobs.all { it.result?.isFailure == true })
+        p.locals.values.forEach { it.complete(ownedLocalPreviewPng(png())) }
+        assertTrue(jobs.all { it.result?.isFailure == true })
+    }
+
+    @Test fun localCancelNeverCompletesALaterFhdReadAndDoesNotEndParentSession() {
+        val p = Platform()
+        val s = NativePreviewReadSession(7, p, { true }, Dispatchers.Unconfined, isFrozenLocalSource = { _, _ -> true })
+        val first = Pending { s.localBitmap(file, "frozen") }; first.job.cancel()
+        val second = Pending { s.fhd(file) }
+        p.locals[1]!!.complete(ownedLocalPreviewPng(png()))
+        assertTrue(first.result!!.isFailure); assertNull(second.result); assertTrue(p.ended.isEmpty())
+        p.reads[2]!!.complete(null); assertNull(second.result!!.getOrThrow())
+        s.close()
+    }
+
+    @Test fun localPayloadPreservesFullDimensionsAndDoesNotRelaxFhdOrProbeLimits() {
+        val bytes = png(8256, 5504)
+        val local = assertNotNull(ownedLocalPreviewPng(bytes))
+        assertSame(bytes, local.encoded); assertEquals(8256, local.width); assertEquals(5504, local.height)
+        assertNull(ownedFhdPreviewPng(bytes)); assertFalse(isBoundedSinglePhotoPng(bytes))
+        assertNotNull(ownedLocalPreviewPng(png().copyOf(SINGLE_PHOTO_MAX_BYTES + 1)))
+        for (bad in listOf(png().copyOf(32), png(-1, 1), png(1, 0), png().also { it[12] = 0 })) {
+            assertNull(ownedLocalPreviewPng(bad))
+        }
     }
 }

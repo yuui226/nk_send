@@ -141,8 +141,10 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         val owner = previewPlatform ?: return null
         if (closed || nextPreviewSession == Long.MAX_VALUE) return null
         previewReads?.close()
+        val frozenSources = currentFiles.values.mapNotNull { file -> localOriginalSource(file)?.let { file to it } }.toMap()
         return NativePreviewReadSession(++nextPreviewSession, owner,
             isCurrentFile = { file -> !closed && queue.connected.value && currentFiles[file.handle] == file },
+            isFrozenLocalSource = { file, source -> !closed && frozenSources[file] == source },
         ).also { previewReads = it }
     }
 
