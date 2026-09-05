@@ -25,6 +25,7 @@ struct ProviderIndexScan: Sendable {
 protocol ProviderFileCoordinating: AnyObject, Sendable {
     func copy(source: URL, directory: URL, accessor: (URL, URL) throws -> SavedCameraFile) throws -> SavedCameraFile
     func read(directory: URL, accessor: (URL) throws -> ProviderIndexScan) throws -> ProviderIndexScan
+    func contents<T>(file: URL, accessor: (URL) throws -> T) throws -> T
     func cancel()
 }
 
@@ -50,6 +51,19 @@ private final class AppleProviderFileCoordinator: ProviderFileCoordinating, @unc
             var failure: NSError?
             // This reads directory entries/metadata, not image bytes or a zipped upload snapshot.
             coordinator.coordinate(readingItemAt: directory, options: [.withoutChanges], error: &failure) { url in
+                result = Result { try accessor(url) }
+            }
+            if let result { return try result.get() }
+            if let failure { throw failure }
+            throw ProviderPublicationError.coordinationFailed
+        }
+    }
+    func contents<T>(file: URL, accessor: (URL) throws -> T) throws -> T {
+        try withCoordinator { coordinator in
+            var result: Result<T, Error>?
+            var failure: NSError?
+            // Unlike directory metadata, content needs pending edits saved and cloud bytes materialized.
+            coordinator.coordinate(readingItemAt: file, options: [], error: &failure) { url in
                 result = Result { try accessor(url) }
             }
             if let result { return try result.get() }
@@ -156,6 +170,49 @@ actor ProviderOriginalStore {
             indexedRoot = candidate.root
         }
         return originalIndex.update(since: revision)
+    }
+
+    func originalData(locator: String) async throws -> Data {
+        try await withReader(locator: locator) { try $0.originalData(locator: locator) }
+    }
+
+    func originalRawPreviewData(locator: String) async throws -> Data? {
+        try await withReader(locator: locator) { try $0.originalRawPreviewData(locator: locator) }
+    }
+
+    func originalExif(locator: String) async throws -> PhotoExif? {
+        try await withReader(locator: locator) { try $0.originalExif(locator: locator) }
+    }
+
+    /// Capture immutable metadata on this actor; file checks/reads/descriptor closes stay inside the
+    /// grant AND file accessor. Root identity is checked within the grant before coordination.
+    /// A frozen preview locator is never silently redirected.
+    private func withReader<T>(locator: String, read: (IndexedOriginalReader) throws -> T) async throws -> T {
+        try Task.checkCancellation()
+        let selection = try await boundSelection()
+        guard let url = URL(string: locator), let entry = originalIndex.entry(at: url),
+              entry.url.absoluteString == locator, let expectedRoot = indexedRoot else {
+            throw OriginalIndexError.unsafeRoot
+        }
+        let control = ProviderPublicationControl(coordinator: coordinatorFactory())
+        let cancellation = PreviewExifReadCancellation()
+        return try await withTaskCancellationHandler(operation: {
+            try await directory.withDirectory(selection: selection) { granted in
+                try control.check()
+                // Validate the current root before asking a provider to materialize an old file path.
+                guard granted.standardizedFileURL.resolvingSymlinksInPath() == expectedRoot else {
+                    throw OriginalIndexError.unsafeRoot
+                }
+                return try control.coordinator.contents(file: entry.url) { actual in
+                    try control.check()
+                    guard actual == entry.url else { throw OriginalIndexError.unsafeRoot }
+                    let coordinatedEntry = OriginalIndexEntry(name: entry.name, size: entry.size, folder: entry.folder, url: actual)
+                    let result = try read(IndexedOriginalReader(root: granted, entry: coordinatedEntry, cancellation: cancellation))
+                    try control.check()
+                    return result // No reader/descriptor escapes this lexical accessor.
+                }
+            }
+        }, onCancel: { control.cancel(); cancellation.cancel() })
     }
 
     private func boundSelection() async throws -> ExportDirectorySelection {

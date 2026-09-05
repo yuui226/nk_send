@@ -1,10 +1,11 @@
 """Descriptor/metadata wiring only. Darwin/ImageIO/Swift concurrency are Mac runtime gates."""
 from pathlib import Path
+from original_reader_wiring import historical_source
 import unittest
 import struct
 
 ROOT = Path(__file__).resolve().parents[2]
-def source(path): return (ROOT / path).read_text(encoding='utf-8')
+def source(path): return historical_source(path)
 
 
 class LocalExifWiringTest(unittest.TestCase):

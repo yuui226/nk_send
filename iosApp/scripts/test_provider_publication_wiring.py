@@ -1,5 +1,6 @@
 """Windows source/wiring guards. File coordination, scope and actual copying are Mac tests."""
 from pathlib import Path
+from original_reader_wiring import historical_source
 import subprocess
 import tempfile
 import unittest
@@ -11,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BASE = '23b893e'
 PUBLISHER = 'iosApp/ZTransfer/Storage/ProviderOriginalStore.swift'
 PROBE = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return historical_source(path)
 def before(path): return subprocess.check_output(['git', 'show', BASE + ':' + path], cwd=ROOT).decode('utf-8')
 
 class ProviderPublicationWiringTest(unittest.TestCase):

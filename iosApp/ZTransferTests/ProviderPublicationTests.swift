@@ -1,10 +1,195 @@
 import Foundation
+import CoreGraphics
+import ImageIO
 import XCTest
 import ZTransferShared
 @testable import ZTransfer
 
 /// Apple filesystem/coordinator tests. Registered for Mac, never counted as Windows execution.
 final class ProviderPublicationTests: XCTestCase {
+    func testRealCoordinatedContentReadUsesIndexedDateEntryWithoutChangingIndexOrSource() async throws {
+        let area = try PublicationArea()
+        let store = ProviderOriginalStore(directory: area.store)
+        let folder = PtpTransferBridge.shared.destinationFolder(captureDate: "20260102T123456", byDate: true, dayKey: 20260905)
+        let saved = try await store.publish(area.saved, folder: folder)
+        let snapshot = try await store.originals(since: -1, rescan: true)
+        let bytes = try await store.originalData(locator: saved.url.absoluteString)
+        XCTAssertEqual(bytes, area.bytes)
+        let unchanged = try await store.originals(since: snapshot.revision, rescan: false)
+        XCTAssertEqual(unchanged.revision, snapshot.revision); XCTAssertTrue(unchanged.entries.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: area.saved.url), area.bytes)
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
+    func testProviderExifAndSandboxUseSameActualMetadataReader() async throws {
+        let area = try PublicationArea(bytes: providerJpeg())
+        let store = ProviderOriginalStore(directory: area.store)
+        let saved = try await store.publish(area.saved)
+        _ = try await store.originals(since: -1, rescan: true)
+        let sandbox = CameraOriginalStore(root: area.saved.url.deletingLastPathComponent())
+        _ = try await sandbox.originals(since: -1, rescan: true)
+        let providerExif = try await store.originalExif(locator: saved.url.absoluteString)
+        let sandboxExif = try await sandbox.originalExif(locator: area.saved.url.absoluteString)
+        let actual = try XCTUnwrap(providerExif), expected = try XCTUnwrap(sandboxExif)
+        XCTAssertEqual(actual.iso, "ISO64"); XCTAssertEqual(actual.dateTime, "2026:09:05 01:02:03")
+        XCTAssertEqual(actual.aperture, expected.aperture); XCTAssertEqual(actual.shutterSpeed, expected.shutterSpeed)
+        XCTAssertEqual(actual.iso, expected.iso); XCTAssertEqual(actual.dateTime, expected.dateTime)
+        XCTAssertEqual(try Data(contentsOf: saved.url), area.bytes)
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
+    func testProviderRawUsesSharedRangesBeyondTwoGiBAndOrdinaryReadRetainsOriginalLimit() async throws {
+        let area = try PublicationArea(bytes: Data([1]))
+        let jpeg = try providerJpeg()
+        let url = area.target.appendingPathComponent("LARGE.NEF")
+        let offset: UInt32 = 2_147_483_648 + 4096
+        var header = Data(repeating: 0, count: 128)
+        func u16(_ at: Int, _ value: UInt16) { for i in 0..<2 { header[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        func u32(_ at: Int, _ value: UInt32) { for i in 0..<4 { header[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        header[0] = 73; header[1] = 73; u16(2, 42); u32(4, 8); u16(8, 2)
+        u16(10, 0x0201); u16(12, 4); u32(14, 1); u32(18, offset)
+        u16(22, 0x0202); u16(24, 4); u32(26, 1); u32(30, UInt32(jpeg.count))
+        try header.write(to: url)
+        let output = try FileHandle(forWritingTo: url)
+        do { try output.seek(toOffset: UInt64(offset)); try output.write(contentsOf: jpeg); try output.close() }
+        catch { try? output.close(); throw error }
+        let store = ProviderOriginalStore(directory: area.store)
+        let snapshot = try await store.originals(since: -1, rescan: true)
+        let locator = try XCTUnwrap(snapshot.entries.first).url.absoluteString
+        let actual = try await store.originalRawPreviewData(locator: locator)
+        XCTAssertEqual(actual, jpeg)
+        do { _ = try await store.originalData(locator: locator); XCTFail("Ordinary data still bounded") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
+    func testContentRejectsUnindexedOrModifiedLocatorBeforeCoordination() async throws {
+        let area = try PublicationArea()
+        let coordinator = PublicationCoordinator(), store = area.publisher()
+        let saved = try await store.publish(area.saved)
+        let reader = area.publisher(coordinator)
+        do { _ = try await reader.originalData(locator: saved.url.absoluteString); XCTFail("No scan") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        XCTAssertEqual(coordinator.calls, 0)
+        _ = try await reader.originals(since: -1, rescan: true)
+        let calls = coordinator.calls
+        for locator in [area.saved.url.absoluteString, saved.url.absoluteString + "?x=1", saved.url.absoluteString + "#part"] {
+            do { _ = try await reader.originalData(locator: locator); XCTFail("Not exact indexed locator") }
+            catch { XCTAssertTrue(error is OriginalIndexError) }
+        }
+        XCTAssertEqual(coordinator.calls, calls)
+    }
+
+    func testChangedSelectionRejectsAllThreeContentRoutesWithoutRedirecting() async throws {
+        let area = try PublicationArea()
+        let coordinator = PublicationCoordinator(), store = area.publisher()
+        let saved = try await store.publish(area.saved)
+        let reader = area.publisher(coordinator)
+        _ = try await reader.originals(since: -1, rescan: true)
+        let calls = coordinator.calls
+        let other = area.root.appendingPathComponent("another", isDirectory: true)
+        try FileManager.default.createDirectory(at: other, withIntermediateDirectories: false)
+        try await area.store.select(other)
+        for mode in 0..<3 {
+            do {
+                if mode == 0 { _ = try await reader.originalData(locator: saved.url.absoluteString) }
+                else if mode == 1 { _ = try await reader.originalRawPreviewData(locator: saved.url.absoluteString) }
+                else { _ = try await reader.originalExif(locator: saved.url.absoluteString) }
+                XCTFail("Old selection must fail")
+            } catch { guard case ExportDirectoryError.selectionChanged = error else { return XCTFail("\(error)") } }
+        }
+        XCTAssertEqual(coordinator.calls, calls)
+        XCTAssertEqual(try Data(contentsOf: saved.url), area.bytes)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: other.path), [])
+    }
+
+    func testContentRevokedGrantDoesNotTouchCoordinatorOrDiscardBookmark() async throws {
+        let area = try PublicationArea()
+        let coordinator = PublicationCoordinator(), store = area.publisher(coordinator)
+        let saved = try await store.publish(area.saved)
+        _ = try await store.originals(since: -1, rescan: true)
+        let calls = coordinator.calls, stops = area.access.stops
+        area.access.allowed = false
+        do { _ = try await store.originalData(locator: saved.url.absoluteString); XCTFail("Revoked") }
+        catch { guard case ExportDirectoryError.permissionLost = error else { return XCTFail("\(error)") } }
+        XCTAssertEqual(coordinator.calls, calls); XCTAssertEqual(area.access.stops, stops)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: area.bookmark.path))
+    }
+
+    func testFrozenContentLocatorRejectsCoordinatorRelocationAndCanRetryOriginal() async throws {
+        let area = try PublicationArea()
+        let coordinator = PublicationCoordinator(), store = area.publisher(coordinator)
+        let saved = try await store.publish(area.saved)
+        _ = try await store.originals(since: -1, rescan: true)
+        coordinator.source = area.saved.url // Even identical bytes elsewhere cannot replace the frozen file.
+        do { _ = try await store.originalData(locator: saved.url.absoluteString); XCTFail("Redirect") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        coordinator.source = nil
+        let actual = try await store.originalData(locator: saved.url.absoluteString)
+        XCTAssertEqual(actual, area.bytes)
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
+    func testContentChangedSizeOrLeafLinkFailsAndClosesScope() async throws {
+        let area = try PublicationArea()
+        let store = area.publisher()
+        let saved = try await store.publish(area.saved)
+        _ = try await store.originals(since: -1, rescan: true)
+        try Data([1]).write(to: saved.url)
+        do { _ = try await store.originalData(locator: saved.url.absoluteString); XCTFail("Changed size") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        try FileManager.default.removeItem(at: saved.url) // Only this fixture's exported file.
+        try FileManager.default.createSymbolicLink(at: saved.url, withDestinationURL: area.saved.url)
+        do { _ = try await store.originalRawPreviewData(locator: saved.url.absoluteString); XCTFail("Link") }
+        catch { XCTAssertTrue(error is OriginalIndexError) }
+        XCTAssertEqual(area.access.starts, area.access.stops)
+        XCTAssertEqual(try Data(contentsOf: area.saved.url), area.bytes)
+    }
+
+    func testContentCoordinationWaitCancellationReleasesGrantAndAllowsRetry() async throws {
+        let area = try PublicationArea()
+        let coordinator = PublicationCoordinator(), store = area.publisher(coordinator)
+        let saved = try await store.publish(area.saved)
+        _ = try await store.originals(since: -1, rescan: true)
+        let began = expectation(description: "content wait")
+        coordinator.blockedContents = WaitingPublicationCoordinator(began)
+        let task = Task { try await store.originalData(locator: saved.url.absoluteString) }
+        await fulfillment(of: [began], timeout: 3)
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Cancelled") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        coordinator.blockedContents = nil
+        let actual = try await store.originalData(locator: saved.url.absoluteString)
+        XCTAssertEqual(actual, area.bytes)
+        XCTAssertEqual(area.access.starts, area.access.stops)
+    }
+
+    func testReaderSharedCancellationFlagRejectsAllRoutesEvenWithoutCancelledTask() throws {
+        let area = try PublicationArea()
+        let cancellation = PreviewExifReadCancellation()
+        cancellation.cancel()
+        let reader = IndexedOriginalReader(root: area.saved.url.deletingLastPathComponent(),
+            entry: OriginalIndexEntry(name: area.saved.url.lastPathComponent, size: area.saved.bytes, folder: nil, url: area.saved.url),
+            cancellation: cancellation)
+        XCTAssertFalse(Task.isCancelled)
+        XCTAssertThrowsError(try reader.originalData(locator: area.saved.url.absoluteString)) { XCTAssertTrue($0 is CancellationError) }
+        XCTAssertThrowsError(try reader.originalRawPreviewData(locator: area.saved.url.absoluteString)) { XCTAssertTrue($0 is CancellationError) }
+        XCTAssertThrowsError(try reader.originalExif(locator: area.saved.url.absoluteString)) { XCTAssertTrue($0 is CancellationError) }
+    }
+
+    private func providerJpeg() throws -> Data {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 12, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let image = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil))
+        let exif: [CFString: Any] = [kCGImagePropertyExifFNumber: 4, kCGImagePropertyExifExposureTime: 0.004,
+            kCGImagePropertyExifISOSpeedRatings: [64], kCGImagePropertyExifDateTimeOriginal: "2026:09:05 01:02:03"]
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyExifDictionary: exif] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
     func testRealCoordinatorCopiesLargeOriginalAndBalancesGrantWithoutDeletingSource() async throws {
         let area = try PublicationArea()
         let saved = try await ProviderOriginalStore(directory: area.store).publish(area.saved)
@@ -396,6 +581,7 @@ private final class PublicationGrant: ExportDirectoryAccess {
 
 private final class PublicationCoordinator: ProviderFileCoordinating, @unchecked Sendable {
     var source: URL?, directory: URL?
+    var blockedContents: WaitingPublicationCoordinator?
     var onBegin: (() throws -> Void)?
     private(set) var calls = 0
     func copy(source: URL, directory: URL, accessor: (URL, URL) throws -> SavedCameraFile) throws -> SavedCameraFile {
@@ -406,7 +592,12 @@ private final class PublicationCoordinator: ProviderFileCoordinating, @unchecked
         calls += 1; try onBegin?()
         return try accessor(self.directory ?? directory)
     }
-    func cancel() {} // Streaming cancellation is separately exercised via the per-chunk check seam.
+    func cancel() { blockedContents?.cancel() }
+    func contents<T>(file: URL, accessor: (URL) throws -> T) throws -> T {
+        calls += 1; try onBegin?()
+        if let blockedContents { return try blockedContents.contents(file: file, accessor: accessor) }
+        return try accessor(self.source ?? file)
+    }
 }
 
 private final class WaitingPublicationCoordinator: ProviderFileCoordinating, @unchecked Sendable {
@@ -427,4 +618,10 @@ private final class WaitingPublicationCoordinator: ProviderFileCoordinating, @un
         throw CancellationError()
     }
     func cancel() { condition.lock(); cancelled = true; condition.broadcast(); condition.unlock() }
+    func contents<T>(file: URL, accessor: (URL) throws -> T) throws -> T {
+        condition.lock(); defer { condition.unlock() }
+        began.fulfill()
+        while !cancelled { condition.wait() }
+        throw CancellationError()
+    }
 }

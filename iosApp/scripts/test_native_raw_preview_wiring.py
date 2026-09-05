@@ -1,12 +1,13 @@
 """RAW wiring/ownership guards; ImageIO, Darwin and Kotlin/Native still need Mac execution."""
 from pathlib import Path
+from original_reader_wiring import historical_source
 import subprocess
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def source(path): return (ROOT / path).read_text(encoding='utf-8')
+def source(path): return historical_source(path)
 
 
 class NativeRawPreviewWiringTest(unittest.TestCase):

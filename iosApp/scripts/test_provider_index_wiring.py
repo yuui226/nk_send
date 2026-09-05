@@ -1,5 +1,6 @@
 """Provider selection/index source preservation; actual Apple IO is covered by Mac-pending XCTest."""
 from pathlib import Path
+from original_reader_wiring import historical_source
 import subprocess
 import unittest
 from provider_index_wiring import without_directory_selection, without_provider_index_cache, without_provider_index_probe
@@ -7,7 +8,7 @@ from provider_index_wiring import without_directory_selection, without_provider_
 ROOT = Path(__file__).resolve().parents[2]
 BASE = '5843705'
 STORE = 'iosApp/ZTransfer/Storage/ProviderOriginalStore.swift'
-def read(path): return (ROOT / path).read_text(encoding='utf-8')
+def read(path): return historical_source(path)
 def before(path): return subprocess.check_output(['git', 'show', BASE + ':' + path], cwd=ROOT).decode('utf-8')
 
 class ProviderIndexWiringTest(unittest.TestCase):
