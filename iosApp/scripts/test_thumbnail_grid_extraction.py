@@ -7,6 +7,7 @@ from signal_pill_extraction import extract_signal_pill
 from queue_execution_extraction import extract_queue_execution
 from filter_overlay_extraction import extract_filter_overlay
 from export_exit_extraction import extract_export_exit
+from photo_preview_session_extraction import extract_queue_flight
 
 
 class ThumbnailGridExtractionTest(unittest.TestCase):
@@ -75,5 +76,5 @@ class ThumbnailGridExtractionTest(unittest.TestCase):
         self.assertNotIn('private val THUMBNAIL_THEME_BORDER_WIDTH', self.android)
 
     def test_android_and_shared_files_exactly_match_full_extraction(self):
-        self.assertEqual(extract_export_exit(extract_filter_overlay(self.android)[0])[0], (self.root / 'app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt').read_text(encoding='utf-8'))
+        self.assertEqual(extract_queue_flight(extract_export_exit(extract_filter_overlay(self.android)[0])[0])[0], (self.root / 'app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt').read_text(encoding='utf-8'))
         self.assertEqual(self.shared, (self.root / 'shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedThumbnailGrid.kt').read_text(encoding='utf-8'))

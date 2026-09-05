@@ -7,6 +7,7 @@ from transfer_page_extraction import extract_collapse_height
 from signal_pill_extraction import extract_signal_pill
 from queue_execution_extraction import extract_queue_execution
 from export_exit_extraction import extract_export_exit
+from photo_preview_session_extraction import extract_queue_flight
 
 
 class FilterOverlayExtractionTest(unittest.TestCase):
@@ -25,7 +26,7 @@ class FilterOverlayExtractionTest(unittest.TestCase):
 
     def test_all_generated_files_equal_full_baseline_transform(self):
         for path, expected in [
-            ('app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt', extract_export_exit(self.android)[0]),
+            ('app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt', extract_queue_flight(extract_export_exit(self.android)[0])[0]),
             ('app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt', self.popup_android),
             ('shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedFilterOverlay.kt', self.shared),
             ('shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedAnchorPopup.kt', self.popup_shared),

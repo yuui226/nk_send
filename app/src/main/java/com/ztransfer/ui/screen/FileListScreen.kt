@@ -2641,37 +2641,6 @@ private const val MAX_PACK_GHOSTS = 8
 
 // "吸入"节奏:前段缓(残影凝聚成形、离巢慢),后段陡(加速俯冲进胶囊)——
 // 到达时带着冲量,与胶囊的"接住"弹跳在动量上衔接。
-internal val QueueFlightEasing = CubicBezierEasing(0.5f, 0f, 0.8f, 0.35f)
-
-/** 列表、单张预览与合集预览共用的入队弧线；只接收像素参数，不持有任何 Compose 状态。 */
-internal fun queueFlightBezierPoint(
-    progress: Float,
-    start: Offset,
-    end: Offset,
-    liftBasePx: Float,
-    maxLiftPx: Float,
-    minApexYPx: Float,
-    maxBowPx: Float,
-    bowFadeDistancePx: Float,
-): Offset {
-    val t = progress.coerceIn(0f, 1f)
-    val dx = abs(end.x - start.x)
-    val lift = (0.35f * dx + liftBasePx).coerceAtMost(maxLiftPx)
-    val controlY = maxOf(
-        minOf(start.y, end.y) - lift,
-        (4f * minApexYPx - start.y - end.y) / 2f,
-    )
-    val bow = maxBowPx * (1f - (dx / bowFadeDistancePx).coerceAtMost(1f))
-    val controlX = (start.x + end.x) / 2f - bow
-    val remaining = 1f - t
-    return Offset(
-        x = remaining * remaining * start.x +
-            2f * remaining * t * controlX + t * t * end.x,
-        y = remaining * remaining * start.y +
-            2f * remaining * t * controlY + t * t * end.y,
-    )
-}
-
 /**
  * "打包 → 吸入"两幕连播:
  * 第一幕(~420ms,吸取灵魂):每张可见照片的半透明本体(原位原尺寸、真实缩略图)

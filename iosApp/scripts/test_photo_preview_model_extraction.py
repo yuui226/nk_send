@@ -5,6 +5,7 @@ from photo_viewport_extraction import extract_photo_viewport
 from photo_preview_model_extraction import extract_photo_preview_model,extract_preview_tests,MIGRATED_TESTS
 from photo_preview_display_extraction import extract_photo_preview_display
 from histogram_extraction import extract_histogram_button
+from photo_preview_session_extraction import extract_photo_preview_session
 
 ROOT=Path(__file__).resolve().parents[2]
 BASE='app/src/main/java/com/ztransfer/ui/screen/'
@@ -19,7 +20,7 @@ class PhotoPreviewModelExtractionTest(unittest.TestCase):
         cls.android,cls.shared=extract_photo_preview_model(cls.source)
 
     def test_entire_android_remainder_and_shared_model_match_baseline(self):
-        self.assertEqual(extract_histogram_button(extract_photo_preview_display(self.android)[0])[0],(ROOT/BASE/'PhotoPreview.kt').read_text(encoding='utf-8'))
+        self.assertEqual(extract_photo_preview_session(extract_histogram_button(extract_photo_preview_display(self.android)[0])[0])[0],(ROOT/BASE/'PhotoPreview.kt').read_text(encoding='utf-8'))
         self.assertEqual(self.shared,(ROOT/'shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedPhotoPreviewModel.kt').read_text(encoding='utf-8'))
 
     def test_every_moved_test_preserves_body_values_and_remaining_android_tests(self):

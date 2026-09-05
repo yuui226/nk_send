@@ -6,6 +6,7 @@ from photo_viewport_extraction import extract_photo_viewport
 from photo_preview_model_extraction import extract_photo_preview_model
 from photo_preview_display_extraction import extract_photo_preview_display
 from thumbnail_grid_extraction import section
+from photo_preview_session_extraction import extract_photo_preview_session
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = 'app/src/main/java/com/ztransfer/ui/screen/'
@@ -29,6 +30,7 @@ class HistogramExtractionTest(unittest.TestCase):
         paths = [BASE+'RemoteViewfinderFeatures.kt', SHARED+'LuminanceHistogram.kt', SHARED+'SharedHistogram.kt',
                  BASE+'PhotoPreview.kt', SHARED+'SharedPreviewHistogramButton.kt']
         for path, expected in zip(paths, (*self.parts, *self.button)):
+            if path == BASE+'PhotoPreview.kt': expected = extract_photo_preview_session(expected)[0]
             self.assertEqual(expected, (ROOT/path).read_text(encoding='utf-8'), path)
 
     def test_remaining_full_preview_coordinator_is_identical(self):

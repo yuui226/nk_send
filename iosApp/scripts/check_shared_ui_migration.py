@@ -15,6 +15,7 @@ from photo_viewport_extraction import extract_photo_viewport
 from photo_preview_model_extraction import extract_photo_preview_model
 from photo_preview_display_extraction import extract_photo_preview_display
 from histogram_extraction import extract_histogram, extract_histogram_button
+from photo_preview_session_extraction import extract_photo_preview_session, extract_queue_flight
 
 FILES = (
     "theme/Type.kt", "theme/Motion.kt", "theme/Color.kt", "screen/ZMark.kt", "screen/BroomMark.kt",
@@ -121,6 +122,9 @@ def main():
     expected_list, expected_grid = extract_thumbnail_grid(expected_list)
     expected_list, expected_filter = extract_filter_overlay(expected_list)
     expected_list, expected_export_exit = extract_export_exit(expected_list)
+    expected_list, expected_flight = extract_queue_flight(expected_list)
+    if (root / 'shared/src/commonMain/kotlin/com/ztransfer/ui/screen/QueueFlightCurve.kt').read_text(encoding='utf-8') != expected_flight:
+        raise ValueError('Original shared queue flight curve/easing differs')
     if (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/ExportExitUiState.kt").read_text(encoding="utf-8") != expected_export_exit:
         raise ValueError("Original untransferred completion-exit state/callback differs")
     expected_popup_android, expected_popup = extract_anchor_popup(original("app/src/main/java/com/ztransfer/ui/screen/AnchorPopup.kt"))
@@ -151,7 +155,11 @@ def main():
     model_android, preview_model = extract_photo_preview_model(previews[0])
     display = extract_photo_preview_display(model_android)
     histogram_button_android, histogram_button = extract_histogram_button(display[0])
-    previews = (histogram_button_android,) + previews[1:]
+    session_android, session_shared, session_contract = extract_photo_preview_session(histogram_button_android)
+    previews = (session_android,) + previews[1:]
+    for name, expected in [('SharedPhotoPreviewOverlay.kt', session_shared), ('PreviewSessionPlatform.kt', session_contract)]:
+        if (root / ('shared/src/commonMain/kotlin/com/ztransfer/ui/screen/' + name)).read_text(encoding='utf-8') != expected:
+            raise ValueError('Full original preview coordinator differs beyond explicit platform bindings: ' + name)
     monitor = extract_histogram(original(preview_base + "RemoteViewfinderFeatures.kt"))
     histogram_paths = [preview_base + "RemoteViewfinderFeatures.kt",
         "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/LuminanceHistogram.kt",
@@ -174,10 +182,11 @@ def main():
     for path, expected in zip(preview_paths, previews):
         if (root / path).read_text(encoding="utf-8") != expected:
             raise ValueError(f"Original photo preview changed beyond viewport/back/text/math adapters: {path}")
-    print("PASS entire original single-photo/zoom/rotation bodies; Android full preview coordinator unchanged beyond shared viewport call")
+    print("PASS entire original single-photo/zoom/rotation bodies; full preview coordinator shared with explicit Android IO/lifecycle/text adapters")
     print("PASS original preview paging/burst/source-snapshot/queue-intent rules; Android date, URI and IO paths retained")
     print("PASS original preview display/FHD reveal/video placeholder/burst stack/EXIF/navigation/transfer bodies and Android adapters")
     print("PASS original histogram sampling, linear normalization, plot/icon/button and complete Android remaining monitor/preview")
+    print("PASS complete original preview FHD/EXIF/neighbor/cancel/burst/queue-flight coordination and common curve/easing")
     android_theme = (root / "app/src/main/java/com/ztransfer/ui/theme/Theme.kt").read_text(encoding="utf-8")
     def window_effect(text):
         block = text[text.index("val view = LocalView.current"):text.index("CompositionLocalProvider(")]

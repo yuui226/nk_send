@@ -1,0 +1,1395 @@
+@file:OptIn(kotlin.experimental.ExperimentalObjCRefinement::class)
+
+package com.ztransfer.ui.screen
+
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BurstMode
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntSize
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.ui.unit.dp
+import com.ztransfer.protocol.CameraFileInfo
+import com.ztransfer.ui.theme.*
+import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.viewmodel.PhotoExif
+import com.ztransfer.viewmodel.ActiveTransferProgress
+import com.ztransfer.viewmodel.TransferTask
+
+private const val PREVIEW_DEFERRED_LOAD_DELAY_MS = 340L
+private const val PREVIEW_QUEUE_SWIPE_TRIGGER_DP = 96f
+private const val PREVIEW_QUEUE_FLIGHT_DURATION_MS = 560
+private const val PREVIEW_QUEUE_GHOST_PREROLL_MS = 32L
+private const val PREVIEW_QUEUE_ANIMATION_TIMEOUT_MS = 1_000L
+
+@kotlin.native.HiddenFromObjC
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun <Source : Any> SharedPhotoPreviewOverlay(
+    items: List<PhotoPreviewItem>,
+    initialIndex: Int,
+    anchorRect: Rect?,
+    session: PreviewSessionSource<Source>,
+    text: PreviewSessionText,
+    burstContent: PreviewBurstContent,
+    backHandler: @Composable (Boolean, () -> Unit) -> Unit,
+    hapticsEnabled: Boolean,
+    transfersBusy: Boolean,
+    // 全局持久化方向：0..3 个逆时针 90°。只用作本次 overlay 初始值；
+    // overlay 内部保留不取模的连续角度，保证 270°→0° 时仍是向左短转 90°。
+    initialRotationQuarterTurns: Int = 0,
+    // 由传输 ViewModel 持久化；所有连接方式和后续预览共用同一个开关状态。
+    histogramVisible: Boolean = false,
+    // 连拍成员 handle 集(列表页的检测结果):预览左上角展示连拍角标用;空集即不展示。
+    burstHandles: Set<Int> = emptySet(),
+    // 复用列表的任务索引与完成判定，预览不维护第二套传输状态。
+    queueTaskFor: (CameraFileInfo) -> TransferTask? = { null },
+    isTransferred: (CameraFileInfo) -> Boolean = { false },
+    // 与完成对号复用同一导出索引；三种连接模式都先走本地 URI，再回退相机 FHD。
+    localOriginalUriFor: (CameraFileInfo) -> Source? = { null },
+    activeProgress: @Composable () -> ActiveTransferProgress?,
+    // 根坐标中的真实队列胶囊承载区；预览残影使用它计算与列表一致的弧线落点。
+    queueTargetBounds: Rect? = null,
+    onQueueFlightCaught: () -> Unit = {},
+    // 把当前预览文件加入传输队列（父层只负责目录/连接校验与入队；动画留在本层）。
+    onTransfer: (CameraFileInfo) -> Boolean = { false },
+    // 合集页整组入队；动画在本层复用当前合集叠片，不借用被遮住的列表坐标。
+    onTransferBurst: (List<CameraFileInfo>) -> Boolean = { false },
+    // 预览内主动展开/收起合集时同步底层列表，关闭预览后两处状态一致。
+    onBurstExpandedChange: (String, Boolean) -> Unit = { _, _ -> },
+    // 每次旋转后回传归一化方向，父层写入全局偏好。
+    onRotationChanged: (Int) -> Unit = {},
+    onHistogramVisibleChanged: (Boolean) -> Unit = {},
+    // 关闭前让底层列表把当前照片准备到可见位置，并返回它最新的根坐标。
+    prepareDismissTarget: suspend (CameraFileInfo) -> Rect? = { null },
+    // 非空表示当前照片已在底层列表找到，可在预览消失后播放定位脉冲。
+    onDismiss: (CameraFileInfo?) -> Unit
+) {
+    // 会话内固定持有自己的分页快照；后台增量加载/筛选不会让正在看的页突然换内容。
+    // 只有用户在合集页主动展开/收起时，才在当前页后插入/移除该组成员。
+    var previewItems by remember { mutableStateOf(items) }
+    val pagerState = rememberPagerState(initialPage = initialIndex) { previewItems.size }
+    val currentItem = previewItems.getOrNull(pagerState.currentPage)
+    val currentFile = (currentItem as? PhotoPreviewItem.Photo)?.file
+    val currentHandle = currentFile?.handle
+    val previewScope = rememberCoroutineScope()
+    val isConnectedToCamera = session.connected()
+    val currentTransfersBusy by rememberUpdatedState(transfersBusy)
+    var previousTransfersBusy by remember { mutableStateOf(transfersBusy) }
+    var overlayBounds by remember { mutableStateOf<Rect?>(null) }
+    var collapseAnchorRect by remember { mutableStateOf(anchorRect) }
+    val progress = remember { Animatable(0f) }
+    var closing by remember { mutableStateOf(false) }
+    var burstTransitionBusy by remember { mutableStateOf(false) }
+    val latestCurrentFile by rememberUpdatedState(currentFile)
+    val latestPrepareDismissTarget by rememberUpdatedState(prepareDismissTarget)
+    val latestOnDismiss by rememberUpdatedState(onDismiss)
+    // 本次 overlay 打开时已经存在的原图可以直接使用；打开后才完成的传输不热切换。
+    // remember 不带动态传输状态 key 是有意的：关闭并重新进入才创建下一份来源快照。
+    val sessionLocalOriginalUris = remember {
+        snapshotPreviewSessionSources(items, localOriginalUriFor)
+    }
+    val sessionLocalOriginalUriFor: (CameraFileInfo) -> Source? = remember(
+        sessionLocalOriginalUris,
+    ) {
+        { file -> sessionLocalOriginalUris[file.handle] }
+    }
+    // 高清图/EXIF 到位会触发大位图纹理上传与预览子树更新，因此稍延后启动。
+    // 这个功能门绝不能依赖 progress.animateTo 返回：某些设备动画帧时钟停滞时，
+    // 等动画完成会让 FHD、EXIF 和远程缩略图全部永久不启动。
+    var deferredLoadsEnabled by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(PREVIEW_DEFERRED_LOAD_DELAY_MS)
+        if (!closing) deferredLoadsEnabled = true
+    }
+
+    LaunchedEffect(overlayBounds, closing) {
+        if (!closing && overlayBounds != null && progress.value < 1f) {
+            progress.animateTo(1f, Motion.overlayExpand)
+        }
+    }
+    LaunchedEffect(closing) {
+        if (closing) {
+            // 长列表的远距离预定位发生在不透明预览层之后；随后才向最新格子坐标缩回，
+            // 因此既不会暴露 LazyGrid 的长距离跳段，也不会飞回已经失效的旧格位。
+            val returnFile = latestCurrentFile
+            collapseAnchorRect = returnFile?.let { latestPrepareDismissTarget(it) }
+            progress.animateTo(0f, Motion.overlayCollapse)
+            latestOnDismiss(returnFile.takeIf { collapseAnchorRect != null })
+        }
+    }
+    // 连拍过渡只有约 260ms；这段时间吞掉关闭请求，避免在不可见切页的单帧里
+    // 把合集页误当成“当前照片”参与退出定位。
+    val startClose: () -> Unit = {
+        if (!burstTransitionBusy) closing = true
+    }
+    backHandler(!closing, startClose)
+
+    // ---- 高清预览：当前本地原图保持完整分辨率；相机回退仍使用 FHD ----
+    // 状态图按 handle 存储；handle 仅在本 overlay 存活期有效（关闭随 Composable 释放）。
+    val highResolutionBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
+    val highResolutionLoading = remember { mutableStateMapOf<Int, Boolean>() }
+    // 仅记录由本地原图生成的高清位图来源。同一会话使用打开时的来源快照，因此这里
+    // 只负责避免重复解码，不会在传输完成瞬间替换正在显示的相机 FHD。
+    val localPreviewUris = remember { mutableStateMapOf<Int, Source>() }
+    // 本地原图或 RAW 内嵌预览仍可能因损坏、权限或格式异常解码失败；按 URI 记住失败结果，
+    // 本次预览不反复读盘，但仍会正常回退到相机 FHD。
+    val localDecodeFailures = remember { mutableStateMapOf<Int, Source>() }
+    // 只有当前照片的 FHD 确认不可用、且当前 EXIF 已经读取完毕后，才允许向相机请求
+    // 一张缩略图兜底。这样占位图不会跑到 FHD / EXIF 前面争抢相机通道。
+    val fhdUnavailable = remember { mutableStateMapOf<Int, Boolean>() }
+    // PreviewPage owns thumbnail fallback loading. Publish the actual bitmap it renders so the
+    // shared monitor histogram can analyse that exact image without another decode or camera read.
+    val displayedBitmaps = remember { mutableStateMapOf<Int, ImageBitmap>() }
+    val exifData = remember { mutableStateMapOf<Int, PhotoExif?>() }
+    val exifLoading = remember { mutableStateMapOf<Int, Boolean>() }
+    val exifFinished = remember { mutableStateMapOf<Int, Boolean>() }
+    // 初始方向来自全局偏好；本 overlay 内不取模，每次继续减 90°，
+    // 动画始终沿逆时针最短方向旋转。翻页不重置，所有照片共用。
+    var rotationDegrees by remember {
+        mutableFloatStateOf(-90f * previewFloorMod(initialRotationQuarterTurns, 4))
+    }
+    val haptics = rememberHaptics(hapticsEnabled)
+    val density = LocalDensity.current
+    val queueSwipeTriggerPx = with(density) { PREVIEW_QUEUE_SWIPE_TRIGGER_DP.dp.toPx() }
+    val queueThrowApexPx = with(density) { 132.dp.toPx() }
+    val currentOnTransfer by rememberUpdatedState(onTransfer)
+    val currentOnTransferBurst by rememberUpdatedState(onTransferBurst)
+    val currentQueueTargetBounds by rememberUpdatedState(queueTargetBounds)
+    val currentOnQueueFlightCaught by rememberUpdatedState(onQueueFlightCaught)
+    val histogramSource = currentHandle?.let(displayedBitmaps::get)
+    val previewHistogram by produceState<LuminanceHistogram?>(
+        initialValue = null,
+        histogramVisible,
+        currentHandle,
+        histogramSource,
+    ) {
+        value = null
+        if (histogramVisible && histogramSource != null &&
+            currentFile.extension !in PREVIEW_VIDEO_EXTENSIONS
+        ) {
+            value = withContext(Dispatchers.Default) {
+                session.histogram(histogramSource)
+            }
+        }
+    }
+
+    // 预览入队只变换 Pager 图层，并用当前已解码位图多绘制一个短命影子：不复制 Bitmap、
+    // 不重新读取相机，也不创建列表 QueueFlight；抵达时仅触发现有胶囊视觉回弹。
+    var currentZoomed by remember { mutableStateOf(false) }
+    var queueGestureActive by remember { mutableStateOf(false) }
+    var queueAnimating by remember { mutableStateOf(false) }
+    var queueOffsetY by remember { mutableFloatStateOf(0f) }
+    var queueFlightProgress by remember { mutableFloatStateOf(0f) }
+    var queueFlightBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var queueFlightBurstFiles by remember {
+        mutableStateOf<List<CameraFileInfo>?>(null)
+    }
+    var queueFlightRotation by remember { mutableFloatStateOf(0f) }
+    var queueFlightTarget by remember { mutableStateOf<Rect?>(null) }
+    var queueMotionJob by remember { mutableStateOf<Job?>(null) }
+    // 连拍展开/收起只驱动 Pager 与合集卡片的图层，不复制位图，也不创建额外页面。
+    // 收起时必须先回到仍存在的合集页，再移除成员，避免页数骤减造成闪现或越界。
+    val burstStackMotion = remember { Animatable(0f) }
+    val burstPagerScale = remember { Animatable(1f) }
+    val burstPagerAlpha = remember { Animatable(1f) }
+    // 归组时用归一化屏宽位移模拟一次“返回左侧合集页”，不横穿中间所有成员。
+    val burstPagerSlide = remember { Animatable(0f) }
+    var animatedBurstId by remember { mutableStateOf<String?>(null) }
+
+    fun settleQueuePhoto() {
+        queueMotionJob?.cancel()
+        val start = queueOffsetY
+        if (abs(start) < 0.5f) {
+            queueOffsetY = 0f
+            return
+        }
+        queueMotionJob = previewScope.launch {
+            Animatable(start).animateTo(
+                targetValue = 0f,
+                animationSpec = spring(
+                    dampingRatio = 0.82f,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+            ) { queueOffsetY = value }
+        }
+    }
+
+    fun startPreviewQueueFlight(
+        bitmap: ImageBitmap?,
+        rotation: Float,
+        burstFiles: List<CameraFileInfo>? = null,
+        enqueue: () -> Boolean,
+    ) {
+        if (queueAnimating || closing) return
+        // 父层先完成目录/连接校验并确认真实入队；被拒绝时不抬图、不放残影、
+        // 不触发胶囊接收，避免视觉反馈与实际队列相矛盾。
+        if (!enqueue()) return
+        queueMotionJob?.cancel()
+        queueGestureActive = false
+        queueAnimating = true
+        queueFlightProgress = 0f
+        queueFlightRotation = rotation
+        queueFlightTarget = currentQueueTargetBounds
+        queueFlightBitmap = bitmap
+        queueFlightBurstFiles = burstFiles
+
+        queueMotionJob = previewScope.launch {
+            try {
+                // 极少数设备的 Compose 帧钟可能暂停；超时只兜底复位视觉状态，
+                // 入队已在上方同步提交，绝不会因动画未返回而锁死后续操作。
+                withTimeoutOrNull(PREVIEW_QUEUE_ANIMATION_TIMEOUT_MS) {
+                    coroutineScope {
+                        launch {
+                            val riseDuration = if (queueOffsetY < -1f) 105 else 155
+                            Animatable(queueOffsetY).animateTo(
+                                targetValue = -queueThrowApexPx,
+                                animationSpec = tween(riseDuration, easing = FastOutSlowInEasing),
+                            ) { queueOffsetY = value }
+                            Animatable(queueOffsetY).animateTo(
+                                targetValue = 0f,
+                                animationSpec = spring(
+                                    dampingRatio = 0.78f,
+                                    stiffness = Spring.StiffnessMedium,
+                                ),
+                            ) { queueOffsetY = value }
+                        }
+                        launch {
+                            if ((queueFlightBitmap != null || queueFlightBurstFiles != null) &&
+                                queueFlightTarget != null
+                            ) {
+                                delay(PREVIEW_QUEUE_GHOST_PREROLL_MS)
+                                Animatable(0f).animateTo(
+                                    targetValue = 1f,
+                                    animationSpec = tween(
+                                        PREVIEW_QUEUE_FLIGHT_DURATION_MS,
+                                        easing = QueueFlightEasing,
+                                    ),
+                                ) { queueFlightProgress = value }
+                            }
+                            // 与列表 QueueFlightGhost 同一时机：残影真正抵达后才让胶囊接住。
+                            currentOnQueueFlightCaught()
+                        }
+                    }
+                }
+            } finally {
+                queueOffsetY = 0f
+                queueFlightProgress = 0f
+                queueFlightBitmap = null
+                queueFlightBurstFiles = null
+                queueFlightTarget = null
+                queueAnimating = false
+                queueMotionJob = null
+            }
+        }
+    }
+
+    fun enqueueFromPreview(file: CameraFileInfo) {
+        // FHD 已经在屏幕上时直接复用；否则复用打开预览所用的缓存缩略图。
+        // 先挂载 alpha=0 的影子并预留两帧，再开始飞行，避免首次绘制纹理闪现。
+        val bitmap = highResolutionBitmaps[file.handle]
+            ?: session.cached(file.handle)
+        startPreviewQueueFlight(bitmap, rotationDegrees) {
+            currentOnTransfer(file)
+        }
+    }
+
+    fun enqueueBurstFromPreview(collection: PhotoPreviewItem.BurstCollection) {
+        if (collection.files.isEmpty()) return
+        startPreviewQueueFlight(
+            bitmap = null,
+            rotation = 0f,
+            burstFiles = collection.files,
+        ) {
+            currentOnTransferBurst(collection.files)
+        }
+    }
+
+    LaunchedEffect(currentItem?.key) {
+        // 翻页时绝不把上一张尚未结束的拖动/影子带到新页。
+        queueMotionJob?.cancel()
+        queueOffsetY = 0f
+        queueFlightProgress = 0f
+        queueFlightBitmap = null
+        queueFlightBurstFiles = null
+        queueFlightTarget = null
+        queueGestureActive = false
+        queueAnimating = false
+    }
+
+    val expandPreviewBurstCollection: (PhotoPreviewItem.BurstCollection) -> Unit =
+        expand@{ collection ->
+            if (closing || burstTransitionBusy || collection.files.isEmpty()) return@expand
+            val page = pagerState.currentPage
+            if (previewItems.getOrNull(page) != collection) return@expand
+            val alreadyExpanded = isPreviewBurstExpanded(previewItems, page, collection.id)
+            burstTransitionBusy = true
+            animatedBurstId = collection.id
+            haptics.tick()
+            previewScope.launch {
+                try {
+                    // 这个按钮永远只表示“展开并进入第一张”，不根据 expanded 改图标或语义。
+                    // 用户滑回已展开的合集页再次点击时，只回到第一张，不重复更新列表模型。
+                    burstStackMotion.snapTo(0f)
+                    if (!alreadyExpanded) {
+                        previewItems = expandPreviewBurst(previewItems, page, collection)
+                        onBurstExpandedChange(collection.id, true)
+                        withFrameNanos { }
+                    }
+                    coroutineScope {
+                        launch {
+                            burstStackMotion.animateTo(
+                                1f,
+                                tween(165, easing = FastOutSlowInEasing),
+                            )
+                        }
+                        launch {
+                            delay(24)
+                            pagerState.animateScrollToPage(
+                                page = page + 1,
+                                animationSpec = tween(205, easing = FastOutSlowInEasing),
+                            )
+                        }
+                    }
+                } finally {
+                    burstStackMotion.snapTo(0f)
+                    burstPagerScale.snapTo(1f)
+                    burstPagerAlpha.snapTo(1f)
+                    burstPagerSlide.snapTo(0f)
+                    animatedBurstId = null
+                    burstTransitionBusy = false
+                }
+            }
+        }
+
+    val collapsePreviewBurstMember: (String) -> Unit = collapseMember@{ burstId ->
+        if (closing || burstTransitionBusy || queueAnimating || queueGestureActive ||
+            queueMotionJob?.isActive == true
+        ) {
+            return@collapseMember
+        }
+        val memberPage = pagerState.currentPage
+        val member = previewItems.getOrNull(memberPage) as? PhotoPreviewItem.Photo
+            ?: return@collapseMember
+        if (member.burstId != burstId) return@collapseMember
+        val collectionPage = previewBurstCollectionPage(previewItems, memberPage)
+            ?: return@collapseMember
+
+        burstTransitionBusy = true
+        animatedBurstId = burstId
+        haptics.tick()
+        previewScope.launch {
+            try {
+                // 无论当前是第几张，都模拟一次标准的“返回上一页”：成员向右离场，
+                // 合集从左侧进入。在不可见的交接帧定位合集，避免横穿几十张成员。
+                burstStackMotion.snapTo(1f)
+                coroutineScope {
+                    launch {
+                        burstPagerScale.animateTo(
+                            0.985f,
+                            tween(120, easing = FastOutSlowInEasing),
+                        )
+                    }
+                    launch {
+                        burstPagerAlpha.animateTo(
+                            0f,
+                            tween(120, easing = FastOutSlowInEasing),
+                        )
+                    }
+                    launch {
+                        burstPagerSlide.animateTo(
+                            0.22f,
+                            tween(120, easing = FastOutSlowInEasing),
+                        )
+                    }
+                }
+                pagerState.scrollToPage(collectionPage)
+
+                // 当前页已经稳定落在合集上，此时原子移除成员不会改变用户正在看的页面。
+                previewItems = collapsePreviewBurst(previewItems, burstId)
+                onBurstExpandedChange(burstId, false)
+                burstPagerSlide.snapTo(-0.22f)
+                withFrameNanos { }
+                coroutineScope {
+                    launch {
+                        burstStackMotion.animateTo(
+                            0f,
+                            spring(
+                                dampingRatio = 0.7f,
+                                stiffness = Spring.StiffnessHigh,
+                            ),
+                        )
+                    }
+                    launch {
+                        burstPagerScale.animateTo(
+                            1f,
+                            spring(
+                                dampingRatio = 0.68f,
+                                stiffness = Spring.StiffnessHigh,
+                            ),
+                        )
+                    }
+                    launch {
+                        burstPagerAlpha.animateTo(
+                            1f,
+                            tween(150, easing = FastOutSlowInEasing),
+                        )
+                    }
+                    launch {
+                        burstPagerSlide.animateTo(
+                            0f,
+                            tween(165, easing = FastOutSlowInEasing),
+                        )
+                    }
+                }
+            } finally {
+                burstStackMotion.snapTo(0f)
+                burstPagerScale.snapTo(1f)
+                burstPagerAlpha.snapTo(1f)
+                burstPagerSlide.snapTo(0f)
+                animatedBurstId = null
+                burstTransitionBusy = false
+            }
+        }
+    }
+
+    // 预览期间暂停后台缩略图填充，把 ioMutex 让给 FHD/EXIF 取图。
+    DisposableEffect(Unit) {
+        session.setFhdActive(true)
+        onDispose { session.setFhdActive(false) }
+    }
+
+    // 加载单页高清图：普通照片读取本地完整原图，NEF/NRW 提取最大内嵌 JPEG，
+    // TIFF 直接请求相机 FHD；视频继续使用既有封面分支。当前页与邻页共用同一规则。
+    // 返回 true 表示本次确实取到并解码成功（用于当前页到位的触感反馈）。
+    suspend fun loadHighResolutionPage(
+        page: Int,
+        awaitExisting: Boolean = false,
+        allowCameraRequest: Boolean,
+    ): Boolean {
+        val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
+            ?: return false
+        val h = file.handle
+        val localUri = sessionLocalOriginalUriFor(file)
+        val localPreviewRoute = session.localRoute(file.extension)
+        // 视频没有高清封面（FHD 操作码只对照片有效），不发注定失败的请求、也不显示加载条。
+        if (file.extension in PREVIEW_VIDEO_EXTENSIONS) {
+            fhdUnavailable[h] = true
+            return false
+        }
+        if (h in highResolutionBitmaps) {
+            val cachedLocalUri = localPreviewUris[h]
+            if (cachedLocalUri != null && cachedLocalUri != localUri) {
+                highResolutionBitmaps.remove(h)
+                displayedBitmaps.remove(h)
+                localPreviewUris.remove(h)
+            } else if (localUri == null || cachedLocalUri == localUri) {
+                fhdUnavailable.remove(h)
+                return false
+            }
+        }
+        if (highResolutionLoading.containsKey(h)) {
+            if (!awaitExisting) return false
+            // 当前页可能正由上一页的预取任务加载。等待它完成；若它因翻页被取消，
+            // loading 会在 finally 中释放，随后由当前页重新发起，绝不漏载。
+            while (highResolutionLoading.containsKey(h) && h !in highResolutionBitmaps) delay(16)
+            if (h in highResolutionBitmaps) return false
+        }
+        fhdUnavailable.remove(h)
+        highResolutionLoading[h] = true
+        try {
+            if (localUri != null &&
+                localPreviewRoute != LocalOriginalPreviewRoute.CAMERA_FHD &&
+                localDecodeFailures[h] != localUri
+            ) {
+                val localPreview = try {
+                    session.decodeLocal(localUri, localPreviewRoute)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+                if (localPreview != null) {
+                    highResolutionBitmaps[h] = localPreview
+                    localPreviewUris[h] = localUri
+                    fhdUnavailable.remove(h)
+                    localDecodeFailures.remove(h)
+                    return true
+                }
+                localDecodeFailures[h] = localUri
+            }
+            // 相机 FHD 已经存在且本地原图不可解码时，继续复用现有位图，不重复请求相机。
+            if (h in highResolutionBitmaps) return false
+            // 本地预览不依赖相机连接。没有本地可用图时等待连接状态变化后再回退，
+            // 不能把“当前离线”永久记成 FHD 不可用。
+            if (!allowCameraRequest) return false
+            val res = session.loadFhdPreview(file) ?: run {
+                fhdUnavailable[h] = true
+                return false
+            }
+            highResolutionBitmaps[h] = res
+            localPreviewUris.remove(h)
+            fhdUnavailable.remove(h)
+            return true
+        } finally {
+            highResolutionLoading.remove(h)
+        }
+    }
+
+    // 加载单页 EXIF（仅当前页，不预加载邻居——EXIF 只在当前页底栏显示，预加载纯浪费通道）。
+    suspend fun loadExifPage(page: Int) {
+        val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
+            ?: return
+        val h = file.handle
+        if (h in exifData || exifLoading.containsKey(h)) return
+        exifFinished.remove(h)
+        exifLoading[h] = true
+        try {
+            val localUri = sessionLocalOriginalUriFor(file)
+            exifData[h] = if (localUri != null) {
+                session.loadLocalExif(file, localUri)
+            } else {
+                session.loadExif(file)
+            }
+            exifFinished[h] = true
+        } finally {
+            exifLoading.remove(h)
+        }
+    }
+
+    // 即时淘汰（独立 effect，翻页瞬间就跑，不排在 1–3s 的慢加载后面）：保留窗口 ±2。
+    // 与加载解耦是关键——否则快速翻页时淘汰永远排在慢加载之后、来不及执行，内存会一路涨。
+    LaunchedEffect(previewItems, pagerState.currentPage, currentHandle) {
+        val cp = pagerState.currentPage
+        val keep = (cp - 2).coerceAtLeast(0)..(cp + 2).coerceAtMost(previewItems.lastIndex)
+        val keepH = keep.mapNotNull { page ->
+            (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file?.handle
+        }.toSet()
+        highResolutionBitmaps.keys
+            .filter { it !in keepH }
+            .forEach { highResolutionBitmaps.remove(it) }
+        localPreviewUris.keys.filter { it !in keepH }.forEach { localPreviewUris.remove(it) }
+        displayedBitmaps.keys.filter { it !in keepH }.forEach { displayedBitmaps.remove(it) }
+        fhdUnavailable.keys.filter { it !in keepH }.forEach { fhdUnavailable.remove(it) }
+        localDecodeFailures.keys.filter { it !in keepH }.forEach { localDecodeFailures.remove(it) }
+        exifData.keys.filter { it !in keepH }.forEach { exifData.remove(it) }
+        exifFinished.keys.filter { it !in keepH }.forEach { exifFinished.remove(it) }
+    }
+
+    val currentLocalOriginalUri = currentFile?.let(sessionLocalOriginalUriFor)
+
+    // 当前页拥有最高优先级。会话快照中的本地 URI 与连接状态纳入 key；传输在本次预览
+    // 期间完成不会改变该 URI，因而不会取消当前任务或热替换位图。关闭后重新进入时，
+    // 新 overlay 会捕获已完成传输的本地 URI。本地不可用且断线后原地重连时仍可重新请求 FHD。
+    // 当前页与邻页由同一协程严格串行，避免首次失败时两个 effect 重复请求并触发熔断。
+    LaunchedEffect(
+        previewItems,
+        pagerState.currentPage,
+        currentHandle,
+        currentLocalOriginalUri,
+        isConnectedToCamera,
+        deferredLoadsEnabled
+    ) {
+        if (!deferredLoadsEnabled) return@LaunchedEffect
+        val cp = pagerState.currentPage
+        val loadedCurrent = loadHighResolutionPage(
+            page = cp,
+            awaitExisting = true,
+            allowCameraRequest = false,
+        )
+        if (loadedCurrent) haptics.tick()
+        val resolvedLocally = currentHandle?.let { handle ->
+            isLocalPreviewResolved(
+                localSource = currentLocalOriginalUri,
+                cachedLocalSource = localPreviewUris[handle],
+            )
+        } == true
+        if (resolvedLocally) {
+            // 图片和 EXIF 都直接读取本地文件，不进入相机交互优先窗口。
+            loadExifPage(cp)
+        } else if (isConnectedToCamera) {
+            session.withInteractivePreviewPriority {
+                if (
+                    loadHighResolutionPage(
+                        page = cp,
+                        awaitExisting = true,
+                        allowCameraRequest = true,
+                    )
+                ) {
+                    haptics.tick()
+                }
+                loadExifPage(cp)
+            }
+        }
+        val allowNeighborCameraRequest = !currentTransfersBusy &&
+            isConnectedToCamera
+        if (cp > 0) {
+            loadHighResolutionPage(
+                page = cp - 1,
+                allowCameraRequest = allowNeighborCameraRequest,
+            )
+        }
+        if (cp < previewItems.lastIndex) {
+            loadHighResolutionPage(
+                page = cp + 1,
+                allowCameraRequest = allowNeighborCameraRequest,
+            )
+        }
+    }
+
+    // 上面的主加载不能把 transfersBusy 放进 key，否则状态变化会取消正在读取的 PTP
+    // 事务。这里仅监听“忙→闲”，在用户仍停留当前页时补上此前跳过的邻页预取。
+    LaunchedEffect(transfersBusy) {
+        val shouldResumePrefetch = previousTransfersBusy && !transfersBusy
+        previousTransfersBusy = transfersBusy
+        if (!shouldResumePrefetch || !deferredLoadsEnabled) {
+            return@LaunchedEffect
+        }
+        val cp = pagerState.currentPage
+        val allowNeighborCameraRequest = isConnectedToCamera
+        if (cp > 0) {
+            loadHighResolutionPage(
+                page = cp - 1,
+                allowCameraRequest = allowNeighborCameraRequest,
+            )
+        }
+        if (cp < previewItems.lastIndex) {
+            loadHighResolutionPage(
+                page = cp + 1,
+                allowCameraRequest = allowNeighborCameraRequest,
+            )
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { overlayBounds = it.boundsInRoot() }
+            .pointerInput(currentHandle, currentZoomed, queueAnimating, closing) {
+                val touchSlop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val file = currentFile
+                    val canSwipeToQueue =
+                        file != null && !currentZoomed && !queueAnimating && !closing &&
+                            progress.value >= 0.99f && !pagerState.isScrollInProgress &&
+                            abs(pagerState.currentPageOffsetFraction) < 0.01f
+
+                    if (!canSwipeToQueue) {
+                        // 保留原有的全屏遮挡语义：深层缩放/翻页先消费，剩余拖动由预览层
+                        // 吃掉，绝不穿透到底下仍存活的照片网格。
+                        do {
+                            val event = awaitPointerEvent()
+                            event.changes.forEach { change ->
+                                if (!change.isConsumed && change.position != change.previousPosition) {
+                                    change.consume()
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
+                        return@awaitEachGesture
+                    }
+                    val queueFile = requireNotNull(file)
+
+                    queueMotionJob?.cancel()
+                    queueOffsetY = 0f
+                    var totalDrag = Offset.Zero
+                    var direction = PreviewQueueDragDirection.UNDECIDED
+                    do {
+                        val event = awaitPointerEvent()
+                        val pressedCount = event.changes.count { it.pressed }
+                        val change = event.changes.firstOrNull { it.id == down.id }
+
+                        if (pressedCount > 1 || currentZoomed) {
+                            direction = PreviewQueueDragDirection.REJECTED
+                            queueGestureActive = false
+                            settleQueuePhoto()
+                        } else if (change != null && direction != PreviewQueueDragDirection.REJECTED) {
+                            totalDrag += change.position - change.previousPosition
+                            if (direction == PreviewQueueDragDirection.UNDECIDED) {
+                                direction = if (change.isConsumed) {
+                                    PreviewQueueDragDirection.REJECTED
+                                } else {
+                                    previewQueueDragDirection(totalDrag, touchSlop)
+                                }
+                                if (direction == PreviewQueueDragDirection.UPWARD) {
+                                    queueGestureActive = true
+                                }
+                            }
+                            if (direction == PreviewQueueDragDirection.UPWARD) {
+                                change.consume()
+                                queueOffsetY = previewQueueVisualOffset(
+                                    upwardDistance = -totalDrag.y,
+                                    triggerDistance = queueSwipeTriggerPx,
+                                )
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
+
+                    if (direction == PreviewQueueDragDirection.UPWARD) {
+                        queueGestureActive = false
+                        if (-totalDrag.y >= queueSwipeTriggerPx) {
+                            enqueueFromPreview(queueFile)
+                        } else {
+                            settleQueuePhoto()
+                        }
+                    }
+                }
+            }
+    ) {
+        // 黑色背景：随进度淡入。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                // 透明黑直接绘制，不让 graphicsLayer(alpha) 创建全屏离屏缓冲。
+                .drawBehind {
+                    drawRect(Color.Black, alpha = 0.74f * progress.value)
+                }
+        )
+
+        // 图片翻页器：整体从被长按格子的位置缩放展开。相邻页预载一页，快速翻页不用等图。
+        HorizontalPager(
+            state = pagerState,
+            beyondViewportPageCount = 1,
+            key = { page -> previewItems[page].key },
+            userScrollEnabled = !currentZoomed && !queueGestureActive && !queueAnimating &&
+                !burstTransitionBusy,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val ob = overlayBounds
+                    val ar = if (closing) collapseAnchorRect else anchorRect
+                    val queueLift =
+                        (-queueOffsetY / queueSwipeTriggerPx).coerceIn(0f, 1.24f)
+                    val queueScale = 1f - min(queueLift, 1f) * 0.055f
+                    val queueAlpha = 1f - min(queueLift, 1f) * 0.07f
+                    var baseScale = 1f
+                    var baseAlpha = progress.value
+                    // 打开阶段只认最初格子；关闭阶段已经重新定位并测得当前照片的新坐标，
+                    // 因此翻页后也能缩回正在看的那张，而不是退回旧格位或只做无方向淡出。
+                    val shrinkToAnchor = if (closing) ar != null
+                        else pagerState.currentPage == initialIndex
+                    if (shrinkToAnchor && ob != null && ar != null && ob.width > 0f && ob.height > 0f) {
+                        transformOrigin = TransformOrigin(
+                            (ar.center.x - ob.left) / ob.width,
+                            (ar.center.y - ob.top) / ob.height
+                        )
+                        val startScale = (ar.width / ob.width).coerceIn(0.05f, 1f)
+                        baseScale = startScale + (1f - startScale) * progress.value
+                        // 打开首帧就绘制已缓存的源缩略图，避免 overlay 已挂载但动画尚未
+                        // 前进时整块图片透明、短暂透出照片列表。关闭时仍随缩回过程淡出，
+                        // 与底层原格子自然交接。
+                        baseAlpha = if (closing) {
+                            (progress.value * 1.6f).coerceAtMost(1f)
+                        } else {
+                            1f
+                        }
+                    }
+                    if (queueLift > 0f || burstPagerScale.value != 1f) {
+                        transformOrigin = TransformOrigin.Center
+                    }
+                    scaleX = baseScale * queueScale * burstPagerScale.value
+                    scaleY = baseScale * queueScale * burstPagerScale.value
+                    translationX = size.width * burstPagerSlide.value
+                    translationY = queueOffsetY
+                    alpha = baseAlpha * queueAlpha * burstPagerAlpha.value
+                }
+        ) { page ->
+            when (val item = previewItems[page]) {
+                is PhotoPreviewItem.Photo -> {
+                    val file = item.file
+                    SharedPhotoPreviewPage(
+                        file = file,
+                        images = session, text = text, uptimeMillis = { session.uptimeMillis() },
+                        fhdBitmap = highResolutionBitmaps[file.handle],
+                        isLoadingFhd = highResolutionLoading.containsKey(file.handle),
+                        allowRemoteThumbnailFallback = allowPreviewRemoteThumbnailFallback(
+                            isCurrent = page == pagerState.currentPage,
+                            fhdUnavailable = fhdUnavailable[file.handle] == true,
+                            exifFinished = exifFinished[file.handle] == true,
+                        ),
+                        loadEnabled = deferredLoadsEnabled,
+                        rotationDegrees = rotationDegrees,
+                        isCurrent = page == pagerState.currentPage,
+                        onDisplayBitmapChanged = { bitmap ->
+                            if (bitmap == null) displayedBitmaps.remove(file.handle)
+                            else displayedBitmaps[file.handle] = bitmap
+                        },
+                        onZoomedChange = { currentZoomed = it },
+                        onTap = startClose
+                    )
+                }
+                is PhotoPreviewItem.BurstCollection -> {
+                    SharedPreviewBurstPage(
+                        collection = item,
+                        content = burstContent,
+                        loadEnabled = deferredLoadsEnabled,
+                        isCurrent = page == pagerState.currentPage,
+                        onZoomedChange = { currentZoomed = it },
+                        stackMotionProgress = {
+                            if (animatedBurstId == item.id) burstStackMotion.value else 0f
+                        },
+                        onTap = startClose
+                    )
+                }
+            }
+        }
+
+        // 入队影子与主图使用同一份已解码纹理。它在 alpha=0 时预挂载两帧，随后按
+        // 列表 QueueFlightGhost 的同款二次贝塞尔弧线加速吸入真实胶囊；主图同时回位，
+        // 因此没有消失后闪回的断帧，也不会出现直线飞行的机械感。
+        queueFlightBitmap?.let { bitmap ->
+            Image(
+                bitmap = bitmap,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val p = queueFlightProgress.coerceIn(0f, 1f)
+                        val viewportWidth = size.width
+                        val viewportHeight = size.height
+                        val rawAspect = bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1)
+                        val viewportAspect = viewportWidth / viewportHeight.coerceAtLeast(1f)
+                        val baseWidth = if (rawAspect > viewportAspect) {
+                            viewportWidth
+                        } else {
+                            viewportHeight * rawAspect
+                        }
+                        val baseHeight = if (rawAspect > viewportAspect) {
+                            viewportWidth / rawAspect
+                        } else {
+                            viewportHeight
+                        }
+                        val angle = previewRadians(queueFlightRotation.toDouble())
+                        val rotatedWidth =
+                            baseWidth * abs(cos(angle)).toFloat() +
+                                baseHeight * abs(sin(angle)).toFloat()
+                        val rotatedHeight =
+                            baseWidth * abs(sin(angle)).toFloat() +
+                                baseHeight * abs(cos(angle)).toFloat()
+                        val rotationFit = if (rotatedWidth > 0f && rotatedHeight > 0f) {
+                            min(viewportWidth / rotatedWidth, viewportHeight / rotatedHeight)
+                        } else {
+                            1f
+                        }
+                        val breathingRoom = if (rawAspect > 1f) {
+                            1f - 0.08f * abs(sin(angle)).toFloat()
+                        } else {
+                            1f
+                        }
+                        val rootBounds = overlayBounds
+                        val targetBounds = queueFlightTarget
+                        val sx = viewportWidth / 2f
+                        val sy = viewportHeight / 2f
+                        // 与列表残影完全相同的胶囊落点：承载区右缘向内 28dp、垂直居中。
+                        val ex = if (rootBounds != null && targetBounds != null) {
+                            targetBounds.right - rootBounds.left - 28.dp.toPx()
+                        } else sx
+                        val ey = if (rootBounds != null && targetBounds != null) {
+                            targetBounds.center.y - rootBounds.top
+                        } else sy
+                        val flightCenter = queueFlightBezierPoint(
+                            progress = p,
+                            start = Offset(sx, sy),
+                            end = Offset(ex, ey),
+                            liftBasePx = 36.dp.toPx(),
+                            maxLiftPx = 90.dp.toPx(),
+                            minApexYPx = 12.dp.toPx(),
+                            maxBowPx = 52.dp.toPx(),
+                            bowFadeDistancePx = 160.dp.toPx(),
+                        )
+
+                        val appear = (p / 0.12f).coerceAtMost(1f)
+                        // 起飞时仍能认出当前照片，抵达时收拢到胶囊内部的小卡片尺度。
+                        val startScale = rotationFit * breathingRoom * 0.82f
+                        val endScale = 18.dp.toPx() /
+                            max(rotatedWidth, rotatedHeight).coerceAtLeast(1f)
+                        val flightScale = startScale + (endScale - startScale) * p
+                        val arc = sin(kotlin.math.PI * p).toFloat()
+
+                        transformOrigin = TransformOrigin.Center
+                        scaleX = flightScale
+                        scaleY = flightScale
+                        translationX = flightCenter.x - sx
+                        translationY = flightCenter.y - sy
+                        rotationZ = queueFlightRotation + 2.2f * arc
+                        // 和列表一致，只在最后 6% 贴着胶囊消失；接收回弹紧随其后。
+                        alpha = appear *
+                            (if (p > 0.94f) (1f - p) / 0.06f else 1f) *
+                            0.82f * progress.value
+                    },
+            )
+        }
+        queueFlightBurstFiles?.let { files ->
+            SharedPreviewBurstQueueFlightGhost(
+                files = files,
+                content = burstContent,
+                flightProgress = { queueFlightProgress },
+                targetBounds = queueFlightTarget,
+                overlayBounds = overlayBounds,
+                overlayAlpha = { progress.value },
+            )
+        }
+
+        if (histogramVisible && currentFile != null &&
+            currentFile.extension !in PREVIEW_VIDEO_EXTENSIONS
+        ) {
+            previewHistogram?.let { histogram ->
+                HistogramOverlay(
+                    histogram = histogram,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .navigationBarsPadding()
+                        .padding(start = 20.dp, bottom = 72.dp)
+                        .graphicsLayer {
+                            val swipe =
+                                (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
+                                    .coerceIn(0f, 1f)
+                            translationX =
+                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                            alpha = progress.value * swipe * burstPagerAlpha.value
+                        },
+                )
+            }
+        }
+
+        // 顶部信息带与右侧队列胶囊严格共用 36dp 高度和 6dp 顶边距。文件名左对齐，
+        // 当前照片的传输状态紧跟其后；右侧为胶囊预留最大安全区，长文件名单行省略。
+        // 整条信息带随翻页跟手渐隐/渐显，内容在中点透明时切换，不会硬跳。
+        if (currentItem != null) {
+            val pageNumber = "${pagerState.currentPage + 1}/${previewItems.size}"
+            val title = (currentItem as? PhotoPreviewItem.Photo)?.file?.fileName
+            val task = currentFile?.let(queueTaskFor)
+            val overlayTask = task?.takeIf { showsQueueStatusOverlay(it.status) }
+            val transferred = currentFile?.let(isTransferred) == true
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(top = 6.dp, start = 12.dp, end = 184.dp)
+                    .height(36.dp)
+                    .graphicsLayer {
+                        val swipe =
+                            (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
+                                .coerceIn(0f, 1f)
+                        translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                        alpha = progress.value * swipe * burstPagerAlpha.value
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title?.let { "$pageNumber  ·  $it" } ?: pageNumber,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.88f),
+                    textAlign = TextAlign.Start,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (overlayTask != null || transferred) {
+                    Spacer(Modifier.width(8.dp))
+                    if (overlayTask != null) {
+                        SharedTransferStatusIndicator(
+                            task = overlayTask,
+                            activeProgress = activeProgress,
+                        )
+                    } else {
+                        TransferredIndicator()
+                    }
+                }
+            }
+        }
+
+        // 左上角第二行：连拍/保护标签与列表语义一致，但在大图舞台上适度放大，避免
+        // 像缩略图角标一样小气；与顶部信息带左边缘对齐，并留出 8dp 呼吸间距。
+        if (currentFile != null &&
+            (currentFile.handle in burstHandles || currentFile.isProtected)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(top = 50.dp, start = 12.dp)
+                    .graphicsLayer {
+                        val swipe =
+                            (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
+                                .coerceIn(0f, 1f)
+                        translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                        alpha = progress.value * swipe * burstPagerAlpha.value
+                    }
+            ) {
+                if (currentFile.handle in burstHandles) {
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = BurstBadgeColor.copy(alpha = 0.85f)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.BurstMode,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = text.burstLabel(),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 12.sp,
+                                    lineHeight = 14.sp,
+                                ),
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+                if (currentFile.isProtected) {
+                    // 黑底胶囊在黑幕/暗部照片上需要细描边定界(列表页衬在照片上无此问题)。
+                    // 钥匙 + "保护"文字，与旁边的连拍角标（图标+字）一致。
+                    Surface(
+                        shape = RoundedCornerShape(9.dp),
+                        color = Color.Black.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Key,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.9f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = text.protectedLabel(),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 12.sp,
+                                    lineHeight = 14.sp,
+                                ),
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 顶部极细进度条：当前页正在取 FHD 高清版时显示（"正在加载高清"的低调提示，
+        // 取代旧的突兀底部小转圈）。随展开动画淡入，取到即消失。
+        val curLoadingFhd = currentFile?.let {
+            highResolutionLoading.containsKey(it.handle)
+        } == true
+        if (curLoadingFhd) {
+            LinearProgressIndicator(
+                color = AccentBlue.copy(alpha = 0.9f),
+                trackColor = Color.Transparent,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .height(2.dp)
+                    .graphicsLayer {
+                        translationX = (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                        alpha = progress.value * burstPagerAlpha.value
+                    }
+            )
+        }
+
+        // ---- 底部栏：当前真实照片的 EXIF 参数 ----
+        // 跟手淡入淡出：alpha 由翻页滚动进度实时驱动——离开当前页时随手指滑动淡出、
+        // 新页吸附到位时淡入，不等翻完。内容在滑过半（currentPage 翻转、此刻 alpha≈0
+        // 看不见）时直接切换，因此不会保留上一页参数的退场副本。
+        // alpha 计算写在 graphicsLayer 内读滚动值：每帧只重绘图层，不触发子树重组。
+        // 新页 EXIF 异步到达后再独立淡入；合集页直接移除整棵参数子树。
+        currentFile?.let { file ->
+            val curExif = exifData[file.handle]
+            val displayExif = curExif?.takeIf {
+                it.aperture != null || it.shutterSpeed != null ||
+                    it.iso != null || it.exposureCompensation != null ||
+                    it.focalLength != null
+            }
+            val loadedAlpha by animateFloatAsState(
+                targetValue = if (displayExif != null) 1f else 0f,
+                animationSpec = tween(180, easing = FastOutSlowInEasing),
+                label = "exifLoaded"
+            )
+            if (displayExif != null) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 12.dp)
+                        .heightIn(min = 44.dp)
+                        .padding(vertical = 24.dp)
+                        .graphicsLayer {
+                            val swipe =
+                                (1f - abs(pagerState.currentPageOffsetFraction) * 2f)
+                                    .coerceIn(0f, 1f)
+                            translationX =
+                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                            alpha = progress.value * swipe * loadedAlpha * burstPagerAlpha.value
+                        },
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    SharedPreviewExifMetadataBar(
+                        exif = displayExif,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                }
+            }
+        }
+
+        // 普通照片沿用右下旋转/入队；合集页改为底部左右双按钮，与列表卡的
+        // “左下 + / 右下 >”完全同语义。合集展开后自动进入第一张成员。
+        when (val item = currentItem) {
+            is PhotoPreviewItem.Photo -> {
+                val current = item.file
+                val memberBurstId = item.burstId
+                val memberCollectionPage = previewBurstCollectionPage(
+                    previewItems,
+                    pagerState.currentPage,
+                ) ?: -1
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(end = 20.dp, bottom = 80.dp)
+                        .graphicsLayer {
+                            translationX =
+                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                            alpha = progress.value * burstPagerAlpha.value
+                        },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (memberCollectionPage in 0 until pagerState.currentPage) {
+                        SharedPreviewBurstNavigationButton(
+                            expand = false, text = text,
+                            // 进入成员页时按钮直接以完整形态出现；连拍过渡的防重由
+                            // collapsePreviewBurstMember 统一拦截，不借禁用态制造透明渐变。
+                            enabled = !queueAnimating && !queueGestureActive &&
+                                queueMotionJob?.isActive != true,
+                            onClick = {
+                                memberBurstId?.let(collapsePreviewBurstMember)
+                            },
+                        )
+                    }
+                    if (current.extension !in PREVIEW_VIDEO_EXTENSIONS) {
+                        SharedPreviewHistogramButton(
+                            description = { text.histogramDescription() },
+                            active = histogramVisible,
+                            onClick = {
+                                onHistogramVisibleChanged(!histogramVisible)
+                            },
+                        )
+                        SharedPreviewRotationButton(description = { text.rotationDescription() }, onClick = {
+                            if (!burstTransitionBusy) {
+                                val nextDegrees = rotationDegrees - 90f
+                                rotationDegrees = nextDegrees
+                                // 从连续角度换算持久化方向；快速连点也不依赖父层重组时机。
+                                val nextTurns = previewFloorMod((-nextDegrees / 90f).toInt(), 4)
+                                onRotationChanged(nextTurns)
+                            }
+                        })
+                    }
+                    SharedPreviewTransferQueueButton(
+                        text = text,
+                        onClick = {
+                            if (!burstTransitionBusy) enqueueFromPreview(current)
+                        }
+                    )
+                }
+            }
+            is PhotoPreviewItem.BurstCollection -> {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(bottom = 112.dp)
+                        .graphicsLayer {
+                            translationX =
+                                (overlayBounds?.width ?: 0f) * burstPagerSlide.value
+                            alpha = progress.value * burstPagerAlpha.value
+                        },
+                    horizontalArrangement = Arrangement.spacedBy(22.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SharedPreviewTransferQueueButton(
+                        text = text,
+                        onClick = {
+                            if (!burstTransitionBusy) enqueueBurstFromPreview(item)
+                        },
+                        buttonSize = 48.dp
+                    )
+                    SharedPreviewBurstNavigationButton(
+                        expand = true, enabled = true, text = text,
+                        onClick = { expandPreviewBurstCollection(item) }
+                    )
+                }
+            }
+            null -> Unit
+        }
+    }
+}
+
+/** 当前合集叠片沿单张预览完全相同的弧线收进队列胶囊。 */
+@kotlin.native.HiddenFromObjC
+@Composable
+fun SharedPreviewBurstQueueFlightGhost(
+    files: List<CameraFileInfo>,
+    content: PreviewBurstContent,
+    flightProgress: () -> Float,
+    targetBounds: Rect?,
+    overlayBounds: Rect?,
+    overlayAlpha: () -> Float,
+) {
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        val stackSize = minOf(maxWidth * 0.72f, maxHeight * 0.46f, 360.dp)
+        val viewportWidth = constraints.maxWidth.toFloat()
+        val viewportHeight = constraints.maxHeight.toFloat()
+        SharedPreviewBurstStack(
+            files = files,
+            content = content,
+            // 影子必须只复用页面已经拿到的缓存，不能为 560ms 的反馈另启网络读取。
+            loadEnabled = false,
+            stackSize = stackSize,
+            modifier = Modifier
+                .size(stackSize)
+                .graphicsLayer {
+                    val p = flightProgress().coerceIn(0f, 1f)
+                    val sx = viewportWidth / 2f
+                    val sy = viewportHeight / 2f
+                    val ex = if (overlayBounds != null && targetBounds != null) {
+                        targetBounds.right - overlayBounds.left - 28.dp.toPx()
+                    } else sx
+                    val ey = if (overlayBounds != null && targetBounds != null) {
+                        targetBounds.center.y - overlayBounds.top
+                    } else sy
+                    val flightCenter = queueFlightBezierPoint(
+                        progress = p,
+                        start = Offset(sx, sy),
+                        end = Offset(ex, ey),
+                        liftBasePx = 36.dp.toPx(),
+                        maxLiftPx = 90.dp.toPx(),
+                        minApexYPx = 12.dp.toPx(),
+                        maxBowPx = 52.dp.toPx(),
+                        bowFadeDistancePx = 160.dp.toPx(),
+                    )
+                    val appear = (p / 0.12f).coerceAtMost(1f)
+                    val startScale = 0.82f
+                    val endScale = 18.dp.toPx() / size.maxDimension.coerceAtLeast(1f)
+                    val flightScale = startScale + (endScale - startScale) * p
+
+                    transformOrigin = TransformOrigin.Center
+                    scaleX = flightScale
+                    scaleY = flightScale
+                    translationX = flightCenter.x - sx
+                    translationY = flightCenter.y - sy
+                    rotationZ = 2.2f * sin(kotlin.math.PI * p).toFloat()
+                    alpha = appear *
+                        (if (p > 0.94f) (1f - p) / 0.06f else 1f) *
+                        0.86f * overlayAlpha()
+                },
+        )
+    }
+}
