@@ -12,6 +12,7 @@ from thumbnail_grid_extraction import extract_thumbnail_grid
 from filter_overlay_extraction import extract_filter_overlay, extract_anchor_popup, expected_contract
 from export_exit_extraction import extract_export_exit
 from photo_viewport_extraction import extract_photo_viewport
+from photo_preview_model_extraction import extract_photo_preview_model
 
 FILES = (
     "theme/Type.kt", "theme/Motion.kt", "theme/Color.kt", "screen/ZMark.kt", "screen/BroomMark.kt",
@@ -145,6 +146,10 @@ def main():
     print("PASS original untransferred completion-exit coordinator and callback; shared by Android and iOS")
     preview_base = "app/src/main/java/com/ztransfer/ui/screen/"
     previews = extract_photo_viewport(original(preview_base + "PhotoPreview.kt"), original(preview_base + "PreviewRotationButton.kt"))
+    model_android, preview_model = extract_photo_preview_model(previews[0])
+    previews = (model_android,) + previews[1:]
+    if (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedPhotoPreviewModel.kt").read_text(encoding="utf-8") != preview_model:
+        raise ValueError("Original preview paging/session/intent rules changed beyond visibility")
     preview_paths = [preview_base + "PhotoPreview.kt",
         "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedSinglePhotoPreviewOverlay.kt",
         "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedZoomablePreviewViewport.kt",
@@ -154,6 +159,7 @@ def main():
         if (root / path).read_text(encoding="utf-8") != expected:
             raise ValueError(f"Original photo preview changed beyond viewport/back/text/math adapters: {path}")
     print("PASS entire original single-photo/zoom/rotation bodies; Android full preview coordinator unchanged beyond shared viewport call")
+    print("PASS original preview paging/burst/source-snapshot/queue-intent rules; Android date, URI and IO paths retained")
     android_theme = (root / "app/src/main/java/com/ztransfer/ui/theme/Theme.kt").read_text(encoding="utf-8")
     def window_effect(text):
         block = text[text.index("val view = LocalView.current"):text.index("CompositionLocalProvider(")]
