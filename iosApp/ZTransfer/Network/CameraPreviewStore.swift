@@ -214,6 +214,22 @@ actor CameraPreviewStore {
     }
 
     func thumbnail(info: PtpObjectInfo) async throws -> Data? { try await load(info: info, fhd: false) }
+    /// Product preview asks for FHD and EXIF before permitting thumbnail fallback. Do not call preview().
+    func fhd(info: PtpObjectInfo) async throws -> Data? {
+        let use = beginForegroundUse()
+        defer { endForegroundUse(use) }
+        return try await load(info: info, fhd: true)
+    }
+
+    /// Cache-only lookup: no disk read, actor child task or camera request for opening/flight frames.
+    func cachedThumbnail(info: PtpObjectInfo) -> Data? {
+        guard !closed else { return nil }
+        let identity = info.identityComplete ? policy.thumbnailKey(info: info) : "incomplete:\(info.handle):\(info.size)"
+        guard allowedThumbnailKeys?.contains(identity) != false, let value = cache["thumb:\(identity)"] else { return nil }
+        access &+= 1; value.lastUsed = access
+        return value.data
+    }
+
     func preview(info: PtpObjectInfo) async throws -> Data? {
         let use = beginForegroundUse()
         defer { endForegroundUse(use) }

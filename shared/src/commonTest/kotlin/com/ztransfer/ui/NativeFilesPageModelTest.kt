@@ -8,6 +8,35 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun previewSessionsHaveDistinctLifetimesWithoutClosingTheirParentQueue() {
+        val events = mutableListOf<String>()
+        val preview = object : NativePreviewReadPlatform {
+            override fun beginPreviewReads(sessionId: Long) { events += "begin:$sessionId" }
+            override fun endPreviewReads(sessionId: Long) { events += "end:$sessionId" }
+            override fun cancelPreviewRead(sessionId: Long, requestId: Long) { }
+            override fun readFhdPreview(sessionId: Long, requestId: Long, file: CameraFileInfo, completion: NativeFhdPreviewCompletion) { }
+        }
+        val m = model()
+        assertNull(m.beginPreviewReads()); assertTrue(m.attachPreviewReads(preview))
+        val first = assertNotNull(m.beginPreviewReads())
+        val second = assertNotNull(m.beginPreviewReads())
+        first.close(); second.close()
+        assertTrue(m.queue.connected.value)
+        assertEquals(listOf("begin:1", "end:1", "begin:2", "end:2"), events)
+        m.close(); assertNull(m.beginPreviewReads()); assertFalse(m.attachPreviewReads(preview))
+    }
+
+    @Test fun previewOriginalLocatorUsesTheSameRealIndexAsTransferredBadge() {
+        val m = model(); m.finishScan(m.beginScan(), snapshot())
+        val file = m.state.value.files.first()
+        assertNull(m.localOriginalSource(file))
+        val update = NativeOriginalIndexUpdate(1, -1, true)
+        update.add(file.fileName, file.size, null, "file:///owned/original.jpg")
+        assertTrue(m.publishOriginals(update)); assertTrue(m.isTransferred(file))
+        assertEquals("file:///owned/original.jpg", m.localOriginalSource(file))
+        m.close(); assertNull(m.localOriginalSource(file))
+    }
+
     @Test fun restoredPendingFilterSurvivesInitialIndexFailureAndCanBeClearedBeforeReadiness() {
         val p = Platform().also { it.preferences = NativeBrowsePreferences(4, false, listOf(".jpg"), true, false, true, 20260101, 20261231) }
         val m = model(p)

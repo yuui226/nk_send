@@ -65,6 +65,9 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     init { require(queue.connectionId == connectionId) }
     private var platform: NativeFilesPagePlatform? = platform
     private var closed = false
+    private var previewPlatform: NativePreviewReadPlatform? = null
+    private var previewReads: NativePreviewReadSession? = null
+    private var nextPreviewSession = 0L
     private var attempt = 0L
     private var currentFiles = emptyMap<Int, CameraFileInfo>()
     private val mutableState = MutableStateFlow(NativeFilesState())
@@ -127,6 +130,23 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         if (!closed) mutableOriginals.value = mutableOriginals.value.copy(refreshing = false, failed = true)
     }
     internal fun isTransferred(file: CameraFileInfo): Boolean = originalIndex.contains(file, folder = null)
+
+    fun attachPreviewReads(platform: NativePreviewReadPlatform): Boolean {
+        if (closed || (previewPlatform != null && previewPlatform !== platform)) return false
+        previewPlatform = platform
+        return true
+    }
+
+    fun beginPreviewReads(): NativePreviewReadSession? {
+        val owner = previewPlatform ?: return null
+        if (closed || nextPreviewSession == Long.MAX_VALUE) return null
+        previewReads?.close()
+        return NativePreviewReadSession(++nextPreviewSession, owner,
+            isCurrentFile = { file -> !closed && queue.connected.value && currentFiles[file.handle] == file },
+        ).also { previewReads = it }
+    }
+
+    internal fun localOriginalSource(file: CameraFileInfo): String? = originalIndex.localLocator(file, folder = null)
 
     fun beginScan(): Long {
         if (closed || !queue.connected.value || mutableState.value.scanning || mutableState.value.enqueueing) return 0
@@ -226,6 +246,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     fun close() {
         if (closed) return
         closed = true
+        previewReads?.close(); previewReads = null; previewPlatform = null
         enqueues.toList().forEach { it.cancel() }; enqueues.clear()
         images.toList().forEach { it.cancel() }; images.clear()
         val owner = platform; platform = null

@@ -5,7 +5,7 @@ import ZTransferShared
 
 /// A page adapter, not another camera/queue owner. The diagnostic/session owner forwards its ONE queue observer.
 @MainActor
-final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, NativeFilesPagePlatform {
+final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, NativeFilesPagePlatform, NativePreviewReadPlatform {
     let id = UUID()
     let queuePage: OriginalQueuePageBridge
     private let connectionID: UUID
@@ -22,6 +22,9 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private var completedOriginalRevision: UInt64?
     private var commands: [UUID: Task<Void, Never>] = [:]
     private var images: [UUID: Task<Void, Never>] = [:]
+    private var previewRequests: [String: Task<Void, Never>] = [:]
+    private var previewUse: (session: Int64, task: Task<UUID, Never>)?
+    private var lastPreviewSession: Int64 = 0
     private var filesByHandle: [Int32: CameraFileInfo] = [:]
     private var infosByHandle: [Int32: PtpObjectInfo] = [:]
     private var scanSequence: Int64 = 0
@@ -35,6 +38,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         self.preferences = preferences ?? BrowsePreferencesStore()
         queuePage = OriginalQueuePageBridge(connectionID: connectionID, queue: queue, previews: previews, stationMode: stationMode)
         super.init()
+        precondition(model.attachPreviewReads(platform: self))
     }
 
     func publishQueue(_ value: OriginalQueueSnapshot) {
@@ -194,9 +198,55 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         }
     }
 
+    func beginPreviewReads(sessionId: Int64) {
+        guard !closed, sessionId > lastPreviewSession else { return }
+        if let previous = previewUse { endPreviewReads(sessionId: previous.session) }
+        lastPreviewSession = sessionId
+        let previews = previews
+        previewUse = (sessionId, Task { await previews.beginForegroundUse() })
+    }
+
+    func readFhdPreview(sessionId: Int64, requestId: Int64, file: CameraFileInfo, completion: NativeFhdPreviewCompletion) {
+        let key = "\(sessionId):\(requestId)"
+        guard !closed, connected, requestId > 0, previewUse?.session == sessionId,
+              previewRequests[key] == nil, previewRequests.count < 32,
+              let use = previewUse, let info = infosByHandle[file.handle],
+              filesByHandle[file.handle] == file else { completion.complete(image: nil); return }
+        previewRequests[key] = Task { [weak self] in
+            guard let self else { completion.complete(image: nil); return }
+            defer { self.previewRequests.removeValue(forKey: key) }
+            do {
+                _ = await use.task.value // Whole-overlay background-fill suppression precedes its first request.
+                try Task.checkCancellation()
+                guard !self.closed, self.connected, self.previewUse?.session == sessionId,
+                      let data = try await self.previews.fhd(info: info) else { completion.complete(image: nil); return }
+                let png = try await self.decoder.fhdPreviewPNG(data)
+                try Task.checkCancellation()
+                guard !self.closed, self.connected, self.previewUse?.session == sessionId,
+                      self.filesByHandle[file.handle] == file else { completion.complete(image: nil); return }
+                completion.complete(image: NativePreviewImageBridge.shared.fhdPng(data: png as NSData))
+            } catch { completion.complete(image: nil) }
+        }
+    }
+
+    func cancelPreviewRead(sessionId: Int64, requestId: Int64) {
+        previewRequests["\(sessionId):\(requestId)"]?.cancel()
+        // Keep the slot until the task finishes; a shared in-flight frame is drained, not cancelled globally.
+    }
+
+    func endPreviewReads(sessionId: Int64) {
+        for (key, request) in previewRequests where key.hasPrefix("\(sessionId):") { request.cancel() }
+        guard let use = previewUse, use.session == sessionId else { return }
+        previewUse = nil
+        let previews = previews
+        Task { let token = await use.task.value; await previews.endForegroundUse(token) }
+    }
+
     func cancelRequests() {
         guard !closed else { return }
         closed = true; refreshTask?.cancel(); refreshTask = nil
+        if let use = previewUse { endPreviewReads(sessionId: use.session) }
+        previewRequests.values.forEach { $0.cancel() }
         originalIndexTask?.cancel(); originalIndexTask = nil
         needsOriginalUpdate = false; needsOriginalRescan = false
         commands.values.forEach { $0.cancel() }; commands.removeAll()

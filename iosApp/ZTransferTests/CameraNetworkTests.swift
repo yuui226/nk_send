@@ -2034,6 +2034,94 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertEqual(counts.thumb, 2); XCTAssertEqual(counts.fhd, 2)
     }
 
+    func testProductFhdMissDoesNotStealTheThumbnailBeforeExif() async throws {
+        let source = FakePreviewSource(thumbs: [.bytes(Data([9]))])
+        let store = CameraPreviewStore(source: source)
+        let info = try sampleInfo(1)
+        let first = try await store.fhd(info: info)
+        let second = try await store.fhd(info: info)
+        XCTAssertNil(first); XCTAssertNil(second)
+        let before = await source.counts()
+        XCTAssertEqual(before.fhd, 2); XCTAssertEqual(before.thumb, 0)
+        let fallback = try await store.thumbnail(info: info)
+        XCTAssertEqual(fallback, Data([9]))
+        let after = await source.counts()
+        XCTAssertEqual(after.thumb, 1)
+    }
+
+    func testProductFhdSuccessReusesExistingCacheWithoutCallingThumbnail() async throws {
+        let payload = try thumbnailFixture()
+        let source = FakePreviewSource(thumbs: [], fhds: [.bytes(payload)])
+        let store = CameraPreviewStore(source: source)
+        let info = try sampleInfo(1)
+        let first = try await store.fhd(info: info)
+        let second = try await store.fhd(info: info)
+        XCTAssertEqual(first, payload); XCTAssertEqual(second, payload)
+        let counts = await source.counts()
+        XCTAssertEqual(counts.fhd, 1); XCTAssertEqual(counts.thumb, 0)
+    }
+
+    func testCacheOnlyPreviewThumbnailNeverTriggersAnIoMiss() async throws {
+        let payload = try thumbnailFixture()
+        let source = FakePreviewSource(thumbs: [.bytes(payload)])
+        let store = CameraPreviewStore(source: source)
+        let info = try sampleInfo(1)
+        let absent = await store.cachedThumbnail(info: info)
+        XCTAssertNil(absent)
+        let before = await source.counts(); XCTAssertEqual(before.thumb, 0)
+        _ = try await store.thumbnail(info: info)
+        let cached = await store.cachedThumbnail(info: info)
+        XCTAssertEqual(cached, payload)
+        await store.clearForMemoryPressure()
+        let cleared = await store.cachedThumbnail(info: info)
+        XCTAssertNil(cleared)
+        let after = await source.counts(); XCTAssertEqual(after.thumb, 1)
+    }
+
+    func testProductFhdKeepsCameraPixelOrientationWhileDiagnosticStillRotates() async throws {
+        let jpeg = try orientedPreviewFixture(width: 40, height: 20, orientation: 6)
+        let decoder = PreviewImageDecoder()
+        let png = try await decoder.fhdPreviewPNG(jpeg)
+        let product = try await decoder.decode(png)
+        let diagnostic = try await decoder.decode(jpeg)
+        XCTAssertEqual(product.width, 40); XCTAssertEqual(product.height, 20)
+        XCTAssertEqual(diagnostic.width, 20); XCTAssertEqual(diagnostic.height, 40)
+    }
+
+    func testProductFhdMatches1920LongEdgeAndRejectsMalformedInput() async throws {
+        let decoder = PreviewImageDecoder()
+        let jpeg = try orientedPreviewFixture(width: 2000, height: 1000, orientation: 6)
+        let png = try await decoder.fhdPreviewPNG(jpeg)
+        let image = try await decoder.decode(png)
+        XCTAssertEqual(image.width, 1920); XCTAssertEqual(image.height, 960)
+        XCTAssertLessThanOrEqual(png.count, 20 * 1024 * 1024)
+        do { _ = try await decoder.fhdPreviewPNG(Data([1, 2, 3])); XCTFail("Malformed input must fail") }
+        catch { XCTAssertTrue(error is PreviewImageError) }
+    }
+
+    @MainActor func testNativeFhdBulkBoundaryChecksDimensionsBeforeComposeDecode() async throws {
+        let png = try await PreviewImageDecoder().fhdPreviewPNG(thumbnailFixture())
+        let payload = try XCTUnwrap(NativePreviewImageBridge.shared.fhdPng(data: png as NSData))
+        XCTAssertEqual(payload.width, 12); XCTAssertEqual(payload.height, 8)
+        var bad = png
+        bad[16] = 0xff // Unsigned IHDR overflow must not become a small signed width.
+        XCTAssertNil(NativePreviewImageBridge.shared.fhdPng(data: bad as NSData))
+        XCTAssertNil(NativePreviewImageBridge.shared.fhdPng(data: Data() as NSData))
+    }
+
+    private func orientedPreviewFixture(width: Int, height: Int, orientation: Int) throws -> Data {
+        let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 0.7, green: 0.2, blue: 0.3, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let image = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
     func testPreviewConfirmedMissIsCachedUntilMemoryClear() async throws {
         let source = FakePreviewSource(thumbs: [.missing, .bytes(Data([2]))])
         let store = CameraPreviewStore(source: source)
@@ -2312,9 +2400,10 @@ private actor HeldPreviewSource: CameraPreviewSource {
 private actor FakePreviewSource: CameraPreviewSource {
     enum Result { case missing, bytes(Data), failure }
     private var thumbs: [Result]
+    private var fhds: [Result]
     private var thumbCount = 0
     private var fhdCount = 0
-    init(thumbs: [Result]) { self.thumbs = thumbs }
+    init(thumbs: [Result], fhds: [Result] = []) { self.thumbs = thumbs; self.fhds = fhds }
     func thumbnail(handle: Int32) throws -> Data? {
         thumbCount += 1
         guard !thumbs.isEmpty else { throw CameraStreamError.closed }
@@ -2324,7 +2413,15 @@ private actor FakePreviewSource: CameraPreviewSource {
         case .failure: throw CameraOperationError.rejected(operation: 0x100A, response: 0x2019)
         }
     }
-    func fhdPicture(handle: Int32, retryDeviceBusy: Bool) -> Data? { fhdCount += 1; return nil }
+    func fhdPicture(handle: Int32, retryDeviceBusy: Bool) throws -> Data? {
+        fhdCount += 1
+        guard !fhds.isEmpty else { return nil }
+        switch fhds.removeFirst() {
+        case .missing: return nil
+        case .bytes(let data): return data
+        case .failure: throw CameraOperationError.rejected(operation: 0x920f, response: 0x2019)
+        }
+    }
     func counts() -> (thumb: Int, fhd: Int) { (thumbCount, fhdCount) }
 }
 

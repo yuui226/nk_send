@@ -28,6 +28,17 @@ actor PreviewImageDecoder {
         return try encodePNG(image, maximumBytes: 20 * 1024 * 1024)
     }
 
+    /// Android loadFhdPreview preserves camera pixel orientation and caps the long edge at 1920.
+    /// Diagnostic/grid/effect images keep their existing orientation-normalized path.
+    func fhdPreviewPNG(_ data: Data) throws -> Data {
+        try Task.checkCancellation()
+        guard !data.isEmpty, data.count <= 32 * 1024 * 1024,
+              let source = CGImageSourceCreateWithData(data as CFData,
+                  [kCGImageSourceShouldCache: false] as CFDictionary) else { throw PreviewImageError.invalidImage }
+        let decoded = try image(source, maximumPixelSize: 1920, honorOrientation: false)
+        return try encodePNG(decoded, maximumBytes: 20 * 1024 * 1024)
+    }
+
     private func encodePNG(_ decoded: CGImage, maximumBytes: Int) throws -> Data {
         try Task.checkCancellation()
         let output = NSMutableData()
@@ -56,12 +67,12 @@ actor PreviewImageDecoder {
         return try image(source, maximumPixelSize: maximumPixelSize)
     }
 
-    private func image(_ source: CGImageSource, maximumPixelSize: Int) throws -> CGImage {
+    private func image(_ source: CGImageSource, maximumPixelSize: Int, honorOrientation: Bool = true) throws -> CGImage {
         guard (1...4096).contains(maximumPixelSize) else { throw PreviewImageError.invalidSize }
         guard CGImageSourceGetCount(source) > 0,
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceCreateThumbnailWithTransform: honorOrientation,
                 kCGImageSourceThumbnailMaxPixelSize: maximumPixelSize,
                 kCGImageSourceShouldCacheImmediately: true,
               ] as CFDictionary) else { throw PreviewImageError.invalidImage }
