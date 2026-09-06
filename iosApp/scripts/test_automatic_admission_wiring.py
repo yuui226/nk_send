@@ -3,11 +3,12 @@ from pathlib import Path
 import subprocess
 import unittest
 from automatic_admission_wiring import CHANGES, previous_automatic_source
+from new_object_policy_wiring import previous_new_object_policy_source
 
 ROOT = Path(__file__).resolve().parents[2]
 CORE = 'shared/src/commonMain/kotlin/com/ztransfer/viewmodel/NativeOriginalTransferQueue.kt'
 QUEUE = 'iosApp/ZTransfer/Network/CameraOriginalQueue.swift'
-def read(path): return (ROOT/path).read_text(encoding='utf-8')
+def read(path): return previous_new_object_policy_source(path, (ROOT/path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', 'e575350:' + path], cwd=ROOT).decode('utf-8')
 def between(value, start, end): return value.split(start, 1)[1].split(end, 1)[0]
 

@@ -16,6 +16,8 @@
 
 ## 当前检查点
 
+- 最新第61批：W02-A共享规则提取完成，Android实际委托NewCameraObjectPolicy，原新增准入/双卡发布/重试值保持；973项Kotlin/Android（656+317）、283项Python与结构/原UI守卫PASS。W02拆成两个半分子项，当前1.5/50分、总计划80.6%；Apple新增事件调度W02-B未接，284项XCTest与17项Native预览/位图仍Mac待验。
+
 - 最新第60批：W01完成Windows门槛；真实目录扫描接shared首次基线/后续差量，成功枚举先于元数据提交，首次旧照片不报告新增。966项Kotlin/Android（649+317）、279项Python、结构/原UI守卫PASS；284项XCTest与17项Native预览/位图仍Mac待验。新增/删除事件消费与自动开关继续W02—W06，进度只更新剩余任务表。
 
 - 第59批已把有界事件记录接到真实AP/STA事件接收入口：同代游标、顺序记录、256条上限、缺口要求重扫；不增加通知流消费者，不改变网络命令。275项Python与结构/原UI守卫通过，新增4项XCTest，累计280项待Mac。真实新增/删除消费、首次扫描基线和自动开关仍未接；960项Kotlin/Android证据为上一批，本批未改Android/shared，不重复Gradle。
@@ -916,3 +918,13 @@
 - 6项新增common实跑：首次目录、空卡、禁用检测仍更新、双卡重复/带符号handle与输入拷贝、重连独立所有者、2048组组合直接对照原shared差量函数。共649 shared+317 app=966项，0失败/错误/跳过；common metadata/Android Debug编译BUILD SUCCESSFUL in 43s，49 tasks（10 executed/39 up-to-date）。
 - 新增4项XCTest源码覆盖真实目录路径的首次/后续/关闭检测、空卡/首次部分元数据、第二卡失败/枚举后取消/关闭/错代、元数据阶段取消仍保留基线但不覆盖旧列表。累计284项XCTest、38个App Swift及17项Native预览/位图仍Mac待验，不将源码检查算Apple运行。
 - Windows279项Python、原UI完整主体守卫、结构和diff检查通过；新增4项顺序/同代/共享委托/变异守卫，并通过枚举逆转换继续旧整文件比较。Android app业务、原catalog规则/扫描器、Wi-Fi协议/队列执行器、Gradle/版本/打包脚本未改。Release/Lint/Manifest仍第46批历史证据，本批未重跑；无APK/无推送。
+
+
+## 第六十一批记录：W02-A原新增对象规则共享化（总计划80.6%，1.5/50分）
+
+- 前检查点8484b35。按剩余任务表原拆分规则，W02分为共享规则提取A和Apple事件调度接线B，各0.5分，总分仍50；本批仅A达Windows门槛，W02整体仍DOING。当前完整主项1/50，得分1.5/50，收尾3.0%、总计划80.6%；下一项W02-B，不能宣称真实新增消费或自动传输已完成。
+- NewCameraObjectPolicy提取原handle准入、首次匹配行发布、真正新增判定和重试常量。无基线/已知handle/可见行、无效0/-1、同名同大小同时间的备份归属合并、保持主行元数据、无变化返回原List/原状态引用均不改变。时序仍90ms合并、每批16、最多5次，失败间隔180/360/720/1400ms。
+- Android CameraViewModel仅四处枚举委托差异：入队准入、失败延迟取值、列表发布/added判定、常量引用；原循环/协程所有权/时钟/扫描与FHD门控/读取协议/迟到移除防护/新媒体emit及缩略图唤醒顺序不动。新helper在getAndUpdate中仍为纯函数，重试执行不会带入IO；没有另造Swift业务算法。
+- 新增7项common测试：有效/无效/有无基线与可见handle、前插顺序与原对象引用、备份扩卡且不算新增、同handle不替换原元数据、优先第一个匹配行、精确节奏与越界契约、399组发布和1197组准入组合对照提取前算法。
+- Windows实跑656 shared+317 app=973项，0失败/错误/跳过；common metadata/Android Debug编译BUILD SUCCESSFUL in 1m 5s，49 tasks（12 executed/37 up-to-date）。283项Python、原共享UI整文件守卫、结构和diff检查通过。一个旧EXIF整ViewModel守卫初次因本批委托差异失败，补最新枚举逆转换后继续对照旧完整主体，不删除或放宽旧检查；另有新变异检查确保无关保活变化不能被归一化隐藏。
+- 本批无Apple生产改动/新增XCTest，38个App Swift、284项XCTest及17项Native预览/位图仍Mac待验。Android业务文件有受控共享委托，不称Android零改动；协议、服务、Gradle/版本/打包脚本不变，未发现回归不等于已做最终真机验收。Release/Lint/Manifest仍第46批历史检查，本批未重复执行；无APK/无推送，按批本地提交。

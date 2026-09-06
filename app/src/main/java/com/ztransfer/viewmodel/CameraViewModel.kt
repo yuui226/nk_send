@@ -2474,10 +2474,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun enqueueNewCameraObject(cam: NikonCamera, handle: Int) {
-        if (camera !== cam || handle == 0 || handle == -1) return
+        if (camera !== cam) return
         val hasKnownBaseline = knownHandlesCamera === cam
-        if (hasKnownBaseline && handle in knownHandles) return
-        if (_state.value.files.any { it.handle == handle }) return
+        if (!NewCameraObjectPolicy.shouldResolve(handle, knownHandles.takeIf { hasKnownBaseline }, _state.value.files)) return
         if (pendingNewObjectCamera !== cam) {
             pendingNewObjectHandles.clear()
             pendingNewObjectCamera = cam
@@ -2597,7 +2596,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             log { "NEW_OBJECT give up handle=0x%08X".format(handle) }
                         } else {
                             pending.nextAttemptAtMs = SystemClock.elapsedRealtime() +
-                                NEW_OBJECT_RESOLVE_BACKOFF_MS[pending.attempts - 1]
+                                NewCameraObjectPolicy.retryDelayMs(pending.attempts)
                         }
                     }
                 }
@@ -2660,22 +2659,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val hasKnownBaseline = knownHandlesCamera === cam
         indexedCameraFiles[handle] = info
         val previousState = _state.getAndUpdate { state ->
-            val duplicateIndex = state.files.indexOfFirst {
-                it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
-            }
-            if (duplicateIndex < 0) {
-                state.copy(files = listOf(info) + state.files)
-            } else {
-                val existing = state.files[duplicateIndex]
-                val merged = mergeStorageMembership(existing, info)
-                if (merged === existing) state else state.copy(
-                    files = state.files.toMutableList().apply { this[duplicateIndex] = merged },
-                )
-            }
+            val published = NewCameraObjectPolicy.publish(state.files, handle, info)
+            if (published === state.files) state else state.copy(files = published)
         }
-        val added = previousState.files.none {
-            it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
-        }
+        val added = NewCameraObjectPolicy.isNew(previousState.files, handle, info)
         if (knownHandlesCamera === cam) knownHandles += handle
         if (added && hasKnownBaseline && knownHandlesCamera === cam) {
             if (isAutoTransferMedia(info)) {
@@ -4082,10 +4069,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // STA 正常走事件通道；2 秒轮询只承担丢包、旧机型和 USB/AP 的原有兜底职责。
         private const val EVENT_POLL_INTERVAL_MS = 2_000L
         private const val HANDLE_CATALOG_SYNC_INTERVAL_MS = 10_000L
-        private const val NEW_OBJECT_COALESCE_MS = 90L
-        private const val NEW_OBJECT_RESOLVE_BATCH_SIZE = 16
-        private const val NEW_OBJECT_RESOLVE_MAX_ATTEMPTS = 5
-        private val NEW_OBJECT_RESOLVE_BACKOFF_MS = longArrayOf(180L, 360L, 720L, 1_400L)
+        private const val NEW_OBJECT_COALESCE_MS = NewCameraObjectPolicy.COALESCE_MS
+        private const val NEW_OBJECT_RESOLVE_BATCH_SIZE = NewCameraObjectPolicy.RESOLVE_BATCH_SIZE
+        private const val NEW_OBJECT_RESOLVE_MAX_ATTEMPTS = NewCameraObjectPolicy.RESOLVE_MAX_ATTEMPTS
         // 连接失败重试间隔：相机刚开热点时 PTP 服务可能晚于 Wi-Fi 就绪，快节奏重试
         // 让"差一步"的场景少等一秒；连续失败后降频，避免普通路由器恰好使用同网关时
         // 每秒空连。看护轮询只读本地 DHCP，保持 1 秒用于及时发现真正的网络切换。

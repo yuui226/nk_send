@@ -3,6 +3,7 @@ from pathlib import Path
 import subprocess
 import unittest
 import preview_exif_extraction as migration
+from new_object_policy_wiring import previous_new_object_policy_source
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -13,7 +14,8 @@ class PreviewExifExtractionTest(unittest.TestCase):
         cls.before = subprocess.check_output(['git', 'show', f'{migration.BASELINE}:{migration.ANDROID}'], cwd=ROOT).decode('utf-8').replace('\r\n', '\n')
 
     def test_complete_viewmodel_only_delegates_pure_exif_parsing(self):
-        self.assertEqual(migration.android(self.before), (ROOT / migration.ANDROID).read_text(encoding='utf-8'))
+        current = (ROOT / migration.ANDROID).read_text(encoding='utf-8')
+        self.assertEqual(migration.android(self.before), previous_new_object_policy_source(migration.ANDROID, current))
 
     def test_complete_common_parser_has_only_enumerated_platform_substitutions(self):
         self.assertEqual(migration.common(self.before), (ROOT / migration.COMMON).read_text(encoding='utf-8'))

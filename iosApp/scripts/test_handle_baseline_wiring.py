@@ -3,11 +3,12 @@ from pathlib import Path
 import subprocess
 import unittest
 from handle_baseline_wiring import CHANGES, previous_handle_baseline_source
+from new_object_policy_wiring import previous_new_object_policy_source
 
 ROOT = Path(__file__).resolve().parents[2]
 CATALOG = 'iosApp/ZTransfer/Network/CameraCatalog.swift'
 CORE = 'shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeCameraHandleBaseline.kt'
-def read(path): return (ROOT/path).read_text(encoding='utf-8')
+def read(path): return previous_new_object_policy_source(path, (ROOT/path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', '42abf5b:' + path], cwd=ROOT).decode('utf-8')
 
 class HandleBaselineWiringTest(unittest.TestCase):

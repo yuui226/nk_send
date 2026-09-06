@@ -14,7 +14,7 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 当前实现检查点
 
-第60批W01已完成Windows实现/检查：首次成功扫描建立基线，后续枚举差量复用shared，元数据部分失败不倒退基线。966项Kotlin/Android（649+317）、279项Python和结构/原UI守卫通过；38个App Swift、284项XCTest及17项Native预览/位图待Mac。下一项W02新增事件消费，自动传输尚未闭环；当前计分见[剩余任务表](../docs/技术调研/iOS剩余任务进度表.md)。
+第61批W02-A已完成共享新增对象规则提取并由Android实际调用；973项Kotlin/Android（656+317）、283项Python及结构/原UI守卫通过。W02-B的Apple事件读取/重试/发布调度仍待接，不能视为新增事件消费已完成。38个App Swift、284项XCTest及17项Native预览/位图待Mac；当前分数见[剩余任务表](../docs/技术调研/iOS剩余任务进度表.md)。
 
 ## Mac 首次准备
 
