@@ -5,6 +5,8 @@ CHANGES['iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'] = [('    priv
 
 
 def previous_restore_source(path, value):
+    from directory_ui_wiring import previous_directory_ui_source
+    value = previous_directory_ui_source(path, value)
     for new, old in CHANGES.get(path, ()):
         assert value.count(new) == 1, (path, new)
         value = value.replace(new, old, 1)

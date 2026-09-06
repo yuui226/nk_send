@@ -206,6 +206,61 @@ private val PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)
 
 @kotlin.native.HiddenFromObjC
 @Composable
+fun SharedTransferDirectoryHeader(dirText: String?, directoryAttentionActive: Boolean,
+    text: SettingsControlsText, selectDirectory: () -> Unit) {
+    val colors = AppTheme.colors
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Default.LocationOn,
+            contentDescription = null,
+            tint = if (dirText != null) colors.statusConnected else colors.accentOrange,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            SharedSectionLabel(text.label(SettingsTextKey.transfer_directory))
+            Text(
+                text = dirText ?: text.label(
+                    if (directoryAttentionActive) {
+                        SettingsTextKey.dir_please_set
+                    } else {
+                        SettingsTextKey.dir_not_set
+                    }
+                ),
+                style = if (directoryAttentionActive) {
+                    MaterialTheme.typography.labelLarge
+                } else {
+                    MaterialTheme.typography.bodySmall
+                },
+                fontWeight = if (directoryAttentionActive) {
+                    FontWeight.Bold
+                } else {
+                    FontWeight.Normal
+                },
+                color = if (dirText != null) colors.onSurfaceVariant else colors.accentOrange,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        GlassButton(
+            onClick = { selectDirectory() },
+            shape = RoundedCornerShape(12.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
+            modifier = Modifier.height(30.dp)
+        ) {
+            Text(
+                text.label(if (dirText != null) SettingsTextKey.change_directory else SettingsTextKey.choose_directory),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onBackground
+            )
+        }
+    }
+}
+
+@kotlin.native.HiddenFromObjC
+@Composable
 fun SharedTransferDirectorySettingsCard(
     dirText: String?, hasDirectory: Boolean, directoryAttentionActive: Boolean, attentionProgress: Float,
     organizeByDate: Boolean, autoTransfer: Boolean, deferStart: Boolean, hapticsEnabled: Boolean,
@@ -228,54 +283,7 @@ fun SharedTransferDirectorySettingsCard(
         attentionColor = colors.accentOrange.takeIf { directoryAttentionActive },
         attentionProgress = attentionProgress,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Default.LocationOn,
-                contentDescription = null,
-                tint = if (dirText != null) colors.statusConnected else colors.accentOrange,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                SharedSectionLabel(text.label(SettingsTextKey.transfer_directory))
-                Text(
-                    text = dirText ?: text.label(
-                        if (directoryAttentionActive) {
-                            SettingsTextKey.dir_please_set
-                        } else {
-                            SettingsTextKey.dir_not_set
-                        }
-                    ),
-                    style = if (directoryAttentionActive) {
-                        MaterialTheme.typography.labelLarge
-                    } else {
-                        MaterialTheme.typography.bodySmall
-                    },
-                    fontWeight = if (directoryAttentionActive) {
-                        FontWeight.Bold
-                    } else {
-                        FontWeight.Normal
-                    },
-                    color = if (dirText != null) colors.onSurfaceVariant else colors.accentOrange,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            GlassButton(
-                onClick = { selectDirectory() },
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp),
-                modifier = Modifier.height(30.dp)
-            ) {
-                Text(
-                    text.label(if (dirText != null) SettingsTextKey.change_directory else SettingsTextKey.choose_directory),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.onBackground
-                )
-            }
-        }
+        SharedTransferDirectoryHeader(dirText, directoryAttentionActive, text, selectDirectory)
 
         SharedCardDivider()
 

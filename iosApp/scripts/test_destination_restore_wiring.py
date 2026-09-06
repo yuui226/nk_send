@@ -3,13 +3,14 @@ from pathlib import Path
 import subprocess
 import unittest
 from destination_restore_wiring import CHANGES, previous_restore_source
+from directory_ui_wiring import previous_directory_ui_source
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFERENCES = 'iosApp/ZTransfer/Configuration/OriginalDestinationPreferences.swift'
 QUEUE = 'iosApp/ZTransfer/Network/CameraOriginalQueue.swift'
 PROBE = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
 
-def read(path): return (ROOT/path).read_text(encoding='utf-8')
+def read(path): return previous_directory_ui_source(path, (ROOT/path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', 'ce167b6:' + path], cwd=ROOT).decode('utf-8')
 def between(value, start, end): return value.split(start, 1)[1].split(end, 1)[0]
 
@@ -17,7 +18,7 @@ class DestinationRestoreWiringTest(unittest.TestCase):
     def test_previous_queue_and_probe_restore_in_full(self):
         self.assertEqual({QUEUE, PROBE}, set(CHANGES))
         for path in CHANGES:
-            self.assertEqual(before(path), previous_restore_source(path, read(path)))
+            self.assertEqual(before(path), previous_restore_source(path, (ROOT/path).read_text(encoding='utf-8')))
 
     def test_preference_is_explicit_bounded_and_does_not_guess_from_a_grant(self):
         value = read(PREFERENCES)
@@ -69,7 +70,7 @@ class DestinationRestoreWiringTest(unittest.TestCase):
         for path, old, new in ((QUEUE, 'self.destination = destination', 'self.destination = nil'),
                                (PROBE, 'destination: restored.destination', 'destination: nil')):
             with self.assertRaises(AssertionError):
-                previous_restore_source(path, read(path).replace(old, new))
+                previous_restore_source(path, (ROOT/path).read_text(encoding='utf-8').replace(old, new))
         value = read(QUEUE).replace('core.finishRun()', 'core.pauseAfterCurrent()')
         self.assertNotEqual(before(QUEUE), previous_restore_source(QUEUE, value))
         for path in ('iosApp/ZTransfer/Network/CameraWiFiConnection.swift',

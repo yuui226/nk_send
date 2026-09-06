@@ -1,11 +1,12 @@
 import Foundation
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import ZTransferShared
 
 /// A page adapter, not another camera/queue owner. The diagnostic/session owner forwards its ONE queue observer.
 @MainActor
-final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, NativeFilesPagePlatform, NativePreviewReadPlatform {
+final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, NativeFilesPagePlatform, NativePreviewReadPlatform, NativeDirectorySettingsPlatform, UIDocumentPickerDelegate {
     let id = UUID()
     let queuePage: OriginalQueuePageBridge
     private let connectionID: UUID
@@ -18,6 +19,8 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private let decoder = PreviewImageDecoder()
     private let preferences: BrowsePreferencesStore
     private let transferPreferences: TransferPreferencesStore
+    private let directorySelection: ((URL, @escaping (String?) -> Void) -> Void)?
+    private var directoryPicker: (request: Int64, controller: UIDocumentPickerViewController)?
     private var refreshTask: Task<Void, Never>?
     private(set) var originalIndexTask: Task<Void, Never>?
     private var needsOriginalUpdate = false
@@ -40,15 +43,53 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     init(connectionID: UUID, catalog: CameraCatalog, queue: CameraOriginalQueue, previews: CameraPreviewStore,
          exifSource: CameraExifSource, exifCache: NativePreviewExifCache, stationMode: Bool,
          preferences: BrowsePreferencesStore? = nil, originals: OriginalFilesReading? = nil,
-         transferPreferences: TransferPreferencesStore? = nil) {
+         transferPreferences: TransferPreferencesStore? = nil, directoryDescription: String? = nil,
+         directoryMessage: String? = nil, selectDirectory: ((URL, @escaping (String?) -> Void) -> Void)? = nil) {
         self.connectionID = connectionID; self.catalog = catalog; self.queue = queue; self.previews = previews
         self.exifSource = exifSource; self.exifCache = exifCache
         self.originals = originals ?? queue // One immutable source for the entire page/preview lifetime.
         self.preferences = preferences ?? BrowsePreferencesStore()
         self.transferPreferences = transferPreferences ?? TransferPreferencesStore()
+        self.directorySelection = selectDirectory
         queuePage = OriginalQueuePageBridge(connectionID: connectionID, queue: queue, previews: previews, stationMode: stationMode)
         super.init()
         precondition(model.attachPreviewReads(platform: self))
+        if selectDirectory != nil {
+            precondition(model.directory.attach(platform: self, description: directoryDescription, message: directoryMessage))
+        }
+    }
+
+    func selectDirectory(requestId: Int64) {
+        guard !closed, directoryPicker == nil, directorySelection != nil,
+              let presenter = queuePage.presenter, presenter.viewIfLoaded?.window != nil,
+              presenter.presentedViewController == nil else {
+            _ = model.directory.finish(requestId: requestId, message: "当前无法打开系统目录选择器，请关闭其它系统窗口后重试。")
+            return
+        }
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+        picker.allowsMultipleSelection = false; picker.delegate = self
+        directoryPicker = (requestId, picker)
+        presenter.present(picker, animated: true)
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        guard let pending = directoryPicker, pending.controller === controller else { return }
+        directoryPicker = nil
+        _ = model.directory.finish(requestId: pending.request, message: nil)
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        guard let pending = directoryPicker, pending.controller === controller else { return }
+        guard let url = urls.first, urls.count == 1 else { documentPickerWasCancelled(controller); return }
+        directoryPicker = nil
+        // Dismiss only this owned system picker before a committed target change closes its old page.
+        controller.dismiss(animated: true) { [weak self] in
+            guard let self, !self.closed, let choose = self.directorySelection else { return }
+            choose(url) { [weak self] message in
+                guard let self, !self.closed else { return }
+                _ = self.model.directory.finish(requestId: pending.request, message: message)
+            }
+        }
     }
 
     func previewDateText(year: Int32, month: Int32, day: Int32) -> String {
@@ -406,6 +447,10 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     func cancelRequests() {
         guard !closed else { return }
         closed = true; refreshTask?.cancel(); refreshTask = nil
+        if let pending = directoryPicker {
+            directoryPicker = nil; pending.controller.delegate = nil
+            pending.controller.dismiss(animated: false)
+        }
         if let use = previewUse { endPreviewReads(sessionId: use.session) }
         previewRequests.values.forEach { $0.cancel() }
         originalIndexTask?.cancel(); originalIndexTask = nil

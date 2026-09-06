@@ -68,6 +68,7 @@ internal data class NativeOriginalsState(val revision: Long = -1, val refreshing
 /** One camera generation, one existing queue model; no copy of Android's ViewModel or protocol. */
 class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageModel, platform: NativeFilesPagePlatform) {
     init { require(queue.connectionId == connectionId) }
+    val directory = NativeDirectorySettingsModel()
     private var platform: NativeFilesPagePlatform? = platform
     private var closed = false
     private var previewPlatform: NativePreviewReadPlatform? = null
@@ -303,6 +304,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     fun close() {
         if (closed) return
         closed = true
+        directory.close()
         previewReads?.close(); previewReads = null; previewPlatform = null
         enqueues.toList().forEach { it.cancel() }; enqueues.clear()
         images.toList().forEach { it.cancel() }; images.clear()

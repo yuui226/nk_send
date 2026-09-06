@@ -139,16 +139,21 @@ final class CameraHandshakeProbe: ObservableObject {
     }
 
     /// Prepare without invalidating the current grant, then commit behind the queue's execution fence.
-    func selectQueueDirectory(_ selection: URL) {
-        guard !directoryBusy, let queue = originalQueue else { return }
+    func selectQueueDirectory(_ selection: URL, completion: ((String?) -> Void)? = nil) {
+        guard !directoryBusy, let queue = originalQueue else {
+            completion?("目录操作尚未结束或连接已关闭，请稍后重试。")
+            return
+        }
         directoryBusy = true
         directoryTask = Task {
-            defer { directoryBusy = false; directoryTask = nil }
+            var outcome: String?
+            defer { directoryBusy = false; directoryTask = nil; completion?(outcome) }
             do {
                 let directory = try ScopedDirectoryStore.applicationStore()
                 let change = try await ProviderDirectoryChange.prepare(selection, directory: directory)
                 guard try await queue.configureDestination(change) else {
                     directoryStatus = "当前队列仍在执行，请完成当前并暂停后重选；目录授权和保存目标均未改变。"
+                    outcome = directoryStatus
                     return
                 }
                 // Commit returned successfully. Cancellation afterwards cannot undo that fact.
@@ -162,6 +167,7 @@ final class CameraHandshakeProbe: ObservableObject {
                 directoryStatus = "已切换到 \(change.displayName)；原目录文件保留，后续执行使用新目标。"
                     + (remembered ? "" : " 本次目标已生效，但偏好保存失败；下次连接可能需重选。")
             } catch {
+                outcome = "保存目标未改变：\(error.localizedDescription)"
                 if !Task.isCancelled, originalQueue === queue {
                     directoryStatus = "保存目标未改变：\(error.localizedDescription)"
                 }
@@ -503,7 +509,12 @@ final class CameraHandshakeProbe: ObservableObject {
         queuePage?.close(); queuePage = nil
         filesPage?.close()
         let page = OriginalFilesPageBridge(connectionID: connection.connectionID, catalog: catalog,
-            queue: queue, previews: previews, exifSource: connection, exifCache: exifCache, stationMode: connection.stationMode, originals: originals ?? transferDestination)
+            queue: queue, previews: previews, exifSource: connection, exifCache: exifCache, stationMode: connection.stationMode,
+            originals: originals ?? transferDestination, directoryDescription: queueDestinationSummary, directoryMessage: queueDestinationError,
+            selectDirectory: { [weak self] url, completion in
+                guard let self else { completion("连接已关闭，请重新连接后选择目录。"); return }
+                self.selectQueueDirectory(url, completion: completion)
+            })
         filesPage = page
         Task {
             let snapshot = await queue.snapshot()

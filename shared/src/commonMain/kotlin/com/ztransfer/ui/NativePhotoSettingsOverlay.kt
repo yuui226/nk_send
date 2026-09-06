@@ -22,6 +22,7 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
     text: NativeSettingsPageText, anchor: Rect, appearance: NativeAppearanceModel, onDismiss: () -> Unit) {
     val appearanceState by appearance.state.collectAsState()
     val transfers by model.transferPreferences.collectAsState()
+    val directory by model.directory.state.collectAsState()
     val openingAnchor = remember { anchor }
     val density = LocalDensity.current
     val panelTop = with(density) { openingAnchor.bottom.toDp() } + 8.dp
@@ -44,8 +45,14 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
                 onCollapseBursts = { model.changeLayout(model.layout.value.columns, it) },
                 onTapToPreview = model::setTapToPreview)
             Spacer(Modifier.height(14.dp))
-            // Only connected options until atomic directory selection / automatic events are integrated.
+            // Reuse the original header; automatic-event controls appear only once actually connected.
             SharedSettingsCard {
+                SharedTransferDirectoryHeader(directory.description, false, text, model.directory::choose)
+                if (directory.selecting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                directory.message?.let {
+                    Text(it, color = AppTheme.colors.accentOrange, style = MaterialTheme.typography.bodySmall)
+                }
+                SharedCardDivider()
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     SharedBooleanSettingsWheel(label = text.label(SettingsTextKey.organize_transfers_by_date),
                         checked = transfers.organizeByDate, onCheckedChange = model::setOrganizeByDate,

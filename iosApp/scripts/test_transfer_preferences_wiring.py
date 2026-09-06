@@ -78,6 +78,6 @@ class TransferPreferencesWiringTest(unittest.TestCase):
                                (MODEL, 'mutableTransfers.value.destinationFolder(file, currentDayKey())', 'null'),
                                (STORE, 'data.count <= 4096', 'data.count <= 999999')):
             with self.assertRaises(AssertionError):
-                previous_transfer_source(path, read(path).replace(old, new))
-        value = read(BRIDGE).replace('func close() { model.close() }', 'func close() {}')
+                previous_transfer_source(path, (ROOT/path).read_text(encoding='utf-8').replace(old, new))
+        value = (ROOT/BRIDGE).read_text(encoding='utf-8').replace('func close() { model.close() }', 'func close() {}')
         self.assertNotEqual(before(BRIDGE), previous_transfer_source(BRIDGE, value))

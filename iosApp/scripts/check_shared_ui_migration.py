@@ -212,9 +212,10 @@ def main():
         raise ValueError("Original haptic waveform/amplitudes/durations changed")
     print("PASS original Android haptic branches/remember keys/delayed tick and complete waveform")
     import settings_controls_extraction as settings
+    from directory_ui_wiring import previous_directory_ui_source
     settings_before = subprocess.check_output(['git', 'show', settings.BASELINE + ':' + settings.ANDROID], cwd=root).decode('utf-8')
     for path, expected in zip((settings.ANDROID, settings.COMMON), settings.extract(settings_before)):
-        if (root / path).read_text(encoding='utf-8') != expected:
+        if previous_directory_ui_source(path, (root / path).read_text(encoding='utf-8')) != expected:
             raise ValueError(f"Original settings cards/platform callbacks changed beyond enumerated extraction: {path}")
     print("PASS complete original settings file with three shared cards/four helpers; directory, effects, GPS and license IO retained")
     print("Dependency upgrades, actual recomposition, screenshots, gestures and iOS rendering are NOT verified here.")
