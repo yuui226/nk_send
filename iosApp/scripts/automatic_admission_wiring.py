@@ -5,6 +5,8 @@ CHANGES['shared/src/commonMain/kotlin/com/ztransfer/viewmodel/NativeOriginalTran
 
 
 def previous_automatic_source(path, value):
+    from event_history_wiring import previous_event_history_source
+    value = previous_event_history_source(path, value)
     for new, old in CHANGES.get(path, ()):
         assert value.count(new) == 1, (path, new)
         value = value.replace(new, old, 1)

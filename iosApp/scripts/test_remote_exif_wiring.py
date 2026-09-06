@@ -3,13 +3,14 @@ from pathlib import Path
 import subprocess
 import unittest
 from preview_priority_wiring import without_priority_connection
+from event_history_wiring import previous_event_history_source
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = '42f4678'
 
 
 def current(path):
-    return (ROOT / path).read_text(encoding='utf-8')
+    return previous_event_history_source(path, (ROOT / path).read_text(encoding='utf-8'))
 
 
 def baseline(path):

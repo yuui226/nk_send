@@ -23,6 +23,26 @@ struct CameraConnectionSnapshot: Sendable {
     let errorDescription: String?
 }
 
+/// A cursor belongs to one connection, not a device name or a reconnecting UI page.
+struct CameraEventCursor: Sendable, Equatable {
+    let connectionID: UUID
+    let revision: UInt64
+}
+
+struct CameraEventRecord: Sendable, Equatable {
+    let revision: UInt64
+    let code: Int32
+    let transactionID: Int64
+    let firstParameter: Int64
+}
+
+struct CameraEventBatch: Sendable {
+    let cursor: CameraEventCursor
+    let events: [CameraEventRecord]
+    /// Initial attachment, stale generation or evicted history: rescan, never apply a partial log.
+    let requiresRescan: Bool
+}
+
 /// One AP/STA connection generation. Reconnection creates a new owner; old callbacks cannot publish
 /// into it. The owner holds both sockets and the command gate, with no Android/UI dependencies.
 /// Raw metadata is exposed here; shared catalog policies will own merging/sorting/publication.
@@ -41,6 +61,8 @@ actor CameraWiFiConnection {
     private var keepaliveTask: Task<Void, Never>?
     private var phase: CameraConnectionSnapshot.Phase = .idle
     private var eventRevision: UInt64 = 0
+    private var eventRecords: [CameraEventRecord] = []
+    static let eventHistoryLimit = 256
     private var terminalError: Error?
     private var downloadActive = false
     private var partialSupport: Int32 = -1
@@ -409,8 +431,8 @@ actor CameraWiFiConnection {
                     let packet = try await channel.readControlPacket(timeout: 15, waitForPacket: true)
                     if packet.type == PtpConstants.shared.PING {
                         try await channel.sendPong(timeout: 15)
-                    } else if packet.type == PtpConstants.shared.EVENT, PtpIPChannel.event(packet.payload) != nil {
-                        await self?.receivedEvent()
+                    } else if packet.type == PtpConstants.shared.EVENT, let decoded = PtpIPChannel.event(packet.payload) {
+                        await self?.receivedEvent(decoded)
                     }
                 }
             } catch { await self?.eventFailed(error) }
@@ -450,9 +472,26 @@ actor CameraWiFiConnection {
         }
     }
 
-    private func receivedEvent() {
+    /// Non-destructive read: a slow/reopened consumer cannot steal another reader's events.
+    /// Keep using the single latest-state observer as a wakeup; do not add an AsyncStream consumer.
+    func events(after cursor: CameraEventCursor?) throws -> CameraEventBatch {
+        try requirePhase(.ready)
+        let current = CameraEventCursor(connectionID: connectionID, revision: eventRevision)
+        guard let cursor, cursor.connectionID == connectionID, cursor.revision <= eventRevision,
+              cursor.revision == eventRevision || eventRecords.first.map({ cursor.revision >= $0.revision - 1 }) == true else {
+            return CameraEventBatch(cursor: current, events: [], requiresRescan: true)
+        }
+        return CameraEventBatch(cursor: current, events: eventRecords.filter { $0.revision > cursor.revision }, requiresRescan: false)
+    }
+
+    private func receivedEvent(_ decoded: PtpIpEvent) async {
         guard phase == .opening || phase == .ready else { return }
-        eventRevision &+= 1
+        // Never wrap a cursor into the range of an old history. Closing preserves fail-closed semantics.
+        guard eventRevision < UInt64.max else { await abort(error: CameraStreamError.invalidArgument); return }
+        eventRevision += 1
+        eventRecords.append(CameraEventRecord(revision: eventRevision, code: decoded.code,
+            transactionID: decoded.transactionId, firstParameter: decoded.firstParameter))
+        if eventRecords.count > Self.eventHistoryLimit { eventRecords.removeFirst(eventRecords.count - Self.eventHistoryLimit) }
         publish()
     }
 
@@ -572,6 +611,7 @@ actor CameraWiFiConnection {
     private func finish(error: Error?) {
         guard phase != .closed else { return }
         phase = .closed
+        eventRecords.removeAll(keepingCapacity: false)
         terminalError = error
         command.close()
         event.close()

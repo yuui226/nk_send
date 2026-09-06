@@ -2488,6 +2488,91 @@ final class CameraNetworkTests: XCTestCase {
         await camera.abort()
     }
 
+    func testEventHistoryPreservesOrderedDecodedFieldsAcrossAPAndStationWithoutAnotherStreamConsumer() async throws {
+        for station in [false, true] {
+            let replies = station ? stationAck() + response(transaction: 0) + response(transaction: 1)
+                + response(transaction: 2, payload: hex("0100000001000100")) : apOpeningReplies()
+            let wire = FakeCameraConnection(bytes: replies)
+            let event = FakeCameraConnection(bytes: hex("0800000004000000"), chunkSize: 3)
+            let camera = station ? stationCamera(command: wire, event: event) : apCamera(command: wire, event: event)
+            _ = try await camera.connect(guid: Data(0...15))
+            let initial = try await camera.events(after: nil)
+            XCTAssertTrue(initial.requiresRescan); XCTAssertTrue(initial.events.isEmpty)
+            let before = wire.sent().count
+            // Independent wire bytes: duplicate adds must remain ordered with removals and unknown events.
+            let added = hex("12000000080000000240EFCDAB89FFFFFFFF")
+            event.feed(added + added + hex("1200000008000000034001000000FFFFFFFF0E0000000800000034C102000000"))
+            try await waitUntil("four retained events") { await camera.snapshot().eventRevision == 4 }
+            let batch = try await camera.events(after: initial.cursor)
+            XCTAssertFalse(batch.requiresRescan); XCTAssertEqual(batch.events.map(\.revision), [1, 2, 3, 4])
+            XCTAssertEqual(batch.events.map(\.code), [0x4002, 0x4002, 0x4003, 0xC134])
+            XCTAssertEqual(batch.events.map(\.firstParameter), [0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0])
+            XCTAssertEqual(batch.events.map(\.transactionID), [0x89ABCDEF, 0x89ABCDEF, 1, 2])
+            let repeated = try await camera.events(after: initial.cursor)
+            XCTAssertEqual(repeated.events, batch.events) // Reading does not acknowledge or consume.
+            let empty = try await camera.events(after: batch.cursor)
+            XCTAssertFalse(empty.requiresRescan); XCTAssertTrue(empty.events.isEmpty)
+            XCTAssertEqual(wire.sent().count, before)
+            await camera.abort()
+        }
+    }
+
+    func testEventHistoryOverflowReportsGapAndNeverReturnsAnIncompleteTailAsComplete() async throws {
+        let event = FakeCameraConnection(bytes: hex("0800000004000000"))
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()), event: event)
+        _ = try await camera.connect(guid: Data(0...15))
+        let initial = try await camera.events(after: nil)
+        let total = CameraWiFiConnection.eventHistoryLimit + 2
+        var bytes = Data()
+        for _ in 0..<total { bytes.append(hex("120000000800000002400000000009000000")) }
+        event.feed(bytes)
+        try await waitUntil("bounded history filled") { await camera.snapshot().eventRevision == UInt64(total) }
+        let gap = try await camera.events(after: initial.cursor)
+        XCTAssertTrue(gap.requiresRescan); XCTAssertTrue(gap.events.isEmpty); XCTAssertEqual(gap.cursor.revision, UInt64(total))
+        let oldestRetained = CameraEventCursor(connectionID: camera.connectionID, revision: 2)
+        let full = try await camera.events(after: oldestRetained)
+        XCTAssertFalse(full.requiresRescan); XCTAssertEqual(full.events.count, CameraWiFiConnection.eventHistoryLimit)
+        XCTAssertEqual(full.events.first?.revision, 3); XCTAssertEqual(full.events.last?.revision, UInt64(total))
+        let tooOld = try await camera.events(after: CameraEventCursor(connectionID: camera.connectionID, revision: 1))
+        XCTAssertTrue(tooOld.requiresRescan); XCTAssertTrue(tooOld.events.isEmpty)
+        await camera.abort()
+    }
+
+    func testEventHistoryRejectsForeignFutureCancelledAndClosedReads() async throws {
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()))
+        _ = try await camera.connect(guid: Data(0...15))
+        for cursor in [CameraEventCursor(connectionID: UUID(), revision: 0),
+                       CameraEventCursor(connectionID: camera.connectionID, revision: 1)] {
+            let result = try await camera.events(after: cursor)
+            XCTAssertTrue(result.requiresRescan); XCTAssertTrue(result.events.isEmpty)
+            XCTAssertEqual(result.cursor.connectionID, camera.connectionID); XCTAssertEqual(result.cursor.revision, 0)
+        }
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await camera.events(after: nil)
+        }
+        do { _ = try await cancelled.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .ready)
+        await camera.abort()
+        do { _ = try await camera.events(after: nil); XCTFail("Expected closed connection") }
+        catch { XCTAssertEqual(error as? CameraStreamError, .closed) }
+    }
+
+    func testEventHistoryIgnoresPingAndMalformedEventButKeepsTheFollowingCompleteEvent() async throws {
+        let event = FakeCameraConnection(bytes: hex("0800000004000000"))
+        let camera = apCamera(command: FakeCameraConnection(bytes: apOpeningReplies()), event: event)
+        _ = try await camera.connect(guid: Data(0...15))
+        let initial = try await camera.events(after: nil)
+        event.feed(hex("080000000D0000000A000000080000000240120000000800000002400000000007000000"))
+        try await waitUntil("only complete event counted") { await camera.snapshot().eventRevision == 1 }
+        let batch = try await camera.events(after: initial.cursor)
+        XCTAssertFalse(batch.requiresRescan); XCTAssertEqual(batch.events.count, 1)
+        XCTAssertEqual(batch.events.first?.firstParameter, 7)
+        XCTAssertEqual(event.sent().last, hex("080000000E000000"))
+        await camera.abort()
+    }
+
     func testEventFailureClosesWholeOwnerAndCannotBeReopened() async throws {
         let eventWire = FakeCameraConnection(bytes: hex("0800000004000000"))
         let commandWire = FakeCameraConnection(bytes: apOpeningReplies())

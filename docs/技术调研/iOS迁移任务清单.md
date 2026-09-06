@@ -15,7 +15,7 @@
 - 分支：`research/ios`
 - 产品版本：`1.81`（Android `versionCode` / iOS build 均为 `54`）
 - 当前阶段：Android 共享化已完成；iOS 实现已开始，完整共享 UI 与 iOS 功能尚未完成
-- 下一项：继续[iOS实现任务清单](./iOS实现任务清单.md)顶部传图范围。原共享网格/队列/完整预览及设置部分已接真实Apple适配；目录选择/显式目标恢复/原片复用和安全分享已写。第58批新增共享自动入队边界，真实事件发现/自动设置和完整连接工作区仍待接。960项Kotlin/Android（643+317）、271项Python与结构/原UI守卫通过；276项XCTest及17项Native预览/位图仍Mac待验。本轮Windows约80%，不等于Apple验收。
+- 下一项：继续[iOS实现任务清单](./iOS实现任务清单.md)顶部传图范围。原共享网格/队列/完整预览及设置部分已接真实Apple适配；目录选择/显式目标恢复/原片复用和安全分享已写。第58批新增共享自动入队边界，第59批真实AP/STA有界事件接收已写；事件消费/首次基线、自动设置和完整连接工作区仍待接。960项Kotlin/Android（643+317）、275项Python与结构/原UI守卫通过；280项XCTest及17项Native预览/位图仍Mac待验。本轮Windows约80%，不等于Apple验收。
 - Mac 最近检查点：`M01/M02`；Windows 静态检查不替代 Apple 编译/真机验收
 
 状态只使用：`DONE`、`NEXT`、`TODO`、`MAC`、`BLOCKED`。
@@ -29,6 +29,8 @@
 - 第57批共享设置系统目录入口：956项Kotlin/Android（639+317）与common metadata实际通过，BUILD SUCCESSFUL in 2m 9s；267项Python及结构/原UI守卫通过。原目录标题行两端复用，真实picker调用已有安全提交；完整自动入队/目录卡片仍继续。273项XCTest、系统picker与Android目录UI实测仍待Mac/真机。
 
 - 第58批自动新文件接收边界：复用原shared去重/媒体规则、历史抑制及暂停/目录切换保护；4项common实跑通过、3项XCTest待验。相机首次基线/真实事件消费尚未接入，不算自动传输已完成。Android业务和打包不改，无APK/无推送。
+
+- 第59批连接事件记录：275项Windows脚本、结构/原UI守卫通过；新增4项XCTest（累计280）待Mac。保存最近256个有序事件，错代/缺口要求重扫，不增加状态流消费者；Android/shared未改，未重复Gradle。中间事件消费/首次基线仍待接，无APK/无推送。
 
 ## 完成规则
 
