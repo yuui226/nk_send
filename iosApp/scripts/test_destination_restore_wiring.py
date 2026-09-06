@@ -71,7 +71,7 @@ class DestinationRestoreWiringTest(unittest.TestCase):
                                (PROBE, 'destination: restored.destination', 'destination: nil')):
             with self.assertRaises(AssertionError):
                 previous_restore_source(path, (ROOT/path).read_text(encoding='utf-8').replace(old, new))
-        value = read(QUEUE).replace('core.finishRun()', 'core.pauseAfterCurrent()')
+        value = (ROOT/QUEUE).read_text(encoding='utf-8').replace('core.finishRun()', 'core.pauseAfterCurrent()')
         self.assertNotEqual(before(QUEUE), previous_restore_source(QUEUE, value))
         for path in ('iosApp/ZTransfer/Network/CameraWiFiConnection.swift',
                      'iosApp/ZTransfer/Storage/ScopedDirectoryStore.swift',

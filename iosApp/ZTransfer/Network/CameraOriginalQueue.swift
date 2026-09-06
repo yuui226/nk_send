@@ -120,6 +120,19 @@ actor CameraOriginalQueue {
         return accepted
     }
 
+    /// Admission only. The event owner supplies newly discovered rows, never the initial whole catalog.
+    /// As on Android, automatic transfer requires an enabled option and an explicit directory target.
+    func enqueueNewMedia(_ infos: [PtpObjectInfo], files: [CameraFileInfo], enabled: Bool,
+                         byDate: Bool, dayKey: Int32, deferred: Bool) -> Int {
+        guard !Task.isCancelled, enabled, destination != nil, infos.count == files.count else { return 0 }
+        let accepted = Int(core.enqueueNewMedia(infos: infos, files: files, byDate: byDate, dayKey: dayKey))
+        if accepted > 0 {
+            publish()
+            if core.shouldAutoStart(deferred: deferred) { start() }
+        }
+        return accepted
+    }
+
     func start() {
         if changingDestination { startAfterDestinationChange = true; return }
         guard worker == nil, core.start() else { return }

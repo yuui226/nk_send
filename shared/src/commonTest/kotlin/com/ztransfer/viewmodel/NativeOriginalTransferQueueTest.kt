@@ -4,6 +4,62 @@ import com.ztransfer.protocol.PtpObjectInfo
 import kotlin.test.*
 
 class NativeOriginalTransferQueueTest {
+    @Test fun automaticBatchUsesSharedIdentityOrderAndPreservesManualDuplicates() {
+        val queue = NativeOriginalTransferQueue()
+        val first = info(); val alias = info(handle = 9); val different = info(handle = 10, name = "NEW.NEF")
+        val mapper = NativeOriginalTransferQueue()
+        val files = listOf(first, alias, different).map { mapper.enqueue(it, false, 0)!!.file }
+        val expected = newMediaQueueCandidates(files, emptyList()).filter(::isAutoTransferMedia)
+        assertEquals(2, queue.enqueueNewMedia(listOf(first, alias, different), files, true, 0))
+        assertEquals(expected, (0 until queue.count).map { queue.taskAt(it)!!.file })
+        assertEquals("ZT2026-09-05", queue.taskAt(0)?.destinationFolderName)
+        assertEquals(0, queue.enqueueNewMedia(listOf(first), listOf(files[0]), false, 0))
+        assertNotNull(queue.enqueue(first, false, 0))
+        assertEquals(3, queue.count)
+    }
+
+    @Test fun everyExistingHistoryStatusSuppressesAutomaticRetryUntilExplicitlyCleared() {
+        for (terminal in listOf("waiting", "active", "completed", "failed", "cancelled")) {
+            val queue = NativeOriginalTransferQueue(); val task = queue.enqueue(info(), false, 0)!!
+            if (terminal != "waiting" && terminal != "cancelled") { queue.start(); queue.takeNext() }
+            when (terminal) {
+                "completed" -> queue.completed(task.taskId, 3, 1)
+                "failed" -> queue.failed(task.taskId, "error", false)
+                "cancelled" -> queue.withdrawPending()
+            }
+            assertEquals(0, queue.enqueueNewMedia(listOf(info()), listOf(task.file), false, 0), terminal)
+            if (terminal in listOf("completed", "failed", "cancelled")) {
+                queue.finishRun(); queue.clearTerminal()
+                assertEquals(1, queue.enqueueNewMedia(listOf(info()), listOf(task.file), false, 0), terminal)
+            }
+        }
+    }
+
+    @Test fun automaticBatchRejectsUnknownTypesAndBadMetadataWithoutDiscardingLaterValidRows() {
+        val queue = NativeOriginalTransferQueue(); val mapper = NativeOriginalTransferQueue()
+        val unknown = info(name = "NOTES.TXT")
+        val invalid = info(handle = 8, name = "BAD.JPG")
+        val valid = info(handle = 9, name = "MOVIE.MOV")
+        val files = listOf(unknown, invalid, valid).map { mapper.enqueue(it, false, 0)!!.file }
+        assertEquals(0, queue.enqueueNewMedia(emptyList(), files, false, 0))
+        assertEquals(1, queue.enqueueNewMedia(listOf(unknown, info(handle = 8, complete = false, name = "BAD.JPG"), valid), files, false, 0))
+        assertEquals(1L, queue.taskAt(0)?.taskId)
+        assertEquals(files[2], queue.taskAt(0)?.file)
+    }
+
+    @Test fun automaticEnqueueKeepsMergedStorageAndDoesNotReleaseManualPause() {
+        val source = info(); val mapper = NativeOriginalTransferQueue()
+        val file = mapper.enqueue(source, false, 0)!!.file.copy(storageIds = setOf(0x10001, 0x20001))
+        val queue = NativeOriginalTransferQueue()
+        queue.enqueue(info(handle = 8, name = "PREVIOUS.JPG"), false, 0)
+        queue.start(); queue.takeNext(); queue.pauseAfterCurrent()
+        queue.completed(1L, 3, 1); queue.finishRun(); queue.clearTerminal()
+        assertEquals(1, queue.enqueueNewMedia(listOf(source), listOf(file), true, 0))
+        assertEquals(file, queue.taskAt(0)?.file)
+        assertTrue(queue.paused); assertFalse(queue.shouldAutoStart(false)); assertFalse(queue.shouldAutoStart(true))
+        assertTrue(queue.start()); assertEquals(file, queue.takeNext()?.file)
+    }
+
     @Test fun catalogEnqueuePreservesMergedStoresAndRejectsMismatchedMetadataWithoutConsumingIds() {
         val source = info()
         val file = com.ztransfer.protocol.CameraFileInfo(7, source.size, source.fileName!!, source.captureDate, true, setOf(0x10001, 0x20001))
@@ -22,8 +78,8 @@ class NativeOriginalTransferQueueTest {
         queue.completed(first.taskId, source.size, 1)
         assertEquals(second.taskId, queue.takeNext()?.taskId)
     }
-    private fun info(handle: Int = 7, complete: Boolean = true, folder: Boolean = false) =
-        PtpObjectInfo(handle, 0x10001, if (folder) 0x3001 else 0x3801, 3, "DSC_0007.JPG", "20260905T120000", true, folder, complete)
+    private fun info(handle: Int = 7, complete: Boolean = true, folder: Boolean = false, name: String = "DSC_0007.JPG") =
+        PtpObjectInfo(handle, 0x10001, if (folder) 0x3001 else 0x3801, 3, name, "20260905T120000", true, folder, complete)
 
     @Test fun pageSnapshotIsSeparateFromActiveProgressAndRetainsIdentity() {
         val queue = NativeOriginalTransferQueue()

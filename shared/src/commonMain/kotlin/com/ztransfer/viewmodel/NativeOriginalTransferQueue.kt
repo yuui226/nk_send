@@ -50,6 +50,16 @@ class NativeOriginalTransferQueue {
         return enqueueFile(file.copy(storageIds = file.storageIds.toSet()), byDate, dayKey)
     }
 
+    /** Automatic events use Android's existing identity suppression; manual enqueue stays repeatable. */
+    fun enqueueNewMedia(infos: List<PtpObjectInfo>, files: List<CameraFileInfo>, byDate: Boolean, dayKey: Int): Int {
+        if (infos.size != files.size) return 0
+        val metadata = LinkedHashMap<CameraFileInfo, PtpObjectInfo>()
+        files.indices.forEach { index -> metadata.getOrPut(files[index]) { infos[index] } }
+        return newMediaQueueCandidates(files, tasks).count { file ->
+            isAutoTransferMedia(file) && enqueueCatalog(checkNotNull(metadata[file]), file, byDate, dayKey) != null
+        }
+    }
+
     private fun enqueueFile(file: CameraFileInfo, byDate: Boolean, dayKey: Int): TransferTask {
         val task = TransferTask(
             file = file,

@@ -1671,6 +1671,84 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }
 
+    @MainActor func testAutomaticAdmissionRequiresEnabledDirectoryAndDeduplicatesConcurrentEventsButNotManualExports() async throws {
+        let wire = FakeCameraConnection(bytes: Data()), camera = apCamera(command: wire)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let info = try sampleInfo(3), mapper = NativeOriginalTransferQueue()
+        let file = try XCTUnwrap(mapper.enqueue(info: info, byDate: false, dayKey: 0)).file
+        let noTarget = await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: true)
+        XCTAssertEqual(noTarget, 0)
+        _ = try await queue.configureDestination(QueueDestinationProbe())
+        let disabled = await queue.enqueueNewMedia([info], files: [file], enabled: false, byDate: false, dayKey: 0, deferred: true)
+        XCTAssertEqual(disabled, 0)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: true)
+        }
+        let cancelledCount = await cancelled.value; XCTAssertEqual(cancelledCount, 0)
+        async let first = queue.enqueueNewMedia([info, info], files: [file, file], enabled: true, byDate: false, dayKey: 0, deferred: true)
+        async let second = queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: true)
+        let counts = await (first, second); XCTAssertEqual(counts.0 + counts.1, 1)
+        let manual = await queue.enqueueCatalog([info], files: [file], byDate: false, dayKey: 0, deferred: true)
+        XCTAssertEqual(manual, 1)
+        let snapshot = await queue.snapshot(); XCTAssertEqual(snapshot.rows.count, 2); XCTAssertFalse(snapshot.running)
+        XCTAssertTrue(wire.sent().isEmpty); XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @MainActor func testAutomaticAdmissionHonorsManualPauseAndDoesNotRetryCompletedHistory() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABCD".utf8))
+            + response(transaction: 4, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), target = QueueDestinationProbe()
+        _ = try await queue.configureDestination(target)
+        let began = expectation(description: "previous publication held"); await target.hold(began)
+        _ = await queue.enqueue(try sampleInfo(4), byDate: false, dayKey: 0, deferred: false)
+        await fulfillment(of: [began], timeout: 3)
+        await queue.pauseAfterCurrent(); await target.release()
+        try await waitUntil("previous run paused") { let s = await queue.snapshot(); return !s.running && s.paused }
+        await queue.clearTerminal()
+        let info = try sampleInfo(3), mapper = NativeOriginalTransferQueue()
+        let file = try XCTUnwrap(mapper.enqueue(info: info, byDate: false, dayKey: 0)).file
+        let before = wire.sent().count
+        let accepted = await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: true, dayKey: 20260906, deferred: false)
+        XCTAssertEqual(accepted, 1)
+        let waiting = await queue.snapshot(); XCTAssertTrue(waiting.paused); XCTAssertFalse(waiting.running)
+        XCTAssertEqual(waiting.rows.first?.destinationFolderName, "ZT2026-09-06"); XCTAssertEqual(wire.sent().count, before)
+        await queue.start()
+        try await waitUntil("explicitly resumed automatic task") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let duplicate = await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: false)
+        XCTAssertEqual(duplicate, 0)
+        let calls = await target.calls(); XCTAssertEqual(calls.count, 2)
+        await camera.abort()
+    }
+
+    @MainActor func testAutomaticAdmissionUsesTheSameDestinationCommitExecutionFence() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: Data("ABC".utf8)))
+        let camera = apCamera(command: wire); _ = try await camera.connect(guid: Data(0...15))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root)), old = QueueDestinationProbe(), next = QueueDestinationProbe()
+        _ = try await queue.configureDestination(old)
+        let began = expectation(description: "automatic destination held"), change = DestinationChangeProbe(next, began: began)
+        let configuring = Task { try await queue.configureDestination(change) }
+        await fulfillment(of: [began], timeout: 3)
+        let info = try sampleInfo(3), mapper = NativeOriginalTransferQueue()
+        let file = try XCTUnwrap(mapper.enqueue(info: info, byDate: false, dayKey: 0)).file
+        let before = wire.sent().count
+        let accepted = await queue.enqueueNewMedia([info], files: [file], enabled: true, byDate: false, dayKey: 0, deferred: false)
+        XCTAssertEqual(accepted, 1); XCTAssertEqual(wire.sent().count, before)
+        let waiting = await queue.snapshot(); XCTAssertFalse(waiting.running)
+        await change.release(); let applied = try await configuring.value; XCTAssertTrue(applied)
+        try await waitUntil("automatic task uses committed target") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }
+        let oldCalls = await old.calls(), newCalls = await next.calls()
+        XCTAssertTrue(oldCalls.isEmpty); XCTAssertEqual(newCalls.count, 1)
+        await camera.abort()
+    }
+
     @MainActor func testCatalogBatchPreservesOrderAndDoesNotStartWhenDeferred() async throws {
         let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -2960,7 +3038,8 @@ final class CameraNetworkTests: XCTestCase {
             let count = wire.sent().count
             await change.release(); let applied = try await configuring.value; XCTAssertTrue(applied)
             let paused = await queue.snapshot()
-            XCTAssertFalse(paused.running); XCTAssertTrue(paused.paused); XCTAssertEqual(paused.rows.first?.status, "WAITING")
+            // The destination fence prevented a run from starting: idle pause is intentionally a no-op.
+            XCTAssertFalse(paused.running); XCTAssertFalse(paused.paused); XCTAssertEqual(paused.rows.first?.status, "WAITING")
             XCTAssertEqual(wire.sent().count, count)
             await queue.start()
             try await waitUntil("resumed new target") { let s = await queue.snapshot(); return !s.running && s.rows.first?.status == "COMPLETED" }

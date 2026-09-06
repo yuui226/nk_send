@@ -8,6 +8,8 @@ CHANGES['shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedSettingsCont
 
 
 def previous_directory_ui_source(path, value):
+    from automatic_admission_wiring import previous_automatic_source
+    value = previous_automatic_source(path, value)
     for new, old in CHANGES.get(path, ()):
         assert value.count(new) == 1, (path, new)
         value = value.replace(new, old, 1)
