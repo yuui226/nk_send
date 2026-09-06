@@ -8,6 +8,8 @@
 
 ## 当前状态
 
+- 第62批W02-B完成Windows门槛：真实新增事件→ObjectInfo→shared准入/双卡发布→同一文件页/缓存；977项Kotlin/Android、290项Python及结构/原UI守卫PASS。本批Android app源码未改，当前2/50分、总计划80.8%；296项XCTest仍待Mac。W03/W04删除与事件缺口编排、W05自动开关未完成，下一项W03。以下为历史检查点。
+
 - 第61批W02-A完成：原新增对象准入/双卡发布/重试规则共享，Android实际调用；973项Kotlin/Android、283项Python与结构/原UI守卫PASS。W02-B的Apple事件调度尚未接，分数1.5/50、总计划80.6%；原W02一分拆为两个半分，总分不变，Apple运行仍待验。
 
 - 第60批W01完成Windows门槛：首次基线/成功枚举差量已接真实扫描，966项Kotlin/Android（649+317）与279项Python及结构/原UI守卫PASS；284项XCTest待Mac。剩余任务表完成1/50，总计划80.4%；下一项W02。下列批次数字为历史检查点。

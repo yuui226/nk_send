@@ -1,9 +1,31 @@
 package com.ztransfer.viewmodel
 
 import com.ztransfer.protocol.CameraFileInfo
+import com.ztransfer.protocol.PtpObjectInfo
 import kotlin.test.*
 
 class NewCameraObjectPolicyTest {
+    @Test fun publicationMappingPreservesUnknownSizeFallbackIdentityAndStorageSentinels() {
+        for (storage in listOf(0, -1, 0x10001, Int.MIN_VALUE)) for (complete in listOf(false, true)) {
+            val info = PtpObjectInfo(7, storage, 0x3801, 0xFFFFFFFFL, "照片.JPG", null, true, false, complete)
+            val mapped = assertNotNull(NewCameraObjectPolicy.publicationFile(info))
+            assertEquals(CameraFileInfo(7, 0xFFFFFFFFL, "照片.JPG", null, true,
+                if (storage == 0 || storage == -1) emptySet() else setOf(storage)), mapped)
+            assertTrue(NewCameraObjectPolicy.automaticMedia(mapped))
+        }
+    }
+
+    @Test fun associationsAndMissingNamesAreNotPublishedButUnknownFilesStayVisible() {
+        assertNull(NewCameraObjectPolicy.publicationFile(PtpObjectInfo(7, 1, 0x3001, 0, "DCIM", null, false, true, true)))
+        assertNull(NewCameraObjectPolicy.publicationFile(PtpObjectInfo(7, 1, 0, 0, null, null, false, false, false)))
+        val unknown = assertNotNull(NewCameraObjectPolicy.publicationFile(PtpObjectInfo(7, 1, 0, 12, "OTHER.BIN", null, false, false, true)))
+        assertFalse(NewCameraObjectPolicy.automaticMedia(unknown))
+        for (name in listOf("a.JPG", "a.NEF", "a.MOV", "a.MP4", "a.BIN", "", "a.jpg")) {
+            val value = file(name = name)
+            assertEquals(isAutoTransferMedia(value), NewCameraObjectPolicy.automaticMedia(value))
+        }
+    }
+
     private fun file(handle: Int = 7, name: String = "DSC_0007.JPG", size: Long = 3,
                      date: String? = "20260906T120000", stores: Set<Int> = setOf(0x10001)) =
         CameraFileInfo(handle, size, name, date, false, stores)

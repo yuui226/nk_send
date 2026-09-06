@@ -36,6 +36,9 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private var filesByHandle: [Int32: CameraFileInfo] = [:]
     private var infosByHandle: [Int32: PtpObjectInfo] = [:]
     private var scanSequence: Int64 = 0
+    private var lastCatalogPublication: UInt64 = 0
+    private var pendingCatalogPublication: CameraCatalogSnapshot?
+    private var catalogPublicationTask: Task<Void, Never>?
     private var connected = false
     private var closed = false
     private(set) lazy var model = NativeFilesPageModel(connectionId: connectionID.uuidString, queue: queuePage.model, platform: self)
@@ -199,6 +202,9 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     @discardableResult
     func acceptCatalog(_ value: CameraCatalogSnapshot, sequence: Int64) -> Bool {
         guard !closed else { return false }
+        guard value.publicationRevision >= lastCatalogPublication else {
+            _ = model.finishScan(sequence: sequence, snapshot: nil); return false
+        }
         let snapshot = NativeFilesPageSnapshot(connectionId: value.connectionID.uuidString,
             metadataComplete: value.metadataComplete, changedWhileScanning: value.changedWhileScanning)
         let cameraStores = KotlinIntArray(size: Int32(value.storageIDs.count))
@@ -213,9 +219,34 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         }
         guard model.finishScan(sequence: sequence, snapshot: snapshot) else { return false }
         scanSequence = sequence
+        lastCatalogPublication = value.publicationRevision
         filesByHandle = Dictionary(uniqueKeysWithValues: value.files.map { ($0.handle, $0) })
         infosByHandle = value.objectInfos
         return true
+    }
+
+    /// Coalesce already-resolved snapshots on the UI actor; never start another network scan.
+    func publishAddition(_ value: CameraCatalogSnapshot) {
+        guard !closed, value.connectionID == connectionID, value.publicationRevision > lastCatalogPublication else { return }
+        if let pendingCatalogPublication, pendingCatalogPublication.publicationRevision >= value.publicationRevision { return }
+        pendingCatalogPublication = value
+        guard catalogPublicationTask == nil else { return }
+        catalogPublicationTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.catalogPublicationTask = nil }
+            while !self.closed && !Task.isCancelled, let pending = self.pendingCatalogPublication {
+                if pending.publicationRevision <= self.lastCatalogPublication { self.pendingCatalogPublication = nil; continue }
+                if self.refreshTask == nil && self.commands.isEmpty {
+                    let sequence = self.model.beginScan()
+                    if sequence > 0 {
+                        self.pendingCatalogPublication = nil
+                        _ = self.acceptCatalog(pending, sequence: sequence)
+                        continue
+                    }
+                }
+                do { try await Task.sleep(nanoseconds: 90_000_000) } catch { return }
+            }
+        }
     }
 
     func enqueue(handles: KotlinIntArray, scanSequence: Int64, completion: NativeFilesEnqueueCompletion) {
@@ -447,6 +478,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     func cancelRequests() {
         guard !closed else { return }
         closed = true; refreshTask?.cancel(); refreshTask = nil
+        catalogPublicationTask?.cancel(); catalogPublicationTask = nil; pendingCatalogPublication = nil
         if let pending = directoryPicker {
             directoryPicker = nil; pending.controller.delegate = nil
             pending.controller.dismiss(animated: false)

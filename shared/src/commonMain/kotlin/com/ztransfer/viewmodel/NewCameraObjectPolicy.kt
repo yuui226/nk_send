@@ -4,6 +4,13 @@ import com.ztransfer.protocol.CameraFileInfo
 
 /** Original CameraViewModel new-object decisions. Platform owners keep IO, clocks and scheduling. */
 object NewCameraObjectPolicy {
+    fun publicationFile(info: com.ztransfer.protocol.PtpObjectInfo): CameraFileInfo? {
+        if (info.isAssociation) return null
+        val name = info.fileName ?: return null
+        return CameraFileInfo(info.handle, info.size, name, info.captureDate, info.isProtected,
+            if (info.storageId == 0 || info.storageId == -1) emptySet() else setOf(info.storageId))
+    }
+    fun automaticMedia(file: CameraFileInfo): Boolean = isAutoTransferMedia(file)
     const val COALESCE_MS = 90L
     const val RESOLVE_BATCH_SIZE = 16
     const val RESOLVE_MAX_ATTEMPTS = 5

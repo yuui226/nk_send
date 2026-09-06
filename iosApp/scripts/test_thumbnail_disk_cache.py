@@ -25,7 +25,7 @@ class ThumbnailDiskWiringTest(unittest.TestCase):
         self.assertIn('private var disk: CameraThumbnailDiskCache?', store)
         self.assertIn('disk?.read(key: identity)', store)
         self.assertIn('disk.write(result, key: identity)', store)
-        self.assertIn('previews: previews)', probe)
+        self.assertIn('source: connection, stationMode: stationMode, previews: previews,', probe)
         self.assertIn('await previews.openDiskCache', probe)
         self.assertEqual(1, probe.count('for await snapshot in queue.updates'))
         self.assertEqual(2, probe.count('await previews.close()'))

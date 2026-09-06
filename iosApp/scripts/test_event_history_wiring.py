@@ -16,7 +16,7 @@ def between(value, start, end): return value.split(start, 1)[1].split(end, 1)[0]
 class EventHistoryWiringTest(unittest.TestCase):
     def test_only_event_history_changes_in_the_entire_connection_owner(self):
         self.assertEqual({CONNECTION}, set(CHANGES))
-        self.assertEqual(before(CONNECTION), previous_event_history_source(CONNECTION, read(CONNECTION)))
+        self.assertEqual(before(CONNECTION), previous_event_history_source(CONNECTION, (ROOT/CONNECTION).read_text(encoding='utf-8')))
         for path in ('iosApp/ZTransfer/Network/PtpIPChannel.swift',
                      'iosApp/ZTransfer/Network/CameraOriginalQueue.swift',
                      'iosApp/ZTransfer/Network/CameraCatalog.swift',
@@ -50,7 +50,7 @@ class EventHistoryWiringTest(unittest.TestCase):
             self.assertNotIn(forbidden, value)
 
     def test_guards_reject_loss_generation_and_unrelated_transaction_mutations(self):
-        raw = read(CONNECTION)
+        raw = (ROOT/CONNECTION).read_text(encoding='utf-8')
         for old, new in (('cursor.connectionID == connectionID,', ''),
                          ('events: [], requiresRescan: true', 'events: [], requiresRescan: false'),
                          ('eventRecords.append(CameraEventRecord', '_ = CameraEventRecord')):

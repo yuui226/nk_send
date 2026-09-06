@@ -3724,6 +3724,240 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertEqual(delta.removed.map { $0.int32Value }.sorted(), removed.sorted(), file: file, line: line)
     }
 
+    func testNewObjectEventsIgnoreInitialOldInvalidAndDuplicateHandlesAndMergeBackups() async throws {
+        let old = try resolverInfo(1, name: "OLD.JPG"), fresh = try resolverInfo(2, name: "NEW.NEF")
+        let backup = try resolverInfo(3, name: "NEW.NEF", storage: 0x20001)
+        let unknown = try resolverInfo(4, name: "OTHER.BIN")
+        let source = NewObjectCatalogSource(infos: [1: old, 2: fresh, 3: backup, 4: unknown], handles: [1])
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [0, -1, 1, 2, 2, 3, 4]))
+        try await waitUntil("three metadata publications") { await sink.values.count == 3 }
+        let values = await sink.values, reads = await source.reads
+        XCTAssertEqual(reads, [2, 3, 4])
+        XCTAssertEqual(values.map { $0.newMedia?.handle }, [2, nil, nil])
+        XCTAssertEqual(values.last?.snapshot.files.map(\.handle), [4, 2, 1])
+        XCTAssertEqual(values.last?.snapshot.files[1].storageIds.map { $0.int32Value }.sorted(), [0x10001, 0x20001])
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2, 3], startingAt: 8))
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let repeated = await source.reads; XCTAssertEqual(repeated, reads)
+        await catalog.close()
+    }
+
+    func testNewObjectBusyRetriesAreBoundedAndSuccessfulRetryPublishesOnce() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], failures: [2: 2, 3: 10])
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2, 3]))
+        try await waitUntil("successful third attempt") { await sink.values.count == 1 }
+        // Original five attempts require 90 + 180 + 360 + 720 + 1400 ms, not five rapid reads.
+        for _ in 0..<60 {
+            if await source.reads.filter({ $0 == 3 }).count == 5 { break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let reads = await source.reads
+        XCTAssertEqual(reads.filter { $0 == 2 }.count, 3)
+        XCTAssertEqual(reads.filter { $0 == 3 }.count, 5)
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let final = await source.reads; XCTAssertEqual(final, reads)
+        await catalog.close()
+    }
+
+    func testNewObjectWaitsForInitialBaselineAndForegroundPreviewWithoutConsumingAttempts() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)])
+        let previews = CameraPreviewStore(source: FakePreviewSource(thumbs: []), connectionID: source.connectionID)
+        let catalog = CameraCatalog(source: source, stationMode: false, previews: previews)
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let before = await source.reads; XCTAssertTrue(before.isEmpty)
+        let foreground = await previews.beginForegroundUse()
+        _ = try await catalog.refresh() // Empty authoritative baseline; event 2 is not an old enumerated file.
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let blocked = await source.reads; XCTAssertTrue(blocked.isEmpty)
+        await previews.endForegroundUse(foreground)
+        try await waitUntil("metadata resumes after preview") { await catalog.snapshot()?.files.count == 1 }
+        let resumed = await source.reads; XCTAssertEqual(resumed, [2])
+        await catalog.close(); await previews.close()
+    }
+
+    func testNewObjectScanSupersedesHeldMetadataAndDoesNotReportAnOldFileAsNew() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], holdFirst: true)
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("resolver holds metadata") { await source.isHeld }
+        await source.setHandles([2])
+        let scanned = try await catalog.refresh()
+        await source.release()
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let additions = await sink.values, snapshot = await catalog.snapshot()
+        XCTAssertTrue(additions.isEmpty)
+        XCTAssertEqual(snapshot?.publicationRevision, scanned.publicationRevision)
+        XCTAssertEqual(snapshot?.files.map(\.handle), [2])
+        await catalog.close()
+    }
+
+    func testNewObjectRemovalAndReadditionInvalidatesTheHeldToken() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], holdFirst: true)
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("first token held") { await source.isHeld }
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2], startingAt: 2, code: 0x4003))
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2], startingAt: 3))
+        await source.setRevision(3)
+        _ = try await catalog.refresh() // Explicit reconciliation; W04 owns scheduling this scan.
+        await source.release()
+        try await waitUntil("fresh token resolves") { await sink.values.count == 1 }
+        let reads = await source.reads; XCTAssertEqual(reads, [2, 2])
+        await catalog.close()
+    }
+
+    func testNewObjectSocketObserverLagDoesNotPublishBeforeRemovalIsForwarded() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], holdFirst: true)
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("metadata held before socket removal") { await source.isHeld }
+        await source.setRevision(2)
+        await source.release()
+        try await Task.sleep(nanoseconds: 160_000_000)
+        let before = await sink.values; XCTAssertTrue(before.isEmpty)
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2], startingAt: 2, code: 0x4003))
+        let needsScan = await catalog.needsEventRescan; XCTAssertTrue(needsScan)
+        await catalog.close()
+    }
+
+    func testNewObjectGapAndForeignConnectionCannotStartReadsAndCloseDropsHeldResults() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], holdFirst: true)
+        let sink = CatalogAdditionSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.append($0) })
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(UUID(), handles: [2]))
+        await catalog.receiveEvents(CameraEventBatch(cursor: CameraEventCursor(connectionID: source.connectionID, revision: 1),
+            events: [], requiresRescan: true))
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2], startingAt: 2))
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let blocked = await source.reads; XCTAssertTrue(blocked.isEmpty)
+        await source.setRevision(2); _ = try await catalog.refresh()
+        try await waitUntil("post-gap request held") { await source.isHeld }
+        await catalog.close(); await source.release()
+        try await Task.sleep(nanoseconds: 160_000_000)
+        let additions = await sink.values; XCTAssertTrue(additions.isEmpty)
+        await expect(.closed) { _ = try await catalog.refresh() }
+    }
+
+    func testNewObjectTransportFailureStopsResolverUntilExplicitSuccessfulScan() async throws {
+        let source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)], transportFailure: true)
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        _ = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("transport failure requires reconciliation") { await catalog.needsEventRescan }
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let failed = await source.reads; XCTAssertEqual(failed, [2])
+        await source.repairTransport(); await source.setRevision(1)
+        _ = try await catalog.refresh()
+        try await waitUntil("explicit successful scan allows retry") { await catalog.snapshot()?.files.count == 1 }
+        await catalog.close()
+    }
+
+    func testRealNewObjectCommandChecksAdmissionWithoutSendingOrConsumingTransaction() async throws {
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + response(transaction: 3, payload: hex("00000000")))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        let before = wire.sent()
+        await expect(.operationInProgress) { _ = try await camera.newObjectInfo(handle: 2, permitted: { false }) }
+        XCTAssertEqual(wire.sent(), before)
+        let stores = try await camera.storageIDs(); XCTAssertEqual(stores, [])
+        XCTAssertEqual(wire.sent().last, hex("120000000600000001000000041003000000"))
+        await camera.abort()
+    }
+
+    func testRealNewObjectCommandPreservesBusyMalformedAndFollowingValidTransactions() async throws {
+        var payload = Data(repeating: 0, count: 52)
+        payload[0] = 1; payload[2] = 1; payload[4] = 1; payload[5] = 0x38; payload[8] = 10
+        payload += hex("0B730061006D0070006C0065002E004A0050004700000000")
+        let wire = FakeCameraConnection(bytes: apOpeningReplies()
+            + response(transaction: 3, code: 0x2019)
+            + response(transaction: 4, payload: Data([0]))
+            + response(transaction: 5, payload: payload))
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        do { _ = try await camera.newObjectInfo(handle: 2, permitted: { true }); XCTFail("Busy is retryable") }
+        catch { guard case CameraOperationError.rejected(operation: 0x1008, response: 0x2019) = error else { throw error } }
+        do { _ = try await camera.newObjectInfo(handle: 2, permitted: { true }); XCTFail("Malformed is not an empty catalog") }
+        catch { guard case CameraOperationError.malformedDataset(operation: 0x1008) = error else { throw error } }
+        let info = try await camera.newObjectInfo(handle: 2, permitted: { true })
+        XCTAssertEqual(info.handle, 2); XCTAssertEqual(info.fileName, "sample.JPG"); XCTAssertEqual(info.size, 10)
+        XCTAssertEqual(Array(wire.sent().suffix(3)), [
+            hex("16000000060000000100000008100300000002000000"),
+            hex("16000000060000000100000008100400000002000000"),
+            hex("16000000060000000100000008100500000002000000")])
+        await camera.abort()
+    }
+
+    @MainActor func testFilesAdditionWaitsForScanAndRejectsOlderPublicationWithoutStartingQueue() async throws {
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let bridge = OriginalFilesPageBridge(connectionID: camera.connectionID,
+            catalog: CameraCatalog(source: camera, stationMode: true), queue: queue,
+            previews: CameraPreviewStore(source: camera), exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: true)
+        bridge.setConnected(true)
+        let info = try resolverInfo(2)
+        func snapshot(_ revision: UInt64) throws -> CameraCatalogSnapshot {
+            CameraCatalogSnapshot(connectionID: camera.connectionID, revision: 0, storageIDs: [0x10001],
+                files: [try XCTUnwrap(NewCameraObjectPolicy.shared.publicationFile(info: info))], objectInfos: [2: info],
+                totalHandles: 1, metadataComplete: true, changedWhileScanning: false, publicationRevision: revision)
+        }
+        let active = bridge.model.beginScan()
+        bridge.publishAddition(try snapshot(2))
+        try await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertTrue(bridge.acceptCatalog(try snapshot(1), sequence: active))
+        try await Task.sleep(nanoseconds: 160_000_000)
+        XCTAssertFalse(bridge.acceptCatalog(try snapshot(1), sequence: bridge.model.beginScan()))
+        let queued = await queue.snapshot(); XCTAssertTrue(queued.rows.isEmpty)
+        bridge.close()
+        bridge.publishAddition(try snapshot(3))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testNewObjectPublicationUpdatesThumbnailAdmissionAndRejectsStaleCacheSnapshot() async throws {
+        let info = try resolverInfo(2), source = NewObjectCatalogSource(infos: [2: try resolverInfo(2)])
+        let previews = CameraPreviewStore(source: FakePreviewSource(thumbs: [.bytes(Data([9]))]), connectionID: source.connectionID)
+        let catalog = CameraCatalog(source: source, stationMode: false, previews: previews)
+        let old = try await catalog.refresh()
+        await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2]))
+        try await waitUntil("new metadata visible") { await catalog.snapshot()?.files.count == 1 }
+        try await Task.sleep(nanoseconds: 100_000_000) // Also allow the cross-actor cache publication to finish.
+        let stale = await previews.reconcile(old); XCTAssertFalse(stale)
+        let bytes = try await previews.thumbnail(info: info); XCTAssertEqual(bytes, Data([9]))
+        await catalog.close(); await previews.close()
+    }
+
+    private func resolverInfo(_ handle: Int32, name: String = "NEW.JPG", storage: Int32 = 0x10001) throws -> PtpObjectInfo {
+        var payload = Data(repeating: 0, count: 52)
+        for index in 0..<4 { payload[index] = UInt8(truncatingIfNeeded: storage >> (index * 8)) }
+        payload[4] = 1; payload[5] = 0x38; payload[8] = 10
+        for value in [name, "20260906T120000", ""] {
+            payload.append(UInt8(value.utf16.count + 1))
+            for unit in value.utf16 { payload.append(UInt8(truncatingIfNeeded: unit)); payload.append(UInt8(unit >> 8)) }
+            payload.append(contentsOf: [0, 0])
+        }
+        return try XCTUnwrap(PtpIPChannel.objectInfo(handle: handle, payload: payload))
+    }
+
+    private func objectEvents(_ id: UUID, handles: [Int32], startingAt: UInt64 = 1, code: Int32 = 0x4002) -> CameraEventBatch {
+        CameraEventBatch(cursor: CameraEventCursor(connectionID: id, revision: startingAt + UInt64(handles.count) - 1),
+            events: handles.enumerated().map { CameraEventRecord(revision: startingAt + UInt64($0.offset), code: code,
+                transactionID: 0, firstParameter: Int64($0.element)) }, requiresRescan: false)
+    }
+
     func testCatalogMarksEventsDuringScanAsInvalidation() async throws {
         let source = FakeCatalogSource(infos: [1: try sampleInfo(1), 2: try sampleInfo(2)], changeDuringRead: true)
         let result = try await CameraCatalog(source: source, stationMode: false).refresh()
@@ -4641,6 +4875,53 @@ private final class FakeDirectoryAccess: ExportDirectoryAccess {
     func isDirectory(_ url: URL) -> Bool { true }
     func bookmark(_ url: URL) -> Data { version += 1; return Data([version]) }
     func resolve(_ bookmark: Data) -> ResolvedExportDirectory { ResolvedExportDirectory(url: url, stale: stale) }
+}
+
+private actor CatalogAdditionSink {
+    private(set) var values: [CameraCatalogAddition] = []
+    func append(_ value: CameraCatalogAddition) { values.append(value) }
+}
+
+private actor NewObjectCatalogSource: CameraCatalogSource {
+    nonisolated let connectionID = UUID()
+    private let infos: [Int32: PtpObjectInfo]
+    private var handles: [Int32]
+    private var failures: [Int32: Int]
+    private var revision: UInt64 = 0
+    private let holdFirst: Bool
+    private var transportFailure: Bool
+    private var held: CheckedContinuation<Void, Never>?
+    private(set) var reads: [Int32] = []
+    var isHeld: Bool { held != nil }
+    init(infos: [Int32: PtpObjectInfo], handles: [Int32] = [], failures: [Int32: Int] = [:],
+         holdFirst: Bool = false, transportFailure: Bool = false) {
+        self.infos = infos; self.handles = handles; self.failures = failures
+        self.holdFirst = holdFirst; self.transportFailure = transportFailure
+    }
+    func setHandles(_ values: [Int32]) { handles = values }
+    func setRevision(_ value: UInt64) { revision = value }
+    func repairTransport() { transportFailure = false }
+    func release() { held?.resume(); held = nil }
+    func storageIDs() -> [Int32] { [0x10001] }
+    func objectHandles(storageID: Int32) -> [Int32] { handles }
+    func objectInfo(handle: Int32) throws -> PtpObjectInfo {
+        guard let info = infos[handle] else { throw CameraOperationError.malformedDataset(operation: 0x1008) }
+        return info
+    }
+    func newObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo {
+        guard await permitted() else { throw CameraStreamError.operationInProgress }
+        reads.append(handle)
+        if holdFirst && reads.count == 1 { await withCheckedContinuation { held = $0 } }
+        if transportFailure { throw CameraStreamError.closed }
+        if failures[handle, default: 0] > 0 {
+            failures[handle, default: 0] -= 1
+            throw CameraOperationError.rejected(operation: 0x1008, response: 0x2019)
+        }
+        return try objectInfo(handle: handle)
+    }
+    func snapshot() -> CameraConnectionSnapshot {
+        CameraConnectionSnapshot(connectionID: connectionID, phase: .ready, eventRevision: revision, errorDescription: nil)
+    }
 }
 
 private actor BaselineCatalogSource: CameraCatalogSource {

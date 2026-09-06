@@ -14,7 +14,7 @@ def before(path): return subprocess.check_output(['git', 'show', '42abf5b:' + pa
 class HandleBaselineWiringTest(unittest.TestCase):
     def test_old_catalog_restores_exactly_and_android_shared_policies_are_unchanged(self):
         self.assertEqual({CATALOG}, set(CHANGES))
-        self.assertEqual(before(CATALOG), previous_handle_baseline_source(CATALOG, read(CATALOG)))
+        self.assertEqual(before(CATALOG), previous_handle_baseline_source(CATALOG, (ROOT/CATALOG).read_text(encoding='utf-8')))
         for path in ('app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt',
                      'shared/src/commonMain/kotlin/com/ztransfer/catalog/CameraCatalogPolicy.kt',
                      'shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeCameraCatalogScan.kt',
@@ -52,10 +52,14 @@ class HandleBaselineWiringTest(unittest.TestCase):
             self.assertNotIn(forbidden, core)
 
     def test_guard_rejects_generation_bypass_and_does_not_hide_old_failure_changes(self):
-        raw = read(CATALOG)
+        raw = (ROOT/CATALOG).read_text(encoding='utf-8')
         for old,new in (('enumerated.connectionID == before.connectionID', 'true'),
                         ('detectNewHandles: Bool = false', 'detectNewHandles: Bool = true')):
             with self.assertRaises(AssertionError):
                 previous_handle_baseline_source(CATALOG, raw.replace(old,new))
         changed = raw.replace('if result.metadataComplete { latest = result }', 'latest = result')
+        # W02-B's adjacent wakeup hunk now guards this original publication condition too.
+        with self.assertRaises(AssertionError):
+            previous_handle_baseline_source(CATALOG, changed)
+        changed = raw.replace('else if !scan.publishNext() { break }', 'else if !scan.publishNext() { continue }')
         self.assertNotEqual(before(CATALOG), previous_handle_baseline_source(CATALOG, changed))

@@ -3,6 +3,10 @@ package com.ztransfer.catalog
 /** One connection owner's successful enumeration baseline. No IO, publication or event scheduling. */
 class NativeCameraHandleBaseline {
     private var knownHandles: Set<Int>? = null
+    val hasSnapshot: Boolean get() = knownHandles != null
+    fun shouldResolve(handle: Int, visibleFiles: List<com.ztransfer.protocol.CameraFileInfo>): Boolean =
+        com.ztransfer.viewmodel.NewCameraObjectPolicy.shouldResolve(handle, knownHandles, visibleFiles)
+    fun recordPublished(handle: Int) { knownHandles = knownHandles?.plus(handle) }
 
     /**
      * Call only after ALL handle enumerations succeed and the connection is still current.

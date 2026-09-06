@@ -225,6 +225,18 @@ actor CameraWiFiConnection {
         return info
     }
 
+    func newObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo {
+        let operation = PtpConstants.shared.GET_OBJECT_INFO
+        let result = try await previewCommand(operation: operation, handle: handle, limit: 64 * 1024, admission: permitted)
+        guard result.code == PtpConstants.shared.RESPONSE_OK else {
+            throw CameraOperationError.rejected(operation: operation, response: result.code)
+        }
+        guard let data = result.payload, let info = PtpIPChannel.objectInfo(handle: handle, payload: data) else {
+            throw CameraOperationError.malformedDataset(operation: operation)
+        }
+        return info
+    }
+
     /// A confirmed miss may be cached; Busy and other errors must remain retryable.
     func thumbnail(handle: Int32) async throws -> Data? {
         try await readThumbnail(handle: handle)

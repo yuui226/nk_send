@@ -3,6 +3,29 @@ package com.ztransfer.catalog
 import kotlin.test.*
 
 class NativeCameraHandleBaselineTest {
+    @Test fun publishedHandlesDoNotInventAnEnumerationAndLaterScansReplaceTheBaseline() {
+        val baseline = NativeCameraHandleBaseline()
+        assertFalse(baseline.hasSnapshot)
+        baseline.recordPublished(7)
+        assertFalse(baseline.hasSnapshot)
+        assertTrue(baseline.shouldResolve(7, emptyList()))
+        baseline.acceptEnumeration(intArrayOf(), false)
+        assertTrue(baseline.hasSnapshot)
+        baseline.recordPublished(7)
+        assertFalse(baseline.shouldResolve(7, emptyList()))
+        assertEquals(CameraHandleDelta(emptySet(), setOf(7)), baseline.acceptEnumeration(intArrayOf(), true))
+        assertTrue(baseline.shouldResolve(7, emptyList()))
+    }
+
+    @Test fun resolverAdmissionKeepsKnownRawHandlesAndVisibleHandlesDistinct() {
+        val baseline = NativeCameraHandleBaseline()
+        baseline.acceptEnumeration(intArrayOf(7), false)
+        val visible = com.ztransfer.protocol.CameraFileInfo(8, 1, "OLD.JPG", null, false, emptySet())
+        for (handle in listOf(0, -1, 7, 8)) assertFalse(baseline.shouldResolve(handle, listOf(visible)))
+        assertTrue(baseline.shouldResolve(Int.MIN_VALUE, listOf(visible)))
+        assertTrue(baseline.shouldResolve(9, listOf(visible)))
+    }
+
     @Test fun firstCatalogNeverReportsOldPhotosEvenWhenDetectionIsRequested() {
         val baseline = NativeCameraHandleBaseline()
         assertEquals(CameraHandleDelta(emptySet(), emptySet()), baseline.acceptEnumeration(intArrayOf(7, 8), true))

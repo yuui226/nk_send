@@ -7,7 +7,9 @@ from new_object_policy_wiring import CHANGES, previous_new_object_policy_source
 ROOT = Path(__file__).resolve().parents[2]
 ANDROID = 'app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt'
 POLICY = 'shared/src/commonMain/kotlin/com/ztransfer/viewmodel/NewCameraObjectPolicy.kt'
-def read(path): return (ROOT/path).read_text(encoding='utf-8')
+def read(path):
+    from new_object_resolver_wiring import previous_new_object_resolver_source
+    return previous_new_object_resolver_source(path, (ROOT/path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', '8484b35:' + path], cwd=ROOT).decode('utf-8')
 def between(value, start, end): return value.split(start, 1)[1].split(end, 1)[0]
 

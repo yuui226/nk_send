@@ -55,6 +55,7 @@ actor CameraPreviewStore {
     private var scanToken: UUID?
     private var catalogReady = false
     private var catalogInfos: [Int32: PtpObjectInfo] = [:]
+    private var catalogPublicationRevision: UInt64 = 0
     private var priorityRevision: UInt64 = 0
 
     func startBackgroundFill(startDay: Int32, endDay: Int32, revision: UInt64) {
@@ -84,6 +85,7 @@ actor CameraPreviewStore {
         if !closed { foregroundUses.insert(token); wakeFill(retryFailures: false) }
         return token
     }
+    func allowsObjectResolution() -> Bool { !closed && foregroundUses.isEmpty }
     func endForegroundUse(_ token: UUID) {
         if foregroundUses.remove(token) != nil { wakeFill(retryFailures: foregroundUses.isEmpty) }
     }
@@ -185,6 +187,7 @@ actor CameraPreviewStore {
     @discardableResult
     func reconcile(_ snapshot: CameraCatalogSnapshot) -> Bool {
         guard !closed, let connectionID, snapshot.connectionID == connectionID,
+              snapshot.publicationRevision >= catalogPublicationRevision,
               snapshot.metadataComplete, !snapshot.changedWhileScanning else { return false }
         var keys = Set<String>()
         for file in snapshot.files {
@@ -193,6 +196,7 @@ actor CameraPreviewStore {
             keys.insert(policy.thumbnailKey(info: info))
         }
         guard fill.replace(files: snapshot.files) else { return false }
+        catalogPublicationRevision = snapshot.publicationRevision
         allowedThumbnailKeys = keys
         catalogInfos = snapshot.objectInfos
         catalogReady = true

@@ -610,7 +610,9 @@ final class CameraHandshakeProbe: ObservableObject {
             }
         }
         apConnection = connection
-        catalog = CameraCatalog(source: connection, stationMode: stationMode, previews: previews)
+        let sessionCatalog = CameraCatalog(source: connection, stationMode: stationMode, previews: previews,
+            onAddition: { [weak self] addition in await self?.receiveCatalogAddition(addition) })
+        catalog = sessionCatalog
         previewStore = previews
         defer {
             filesPage?.close(); filesPage = nil
@@ -658,6 +660,8 @@ final class CameraHandshakeProbe: ObservableObject {
             let summary = "\(description)：原始存储 ID \(stores.count) 个、对象 \(handles.count) 个；仅抽样前 20 个对象，不代表完整照片列表。" +
                 (diskReady ? "" : "缩略图磁盘缓存不可用，当前仅使用内存缓存。")
             status = summary + "连接保持中。"
+            // This owner existed before connect; revision zero includes opening events still retained.
+            var eventCursor = CameraEventCursor(connectionID: connection.connectionID, revision: 0)
             for await state in connection.updates {
                 try Task.checkCancellation()
                 await previews.setConnected(state.phase == .ready)
@@ -666,19 +670,31 @@ final class CameraHandshakeProbe: ObservableObject {
                 if state.phase == .closed {
                     status = state.errorDescription ?? "相机会话已关闭。"
                 } else if state.phase == .ready {
+                    let batch = try await connection.events(after: eventCursor)
+                    eventCursor = batch.cursor
+                    await sessionCatalog.receiveEvents(batch)
                     status = summary + "连接保持中，已收到 \(state.eventRevision) 个有效事件。"
                 }
             }
             try Task.checkCancellation()
+            await sessionCatalog.close()
             await previews.close()
             await queue.stop()
             await connection.abort()
         } catch {
+            await sessionCatalog.close()
             await previews.close()
             await queue.stop()
             await connection.abort(error: error)
             throw error
         }
+    }
+
+    private func receiveCatalogAddition(_ addition: CameraCatalogAddition) {
+        guard apConnection?.connectionID == addition.snapshot.connectionID else { return }
+        filesPage?.publishAddition(addition.snapshot)
+        if let media = addition.newMedia { catalogStatus = "已发现新文件：\(media.fileName)" }
+        // Automatic queue admission is deliberately not enabled before W05's real option is wired.
     }
 
     nonisolated static func inspectAPSession(
