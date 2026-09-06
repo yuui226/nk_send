@@ -3,12 +3,13 @@ from pathlib import Path
 import subprocess
 import unittest
 from event_history_wiring import CHANGES, previous_event_history_source
+from handle_baseline_wiring import previous_handle_baseline_source
 
 ROOT = Path(__file__).resolve().parents[2]
 CONNECTION = 'iosApp/ZTransfer/Network/CameraWiFiConnection.swift'
 TESTS = 'iosApp/ZTransferTests/CameraNetworkTests.swift'
 
-def read(path): return (ROOT/path).read_text(encoding='utf-8')
+def read(path): return previous_handle_baseline_source(path, (ROOT/path).read_text(encoding='utf-8'))
 def before(path): return subprocess.check_output(['git', 'show', '5bedb81:' + path], cwd=ROOT).decode('utf-8')
 def between(value, start, end): return value.split(start, 1)[1].split(end, 1)[0]
 

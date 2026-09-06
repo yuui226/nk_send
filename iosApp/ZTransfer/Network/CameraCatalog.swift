@@ -20,6 +20,17 @@ struct CameraCatalogSnapshot {
     let totalHandles: Int
     let metadataComplete: Bool
     let changedWhileScanning: Bool
+    /// Raw successful enumeration delta, not a list of publishable/auto-transferable rows.
+    let handleDelta: CameraHandleDelta?
+
+    init(connectionID: UUID, revision: UInt64, storageIDs: [Int32], files: [CameraFileInfo],
+         objectInfos: [Int32: PtpObjectInfo], totalHandles: Int, metadataComplete: Bool,
+         changedWhileScanning: Bool, handleDelta: CameraHandleDelta? = nil) {
+        self.connectionID = connectionID; self.revision = revision; self.storageIDs = storageIDs
+        self.files = files; self.objectInfos = objectInfos; self.totalHandles = totalHandles
+        self.metadataComplete = metadataComplete; self.changedWhileScanning = changedWhileScanning
+        self.handleDelta = handleDelta
+    }
 }
 
 /// Normal AP/STA catalog only. One immutable camera generation; failed enumeration never replaces
@@ -32,13 +43,14 @@ actor CameraCatalog {
     private let previews: CameraPreviewStore?
     private var scanning = false
     private var latest: CameraCatalogSnapshot?
+    private let handleBaseline = NativeCameraHandleBaseline()
 
     init(source: CameraCatalogSource, stationMode: Bool, previews: CameraPreviewStore? = nil) {
         self.source = source; self.stationMode = stationMode; self.previews = previews
     }
     func snapshot() -> CameraCatalogSnapshot? { latest }
 
-    func refresh() async throws -> CameraCatalogSnapshot {
+    func refresh(detectNewHandles: Bool = false) async throws -> CameraCatalogSnapshot {
         guard !scanning else { throw CameraStreamError.operationInProgress }
         try Task.checkCancellation()
         scanning = true
@@ -47,14 +59,23 @@ actor CameraCatalog {
         do {
             let before = await source.snapshot()
             guard before.phase == .ready else { throw CameraStreamError.notConnected }
+            guard before.connectionID == source.connectionID else { throw CameraStreamError.closed }
             let stores = try await source.storageIDs()
             let scan = NativeCameraCatalogScan(rawStorageIds: Self.native(stores), stationMode: stationMode)
+            var enumeratedHandles: [Int32] = []
             for index in 0..<Int(scan.storageCount) {
                 try Task.checkCancellation()
                 let handles = try await source.objectHandles(storageID: scan.queryStorageId(index: Int32(index)))
                 guard scan.addHandles(index: Int32(index), handles: Self.native(handles)) else { throw CameraStreamError.invalidArgument }
+                enumeratedHandles.append(contentsOf: handles)
             }
             guard scan.begin() else { throw CameraStreamError.invalidArgument }
+            let enumerated = await source.snapshot()
+            try Task.checkCancellation()
+            guard enumerated.phase == .ready, enumerated.connectionID == before.connectionID else { throw CameraStreamError.closed }
+            // The raw handle list is already authoritative, even if later ObjectInfo is partial.
+            // Like Android, disabled detection still advances the baseline; no first-scan catch-up.
+            let handleDelta = handleBaseline.acceptEnumeration(handles: Self.native(enumeratedHandles), detectNewHandles: detectNewHandles)
             while true {
                 try Task.checkCancellation()
                 if let handle = scan.nextReadHandle()?.int32Value {
@@ -81,7 +102,8 @@ actor CameraCatalog {
             let result = CameraCatalogSnapshot(connectionID: source.connectionID, revision: before.eventRevision,
                 storageIDs: (0..<Int(scan.storageCount)).map { scan.storageId(index: Int32($0)) },
                 files: files, objectInfos: infos, totalHandles: Int(scan.totalHandles),
-                metadataComplete: scan.metadataComplete, changedWhileScanning: before.eventRevision != after.eventRevision)
+                metadataComplete: scan.metadataComplete, changedWhileScanning: before.eventRevision != after.eventRevision,
+                handleDelta: handleDelta)
             // Keep old complete rows on partial metadata failure; return the partial attempt explicitly
             // for diagnostics. A future incremental reconciler may merge it, never infer missing=deleted.
             if result.metadataComplete { latest = result }

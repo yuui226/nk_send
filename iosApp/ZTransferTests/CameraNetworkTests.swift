@@ -3645,6 +3645,85 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertEqual(preserved?.files.count, 2)
     }
 
+    func testCatalogBaselineDoesNotReportInitialFilesAndOnlyDetectsWhenRequested() async throws {
+        let source = BaselineCatalogSource()
+        await source.set([1, 2], infos: [1: try sampleInfo(1), 2: try sampleInfo(2)])
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        let first = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(first, added: [], removed: [])
+        await source.set([2, 3], infos: [2: try sampleInfo(2), 3: try sampleInfo(3)])
+        let next = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(next, added: [3], removed: [1])
+        await source.set([3, 4], infos: [3: try sampleInfo(3), 4: try sampleInfo(4)])
+        let disabled = try await catalog.refresh() // Existing manual callers retain the disabled default.
+        try assertHandleDelta(disabled, added: [], removed: [2])
+        let repeated = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(repeated, added: [], removed: [])
+    }
+
+    func testCatalogEmptyFirstScanAndPartialMetadataBothEstablishHandleBaseline() async throws {
+        let source = BaselineCatalogSource(), catalog = CameraCatalog(source: source, stationMode: false)
+        let empty = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(empty, added: [], removed: []); XCTAssertTrue(empty.metadataComplete)
+        await source.set([3], infos: [:])
+        let partial = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(partial, added: [3], removed: []); XCTAssertFalse(partial.metadataComplete)
+        let retained = await catalog.snapshot(); XCTAssertTrue(try XCTUnwrap(retained).files.isEmpty)
+        await source.set([3], infos: [3: try sampleInfo(3)])
+        let repaired = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(repaired, added: [], removed: []); XCTAssertEqual(repaired.files.count, 1)
+        // First attachment with incomplete metadata must not later reclassify an old file as new.
+        let otherSource = BaselineCatalogSource()
+        await otherSource.set([3], infos: [:])
+        let other = CameraCatalog(source: otherSource, stationMode: false)
+        let initialPartial = try await other.refresh(detectNewHandles: true)
+        try assertHandleDelta(initialPartial, added: [], removed: [])
+        await otherSource.set([3], infos: [3: try sampleInfo(3)])
+        let initialRepaired = try await other.refresh(detectNewHandles: true)
+        try assertHandleDelta(initialRepaired, added: [], removed: [])
+    }
+
+    func testCatalogFailedCancelledOrStaleEnumerationDoesNotAdvanceTheBaseline() async throws {
+        for failure in [BaselineCatalogSource.Failure.enumeration, .cancelEnumeration, .closedEnumeration, .foreignEnumeration] {
+            let source = BaselineCatalogSource(), catalog = CameraCatalog(source: source, stationMode: false)
+            await source.set([1], infos: [1: try sampleInfo(1)])
+            _ = try await catalog.refresh(detectNewHandles: true)
+            await source.set([2], infos: [2: try sampleInfo(2)], failure: failure)
+            let failed = Task { try await catalog.refresh(detectNewHandles: true) }
+            do { _ = try await failed.value; XCTFail("Expected failed enumeration") }
+            catch {
+                if failure == .cancelEnumeration { XCTAssertTrue(error is CancellationError) }
+                else if failure == .enumeration { XCTAssertTrue(error is CameraOperationError) }
+                else { XCTAssertEqual(error as? CameraStreamError, .closed) }
+            }
+            let retained = await catalog.snapshot(); XCTAssertEqual(try XCTUnwrap(retained).files.map(\.handle), [1])
+            await source.set([2], infos: [2: try sampleInfo(2)])
+            let retried = try await catalog.refresh(detectNewHandles: true)
+            try assertHandleDelta(retried, added: [2], removed: [1])
+        }
+    }
+
+    func testCatalogCancellationAfterEnumerationKeepsCommittedBaselineButNotPartialRows() async throws {
+        let source = BaselineCatalogSource(), catalog = CameraCatalog(source: source, stationMode: false)
+        await source.set([1], infos: [1: try sampleInfo(1)])
+        _ = try await catalog.refresh(detectNewHandles: true)
+        await source.set([2], infos: [2: try sampleInfo(2)], failure: .cancelMetadata)
+        let cancelled = Task { try await catalog.refresh(detectNewHandles: true) }
+        do { _ = try await cancelled.value; XCTFail("Expected cancelled metadata read") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        let retained = await catalog.snapshot(); XCTAssertEqual(try XCTUnwrap(retained).files.map(\.handle), [1])
+        await source.set([2], infos: [2: try sampleInfo(2)])
+        let retried = try await catalog.refresh(detectNewHandles: true)
+        try assertHandleDelta(retried, added: [], removed: [])
+    }
+
+    private func assertHandleDelta(_ value: CameraCatalogSnapshot, added: [Int32], removed: [Int32],
+                                   file: StaticString = #filePath, line: UInt = #line) throws {
+        let delta = try XCTUnwrap(value.handleDelta, file: file, line: line)
+        XCTAssertEqual(delta.added.map { $0.int32Value }.sorted(), added.sorted(), file: file, line: line)
+        XCTAssertEqual(delta.removed.map { $0.int32Value }.sorted(), removed.sorted(), file: file, line: line)
+    }
+
     func testCatalogMarksEventsDuringScanAsInvalidation() async throws {
         let source = FakeCatalogSource(infos: [1: try sampleInfo(1), 2: try sampleInfo(2)], changeDuringRead: true)
         let result = try await CameraCatalog(source: source, stationMode: false).refresh()
@@ -4562,6 +4641,35 @@ private final class FakeDirectoryAccess: ExportDirectoryAccess {
     func isDirectory(_ url: URL) -> Bool { true }
     func bookmark(_ url: URL) -> Data { version += 1; return Data([version]) }
     func resolve(_ bookmark: Data) -> ResolvedExportDirectory { ResolvedExportDirectory(url: url, stale: stale) }
+}
+
+private actor BaselineCatalogSource: CameraCatalogSource {
+    enum Failure: Equatable { case none, enumeration, cancelEnumeration, closedEnumeration, foreignEnumeration, cancelMetadata }
+    nonisolated let connectionID = UUID()
+    private var handles: [Int32] = []
+    private var infos: [Int32: PtpObjectInfo] = [:]
+    private var failure: Failure = .none
+    private var enumerated = false
+    func set(_ handles: [Int32], infos: [Int32: PtpObjectInfo], failure: Failure = .none) {
+        self.handles = handles; self.infos = infos; self.failure = failure; enumerated = false
+    }
+    func storageIDs() -> [Int32] { [0x10001, 0x20001] }
+    func objectHandles(storageID: Int32) throws -> [Int32] {
+        if storageID == 0x10001 { return handles }
+        enumerated = true // Fail the second card, after the first query succeeded.
+        if failure == .enumeration { throw CameraOperationError.malformedDataset(operation: 0x1007) }
+        if failure == .cancelEnumeration { withUnsafeCurrentTask { $0?.cancel() } }
+        return []
+    }
+    func objectInfo(handle: Int32) throws -> PtpObjectInfo {
+        if failure == .cancelMetadata { withUnsafeCurrentTask { $0?.cancel() }; throw CancellationError() }
+        guard let info = infos[handle] else { throw CameraOperationError.malformedDataset(operation: 0x1008) }
+        return info
+    }
+    func snapshot() -> CameraConnectionSnapshot {
+        CameraConnectionSnapshot(connectionID: enumerated && failure == .foreignEnumeration ? UUID() : connectionID,
+            phase: enumerated && failure == .closedEnumeration ? .closed : .ready, eventRevision: 0, errorDescription: nil)
+    }
 }
 
 private actor FakeCatalogSource: CameraCatalogSource {
