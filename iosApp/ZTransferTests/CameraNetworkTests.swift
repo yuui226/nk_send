@@ -3724,6 +3724,60 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertEqual(delta.removed.map { $0.int32Value }.sorted(), removed.sorted(), file: file, line: line)
     }
 
+    func testCatalogCarriesHiddenBackupMetadataInReadOrderForSharedRemovalReconciliation() async throws {
+        let source = AliasCatalogSource(primary: try resolverInfo(91), backup: try resolverInfo(7, storage: 0x20001))
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        let full = try await catalog.refresh()
+        XCTAssertEqual(full.files.map(\.handle), [91])
+        XCTAssertEqual(full.indexedObjectInfos.map(\.handle), [91, 7])
+        XCTAssertEqual(Set(full.objectInfos.keys), Set([Int32(91), Int32(7)]))
+        let current = KotlinIntArray(size: 1); current.set(index: 0, value: 7)
+        let survived = try XCTUnwrap(NativeCameraCatalogReconciliation.shared.reconcile(
+            publishedFiles: full.files, currentHandles: current, indexedInfos: full.indexedObjectInfos))
+        XCTAssertEqual(survived.map(\.handle), [7])
+        XCTAssertEqual(survived[0].storageIds.map { $0.int32Value }, [0x20001])
+        XCTAssertEqual(full.files[0].storageIds.map { $0.int32Value }.sorted(), [0x10001, 0x20001])
+        // The pure proposal does not mutate the live catalog; W03-B owns validated event publication.
+        let untouched = await catalog.snapshot(); XCTAssertEqual(untouched?.files.map(\.handle), [91])
+        await catalog.close()
+    }
+
+    func testPartialCatalogRetainsPreviousCompleteAliasIndexAndNullQueryCannotDeleteRows() async throws {
+        let source = AliasCatalogSource(primary: try resolverInfo(91), backup: try resolverInfo(7, storage: 0x20001))
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        _ = try await catalog.refresh()
+        await source.failBackup()
+        let partial = try await catalog.refresh()
+        XCTAssertFalse(partial.metadataComplete)
+        XCTAssertEqual(partial.indexedObjectInfos.map(\.handle), [91])
+        let snapshot = await catalog.snapshot(), preserved = try XCTUnwrap(snapshot)
+        XCTAssertEqual(preserved.indexedObjectInfos.map(\.handle), [91, 7])
+        XCTAssertNotNil(preserved.objectInfos[7])
+        XCTAssertNil(NativeCameraCatalogReconciliation.shared.reconcile(
+            publishedFiles: preserved.files, currentHandles: nil, indexedInfos: preserved.indexedObjectInfos))
+        let empty = try XCTUnwrap(NativeCameraCatalogReconciliation.shared.reconcile(
+            publishedFiles: preserved.files, currentHandles: KotlinIntArray(size: 0), indexedInfos: preserved.indexedObjectInfos))
+        XCTAssertTrue(empty.isEmpty)
+        await catalog.close()
+    }
+
+    func testNativeIdleBaselineDoesNotInventFirstScanOrConsumeUnresolvedAdds() throws {
+        let baseline = NativeCameraHandleBaseline()
+        let old = KotlinIntArray(size: 1); old.set(index: 0, value: 91)
+        let next = KotlinIntArray(size: 1); next.set(index: 0, value: 7)
+        XCTAssertNil(baseline.acceptIdleEnumeration(handles: old)); XCTAssertFalse(baseline.hasSnapshot)
+        _ = baseline.acceptEnumeration(handles: old, detectNewHandles: false)
+        XCTAssertNil(baseline.acceptIdleEnumeration(handles: nil))
+        let delta = try XCTUnwrap(baseline.acceptIdleEnumeration(handles: next))
+        XCTAssertEqual(delta.removed.map { $0.int32Value }, [91])
+        XCTAssertEqual(delta.added.map { $0.int32Value }, [7])
+        XCTAssertTrue(baseline.shouldResolve(handle: 7, visibleFiles: []))
+        let repeated = try XCTUnwrap(baseline.acceptIdleEnumeration(handles: next))
+        XCTAssertTrue(repeated.removed.isEmpty); XCTAssertEqual(repeated.added.map { $0.int32Value }, [7])
+        baseline.recordPublished(handle: 7)
+        let published = try XCTUnwrap(baseline.acceptIdleEnumeration(handles: next)); XCTAssertTrue(published.added.isEmpty)
+    }
+
     func testNewObjectEventsIgnoreInitialOldInvalidAndDuplicateHandlesAndMergeBackups() async throws {
         let old = try resolverInfo(1, name: "OLD.JPG"), fresh = try resolverInfo(2, name: "NEW.NEF")
         let backup = try resolverInfo(3, name: "NEW.NEF", storage: 0x20001)
@@ -3738,6 +3792,8 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertEqual(reads, [2, 3, 4])
         XCTAssertEqual(values.map { $0.newMedia?.handle }, [2, nil, nil])
         XCTAssertEqual(values.last?.snapshot.files.map(\.handle), [4, 2, 1])
+        XCTAssertEqual(values.last?.snapshot.indexedObjectInfos.map(\.handle), [1, 2, 3, 4])
+        XCTAssertEqual(values.last?.snapshot.objectInfos[3]?.handle, 3)
         XCTAssertEqual(values.last?.snapshot.files[1].storageIds.map { $0.int32Value }.sorted(), [0x10001, 0x20001])
         await catalog.receiveEvents(objectEvents(source.connectionID, handles: [2, 3], startingAt: 8))
         try await Task.sleep(nanoseconds: 220_000_000)
@@ -4875,6 +4931,25 @@ private final class FakeDirectoryAccess: ExportDirectoryAccess {
     func isDirectory(_ url: URL) -> Bool { true }
     func bookmark(_ url: URL) -> Data { version += 1; return Data([version]) }
     func resolve(_ bookmark: Data) -> ResolvedExportDirectory { ResolvedExportDirectory(url: url, stale: stale) }
+}
+
+private actor AliasCatalogSource: CameraCatalogSource {
+    nonisolated let connectionID = UUID()
+    private let primary: PtpObjectInfo
+    private let backup: PtpObjectInfo
+    private var backupFails = false
+    init(primary: PtpObjectInfo, backup: PtpObjectInfo) { self.primary = primary; self.backup = backup }
+    func failBackup() { backupFails = true }
+    func storageIDs() -> [Int32] { [0x10001, 0x20001] }
+    func objectHandles(storageID: Int32) -> [Int32] { storageID == 0x10001 ? [primary.handle] : [backup.handle] }
+    func objectInfo(handle: Int32) throws -> PtpObjectInfo {
+        if handle == primary.handle { return primary }
+        if handle == backup.handle && !backupFails { return backup }
+        throw CameraOperationError.rejected(operation: 0x1008, response: 0x2019)
+    }
+    func snapshot() -> CameraConnectionSnapshot {
+        CameraConnectionSnapshot(connectionID: connectionID, phase: .ready, eventRevision: 0, errorDescription: nil)
+    }
 }
 
 private actor CatalogAdditionSink {

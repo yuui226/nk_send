@@ -16,6 +16,8 @@ CHANGES['shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeCameraHandleBa
 CHANGES['shared/src/commonMain/kotlin/com/ztransfer/viewmodel/NewCameraObjectPolicy.kt'] = [('/** Original CameraViewModel new-object decisions. Platform owners keep IO, clocks and scheduling. */\nobject NewCameraObjectPolicy {\n    fun publicationFile(info: com.ztransfer.protocol.PtpObjectInfo): CameraFileInfo? {\n        if (info.isAssociation) return null\n        val name = info.fileName ?: return null\n        return CameraFileInfo(info.handle, info.size, name, info.captureDate, info.isProtected,\n            if (info.storageId == 0 || info.storageId == -1) emptySet() else setOf(info.storageId))\n    }\n    fun automaticMedia(file: CameraFileInfo): Boolean = isAutoTransferMedia(file)\n    const val COALESCE_MS = 90L\n    const val RESOLVE_BATCH_SIZE = 16\n', '/** Original CameraViewModel new-object decisions. Platform owners keep IO, clocks and scheduling. */\nobject NewCameraObjectPolicy {\n    const val COALESCE_MS = 90L\n    const val RESOLVE_BATCH_SIZE = 16\n')]
 
 def previous_new_object_resolver_source(path, value):
+    from catalog_alias_index_wiring import previous_catalog_alias_index_source
+    value = previous_catalog_alias_index_source(path, value)
     for current, previous in CHANGES.get(path, ()):
         assert value.count(current) == 1, f"new object resolver hunk changed: {path}"
         value = value.replace(current, previous, 1)

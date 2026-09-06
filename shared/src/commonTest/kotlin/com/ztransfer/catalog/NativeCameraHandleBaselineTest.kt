@@ -3,6 +3,42 @@ package com.ztransfer.catalog
 import kotlin.test.*
 
 class NativeCameraHandleBaselineTest {
+    @Test fun idleEnumerationNeedsExistingBaselineAndFailureDoesNotMutateIt() {
+        val baseline = NativeCameraHandleBaseline()
+        assertNull(baseline.acceptIdleEnumeration(intArrayOf(7)))
+        assertFalse(baseline.hasSnapshot)
+        baseline.acceptEnumeration(intArrayOf(7, 8), false)
+        assertNull(baseline.acceptIdleEnumeration(null))
+        assertFalse(baseline.shouldResolve(7, emptyList()))
+        assertEquals(CameraHandleDelta(emptySet(), setOf(7, 8)), baseline.acceptIdleEnumeration(intArrayOf()))
+        assertTrue(baseline.hasSnapshot)
+    }
+
+    @Test fun idleAddsStayUnresolvedUntilPublicationAndRemovedHandlesDoNotRepeat() {
+        val baseline = NativeCameraHandleBaseline()
+        baseline.acceptEnumeration(intArrayOf(1, 2), false)
+        assertEquals(CameraHandleDelta(setOf(3), setOf(1)), baseline.acceptIdleEnumeration(intArrayOf(2, 3)))
+        assertTrue(baseline.shouldResolve(3, emptyList()))
+        assertEquals(CameraHandleDelta(setOf(3), emptySet()), baseline.acceptIdleEnumeration(intArrayOf(2, 3)))
+        baseline.recordPublished(3)
+        assertEquals(CameraHandleDelta(emptySet(), emptySet()), baseline.acceptIdleEnumeration(intArrayOf(2, 3)))
+        assertFalse(baseline.shouldResolve(3, emptyList()))
+    }
+
+    @Test fun idleCombinationsMatchOriginalAndroidRemoveOnlyBaselineTransition() {
+        val values = listOf(0, -1, Int.MIN_VALUE, 7, 8)
+        fun snapshot(mask: Int) = values.filterIndexed { i, _ -> mask and (1 shl i) != 0 }.toSet()
+        for (oldMask in 0 until 32) for (nextMask in 0 until 32) {
+            val old = snapshot(oldMask); val next = snapshot(nextMask)
+            val baseline = NativeCameraHandleBaseline()
+            baseline.acceptEnumeration(old.toIntArray(), false)
+            val delta = cameraHandleDelta(old, next)
+            assertEquals(delta, baseline.acceptIdleEnumeration(next.toIntArray()))
+            // Frozen applyIdleHandleCatalog: knownHandles.removeAll(delta.removed), not known += added.
+            assertEquals(cameraHandleDelta(old - delta.removed, next), baseline.acceptIdleEnumeration(next.toIntArray()))
+        }
+    }
+
     @Test fun publishedHandlesDoNotInventAnEnumerationAndLaterScansReplaceTheBaseline() {
         val baseline = NativeCameraHandleBaseline()
         assertFalse(baseline.hasSnapshot)

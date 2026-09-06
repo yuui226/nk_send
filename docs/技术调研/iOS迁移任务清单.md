@@ -8,6 +8,8 @@
 
 ## 当前状态
 
+- 第63批W03-A完成：完整目录和新增对象快照保留全部备份别名，提供原共享删除重建/idle基线Native入口；987项Kotlin/Android、298项Python及结构/原UI守卫PASS。本批Android app源码未改，299项XCTest待Mac；2.5/50分、总计划81.0%，W03整体仍进行中，实际删除/属性/卡变化调度继续W03-B。Mac操作指南已纳入文档。
+
 - 第62批W02-B完成Windows门槛：真实新增事件→ObjectInfo→shared准入/双卡发布→同一文件页/缓存；977项Kotlin/Android、290项Python及结构/原UI守卫PASS。本批Android app源码未改，当前2/50分、总计划80.8%；296项XCTest仍待Mac。W03/W04删除与事件缺口编排、W05自动开关未完成，下一项W03。以下为历史检查点。
 
 - 第61批W02-A完成：原新增对象准入/双卡发布/重试规则共享，Android实际调用；973项Kotlin/Android、283项Python与结构/原UI守卫PASS。W02-B的Apple事件调度尚未接，分数1.5/50、总计划80.6%；原W02一分拆为两个半分，总分不变，Apple运行仍待验。

@@ -10,7 +10,10 @@ CONNECTION = 'iosApp/ZTransfer/Network/CameraWiFiConnection.swift'
 PROBE = 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift'
 PAGE = 'iosApp/ZTransfer/UI/OriginalFilesPage.swift'
 PREVIEWS = 'iosApp/ZTransfer/Network/CameraPreviewStore.swift'
-def read(path): return (ROOT/path).read_text(encoding='utf-8')
+def raw_read(path): return (ROOT/path).read_text(encoding='utf-8')
+def read(path):
+    from catalog_alias_index_wiring import previous_catalog_alias_index_source
+    return previous_catalog_alias_index_source(path, raw_read(path))
 def before(path): return subprocess.check_output(['git', 'show', '9a65a60:' + path], cwd=ROOT).decode('utf-8')
 def between(value, start, end): return value.split(start, 1)[1].split(end, 1)[0]
 
@@ -18,7 +21,7 @@ class NewObjectResolverWiringTest(unittest.TestCase):
     def test_exact_reviewed_hunks_restore_all_previous_production_owners(self):
         self.assertEqual(7, len(CHANGES))
         for path in CHANGES:
-            self.assertEqual(before(path), previous_new_object_resolver_source(path, read(path)))
+            self.assertEqual(before(path), previous_new_object_resolver_source(path, raw_read(path)))
         for path in ('app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt',
                      'app/src/main/java/com/ztransfer/protocol/NikonCamera.kt',
                      'iosApp/ZTransfer/Network/CameraOriginalQueue.swift',
@@ -90,7 +93,7 @@ class NewObjectResolverWiringTest(unittest.TestCase):
                                (PAGE, 'value.publicationRevision >= lastCatalogPublication', 'true'),
                                (PREVIEWS, 'snapshot.publicationRevision >= catalogPublicationRevision', 'true')):
             with self.assertRaises(AssertionError):
-                previous_new_object_resolver_source(path, read(path).replace(old, new))
+                previous_new_object_resolver_source(path, raw_read(path).replace(old, new))
         raw = read(CONNECTION).replace('initialTransactionId: stationMode ? -1 : 0', 'initialTransactionId: 0')
         self.assertNotEqual(before(CONNECTION), previous_new_object_resolver_source(CONNECTION, raw))
 

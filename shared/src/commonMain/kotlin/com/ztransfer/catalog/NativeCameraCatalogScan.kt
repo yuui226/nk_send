@@ -20,6 +20,7 @@ class NativeCameraCatalogScan(rawStorageIds: IntArray, private val stationMode: 
     private val rows = ArrayList<CameraFileInfo>()
     private val indices = HashMap<String, Int>()
     private val objectInfos = HashMap<Int, PtpObjectInfo>()
+    private val indexedHandles = ArrayList<Int>()
     var metadataComplete: Boolean = true
         private set
     val storageCount: Int get() = stores.size
@@ -30,6 +31,9 @@ class NativeCameraCatalogScan(rawStorageIds: IntArray, private val stationMode: 
     fun queryStorageId(index: Int): Int = objectHandleQueryStorageId(storageId(index), stationMode)
     fun fileAt(index: Int): CameraFileInfo? = rows.getOrNull(index)
     fun objectInfo(handle: Int): PtpObjectInfo? = objectInfos[handle]
+    /** Includes hidden backup aliases, in first accepted metadata order; indexed access is O(1). */
+    val indexedObjectCount: Int get() = indexedHandles.size
+    fun indexedObjectInfoAt(index: Int): PtpObjectInfo? = indexedHandles.getOrNull(index)?.let(objectInfos::get)
 
     fun addHandles(index: Int, handles: IntArray): Boolean {
         if (orders != null || index !in batches.indices || batches[index] != null) return false
@@ -62,6 +66,7 @@ class NativeCameraCatalogScan(rawStorageIds: IntArray, private val stationMode: 
         if (info == null) { metadataComplete = false; return true }
         if (info.isAssociation) return true
         val name = info.fileName ?: run { metadataComplete = false; return true }
+        if (!objectInfos.containsKey(handle)) indexedHandles += handle
         objectInfos[handle] = info
         metadataComplete = metadataComplete && info.identityComplete
         heads[index] = CameraFileInfo(handle, info.size, name, info.captureDate, info.isProtected,

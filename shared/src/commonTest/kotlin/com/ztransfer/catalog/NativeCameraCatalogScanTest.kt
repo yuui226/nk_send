@@ -43,6 +43,8 @@ class NativeCameraCatalogScanTest {
         assertEquals(listOf(2, 4, 1), (0 until scan.rowCount).map { scan.fileAt(it)!!.handle })
         assertEquals(setOf(0x10001, 0x20001), scan.fileAt(0)!!.storageIds)
         assertTrue(scan.metadataComplete)
+        assertEquals(listOf(2, 3, 1, 4), (0 until scan.indexedObjectCount).map { scan.indexedObjectInfoAt(it)!!.handle })
+        assertSame(infos[3], scan.indexedObjectInfoAt(1)) // Hidden alias must not disappear with row merging.
     }
 
     @Test fun foldersFailuresIncompleteAndDuplicateHandlesStayDistinctConcepts() {
@@ -70,5 +72,34 @@ class NativeCameraCatalogScanTest {
         scan.addHandles(0, intArrayOf()); assertTrue(scan.begin())
         assertNull(scan.nextReadHandle()); assertFalse(scan.publishNext())
         assertEquals(0, scan.rowCount); assertTrue(scan.metadataComplete)
+    }
+
+    @Test fun metadataIndexExcludesFoldersAndFailuresButRetainsIncompleteFileIdentity() {
+        val scan = NativeCameraCatalogScan(intArrayOf(0x10001), false)
+        assertEquals(0, scan.indexedObjectCount)
+        assertNull(scan.indexedObjectInfoAt(-1)); assertNull(scan.indexedObjectInfoAt(0))
+        scan.addHandles(0, intArrayOf(1, 2, 3, 4)); scan.begin()
+        while (true) {
+            val h = scan.nextReadHandle()
+            if (h != null) scan.accept(h, when (h) { 4 -> info(h, folder = true); 3 -> null; 2 -> info(h, complete = false); else -> info(h) })
+            else if (!scan.publishNext()) break
+        }
+        assertEquals(listOf(2, 1), (0 until scan.indexedObjectCount).map { scan.indexedObjectInfoAt(it)!!.handle })
+        assertFalse(scan.indexedObjectInfoAt(0)!!.identityComplete)
+        assertFalse(scan.metadataComplete)
+        assertNull(scan.indexedObjectInfoAt(scan.indexedObjectCount))
+    }
+
+    @Test fun repeatedRawHandlesAreIndexedOnceWithoutNumericSorting() {
+        val scan = NativeCameraCatalogScan(intArrayOf(0x10001, 0x20001), false)
+        scan.addHandles(0, intArrayOf(3, 99, 3)); scan.addHandles(1, intArrayOf(99, Int.MIN_VALUE)); scan.begin()
+        val reads = ArrayList<Int>()
+        while (true) {
+            val h = scan.nextReadHandle()
+            if (h != null) { reads += h; scan.accept(h, info(h)) }
+            else if (!scan.publishNext()) break
+        }
+        assertEquals(reads.distinct(), (0 until scan.indexedObjectCount).map { scan.indexedObjectInfoAt(it)!!.handle })
+        assertEquals(reads.distinct().size, scan.indexedObjectCount)
     }
 }

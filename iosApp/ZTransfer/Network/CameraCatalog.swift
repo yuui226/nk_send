@@ -31,6 +31,8 @@ struct CameraCatalogSnapshot {
     let storageIDs: [Int32]
     let files: [CameraFileInfo]
     let objectInfos: [Int32: PtpObjectInfo]
+    /// All metadata aliases, not just visible rows. Order is explicit, never Dictionary iteration.
+    let indexedObjectInfos: [PtpObjectInfo]
     let totalHandles: Int
     let metadataComplete: Bool
     let changedWhileScanning: Bool
@@ -40,9 +42,12 @@ struct CameraCatalogSnapshot {
 
     init(connectionID: UUID, revision: UInt64, storageIDs: [Int32], files: [CameraFileInfo],
          objectInfos: [Int32: PtpObjectInfo], totalHandles: Int, metadataComplete: Bool,
-         changedWhileScanning: Bool, handleDelta: CameraHandleDelta? = nil, publicationRevision: UInt64 = 0) {
+         changedWhileScanning: Bool, handleDelta: CameraHandleDelta? = nil, publicationRevision: UInt64 = 0,
+         indexedObjectInfos: [PtpObjectInfo]? = nil) {
         self.connectionID = connectionID; self.revision = revision; self.storageIDs = storageIDs
         self.files = files; self.objectInfos = objectInfos; self.totalHandles = totalHandles
+        // Old/manual fixtures keep a deterministic fallback; real producers always supply read order.
+        self.indexedObjectInfos = indexedObjectInfos ?? objectInfos.keys.sorted().compactMap { objectInfos[$0] }
         self.metadataComplete = metadataComplete; self.changedWhileScanning = changedWhileScanning
         self.handleDelta = handleDelta
         self.publicationRevision = publicationRevision
@@ -127,16 +132,20 @@ actor CameraCatalog {
             guard !closed, after.phase == .ready, after.connectionID == before.connectionID else { throw CameraStreamError.closed }
             var files: [CameraFileInfo] = []
             var infos: [Int32: PtpObjectInfo] = [:]
+            var indexedInfos: [PtpObjectInfo] = []
+            for index in 0..<Int(scan.indexedObjectCount) {
+                guard let info = scan.indexedObjectInfoAt(index: Int32(index)) else { throw CameraStreamError.invalidArgument }
+                infos[info.handle] = info; indexedInfos.append(info)
+            }
             for index in 0..<Int(scan.rowCount) {
                 guard let file = scan.fileAt(index: Int32(index)) else { throw CameraStreamError.invalidArgument }
                 files.append(file)
-                if let info = scan.objectInfo(handle: file.handle) { infos[file.handle] = info }
             }
             let result = CameraCatalogSnapshot(connectionID: source.connectionID, revision: before.eventRevision,
                 storageIDs: (0..<Int(scan.storageCount)).map { scan.storageId(index: Int32($0)) },
                 files: files, objectInfos: infos, totalHandles: Int(scan.totalHandles),
                 metadataComplete: scan.metadataComplete, changedWhileScanning: before.eventRevision != after.eventRevision,
-                handleDelta: handleDelta, publicationRevision: publicationRevision)
+                handleDelta: handleDelta, publicationRevision: publicationRevision, indexedObjectInfos: indexedInfos)
             // Keep old complete rows on partial metadata failure; return the partial attempt explicitly
             // for diagnostics. A future incremental reconciler may merge it, never infer missing=deleted.
             if result.metadataComplete { latest = result }
@@ -249,7 +258,7 @@ actor CameraCatalog {
                 let updated = CameraCatalogSnapshot(connectionID: base.connectionID, revision: base.revision,
                     storageIDs: base.storageIDs, files: files, objectInfos: infos, totalHandles: base.totalHandles + 1,
                     metadataComplete: base.metadataComplete, changedWhileScanning: base.changedWhileScanning,
-                    publicationRevision: publicationRevision)
+                    publicationRevision: publicationRevision, indexedObjectInfos: base.indexedObjectInfos + [info])
                 latest = updated; handleBaseline.recordPublished(handle: handle)
                 pendingObjects.removeValue(forKey: handle); pendingOrder.removeAll { $0 == handle }
                 let media = isNew && NewCameraObjectPolicy.shared.automaticMedia(file: file) ? file : nil

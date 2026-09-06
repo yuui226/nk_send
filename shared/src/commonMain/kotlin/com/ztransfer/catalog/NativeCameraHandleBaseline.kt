@@ -9,6 +9,19 @@ class NativeCameraHandleBaseline {
     fun recordPublished(handle: Int) { knownHandles = knownHandles?.plus(handle) }
 
     /**
+     * Idle GetObjectHandles reconciliation, unlike a full scan: only remove missing known handles.
+     * New handles remain unresolved until recordPublished, matching CameraViewModel.applyIdleHandleCatalog.
+     * Null denotes failed/incomplete enumeration; no baseline is invented and no deletion is inferred.
+     */
+    fun acceptIdleEnumeration(handles: IntArray?): CameraHandleDelta? {
+        val previous = knownHandles ?: return null
+        val current = handles?.toSet() ?: return null
+        val delta = cameraHandleDelta(previous, current)
+        knownHandles = previous - delta.removed
+        return delta
+    }
+
+    /**
      * Call only after ALL handle enumerations succeed and the connection is still current.
      * Like CameraViewModel.loadFiles, commit BEFORE ObjectInfo reads: metadata failures do not
      * undo a successful enumeration. An empty first catalog is still a valid baseline.

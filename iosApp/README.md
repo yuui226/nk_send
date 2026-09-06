@@ -14,9 +14,13 @@ Android 业务共享化阶段已完成：`shared`承载平台中立协议、目�
 
 ## 当前实现检查点
 
+第63批W03-A补全真实扫描和新增发布的备份别名索引；Native删除核对入口委托原Android已用的shared重建规则，idle枚举仅移除已确认消失的已知handle、不吞掉未解析新增。987项Kotlin/Android（670+317）、298项Python与结构/原UI守卫通过；299项XCTest、17项Native预览/位图仍待Mac。W03-B的删除/属性/卡变化真实调度尚未接，W03整体不能标完成；以下为第62批接线背景。首次Mac操作见下方指南。
+
 第62批W02-B完成Windows门槛：现有AP/标准STA连接观察者转发有界事件记录，目录独立串行读取ObjectInfo，使用shared新增准入/双卡发布/重试规则，同步到已有共享文件页和缩略图缓存。977项Kotlin/Android（660+317）、290项Python及结构/原UI守卫通过；本批Android app源码未改。首次基线前不读新增，扫描/预览暂缓、删除撤销待发布结果、旧版本不覆盖新列表。删除现有行/属性/存储变化W03和缺口/扫描追赶W04尚未编排，自动开关W05尚未接，不能视为自动传图闭环完成。38个App Swift、296项XCTest及17项Native预览/位图仍待Mac；当前分数见[剩余任务表](../docs/技术调研/iOS剩余任务进度表.md)。
 
 ## Mac 首次准备
+
+首次实际操作请按[Mac操作指南](../docs/测试与验证/iOS首次Mac操作指南.md)执行；下面仅保留工程准备摘要。
 
 1. 安装与 Kotlin 2.2.21 兼容的 Xcode，并至少启动一次完成组件安装。
 2. 安装 Android Studio、Android SDK 35 和 JDK 17。因为这是同一个 Gradle 工程，Xcode 构建共享模块时也需要能够配置 Android 模块。
