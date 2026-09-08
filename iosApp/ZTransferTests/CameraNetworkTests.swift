@@ -3996,6 +3996,189 @@ final class CameraNetworkTests: XCTestCase {
         await catalog.close(); await previews.close()
     }
 
+    @MainActor func testAutomaticLoopBurstPublishesUniqueOriginalsAndRefreshesPageIndex() async throws {
+        try await automaticPublicationLoop()
+    }
+
+    @MainActor func testAutomaticLoopScanCatchUpPublishesOnlyNewLogicalOriginals() async throws {
+        try await automaticPublicationLoop(scanCatchUp: true)
+    }
+
+    @MainActor func testAutomaticLoopDeferredAdmissionUsesNewDestinationWhenStarted() async throws {
+        try await automaticPublicationLoop(deferredSwitch: true)
+    }
+
+    @MainActor func testAutomaticLoopCannotOverrideManualPause() async throws {
+        try await automaticPublicationLoop(paused: true)
+    }
+
+    @MainActor func testAutomaticLoopRetriesFailedPublicationWithoutDownloadingAgain() async throws {
+        try await automaticPublicationLoop(failPublication: true)
+    }
+
+    @MainActor func testAutomaticLoopExistingOriginalSkipsDownloadAndRefreshesPageIndex() async throws {
+        try await automaticPublicationLoop(existing: true)
+    }
+
+    /// Fake only the camera wire/catalog and security grant. Admission, PTP download, sandbox
+    /// retention, provider coordination/index and the shared-page adapter are production objects.
+    /// The internal Kotlin badge predicate is covered by NativeFilesPageModelTest; here we verify
+    /// its real Apple index input, not a test-only exported badge API.
+    @MainActor private func automaticPublicationLoop(deferredSwitch: Bool = false, paused: Bool = false,
+        failPublication: Bool = false, existing: Bool = false, scanCatchUp: Bool = false) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let suite = "automatic-loop-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
+        let targetRoot = root.appendingPathComponent("provider")
+        try FileManager.default.createDirectory(at: targetRoot, withIntermediateDirectories: true)
+        let bookmark = root.appendingPathComponent("grant")
+        try Data([1]).write(to: bookmark)
+        let grant = PageDirectoryGrant(targetRoot)
+        let target = ProviderOriginalStore(directory: ScopedDirectoryStore(bookmarkFile: bookmark, access: grant))
+        let bytes = Data("0123456789".utf8)
+        let folder = targetRoot.appendingPathComponent("ZT2026-09-06")
+        if existing {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try bytes.write(to: folder.appendingPathComponent("A.JPG"))
+        }
+        let transferReplies = paused
+            ? response(transaction: 3, payload: Data("ABC".utf8))
+                + response(transaction: 4, payload: bytes) + response(transaction: 5, payload: bytes)
+            : response(transaction: 3, payload: bytes) + response(transaction: 4, payload: bytes)
+        let wire = FakeCameraConnection(bytes: apOpeningReplies() + transferReplies)
+        let camera = apCamera(command: wire)
+        _ = try await camera.connect(guid: Data(0...15))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root.appendingPathComponent("app")))
+        let initialTarget = QueueDestinationProbe()
+        await initialTarget.failures(failPublication)
+        let oldRoot = root.appendingPathComponent("old-provider")
+        if deferredSwitch {
+            try FileManager.default.createDirectory(at: oldRoot, withIntermediateDirectories: true)
+            let oldBookmark = root.appendingPathComponent("old-grant")
+            try Data([1]).write(to: oldBookmark)
+            let oldTarget = ProviderOriginalStore(directory: ScopedDirectoryStore(bookmarkFile: oldBookmark,
+                access: PageDirectoryGrant(oldRoot)))
+            _ = try await queue.configureDestination(oldTarget)
+        }
+        else if failPublication || paused { _ = try await queue.configureDestination(initialTarget) }
+        else { _ = try await queue.configureDestination(target) }
+        if paused {
+            // The shared Android rule ignores pause on an idle queue. Establish a real pause
+            // during a prior transfer, then clear only its terminal history before the burst.
+            let publishing = expectation(description: "prior transfer publishing")
+            await initialTarget.hold(publishing)
+            _ = await queue.enqueue(try sampleInfo(3), byDate: false, dayKey: 0, deferred: false)
+            await fulfillment(of: [publishing], timeout: 3)
+            await queue.pauseAfterCurrent(); await initialTarget.release()
+            try await waitUntil("prior transfer left queue manually paused") {
+                let value = await queue.snapshot(); return !value.running && value.paused
+            }
+            await queue.clearTerminal()
+            _ = try await queue.configureDestination(target)
+        }
+        let transfer = TransferPreferencesStore(defaults: defaults)
+        XCTAssertTrue(transfer.saveAutomatic(true))
+        XCTAssertTrue(transfer.save(NativeTransferPreferences(organizeByDate: true, deferStart: deferredSwitch)))
+        let automatic = CameraAutomaticTransferCoordinator(connectionID: camera.connectionID, queue: queue,
+            preferences: transfer)
+        defer { automatic.close() }
+        let source = NewObjectCatalogSource(infos: [
+            1: try resolverInfo(1, name: "OLD.JPG"), 2: try resolverInfo(2, name: "A.JPG"),
+            3: try resolverInfo(3, name: "A.JPG", storage: 0x20001), 4: try resolverInfo(4, name: "B.JPG")
+        ], handles: [1], connectionID: camera.connectionID)
+        let catalog = CameraCatalog(source: source, stationMode: false,
+            onAddition: { await automatic.receive($0) })
+        let previews = CameraPreviewStore(source: camera, connectionID: camera.connectionID)
+        let page = OriginalFilesPageBridge(connectionID: camera.connectionID, catalog: catalog, queue: queue,
+            previews: previews, exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: false,
+            originals: target, transferPreferences: transfer)
+        page.setConnected(true)
+        let observer = Task {
+            for await snapshot in queue.updates {
+                if Task.isCancelled { break }
+                page.publishQueue(snapshot)
+            }
+        }
+        defer { observer.cancel(); page.close() }
+        let baseline = try await catalog.refresh()
+        XCTAssertEqual(baseline.files.map(\.handle), [1])
+        let initial = await queue.snapshot()
+        XCTAssertTrue(initial.rows.isEmpty)
+        let requestBaseline = wire.sent().count
+        await source.setRevision(6)
+        if scanCatchUp {
+            await source.setHandles([1, 2, 3, 4])
+            _ = try await catalog.refresh(detectNewHandles: true)
+        } else {
+            await catalog.receiveEvents(objectEvents(camera.connectionID, handles: [1, 2, 2, 3, 4, 4]))
+        }
+        try await waitUntil("two real admissions") { await queue.snapshot().rows.count == 2 }
+        if deferredSwitch || paused {
+            let waiting = await queue.snapshot()
+            XCTAssertFalse(waiting.running); XCTAssertEqual(waiting.paused, paused)
+            XCTAssertEqual(waiting.rows.map(\.status), ["WAITING", "WAITING"])
+            XCTAssertEqual(wire.sent().count, requestBaseline)
+            if deferredSwitch { _ = try await queue.configureDestination(target) }
+            await queue.start()
+        }
+        if failPublication {
+            try await waitUntil("two retained publication failures") {
+                let value = await queue.snapshot()
+                return !value.running && value.rows.count == 2 && value.rows.allSatisfy { $0.status == "FAILED" }
+            }
+            let failed = await queue.snapshot()
+            XCTAssertEqual(failed.completedOriginalRevision, 0)
+            let failedIndex = try await target.originals(since: -1, rescan: false)
+            XCTAssertTrue(failedIndex.entries.isEmpty)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("A.JPG").path))
+            for row in failed.rows {
+                let retained = await queue.savedFile(row.id)
+                XCTAssertEqual(try Data(contentsOf: XCTUnwrap(retained?.url)), bytes)
+            }
+            let downloaded = wire.sent().count
+            _ = try await queue.configureDestination(target)
+            let retried = await queue.retryFailed(excluding: [])
+            XCTAssertEqual(retried, 2)
+            try await waitUntil("retained files published") {
+                let value = await queue.snapshot()
+                return !value.running && value.rows.allSatisfy { $0.status == "COMPLETED" }
+            }
+            XCTAssertEqual(wire.sent().count, downloaded)
+        }
+        try await waitUntil("both automatic originals completed") {
+            let value = await queue.snapshot()
+            return !value.running && value.rows.count == 2 && value.rows.allSatisfy { $0.status == "COMPLETED" }
+        }
+        let done = await queue.snapshot()
+        XCTAssertEqual(done.completedOriginalRevision, initial.completedOriginalRevision + 2)
+        XCTAssertEqual(done.rows.filter(\.skipped).count, existing ? 1 : 0)
+        XCTAssertEqual(Set(done.rows.map(\.name)), Set(["A.JPG", "B.JPG"]))
+        for name in ["A.JPG", "B.JPG"] {
+            XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent(name)), bytes)
+        }
+        if deferredSwitch {
+            XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: oldRoot.path).isEmpty)
+        }
+        let catalogValue = await catalog.snapshot()
+        let finalCatalog = try XCTUnwrap(catalogValue)
+        XCTAssertTrue(page.acceptCatalog(finalCatalog, sequence: page.model.beginScan()))
+        let index = try await target.originals(since: -1, rescan: false)
+        try await waitUntil("queue subscription refreshed the page's original index") {
+            page.originalIndexTask == nil && page.originalRevision == index.revision
+        }
+        XCTAssertEqual(page.originalRevision, index.revision)
+        XCTAssertEqual(index.entries.count, 2)
+        let requests = wire.sent().count
+        await source.setRevision(8)
+        await catalog.receiveEvents(objectEvents(camera.connectionID, handles: [2, 3], startingAt: 7))
+        try await Task.sleep(nanoseconds: 220_000_000)
+        let repeated = await queue.snapshot()
+        XCTAssertEqual(repeated.rows.map(\.id), done.rows.map(\.id))
+        XCTAssertEqual(wire.sent().count, requests)
+        observer.cancel(); page.close(); automatic.close(); await catalog.close(); await queue.stop(); await camera.abort()
+        XCTAssertEqual(grant.starts, grant.stops)
+    }
+
     private func resolverInfo(_ handle: Int32, name: String = "NEW.JPG", storage: Int32 = 0x10001) throws -> PtpObjectInfo {
         var payload = Data(repeating: 0, count: 52)
         for index in 0..<4 { payload[index] = UInt8(truncatingIfNeeded: storage >> (index * 8)) }
@@ -4958,7 +5141,7 @@ private actor CatalogAdditionSink {
 }
 
 private actor NewObjectCatalogSource: CameraCatalogSource {
-    nonisolated let connectionID = UUID()
+    nonisolated let connectionID: UUID
     private let infos: [Int32: PtpObjectInfo]
     private var handles: [Int32]
     private var failures: [Int32: Int]
@@ -4969,7 +5152,8 @@ private actor NewObjectCatalogSource: CameraCatalogSource {
     private(set) var reads: [Int32] = []
     var isHeld: Bool { held != nil }
     init(infos: [Int32: PtpObjectInfo], handles: [Int32] = [], failures: [Int32: Int] = [:],
-         holdFirst: Bool = false, transportFailure: Bool = false) {
+         holdFirst: Bool = false, transportFailure: Bool = false, connectionID: UUID = UUID()) {
+        self.connectionID = connectionID
         self.infos = infos; self.handles = handles; self.failures = failures
         self.holdFirst = holdFirst; self.transportFailure = transportFailure
     }

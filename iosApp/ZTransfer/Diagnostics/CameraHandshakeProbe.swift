@@ -650,9 +650,7 @@ final class CameraHandshakeProbe: ObservableObject {
             for await snapshot in queue.updates {
                 if Task.isCancelled { break }
                 await previews.setTransfersBusy(snapshot.running)
-                queueSnapshot = snapshot
-                queuePage?.publish(snapshot)
-                filesPage?.publishQueue(snapshot)
+                publishQueueSnapshot(snapshot)
             }
         }
         apConnection = connection
@@ -785,6 +783,17 @@ final class CameraHandshakeProbe: ObservableObject {
             await connection.abort(error: error)
             throw error
         }
+    }
+
+    /// One queue subscription drives both pages, including automatic admissions and terminal rows.
+    /// Ignore obsolete connection/sequence values after suspension; never infer a saved-file badge.
+    private func publishQueueSnapshot(_ snapshot: OriginalQueueSnapshot) {
+        guard apConnection?.connectionID == snapshot.connectionID else { return }
+        if let previous = queueSnapshot, previous.connectionID == snapshot.connectionID,
+           previous.sequence > snapshot.sequence { return }
+        queueSnapshot = snapshot
+        queuePage?.publish(snapshot)
+        filesPage?.publishQueue(snapshot)
     }
 
     private func receiveCatalogAddition(_ addition: CameraCatalogAddition) {

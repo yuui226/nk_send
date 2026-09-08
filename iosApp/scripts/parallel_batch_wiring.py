@@ -166,6 +166,10 @@ CHANGES.setdefault('shared/src/iosMain/kotlin/com/ztransfer/preview/NativePrevie
 # END REVIEWED CHANGES
 
 def previous_parallel_batch_source(path, value):
+    if path == 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift':
+        for current, previous in AUTOMATIC_LOOP_CHANGES:
+            assert value.count(current) == 1, f"automatic loop hunk changed: {path}"
+            value = value.replace(current, previous, 1)
     for current, previous in AUDIT_CHANGES.get(path, ()):
         assert value.count(current) == 1, f"parallel audit hunk changed: {path}"
         value = value.replace(current, previous, 1)
@@ -173,6 +177,26 @@ def previous_parallel_batch_source(path, value):
         assert value.count(current) == 1, f"parallel batch hunk changed: {path}"
         value = value.replace(current, previous, 1)
     return value
+
+# W06: exact inverse only; the original whole-file guards still verify the prebatch baseline.
+AUTOMATIC_LOOP_CHANGES = [
+    ("                publishQueueSnapshot(snapshot)\n",
+     "                queueSnapshot = snapshot\n"
+     "                queuePage?.publish(snapshot)\n"
+     "                filesPage?.publishQueue(snapshot)\n"),
+    ("""    /// One queue subscription drives both pages, including automatic admissions and terminal rows.
+    /// Ignore obsolete connection/sequence values after suspension; never infer a saved-file badge.
+    private func publishQueueSnapshot(_ snapshot: OriginalQueueSnapshot) {
+        guard apConnection?.connectionID == snapshot.connectionID else { return }
+        if let previous = queueSnapshot, previous.connectionID == snapshot.connectionID,
+           previous.sequence > snapshot.sequence { return }
+        queueSnapshot = snapshot
+        queuePage?.publish(snapshot)
+        filesPage?.publishQueue(snapshot)
+    }
+
+""", ""),
+]
 
 # Exact post-checkpoint audit fixes, reviewed against 8503823.
 AUDIT_CHANGES = {}
