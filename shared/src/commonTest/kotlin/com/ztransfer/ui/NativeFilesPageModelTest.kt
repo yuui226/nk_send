@@ -13,6 +13,7 @@ class NativeFilesPageModelTest {
         val before = m.state.value
         val preferences = m.filters.value
         m.releaseImageMemory()
+        assertEquals(1L, m.queue.memoryRevision.value)
         assertEquals(1L, m.memoryRevision.value)
         assertSame(before, m.state.value); assertEquals(preferences, m.filters.value)
         m.close(); m.releaseImageMemory()

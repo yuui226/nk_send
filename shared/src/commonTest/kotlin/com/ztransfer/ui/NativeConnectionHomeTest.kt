@@ -6,6 +6,22 @@ import com.ztransfer.ui.screen.homeSelectedConnection
 import kotlin.test.*
 
 class NativeConnectionHomeTest {
+    @Test fun diagnosticsAreExplicitBoundedAndUnavailableAfterClose() {
+        val base = Platform()
+        var reads = 0; var shares = 0; var clears = 0
+        val model = NativeConnectionHomeModel(object : NativeConnectionHomePlatform by base {
+            override fun diagnosticReport(): String { reads++; return "x".repeat(70000) }
+            override fun shareDiagnostics(): Boolean { shares++; return true }
+            override fun clearDiagnostics() { clears++ }
+        })
+        assertEquals(0, reads)
+        assertEquals(65536, model.diagnosticReport().length)
+        assertTrue(model.shareDiagnostics()); model.clearDiagnostics()
+        assertEquals(0, base.starts)
+        model.close()
+        assertEquals("", model.diagnosticReport()); assertFalse(model.shareDiagnostics()); model.clearDiagnostics()
+        assertEquals(1, reads); assertEquals(1, shares); assertEquals(1, clears)
+    }
     @Test fun lateRecoveryResetCannotEraseANewerRecordOrStartConnectionDuringReset() {
         val p = Platform()
         var result: NativeQueueActionCompletion? = null

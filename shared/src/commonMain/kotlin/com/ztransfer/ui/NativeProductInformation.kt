@@ -36,7 +36,7 @@ internal fun NativeProductInformation(appearance: NativeAppearanceModel, files: 
     }
     if (detail != null) AlertDialog(onDismissRequest = { detail = null },
         title = { Text(if (detail == "help") text("传图帮助", "Transfer help", "傳圖說明") else text("隐私说明", "Privacy", "隱私說明")) },
-        text = { Text(if (detail == "help")
+        text = { Text(modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()), text = if (detail == "help")
             text("AP：加入相机热点；STA：相机与手机接入同一局域网并在相机确认电脑配对。允许本地网络。连接后点单张或日期/连拍组的传输按钮；设置中选择保存目录。图库与系统分享只处理已存原片。iOS 本轮不提供 USB、照片效果、会员、监看或 GPS 发送，后台传输不保证持续。",
                 "AP: join the camera hotspot. STA: use the same LAN and confirm computer pairing on the camera. Allow Local Network. Transfer a photo or date/burst group, and choose a destination in settings. Photos and sharing use saved originals. USB, effects, membership, live view and GPS sending are outside this iOS scope; uninterrupted background transfer is not guaranteed.",
                 "AP：加入相機熱點；STA：相機與手機接入同一區域網路並在相機確認電腦配對。允許本機網路。連接後點單張或日期/連拍組的傳輸按鈕；設定中選擇儲存目錄。圖庫與系統分享只處理已存原檔。此版不提供 USB、照片效果、會員、監看或 GPS 傳送，不保證持續背景傳輸。")

@@ -37,6 +37,9 @@ interface NativeConnectionHomePlatform {
     fun resetCameraHistory(): Boolean
     fun recoverCameraIdentity(): Boolean
     fun clearRecoveryRecord(completion: NativeQueueActionCompletion) { completion.complete(false) }
+    fun diagnosticReport(): String = ""
+    fun clearDiagnostics() {}
+    fun shareDiagnostics(): Boolean = false
 }
 
 /** paired distinguishes profile rows from live service rows; only the platform pairing store grants trust. */
@@ -240,6 +243,9 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
         platform?.openCameraFiles()
     }
     internal fun settings() { if (!closed) platform?.openNetworkSettings() }
+    internal fun diagnosticReport(): String = if (closed) "" else platform?.diagnosticReport()?.take(65536) ?: ""
+    internal fun clearDiagnostics() { if (!closed) platform?.clearDiagnostics() }
+    internal fun shareDiagnostics(): Boolean = !closed && platform?.shareDiagnostics() == true
     internal fun resetModeConfirmed() {
         if (closed || mutableState.value.busy || platform?.resetConnectionModeAfterConfirmation() != true) return
         mutableState.value = mutableState.value.copy(stationMode = false, preferencesUnavailable = false)
@@ -261,6 +267,7 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
     var resettingHistory by remember(model) { mutableStateOf(false) }
     var recoveringIdentity by remember(model) { mutableStateOf(false) }
     var generalSettings by remember(model) { mutableStateOf(false) }
+    var diagnostics by remember(model) { mutableStateOf(false) }
     var resettingMode by remember(model) { mutableStateOf(false) }
     fun label(zh: String, en: String) = NativeConnectionHomeText.label(language, zh, en)
     val renderedState = state.copy(message = state.message?.let { NativeTransferMessages.render(it, language) })
@@ -290,6 +297,9 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             ZMark(modifier = Modifier.height(24.dp))
             NativeRecoveryRecordCard(model, language)
+            TextButton(onClick = { diagnostics = true }) {
+                Text(nativeActionText(language, "传图诊断", "Transfer diagnostics", "傳圖診斷"))
+            }
             state.recoveryNotice?.let { code ->
                 Text(when (code) {
                     "background" -> nativeActionText(language, "已安全停止后台会话。请确认 Wi-Fi 后重新连接；不会自动继续暂停的任务。",
@@ -421,6 +431,7 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
         confirmButton = { TextButton(onClick = { resettingHistory = false; model.resetHistoryConfirmed() }) { Text(label("备份并重置", "Back up and reset")) } },
         dismissButton = { TextButton(onClick = { resettingHistory = false }) { Text(label("取消", "Cancel")) } })
     if (generalSettings && appearance != null) NativeGeneralSettingsDialog(appearance) { generalSettings = false }
+    if (diagnostics) NativeDiagnosticsDialog(model, language) { diagnostics = false }
     if (resettingMode) AlertDialog(onDismissRequest = { resettingMode = false },
         title = { Text(nativeActionText(language, "备份并恢复 AP 模式？", "Back up and restore AP mode?", "備份並恢復 AP 模式？")) },
         text = { Text(nativeActionText(language, "只重置连接模式偏好，不更改配对身份、相机历史或照片。", "Reset only the mode preference; pairing, camera history and photos remain.", "只重置連接模式偏好，不更改配對身分、相機歷史或照片。")) },

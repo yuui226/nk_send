@@ -8,6 +8,8 @@ import ZTransferShared
 @MainActor
 final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionHomePlatform {
     let session: CameraHandshakeProbe
+    @Published var diagnosticShare: DiagnosticShareRequest?
+    private var diagnosticPreview: String?
     private(set) lazy var model = NativeConnectionHomeModel(platform: self)
     private var discovery: CameraDiscoveryCoordinator?
     private var discoveryObservation: AnyCancellable?
@@ -30,6 +32,7 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
         self.session.$productState.sink { [weak self] value in
             guard let self, let value, !self.closed else { return }
             _ = self.model.publish(requestId: value.requestID, phase: value.phase, message: value.message)
+            self.session.diagnostics.phase(value.phase, message: value.message)
             if value.phase == "failed" { self.model.publishRecoveryNotice(code: "disconnected") }
         }.store(in: &observations)
         self.session.$running.sink { [weak self] running in
@@ -37,13 +40,26 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
         }.store(in: &observations)
     }
 
+    func diagnosticReport() -> String {
+        guard !closed else { return "" }
+        let report = session.diagnostics.report()
+        diagnosticPreview = report
+        return report
+    }
+    func clearDiagnostics() { if !closed { session.diagnostics.clear() } }
+    func shareDiagnostics() -> Bool {
+        guard !closed, foreground, diagnosticShare == nil,
+              session.filesPage == nil, session.queuePage == nil, let diagnosticPreview else { return false }
+        diagnosticShare = DiagnosticShareRequest(text: diagnosticPreview)
+        return true
+    }
     func loadRecoveryRecord() async {
         guard !closed else { return }
         do {
             guard let journal = session.recoveryJournal else { throw TransferRecoveryJournal.Failure.unavailable }
             let value = try await journal.read()
             guard !closed else { return }
-            model.publishRecoveryRecord(names: value?.pending.map(\.name) ?? [], completed: Int32(value?.completed ?? 0),
+            model.publishRecoveryRecord(names: value?.pending.map(\.name) ?? [], completed: Int32(clamping: value?.completed ?? 0),
                 unavailable: false, truncated: value?.truncated ?? false)
         } catch { if !closed { model.publishRecoveryRecord(names: [], completed: 0, unavailable: true, truncated: false) } }
     }
@@ -224,6 +240,7 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
     func close() {
         guard !closed else { return }
         model.close(); closed = true
+        diagnosticPreview = nil; diagnosticShare = nil
         discovery?.stop(); discoveryObservation = nil
         session.cancel(); backgroundLease.end(); observations.removeAll()
     }
@@ -270,6 +287,7 @@ struct CameraWorkspace: View {
     var body: some View {
         CameraWorkspaceController(bridge: bridge).ignoresSafeArea()
             .task { await bridge.loadRecoveryRecord() }
+            .sheet(item: $bridge.diagnosticShare) { DiagnosticShareSheet(request: $0) }
             .sheet(item: Binding(get: { bridge.session.filesPage }, set: { bridge.session.filesPage = $0 })) {
                 OriginalFilesPage(bridge: $0)
             }

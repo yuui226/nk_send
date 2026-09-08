@@ -47,7 +47,7 @@ actor TransferRecoveryJournal {
         let data = try input.read(upToCount: 512 * 1024 + 1) ?? Data()
         guard data.count <= 512 * 1024 else { throw Failure.unavailable }
         guard let value = try? JSONDecoder().decode(Document.self, from: data),
-              value.version == 1, value.pending.count <= 500, value.completed >= 0,
+              value.version == 1, value.pending.count <= 500, (0...Int(Int32.max)).contains(value.completed),
               value.pending.allSatisfy({ SandboxTransferFile.safeComponent($0.name) && $0.size >= 0 &&
                   $0.downloaded >= 0 && $0.storageIDs.count <= 8 &&
                   ["WAITING", "TRANSFERING", "FAILED", "CANCELLED"].contains($0.status) }) else {

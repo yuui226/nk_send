@@ -94,6 +94,8 @@ class AutomaticLoopWiringTest(unittest.TestCase):
             "shared/src/iosMain/kotlin/com/ztransfer/ui/NativeConnectionHomeController.kt",
             "shared/src/iosMain/kotlin/com/ztransfer/ui/SharedUiController.kt"})
         allowed.update({
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeDiagnosticsDialog.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/integration/TransferGoldenJourneyTest.kt",
             "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeBrowseSession.kt",
             "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeProductInformation.kt",
             "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeOriginalActionsTest.kt",

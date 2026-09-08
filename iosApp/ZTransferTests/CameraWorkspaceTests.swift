@@ -6,6 +6,49 @@ import ZTransferShared
 @testable import ZTransfer
 
 final class CameraWorkspaceTests: XCTestCase {
+    func testRecoveryJournalRejectsCompletionCountThatCannotCrossNativeIntBoundary() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("recovery.json")
+        let invalid = TransferRecoveryJournal.Document(version: 1, connectionID: UUID(), responderGUID: nil,
+            sequence: 1, completed: Int(Int32.max) + 1, paused: true, truncated: false, pending: [])
+        let bytes = try JSONEncoder().encode(invalid)
+        try bytes.write(to: file)
+        do { _ = try await TransferRecoveryJournal(file: file).read(); XCTFail("Overflow accepted") } catch {}
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+    }
+    @MainActor func testDiagnosticRingRejectsPrivateInputsAndExportsOnlyBoundedWhitelistedFields() {
+        let log = TransferDiagnosticLog()
+        log.begin(stationMode: true)
+        log.identify("NIKON Z 8")
+        XCTAssertTrue(log.report().contains("NIKON Z 8"))
+        log.identify("/private/photos/secret.JPG?GPS=1,2")
+        for _ in 0..<300 {
+            log.phase("failed", message: "@ztr|failed|/private/bookmarks/credentials")
+        }
+        log.phase("password=secret", message: nil)
+        XCTAssertEqual(log.lines.count, 256)
+        let report = log.report()
+        XCTAssertLessThan(report.utf8.count, 65536)
+        for token in ["secret.JPG", "credentials", "GPS=1,2", "password=secret"] {
+            XCTAssertFalse(report.contains(token))
+        }
+        XCTAssertTrue(report.contains("error=failed"))
+        XCTAssertEqual(TransferDiagnosticLog.errorCode("@ztr|not-known|secret"), "other")
+        log.clear(); XCTAssertTrue(log.lines.isEmpty)
+    }
+    @MainActor func testDiagnosticQueueRecordsHistoryNotByteTicksAndNeverCameraHandles() {
+        let log = TransferDiagnosticLog(), id = UUID()
+        log.queue(recoverySnapshot(id, sequence: 1, history: 1))
+        let before = log.report()
+        log.queue(recoverySnapshot(id, sequence: 2, history: 1))
+        XCTAssertEqual(log.report(), before)
+        XCTAssertFalse(before.contains("DSC.JPG")); XCTAssertFalse(before.contains(id.uuidString))
+        let request = DiagnosticShareRequest(text: before)
+        log.clear()
+        XCTAssertEqual(request.text, before) // Frozen explicit share snapshot remains stable.
+    }
     func testRecoveryJournalFencesGenerationAndDoesNotPersistByteTicks() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

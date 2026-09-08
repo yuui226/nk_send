@@ -100,7 +100,10 @@ def main():
                 walk(child, folder / obj.get("path", ""))
         elif obj["isa"] == "PBXFileReference" and obj["sourceTree"] == "<group>":
             path = folder / obj["path"]
-            check(path.is_file(), f"Source file missing: {path}")
+            if obj.get("lastKnownFileType") == "folder.assetcatalog":
+                check(path.is_dir() and (path / "Contents.json").is_file(), f"Asset catalog missing: {path}")
+            else:
+                check(path.is_file(), f"Source file missing: {path}")
             paths[identifier] = path.resolve()
 
     walk(main_project["mainGroup"], root)

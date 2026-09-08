@@ -52,6 +52,7 @@ final class CameraHandshakeProbe: ObservableObject {
         running && sessionReady && !downloading && originalQueue != nil && apConnection != nil && previewStore != nil && catalog != nil
     }
     var recoveryJournal: TransferRecoveryJournal?
+    let diagnostics = TransferDiagnosticLog()
     private var recoveryResponder: String?
     private var originalQueue: CameraOriginalQueue?
     private var queueObserver: Task<Void, Never>?
@@ -259,6 +260,7 @@ final class CameraHandshakeProbe: ObservableObject {
                         expectedResponder: String? = nil, service: CameraBonjourService? = nil) -> Bool {
         guard requestID > 0, !running, !downloading, !directoryBusy, closingTask == nil else { return false }
         guard service != nil || NativeCameraEndpointAddress.shared.normalize(raw: host) != nil else { return false }
+        diagnostics.begin(stationMode: stationMode)
         start(host: host, stationMode: stationMode, persistentAP: true, allowPairing: allowPairing,
               expectedResponder: expectedResponder, service: service, productRequestID: requestID)
         return running
@@ -273,7 +275,7 @@ final class CameraHandshakeProbe: ObservableObject {
     private func publishPairingStarted(connectionID: UUID, requestID: Int64?) {
         guard !Task.isCancelled, apConnection?.connectionID == connectionID,
               productState?.requestID == requestID, productState?.phase == "connecting" else { return }
-        publishProduct("connecting", message: "正在配对，请在相机端确认。 / Pairing; confirm on the camera.")
+        publishProduct("connecting", message: "@ztr|pairing")
     }
 
     func start(host: String, stationMode: Bool, persistentAP: Bool = false,
@@ -734,6 +736,7 @@ final class CameraHandshakeProbe: ObservableObject {
                     await self?.publishPairingStarted(connectionID: connection.connectionID, requestID: openingRequest)
                 })
             let description = identity.map { "\($0.manufacturer) \($0.model)" } ?? "相机（机型信息不可用）"
+            diagnostics.identify(identity?.model)
             let directReads = await connection.usesDirectObjectReads()
             await previews.configureDirectObjectReads(directReads)
             let diskReady: Bool
@@ -856,6 +859,7 @@ final class CameraHandshakeProbe: ObservableObject {
         if let previous = queueSnapshot, previous.connectionID == snapshot.connectionID,
            previous.sequence > snapshot.sequence { return }
         queueSnapshot = snapshot
+        diagnostics.queue(snapshot)
         queuePage?.publish(snapshot)
         filesPage?.publishQueue(snapshot)
     }

@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.ztransfer.ui.screen.*
 import com.ztransfer.ui.theme.AppTheme
 
-/** Temporary settings host: only working preferences appear; the full workspace remains pending. */
+/** Product settings adapter: uses the original shared controls and the existing preference owners. */
 @Composable
 internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: NativeBrowseLayout,
     text: NativeSettingsPageText, anchor: Rect, appearance: NativeAppearanceModel, onDismiss: () -> Unit) {

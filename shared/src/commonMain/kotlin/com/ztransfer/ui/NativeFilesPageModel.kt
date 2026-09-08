@@ -78,7 +78,11 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     private var closed = false
     private val mutableMemoryRevision = MutableStateFlow(0L)
     internal val memoryRevision = mutableMemoryRevision.asStateFlow()
-    fun releaseImageMemory() { if (!closed) mutableMemoryRevision.value++ }
+    fun releaseImageMemory() {
+        if (closed) return
+        mutableMemoryRevision.value++
+        queue.releaseImageMemory() // The embedded queue is a different page owner from the home queue.
+    }
 
     private var previewPlatform: NativePreviewReadPlatform? = null
     private var previewReads: NativePreviewReadSession? = null

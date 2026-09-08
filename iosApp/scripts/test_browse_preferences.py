@@ -41,9 +41,11 @@ class BrowsePreferencesWiringTest(unittest.TestCase):
     def test_privacy_reason_is_registered_in_app_resources_exactly_once(self):
         manifest = plistlib.loads((ROOT/'iosApp/ZTransfer/Configuration/PrivacyInfo.xcprivacy').read_bytes())
         self.assertEqual([{'NSPrivacyAccessedAPIType':'NSPrivacyAccessedAPICategoryFileTimestamp',
-                          'NSPrivacyAccessedAPITypeReasons':['C617.1']},
+                          'NSPrivacyAccessedAPITypeReasons':['C617.1', '3B52.1']},
                          {'NSPrivacyAccessedAPIType':'NSPrivacyAccessedAPICategoryUserDefaults',
-                          'NSPrivacyAccessedAPITypeReasons':['CA92.1']}], manifest['NSPrivacyAccessedAPITypes'])
+                          'NSPrivacyAccessedAPITypeReasons':['CA92.1']},
+                         {'NSPrivacyAccessedAPIType':'NSPrivacyAccessedAPICategorySystemBootTime',
+                          'NSPrivacyAccessedAPITypeReasons':['35F9.1']}], manifest['NSPrivacyAccessedAPITypes'])
         project = OpenStepParser(source('iosApp/ZTransfer.xcodeproj/project.pbxproj')).parse()
         objects = project['objects']
         resource = objects['7A1100000000000000000015']['files']

@@ -29,6 +29,8 @@ CHANGES = {
 }
 
 def previous_lifecycle_completion_source(path, value):
+    from final_completion_wiring import previous_final_completion_source
+    value = previous_final_completion_source(path, value)
     if path in CHANGES:
         assert hashlib.sha256(value.encode("utf8")).hexdigest() == CHANGES[path], f"reviewed lifecycle source changed: {path}"
         return subprocess.check_output(["git", "show", "8594187:" + path], cwd=ROOT).decode("utf8")

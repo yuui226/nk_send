@@ -126,8 +126,12 @@ def main():
         ("swift-tests", project + ["-configuration", "Debug", "-destination", f"platform=iOS Simulator,id={device['udid']}",
                                    "-parallel-testing-enabled", "NO", "-resultBundlePath", str(output / "Tests.xcresult"), "test"], "** TEST SUCCEEDED **"),
         ("release-device-build", project + ["-configuration", "Release", "-destination", "generic/platform=iOS", "build"], "** BUILD SUCCEEDED **"),
+        ("debug-device-build", project + ["-configuration", "Debug", "-destination", "generic/platform=iOS", "build"], "** BUILD SUCCEEDED **"),
+        ("release-simulator-build", project + ["-configuration", "Release", "-destination", f"platform=iOS Simulator,id={device['udid']}", "build"], "** BUILD SUCCEEDED **"),
     ]
     report = {"status": "RUNNING", "xcode": xcode, "simulator": device["udid"], "steps": [],
+              "commit": capture(["git", "rev-parse", "HEAD"], env),
+              "working_tree_dirty": bool(capture(["git", "status", "--porcelain"], env)),
               "scope": "Native tests, Swift tests and unsigned Release compilation. NOT camera/device acceptance or distribution."}
     try:
         for name, arguments, marker in steps:

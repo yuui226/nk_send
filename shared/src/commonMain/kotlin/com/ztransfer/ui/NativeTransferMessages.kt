@@ -3,6 +3,7 @@ package com.ztransfer.ui
 /** Platform messages carry stable codes; rendering stays live with the shared language setting. */
 object NativeTransferMessages {
     private val entries = mapOf(
+        "pairing" to listOf("正在配对，请在相机端确认。", "Pairing; confirm on the camera.", "正在配對，請在相機端確認。"),
         "no_services" to listOf("未发现 Bonjour 服务；请检查 Wi-Fi 或输入地址。这不代表权限被拒绝。", "No Bonjour service found. Check Wi-Fi or enter an address; this does not prove permission denial.", "未找到 Bonjour 服務；請檢查 Wi-Fi 或輸入位址。這不代表權限遭拒。"),
         "no_verified_route" to listOf("相机暂无已验证地址，请明确选择服务或输入地址；不会自动扫描网段。", "No verified camera address. Select a service or enter an address; no automatic subnet scan.", "相機暫無已驗證位址，請明確選擇服務或輸入位址；不會自動掃描網段。"),
         "paired_camera" to listOf("已配对相机 · {0}", "Paired camera · {0}", "已配對相機 · {0}"),
