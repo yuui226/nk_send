@@ -26,6 +26,8 @@ CHANGES = {
 }
 
 def previous_workspace_completion_source(path, value):
+    from lifecycle_completion_wiring import previous_lifecycle_completion_source
+    value = previous_lifecycle_completion_source(path, value)
     from queue_workspace_extraction import previous_queue_workspace_source
     from workspace_transition_extraction import previous_workspace_transition_source
     value = previous_queue_workspace_source(path, value)

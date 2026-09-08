@@ -36,6 +36,7 @@ interface NativeConnectionHomePlatform {
     fun forgetCameraProfile(id: String): Boolean
     fun resetCameraHistory(): Boolean
     fun recoverCameraIdentity(): Boolean
+    fun clearRecoveryRecord(completion: NativeQueueActionCompletion) { completion.complete(false) }
 }
 
 /** paired distinguishes profile rows from live service rows; only the platform pairing store grants trust. */
@@ -54,6 +55,9 @@ internal data class NativeConnectionHomeState(
     val expectedCamera: String? = null,
     val attemptedChoice: String? = null,
     val preferencesUnavailable: Boolean = false,
+    val recoveryNotice: String? = null,
+    val recoveryRecord: NativeRecoveryRecord = NativeRecoveryRecord(),
+    val clearingRecovery: Boolean = false,
 ) {
     val busy: Boolean get() = phase == "connecting" || phase == "closing" || phase == "ready"
     val ready: Boolean get() = phase == "ready"
@@ -73,6 +77,8 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
     private var nextRequest = 1L
     private var retryChoice: NativeStationChoice? = null
     private var celebratedRequest: Long? = null
+    private var recoveryRecordRevision = 0L
+    private var recoveryRequest = 0L
     private val savedMode = platform?.readConnectionMode()
     private val mutableState = MutableStateFlow(NativeConnectionHomeState(
         stationMode = savedMode == "sta", preferencesUnavailable = savedMode !in setOf("ap", "sta")))
@@ -81,6 +87,32 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
     fun isReady(): Boolean = mutableState.value.ready
     fun currentPhase(): String = mutableState.value.phase
     fun currentAddress(): String = mutableState.value.address
+    fun publishRecoveryRecord(names: List<String>, completed: Int, unavailable: Boolean, truncated: Boolean) {
+        if (closed) return
+        recoveryRecordRevision++
+        if (!closed) mutableState.value = mutableState.value.copy(
+            recoveryRecord = NativeRecoveryRecord(names.take(500).map { it.take(255) }, completed.coerceAtLeast(0), unavailable, truncated))
+    }
+    internal fun clearRecoveryRecord() {
+        val owner = platform ?: return
+        if (closed || mutableState.value.busy || mutableState.value.clearingRecovery) return
+        val request = ++recoveryRequest
+        val revision = recoveryRecordRevision
+        mutableState.value = mutableState.value.copy(clearingRecovery = true)
+        owner.clearRecoveryRecord(object : NativeQueueActionCompletion {
+            override fun complete(succeeded: Boolean) {
+                if (closed || request != recoveryRequest || !mutableState.value.clearingRecovery) return
+                mutableState.value = mutableState.value.copy(clearingRecovery = false,
+                    recoveryRecord = if (revision != recoveryRecordRevision) mutableState.value.recoveryRecord
+                    else if (succeeded) NativeRecoveryRecord() else mutableState.value.recoveryRecord.copy(unavailable = true))
+            }
+        })
+    }
+
+    fun publishRecoveryNotice(code: String) {
+        if (!closed && code in setOf("background", "disconnected", "permissions"))
+            mutableState.value = mutableState.value.copy(recoveryNotice = code)
+    }
 
     internal fun editAddress(value: String) {
         if (!closed && !mutableState.value.busy) {
@@ -104,9 +136,9 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
         if (!closed && !mutableState.value.busy) mutableState.value = mutableState.value.copy(allowPairing = value)
     }
     private fun begin(): Long? {
-        if (closed || mutableState.value.busy || nextRequest == Long.MAX_VALUE) return null
+        if (closed || mutableState.value.busy || mutableState.value.clearingRecovery || nextRequest == Long.MAX_VALUE) return null
         val request = nextRequest++
-        mutableState.value = mutableState.value.copy(requestId = request, phase = "connecting", message = null, searching = false)
+        mutableState.value = mutableState.value.copy(requestId = request, phase = "connecting", message = null, searching = false, recoveryNotice = null)
         return request
     }
     internal fun connect() {
@@ -115,12 +147,12 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
         if (closed || before.busy) return
         retryChoice?.let { previous ->
             if (previous in before.choices) choose(previous)
-            else mutableState.value = before.copy(phase = "failed", message = "候选已失效，请重新选择相机。 / Select the camera again; this candidate is no longer available.")
+            else mutableState.value = before.copy(phase = "failed", message = "@ztr|stale_choice")
             return
         }
         val address = NativeCameraEndpointAddress.normalize(before.address)
         if (address == null) {
-            mutableState.value = before.copy(phase = "failed", message = "请输入有效相机地址，不要包含网址、路径或端口。 / Enter a camera address without a URL, path or port.")
+            mutableState.value = before.copy(phase = "failed", message = "@ztr|invalid_address")
             return
         }
         mutableState.value = before.copy(address = address)
@@ -231,7 +263,8 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
     var generalSettings by remember(model) { mutableStateOf(false) }
     var resettingMode by remember(model) { mutableStateOf(false) }
     fun label(zh: String, en: String) = NativeConnectionHomeText.label(language, zh, en)
-    val presentation = state.presentation()
+    val renderedState = state.copy(message = state.message?.let { NativeTransferMessages.render(it, language) })
+    val presentation = renderedState.presentation()
     val selected = homeSelectedConnection(presentation.isConnectedToCamera, presentation.connectionType)
     val clock = remember { kotlin.time.TimeSource.Monotonic.markNow() }
     val totalMs = CONNECT_CELEBRATE_DELAY_MS + CONNECTION_SUCCESS_DURATION_MS
@@ -253,14 +286,28 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
         val density = androidx.compose.ui.platform.LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }
         val heightPx = with(density) { maxHeight.toPx() }
-        Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),
+        Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState()).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             ZMark(modifier = Modifier.height(24.dp))
+            NativeRecoveryRecordCard(model, language)
+            state.recoveryNotice?.let { code ->
+                Text(when (code) {
+                    "background" -> nativeActionText(language, "已安全停止后台会话。请确认 Wi-Fi 后重新连接；不会自动继续暂停的任务。",
+                        "Background session stopped. Check Wi-Fi and reconnect; paused tasks are not restarted.",
+                        "已安全停止背景工作階段。請確認 Wi-Fi 後重新連接；不會自動繼續暫停的工作。")
+                    "permissions" -> nativeActionText(language, "请在系统设置确认本地网络权限和 Wi-Fi，再手动重试。",
+                        "Check Local Network permission and Wi-Fi in Settings, then retry.",
+                        "請在系統設定確認本機網路權限與 Wi-Fi，再手動重試。")
+                    else -> nativeActionText(language, "旧连接已关闭。重新连接会再次核对相机身份，旧任务不会直接套用新句柄。",
+                        "Old connection closed. Reconnect to verify camera identity; old handles are never reused.",
+                        "舊連線已關閉。重新連接會再次核對相機身分，舊工作不會直接套用新控制代碼。")
+                }, color = AppTheme.colors.onSurfaceVariant)
+            }
             if (appearance != null) TextButton(onClick = { generalSettings = true }) { Text(label("设置", "Settings")) }
             Text(label("连接相机，浏览与传输原片", "Connect your camera to browse and transfer originals"),
                 color = AppTheme.colors.onSurfaceVariant)
             SharedConnectionMethodCard(
-                modifier = Modifier.fillMaxWidth().height(380.dp),
+                modifier = Modifier.fillMaxWidth().height(380.dp * density.fontScale.coerceAtLeast(1f)),
                 failedLabel = label("连接失败", "Connection failed"),
                 viewportWidth = widthPx, viewportHeight = heightPx,
                 uptimeMillis = { clock.elapsedNow().inWholeMilliseconds },
@@ -279,9 +326,9 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
                 feedbackFollowsModeSelector = true,
                 feedback = when (state.phase) {
                     "connecting" -> ConnectionCardFeedback(label("正在连接…", "Connecting…"),
-                        state.message, AppTheme.colors.accentBlue, busy = true, multiline = true)
+                        renderedState.message, AppTheme.colors.accentBlue, busy = true, multiline = true)
                     "failed" -> ConnectionCardFeedback(label("连接失败", "Connection failed"),
-                        state.message, AppTheme.colors.statusError, multiline = true)
+                        renderedState.message, AppTheme.colors.statusError, multiline = true)
                     else -> null
                 },
                 footer = {
@@ -333,10 +380,10 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
                             Text(label("停止查找", "Stop searching"))
                         }
                     }
-                    state.discoveryMessage?.let { Text(it, color = AppTheme.colors.onSurfaceVariant) }
+                    state.discoveryMessage?.let { Text(NativeTransferMessages.render(it, language), color = AppTheme.colors.onSurfaceVariant) }
                     state.choices.forEach { choice ->
                         OutlinedButton(onClick = { model.choose(choice) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
-                            Column { Text(choice.title); Text(choice.detail, style = MaterialTheme.typography.bodySmall) }
+                            Column { Text(NativeTransferMessages.render(choice.title, language)); Text(NativeTransferMessages.render(choice.detail, language), style = MaterialTheme.typography.bodySmall) }
                         }
                         if (choice.paired) TextButton(onClick = { forgetting = choice }, enabled = !state.busy) {
                             Text(label("忘记此相机记录", "Forget this camera record"))
@@ -357,7 +404,7 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
                 Text(nativeActionText(language, "修复连接模式偏好", "Repair connection mode", "修復連接模式偏好"))
             }
             if (state.phase == "paired") Text(label("配对已确认，请完成相机提示后重新连接。", "Pairing confirmed. Finish the camera prompts, then reconnect."))
-            else if (state.phase != "connecting" && state.phase != "failed") state.message?.let { Text(it) }
+            else if (state.phase != "connecting" && state.phase != "failed") state.message?.let { Text(NativeTransferMessages.render(it, language)) }
             Text(label("请允许局域网访问。传输期间保持应用在前台；切入后台会关闭当前相机会话。此版本仅提供 AP / 标准 STA，不提供 iOS USB 连接。", "Allow Local Network access. Keep this app in the foreground while transferring; backgrounding closes the camera session. This version supports AP / standard STA, not iOS USB."),
                 style = MaterialTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
             TextButton(onClick = model::settings) { Text(label("打开应用系统设置", "Open app Settings")) }

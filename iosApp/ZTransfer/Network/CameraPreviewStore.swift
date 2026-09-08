@@ -258,7 +258,10 @@ actor CameraPreviewStore {
         catch { diskWritesBlocked = true; return false }
     }
 
-    func clearForMemoryPressure() { epoch &+= 1; cache.removeAll(); cacheBytes = 0 }
+    func clearForMemoryPressure() {
+        epoch &+= 1; cache.removeAll(); cacheBytes = 0
+        fillEnabled = false // Stop speculative refill; visible/explicit preview reads remain available.
+    }
 
     /// Session teardown awaits this before a new connection can reuse this camera's directory.
     /// Do not cancel a shared request mid-frame here; the existing connection owner closes its sockets.

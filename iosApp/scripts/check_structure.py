@@ -124,8 +124,8 @@ def main():
         check(settings.get("INFOPLIST_FILE") == "ZTransfer/Configuration/Info.plist", "Missing explicit Bonjour plist input")
         check(settings.get("INFOPLIST_KEY_NSLocalNetworkUsageDescription"), "Missing local network purpose")
         check(settings.get("INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription"), "Missing add-only Photos purpose")
-        check(settings.get("INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription"), "Missing Bluetooth purpose")
-        check(settings.get("INFOPLIST_KEY_NSLocationWhenInUseUsageDescription"), "Missing foreground location purpose")
+        for deferred in ("NSBluetoothAlwaysUsageDescription", "NSLocationWhenInUseUsageDescription", "NSMicrophoneUsageDescription", "NSPhotoLibraryUsageDescription"):
+            check(not settings.get("INFOPLIST_KEY_" + deferred), "Unexpected deferred/read-library permission: " + deferred)
     info = plistlib.loads((root / "ZTransfer/Configuration/Info.plist").read_bytes())
     check(info.get("NSBonjourServices") == ["_ptp._tcp", "_nikon._tcp"], "Bonjour services must match browser descriptors")
     check(info.get("CADisableMinimumFrameDurationOnPhone") is True, "Missing Compose iOS frame-duration setting")

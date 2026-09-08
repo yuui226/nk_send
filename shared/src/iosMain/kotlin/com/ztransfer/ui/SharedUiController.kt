@@ -47,6 +47,8 @@ object SharedUiController {
         ComposeUIViewController {
             val images = remember(model) { NativeGridImages(model) }
             DisposableEffect(images) { onDispose { images.close() } }
+            val memoryRevision by model.memoryRevision.collectAsState()
+            LaunchedEffect(memoryRevision) { if (memoryRevision > 0L) images.releaseMemory() }
             val appearanceState by appearance.state.collectAsState()
             val languageTag = appearanceState.resolvedLanguage
             NativeAppTheme(appearanceState) {
@@ -62,7 +64,7 @@ object SharedUiController {
                         NativeOriginalQueuePage(model.queue, queueText,
                             elapsedRealtimeMs = { (NSProcessInfo.processInfo.systemUptime * 1000.0).toLong() },
                             onBack = back,
-                            showContent = !topOnly, showControls = topOnly,
+                            showContent = !topOnly, showControls = topOnly, language = languageTag,
                             thumbnail = { file, nudge, modifier -> OriginalQueueThumbnail(model.queue, file, nudge, modifier) })
                     })
             }
@@ -75,7 +77,7 @@ object SharedUiController {
             NativeAppTheme(appearanceState) {
                 NativeOriginalQueuePage(model, NativeQueueTextCatalog.forLanguage(languageTag),
                     elapsedRealtimeMs = { (NSProcessInfo.processInfo.systemUptime * 1000.0).toLong() },
-                    onBack = onBack,
+                    onBack = onBack, language = languageTag,
                     thumbnail = { file, retryNudge, modifier -> OriginalQueueThumbnail(model, file, retryNudge, modifier) })
             }
         }
@@ -84,8 +86,9 @@ object SharedUiController {
 @Composable
 private fun OriginalQueueThumbnail(model: NativeQueuePageModel, file: CameraFileInfo, retryNudge: Boolean, modifier: Modifier) {
     val connected by model.connected.collectAsState()
-    var bitmap by remember(model, file.handle) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(model, file.handle, retryNudge, connected) {
+    val memoryRevision by model.memoryRevision.collectAsState()
+    var bitmap by remember(model, file.handle, memoryRevision) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(model, file.handle, retryNudge, connected, memoryRevision) {
         if (connected && bitmap == null) {
             try {
                 model.thumbnail(file)?.let { encoded ->

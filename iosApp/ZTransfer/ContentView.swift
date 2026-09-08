@@ -25,7 +25,7 @@ struct ContentView: View {
                         VStack(spacing: 16) {
                             Button("检查共享 Compose 组件") { showSharedComponents = true }
                             CameraHandshakeProbeView(probe: workspace.session)
-                            Divider(); LocationProbeView(); BluetoothProbeView()
+                            // GPS/remote capture are deferred; their permission probes are not reachable in this transfer build.
                         }.padding()
                     }
                     .toolbar { Button("关闭") { showDiagnostics = false } }

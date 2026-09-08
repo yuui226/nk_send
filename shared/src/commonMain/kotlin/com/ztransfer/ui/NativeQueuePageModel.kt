@@ -74,6 +74,15 @@ class NativeQueuePageModel(val connectionId: String, platform: NativeQueuePagePl
     internal val connected = mutableConnected.asStateFlow()
     private val mutablePaused = MutableStateFlow(false)
     internal val paused = mutablePaused.asStateFlow()
+    private val mutableMemoryRevision = MutableStateFlow(0L)
+    internal val memoryRevision = mutableMemoryRevision.asStateFlow()
+
+    fun releaseImageMemory() {
+        if (closed) return
+        mutableMemoryRevision.value++
+        imagesPending.toList().forEach { it.cancel() }
+        imagesPending.clear()
+    }
     private var closed = false
     private var sequence = -1L
     private var historyRevision = -1L

@@ -2886,8 +2886,9 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertTrue(closed)
     }
 
-    func testStreamingSinkFailureClosesCommandGate() async throws {
-        let stream = CameraTCPStream(connection: FakeCameraConnection(bytes: response(transaction: 1, payload: Data([1, 2]))))
+    func testStreamingSinkFailureDrainsBeforeReusingCommandGate() async throws {
+        let wire = FakeCameraConnection(bytes: response(transaction: 1, payload: Data([1, 2])) + response(transaction: 2))
+        let stream = CameraTCPStream(connection: wire)
         defer { stream.close() }
         try await stream.connect(timeout: 1)
         let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
@@ -2898,7 +2899,48 @@ final class CameraNetworkTests: XCTestCase {
             XCTFail("Expected disk failure")
         } catch { XCTAssertTrue(error is SandboxTransferError) }
         let closed = await session.isClosed()
-        XCTAssertTrue(closed)
+        XCTAssertFalse(closed)
+        XCTAssertTrue(wire.sent().contains(PtpIPChannel.data(PtpIpProtocolCodec.shared.encodeCancelRequest(transactionId: 1))))
+        let next = try await session.execute(operationCode: 0x1001)
+        XCTAssertEqual(next.code, PtpConstants.shared.RESPONSE_OK)
+    }
+
+    func testStreamingCancellationHoldsGateUntilMatchingResponseIsDrained() async throws {
+        let wire = FakeCameraConnection()
+        let stream = CameraTCPStream(connection: wire)
+        defer { stream.close() }
+        try await stream.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: stream, initialTransactionId: 0)
+        let transfer = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in
+            XCTFail("Cancelled transfer must not write discarded bytes")
+        } }
+        try await waitUntil("download command") { wire.sent().count == 1 }
+        transfer.cancel()
+        try await waitUntil("cancel packet") { wire.sent().count == 2 }
+        let next = Task { try await session.execute(operationCode: 0x1001) }
+        wire.feed(response(transaction: 1, payload: Data(repeating: 1, count: 150_000)))
+        do { _ = try await transfer.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        try await waitUntil("next command after drain") { wire.sent().count == 3 }
+        wire.feed(response(transaction: 2))
+        let result = try await next.value
+        XCTAssertEqual(result.code, PtpConstants.shared.RESPONSE_OK)
+        let closed = await session.isClosed(); XCTAssertFalse(closed)
+    }
+
+    func testStreamingCancelledWithoutResponseClosesWithinRecoveryBudget() async throws {
+        let wire = FakeCameraConnection()
+        let actual = CameraTCPStream(connection: wire)
+        defer { actual.close() }
+        try await actual.connect(timeout: 1)
+        let session = PtpIPCommandSession(stream: actual, initialTransactionId: 0)
+        let transfer = Task { try await session.executeStreaming(operationCode: 0x1009, parameters: [7]) { _ in } }
+        try await waitUntil("download command") { wire.sent().count == 1 }
+        let start = ProcessInfo.processInfo.systemUptime
+        transfer.cancel()
+        do { _ = try await transfer.value; XCTFail("Expected cancellation") } catch {}
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - start, 5)
+        let closed = await session.isClosed(); XCTAssertTrue(closed)
     }
 
     func testAPPartialDownloadWritesOriginalBytesAndUsesSharedParameters() async throws {

@@ -30,7 +30,8 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
-/** Temporary original-file coordinator around the original grid, not a replacement product UI. */
+/** Product original-file coordinator reusing the original grid, preview and queue workspace. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun NativeOriginalFilesPage(
     model: NativeFilesPageModel, text: NativeFilesPageText, queueText: NativeQueuePageText,
@@ -44,6 +45,7 @@ internal fun NativeOriginalFilesPage(
     queuePage: @Composable (topOnly: Boolean, onBack: () -> Unit) -> Unit,
 ) {
     val state by model.state.collectAsState()
+    val memoryRevision by model.memoryRevision.collectAsState()
     val originals by model.originals.collectAsState()
     val criteria by model.filters.collectAsState()
     val layout by model.layout.collectAsState()
@@ -93,6 +95,7 @@ internal fun NativeOriginalFilesPage(
         previewBuildJob?.cancel(); previewBuildJob = null
         preview?.source?.close(); preview = null
     }
+    LaunchedEffect(memoryRevision) { if (memoryRevision > 0L) { closePreview(); flights.clear() } }
     val columns = layout.columns
     val collapseBursts = layout.collapseBursts
     val dates = remember(model) { model.browseSession.collapsedDates }
@@ -242,7 +245,7 @@ internal fun NativeOriginalFilesPage(
         filesContent = {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val screenWidth = maxWidth
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GlassButton(onClick = { closePreview(); onBack() }, contentPadding = PaddingValues(8.dp)) {
@@ -254,7 +257,6 @@ internal fun NativeOriginalFilesPage(
                     onStaDisconnectedClick = model.queue::showConnectionHelp)
                 }
                 Spacer(Modifier.weight(1f))
-                GlassButton(onClick = model::refresh, enabled = connected && !state.scanning && !state.enqueueing) { Text(text.refresh) }
                 Box(Modifier.onGloballyPositioned { queueBounds = it.boundsInRoot() }
                     .graphicsLayer { scaleX = catchScale.value; scaleY = catchScale.value }) {
                     SharedQueuePill(tasks.tasks, tasks.isTransferring,
@@ -265,7 +267,10 @@ internal fun NativeOriginalFilesPage(
                         transferDescription = text.queue, generatingLabel = "")
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                GlassButton(onClick = model::refresh, enabled = connected && !state.scanning && !state.enqueueing) { Text(text.refresh) }
+
                 GlassButton(onClick = { closePreview(); openedSettingsAnchor = settingsAnchor },
                     modifier = Modifier.onGloballyPositioned { settingsAnchor = it.boundsInRoot() }) {
                     Text(settingsText.title)

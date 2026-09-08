@@ -76,6 +76,10 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     val originalActions = NativeOriginalActionsModel()
     private var platform: NativeFilesPagePlatform? = platform
     private var closed = false
+    private val mutableMemoryRevision = MutableStateFlow(0L)
+    internal val memoryRevision = mutableMemoryRevision.asStateFlow()
+    fun releaseImageMemory() { if (!closed) mutableMemoryRevision.value++ }
+
     private var previewPlatform: NativePreviewReadPlatform? = null
     private var previewReads: NativePreviewReadSession? = null
     private var nextPreviewSession = 0L

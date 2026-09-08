@@ -6,6 +6,44 @@ import com.ztransfer.ui.screen.homeSelectedConnection
 import kotlin.test.*
 
 class NativeConnectionHomeTest {
+    @Test fun lateRecoveryResetCannotEraseANewerRecordOrStartConnectionDuringReset() {
+        val p = Platform()
+        var result: NativeQueueActionCompletion? = null
+        val m = NativeConnectionHomeModel(object : NativeConnectionHomePlatform by p {
+            override fun clearRecoveryRecord(completion: NativeQueueActionCompletion) { result = completion }
+        })
+        m.publishRecoveryRecord(listOf("old.JPG"), 1, false, false)
+        m.clearRecoveryRecord(); m.connect()
+        assertEquals(0, p.starts)
+        m.publishRecoveryRecord(listOf("new.JPG"), 2, false, false)
+        result!!.complete(true); result!!.complete(true)
+        assertEquals(listOf("new.JPG"), m.state.value.recoveryRecord.names)
+        assertFalse(m.state.value.clearingRecovery)
+    }
+    @Test fun recoveryNoticeNeverReconnectsOrRestartsAnOldQueue() {
+        val p = Platform(); val m = NativeConnectionHomeModel(p)
+        m.publishRecoveryNotice("background")
+        assertEquals("background", m.state.value.recoveryNotice)
+        assertEquals(0, p.starts)
+        m.connect(); val old = m.currentRequestId()
+        assertNull(m.state.value.recoveryNotice)
+        m.cancel(); m.publish(old, "idle", null); m.connect()
+        assertFalse(m.publish(old, "ready", "stale"))
+        m.close(); m.publishRecoveryNotice("disconnected")
+        assertNull(m.state.value.recoveryNotice)
+    }
+    @Test fun recoveryRecordIsBoundedAndDoesNotRestoreOldHandlesOrStartTasks() {
+        val p = Platform(); val m = NativeConnectionHomeModel(p)
+        m.publishRecoveryRecord(List(1000) { "DSC_$it.JPG" }, -1, false, true)
+        assertEquals(500, m.state.value.recoveryRecord.names.size)
+        assertEquals(0, m.state.value.recoveryRecord.completed)
+        assertEquals(0, p.starts)
+        m.clearRecoveryRecord() // Default platform rejects safely; no false acknowledgement.
+        assertTrue(m.state.value.recoveryRecord.unavailable)
+        assertFalse(m.state.value.clearingRecovery)
+        m.close(); m.publishRecoveryRecord(emptyList(), 0, false, false)
+        assertTrue(m.state.value.recoveryRecord.unavailable)
+    }
     @Test fun stoppingDiscoveryRetainsChoicesAndCannotCancelAnActiveConnection() {
         val p = Platform(); val m = NativeConnectionHomeModel(p); m.setStationMode(true)
         val choice = NativeStationChoice("one", "Camera", "Bonjour", false)

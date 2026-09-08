@@ -1,6 +1,9 @@
 package com.ztransfer.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.semantics.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
@@ -20,6 +23,7 @@ interface NativeOriginalActionCompletion {
 }
 interface NativeOriginalActionsPlatform {
     fun performOriginalAction(action: String, items: List<NativeOriginalActionItem>, completion: NativeOriginalActionCompletion)
+    fun openOriginalActionSettings() {}
     fun cancelOriginalActions()
 }
 internal data class NativeOriginalActionState(val busy: Boolean = false, val revision: Long = 0,
@@ -57,6 +61,7 @@ class NativeOriginalActionsModel {
         })
         return true
     }
+    internal fun openSettings() { if (!closed && !mutableState.value.busy) platform?.openOriginalActionSettings() }
     fun close() {
         if (closed) return
         closed = true; request++
@@ -83,7 +88,7 @@ internal fun NativeOriginalActionsDialog(model: NativeOriginalActionsModel, orig
     AlertDialog(onDismissRequest = { if (!state.busy) onDismiss() },
         title = { Text(text("已存原片", "Saved originals")) },
         text = {
-            Column {
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
                 Text(text("只操作已保存的原文件，不下载、不删相机照片。每次最多500项。", "Saved originals only; no camera downloads or deletion. Up to 500 per operation.", "只操作已儲存的原檔，不下載、不刪相機照片。每次最多500項。"))
                 Row {
                     TextButton(enabled = !state.busy, onClick = {
@@ -95,6 +100,7 @@ internal fun NativeOriginalActionsDialog(model: NativeOriginalActionsModel, orig
                     items(originals, key = { it.locator }) { item ->
                         Row {
                             Checkbox(checked = chosen[item.locator] == true, enabled = !state.busy,
+                                modifier = Modifier.semantics { contentDescription = item.originalName },
                                 onCheckedChange = { value ->
                                     if (!value) chosen.remove(item.locator)
                                     else if (chosen.size < 500) chosen[item.locator] = true
@@ -105,7 +111,10 @@ internal fun NativeOriginalActionsDialog(model: NativeOriginalActionsModel, orig
                 }
                 if (originals.isEmpty()) Text(text("当前筛选下没有可用原片。", "No saved originals in this filter.", "目前篩選下沒有可用原片。"))
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                state.message?.let { Text(it) }
+                if (!state.busy && state.failedCount > 0) TextButton(onClick = model::openSettings) {
+                    Text(text("打开系统设置", "Open Settings", "開啟系統設定"))
+                }
+                state.message?.let { Text(NativeTransferMessages.render(it, language), Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
                 if (!state.busy && state.revision > 0) Text(
                     text("已确认 ", "Confirmed ", "已確認 ") + state.succeeded.size +
                         text("，失败 ", "; failed ", "，失敗 ") + state.failedCount +

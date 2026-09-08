@@ -51,6 +51,8 @@ final class CameraHandshakeProbe: ObservableObject {
     var canOpenSharedWorkspace: Bool {
         running && sessionReady && !downloading && originalQueue != nil && apConnection != nil && previewStore != nil && catalog != nil
     }
+    var recoveryJournal: TransferRecoveryJournal?
+    private var recoveryResponder: String?
     private var originalQueue: CameraOriginalQueue?
     private var queueObserver: Task<Void, Never>?
     private var task: Task<Void, Never>?
@@ -86,10 +88,10 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published private(set) var savesToSelectedDirectory = false
     private var queueDestinationName: String?
     var queueDestinationSummary: String {
-        if queueDestinationError != nil { return "保存目标待修复 / Destination needs repair" }
+        if queueDestinationError != nil { return "@ztr|destination_repair" }
         return savesToSelectedDirectory
-            ? "Files: " + (queueDestinationName ?? "所选目录 / Selected directory") + " · 校验发布后完成 / Verified publication"
-            : "队列：应用沙盒。选择目录授权本身不会改变保存目标。"
+            ? "@ztr|destination_provider|" + (queueDestinationName ?? "Files")
+            : "@ztr|destination_sandbox"
     }
     @Published private(set) var metadataStatus = ""
     @Published private(set) var readingMetadata = false
@@ -164,7 +166,7 @@ final class CameraHandshakeProbe: ObservableObject {
                 let directory = try ScopedDirectoryStore.applicationStore()
                 let change = try await ProviderDirectoryChange.prepare(selection, directory: directory)
                 guard try await queue.configureDestination(change) else {
-                    directoryStatus = "当前队列仍在执行，请完成当前并暂停后重选；目录授权和保存目标均未改变。"
+                    directoryStatus = "@ztr|destination_busy"
                     outcome = directoryStatus
                     return
                 }
@@ -177,12 +179,12 @@ final class CameraHandshakeProbe: ObservableObject {
                 savesToSelectedDirectory = true
                 workspaceNavigation &+= 1
                 filesPage?.close(); filesPage = nil
-                directoryStatus = "已切换到 \(change.displayName)；原目录文件保留，后续执行使用新目标。"
+                directoryStatus = "@ztr|destination_provider|\(change.displayName)"
                     + (remembered ? "" : " 本次目标已生效，但偏好保存失败；下次连接可能需重选。")
             } catch {
-                outcome = "保存目标未改变：\(error.localizedDescription)"
+                outcome = TransferFailureMessage.describe(error)
                 if !Task.isCancelled, originalQueue === queue {
-                    directoryStatus = "保存目标未改变：\(error.localizedDescription)"
+                    directoryStatus = TransferFailureMessage.describe(error)
                 }
             }
         }
@@ -346,12 +348,18 @@ final class CameraHandshakeProbe: ObservableObject {
             } catch {
                 status = Task.isCancelled ? "诊断已取消，连接已关闭。" : error.localizedDescription
                 if !Task.isCancelled, let station = error as? CameraStationError, case .pairingCompleted = station {
-                    publishProduct("paired", message: error.localizedDescription)
+                    publishProduct("paired", message: "@ztr|pair_again")
                 } else {
-                    publishProduct(Task.isCancelled ? "idle" : "failed", message: Task.isCancelled ? nil : error.localizedDescription)
+                    publishProduct(Task.isCancelled ? "idle" : "failed", message: Task.isCancelled ? nil : TransferFailureMessage.describe(error))
                 }
             }
         }
+    }
+
+    func forceAbortForBackgroundExpiration() {
+        let connection = apConnection
+        cancel()
+        if let connection { Task { await connection.abort() } }
     }
 
     func cancel() {
@@ -418,6 +426,8 @@ final class CameraHandshakeProbe: ObservableObject {
     }
 
     func releasePreviewMemory() {
+        filesPage?.model.releaseImageMemory()
+        queuePage?.model.releaseImageMemory()
         previewTask?.cancel()
         previewImage = nil; previewPNG = nil
         if let previewStore { Task { await previewStore.clearForMemoryPressure() } }
@@ -507,7 +517,7 @@ final class CameraHandshakeProbe: ObservableObject {
     func startQueue() { if let queue = originalQueue, !downloading { Task { await queue.start() } } }
     func configureQueueDirectory(_ enabled: Bool, confirmedReset: Bool = false, completion: ((String?) -> Void)? = nil) {
         guard !directoryBusy, let queue = originalQueue else {
-            completion?("当前无法切换保存目标 / Destination unavailable"); return
+            completion?("@ztr|destination_busy"); return
         }
         directoryBusy = true
         directoryTask = Task {
@@ -517,7 +527,7 @@ final class CameraHandshakeProbe: ObservableObject {
                 let target: ProviderOriginalStore?
                 if enabled { target = try providerStore() } else { target = nil }
                 guard try await queue.configureDestination(target) else {
-                    directoryStatus = "当前队列仍在执行，请传完当前并暂停后再切换保存目标。"
+                    directoryStatus = "@ztr|destination_busy"
                     outcome = directoryStatus
                     return
                 }
@@ -531,12 +541,12 @@ final class CameraHandshakeProbe: ObservableObject {
                 workspaceNavigation &+= 1
                 filesPage?.close(); filesPage = nil
                 directoryStatus = enabled
-                    ? "队列已使用所选目录：下载后校验发布才完成，应用内原片保留；已有待传任务使用此目标。"
-                    : "队列已切回应用沙盒；所选目录中的已有文件不变。"
-                if !remembered { directoryStatus += " 本次目标已生效，但偏好保存失败；下次连接可能需重选。" }
+                    ? "@ztr|destination_provider|" + (queueDestinationName ?? "Files")
+                    : "@ztr|destination_sandbox"
+                if !remembered { directoryStatus = "@ztr|destination_unsaved" }
             } catch {
-                outcome = "保存目标未改变：\(error.localizedDescription)"
-                if !Task.isCancelled { directoryStatus = "保存目标未改变：\(error.localizedDescription)" }
+                outcome = TransferFailureMessage.describe(error)
+                if !Task.isCancelled { directoryStatus = TransferFailureMessage.describe(error) }
             }
         }
     }
@@ -674,6 +684,8 @@ final class CameraHandshakeProbe: ObservableObject {
         queueDestinationName = restored.displayName
         directoryStatus = restored.failure ?? (savesToSelectedDirectory ? "已恢复所选目录保存目标。" : "队列使用应用沙盒。")
         originalQueue = queue
+        recoveryResponder = nil
+        await recoveryJournal?.activate(connection.connectionID)
         let sessionAutomatic = CameraAutomaticTransferCoordinator(connectionID: connection.connectionID,
             queue: queue, preferences: transferPreferences)
         automaticTransfer = sessionAutomatic
@@ -682,6 +694,10 @@ final class CameraHandshakeProbe: ObservableObject {
                 if Task.isCancelled { break }
                 await previews.setTransfersBusy(snapshot.running)
                 publishQueueSnapshot(snapshot)
+                if apConnection?.connectionID == snapshot.connectionID, let journal = recoveryJournal {
+                    do { try await journal.record(snapshot, responderGUID: recoveryResponder) }
+                    catch { status = "任务恢复记录未写入，完整原片不受影响。 / Recovery record unavailable; originals retained." }
+                }
             }
         }
         apConnection = connection
@@ -750,7 +766,7 @@ final class CameraHandshakeProbe: ObservableObject {
             try Task.checkCancellation()
             let readyState = await connection.snapshot()
             guard readyState.phase == .ready, productState?.phase != "closing" else { throw CameraStreamError.closed }
-            var readyMessage = description
+            var readyMessage = "@ztr|ready"
             if productState != nil {
                 let responder = await connection.responderGUID()
                 let resolvedHost = await connection.resolvedRemoteHost()
@@ -763,12 +779,15 @@ final class CameraHandshakeProbe: ObservableObject {
                         responderGUID: responder, displayName: description, resolvedHost: resolvedHost,
                         history: CameraEndpointHistory.applicationStore)
                 } catch {
-                    readyMessage += "（地址历史未保存：\(error.localizedDescription)）"
+                    readyMessage = "@ztr|history_unsaved"
                 }
             }
             try Task.checkCancellation()
             let finalReadyState = await connection.snapshot()
             guard finalReadyState.phase == .ready, productState?.phase != "closing" else { throw CameraStreamError.closed }
+            recoveryResponder = await connection.responderGUID()
+            try Task.checkCancellation()
+            guard apConnection === connection, productState?.phase != "closing" else { throw CameraStreamError.closed }
             sessionReady = true
             publishProduct("ready", message: readyMessage)
             status = summary + "连接保持中。"

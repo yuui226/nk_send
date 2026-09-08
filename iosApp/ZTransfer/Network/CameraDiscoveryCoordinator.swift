@@ -68,13 +68,13 @@ struct CameraConnectionChoice {
         var issues: [String] = []
         var entries: [CameraEndpointRecord] = []
         var paired = Set<String>()
-        do { entries = try history.entries() } catch { issues.append(error.localizedDescription) }
-        do { paired = Set(try profileStore.pairedResponderGUIDs()) } catch { issues.append(error.localizedDescription) }
+        do { entries = try history.entries() } catch { issues.append(TransferFailureMessage.describe(error)) }
+        do { paired = Set(try profileStore.pairedResponderGUIDs()) } catch { issues.append(TransferFailureMessage.describe(error)) }
         profiles = entries.map { CameraKnownProfile(responderGUID: $0.responderGUID, displayName: $0.displayName,
             address: $0.address.host, paired: paired.contains($0.responderGUID)) }
         let represented = Set(entries.map(\.responderGUID))
         profiles += paired.subtracting(represented).sorted().map {
-            CameraKnownProfile(responderGUID: $0, displayName: "已配对相机 · \($0.suffix(8))", address: nil, paired: true)
+            CameraKnownProfile(responderGUID: $0, displayName: "@ztr|paired_camera|\($0.suffix(8))", address: nil, paired: true)
         }
         profileIssue = issues.isEmpty ? nil : issues.joined(separator: "；")
         message = profileIssue
@@ -82,7 +82,7 @@ struct CameraConnectionChoice {
     func selectService(id: String, expectedResponderGUID: String? = nil) -> CameraConnectionChoice? {
         guard let service = selectableServices.first(where: { $0.id == id }) else { return nil }
         if let expectedResponderGUID, !profiles.contains(where: { $0.responderGUID == expectedResponderGUID }) {
-            message = CameraEndpointError.invalidIdentity.localizedDescription; return nil
+            message = TransferFailureMessage.describe(CameraEndpointError.invalidIdentity); return nil
         }
         stop()
         return CameraConnectionChoice(host: "", service: service, expectedResponderGUID: expectedResponderGUID)
@@ -90,13 +90,13 @@ struct CameraConnectionChoice {
     func selectProfile(responderGUID: String) -> CameraConnectionChoice? {
         do {
             guard let entry = try history.select(responderGUID: responderGUID) else {
-                message = "此相机尚无成功连接的地址；请明确选择 Bonjour 服务或输入地址后连接，不会自动扫描网段。"
+                message = "@ztr|no_verified_route"
                 return nil
             }
             let address = try CameraEndpointAddress.parse(entry.address.host)
             stop()
             return CameraConnectionChoice(host: address.host, service: nil, expectedResponderGUID: entry.responderGUID)
-        } catch { message = error.localizedDescription; return nil }
+        } catch { message = TransferFailureMessage.describe(error); return nil }
     }
     func forgetProfile(responderGUID: String, confirmed: Bool) throws {
         guard confirmed else { throw CameraEndpointError.confirmationRequired }

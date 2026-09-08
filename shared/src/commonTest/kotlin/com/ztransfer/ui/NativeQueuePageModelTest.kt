@@ -12,6 +12,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class NativeQueuePageModelTest {
+    @Test fun memoryPressureRejectsLateImageWithoutTouchingQueueActions() {
+        val platform = Platform()
+        val model = NativeQueuePageModel("camera", platform)
+        model.publish(snapshot())
+        val before = model.state.value
+        val image = start { model.thumbnail(before.tasks.single().file) }
+        val old = platform.imageCompletion!!
+        val action = start { model.start() }
+        model.releaseImageMemory()
+        assertEquals(1L, model.memoryRevision.value)
+        assertSame(before, model.state.value)
+        assertTrue(image.result!!.isFailure)
+        old.complete(byteArrayOf(1))
+        platform.completion!!.complete(true)
+        assertTrue(action.result!!.isSuccess)
+        model.close(); model.releaseImageMemory()
+        assertEquals(1L, model.memoryRevision.value)
+    }
     private class Platform : NativeQueuePagePlatform {
         override fun showConnectionHelp() {}
         var completion: NativeQueueActionCompletion? = null

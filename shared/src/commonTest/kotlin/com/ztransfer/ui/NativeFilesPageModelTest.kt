@@ -8,6 +8,16 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun memoryPressureDoesNotChangeCatalogQueueOrPreferencesAndCannotReviveClosedPage() {
+        val m = model(); m.finishScan(m.beginScan(), snapshot())
+        val before = m.state.value
+        val preferences = m.filters.value
+        m.releaseImageMemory()
+        assertEquals(1L, m.memoryRevision.value)
+        assertSame(before, m.state.value); assertEquals(preferences, m.filters.value)
+        m.close(); m.releaseImageMemory()
+        assertEquals(1L, m.memoryRevision.value)
+    }
     @Test fun automaticArrivalRequiresBothCatalogIntentAndOneActualQueuePublication() {
         val m = model(); m.finishScan(m.beginScan(), snapshot())
         val file = m.state.value.files.first()

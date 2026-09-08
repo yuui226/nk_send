@@ -11,7 +11,9 @@ internal class NativeGridImages(private val model: NativeFilesPageModel) : Thumb
     private val cache = LinkedHashMap<CameraFileInfo, ImageBitmap>()
     private var bytes = 0L
     private var closed = false
-    fun close() { closed = true; cache.clear(); bytes = 0L }
+    private var memoryEpoch by mutableLongStateOf(0L)
+    fun releaseMemory() { memoryEpoch++; cache.clear(); bytes = 0L }
+    fun close() { closed = true; releaseMemory() }
     fun preview(reads: NativePreviewReadSession, files: List<CameraFileInfo>) = NativePreviewBitmaps(reads, this, files)
     fun cached(file: CameraFileInfo): ImageBitmap? =
         if (closed) null else cache.remove(file)?.also { cache[file] = it }
@@ -20,12 +22,13 @@ internal class NativeGridImages(private val model: NativeFilesPageModel) : Thumb
     private data class Loaded(val bitmap: ImageBitmap?, val retryable: Boolean)
     private suspend fun load(file: CameraFileInfo, allowRemote: Boolean): Loaded {
         if (closed) return Loaded(null, false)
+        val epoch = memoryEpoch
         val result = model.thumbnail(file, allowRemote)
         val bitmap = result.bytes?.let { encoded ->
             withContext(Dispatchers.Default) { decodeNativePreviewBitmap(encoded, maxEdge = 512) }
         }
         currentCoroutineContext().ensureActive()
-        if (closed) return Loaded(null, false)
+        if (closed || epoch != memoryEpoch) return Loaded(null, false)
         bitmap?.let { store(file, it) }
         return Loaded(bitmap, result.retryable)
     }
@@ -45,8 +48,8 @@ internal class NativeGridImages(private val model: NativeFilesPageModel) : Thumb
     @Composable override fun stack(file: CameraFileInfo, transfersBusy: Boolean, loadEnabled: Boolean, allowRemoteThumbnail: Boolean): ImageBitmap? =
         image(file, transfersBusy, loadEnabled, allowRemoteThumbnail)
     @Composable private fun image(file: CameraFileInfo, busy: Boolean, enabled: Boolean, remote: Boolean): ImageBitmap? {
-        var bitmap by remember(file) { mutableStateOf(cached(file)) }
-        LaunchedEffect(file, busy, enabled, remote) {
+        var bitmap by remember(file, memoryEpoch) { mutableStateOf(cached(file)) }
+        LaunchedEffect(file, busy, enabled, remote, memoryEpoch) {
             if (enabled && bitmap == null) {
                 repeat(8) { attempt ->
                     try {

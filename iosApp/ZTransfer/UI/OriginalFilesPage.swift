@@ -81,7 +81,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         guard !closed, directoryPicker == nil, directorySelection != nil,
               let presenter = queuePage.presenter, presenter.viewIfLoaded?.window != nil,
               presenter.presentedViewController == nil else {
-            _ = model.directory.finish(requestId: requestId, message: "当前无法打开系统目录选择器，请关闭其它系统窗口后重试。")
+            _ = model.directory.finish(requestId: requestId, message: "@ztr|system_busy")
             return
         }
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
@@ -631,6 +631,10 @@ extension OriginalFilesPageBridge: NativeOriginalActionsPlatform {
             failedCount: Int32(items.count), cancelled: true, message: nil); return }
         originalActions.perform(action, items: items, presenter: queuePage.presenter, completion: completion)
     }
+    func openOriginalActionSettings() {
+        guard !closed, let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
     func cancelOriginalActions() { originalActions.close() }
 }
 
@@ -656,7 +660,7 @@ final class OriginalActionPresenter: NSObject, UIDocumentPickerDelegate {
               let source = source as? OriginalFilesReusing,
               let presenter, presenter.viewIfLoaded?.window != nil, presenter.presentedViewController == nil else {
             completion.complete(succeededIndices: KotlinIntArray(size: 0), failedCount: Int32(items.count),
-                cancelled: false, message: "暂不能操作这些原片，请关闭其它系统窗口或检查保存目录。 / Check the source and close other system windows.")
+                cancelled: false, message: "@ztr|action_unavailable")
             return
         }
         self.completion = completion; failures = 0; preparedIndices = []
@@ -684,12 +688,12 @@ final class OriginalActionPresenter: NSObject, UIDocumentPickerDelegate {
             if action == "photos" || Task.isCancelled || closed || urls.isEmpty {
                 finish(confirmed, cancelled: Task.isCancelled || closed,
                     message: action == "photos"
-                        ? "图库接收结果已返回；不支持的 RAW/视频可改用分享或 Files，原文件保留。 / Originals are retained; unsupported media can be exported via Share or Files."
-                        : "导出准备已结束或取消，原文件保留；未收到系统回执的项目不计成功。 / Export preparation ended; originals retained. Unconfirmed items are not counted as successful.")
+                        ? "@ztr|photos_receipt"
+                        : "@ztr|export_ended")
                 return
             }
             guard presenter.viewIfLoaded?.window != nil, presenter.presentedViewController == nil else {
-                failures += urls.count; finish([], cancelled: false, message: "系统窗口暂不可用。 / System presentation unavailable.")
+                failures += urls.count; finish([], cancelled: false, message: "@ztr|system_busy")
                 return
             }
             if action == "share" {
@@ -700,7 +704,7 @@ final class OriginalActionPresenter: NSObject, UIDocumentPickerDelegate {
                         if error != nil { self.failures += self.preparedIndices.count }
                         self.finish(completed && error == nil ? self.preparedIndices : [],
                             cancelled: !completed && error == nil,
-                            message: "系统分享回执不代表接收方持久保存或云端同步完成。 / System activity receipt does not verify recipient storage or cloud sync.")
+                            message: "@ztr|share_receipt")
                     }
                 }
                 if let popover = sheet.popoverPresentationController {
@@ -727,7 +731,7 @@ final class OriginalActionPresenter: NSObject, UIDocumentPickerDelegate {
         let complete = urls.count == preparedIndices.count && Set(urls).count == urls.count
         // A partial receipt has no stable per-source mapping. Do not invent which file succeeded.
         finish(complete ? preparedIndices : [], cancelled: false,
-            message: "Files 返回 \(urls.count)/\(preparedIndices.count) 个结果；不代表云端同步完成。部分回执请核对目标，不自动重试。 / Files returned \(urls.count)/\(preparedIndices.count) results; verify partial receipts before retrying.")
+            message: "@ztr|files_receipt|\(urls.count)/\(preparedIndices.count)")
     }
     private func finish(_ indices: [Int], cancelled: Bool, message: String?) {
         guard let callback = completion else { return }

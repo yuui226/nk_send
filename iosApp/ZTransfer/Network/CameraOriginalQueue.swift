@@ -313,7 +313,7 @@ actor CameraOriginalQueue {
             core.completed(taskId: task.taskId, bytes: saved.bytes,
                            elapsedMs: Int64((ProcessInfo.processInfo.systemUptime - began) * 1000))
         } catch {
-            core.failed(taskId: task.taskId, message: error.localizedDescription, cancelled: Task.isCancelled)
+            core.failed(taskId: task.taskId, message: TransferFailureMessage.describe(error), cancelled: Task.isCancelled)
             let state = await camera.snapshot()
             if Task.isCancelled || state.phase != .ready { core.pauseAfterCurrent() }
         }

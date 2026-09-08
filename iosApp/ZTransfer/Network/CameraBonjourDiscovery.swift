@@ -79,7 +79,7 @@ private final class AppleCameraBonjourBrowser: CameraBonjourBrowser {
         browser.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready: self?.onState?(.ready)
-            case .waiting(let error), .failed(let error): self?.onState?(.issue(error.localizedDescription))
+            case .waiting(let error), .failed(let error): self?.onState?(.issue(TransferFailureMessage.describe(error)))
             default: break
             }
         }
@@ -175,7 +175,7 @@ final class CameraBonjourDiscovery: @unchecked Sendable {
         let message: String?
         if !issues.isEmpty { message = issues.keys.sorted().compactMap { issues[$0] }.joined(separator: "；") }
         else if browsers.isEmpty && candidates.isEmpty {
-            message = "未发现 Bonjour 相机服务。可能未广播、Wi-Fi 不同或权限未允许；仍可输入 IP，不能据此判定拒绝授权。"
+            message = "@ztr|no_services"
         } else { message = nil }
         continuation.yield(CameraBonjourSnapshot(services: candidates, searching: !browsers.isEmpty, message: message))
     }

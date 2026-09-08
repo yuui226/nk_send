@@ -1,10 +1,110 @@
 import Foundation
 import Network
 import XCTest
+import UIKit
 import ZTransferShared
 @testable import ZTransfer
 
 final class CameraWorkspaceTests: XCTestCase {
+    func testRecoveryJournalFencesGenerationAndDoesNotPersistByteTicks() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("recovery.json"), journal = TransferRecoveryJournal(file: url)
+        let id = UUID(), other = UUID()
+        await journal.activate(id)
+        try await journal.record(recoverySnapshot(id, sequence: 1, history: 1), responderGUID: "camera")
+        let bytes = try Data(contentsOf: url)
+        try await journal.record(recoverySnapshot(id, sequence: 2, history: 1), responderGUID: "camera")
+        try await journal.record(recoverySnapshot(other, sequence: 3, history: 2), responderGUID: "other")
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+        let read = try await journal.read()
+        XCTAssertEqual(read?.pending.first?.name, "DSC.JPG")
+        XCTAssertFalse(String(data: bytes, encoding: .utf8)!.contains("handle"))
+        try await journal.resetAfterConfirmation()
+        try await journal.record(recoverySnapshot(id, sequence: 4, history: 3), responderGUID: "camera")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path).count, 1)
+    }
+    func testRecoveryJournalPreservesUnknownCorruptAndOversizedRecords() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("recovery.json"), journal = TransferRecoveryJournal(file: url)
+        let id = UUID()
+        await journal.activate(id)
+        for bytes in [Data("broken".utf8), Data(repeating: 65, count: 512 * 1024 + 1)] {
+            try bytes.write(to: url)
+            do { _ = try await journal.read(); XCTFail("Unsafe record accepted") } catch {}
+            do { try await journal.record(recoverySnapshot(id, sequence: 1, history: 1), responderGUID: nil)
+                XCTFail("Unsafe record overwritten") } catch {}
+            XCTAssertEqual(try Data(contentsOf: url), bytes)
+        }
+        let future = TransferRecoveryJournal.Document(version: 2, connectionID: id, responderGUID: nil,
+            sequence: 1, completed: 0, paused: true, truncated: false, pending: [])
+        let bytes = try JSONEncoder().encode(future)
+        try bytes.write(to: url)
+        do { _ = try await journal.read(); XCTFail("Future record accepted") } catch {}
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+    }
+    func testRecoveryJournalBoundsPendingRowsWithoutClaimingResume() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let journal = TransferRecoveryJournal(file: root.appendingPathComponent("recovery.json")), id = UUID()
+        await journal.activate(id)
+        try await journal.record(recoverySnapshot(id, sequence: 1, history: 1, count: 501), responderGUID: nil)
+        let read = try await journal.read()
+        XCTAssertEqual(read?.pending.count, 500); XCTAssertEqual(read?.truncated, true)
+        XCTAssertEqual(read?.completed, 0); XCTAssertEqual(read?.paused, true)
+    }
+    private func recoverySnapshot(_ id: UUID, sequence: UInt64, history: UInt64, count: Int = 1) -> OriginalQueueSnapshot {
+        let row = OriginalQueueRow(id: 1, name: "DSC.JPG", handle: 123, size: 1024, captureDate: nil,
+            isProtected: false, storageIDs: [1], destinationFolderName: nil, status: "WAITING", skipped: false,
+            downloaded: 0, fraction: 0, bytesPerSecond: 0, error: nil, elapsedMs: nil, downloadMBps: 0)
+        return OriginalQueueSnapshot(connectionID: id, sequence: sequence, historyRevision: history,
+            completedOriginalRevision: 0, rows: Array(repeating: row, count: count), running: false, paused: true)
+    }
+    func testFailureCodesDistinguishPermissionTimeoutCancellationAndStorageWithoutPaths() {
+        XCTAssertEqual(TransferFailureMessage.describe(CameraStreamError.timedOut), "@ztr|timeout")
+        XCTAssertEqual(TransferFailureMessage.describe(CameraStreamError.localNetworkDenied), "@ztr|network_denied")
+        XCTAssertEqual(TransferFailureMessage.describe(CancellationError()), "@ztr|cancelled")
+        let disk = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteOutOfSpaceError,
+            userInfo: [NSFilePathErrorKey: "/private/GPS/secret.JPG"])
+        XCTAssertEqual(TransferFailureMessage.describe(disk), "@ztr|disk_full")
+        let denied = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+        XCTAssertEqual(TransferFailureMessage.describe(denied), "@ztr|permission")
+        let unknown = NSError(domain: "private-camera-secret", code: 123, userInfo: disk.userInfo)
+        XCTAssertEqual(TransferFailureMessage.describe(unknown), "@ztr|failed|123")
+    }
+    @MainActor func testBackgroundLeaseEndsExactlyOnceAndIgnoresOldExpiration() {
+        var callbacks: [() -> Void] = [], ended: [Int] = [], expired = 0
+        let lease = SessionBackgroundLease(start: { callbacks.append($0); return callbacks.count },
+            finish: { ended.append($0) })
+        lease.begin { expired += 1 }; lease.begin { expired += 1 }
+        XCTAssertEqual(callbacks.count, 1)
+        lease.end(); lease.end()
+        XCTAssertEqual(ended, [1])
+        lease.begin { expired += 1 }
+        callbacks[0](); XCTAssertTrue(lease.isActive); XCTAssertEqual(expired, 0)
+        callbacks[1](); XCTAssertFalse(lease.isActive)
+        XCTAssertEqual(ended, [1, 2]); XCTAssertEqual(expired, 1)
+    }
+    @MainActor func testBackgroundLeaseHandlesImmediateExpirationAndRejectedBudget() {
+        var ended: [Int] = [], expired = 0
+        let immediate = SessionBackgroundLease(start: { $0(); return 7 }, finish: { ended.append($0) })
+        immediate.begin { expired += 1 }; immediate.end()
+        XCTAssertEqual(expired, 1); XCTAssertEqual(ended, [7]); XCTAssertFalse(immediate.isActive)
+        let rejected = SessionBackgroundLease(start: { _ in UIBackgroundTaskIdentifier.invalid.rawValue },
+            finish: { _ in XCTFail("Invalid lease cannot be ended") })
+        rejected.begin {}; XCTAssertFalse(rejected.isActive); rejected.end()
+    }
+    @MainActor func testForegroundReturnDoesNotReconnectOrStartPausedTasks() {
+        let workspace = CameraWorkspaceBridge()
+        workspace.enterBackground()
+        XCTAssertFalse(workspace.connectCamera(address: "camera.local", stationMode: false, allowPairing: false, requestId: 1))
+        workspace.enterForeground()
+        XCTAssertFalse(workspace.session.running); XCTAssertFalse(workspace.session.sessionReady)
+        workspace.close()
+    }
     @MainActor func testClosingWorkspaceCancelsPendingConnectionAndNeverCreatesPages() async throws {
         let owner = CameraHandshakeProbe(), workspace = CameraWorkspaceBridge(session: nil)
         workspace.close()

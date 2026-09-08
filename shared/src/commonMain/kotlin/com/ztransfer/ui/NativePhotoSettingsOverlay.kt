@@ -51,13 +51,13 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
             Spacer(Modifier.height(14.dp))
             // All three controls use the same preferences document and existing transfer queue.
             SharedSettingsCard {
-                SharedTransferDirectoryHeader(directory.description, false, text, model.directory::choose)
+                SharedTransferDirectoryHeader(directory.description?.let { NativeTransferMessages.render(it, appearanceState.resolvedLanguage) }, false, text, model.directory::choose)
                 TextButton(enabled = !directory.selecting, onClick = { confirmSandbox = true }) {
                     Text(nativeActionText(appearanceState.resolvedLanguage, "切回应用目录 / 修复保存目标", "Use app storage / repair destination", "切回應用程式目錄 / 修復儲存目標"))
                 }
                 if (directory.selecting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 directory.message?.let {
-                    Text(it, color = AppTheme.colors.accentOrange, style = MaterialTheme.typography.bodySmall)
+                    Text(NativeTransferMessages.render(it, appearanceState.resolvedLanguage), color = AppTheme.colors.accentOrange, style = MaterialTheme.typography.bodySmall)
                 }
                 SharedCardDivider()
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {

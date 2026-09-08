@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        7A1200000000000000000092 = {isa = PBXBuildFile; fileRef = 7A120000000000000000008E; };
+        7A120000000000000000008C = {isa = PBXBuildFile; fileRef = 7A120000000000000000008D; };
+        7A120000000000000000008A = {isa = PBXBuildFile; fileRef = 7A120000000000000000008B; };
         7A120000000000000000007E = {isa = PBXBuildFile; fileRef = 7A120000000000000000007F; };
         7A1200000000000000000080 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000081; };
         7A1200000000000000000082 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000083; };
@@ -61,6 +64,12 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        7A120000000000000000008F = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "en"; path = "Configuration/en.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+        7A1200000000000000000090 = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "Configuration/zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+        7A1200000000000000000091 = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hant"; path = "Configuration/zh-Hant.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+
+        7A120000000000000000008D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/TransferFailureMessage.swift; sourceTree = "<group>"; };
+        7A120000000000000000008B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/TransferRecoveryJournal.swift; sourceTree = "<group>"; };
         7A120000000000000000007F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/CameraWorkspace.swift; sourceTree = "<group>"; };
         7A1200000000000000000081 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network/CameraEndpointHistory.swift; sourceTree = "<group>"; };
         7A1200000000000000000083 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network/CameraDiscoveryCoordinator.swift; sourceTree = "<group>"; };
@@ -182,6 +191,9 @@
 				7A120000000000000000006D /* ProviderOriginalStore.swift */,
 				7A1200000000000000000071 /* IndexedOriginalReader.swift */,
 				7A1200000000000000000073 /* OriginalFilesReading.swift */,
+                7A120000000000000000008B /* TransferRecoveryJournal.swift */,
+                7A120000000000000000008D /* TransferFailureMessage.swift */,
+                7A120000000000000000008E /* InfoPlist.strings */,
 				7A1200000000000000000067 /* CameraThumbnailDiskCache.swift */,
 				7A1200000000000000000065 /* PrivacyInfo.xcprivacy */,
 				7A120000000000000000005D /* OriginalQueuePage.swift */,
@@ -198,6 +210,9 @@
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
+/* Begin PBXVariantGroup section */
+        7A120000000000000000008E = {isa = PBXVariantGroup; children = (7A120000000000000000008F, 7A1200000000000000000090, 7A1200000000000000000091,); name = InfoPlist.strings; sourceTree = "<group>"; };
+/* End PBXVariantGroup section */
 
 /* iOS network tests: built by the shared scheme against the real application/framework. */
 		7A1200000000000000000021 /* ZTransferTests */ = {
@@ -347,6 +362,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				7A1200000000000000000064 /* PrivacyInfo.xcprivacy */,
+                7A1200000000000000000092 /* InfoPlist.strings */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -418,6 +434,8 @@
 				7A120000000000000000006C /* ProviderOriginalStore.swift in Sources */,
 				7A1200000000000000000070 /* IndexedOriginalReader.swift in Sources */,
 				7A1200000000000000000072 /* OriginalFilesReading.swift in Sources */,
+                7A120000000000000000008A /* TransferRecoveryJournal.swift in Sources */,
+                7A120000000000000000008C /* TransferFailureMessage.swift in Sources */,
 				7A1200000000000000000054 /* BluetoothProbeView.swift in Sources */,
 				7A1200000000000000000050 /* NikonGpsGattConnection.swift in Sources */,
 				7A1200000000000000000052 /* AppleNikonGpsGattDriver.swift in Sources */,
@@ -475,11 +493,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Z传";
 				INFOPLIST_FILE = ZTransfer/Configuration/Info.plist;
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "用于连接尼康相机并写入 GPS 信息。";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接尼康相机并传输照片和视频。";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于将手机定位信息写入相机照片。";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于为手机端监看录像录制声音。";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于把相机照片、视频和效果图保存到照片图库。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于通过相机热点或同一局域网连接尼康相机、浏览并传输您选择的照片和视频。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "仅用于把您选择的已保存相机原片和视频添加到照片图库；不会读取或管理相册。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -514,11 +529,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Z传";
 				INFOPLIST_FILE = ZTransfer/Configuration/Info.plist;
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "用于连接尼康相机并写入 GPS 信息。";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于连接尼康相机并传输照片和视频。";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于将手机定位信息写入相机照片。";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于为手机端监看录像录制声音。";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于把相机照片、视频和效果图保存到照片图库。";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "用于通过相机热点或同一局域网连接尼康相机、浏览并传输您选择的照片和视频。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "仅用于把您选择的已保存相机原片和视频添加到照片图库；不会读取或管理相册。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

@@ -28,7 +28,7 @@ class DirectoryUIWiringTest(unittest.TestCase):
         card = read(CONTROLS).split('fun SharedTransferDirectorySettingsCard(', 1)[1]
         self.assertIn('SharedTransferDirectoryHeader(dirText, directoryAttentionActive, text, selectDirectory)', card)
         native = read(COMMON + 'NativePhotoSettingsOverlay.kt')
-        self.assertIn('SharedTransferDirectoryHeader(directory.description, false, text, model.directory::choose)', native)
+        self.assertIn('SharedTransferDirectoryHeader(directory.description?.let { NativeTransferMessages.render(it, appearanceState.resolvedLanguage) }, false, text, model.directory::choose)', native)
         # This historical stage had no automatic control; the later batch verifies its real wiring.
         from parallel_batch_wiring import previous_parallel_batch_source
         self.assertNotIn('SettingsTextKey.auto_transfer_new_media',

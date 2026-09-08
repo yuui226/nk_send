@@ -916,7 +916,7 @@ actor CameraWiFiConnection {
 
     func snapshot() -> CameraConnectionSnapshot {
         CameraConnectionSnapshot(connectionID: connectionID, phase: phase, eventRevision: eventRevision,
-                         errorDescription: terminalError?.localizedDescription)
+                         errorDescription: terminalError.map(TransferFailureMessage.describe))
     }
 
     private func identifiers(operation: Int32, parameters: [Int32]) async throws -> [Int32] {
@@ -1040,7 +1040,7 @@ actor CameraWiFiConnection {
         handle: Int32, declaredSize: Int64, resumeOffset: Int64 = 0,
         highThroughput: Bool = false,
         onProgress: ((CameraDownloadProgress) -> Void)? = nil,
-        consume: (Data) throws -> Void
+        consume: @escaping (Data) throws -> Void
     ) async throws -> CameraDownloadStats {
         try requirePhase(.ready)
         guard resumeOffset >= 0 else { throw CameraStreamError.invalidArgument }

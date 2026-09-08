@@ -93,6 +93,15 @@ class AutomaticLoopWiringTest(unittest.TestCase):
             "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeDirectorySettingsModelTest.kt",
             "shared/src/iosMain/kotlin/com/ztransfer/ui/NativeConnectionHomeController.kt",
             "shared/src/iosMain/kotlin/com/ztransfer/ui/SharedUiController.kt"})
+        allowed.update({
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeBrowseSession.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeProductInformation.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeOriginalActionsTest.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeOriginalActions.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeRecoveryRecord.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeTransferMessages.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeTransferMessagesTest.kt",
+            "shared/src/iosMain/kotlin/com/ztransfer/ui/NativeGridImages.kt"})
         self.assertLessEqual(set(changes.splitlines()), allowed)
 
 

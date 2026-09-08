@@ -123,6 +123,11 @@ actor PtpIPChannel {
         try await stream.write(Self.data(packet), timeout: timeout)
     }
 
+    func sendCancel(transactionID: Int32, timeout: TimeInterval) async throws {
+        let packet = PtpIpProtocolCodec.shared.encodeCancelRequest(transactionId: transactionID)
+        try await stream.write(Self.data(packet), timeout: timeout)
+    }
+
     func sendPong(timeout: TimeInterval) async throws {
         let packet = PtpIpPacketCodec.shared.encode(type: PtpConstants.shared.PONG, payload: nil)
         try await stream.write(Self.data(packet), timeout: timeout)

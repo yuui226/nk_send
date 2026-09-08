@@ -132,11 +132,11 @@ actor PtpIPCommandSession {
     func close() { terminate(CameraStreamError.closed) }
 
     /// One complete data-in transaction. Response is always consumed after END_DATA, and media
-    /// bytes never cross Kotlin/ObjC. On sink failure/cancellation, close rather than reuse a
-    /// partially consumed frame. Android's optional Cancel/drain recovery remains a later task.
+    /// bytes never cross Kotlin/ObjC. Cancellation/sink failure sends shared Cancel and drains
+    /// under the same gate; malformed/truncated/over-budget streams are never reused.
     func executeStreaming(
         operationCode: Int32, parameters: [Int32], idleTimeout: TimeInterval = 30,
-        maximumBytes: Int64 = Int64.max, consume: (Data) throws -> Void
+        maximumBytes: Int64 = Int64.max, consume: @escaping (Data) throws -> Void
     ) async throws -> PtpIPStreamResult {
         guard idleTimeout.isFinite, idleTimeout > 0, maximumBytes >= 0,
               (0...0xFFFF).contains(operationCode), parameters.count <= 5 else {
@@ -154,11 +154,30 @@ actor PtpIPCommandSession {
         if let terminalError { throw terminalError }
         lastTransactionId &+= 1
         let transactionID = lastTransactionId
+        let recovery = StreamingAbortRecovery(channel: channel, stream: stream, transactionID: transactionID)
+        // An unstructured child deliberately does NOT inherit caller cancellation. The caller
+        // still awaits its terminal result while holding the gate; no detached transaction escapes.
+        let operation = Task {
+            try await self.streamingTransaction(operationCode: operationCode, parameters: parameters,
+                idleTimeout: idleTimeout, maximumBytes: maximumBytes, transactionID: transactionID,
+                recovery: recovery, consume: consume)
+        }
+        return try await withTaskCancellationHandler(operation: {
+            try await operation.value
+        }, onCancel: { recovery.request(CancellationError()) })
+    }
+
+    private func streamingTransaction(operationCode: Int32, parameters: [Int32], idleTimeout: TimeInterval,
+        maximumBytes: Int64, transactionID: Int32, recovery: StreamingAbortRecovery,
+        consume: @escaping (Data) throws -> Void) async throws -> PtpIPStreamResult {
+        var drained = false
+        var discarded: Int64 = 0
         var written: Int64 = 0
         var declared: Int64 = -1
         do {
             try await channel.sendCommand(operationCode: operationCode, transactionId: transactionID,
                                            parameters: parameters, timeout: idleTimeout)
+            recovery.arm() // Cancel cannot race the command write or target the preceding TID.
             while true {
                 try Task.checkCancellation()
                 var frameType: Int32 = 0
@@ -189,8 +208,16 @@ actor PtpIPCommandSession {
                             let data = Data(chunk.dropFirst(prefixCount))
                             guard Int64(data.count) <= maximumBytes - written else { throw PtpIPSessionError.metadataLimit }
                             if !data.isEmpty {
-                                try consume(data)
-                                written += Int64(data.count)
+                                if recovery.error == nil {
+                                    do { try consume(data); written += Int64(data.count) }
+                                    catch { recovery.request(error) }
+                                }
+                                if recovery.error != nil {
+                                    discarded += Int64(chunk.count)
+                                    guard discarded <= StreamingAbortRecovery.byteBudget else {
+                                        throw PtpIPSessionError.metadataLimit
+                                    }
+                                }
                             }
                         } else {
                             control.append(chunk)
@@ -201,6 +228,9 @@ actor PtpIPCommandSession {
                 case PtpConstants.shared.CMD_RESPONSE:
                     guard let response = PtpIPChannel.operationResponse(control) else { throw PtpIPSessionError.malformedResponse }
                     guard response.transactionId == transactionID else { throw PtpIPSessionError.wrongTransaction }
+                    drained = true
+                    await recovery.finish()
+                    if let error = recovery.error { throw error }
                     return PtpIPStreamResult(code: response.code, bytes: written, declaredBytes: declared)
                 case PtpConstants.shared.START_DATA_PACKET:
                     guard let start = PtpIPChannel.dataStart(control) else { throw PtpIPSessionError.malformedResponse }
@@ -212,8 +242,9 @@ actor PtpIPCommandSession {
                 }
             }
         } catch {
-            terminate(error)
-            throw error
+            await recovery.finish()
+            if !drained || recovery.connectionPoisoned { terminate(error) }
+            throw recovery.error ?? error
         }
     }
 
@@ -287,4 +318,61 @@ actor PtpIPCommandSession {
         waiters.removeAll()
         for waiter in pending { waiter.continuation.resume(throwing: error) }
     }
+}
+
+
+/// Bounded recovery for one TID. The lock only protects tiny state; no socket work runs under it.
+private final class StreamingAbortRecovery: @unchecked Sendable {
+    static let byteBudget: Int64 = 32 * 1024 * 1024 // Android CANCEL_DRAIN_BUDGET.
+    static let timeoutNanoseconds: UInt64 = 3_000_000_000 // Android 3-second drain safety boundary.
+    private let lock = NSLock()
+    private let channel: PtpIPChannel
+    private let stream: CameraTCPStream
+    private let transactionID: Int32
+    private var failure: Error?
+    private var poisoned = false
+    private var armed = false
+    private var finished = false
+    private var sender: Task<Void, Never>?
+    private var watchdog: Task<Void, Never>?
+    init(channel: PtpIPChannel, stream: CameraTCPStream, transactionID: Int32) {
+        self.channel = channel; self.stream = stream; self.transactionID = transactionID
+    }
+    var error: Error? { lock.lock(); defer { lock.unlock() }; return failure }
+    var connectionPoisoned: Bool { lock.lock(); defer { lock.unlock() }; return poisoned }
+    func request(_ error: Error) {
+        lock.lock(); defer { lock.unlock() }
+        guard !finished else { return }
+        if failure == nil { failure = error }
+        startLocked()
+    }
+    func arm() {
+        lock.lock(); defer { lock.unlock() }
+        armed = true; startLocked()
+    }
+    private func startLocked() {
+        guard armed, failure != nil, sender == nil, !finished else { return }
+        watchdog = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: Self.timeoutNanoseconds) } catch { return }
+            self?.expire()
+        }
+        sender = Task { [weak self, channel, transactionID] in
+            do { try await channel.sendCancel(transactionID: transactionID, timeout: 3) }
+            catch { self?.closePoisoned() }
+        }
+    }
+    private func expire() {
+        lock.lock(); defer { lock.unlock() }
+        if !finished { poisoned = true; stream.close() }
+    }
+    private func closePoisoned() {
+        lock.lock(); defer { lock.unlock() }
+        poisoned = true; stream.close()
+    }
+    private func end() -> Task<Void, Never>? {
+        lock.lock(); defer { lock.unlock() }
+        finished = true; watchdog?.cancel(); watchdog = nil
+        return sender
+    }
+    func finish() async { await end()?.value }
 }

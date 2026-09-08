@@ -31,6 +31,7 @@ internal fun NativeOriginalQueuePage(
     thumbnail: @Composable (CameraFileInfo, Boolean, Modifier) -> Unit,
     showContent: Boolean = true,
     showControls: Boolean = true,
+    language: String = "zh-Hans",
 ) {
     val state by model.state.collectAsState()
     val connected by model.connected.collectAsState()
@@ -46,7 +47,7 @@ internal fun NativeOriginalQueuePage(
     LaunchedEffect(executionControl) {
         executionControl?.let { retainedExecutionControl = it }
     }
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().navigationBarsPadding()) {
         if (showContent) SharedTransferScreen(
             state, connected, controlNonce, model.activeProgress, elapsedRealtimeMs,
             // The original-only coordinator does not yet have a local-original export index.
@@ -68,14 +69,14 @@ internal fun NativeOriginalQueuePage(
                         task.downloaded > 0 -> formatFileSizeText(task.downloaded, model::fixed)
                         else -> "—"
                     },
-                    failureText = task.error ?: text.failed,
+                    failureText = task.error?.let { NativeTransferMessages.render(it, language) } ?: text.failed,
                 ), modifier)
             },
         )
         if (showControls) Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             GlassButton(onClick = onBack, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
-                enforceMinimumTouchTarget = false, modifier = Modifier.height(36.dp)) {
+                enforceMinimumTouchTarget = true, modifier = Modifier.heightIn(min = 48.dp)) {
                 Icon(Icons.Default.ArrowBack, text.back, tint = colors.onBackground, modifier = Modifier.size(22.dp))
             }
             Spacer(Modifier.width(8.dp))

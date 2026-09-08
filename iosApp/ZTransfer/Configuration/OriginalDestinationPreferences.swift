@@ -53,7 +53,7 @@ final class OriginalDestinationPreferences {
         }
         do {
             guard selected == .provider else {
-                throw OriginalDestinationUnavailable(message: "保存目标偏好无法读取；请明确重新选择目标。原数据保留，未自动切回沙盒。")
+                throw OriginalDestinationUnavailable(message: "@ztr|destination_unknown")
             }
             let store = try directory()
             // Bind this connection before it is exposed to admissions; never reuse the last connection's actor.
@@ -66,7 +66,7 @@ final class OriginalDestinationPreferences {
         } catch {
             if error is CancellationError { throw error }
             try Task.checkCancellation() // Cancellation aborts restoration, not a recoverable target error.
-            let message = "保存目标未恢复：\(error.localizedDescription) 请重选目录或明确切回沙盒。"
+            let message = "@ztr|destination_repair"
             return RestoredOriginalDestination(destination: UnavailableOriginalDestination(message: message),
                 provider: nil, selected: selected, failure: message)
         }
