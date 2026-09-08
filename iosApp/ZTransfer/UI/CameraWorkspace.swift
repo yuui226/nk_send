@@ -15,9 +15,11 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
     private var closed = false
     private var pendingFilesNavigation = false
     private var expectedResponderGUID: String?
+    private let connectionPreferences: CameraConnectionPreferences
 
-    init(session: CameraHandshakeProbe? = nil) {
+    init(session: CameraHandshakeProbe? = nil, connectionPreferences: CameraConnectionPreferences? = nil) {
         self.session = session ?? CameraHandshakeProbe()
+        self.connectionPreferences = connectionPreferences ?? CameraConnectionPreferences()
         super.init()
         self.session.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
         self.session.$productState.sink { [weak self] value in
@@ -33,6 +35,9 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
             }
         }.store(in: &observations)
     }
+
+    func readConnectionMode() -> String? { connectionPreferences.read() }
+    func saveConnectionMode(stationMode: Bool) -> Bool { connectionPreferences.save(stationMode ? "sta" : "ap") }
 
     func connectCamera(address: String, stationMode: Bool, allowPairing: Bool, requestId: Int64) -> Bool {
         guard !closed else { return false }
@@ -181,6 +186,27 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
         pendingFilesNavigation = false
         discovery?.stop(); discoveryObservation = nil
         session.cancel(); observations.removeAll()
+    }
+}
+
+/// Presentation preference only. Never persist pairing permission, selected identity or a ready state.
+@MainActor final class CameraConnectionPreferences {
+    static let key = "ztransfer.connection.preferences"
+    private struct Document: Codable { let version: Int; let mode: String }
+    private let defaults: UserDefaults
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    func read() -> String? {
+        guard let raw = defaults.object(forKey: Self.key) else { return "ap" }
+        guard let bytes = raw as? Data, bytes.count <= 4096,
+              let value = try? JSONDecoder().decode(Document.self, from: bytes),
+              value.version == 1, ["ap", "sta"].contains(value.mode) else { return nil }
+        return value.mode
+    }
+    func save(_ mode: String) -> Bool {
+        guard read() != nil, ["ap", "sta"].contains(mode),
+              let bytes = try? JSONEncoder().encode(Document(version: 1, mode: mode)) else { return false }
+        defaults.set(bytes, forKey: Self.key)
+        return defaults.data(forKey: Self.key) == bytes
     }
 }
 

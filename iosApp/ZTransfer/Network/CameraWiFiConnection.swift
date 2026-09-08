@@ -159,6 +159,12 @@ actor CameraWiFiConnection {
     /// display name, Bonjour candidate or thumbnail-cache fallback containing a session UUID.
     func responderGUID() -> String? { phase == .ready ? verifiedResponderGUID : nil }
 
+    func resolvedRemoteHost() async -> String? {
+        guard phase == .ready else { return nil }
+        let host = await command.resolvedRemoteHost()
+        return phase == .ready ? host : nil
+    }
+
     private func initializeStation(options: StationConnectionOptions, responder: String?,
                                    hasMarker: ((String) throws -> Bool)?, acknowledged: ((String) throws -> Void)?) async throws {
         let policy = NikonStaBridge.shared

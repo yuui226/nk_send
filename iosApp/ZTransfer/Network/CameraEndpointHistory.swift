@@ -38,13 +38,19 @@ final class CameraEndpointHistory: @unchecked Sendable {
     private static let diskLock = NSLock()
     private let file: URL
     private let now: () -> Int64
-    init(file: URL, now: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }) throws {
+    init(file: URL, validateOnOpen: Bool = true,
+         now: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1_000) }) throws {
         guard file.isFileURL else { throw CameraEndpointError.corruptHistory }
         self.file = file; self.now = now
         Self.diskLock.lock(); defer { Self.diskLock.unlock() }
-        _ = try Self.read(file)
+        if validateOnOpen { _ = try Self.read(file) }
     }
     static func applicationStore() throws -> CameraEndpointHistory { try CameraEndpointHistory(file: applicationFile()) }
+    /// Discovery needs a handle even when metadata is damaged, so it can display valid identities
+    /// and offer explicit recovery. Every entries/select/write still validates the document.
+    static func applicationDiscoveryStore() throws -> CameraEndpointHistory {
+        try CameraEndpointHistory(file: applicationFile(), validateOnOpen: false)
+    }
     private static func applicationFile() throws -> URL {
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         return support.appendingPathComponent("ZTransfer/camera-endpoint-history.json")

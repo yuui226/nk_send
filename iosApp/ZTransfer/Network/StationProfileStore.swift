@@ -13,7 +13,7 @@ enum CameraStationError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unexpectedResponder: return "响应相机与选中的机身身份不符，已停止连接。"
-        case .pairingRequired: return "相机需要完成电脑模式配对，请先启用配对诊断并在相机端确认。"
+        case .pairingRequired: return "相机需要完成电脑模式配对，请勾选“允许首次电脑模式配对”，重试并在相机端确认。"
         case .albumUnavailable: return "STA 标准流程尚未取得可用相册；专用兼容/直接读取路径还未接入。"
         case .missingIdentity: return "相机未返回可持久保存的机身身份，不能确认配对。"
         case .corruptIdentityStore: return "本地相机身份文件无效；未重置身份或覆盖原文件。"
@@ -122,6 +122,8 @@ final class StationProfileStore: @unchecked Sendable {
     }
 
     private static func read(_ file: URL) throws -> Document {
+        let type = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard type.isRegularFile == true, type.isSymbolicLink != true else { throw CameraStationError.corruptIdentityStore }
         let length = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
         guard length <= 1024 * 1024 else { throw CameraStationError.corruptIdentityStore }
         let document = try JSONDecoder().decode(Document.self, from: Data(contentsOf: file))

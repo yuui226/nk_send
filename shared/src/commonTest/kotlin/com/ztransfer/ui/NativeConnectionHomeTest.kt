@@ -6,7 +6,61 @@ import com.ztransfer.ui.screen.homeSelectedConnection
 import kotlin.test.*
 
 class NativeConnectionHomeTest {
+    @Test fun apDefaultAddressRecoveryCannotChangeStationOrActiveSession() {
+        val m = NativeConnectionHomeModel(Platform())
+        m.editAddress("bad:15740"); m.connect(); assertEquals("failed", m.currentPhase())
+        m.resetApAddress(); assertEquals(com.ztransfer.protocol.PtpConstants.CAMERA_IP, m.currentAddress())
+        m.connect(); val address = m.currentAddress(); m.resetApAddress(); assertEquals(address, m.currentAddress())
+        m.publish(m.currentRequestId(), "failed", null); m.setStationMode(true); m.editAddress("camera.local")
+        m.resetApAddress(); assertEquals("camera.local", m.currentAddress())
+    }
+    @Test fun restoredModeDoesNotRestoreTrustPermissionOrReadyState() {
+        val p = Platform().apply { mode = "sta" }; val m = NativeConnectionHomeModel(p)
+        assertTrue(m.state.value.stationMode); assertFalse(m.state.value.allowPairing)
+        assertFalse(m.isReady()); assertEquals(0, p.starts)
+        m.setStationMode(false); assertEquals("ap", p.mode)
+        assertFalse(NativeConnectionHomeModel(p).state.value.stationMode)
+    }
+    @Test fun damagedModePreferencesStayUntouchedAndSurfaceFailure() {
+        val p = Platform().apply { mode = null; saveMode = false }; val m = NativeConnectionHomeModel(p)
+        assertTrue(m.state.value.preferencesUnavailable)
+        m.setStationMode(true)
+        assertTrue(m.state.value.stationMode); assertTrue(m.state.value.preferencesUnavailable)
+        assertNull(p.mode); assertEquals(0, p.starts)
+    }
+    @Test fun switchingModesNeverCarriesPairingOptInAcrossModes() {
+        val m = NativeConnectionHomeModel(Platform())
+        m.setStationMode(true); m.setAllowPairing(true); m.setStationMode(false); m.setStationMode(true)
+        assertFalse(m.state.value.allowPairing)
+    }
+    @Test fun pairingAcknowledgementIsTerminalButNotAReadyCameraSession() {
+        val p = Platform(); val m = NativeConnectionHomeModel(p)
+        m.setStationMode(true); m.setAllowPairing(true); m.connect()
+        val request = m.currentRequestId()
+        assertTrue(m.publish(request, "paired", "confirmed"))
+        assertFalse(m.isReady()); assertFalse(m.state.value.allowPairing)
+        m.openFiles(); m.openQueue(); assertEquals(0, p.files + p.queues)
+        assertFalse(m.publish(request, "ready", "late"))
+        m.connect(); assertTrue(m.currentRequestId() > request); assertFalse(p.pairing)
+    }
+    @Test fun cancelledPairingCannotPublishSuccess() {
+        val m = NativeConnectionHomeModel(Platform())
+        m.connect(); m.cancel(); assertFalse(m.publish(m.currentRequestId(), "paired", "late"))
+    }
+    @Test fun homeSupportsTraditionalChineseWithoutChangingSimplifiedOrEnglish() {
+        assertEquals("連接相機", NativeConnectionHomeText.label("zh-TW", "连接相机", "Connect camera"))
+        assertEquals("連接相機", NativeConnectionHomeText.label("zh-Hant", "连接相机", "Connect camera"))
+        assertEquals("连接相机", NativeConnectionHomeText.label("zh-CN", "连接相机", "Connect camera"))
+        assertEquals("Connect camera", NativeConnectionHomeText.label("en", "连接相机", "Connect camera"))
+    }
     private class Platform : NativeConnectionHomePlatform {
+        var mode: String? = "ap"
+        var saveMode = true
+        override fun readConnectionMode(): String? = mode
+        override fun saveConnectionMode(stationMode: Boolean): Boolean {
+            if (saveMode) mode = if (stationMode) "sta" else "ap"
+            return saveMode
+        }
         var accept = true
         var starts = 0; var cancels = 0; var disconnects = 0; var files = 0; var queues = 0; var settings = 0; var scans = 0; var stops = 0
         var address: String? = null; var station = false; var pairing = false; var request = 0L

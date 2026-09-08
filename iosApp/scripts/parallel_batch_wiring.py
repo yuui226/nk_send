@@ -166,6 +166,8 @@ CHANGES.setdefault('shared/src/iosMain/kotlin/com/ztransfer/preview/NativePrevie
 # END REVIEWED CHANGES
 
 def previous_parallel_batch_source(path, value):
+    from connection_product_wiring import previous_connection_product_source
+    value = previous_connection_product_source(path, value)
     if path == 'iosApp/ZTransfer/Diagnostics/CameraHandshakeProbe.swift':
         for current, previous in AUTOMATIC_LOOP_CHANGES:
             assert value.count(current) == 1, f"automatic loop hunk changed: {path}"

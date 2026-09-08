@@ -3,16 +3,28 @@ import Network
 
 /// This small Apple I/O seam also permits deterministic callback/short-read tests.
 protocol CameraByteConnection: AnyObject {
+    func resolvedRemoteHost() -> String?
     func start(on queue: DispatchQueue, state: @escaping (CameraConnectionEvent) -> Void)
     func receive(maximumLength: Int, completion: @escaping (Data?, Bool, Error?) -> Void)
     func send(_ data: Data, completion: @escaping (Error?) -> Void)
     func cancel()
 }
 
+extension CameraByteConnection {
+    func resolvedRemoteHost() -> String? { nil } // Fixtures/non-Network transports provide no route evidence.
+}
+
 enum CameraConnectionEvent { case ready, failed(Error), cancelled }
 
 private final class AppleCameraByteConnection: CameraByteConnection {
     private let connection: NWConnection
+    private let permittedInterface: Bool
+
+    func resolvedRemoteHost() -> String? {
+        guard case .ready = connection.state, let path = connection.currentPath,
+              CameraNetworkPathPolicy.failure(path) == nil else { return nil }
+        return CameraNetworkPathPolicy.numericRemoteHost(path.remoteEndpoint)
+    }
 
     convenience init(host: String, port: UInt16) throws {
         guard !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -28,14 +40,37 @@ private final class AppleCameraByteConnection: CameraByteConnection {
         let parameters = NWParameters(tls: nil, tcp: tcp)
         // Camera hotspots have no Internet: never fall back to cellular for this socket.
         parameters.requiredInterfaceType = .wifi
+        if case .service(_, _, _, let interface) = endpoint, let interface {
+            parameters.requiredInterface = interface
+            permittedInterface = interface.type == .wifi
+        } else { permittedInterface = true }
         connection = NWConnection(to: endpoint, using: parameters)
     }
 
     func start(on queue: DispatchQueue, state: @escaping (CameraConnectionEvent) -> Void) {
-        connection.stateUpdateHandler = { update in
+        guard permittedInterface else { state(.failed(CameraStreamError.wifiUnavailable)); return }
+        var deliveredReady = false // Network callbacks are serialized on the supplied queue.
+        connection.pathUpdateHandler = { path in
+            guard deliveredReady, let failure = CameraNetworkPathPolicy.failure(path) else { return }
+            state(.failed(failure))
+        }
+        connection.stateUpdateHandler = { [weak self] update in
+            guard let self else { return }
             switch update {
-            case .ready: state(.ready)
-            case .failed(let error): state(.failed(error))
+            case .ready:
+                guard let path = self.connection.currentPath else { state(.failed(CameraStreamError.wifiUnavailable)); return }
+                if let failure = CameraNetworkPathPolicy.failure(path) { state(.failed(failure)); return }
+                deliveredReady = true
+                state(.ready)
+            case .waiting:
+                // Only explicit system evidence means denied. A prompt or timeout is not denial.
+                if self.connection.currentPath?.unsatisfiedReason == .localNetworkDenied {
+                    state(.failed(CameraStreamError.localNetworkDenied))
+                }
+            case .failed(let error):
+                if self.connection.currentPath?.unsatisfiedReason == .localNetworkDenied {
+                    state(.failed(CameraStreamError.localNetworkDenied))
+                } else { state(.failed(error)) }
             case .cancelled: state(.cancelled)
             // Waiting may include the Local Network prompt. A deadline bounds it but does not
             // establish that the user denied permission.
@@ -57,14 +92,18 @@ private final class AppleCameraByteConnection: CameraByteConnection {
 
     func cancel() {
         connection.stateUpdateHandler = nil
+        connection.pathUpdateHandler = nil
         connection.cancel()
     }
 }
 
 enum CameraStreamError: Error, LocalizedError, Equatable {
     case invalidArgument, notConnected, operationInProgress, closed, timedOut, endOfStream
+    case wifiUnavailable, localNetworkDenied
     var errorDescription: String? {
         switch self {
+        case .wifiUnavailable: return "相机 Wi-Fi 路由不可用，请在系统 Wi-Fi 设置中加入相机热点或与相机相同的局域网；不会改用蜂窝网络。"
+        case .localNetworkDenied: return "系统已禁止本应用访问局域网。请在应用系统设置中允许“本地网络”，返回后重新连接。"
         case .invalidArgument: return "相机网络参数无效。"
         case .notConnected: return "相机网络尚未连接。"
         case .operationInProgress: return "相机通道正在执行同类操作。"
@@ -72,6 +111,26 @@ enum CameraStreamError: Error, LocalizedError, Equatable {
         case .timedOut: return "相机网络操作超时，请检查 Wi-Fi、相机状态和局域网权限。"
         case .endOfStream: return "相机关闭了网络连接。"
         }
+    }
+}
+
+/// Apple transport evidence only, not camera authentication or Internet reachability.
+enum CameraNetworkPathPolicy {
+    static func numericRemoteHost(_ endpoint: NWEndpoint?) -> String? {
+        guard let endpoint, case .hostPort(let host, _) = endpoint else { return nil }
+        switch host {
+        case .ipv4, .ipv6: return try? CameraEndpointAddress.parse(String(describing: host)).host
+        default: return nil // Never turn an advertised name into a fabricated successful IP.
+        }
+    }
+    static func failure(_ path: NWPath) -> CameraStreamError? {
+        failure(satisfied: path.status == .satisfied, wifi: path.usesInterfaceType(.wifi),
+                denied: path.unsatisfiedReason == .localNetworkDenied)
+    }
+    static func failure(satisfied: Bool, wifi: Bool, denied: Bool) -> CameraStreamError? {
+        if denied { return .localNetworkDenied }
+        if !satisfied || !wifi { return .wifiUnavailable }
+        return nil
     }
 }
 
@@ -102,6 +161,14 @@ final class CameraTCPStream: @unchecked Sendable {
         self.init(connection: AppleCameraByteConnection(endpoint: service.endpoint))
     }
     init(connection: CameraByteConnection) { self.connection = connection }
+
+    func resolvedRemoteHost() async -> String? {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: self.state == .ready ? self.connection.resolvedRemoteHost() : nil)
+            }
+        }
+    }
 
     deinit { connection.cancel() }
 

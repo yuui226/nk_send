@@ -25,6 +25,9 @@ class ParallelBatchWiringTest(unittest.TestCase):
         paths = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', 'ca00994', 'app', 'dist', 'dist-debug'], cwd=ROOT).decode().splitlines()
         changed = set(subprocess.check_output(['git', 'diff', 'ca00994', '--name-only', '--', 'app', 'dist', 'dist-debug'], cwd=ROOT).decode().splitlines())
         self.assertTrue(paths)
+        import home_card_extraction as home
+        home.verify()
+        changed.discard(home.ANDROID)
         self.assertFalse(changed, changed)
 
     def test_one_event_observer_owns_catalog_and_real_automatic_admission(self):
@@ -126,7 +129,8 @@ class ParallelBatchWiringTest(unittest.TestCase):
             self.assertNotIn(token, workspace)
 
     def test_history_never_trusts_an_ap_or_guesses_bonjour_address(self):
-        self.assertIn('guard stationMode, service == nil, let responderGUID else { return }', read(PROBE))
+        self.assertIn('guard stationMode, let responderGUID, let address = service == nil ? host : resolvedHost else { return }', read(PROBE))
+        self.assertIn('let resolvedHost = await connection.resolvedRemoteHost()', read(PROBE))
         discovery = read('iosApp/ZTransfer/Network/CameraDiscoveryCoordinator.swift')
         for token in ('selectableServices.first(where: { $0.id == id })',
                       'expectedResponderGUID: entry.responderGUID', 'self.generation == current',

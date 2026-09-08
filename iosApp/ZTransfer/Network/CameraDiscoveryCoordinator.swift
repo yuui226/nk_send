@@ -37,7 +37,7 @@ struct CameraConnectionChoice {
         reloadProfiles()
     }
     static func applicationCoordinator() throws -> CameraDiscoveryCoordinator {
-        try CameraDiscoveryCoordinator(history: CameraEndpointHistory.applicationStore(), profiles: StationProfileStore.applicationStore())
+        try CameraDiscoveryCoordinator(history: CameraEndpointHistory.applicationDiscoveryStore(), profiles: StationProfileStore.applicationStore())
     }
     deinit { observer?.cancel(); discovery?.stop() }
     func start() {
@@ -63,17 +63,21 @@ struct CameraConnectionChoice {
         discovery?.stop(); discovery = nil; searching = false
     }
     func reloadProfiles() {
-        do {
-            let entries = try history.entries()
-            let paired = Set(try profileStore.pairedResponderGUIDs())
-            profiles = entries.map { CameraKnownProfile(responderGUID: $0.responderGUID, displayName: $0.displayName,
-                address: $0.address.host, paired: paired.contains($0.responderGUID)) }
-            let represented = Set(entries.map(\.responderGUID))
-            profiles += paired.subtracting(represented).sorted().map {
-                CameraKnownProfile(responderGUID: $0, displayName: "已配对相机 · \($0.suffix(8))", address: nil, paired: true)
-            }
-            profileIssue = nil; message = nil
-        } catch { profiles = []; profileIssue = error.localizedDescription; message = profileIssue }
+        // Metadata and trust have independent failure domains. Corrupt address history must not
+        // hide a valid pairing identity; address-only rows never grant pairing authority.
+        var issues: [String] = []
+        var entries: [CameraEndpointRecord] = []
+        var paired = Set<String>()
+        do { entries = try history.entries() } catch { issues.append(error.localizedDescription) }
+        do { paired = Set(try profileStore.pairedResponderGUIDs()) } catch { issues.append(error.localizedDescription) }
+        profiles = entries.map { CameraKnownProfile(responderGUID: $0.responderGUID, displayName: $0.displayName,
+            address: $0.address.host, paired: paired.contains($0.responderGUID)) }
+        let represented = Set(entries.map(\.responderGUID))
+        profiles += paired.subtracting(represented).sorted().map {
+            CameraKnownProfile(responderGUID: $0, displayName: "已配对相机 · \($0.suffix(8))", address: nil, paired: true)
+        }
+        profileIssue = issues.isEmpty ? nil : issues.joined(separator: "；")
+        message = profileIssue
     }
     func selectService(id: String, expectedResponderGUID: String? = nil) -> CameraConnectionChoice? {
         guard let service = selectableServices.first(where: { $0.id == id }) else { return nil }
@@ -98,8 +102,13 @@ struct CameraConnectionChoice {
         guard confirmed else { throw CameraEndpointError.confirmationRequired }
         // Remove the trust marker first. A failed history write may leave a harmless address hint,
         // but must never leave an allegedly-forgotten pairing trusted. Other identities are intact.
-        try profileStore.forgetResponder(responderGUID)
-        try history.forget(responderGUID: responderGUID)
+        do {
+            try profileStore.forgetResponder(responderGUID)
+            try history.forget(responderGUID: responderGUID)
+        } catch {
+            reloadProfiles() // A failed metadata write must not display an already-removed trust marker.
+            throw error
+        }
         reloadProfiles()
     }
     @discardableResult func resetHistoryAfterConfirmation(confirmed: Bool) throws -> URL? {

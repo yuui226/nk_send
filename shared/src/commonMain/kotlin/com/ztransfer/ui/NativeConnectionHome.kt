@@ -5,6 +5,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -18,6 +20,8 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /** One platform session owner. No sockets, queue, profile store or permission authority in shared UI. */
 interface NativeConnectionHomePlatform {
+    fun readConnectionMode(): String?
+    fun saveConnectionMode(stationMode: Boolean): Boolean
     fun connectCamera(address: String, stationMode: Boolean, allowPairing: Boolean, requestId: Long): Boolean
     fun cancelConnection(requestId: Long)
     fun disconnectCamera(requestId: Long)
@@ -48,6 +52,7 @@ internal data class NativeConnectionHomeState(
     val discoveryMessage: String? = null,
     val expectedCamera: String? = null,
     val attemptedChoice: String? = null,
+    val preferencesUnavailable: Boolean = false,
 ) {
     val busy: Boolean get() = phase == "connecting" || phase == "closing" || phase == "ready"
     val ready: Boolean get() = phase == "ready"
@@ -66,7 +71,9 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
     private var closed = false
     private var nextRequest = 1L
     private var retryChoice: NativeStationChoice? = null
-    private val mutableState = MutableStateFlow(NativeConnectionHomeState())
+    private val savedMode = platform?.readConnectionMode()
+    private val mutableState = MutableStateFlow(NativeConnectionHomeState(
+        stationMode = savedMode == "sta", preferencesUnavailable = savedMode !in setOf("ap", "sta")))
     internal val state = mutableState.asStateFlow()
     fun currentRequestId(): Long = mutableState.value.requestId
     fun isReady(): Boolean = mutableState.value.ready
@@ -79,12 +86,17 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
             mutableState.value = mutableState.value.copy(address = value.take(512), attemptedChoice = null)
         }
     }
+    internal fun resetApAddress() {
+        if (!mutableState.value.stationMode) editAddress(PtpConstants.CAMERA_IP)
+    }
     internal fun setStationMode(value: Boolean) {
         if (closed || mutableState.value.busy) return
         platform?.stopDiscovering()
         platform?.clearExpectedCamera(); retryChoice = null
+        val saved = platform?.saveConnectionMode(value) == true
         mutableState.value = mutableState.value.copy(stationMode = value, phase = "idle", message = null,
-            choices = emptyList(), searching = false, discoveryMessage = null, expectedCamera = null, attemptedChoice = null)
+            choices = emptyList(), searching = false, discoveryMessage = null, expectedCamera = null,
+            attemptedChoice = null, allowPairing = false, preferencesUnavailable = !saved)
     }
     internal fun setAllowPairing(value: Boolean) {
         if (!closed && !mutableState.value.busy) mutableState.value = mutableState.value.copy(allowPairing = value)
@@ -127,10 +139,11 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
     fun publish(requestId: Long, phase: String, message: String?): Boolean {
         val before = mutableState.value
         if (closed || requestId <= 0 || before.requestId != requestId ||
-            phase !in setOf("connecting", "ready", "closing", "failed", "idle")) return false
+            phase !in setOf("connecting", "ready", "closing", "failed", "idle", "paired")) return false
         if (before.phase == "closing" && phase !in setOf("closing", "failed", "idle")) return false
-        if (before.phase in setOf("idle", "failed") && phase in setOf("connecting", "ready")) return false
-        mutableState.value = before.copy(phase = phase, message = message)
+        if (before.phase in setOf("idle", "failed", "paired") && phase in setOf("connecting", "ready", "paired")) return false
+        mutableState.value = before.copy(phase = phase, message = message,
+            allowPairing = before.allowPairing && phase != "paired")
         return true
     }
     fun publishChoices(values: List<NativeStationChoice>, searching: Boolean, message: String?) {
@@ -192,28 +205,73 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
     var forgetting by remember(model) { mutableStateOf<NativeStationChoice?>(null) }
     var resettingHistory by remember(model) { mutableStateOf(false) }
     var recoveringIdentity by remember(model) { mutableStateOf(false) }
-    val chinese = language.startsWith("zh", ignoreCase = true)
-    fun label(zh: String, en: String) = if (chinese) zh else en
+    fun label(zh: String, en: String) = NativeConnectionHomeText.label(language, zh, en)
     val presentation = state.presentation()
     val selected = homeSelectedConnection(presentation.isConnectedToCamera, presentation.connectionType)
-    val shape = RoundedCornerShape(24.dp)
-    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Z传", style = MaterialTheme.typography.headlineLarge)
-        Text(label("连接相机，浏览与传输原片", "Connect your camera to browse and transfer originals"), color = AppTheme.colors.onSurfaceVariant)
-        ConnectionCardSurface(modifier = Modifier.fillMaxWidth().connectionCardMaterialFrame(shape),
-            shape = shape, tint = AppTheme.colors.accentBlue.copy(alpha = 0.05f)) {
-            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = !state.stationMode, enabled = !state.busy, onClick = { model.setStationMode(false) },
-                        label = { Text(label("相机热点 AP", "Camera hotspot AP")) })
-                    FilterChip(selected = state.stationMode, enabled = !state.busy, onClick = { model.setStationMode(true) },
-                        label = { Text(label("局域网 STA", "Local network STA")) })
+    val clock = remember { kotlin.time.TimeSource.Monotonic.markNow() }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val widthPx = with(density) { maxWidth.toPx() }
+        val heightPx = with(density) { maxHeight.toPx() }
+        Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            ZMark(modifier = Modifier.height(24.dp))
+            Text(label("连接相机，浏览与传输原片", "Connect your camera to browse and transfer originals"),
+                color = AppTheme.colors.onSurfaceVariant)
+            SharedConnectionMethodCard(
+                modifier = Modifier.fillMaxWidth().height(380.dp),
+                failedLabel = label("连接失败", "Connection failed"),
+                viewportWidth = widthPx, viewportHeight = heightPx,
+                uptimeMillis = { clock.elapsedNow().inWholeMilliseconds },
+                modeIcon = { color, modifier -> Icon(Icons.Default.Wifi, contentDescription = null, tint = color, modifier = modifier) },
+                title = label("连接相机", "Connect camera"), accent = AppTheme.colors.accentBlue,
+                materialSeed = 0x57494649,
+                steps = if (state.stationMode) listOf(
+                    label("手机与相机加入同一个 Wi-Fi，在相机中启用连接至计算机。", "Join the same Wi-Fi as the camera and enable Connect to computer on the camera."))
+                else listOf(label("在相机中启用 Wi-Fi 热点，然后在 iPhone 的系统设置中加入该热点。没有互联网连接是正常现象。", "Enable the camera Wi-Fi hotspot and join it in iPhone Settings. No Internet connection is expected.")),
+                modeSelector = { WifiModeTabs(selectedMode = presentation.wirelessMode, enabled = !state.busy,
+                    onSelectAp = { model.setStationMode(false) }, onSelectSta = { model.setStationMode(true) }) },
+                selected = state.ready, success = state.ready, attentionActive = !state.busy,
+                attentionPhaseOffset = 0f, selectionSceneProgress = { 0f }, successEffectProgress = { 1f },
+                feedbackFollowsModeSelector = true,
+                feedback = when (state.phase) {
+                    "connecting" -> ConnectionCardFeedback(label("正在连接…", "Connecting…"),
+                        state.message, AppTheme.colors.accentBlue, busy = true, multiline = true)
+                    "failed" -> ConnectionCardFeedback(label("连接失败", "Connection failed"),
+                        state.message, AppTheme.colors.statusError, multiline = true)
+                    else -> null
+                },
+                footer = {
+                when (state.phase) {
+                    "ready" -> {
+                        Text(label("相机会话已连接", "Camera session connected"))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = model::openFiles, enabled = selected == CameraConnectionType.WIFI) { Text(label("浏览照片", "Browse photos")) }
+                            OutlinedButton(onClick = model::openQueue) { Text(label("传输队列", "Transfer queue")) }
+                        }
+                        TextButton(onClick = model::disconnect) { Text(label("断开连接", "Disconnect")) }
+                    }
+                    "connecting" -> {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        TextButton(onClick = model::cancel) { Text(label("取消连接", "Cancel connection")) }
+                    }
+                    "closing" -> Text(label("正在关闭连接…", "Closing connection…"))
+                    else -> Button(onClick = model::connect) {
+                        Text(if (state.phase == "failed") label("重试连接", "Retry connection") else label("连接相机", "Connect camera"))
+                    }
                 }
-                Text(if (state.stationMode) label("手机与相机加入同一个 Wi-Fi，在相机中启用连接至计算机。", "Join the same Wi-Fi as the camera and enable Connect to computer on the camera.")
-                    else label("在相机中启用 Wi-Fi 热点，然后在 iPhone 的系统设置中加入该热点。没有互联网连接是正常现象。", "Enable the camera Wi-Fi hotspot and join it in iPhone Settings. No Internet connection is expected."))
+
+                })
+            // Platform-specific address/discovery controls do not fork the original card renderer.
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(value = state.address, onValueChange = model::editAddress, enabled = !state.busy,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        autoCorrectEnabled = false, keyboardType = androidx.compose.ui.text.input.KeyboardType.Ascii),
                     singleLine = true, label = { Text(label("相机 IP 地址或主机名", "Camera IP address or hostname")) }, modifier = Modifier.fillMaxWidth())
+                if (!state.stationMode) {
+                    TextButton(onClick = model::resetApAddress, enabled = !state.busy) { Text(label("恢复相机热点默认地址", "Restore the camera hotspot default address")) }
+                    Text(label("热点没有互联网也请保持连接。系统首次询问本地网络权限时请选择允许；超时不代表权限被拒绝。应用设置只管理权限，Wi-Fi 需手动到系统设置切换。", "Stay connected even without Internet. Allow Local Network when prompted; a timeout does not mean permission was denied. App Settings manages permissions; switch Wi-Fi manually in system Settings."))
+                }
                 if (state.stationMode) {
                     state.expectedCamera?.let {
                         Text(label("将核对所选相机身份：", "Expected camera identity: ") + it)
@@ -244,31 +302,15 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
                     }
                 }
                 state.attemptedChoice?.let { Text(label("当前连接候选：", "Connection candidate: ") + it) }
-                when (state.phase) {
-                    "ready" -> {
-                        Text(label("相机会话已连接", "Camera session connected"))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = model::openFiles, enabled = selected == CameraConnectionType.WIFI) { Text(label("浏览照片", "Browse photos")) }
-                            OutlinedButton(onClick = model::openQueue) { Text(label("传输队列", "Transfer queue")) }
-                        }
-                        TextButton(onClick = model::disconnect) { Text(label("断开连接", "Disconnect")) }
-                    }
-                    "connecting" -> {
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                        TextButton(onClick = model::cancel) { Text(label("取消连接", "Cancel connection")) }
-                    }
-                    "closing" -> Text(label("正在关闭连接…", "Closing connection…"))
-                    else -> Button(onClick = model::connect) {
-                        Text(if (state.phase == "failed") label("重试连接", "Retry connection") else label("连接相机", "Connect camera"))
-                    }
-                }
-                if (state.phase == "failed" && state.message == null) Text(label("连接未能开始，请检查地址和当前会话。", "Connection could not start. Check the address and current session."))
-                state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
             }
+            if (state.preferencesUnavailable) Text(label("连接模式无法保存，原偏好文件未被覆盖。", "Connection mode could not be saved; the original preferences were preserved."))
+            if (state.phase == "paired") Text(label("配对已确认，请完成相机提示后重新连接。", "Pairing confirmed. Finish the camera prompts, then reconnect."))
+            else if (state.phase != "connecting" && state.phase != "failed") state.message?.let { Text(it) }
+            Text(label("请允许局域网访问。传输期间保持应用在前台；切入后台会关闭当前相机会话。此版本仅提供 AP / 标准 STA，不提供 iOS USB 连接。", "Allow Local Network access. Keep this app in the foreground while transferring; backgrounding closes the camera session. This version supports AP / standard STA, not iOS USB."),
+                style = MaterialTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
+            TextButton(onClick = model::settings) { Text(label("打开应用系统设置", "Open app Settings")) }
         }
-        Text(label("请允许局域网访问。传输期间保持应用在前台；切入后台会关闭当前相机会话。此版本仅提供 AP / 标准 STA，不提供 iOS USB 连接。", "Allow Local Network access. Keep this app in the foreground while transferring; backgrounding closes the camera session. This version supports AP / standard STA, not iOS USB."),
-            style = MaterialTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
-        TextButton(onClick = model::settings) { Text(label("打开应用系统设置", "Open app Settings")) }
     }
     forgetting?.let { choice ->
         AlertDialog(onDismissRequest = { forgetting = null }, title = { Text(label("忘记此相机？", "Forget this camera?")) },

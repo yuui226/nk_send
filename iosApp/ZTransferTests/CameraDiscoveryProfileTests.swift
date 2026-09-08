@@ -4,6 +4,86 @@ import XCTest
 @testable import ZTransfer
 
 final class CameraDiscoveryProfileTests: XCTestCase {
+    @MainActor func testColdStartWithCorruptHistoryStillOffersPairingProfilesAndExplicitRecovery() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let profiles = try StationProfileStore(file: root.appendingPathComponent("identity.json"))
+        try profiles.markPaired(firstGUID)
+        let file = root.appendingPathComponent("history.json"), bytes = Data("broken before launch".utf8)
+        try bytes.write(to: file)
+        XCTAssertThrowsError(try CameraEndpointHistory(file: file))
+        let recovery = try CameraEndpointHistory(file: file, validateOnOpen: false)
+        let coordinator = CameraDiscoveryCoordinator(history: recovery, profiles: profiles)
+        XCTAssertEqual(coordinator.profiles.map(\.responderGUID), [firstGUID]); XCTAssertNotNil(coordinator.message)
+        XCTAssertThrowsError(try recovery.recordSuccessful(responderGUID: firstGUID, displayName: "Camera",
+            address: CameraEndpointAddress.parse("192.168.10.7")))
+        XCTAssertEqual(try Data(contentsOf: file), bytes)
+        let archive = try XCTUnwrap(coordinator.resetHistoryAfterConfirmation(confirmed: true))
+        XCTAssertEqual(try Data(contentsOf: archive), bytes)
+        XCTAssertTrue(try profiles.isPaired(firstGUID)); XCTAssertNil(coordinator.message)
+    }
+    @MainActor func testBrokenAddressHistoryKeepsIndependentPairingProfilesVisible() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("history.json")
+        let history = try CameraEndpointHistory(file: file)
+        let profiles = try StationProfileStore(file: root.appendingPathComponent("identity.json"))
+        try profiles.markPaired(firstGUID)
+        let coordinator = CameraDiscoveryCoordinator(history: history, profiles: profiles)
+        let damaged = Data("broken".utf8); try damaged.write(to: file)
+        coordinator.reloadProfiles()
+        XCTAssertNotNil(coordinator.message)
+        XCTAssertEqual(coordinator.profiles.map(\.responderGUID), [firstGUID])
+        XCTAssertEqual(coordinator.profiles.first?.paired, true)
+        XCTAssertNil(coordinator.profiles.first?.address)
+        XCTAssertNil(coordinator.selectProfile(responderGUID: firstGUID))
+        XCTAssertEqual(try Data(contentsOf: file), damaged)
+    }
+    @MainActor func testPartialForgetNeverLeavesStaleTrustedRowAndKeepsOtherCamera() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("history.json")
+        let history = try CameraEndpointHistory(file: file)
+        let profiles = try StationProfileStore(file: root.appendingPathComponent("identity.json"))
+        let identity = profiles.identity
+        try profiles.markPaired(firstGUID); try profiles.markPaired(secondGUID)
+        let coordinator = CameraDiscoveryCoordinator(history: history, profiles: profiles)
+        try Data("broken".utf8).write(to: file)
+        XCTAssertThrowsError(try coordinator.forgetProfile(responderGUID: firstGUID, confirmed: true))
+        XCTAssertFalse(try profiles.isPaired(firstGUID)); XCTAssertTrue(try profiles.isPaired(secondGUID))
+        XCTAssertEqual(coordinator.profiles.map(\.responderGUID), [secondGUID])
+        XCTAssertEqual(profiles.identity, identity)
+    }
+    @MainActor func testForgetThenAcknowledgedRepairRestoresOnlySelectedCamera() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let identityFile = root.appendingPathComponent("identity.json")
+        let historyFile = root.appendingPathComponent("history.json")
+        let profiles = try StationProfileStore(file: identityFile)
+        let history = try CameraEndpointHistory(file: historyFile, now: { 10 })
+        let identity = profiles.identity
+        for guid in [firstGUID, secondGUID] {
+            try profiles.markPaired(guid)
+            try history.recordSuccessful(responderGUID: guid, displayName: guid, address: CameraEndpointAddress.parse("192.168.10.7"))
+        }
+        let coordinator = CameraDiscoveryCoordinator(history: history, profiles: profiles)
+        try coordinator.forgetProfile(responderGUID: firstGUID, confirmed: true)
+        XCTAssertNil(try history.select(responderGUID: firstGUID))
+        XCTAssertEqual(try StationProfileStore(file: identityFile).identity, identity)
+        // This is the same acknowledgement-only store entry invoked by CameraWiFiConnection.
+        try profiles.markPaired(firstGUID)
+        try history.recordSuccessful(responderGUID: firstGUID, displayName: "Repaired", address: CameraEndpointAddress.parse("192.168.10.8"))
+        let reopened = try CameraDiscoveryCoordinator(history: CameraEndpointHistory(file: historyFile), profiles: StationProfileStore(file: identityFile))
+        XCTAssertEqual(reopened.profiles.count, 2)
+        XCTAssertEqual(reopened.selectProfile(responderGUID: firstGUID)?.host, "192.168.10.8")
+        XCTAssertTrue(try profiles.isPaired(secondGUID))
+    }
+    func testIdentitySymlinkIsRejectedWithoutChangingItsTarget() throws {
+        let root = temporaryRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let original = root.appendingPathComponent("identity-original.json")
+        _ = try StationProfileStore(file: original)
+        let before = try Data(contentsOf: original)
+        let link = root.appendingPathComponent("identity-link.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: original)
+        XCTAssertThrowsError(try StationProfileStore(file: link))
+        XCTAssertEqual(try Data(contentsOf: original), before)
+    }
     private let firstGUID = "00112233445566778899aabbccddeeff"
     private let secondGUID = "ffeeddccbbaa99887766554433221100"
 

@@ -283,7 +283,7 @@ final class CameraHandshakeProbe: ObservableObject {
         task = Task {
             defer {
                 running = false; task = nil; sessionReady = false
-                if productState?.phase != "failed" { publishProduct("idle") }
+                if productState?.phase != "failed" && productState?.phase != "paired" { publishProduct("idle") }
             }
             do {
                 let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -336,7 +336,11 @@ final class CameraHandshakeProbe: ObservableObject {
                 }
             } catch {
                 status = Task.isCancelled ? "诊断已取消，连接已关闭。" : error.localizedDescription
-                publishProduct(Task.isCancelled ? "idle" : "failed", message: Task.isCancelled ? nil : error.localizedDescription)
+                if !Task.isCancelled, let station = error as? CameraStationError, case .pairingCompleted = station {
+                    publishProduct("paired", message: error.localizedDescription)
+                } else {
+                    publishProduct(Task.isCancelled ? "idle" : "failed", message: Task.isCancelled ? nil : error.localizedDescription)
+                }
             }
         }
     }
@@ -715,9 +719,15 @@ final class CameraHandshakeProbe: ObservableObject {
             var readyMessage = description
             if productState != nil {
                 let responder = await connection.responderGUID()
+                let resolvedHost = await connection.resolvedRemoteHost()
+                let historyState = await connection.snapshot()
+                try Task.checkCancellation()
+                guard historyState.phase == .ready, apConnection === connection,
+                      productState?.phase != "closing" else { throw CameraStreamError.closed }
                 do {
                     try Self.recordVerifiedStationEndpoint(stationMode: stationMode, service: service, host: host,
-                        responderGUID: responder, displayName: description, history: CameraEndpointHistory.applicationStore)
+                        responderGUID: responder, displayName: description, resolvedHost: resolvedHost,
+                        history: CameraEndpointHistory.applicationStore)
                 } catch {
                     readyMessage += "（地址历史未保存：\(error.localizedDescription)）"
                 }
@@ -806,10 +816,11 @@ final class CameraHandshakeProbe: ObservableObject {
     /// This history belongs to standard STA. An AP hotspot must not overwrite the same camera's
     /// LAN address, and a Bonjour service name is never guessed to be a resolved host address.
     nonisolated static func recordVerifiedStationEndpoint(stationMode: Bool, service: CameraBonjourService?, host: String,
-        responderGUID: String?, displayName: String, history: () throws -> CameraEndpointHistory) throws {
-        guard stationMode, service == nil, let responderGUID else { return }
+        responderGUID: String?, displayName: String, resolvedHost: String? = nil,
+        history: () throws -> CameraEndpointHistory) throws {
+        guard stationMode, let responderGUID, let address = service == nil ? host : resolvedHost else { return }
         try history().recordSuccessful(responderGUID: responderGUID, displayName: displayName,
-                                       address: CameraEndpointAddress.parse(host))
+            address: CameraEndpointAddress.parse(address))
     }
 
     private func receiveCatalogChange(_ snapshot: CameraCatalogSnapshot) {

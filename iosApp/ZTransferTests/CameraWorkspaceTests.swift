@@ -1,9 +1,74 @@
 import Foundation
+import Network
 import XCTest
 import ZTransferShared
 @testable import ZTransfer
 
 final class CameraWorkspaceTests: XCTestCase {
+    func testResolvedEndpointIsUnavailableBeforeReadyAndAfterCancellation() async throws {
+        let wire = WorkspaceWire(bytes: Data(), remoteHost: "192.168.10.7")
+        let stream = CameraTCPStream(connection: wire)
+        let before = await stream.resolvedRemoteHost(); XCTAssertNil(before)
+        try await stream.connect(timeout: 1)
+        let ready = await stream.resolvedRemoteHost(); XCTAssertEqual(ready, "192.168.10.7")
+        stream.close()
+        let closed = await stream.resolvedRemoteHost(); XCTAssertNil(closed)
+    }
+    func testBonjourHistoryUsesResolvedReadyAddressButNeverAdvertisementName() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let history = try CameraEndpointHistory(file: root.appendingPathComponent("history.json"), now: { 1 })
+        let service = CameraBonjourService(endpoint: .service(name: "Camera", type: "_ptp._tcp", domain: "local.", interface: nil), name: "Camera")
+        let id = "00112233445566778899aabbccddeeff"
+        try CameraHandshakeProbe.recordVerifiedStationEndpoint(stationMode: true, service: service, host: "",
+            responderGUID: id, displayName: "Camera", history: { history })
+        XCTAssertTrue(try history.entries().isEmpty)
+        try CameraHandshakeProbe.recordVerifiedStationEndpoint(stationMode: true, service: service, host: "",
+            responderGUID: id, displayName: "Camera", resolvedHost: "192.168.10.7", history: { history })
+        XCTAssertEqual(try history.select(responderGUID: id)?.address.host, "192.168.10.7")
+        try CameraHandshakeProbe.recordVerifiedStationEndpoint(stationMode: true, service: service, host: "",
+            responderGUID: nil, displayName: "Unknown", resolvedHost: "192.168.10.8", history: { history })
+        XCTAssertEqual(try history.entries().count, 1)
+    }
+    func testResolvedRouteNeverUsesHostnamesOrServiceLabelsAsNumericEvidence() {
+        XCTAssertEqual(CameraNetworkPathPolicy.numericRemoteHost(.hostPort(host: "192.168.10.7", port: 15740)), "192.168.10.7")
+        XCTAssertNotNil(CameraNetworkPathPolicy.numericRemoteHost(.hostPort(host: "fe80::1234", port: 15740)))
+        XCTAssertNil(CameraNetworkPathPolicy.numericRemoteHost(.hostPort(host: "camera.local", port: 15740)))
+        XCTAssertNil(CameraNetworkPathPolicy.numericRemoteHost(.service(name: "Camera", type: "_ptp._tcp", domain: "local.", interface: nil)))
+        XCTAssertNil(CameraNetworkPathPolicy.numericRemoteHost(nil))
+    }
+    func testExplicitLocalNetworkDenialIsDistinctFromUnavailableWifi() {
+        XCTAssertEqual(CameraNetworkPathPolicy.failure(satisfied: false, wifi: false, denied: true), .localNetworkDenied)
+        XCTAssertEqual(CameraNetworkPathPolicy.failure(satisfied: false, wifi: true, denied: false), .wifiUnavailable)
+        XCTAssertEqual(CameraNetworkPathPolicy.failure(satisfied: true, wifi: false, denied: false), .wifiUnavailable)
+        XCTAssertNil(CameraNetworkPathPolicy.failure(satisfied: true, wifi: true, denied: false))
+        XCTAssertNotEqual(CameraStreamError.timedOut, CameraStreamError.localNetworkDenied)
+    }
+    @MainActor func testConnectionModeRoundTripStoresOnlyPresentationPreference() throws {
+        let suite = "connection-mode-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = CameraConnectionPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.read(), "ap")
+        XCTAssertTrue(preferences.save("sta"))
+        let workspace = CameraWorkspaceBridge(connectionPreferences: CameraConnectionPreferences(defaults: defaults))
+        defer { workspace.close() }
+        XCTAssertEqual(workspace.readConnectionMode(), "sta")
+        XCTAssertFalse(workspace.model.isReady()); XCTAssertFalse(workspace.session.running)
+        let data = try XCTUnwrap(defaults.data(forKey: CameraConnectionPreferences.key))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(json.keys), Set(["version", "mode"]))
+    }
+    @MainActor func testInvalidConnectionModeNeverOverwritesUnknownBytes() throws {
+        let suite = "connection-mode-invalid-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for bytes in [Data("broken".utf8), Data(#"{"version":2,"mode":"sta"}"#.utf8),
+                      Data(#"{"version":1,"mode":"usb"}"#.utf8), Data(repeating: 0, count: 4097)] {
+            defaults.set(bytes, forKey: CameraConnectionPreferences.key)
+            let preferences = CameraConnectionPreferences(defaults: defaults)
+            XCTAssertNil(preferences.read()); XCTAssertFalse(preferences.save("ap"))
+            XCTAssertEqual(defaults.data(forKey: CameraConnectionPreferences.key), bytes)
+        }
+    }
     @MainActor func testWorkspaceAndDiagnosticEntryUseTheSameSessionInstance() {
         let owner = CameraHandshakeProbe()
         let workspace = CameraWorkspaceBridge(session: owner)
@@ -238,7 +303,9 @@ private final class WorkspaceWire: CameraByteConnection {
     private let lock = NSLock()
     private var bytes: Data
     private var held: ((Data?, Bool, Error?) -> Void)?
-    init(bytes: Data) { self.bytes = bytes }
+    private let remoteHost: String?
+    init(bytes: Data, remoteHost: String? = nil) { self.bytes = bytes; self.remoteHost = remoteHost }
+    func resolvedRemoteHost() -> String? { remoteHost }
     func start(on queue: DispatchQueue, state: @escaping (CameraConnectionEvent) -> Void) { state(.ready) }
     func receive(maximumLength: Int, completion: @escaping (Data?, Bool, Error?) -> Void) {
         lock.lock()
