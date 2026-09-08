@@ -3,6 +3,7 @@ package com.ztransfer.ui
 /** Explicit home translations; never infer Traditional Chinese by character substitution. */
 object NativeConnectionHomeText {
     private val traditional = mapOf(
+        "设置" to "設定",
         "停止查找" to "停止尋找",
         "恢复相机热点默认地址" to "還原相機熱點預設位址",
         "热点没有互联网也请保持连接。系统首次询问本地网络权限时请选择允许；超时不代表权限被拒绝。应用设置只管理权限，Wi-Fi 需手动到系统设置切换。" to "熱點沒有網際網路也請保持連接。系統首次詢問本地網路權限時請選擇允許；逾時不代表權限被拒絕。應用程式設定只管理權限，Wi-Fi 需手動到系統設定切換。",

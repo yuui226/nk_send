@@ -56,11 +56,13 @@ object SharedUiController {
                     previewText = NativePreviewTextCatalog.forLanguage(languageTag, model::previewMetadata),
                     settingsText = NativeSettingsTextCatalog.forLanguage(languageTag),
                     appearance = appearance,
+                    cachedThumbnail = images::cached,
                     openPreview = { files -> NativePreviewSessionSource.open(model, images, files) },
-                    queuePage = { back ->
+                    queuePage = { topOnly, back ->
                         NativeOriginalQueuePage(model.queue, queueText,
                             elapsedRealtimeMs = { (NSProcessInfo.processInfo.systemUptime * 1000.0).toLong() },
                             onBack = back,
+                            showContent = !topOnly, showControls = topOnly,
                             thumbnail = { file, nudge, modifier -> OriginalQueueThumbnail(model.queue, file, nudge, modifier) })
                     })
             }

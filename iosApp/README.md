@@ -1,6 +1,6 @@
 # Z传 iOS 工程
 
-> 2026-09-08：已达到本轮目标20/50，W01—W20为WIN-DONE（历史刻度88.0%），停止于此，下一项W21等待继续指令。e5dbadb已推送，W11—W20随本次提交归档，推送状态以Git核对为准。1061项Kotlin/Android、340项Python、3213项实际AndroidX对照、common metadata、Release Kotlin编译、Debug Lint及源码守卫通过；430项XCTest和17项Native图片样本待Mac，Swift/Native尚未编译。Android本轮三处原算法受控提取：连接时间、STA媒体解析、缩略图裁边；平台IO/服务/版本/打包未改。当前状态和Mac边界以主任务表为准。
+> 2026-09-08：已达到本轮目标30/50，W01—W30为WIN-DONE（历史刻度92.0%）；下一项W31等待指令。W11—W20已推送ad101d5，本批W21—W30未提交。1073项Kotlin/Android、346项Python、common metadata、Release Kotlin编译、Debug Lint及源码守卫通过；437项XCTest和17项Native图片样本待Mac，Swift/Native尚未编译。本批Android仅原胶囊/飞入与FilesQueueWorkspace两处纯UI受控提取，平台IO/服务/版本/打包未改。细节见主任务表及工作区与原片交付验收说明。
 
 > **当前执行/进度唯一入口：** [iOS剩余任务进度表](../docs/技术调研/iOS剩余任务进度表.md)。第59批后剩余50项固定计分，每完成1项总计划增加0.4个百分点；实时完成数和百分比只维护在该表。旧百分比仅保留为历史估计，不再继续粗估。Mac/真机另计12项，暂缓功能另表。
 

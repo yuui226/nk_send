@@ -79,7 +79,9 @@ class TransferPreferencesWiringTest(unittest.TestCase):
                                (STORE, 'data.count <= 4096', 'data.count <= 999999')):
             with self.assertRaises(AssertionError):
                 previous_transfer_source(path, (ROOT/path).read_text(encoding='utf-8').replace(old, new))
-        value = (ROOT/BRIDGE).read_text(encoding='utf-8').replace('func close() { model.close() }', 'func close() {}')
+        original = (ROOT/BRIDGE).read_text(encoding='utf-8')
+        self.assertIn('rememberBrowseSession?(model.captureBrowseSession())', original)
+        value = original.replace('rememberBrowseSession?(model.captureBrowseSession())', '// lost close capture')
         # Full-file fingerprints now reject unrelated mutations before historical inversion.
         with self.assertRaises(AssertionError):
             previous_transfer_source(BRIDGE, value)

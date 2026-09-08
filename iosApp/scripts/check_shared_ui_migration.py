@@ -123,6 +123,12 @@ def main():
     expected_list, expected_filter = extract_filter_overlay(expected_list)
     expected_list, expected_export_exit = extract_export_exit(expected_list)
     expected_list, expected_flight = extract_queue_flight(expected_list)
+    from queue_workspace_extraction import extract as extract_queue_workspace, COMMON as queue_workspace_common
+    expected_list, expected_queue_workspace = extract_queue_workspace(expected_list)
+    if (root / queue_workspace_common).read_text(encoding="utf-8") != expected_queue_workspace:
+        raise ValueError("Original queue pill/flight visuals differ beyond platform slots")
+    from workspace_transition_extraction import verify as verify_workspace_transition
+    verify_workspace_transition(root)
     if (root / 'shared/src/commonMain/kotlin/com/ztransfer/ui/screen/QueueFlightCurve.kt').read_text(encoding='utf-8') != expected_flight:
         raise ValueError('Original shared queue flight curve/easing differs')
     if (root / "shared/src/commonMain/kotlin/com/ztransfer/ui/screen/ExportExitUiState.kt").read_text(encoding="utf-8") != expected_export_exit:

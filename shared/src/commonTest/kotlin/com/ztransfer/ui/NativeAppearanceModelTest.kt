@@ -24,6 +24,11 @@ class NativeAppearanceModelTest {
             return true
         }
         override fun setScreenAwake(enabled: Boolean) { awake += enabled }
+        override fun resetAppearanceAfterConfirmation(): Boolean {
+            if (failSave) return false
+            stored = NativeAppearancePreferences.defaults()
+            return true
+        }
     }
 
     @Test fun defaultsMatchActualAndroidRestore() {
@@ -37,6 +42,23 @@ class NativeAppearanceModelTest {
         assertTrue(state.hapticsEnabled); assertTrue(state.keepScreenOn)
         assertFalse(state.preferencesFailed)
         assertTrue(platform.saves.isEmpty()); assertTrue(platform.awake.isEmpty())
+    }
+    @Test fun explicitRepairReloadsLiveAppearanceWithoutChangingApplicationLifetime() {
+        val p = Platform().also { it.stored = null }
+        val model = NativeAppearanceModel(p, "zh-Hant")
+        model.setApplicationActive(true)
+        model.setKeepScreenOn(false)
+        assertTrue(model.state.value.preferencesFailed)
+        p.failSave = true
+        assertFalse(model.resetAfterConfirmation())
+        assertFalse(model.state.value.keepScreenOn)
+        p.failSave = false
+        assertTrue(model.resetAfterConfirmation())
+        assertTrue(model.state.value.keepScreenOn)
+        assertFalse(model.state.value.preferencesFailed)
+        assertEquals("zh-Hant", model.state.value.resolvedLanguage)
+        assertEquals(true, p.awake.last())
+        model.close(); assertFalse(model.resetAfterConfirmation())
     }
 
     @Test fun unknownStoredSkinIsTitaniumAndRepairedButMissingSkinIsFrosted() {

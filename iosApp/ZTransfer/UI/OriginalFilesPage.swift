@@ -22,6 +22,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private let automaticTransfer: CameraAutomaticTransferCoordinator?
     private let automaticTransferTargetAvailable: Bool
     private let directorySelection: ((URL, @escaping (String?) -> Void) -> Void)?
+    private let sandboxSelection: ((@escaping (String?) -> Void) -> Void)?
     private var directoryPicker: (request: Int64, controller: UIDocumentPickerViewController)?
     private var refreshTask: Task<Void, Never>?
     private(set) var originalIndexTask: Task<Void, Never>?
@@ -43,6 +44,8 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private var catalogPublicationTask: Task<Void, Never>?
     private var connected = false
     private var closed = false
+    private lazy var originalActions = OriginalActionPresenter(source: originals)
+    private let rememberBrowseSession: ((NativeBrowseSession) -> Void)?
     private(set) lazy var model = NativeFilesPageModel(connectionId: connectionID.uuidString, queue: queuePage.model, platform: self)
 
     init(connectionID: UUID, catalog: CameraCatalog, queue: CameraOriginalQueue, previews: CameraPreviewStore,
@@ -50,7 +53,9 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
          preferences: BrowsePreferencesStore? = nil, originals: OriginalFilesReading? = nil,
          transferPreferences: TransferPreferencesStore? = nil, directoryDescription: String? = nil,
          directoryMessage: String? = nil, selectDirectory: ((URL, @escaping (String?) -> Void) -> Void)? = nil,
-         automaticTransfer: CameraAutomaticTransferCoordinator? = nil, automaticTransferTargetAvailable: Bool = false) {
+         automaticTransfer: CameraAutomaticTransferCoordinator? = nil, automaticTransferTargetAvailable: Bool = false,
+         browseSession: NativeBrowseSession? = nil, rememberBrowseSession: ((NativeBrowseSession) -> Void)? = nil,
+         useSandbox: ((@escaping (String?) -> Void) -> Void)? = nil) {
         self.connectionID = connectionID; self.catalog = catalog; self.queue = queue; self.previews = previews
         self.exifSource = exifSource; self.exifCache = exifCache
         self.originals = originals ?? queue // One immutable source for the entire page/preview lifetime.
@@ -59,9 +64,13 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         self.automaticTransfer = automaticTransfer
         self.automaticTransferTargetAvailable = automaticTransferTargetAvailable
         self.directorySelection = selectDirectory
+        self.sandboxSelection = useSandbox
+        self.rememberBrowseSession = rememberBrowseSession
         queuePage = OriginalQueuePageBridge(connectionID: connectionID, queue: queue, previews: previews, stationMode: stationMode)
         super.init()
+        if let browseSession { _ = model.restoreBrowseSession(value: browseSession) }
         precondition(model.attachPreviewReads(platform: self))
+        precondition(model.originalActions.attach(platform: self))
         if automaticTransfer != nil { precondition(model.automaticTransfer.attach(platform: self)) }
         if selectDirectory != nil {
             precondition(model.directory.attach(platform: self, description: directoryDescription, message: directoryMessage))
@@ -79,6 +88,14 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         picker.allowsMultipleSelection = false; picker.delegate = self
         directoryPicker = (requestId, picker)
         presenter.present(picker, animated: true)
+    }
+    func useSandboxAfterConfirmation(requestId: Int64) -> Bool {
+        guard !closed, let sandboxSelection else { return false }
+        sandboxSelection { [weak self] message in
+            guard let self, !self.closed else { return }
+            _ = self.model.directory.finish(requestId: requestId, message: message)
+        }
+        return true
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
@@ -104,6 +121,11 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     func previewDateText(year: Int32, month: Int32, day: Int32) -> String {
         ApplePreviewDateText.date(year: year, month: month, day: day)
     }
+    func resetBrowsePreferencesAfterConfirmation() -> Bool {
+        guard !closed, preferences.resetAfterUserConfirmation(), let value = preferences.read() else { return false }
+        relayPriority(value)
+        return true
+    }
     func previewTimeText(hour: Int32, minute: Int32, second: Int32) -> String {
         ApplePreviewDateText.time(hour: hour, minute: minute, second: second)
     }
@@ -111,6 +133,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     func publishQueue(_ value: OriginalQueueSnapshot) {
         guard !closed, value.connectionID == connectionID else { return }
         queuePage.publish(value)
+        model.observeQueuePublication()
         if completedOriginalRevision == nil || value.completedOriginalRevision > completedOriginalRevision! {
             completedOriginalRevision = value.completedOriginalRevision
             refreshOriginals(rescan: originalRevision < 0)
@@ -564,6 +587,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     func cancelRequests() {
         guard !closed else { return }
         closed = true; refreshTask?.cancel(); refreshTask = nil
+        originalActions.close()
         catalogPublicationTask?.cancel(); catalogPublicationTask = nil; pendingCatalogPublication = nil
         if let pending = directoryPicker {
             directoryPicker = nil; pending.controller.delegate = nil
@@ -578,7 +602,11 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         filesByHandle.removeAll(); infosByHandle.removeAll()
         committedFiles.removeAll(); committedInfos.removeAll()
     }
-    func close() { model.close() }
+    func close() {
+        guard !closed else { return }
+        rememberBrowseSession?(model.captureBrowseSession())
+        model.close()
+    }
 }
 
 struct OriginalFilesPage: UIViewControllerRepresentable {
@@ -595,4 +623,128 @@ struct OriginalFilesPage: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ controller: UIViewController, context: Context) {}
     static func dismantleUIViewController(_ controller: UIViewController, coordinator: OriginalFilesPageBridge) { coordinator.close() }
+}
+
+extension OriginalFilesPageBridge: NativeOriginalActionsPlatform {
+    func performOriginalAction(action: String, items: [NativeOriginalActionItem], completion: NativeOriginalActionCompletion) {
+        guard !closed else { completion.complete(succeededIndices: KotlinIntArray(size: 0),
+            failedCount: Int32(items.count), cancelled: true, message: nil); return }
+        originalActions.perform(action, items: items, presenter: queuePage.presenter, completion: completion)
+    }
+    func cancelOriginalActions() { originalActions.close() }
+}
+
+/// UIKit/PhotoKit adapter for the shared saved-original panel. No camera or queue subscription.
+@MainActor
+final class OriginalActionPresenter: NSObject, UIDocumentPickerDelegate {
+    private let source: OriginalFilesReading
+    private let importer: PhotoLibraryImporter
+    private var task: Task<Void, Never>?
+    private var completion: NativeOriginalActionCompletion?
+    private var copies: OriginalActionCopies?
+    private var controller: UIViewController?
+    private var preparedIndices: [Int] = []
+    private var failures = 0
+    private var closed = false
+    init(source: OriginalFilesReading, importer: PhotoLibraryImporter = PhotoLibraryImporter()) {
+        self.source = source; self.importer = importer
+    }
+    func perform(_ action: String, items: [NativeOriginalActionItem], presenter: UIViewController?,
+                 completion: NativeOriginalActionCompletion) {
+        guard !closed, self.completion == nil, ["photos", "share", "files"].contains(action),
+              !items.isEmpty, items.count <= 500, Set(items.map(\.locator)).count == items.count,
+              let source = source as? OriginalFilesReusing,
+              let presenter, presenter.viewIfLoaded?.window != nil, presenter.presentedViewController == nil else {
+            completion.complete(succeededIndices: KotlinIntArray(size: 0), failedCount: Int32(items.count),
+                cancelled: false, message: "暂不能操作这些原片，请关闭其它系统窗口或检查保存目录。 / Check the source and close other system windows.")
+            return
+        }
+        self.completion = completion; failures = 0; preparedIndices = []
+        let copies = OriginalActionCopies(source: source)
+        self.copies = copies
+        task = Task { [self] in
+            var urls: [URL] = [], confirmed: [Int] = []
+            for (index, item) in items.enumerated() {
+                if Task.isCancelled || closed { break }
+                do {
+                    let saved = try await copies.prepare(ExistingOriginalReference(name: item.originalName,
+                        size: item.originalSize, locator: item.locator))
+                    if action == "photos" {
+                        try await importer.save(saved.url)
+                        confirmed.append(index) // Photos may commit after cancellation; record its real result.
+                    } else {
+                        urls.append(saved.url); preparedIndices.append(index)
+                    }
+                } catch {
+                    if error is CancellationError || Task.isCancelled { break }
+                    failures += 1
+                }
+            }
+            task = nil
+            if action == "photos" || Task.isCancelled || closed || urls.isEmpty {
+                finish(confirmed, cancelled: Task.isCancelled || closed,
+                    message: action == "photos"
+                        ? "图库接收结果已返回；不支持的 RAW/视频可改用分享或 Files，原文件保留。 / Originals are retained; unsupported media can be exported via Share or Files."
+                        : "导出准备已结束或取消，原文件保留；未收到系统回执的项目不计成功。 / Export preparation ended; originals retained. Unconfirmed items are not counted as successful.")
+                return
+            }
+            guard presenter.viewIfLoaded?.window != nil, presenter.presentedViewController == nil else {
+                failures += urls.count; finish([], cancelled: false, message: "系统窗口暂不可用。 / System presentation unavailable.")
+                return
+            }
+            if action == "share" {
+                let sheet = UIActivityViewController(activityItems: urls, applicationActivities: nil)
+                sheet.completionWithItemsHandler = { [weak self] _, completed, _, error in
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        if error != nil { self.failures += self.preparedIndices.count }
+                        self.finish(completed && error == nil ? self.preparedIndices : [],
+                            cancelled: !completed && error == nil,
+                            message: "系统分享回执不代表接收方持久保存或云端同步完成。 / System activity receipt does not verify recipient storage or cloud sync.")
+                    }
+                }
+                if let popover = sheet.popoverPresentationController {
+                    popover.sourceView = presenter.view
+                    popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
+                    popover.permittedArrowDirections = []
+                }
+                controller = sheet
+                presenter.present(sheet, animated: true)
+            } else {
+                let picker = UIDocumentPickerViewController(forExporting: urls, asCopy: true)
+                picker.delegate = self
+                controller = picker
+                presenter.present(picker, animated: true)
+            }
+        }
+    }
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        guard self.controller === controller else { return }
+        finish([], cancelled: true, message: nil)
+    }
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        guard self.controller === controller else { return }
+        let complete = urls.count == preparedIndices.count && Set(urls).count == urls.count
+        // A partial receipt has no stable per-source mapping. Do not invent which file succeeded.
+        finish(complete ? preparedIndices : [], cancelled: false,
+            message: "Files 返回 \(urls.count)/\(preparedIndices.count) 个结果；不代表云端同步完成。部分回执请核对目标，不自动重试。 / Files returned \(urls.count)/\(preparedIndices.count) results; verify partial receipts before retrying.")
+    }
+    private func finish(_ indices: [Int], cancelled: Bool, message: String?) {
+        guard let callback = completion else { return }
+        completion = nil
+        let values = KotlinIntArray(size: Int32(indices.count))
+        for (offset, index) in indices.enumerated() { values.set(index: Int32(offset), value: Int32(index)) }
+        callback.complete(succeededIndices: values, failedCount: Int32(failures), cancelled: cancelled, message: message)
+        let released = copies; copies = nil
+        controller = nil; preparedIndices = []
+        Task { await released?.release() }
+    }
+    func close() {
+        guard !closed else { return }
+        closed = true
+        if let task { task.cancel(); return } // Its Photos commit/reader must finish before copy cleanup.
+        if let controller {
+            controller.dismiss(animated: false) { [self] in finish([], cancelled: true, message: nil) }
+        } else { finish([], cancelled: true, message: nil) }
+    }
 }

@@ -55,6 +55,9 @@ class AutomaticLoopWiringTest(unittest.TestCase):
         sta.verify()
         import thumbnail_crop_extraction as crop
         crop.verify()
+        import queue_workspace_extraction as workspace
+        import workspace_transition_extraction as transition
+        workspace.verify(); transition.verify()
         allowed = {home.ANDROID, home.COMMON, sta.ANDROID, sta.COMMON, crop.ANDROID, crop.COMMON,
             "shared/src/commonMain/kotlin/com/ztransfer/catalog/ThumbnailFillQueue.kt",
             "shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeThumbnailFillQueue.kt",
@@ -78,6 +81,18 @@ class AutomaticLoopWiringTest(unittest.TestCase):
             "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeConnectionHome.kt",
             "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeConnectionHomeText.kt",
             "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeConnectionHomeTest.kt"}
+        allowed.update({workspace.ANDROID, workspace.COMMON, transition.ANDROID, transition.COMMON,
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeAppearanceModel.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeOriginalFilesPage.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeOriginalQueuePage.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativePhotoSettingsOverlay.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeDirectorySettingsModel.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeQueuePageModel.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeQueuePageModelTest.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeAppearanceModelTest.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeDirectorySettingsModelTest.kt",
+            "shared/src/iosMain/kotlin/com/ztransfer/ui/NativeConnectionHomeController.kt",
+            "shared/src/iosMain/kotlin/com/ztransfer/ui/SharedUiController.kt"})
         self.assertLessEqual(set(changes.splitlines()), allowed)
 
 

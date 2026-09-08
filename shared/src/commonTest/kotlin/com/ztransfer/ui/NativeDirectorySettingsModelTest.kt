@@ -3,6 +3,23 @@ package com.ztransfer.ui
 import kotlin.test.*
 
 class NativeDirectorySettingsModelTest {
+    @Test fun explicitSandboxRepairSharesThePickerFenceAndRejectsLateReceipts() {
+        val model = NativeDirectorySettingsModel()
+        var sandboxCalls = 0
+        val owner = object : NativeDirectorySettingsPlatform {
+            override fun selectDirectory(requestId: Long) {}
+            override fun useSandboxAfterConfirmation(requestId: Long): Boolean { sandboxCalls++; return true }
+        }
+        model.attach(owner, "unknown", "invalid preference")
+        model.choose(); model.useSandboxAfterConfirmation()
+        assertEquals(0, sandboxCalls)
+        model.finish(1, null); model.useSandboxAfterConfirmation()
+        assertEquals(1, sandboxCalls); assertTrue(model.state.value.selecting)
+        assertFalse(model.finish(1, "old picker"))
+        assertTrue(model.finish(2, "queue still running"))
+        model.close(); model.useSandboxAfterConfirmation()
+        assertEquals(1, sandboxCalls)
+    }
     private class Platform : NativeDirectorySettingsPlatform {
         val calls = ArrayList<Long>()
         var callback: ((Long) -> Unit)? = null

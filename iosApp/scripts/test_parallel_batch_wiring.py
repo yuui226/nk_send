@@ -34,6 +34,10 @@ class ParallelBatchWiringTest(unittest.TestCase):
         import thumbnail_crop_extraction as crop
         crop.verify()
         changed.discard(crop.ANDROID)
+        import queue_workspace_extraction as workspace
+        import workspace_transition_extraction as transition
+        workspace.verify(); transition.verify()
+        changed.discard(workspace.ANDROID); changed.discard(transition.ANDROID)
         self.assertFalse(changed, changed)
 
     def test_one_event_observer_owns_catalog_and_real_automatic_admission(self):

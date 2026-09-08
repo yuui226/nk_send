@@ -76,5 +76,7 @@ class ThumbnailGridExtractionTest(unittest.TestCase):
         self.assertNotIn('private val THUMBNAIL_THEME_BORDER_WIDTH', self.android)
 
     def test_android_and_shared_files_exactly_match_full_extraction(self):
-        self.assertEqual(extract_queue_flight(extract_export_exit(extract_filter_overlay(self.android)[0])[0])[0], (self.root / 'app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt').read_text(encoding='utf-8'))
+        from queue_workspace_extraction import previous_queue_workspace_source
+        path = 'app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt'
+        self.assertEqual(extract_queue_flight(extract_export_exit(extract_filter_overlay(self.android)[0])[0])[0], previous_queue_workspace_source(path, (self.root/path).read_text(encoding='utf-8')))
         self.assertEqual(self.shared, (self.root / 'shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedThumbnailGrid.kt').read_text(encoding='utf-8'))

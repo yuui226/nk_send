@@ -16,7 +16,7 @@ class AutomaticAdmissionWiringTest(unittest.TestCase):
     def test_old_queue_worker_and_manual_admission_restore_exactly(self):
         self.assertEqual({CORE, QUEUE}, set(CHANGES))
         for path in CHANGES:
-            self.assertEqual(before(path), previous_automatic_source(path, read(path)))
+            self.assertEqual(before(path), previous_automatic_source(path, (ROOT/path).read_text(encoding="utf-8")))
 
     def test_shared_batch_calls_original_android_identity_and_media_rules(self):
         value = between(read(CORE), '    fun enqueueNewMedia(', '    private fun enqueueFile(')
@@ -44,6 +44,7 @@ class AutomaticAdmissionWiringTest(unittest.TestCase):
         for path, old, new in ((CORE, 'newMediaQueueCandidates(files, tasks)', 'files'),
                                (QUEUE, 'enabled, destination != nil,', 'enabled,')):
             with self.assertRaises(AssertionError):
-                previous_automatic_source(path, read(path).replace(old, new))
-        changed = read(QUEUE).replace('core.finishRun()', 'core.pauseAfterCurrent()')
-        self.assertNotEqual(before(QUEUE), previous_automatic_source(QUEUE, changed))
+                previous_automatic_source(path, (ROOT/path).read_text(encoding="utf-8").replace(old, new))
+        changed = (ROOT/QUEUE).read_text(encoding="utf-8").replace('core.finishRun()', 'core.pauseAfterCurrent()')
+        with self.assertRaises(AssertionError):
+            previous_automatic_source(QUEUE, changed)

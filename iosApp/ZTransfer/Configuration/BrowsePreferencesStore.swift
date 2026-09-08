@@ -45,6 +45,7 @@ final class TransferPreferencesStore {
     /// The UI must obtain explicit confirmation. Ordinary reads/writes never erase unknown data.
     @discardableResult
     func resetAfterUserConfirmation() -> Bool {
+        if let raw = defaults.object(forKey: Self.key) { defaults.set(raw, forKey: Self.key + ".recoveryBackup") }
         return write(Document(version: 1, organizeByDate: false, deferStart: false, autoTransferNewMedia: false))
     }
 
@@ -81,6 +82,11 @@ final class BrowsePreferencesStore {
     }
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    func resetAfterUserConfirmation() -> Bool {
+        if let raw = defaults.object(forKey: Self.key) { defaults.set(raw, forKey: Self.key + ".recoveryBackup") }
+        defaults.removeObject(forKey: Self.key)
+        return save(NativeBrowsePreferences.companion.defaults())
+    }
 
     func read() -> NativeBrowsePreferences? {
         guard let raw = defaults.object(forKey: Self.key) else { return NativeBrowsePreferences.companion.defaults() }

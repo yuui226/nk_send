@@ -33,6 +33,8 @@ CHANGES = {
 }
 
 def previous_transfer_completion_source(path, value):
+    from workspace_completion_wiring import previous_workspace_completion_source
+    value = previous_workspace_completion_source(path, value)
     from sta_media_extraction import previous_sta_media_source
     from thumbnail_crop_extraction import previous_thumbnail_crop_source
     value = previous_sta_media_source(path, value)

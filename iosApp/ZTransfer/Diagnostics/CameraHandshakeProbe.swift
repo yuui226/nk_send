@@ -46,6 +46,7 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published private(set) var queueSnapshot: OriginalQueueSnapshot?
     @Published var queuePage: OriginalQueuePageBridge?
     @Published var filesPage: OriginalFilesPageBridge?
+    private var browseSession: NativeBrowseSession?
     private var workspaceNavigation: UInt64 = 0
     var canOpenSharedWorkspace: Bool {
         running && sessionReady && !downloading && originalQueue != nil && apConnection != nil && previewStore != nil && catalog != nil
@@ -83,10 +84,11 @@ final class CameraHandshakeProbe: ObservableObject {
     private let destinationPreferences = OriginalDestinationPreferences()
     @Published private(set) var queueDestinationError: String?
     @Published private(set) var savesToSelectedDirectory = false
+    private var queueDestinationName: String?
     var queueDestinationSummary: String {
-        if let queueDestinationError { return queueDestinationError }
+        if queueDestinationError != nil { return "保存目标待修复 / Destination needs repair" }
         return savesToSelectedDirectory
-            ? "队列：所选目录。副本校验发布后才完成，应用内原片保留。"
+            ? "Files: " + (queueDestinationName ?? "所选目录 / Selected directory") + " · 校验发布后完成 / Verified publication"
             : "队列：应用沙盒。选择目录授权本身不会改变保存目标。"
     }
     @Published private(set) var metadataStatus = ""
@@ -170,6 +172,7 @@ final class CameraHandshakeProbe: ObservableObject {
                 let remembered = destinationPreferences.save(.provider)
                 guard originalQueue === queue else { return }
                 providerOriginals = change.provider; transferDestination = change.provider
+                queueDestinationName = change.displayName
                 queueDestinationError = nil
                 savesToSelectedDirectory = true
                 workspaceNavigation &+= 1
@@ -356,6 +359,7 @@ final class CameraHandshakeProbe: ObservableObject {
         if running { publishProduct("closing") }
         automaticTransfer?.close()
         filesPage?.close(); filesPage = nil
+        browseSession = nil
         queuePage?.close(); queuePage = nil
         stopDiscovery()
         downloadTask?.cancel(); photoImportTask?.cancel(); catalogTask?.cancel()
@@ -501,20 +505,26 @@ final class CameraHandshakeProbe: ObservableObject {
         }
     }
     func startQueue() { if let queue = originalQueue, !downloading { Task { await queue.start() } } }
-    func configureQueueDirectory(_ enabled: Bool) {
-        guard !directoryBusy, let queue = originalQueue else { return }
+    func configureQueueDirectory(_ enabled: Bool, confirmedReset: Bool = false, completion: ((String?) -> Void)? = nil) {
+        guard !directoryBusy, let queue = originalQueue else {
+            completion?("当前无法切换保存目标 / Destination unavailable"); return
+        }
         directoryBusy = true
         directoryTask = Task {
-            defer { directoryBusy = false; directoryTask = nil }
+            var outcome: String?
+            defer { directoryBusy = false; directoryTask = nil; completion?(outcome) }
             do {
                 let target: ProviderOriginalStore?
                 if enabled { target = try providerStore() } else { target = nil }
                 guard try await queue.configureDestination(target) else {
                     directoryStatus = "当前队列仍在执行，请传完当前并暂停后再切换保存目标。"
+                    outcome = directoryStatus
                     return
                 }
                 // The configuration is committed. Mirror it even if cancellation arrives just afterwards.
-                let remembered = destinationPreferences.save(enabled ? .provider : .sandbox)
+                let remembered = confirmedReset && !enabled
+                    ? destinationPreferences.resetToSandboxAfterUserConfirmation()
+                    : destinationPreferences.save(enabled ? .provider : .sandbox)
                 guard originalQueue === queue else { return }
                 transferDestination = target; savesToSelectedDirectory = enabled
                 queueDestinationError = nil
@@ -525,6 +535,7 @@ final class CameraHandshakeProbe: ObservableObject {
                     : "队列已切回应用沙盒；所选目录中的已有文件不变。"
                 if !remembered { directoryStatus += " 本次目标已生效，但偏好保存失败；下次连接可能需重选。" }
             } catch {
+                outcome = "保存目标未改变：\(error.localizedDescription)"
                 if !Task.isCancelled { directoryStatus = "保存目标未改变：\(error.localizedDescription)" }
             }
         }
@@ -565,7 +576,14 @@ final class CameraHandshakeProbe: ObservableObject {
                 guard let self else { completion("连接已关闭，请重新连接后选择目录。"); return }
                 self.selectQueueDirectory(url, completion: completion)
             }, automaticTransfer: automaticTransfer,
-            automaticTransferTargetAvailable: savesToSelectedDirectory && queueDestinationError == nil)
+            automaticTransferTargetAvailable: savesToSelectedDirectory && queueDestinationError == nil,
+            browseSession: browseSession, rememberBrowseSession: { [weak self] value in
+                guard let self, self.apConnection === connection else { return }
+                self.browseSession = value
+            }, useSandbox: { [weak self] completion in
+                guard let self else { completion("连接已关闭 / Connection closed"); return }
+                self.configureQueueDirectory(false, confirmedReset: true, completion: completion)
+            })
         filesPage = page
         Task {
             let snapshot = await queue.snapshot()
@@ -653,6 +671,7 @@ final class CameraHandshakeProbe: ObservableObject {
         let queue = CameraOriginalQueue(camera: connection, store: try CameraOriginalStore.applicationStore(), destination: restored.destination)
         providerOriginals = restored.provider; transferDestination = restored.destination
         savesToSelectedDirectory = restored.selected == .provider; queueDestinationError = restored.failure
+        queueDestinationName = restored.displayName
         directoryStatus = restored.failure ?? (savesToSelectedDirectory ? "已恢复所选目录保存目标。" : "队列使用应用沙盒。")
         originalQueue = queue
         let sessionAutomatic = CameraAutomaticTransferCoordinator(connectionID: connection.connectionID,
@@ -826,6 +845,9 @@ final class CameraHandshakeProbe: ObservableObject {
         guard apConnection?.connectionID == addition.snapshot.connectionID else { return }
         filesPage?.publishAddition(addition.snapshot)
         if let media = addition.newMedia { catalogStatus = "已发现新文件：\(media.fileName)" }
+        if automaticTransfer?.enabled == true, let media = addition.newMedia {
+            filesPage?.model.expectAutomaticArrival(file: media)
+        }
         automaticTransfer?.receive(addition, transfer: filesPage?.model.currentTransferPreferences())
     }
 

@@ -77,6 +77,8 @@ class NativeQueuePageModel(val connectionId: String, platform: NativeQueuePagePl
     private var closed = false
     private var sequence = -1L
     private var historyRevision = -1L
+    private var connectionUnavailable = false
+    private var retainedSpeed = 0L
     private val actionsPending = HashSet<CancellableContinuation<Boolean>>()
     private val imagesPending = HashSet<CancellableContinuation<ByteArray?>>()
 
@@ -90,7 +92,15 @@ class NativeQueuePageModel(val connectionId: String, platform: NativeQueuePagePl
         currentTasks = { mutableState.value.tasks },
     )
 
-    fun setConnected(value: Boolean) { if (!closed) mutableConnected.value = value }
+    fun setConnected(value: Boolean) {
+        if (closed) return
+        mutableConnected.value = value
+        connectionUnavailable = !value
+        if (!value) {
+            retainedSpeed = 0L; mutableProgress.value = null
+            mutableState.value = mutableState.value.copy(isTransferring = false)
+        }
+    }
 
     fun publish(snapshot: NativeQueuePageSnapshot): Boolean {
         if (closed || snapshot.connectionId != connectionId || snapshot.sequence <= sequence ||
@@ -99,12 +109,14 @@ class NativeQueuePageModel(val connectionId: String, platform: NativeQueuePagePl
         val active = rows.firstOrNull { it.status == TransferStatus.TRANSFERING }
         // Swift's single observer forwards history only on low-frequency changes. Byte updates
         // must not churn the page's task list, even though the diagnostic snapshot contains both.
-        if (snapshot.historyRevision != historyRevision) {
-            mutableState.value = TransferQueueUiState(rows, snapshot.running, 0L)
+        val running = snapshot.running && !connectionUnavailable
+        if (snapshot.historyRevision != historyRevision || mutableState.value.isTransferring != running) {
+            mutableState.value = TransferQueueUiState(rows, running, 0L)
         }
-        mutableProgress.value = active?.let {
-            ActiveTransferProgress(it.taskId, it.progress, it.downloaded, it.speed)
-        }
+        retainedSpeed = if (running) retainLastValidTransferSpeed(retainedSpeed, active?.speed ?: 0) else 0
+        mutableProgress.value = if (!running) null else active?.let {
+            ActiveTransferProgress(it.taskId, it.progress, it.downloaded, it.speed, retainedSpeed)
+        } ?: mutableProgress.value?.copy(bytesPerSecond = 0, retainedBytesPerSecond = retainedSpeed)
         mutablePaused.value = snapshot.paused
         sequence = snapshot.sequence
         historyRevision = snapshot.historyRevision

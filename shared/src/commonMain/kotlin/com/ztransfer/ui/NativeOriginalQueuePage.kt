@@ -29,6 +29,8 @@ internal fun NativeOriginalQueuePage(
     elapsedRealtimeMs: () -> Long,
     onBack: () -> Unit,
     thumbnail: @Composable (CameraFileInfo, Boolean, Modifier) -> Unit,
+    showContent: Boolean = true,
+    showControls: Boolean = true,
 ) {
     val state by model.state.collectAsState()
     val connected by model.connected.collectAsState()
@@ -45,7 +47,7 @@ internal fun NativeOriginalQueuePage(
         executionControl?.let { retainedExecutionControl = it }
     }
     Box(Modifier.fillMaxSize()) {
-        SharedTransferScreen(
+        if (showContent) SharedTransferScreen(
             state, connected, controlNonce, model.activeProgress, elapsedRealtimeMs,
             // The original-only coordinator does not yet have a local-original export index.
             // Never claim offline effect retries work until that pipeline is actually connected.
@@ -70,7 +72,7 @@ internal fun NativeOriginalQueuePage(
                 ), modifier)
             },
         )
-        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp),
+        if (showControls) Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             GlassButton(onClick = onBack, contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
                 enforceMinimumTouchTarget = false, modifier = Modifier.height(36.dp)) {

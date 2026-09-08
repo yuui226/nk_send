@@ -3,6 +3,7 @@ import unittest
 from export_exit_extraction import extract_export_exit
 from photo_preview_session_extraction import extract_queue_flight
 import test_filter_overlay_extraction as filter_baseline
+from queue_workspace_extraction import previous_queue_workspace_source
 
 
 class ExportExitExtractionTest(unittest.TestCase):
@@ -14,7 +15,8 @@ class ExportExitExtractionTest(unittest.TestCase):
         cls.android, cls.shared = extract_export_exit(cls.source)
 
     def test_complete_android_page_and_shared_coordinator_match_explicit_extraction(self):
-        self.assertEqual(extract_queue_flight(self.android)[0], (self.root/'app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt').read_text(encoding='utf-8'))
+        path = 'app/src/main/java/com/ztransfer/ui/screen/FileListScreen.kt'
+        self.assertEqual(extract_queue_flight(self.android)[0], previous_queue_workspace_source(path, (self.root/path).read_text(encoding='utf-8')))
         self.assertEqual(self.shared, (self.root/'shared/src/commonMain/kotlin/com/ztransfer/ui/screen/ExportExitUiState.kt').read_text(encoding='utf-8'))
 
     def test_same_original_state_is_used_by_both_platform_pages(self):

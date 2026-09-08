@@ -24,6 +24,7 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
     val transfers by model.transferPreferences.collectAsState()
     val automatic by model.automaticTransfer.state.collectAsState()
     var confirmTransferReset by remember(model) { mutableStateOf(false) }
+    var confirmSandbox by remember(model) { mutableStateOf(false) }
     val recoveryText = nativeTransferRecoveryText(appearanceState.resolvedLanguage)
     val directory by model.directory.state.collectAsState()
     val openingAnchor = remember { anchor }
@@ -51,6 +52,9 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
             // All three controls use the same preferences document and existing transfer queue.
             SharedSettingsCard {
                 SharedTransferDirectoryHeader(directory.description, false, text, model.directory::choose)
+                TextButton(enabled = !directory.selecting, onClick = { confirmSandbox = true }) {
+                    Text(nativeActionText(appearanceState.resolvedLanguage, "切回应用目录 / 修复保存目标", "Use app storage / repair destination", "切回應用程式目錄 / 修復儲存目標"))
+                }
                 if (directory.selecting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 directory.message?.let {
                     Text(it, color = AppTheme.colors.accentOrange, style = MaterialTheme.typography.bodySmall)
@@ -82,8 +86,15 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
                 onTheme = { appearance.setThemeName(it.name) }, onLanguage = appearance::setLanguage,
                 onSkin = { appearance.setSkinName(it.name) }, onHaptics = appearance::setHapticsEnabled,
                 onKeepScreenOn = appearance::setKeepScreenOn, close = close)
+            Spacer(Modifier.height(14.dp))
+            NativeProductInformation(appearance, model)
         }
     }
+    if (confirmSandbox) AlertDialog(onDismissRequest = { confirmSandbox = false },
+        title = { Text(nativeActionText(appearanceState.resolvedLanguage, "使用应用目录？", "Use app storage?", "使用應用程式目錄？")) },
+        text = { Text(nativeActionText(appearanceState.resolvedLanguage, "只在队列暂停且当前文件结束后切换。后续任务保存到应用目录；原目录文件和授权保留。未知保存目标偏好将备份后重置。", "Switch only while idle after the current file ends. Subsequent tasks use app storage; existing files and grants remain. Unknown destination preferences are backed up and reset.", "只在佇列暫停且目前檔案結束後切換。後續任務存至應用程式目錄；原目錄檔案與授權保留。未知儲存目標偏好將備份後重置。")) },
+        confirmButton = { TextButton(onClick = { confirmSandbox = false; model.directory.useSandboxAfterConfirmation() }) { Text(recoveryText.reset) } },
+        dismissButton = { TextButton(onClick = { confirmSandbox = false }) { Text(recoveryText.cancel) } })
     if (confirmTransferReset) AlertDialog(onDismissRequest = { confirmTransferReset = false },
         title = { Text(recoveryText.title) }, text = { Text(recoveryText.message) },
         confirmButton = { TextButton(onClick = {

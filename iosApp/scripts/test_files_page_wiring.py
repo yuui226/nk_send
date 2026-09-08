@@ -11,10 +11,11 @@ class FilesPageWiringTest(unittest.TestCase):
         self.assertIn('Calendar(identifier: .gregorian)', bridge)
         self.assertIn('calendar.timeZone = timeZone', bridge)
         page=(root/'shared/src/commonMain/kotlin/com/ztransfer/ui/NativeOriginalFilesPage.kt').read_text(encoding='utf-8')
-        self.assertIn('LaunchedEffect(state.files)', page)
+        self.assertIn('LaunchedEffect(state.files, state.hasSnapshot, state.scanning)', page)
         self.assertIn('delay(600); filterRevealWindow = false', page)
         self.assertIn('filterRevealWindow = true // Set synchronously', page)
-        self.assertLess(page.index('if (showQueue)'), page.index('rememberExportExitState('))
+        self.assertIn('SharedFilesQueueWorkspace(queueVisible = showQueue', page)
+        self.assertIn('allowRemoteThumbnails = connected && preview == null && !showQueue', page)
     def test_native_grid_uses_original_defaults_and_clears_expansion_when_disabled(self):
         root=Path(__file__).resolve().parents[2]
         s=(root/'shared/src/commonMain/kotlin/com/ztransfer/ui/NativeOriginalFilesPage.kt').read_text(encoding='utf-8')
@@ -24,7 +25,7 @@ class FilesPageWiringTest(unittest.TestCase):
         controls=(root/'shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedSettingsControls.kt').read_text(encoding='utf-8')
         self.assertIn('PHOTO_COLUMN_OPTIONS = listOf(2, 3, 4)', controls)
         self.assertIn('NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor, appearance)', s)
-        self.assertIn('LaunchedEffect(collapseBursts, state.bursts)', s)
+        self.assertIn('LaunchedEffect(collapseBursts, state.bursts, state.hasSnapshot, state.scanning)', s)
         self.assertIn('} else emptySet()', s)
         self.assertIn('tapToPreview = layout.tapToPreview', s)
 

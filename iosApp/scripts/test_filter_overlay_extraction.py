@@ -32,7 +32,8 @@ class FilterOverlayExtractionTest(unittest.TestCase):
             ('shared/src/commonMain/kotlin/com/ztransfer/ui/screen/SharedAnchorPopup.kt', self.popup_shared),
             ('shared/src/commonMain/kotlin/com/ztransfer/ui/screen/FilterOverlayContract.kt', expected_contract()),
         ]:
-            self.assertEqual(expected, (self.root/path).read_text(encoding='utf-8'), path)
+            from queue_workspace_extraction import previous_queue_workspace_source
+            self.assertEqual(expected, previous_queue_workspace_source(path, (self.root/path).read_text(encoding='utf-8')), path)
 
     def test_android_coordinator_and_calendar_helpers_unchanged(self):
         start, end = 'fun FileListScreen(', '/** 与状态胶囊同材质的顶部队列操作按钮'

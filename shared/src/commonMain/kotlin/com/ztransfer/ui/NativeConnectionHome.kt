@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 interface NativeConnectionHomePlatform {
     fun readConnectionMode(): String?
     fun saveConnectionMode(stationMode: Boolean): Boolean
+    fun resetConnectionModeAfterConfirmation(): Boolean = false
     fun connectCamera(address: String, stationMode: Boolean, allowPairing: Boolean, requestId: Long): Boolean
     fun cancelConnection(requestId: Long)
     fun disconnectCamera(requestId: Long)
@@ -207,6 +208,10 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
         platform?.openCameraFiles()
     }
     internal fun settings() { if (!closed) platform?.openNetworkSettings() }
+    internal fun resetModeConfirmed() {
+        if (closed || mutableState.value.busy || platform?.resetConnectionModeAfterConfirmation() != true) return
+        mutableState.value = mutableState.value.copy(stationMode = false, preferencesUnavailable = false)
+    }
     fun close() {
         if (closed) return
         val owner = platform; val value = mutableState.value
@@ -218,11 +223,13 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
 }
 
 @Composable
-internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: String) {
+internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: String, appearance: NativeAppearanceModel? = null) {
     val state by model.state.collectAsState()
     var forgetting by remember(model) { mutableStateOf<NativeStationChoice?>(null) }
     var resettingHistory by remember(model) { mutableStateOf(false) }
     var recoveringIdentity by remember(model) { mutableStateOf(false) }
+    var generalSettings by remember(model) { mutableStateOf(false) }
+    var resettingMode by remember(model) { mutableStateOf(false) }
     fun label(zh: String, en: String) = NativeConnectionHomeText.label(language, zh, en)
     val presentation = state.presentation()
     val selected = homeSelectedConnection(presentation.isConnectedToCamera, presentation.connectionType)
@@ -249,6 +256,7 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
         Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             ZMark(modifier = Modifier.height(24.dp))
+            if (appearance != null) TextButton(onClick = { generalSettings = true }) { Text(label("设置", "Settings")) }
             Text(label("连接相机，浏览与传输原片", "Connect your camera to browse and transfer originals"),
                 color = AppTheme.colors.onSurfaceVariant)
             SharedConnectionMethodCard(
@@ -345,6 +353,9 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
 
             }
             if (state.preferencesUnavailable) Text(label("连接模式无法保存，原偏好文件未被覆盖。", "Connection mode could not be saved; the original preferences were preserved."))
+            if (state.preferencesUnavailable) TextButton(enabled = !state.busy, onClick = { resettingMode = true }) {
+                Text(nativeActionText(language, "修复连接模式偏好", "Repair connection mode", "修復連接模式偏好"))
+            }
             if (state.phase == "paired") Text(label("配对已确认，请完成相机提示后重新连接。", "Pairing confirmed. Finish the camera prompts, then reconnect."))
             else if (state.phase != "connecting" && state.phase != "failed") state.message?.let { Text(it) }
             Text(label("请允许局域网访问。传输期间保持应用在前台；切入后台会关闭当前相机会话。此版本仅提供 AP / 标准 STA，不提供 iOS USB 连接。", "Allow Local Network access. Keep this app in the foreground while transferring; backgrounding closes the camera session. This version supports AP / standard STA, not iOS USB."),
@@ -362,6 +373,12 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
         text = { Text(label("先备份现有历史文件，再清空地址记录。不会重置安装身份、配对标记或照片。", "Back up the existing history file, then clear addresses. Installation identity, pairing markers and photos are kept.")) },
         confirmButton = { TextButton(onClick = { resettingHistory = false; model.resetHistoryConfirmed() }) { Text(label("备份并重置", "Back up and reset")) } },
         dismissButton = { TextButton(onClick = { resettingHistory = false }) { Text(label("取消", "Cancel")) } })
+    if (generalSettings && appearance != null) NativeGeneralSettingsDialog(appearance) { generalSettings = false }
+    if (resettingMode) AlertDialog(onDismissRequest = { resettingMode = false },
+        title = { Text(nativeActionText(language, "备份并恢复 AP 模式？", "Back up and restore AP mode?", "備份並恢復 AP 模式？")) },
+        text = { Text(nativeActionText(language, "只重置连接模式偏好，不更改配对身份、相机历史或照片。", "Reset only the mode preference; pairing, camera history and photos remain.", "只重置連接模式偏好，不更改配對身分、相機歷史或照片。")) },
+        confirmButton = { TextButton(onClick = { resettingMode = false; model.resetModeConfirmed() }) { Text(label("确认恢复", "Confirm recovery")) } },
+        dismissButton = { TextButton(onClick = { resettingMode = false }) { Text(label("取消", "Cancel")) } })
     if (recoveringIdentity) AlertDialog(onDismissRequest = { recoveringIdentity = false }, title = { Text(label("恢复损坏的配对身份？", "Recover damaged pairing identity?")) },
         text = { Text(label("仅在身份文件损坏时先备份再重新创建。恢复后所有相机需要重新进行电脑模式配对；照片和地址历史不删除。有效身份不会被重置。", "Only a damaged identity file is backed up and recreated. Afterwards every camera must be paired again. Photos and address history are kept; a valid identity is not reset.")) },
         confirmButton = { TextButton(onClick = { recoveringIdentity = false; model.recoverIdentityConfirmed() }) { Text(label("确认恢复", "Confirm recovery")) } },

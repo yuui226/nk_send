@@ -91,4 +91,5 @@ class DirectoryChangeWiringTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 previous_directory_change_source(path, (ROOT/path).read_text(encoding='utf-8').replace(old, new))
         changed = (ROOT/QUEUE).read_text(encoding='utf-8').replace('let target = destination //', 'let target: OriginalFilesDestination? = nil //')
-        self.assertNotEqual(before(QUEUE), previous_directory_change_source(QUEUE, changed))
+        with self.assertRaises(AssertionError):
+            previous_directory_change_source(QUEUE, changed)

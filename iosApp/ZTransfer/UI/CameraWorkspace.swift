@@ -29,6 +29,10 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
 
     func readConnectionMode() -> String? { connectionPreferences.read() }
     func saveConnectionMode(stationMode: Bool) -> Bool { connectionPreferences.save(stationMode ? "sta" : "ap") }
+    func resetConnectionModeAfterConfirmation() -> Bool {
+        guard !closed, !session.running else { return false }
+        return connectionPreferences.resetAfterConfirmation()
+    }
 
     func connectCamera(address: String, stationMode: Bool, allowPairing: Bool, requestId: Int64) -> Bool {
         guard !closed else { return false }
@@ -178,6 +182,11 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
     private struct Document: Codable { let version: Int; let mode: String }
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    func resetAfterConfirmation() -> Bool {
+        if let raw = defaults.object(forKey: Self.key) { defaults.set(raw, forKey: Self.key + ".recoveryBackup") }
+        defaults.removeObject(forKey: Self.key)
+        return save("ap")
+    }
     func read() -> String? {
         guard let raw = defaults.object(forKey: Self.key) else { return "ap" }
         guard let bytes = raw as? Data, bytes.count <= 4096,

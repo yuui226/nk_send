@@ -1,6 +1,8 @@
 package com.ztransfer.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -9,6 +11,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -35,8 +39,9 @@ internal fun NativeOriginalFilesPage(
     previewText: PreviewSessionText,
     settingsText: NativeSettingsPageText,
     appearance: NativeAppearanceModel,
+    cachedThumbnail: (CameraFileInfo) -> ImageBitmap?,
     openPreview: (List<CameraFileInfo>) -> NativePreviewPageSource?,
-    queuePage: @Composable (onBack: () -> Unit) -> Unit,
+    queuePage: @Composable (topOnly: Boolean, onBack: () -> Unit) -> Unit,
 ) {
     val state by model.state.collectAsState()
     val originals by model.originals.collectAsState()
@@ -55,15 +60,28 @@ internal fun NativeOriginalFilesPage(
     }
     val appearanceState by appearance.state.collectAsState()
     val tasks by model.queue.state.collectAsState()
+    val arrivals by model.arrivals.collectAsState()
     val connected by model.queue.connected.collectAsState()
     val colors = AppTheme.colors
     val scope = rememberCoroutineScope()
+    val flights = remember(model) { mutableStateListOf<QueueFlight>() }
+    var nextFlight by remember(model) { mutableLongStateOf(0) }
+    var caught by remember(model) { mutableLongStateOf(0) }
+    val catchScale = remember(model) { Animatable(1f) }
+    LaunchedEffect(caught) {
+        if (caught > 0) {
+            catchScale.animateTo(1.18f, tween(110, easing = FastOutSlowInEasing))
+            catchScale.animateTo(1f, com.ztransfer.ui.theme.Motion.bouncy())
+        }
+    }
     var showQueue by remember { mutableStateOf(false) }
+    var originalActionItems by remember(model) { mutableStateOf<List<NativeOriginalActionItem>?>(null) }
     var preview by remember(model) { mutableStateOf<NativeFilesPreview?>(null) }
     var previewBuildJob by remember(model) { mutableStateOf<Job?>(null) }
     var returnHandle by remember(model) { mutableStateOf<Int?>(null) }
     var returnNonce by remember(model) { mutableIntStateOf(0) }
     var queueBounds by remember(model) { mutableStateOf<Rect?>(null) }
+    var signalBounds by remember(model) { mutableStateOf<Rect?>(null) }
     var settingsAnchor by remember(model) { mutableStateOf<Rect?>(null) }
     var openedSettingsAnchor by remember(model) { mutableStateOf<Rect?>(null) }
     val haptics = rememberHaptics(appearanceState.hapticsEnabled)
@@ -77,14 +95,15 @@ internal fun NativeOriginalFilesPage(
     }
     val columns = layout.columns
     val collapseBursts = layout.collapseBursts
-    val dates = remember(model) { mutableStateMapOf<String, Boolean>() }
-    LaunchedEffect(state.files) {
+    val dates = remember(model) { model.browseSession.collapsedDates }
+    LaunchedEffect(state.files, state.hasSnapshot, state.scanning) {
         val validDates = state.files.mapTo(HashSet()) { it.captureDate?.take(8) ?: UNKNOWN_CAPTURE_DATE_GROUP_KEY }
-        dates.keys.filterNot { it in validDates }.forEach(dates::remove)
+        if (state.hasSnapshot && !state.scanning) dates.keys.filterNot { it in validDates }.forEach(dates::remove)
     }
-    val expanded = remember(model) { mutableStateMapOf<String, Boolean>() }
+    val expanded = remember(model) { model.browseSession.expandedBursts }
     val previousBursts = remember(model) { arrayOf(state.bursts) }
-    LaunchedEffect(collapseBursts, state.bursts) {
+    LaunchedEffect(collapseBursts, state.bursts, state.hasSnapshot, state.scanning) {
+        if (!state.hasSnapshot || state.scanning) return@LaunchedEffect
         val retained = if (collapseBursts) {
             reconciledExpandedBurstIds(previousBursts[0], state.bursts, expanded.keys.toSet())
         } else emptySet()
@@ -96,7 +115,19 @@ internal fun NativeOriginalFilesPage(
     val burstBounds = remember(model) { HashMap<String, Rect>() }
     val burstIDs = remember(state.bursts) { state.bursts.flatMap { b -> b.files.map { it.handle to b.id } }.toMap() }
     val taskIndex = remember(tasks.tasks) { buildLatestTaskIndexByHandle(tasks.tasks) }
-    val grid = rememberLazyGridState()
+    val grid = rememberLazyGridState(model.browseSession.firstVisibleIndex, model.browseSession.firstVisibleOffset)
+    val openingScroll = remember(model) { Triple(model.browseSession.anchorHandle,
+        model.browseSession.firstVisibleIndex, model.browseSession.firstVisibleOffset) }
+    LaunchedEffect(model, grid) {
+        snapshotFlow { Triple(grid.firstVisibleItemIndex, grid.firstVisibleItemScrollOffset,
+            grid.layoutInfo.visibleItemsInfo.firstNotNullOfOrNull { it.key as? Int }) }.collect { value ->
+            if (grid.layoutInfo.totalItemsCount > 0) {
+                model.browseSession.firstVisibleIndex = value.first
+                model.browseSession.firstVisibleOffset = value.second
+                model.browseSession.anchorHandle = value.third
+            }
+        }
+    }
     var filterAnchor by remember(model) { mutableStateOf<Rect?>(null) }
     var openedFilterAnchor by remember(model) { mutableStateOf<Rect?>(null) }
     var filterRevealTick by remember(model) { mutableIntStateOf(0) }
@@ -104,7 +135,6 @@ internal fun NativeOriginalFilesPage(
     LaunchedEffect(filterRevealTick) {
         if (filterRevealTick > 0) { delay(600); filterRevealWindow = false }
     }
-    if (showQueue) { queuePage { showQueue = false }; return }
     val filterCalendar = remember(model) { NativeFilterCalendar(model::currentDayKey) }
     val availableExts = remember(state.files) { state.files.map { it.extension }.distinct().sorted() }
     val storageSlots = remember(state.storageIds) { storageFilterSlots(storageIdsBySlot(state.storageIds).keys) }
@@ -117,9 +147,45 @@ internal fun NativeOriginalFilesPage(
             burstIDs.keys, exportExit.filteredHandles)).map { FileGroup(it.date, it.files) }
     }
     val expandedIds = expanded.keys.toSet()
+    var restoredScroll by remember(model) { mutableStateOf(false) }
+    LaunchedEffect(state.hasSnapshot, state.scanning) {
+        if (!restoredScroll && state.hasSnapshot && !state.scanning) {
+            restoredScroll = true
+            val target = openingScroll.first?.let {
+                nativePreviewGridIndex(it, groups, burstIDs, collapseBursts, expandedIds, dates.filterValues { v -> v }.keys)
+            } ?: openingScroll.second
+            if (target > 0 || openingScroll.third > 0) grid.scrollToItem(target.coerceAtLeast(0), openingScroll.third.coerceAtLeast(0))
+        }
+    }
     val previewIdentity = remember(groups, burstIDs, collapseBursts, expandedIds) { Any() }
     val currentPreviewIdentity by rememberUpdatedState(previewIdentity)
     val latestOpenPreview by rememberUpdatedState(openPreview)
+    LaunchedEffect(arrivals.revision) {
+        if (arrivals.revision > 0 && !showQueue && preview == null && arrivals.files.isNotEmpty()) {
+            val from = bounds[arrivals.files.first().handle] ?: signalBounds
+            if (from != null && queueBounds != null && flights.none { it.from == from }) {
+                flights += QueueFlight(++nextFlight, from, emptyList(), arrivals.files.size,
+                    cachedThumbnail(arrivals.files.first()))
+            }
+        }
+    }
+    fun enqueueFromGrid(files: List<CameraFileInfo>, from: Rect?, group: Boolean) {
+        if (files.isEmpty()) return
+        val visible = grid.layoutInfo.visibleItemsInfo.mapNotNullTo(HashSet()) { it.key as? Int }
+        val cells = if (group) files.filter { it.handle in visible }.mapNotNull { file ->
+            bounds[file.handle]?.let { PackSoul(it, cachedThumbnail(file)) }
+        } else emptyList()
+        val packs = if (cells.size <= MAX_PACK_GHOSTS) cells else List(MAX_PACK_GHOSTS) { cells[it * cells.size / MAX_PACK_GHOSTS] }
+        val thumb = cachedThumbnail(files.first())
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            if (model.enqueue(files) == files.size) {
+                haptics.tick()
+                if (!showQueue && from != null && flights.none { it.from == from }) {
+                    flights += QueueFlight(++nextFlight, from, packs, files.size, thumb)
+                }
+            }
+        }
+    }
     val burstContent = remember(thumbnails, text) { NativePreviewBurstContent(thumbnails, text) }
     fun requestPreview(file: CameraFileInfo, rect: Rect, expandBurst: String? = null) {
         haptics.longPress()
@@ -172,6 +238,8 @@ internal fun NativeOriginalFilesPage(
         openedFilterAnchor = null // Destroy any date draft together with all current criteria.
         model.changeFilters(SharedPhotoFilterCriteria())
     }
+    SharedFilesQueueWorkspace(queueVisible = showQueue, onFilesSettledChanged = {},
+        filesContent = {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val screenWidth = maxWidth
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -180,13 +248,22 @@ internal fun NativeOriginalFilesPage(
                 GlassButton(onClick = { closePreview(); onBack() }, contentPadding = PaddingValues(8.dp)) {
                     Icon(Icons.Default.ArrowBack, queueText.back, Modifier.size(20.dp))
                 }
+                Box(Modifier.onGloballyPositioned { signalBounds = it.boundsInRoot() }) {
                 SharedSignalPill(text = queueText.signal, onOpenWifiSettings = model.queue::showConnectionHelp,
                     allowUnknownRssi = true, rssi = null, connected = connected, staMode = model.queue.stationMode,
                     onStaDisconnectedClick = model.queue::showConnectionHelp)
+                }
                 Spacer(Modifier.weight(1f))
                 GlassButton(onClick = model::refresh, enabled = connected && !state.scanning && !state.enqueueing) { Text(text.refresh) }
-                GlassButton(onClick = { closePreview(); showQueue = true },
-                    modifier = Modifier.onGloballyPositioned { queueBounds = it.boundsInRoot() }) { Text(text.queue) }
+                Box(Modifier.onGloballyPositioned { queueBounds = it.boundsInRoot() }
+                    .graphicsLayer { scaleX = catchScale.value; scaleY = catchScale.value }) {
+                    SharedQueuePill(tasks.tasks, tasks.isTransferring,
+                        liveProgressSource = { model.queue.activeProgress.collectAsState().value },
+                        haptics = haptics, onClick = { closePreview(); flights.clear(); showQueue = true },
+                        heldCount = flights.filter { it.holdsQueueCount }.sumOf { it.count },
+                        formatSpeed = { com.ztransfer.format.formatTransferSpeedText(it, model.queue::fixed) },
+                        transferDescription = text.queue, generatingLabel = "")
+                }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GlassButton(onClick = { closePreview(); openedSettingsAnchor = settingsAnchor },
@@ -200,9 +277,10 @@ internal fun NativeOriginalFilesPage(
                     Text(filterText.label(FilterTextKey.filter_title))
                 }
                 if (filterActive) GlassButton(onClick = ::clearFilters) { Text(text.clearFilters) }
+                GlassButton(enabled = originals.ready, onClick = {
+                    originalActionItems = model.originalActionItems(groups.flatMap { it.files })
+                }) { Text(nativeActionText(appearanceState.resolvedLanguage, "已存原片", "Saved")) }
             }
-            Text(text.integrationStatus, color = colors.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
             text.notice(state.notice)?.let { Text(it, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) }
             if (originals.failed) Text(text.indexFailed, color = colors.accentOrange, style = MaterialTheme.typography.bodySmall,
@@ -236,11 +314,11 @@ internal fun NativeOriginalFilesPage(
                     groups = groups, tasks = tasks.tasks, queuedIndexByHandle = taskIndex,
                     activeProgress = { model.queue.activeProgress.collectAsState().value },
                     columns = columns, isLoading = state.scanning, transfersBusy = tasks.isTransferring,
-                    allowRemoteThumbnails = connected && preview == null, collapsedDates = dates, thumbnails = thumbnails, text = text,
+                    allowRemoteThumbnails = connected && preview == null && !showQueue, collapsedDates = dates, thumbnails = thumbnails, text = text,
                     // Current original-only defaults save in the root bucket; future date preferences must share this rule.
                     isTransferred = { file -> remember(file, originals.revision, transferPreferences.organizeByDate, lookupDayKey) { model.isTransferred(file) } },
-                    onTransferGroup = { files, _ -> scope.launch(start = CoroutineStart.UNDISPATCHED) { model.enqueue(files) } },
-                    onTapFile = { file -> scope.launch(start = CoroutineStart.UNDISPATCHED) { model.enqueue(listOf(file)) } },
+                    onTransferGroup = { files, from -> enqueueFromGrid(files, from, true) },
+                    onTapFile = { file -> enqueueFromGrid(listOf(file), bounds[file.handle], false) },
                     onPreview = { file, rect -> requestPreview(file, rect) },
                     onPreviewBurst = { id, files, rect -> files.firstOrNull()?.let { requestPreview(it, rect, id) } },
                     tapToPreview = layout.tapToPreview, cellBoundsRegistry = bounds, burstBoundsRegistry = burstBounds,
@@ -253,6 +331,9 @@ internal fun NativeOriginalFilesPage(
                     returnFocusHandle = returnHandle, returnFocusNonce = returnNonce,
                 )
             }
+        }
+        flights.toList().forEach { flight ->
+            key(flight.id) { QueueFlightGhost(flight, queueBounds) { flights.remove(flight); caught++ } }
         }
         preview?.let { opening ->
             key(opening) {
@@ -268,6 +349,7 @@ internal fun NativeOriginalFilesPage(
                     isTransferred = model::isTransferred, localOriginalUriFor = opening.source::localSource,
                     activeProgress = { model.queue.activeProgress.collectAsState().value },
                     queueTargetBounds = queueBounds, onTransferAsync = model::enqueue,
+                    onQueueFlightCaught = { caught++ },
                     onBurstExpandedChange = { id, value -> if (value) expanded[id] = true else expanded.remove(id) },
                     onRotationChanged = model::setPreviewRotationQuarterTurns,
                     onHistogramVisibleChanged = model::setPreviewHistogramEnabled,
@@ -289,6 +371,9 @@ internal fun NativeOriginalFilesPage(
         openedSettingsAnchor?.let { frozenAnchor ->
             NativePhotoSettingsOverlay(model, layout, settingsText, frozenAnchor, appearance) { openedSettingsAnchor = null }
         }
+        originalActionItems?.let { frozen ->
+            NativeOriginalActionsDialog(model.originalActions, frozen, appearanceState.resolvedLanguage) { originalActionItems = null }
+        }
         openedFilterAnchor?.let { frozenAnchor ->
             SharedFilterOverlay(
                 anchorBounds = frozenAnchor, calendar = filterCalendar, text = filterText, screenWidth = screenWidth,
@@ -305,6 +390,8 @@ internal fun NativeOriginalFilesPage(
             )
         }
     }
+        }, queueContent = { queuePage(false) { showQueue = false } },
+        queueTopContent = { queuePage(true) { showQueue = false } })
 }
 
 private class NativeFilesPreview(val items: List<PhotoPreviewItem>, val index: Int, val anchor: Rect,

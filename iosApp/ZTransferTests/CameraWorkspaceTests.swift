@@ -83,6 +83,21 @@ final class CameraWorkspaceTests: XCTestCase {
             XCTAssertEqual(defaults.data(forKey: CameraConnectionPreferences.key), bytes)
         }
     }
+    @MainActor func testExplicitConnectionModeRepairBacksUpUnknownBytesAndKeepsOtherDomains() throws {
+        let suite = "connection-mode-repair-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let raw = Data(#"{"version":99,"mode":"future"}"#.utf8)
+        defaults.set(raw, forKey: CameraConnectionPreferences.key)
+        defaults.set("keep", forKey: "camera.identity.fixture")
+        let workspace = CameraWorkspaceBridge(connectionPreferences: CameraConnectionPreferences(defaults: defaults))
+        XCTAssertNil(workspace.readConnectionMode())
+        XCTAssertTrue(workspace.resetConnectionModeAfterConfirmation())
+        XCTAssertEqual(workspace.readConnectionMode(), "ap")
+        XCTAssertEqual(defaults.data(forKey: CameraConnectionPreferences.key + ".recoveryBackup"), raw)
+        XCTAssertEqual(defaults.string(forKey: "camera.identity.fixture"), "keep")
+        workspace.close()
+        XCTAssertFalse(workspace.resetConnectionModeAfterConfirmation())
+    }
     @MainActor func testWorkspaceAndDiagnosticEntryUseTheSameSessionInstance() {
         let owner = CameraHandshakeProbe()
         let workspace = CameraWorkspaceBridge(session: owner)

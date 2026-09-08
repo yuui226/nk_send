@@ -236,6 +236,9 @@ actor CameraOriginalQueue {
     func originalData(locator: String) async throws -> Data {
         try await store.originalData(locator: locator)
     }
+    func copyOriginal(_ reference: ExistingOriginalReference, to output: SandboxTransferFile) async throws -> Int64 {
+        try await store.copyOriginal(reference, to: output)
+    }
 
     func originalRawPreviewData(locator: String) async throws -> Data? {
         try await store.originalRawPreviewData(locator: locator)

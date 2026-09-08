@@ -3,7 +3,10 @@ package com.ztransfer.ui
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-interface NativeDirectorySettingsPlatform { fun selectDirectory(requestId: Long) }
+interface NativeDirectorySettingsPlatform {
+    fun selectDirectory(requestId: Long)
+    fun useSandboxAfterConfirmation(requestId: Long): Boolean = false
+}
 
 internal data class NativeDirectorySettingsState(
     val description: String? = null,
@@ -32,6 +35,13 @@ class NativeDirectorySettingsModel {
         request += 1
         mutableState.value = mutableState.value.copy(selecting = true)
         owner.selectDirectory(request)
+    }
+    internal fun useSandboxAfterConfirmation() {
+        val owner = platform ?: return
+        if (closed || mutableState.value.selecting) return
+        request += 1
+        mutableState.value = mutableState.value.copy(selecting = true)
+        if (!owner.useSandboxAfterConfirmation(request)) finish(request, "保存目标未改变 / Destination unchanged")
     }
 
     /** Null means cancelled/no new error: never clear an existing invalid-target warning on cancel. */

@@ -28,6 +28,10 @@ interface NativeAppearancePlatform {
     fun readAppearance(): NativeAppearancePreferences?
     fun saveAppearance(value: NativeAppearancePreferences): Boolean
     fun setScreenAwake(enabled: Boolean)
+    fun productVersion(): String = ""
+    fun copyFeedbackContact(): Boolean = false
+    fun openSourceRepository() {}
+    fun resetAppearanceAfterConfirmation(): Boolean = false
 }
 
 internal data class NativeAppearanceState(
@@ -55,6 +59,19 @@ class NativeAppearanceModel(platform: NativeAppearancePlatform, systemLanguageTa
     }
 
     fun currentPreferences(): NativeAppearancePreferences = state.value.preferences()
+    internal fun productVersion(): String = platform?.productVersion().orEmpty()
+    internal fun copyFeedbackContact(): Boolean = platform?.copyFeedbackContact() == true
+    internal fun openSourceRepository() { platform?.openSourceRepository() }
+    internal fun resetAfterConfirmation(): Boolean {
+        val owner = platform ?: return false
+        if (!owner.resetAppearanceAfterConfirmation()) return false
+        val restored = owner.readAppearance() ?: return false
+        mutableState.value = state.value.copy(theme = restored.theme, language = restored.appLanguage,
+            skin = restored.skin, hapticsEnabled = restored.hapticsEnabled,
+            keepScreenOn = restored.keepScreenOn, preferencesFailed = false)
+        applyScreenAwake()
+        return true
+    }
     fun setThemeName(name: String) = change { copy(theme = ThemeMode.entries.firstOrNull { it.name == name } ?: ThemeMode.SYSTEM) }
     fun setLanguage(tag: String) = change { copy(language = tag) }
     fun setSkinName(name: String) = change { copy(skin = SkinPreset.entries.firstOrNull { it.name == name } ?: SkinPreset.TITANIUM) }

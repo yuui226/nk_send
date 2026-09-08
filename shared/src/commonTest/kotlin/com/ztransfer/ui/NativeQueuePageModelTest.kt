@@ -84,9 +84,26 @@ class NativeQueuePageModelTest {
         assertEquals(0L, history.tasks.single().downloaded)
         assertEquals(512L, model.activeProgress.value?.downloaded)
         assertEquals(0.5f, model.activeProgress.value?.fraction)
+        assertEquals(128L, model.activeProgress.value?.retainedBytesPerSecond)
         model.publish(snapshot(sequence = 3, status = "COMPLETED", bytes = 1024))
         assertNull(model.activeProgress.value)
         assertEquals(TransferStatus.COMPLETED, model.state.value.tasks.single().status)
+    }
+    @Test fun disconnectedPagesNeverReviveStaleByteProgressFromQueuedSnapshots() {
+        val model = NativeQueuePageModel("camera", Platform())
+        model.setConnected(true)
+        model.publish(snapshot(status = "TRANSFERING", bytes = 512))
+        assertNotNull(model.activeProgress.value)
+        model.setConnected(false)
+        assertNull(model.activeProgress.value)
+        assertFalse(model.state.value.isTransferring)
+        model.publish(snapshot(sequence = 2, history = 1, status = "TRANSFERING", bytes = 768))
+        assertNull(model.activeProgress.value)
+        assertFalse(model.state.value.isTransferring)
+        model.setConnected(true)
+        model.publish(snapshot(sequence = 3, history = 1, status = "TRANSFERING", bytes = 900))
+        assertEquals(900L, model.activeProgress.value?.downloaded)
+        assertTrue(model.state.value.isTransferring)
     }
 
     @Test fun invalidDuplicateAndMultipleActiveRowsNeverReplaceGoodState() {

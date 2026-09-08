@@ -25,6 +25,7 @@ interface NativeFilesPagePlatform {
     fun saveTransferPreferences(value: NativeTransferPreferences): Boolean = false
     fun readBrowsePreferences(): NativeBrowsePreferences?
     fun saveBrowsePreferences(value: NativeBrowsePreferences): Boolean
+    fun resetBrowsePreferencesAfterConfirmation(): Boolean = false
     fun currentDayKey(): Int
     fun previewDateText(year: Int, month: Int, day: Int): String
     fun previewTimeText(hour: Int, minute: Int, second: Int): String
@@ -62,6 +63,7 @@ internal data class NativeFilesState(
     val notice: NativeFilesNotice = NativeFilesNotice.NONE,
 )
 internal data class NativeFilesImageResult(val bytes: ByteArray?, val retryable: Boolean)
+internal data class NativeQueueArrival(val revision: Long = 0, val files: List<CameraFileInfo> = emptyList())
 internal data class NativeOriginalsState(val revision: Long = -1, val refreshing: Boolean = false, val failed: Boolean = false) {
     val ready: Boolean get() = revision >= 0
 }
@@ -71,6 +73,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     init { require(queue.connectionId == connectionId) }
     val directory = NativeDirectorySettingsModel()
     val automaticTransfer = NativeAutomaticTransferSettingsModel()
+    val originalActions = NativeOriginalActionsModel()
     private var platform: NativeFilesPagePlatform? = platform
     private var closed = false
     private var previewPlatform: NativePreviewReadPlatform? = null
@@ -97,12 +100,47 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     internal val preferencesFailed = mutablePreferencesFailed.asStateFlow()
     private val mutableFilters = MutableStateFlow(initialPreferences.criteria())
     internal val filters = mutableFilters.asStateFlow()
+    var browseSession = NativeBrowseSession(connectionId)
+        private set
+    /** Restore before a page starts scanning; a different camera generation cannot borrow state. */
+    fun restoreBrowseSession(value: NativeBrowseSession): Boolean {
+        if (closed || value.connectionId != connectionId || mutableState.value.hasSnapshot ||
+            mutableState.value.scanning || !value.initialized) return false
+        browseSession = value
+        mutableFilters.value = value.criteria.copy(extensions = value.criteria.extensions?.toSet())
+        return true
+    }
+    fun captureBrowseSession(): NativeBrowseSession {
+        if (!closed) {
+            browseSession.criteria = mutableFilters.value.copy(extensions = mutableFilters.value.extensions?.toSet())
+            browseSession.initialized = true
+        }
+        return browseSession
+    }
     private var lastDayKey = checkNotNull(this.platform).currentDayKey()
     private val restoredTransfers = checkNotNull(this.platform).readTransferPreferences()
     private val mutableTransfers = MutableStateFlow(restoredTransfers ?: NativeTransferPreferences.defaults())
     internal val transferPreferences = mutableTransfers.asStateFlow()
     private val mutableTransferPreferencesFailed = MutableStateFlow(restoredTransfers == null)
     internal val transferPreferencesFailed = mutableTransferPreferencesFailed.asStateFlow()
+    private val expectedAutomaticArrivals = LinkedHashSet<CameraFileInfo>()
+    private var seenQueueTasks = emptySet<Long>()
+    private val mutableArrivals = MutableStateFlow(NativeQueueArrival())
+    internal val arrivals = mutableArrivals.asStateFlow()
+    fun expectAutomaticArrival(file: CameraFileInfo) {
+        if (closed) return
+        if (expectedAutomaticArrivals.size >= 256) expectedAutomaticArrivals.remove(expectedAutomaticArrivals.first())
+        expectedAutomaticArrivals += file
+    }
+    /** Called from the existing queue snapshot relay, not another subscription or admission callback. */
+    fun observeQueuePublication() {
+        if (closed) return
+        val rows = queue.state.value.tasks
+        val arrived = rows.filter { it.taskId !in seenQueueTasks && it.file in expectedAutomaticArrivals }.map { it.file }
+        seenQueueTasks = rows.mapTo(HashSet()) { it.taskId }
+        expectedAutomaticArrivals.removeAll(rows.map { it.file }.toSet())
+        if (arrived.isNotEmpty()) mutableArrivals.value = NativeQueueArrival(mutableArrivals.value.revision + 1, arrived)
+    }
 
     fun currentTransferPreferences(): NativeTransferPreferences = mutableTransfers.value
     /** After an explicit settings reset; never clears catalog, selection or queue state. */
@@ -139,6 +177,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         )
         if (normalized == mutableFilters.value) return false
         mutableFilters.value = normalized
+        browseSession.criteria = normalized
         persistPreferences()
         return true
     }
@@ -215,6 +254,12 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
 
     internal fun localOriginalSource(file: CameraFileInfo): String? = originalIndex.localLocator(file,
         folder = mutableTransfers.value.destinationFolder(file, currentDayKey()))
+    internal fun originalActionItems(files: List<CameraFileInfo>): List<NativeOriginalActionItem> =
+        if (closed) emptyList() else files.mapNotNull { file ->
+            originalIndex.find(file, mutableTransfers.value.destinationFolder(file, currentDayKey()))?.let {
+                NativeOriginalActionItem(file, it.locator, it.name, it.size)
+            }
+        }.distinctBy { it.locator }
 
     fun beginScan(): Long {
         if (closed || !queue.connected.value || mutableState.value.scanning || mutableState.value.enqueueing) return 0
@@ -222,6 +267,18 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         scanBaseline = mutableState.value
         mutableState.value = mutableState.value.copy(scanning = true, notice = NativeFilesNotice.NONE)
         return attempt
+    }
+    internal fun resetBrowseAfterConfirmation(): Boolean {
+        val owner = platform ?: return false
+        if (closed || !owner.resetBrowsePreferencesAfterConfirmation()) return false
+        val value = owner.readBrowsePreferences() ?: return false
+        mutableLayout.value = NativeBrowseLayout(value.columns, value.collapseBursts, value.tapToPreview)
+        mutablePreviewOptions.value = NativePreviewOptions(value.previewRotationQuarterTurns, value.previewHistogramEnabled)
+        // Explicit reset includes the current filter, not the camera catalog, original index or queue.
+        mutableFilters.value = value.criteria()
+        browseSession.criteria = value.criteria()
+        mutablePreferencesFailed.value = false
+        return true
     }
 
     fun currentScanSequence(): Long = if (!closed && mutableState.value.scanning) attempt else 0
@@ -289,6 +346,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
             return 0
         }
         mutableState.value = before.copy(enqueueing = true, notice = NativeFilesNotice.NONE)
+        expectedAutomaticArrivals.removeAll(files.toSet()) // Explicit taps do not also fly as automatic arrivals.
         var pending: CancellableContinuation<Int>? = null
         try {
             val accepted = withTimeout(15_000L) {
@@ -341,6 +399,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         closed = true
         directory.close()
         automaticTransfer.close()
+        originalActions.close()
         previewReads?.close(); previewReads = null; previewPlatform = null
         enqueues.toList().forEach { it.cancel() }; enqueues.clear()
         images.toList().forEach { it.cancel() }; images.clear()
@@ -348,6 +407,8 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         owner?.cancelRequests()
         queue.close()
         currentFiles = emptyMap()
+        expectedAutomaticArrivals.clear(); seenQueueTasks = emptySet()
+        mutableArrivals.value = NativeQueueArrival()
         scanBaseline = null
         mutableState.value = NativeFilesState()
         mutableOriginals.value = NativeOriginalsState()

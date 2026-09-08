@@ -8,6 +8,7 @@ struct RestoredOriginalDestination {
     let provider: ProviderOriginalStore?
     let selected: OriginalDestinationPreference?
     let failure: String?
+    var displayName: String? = nil
 }
 
 /// Explicit target choice, separate from a grant that may only have been used for browsing/export.
@@ -22,6 +23,12 @@ final class OriginalDestinationPreferences {
         let target: OriginalDestinationPreference
     }
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    /// Called only after explicit sandbox confirmation and a successful queue target commit.
+    func resetToSandboxAfterUserConfirmation() -> Bool {
+        if let raw = defaults.object(forKey: Self.key) { defaults.set(raw, forKey: Self.key + ".recoveryBackup") }
+        defaults.removeObject(forKey: Self.key)
+        return save(.sandbox)
+    }
 
     func read() -> OriginalDestinationPreference? {
         guard let raw = defaults.object(forKey: Self.key) else { return .sandbox }
@@ -53,7 +60,9 @@ final class OriginalDestinationPreferences {
             let provider = ProviderOriginalStore(directory: store, selection: try await store.selection())
             try await provider.validateSelection()
             try Task.checkCancellation()
-            return RestoredOriginalDestination(destination: provider, provider: provider, selected: selected, failure: nil)
+            let name = try await store.displayName()
+            try Task.checkCancellation()
+            return RestoredOriginalDestination(destination: provider, provider: provider, selected: selected, failure: nil, displayName: name)
         } catch {
             if error is CancellationError { throw error }
             try Task.checkCancellation() // Cancellation aborts restoration, not a recoverable target error.

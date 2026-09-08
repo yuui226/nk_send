@@ -8,6 +8,94 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun automaticArrivalRequiresBothCatalogIntentAndOneActualQueuePublication() {
+        val m = model(); m.finishScan(m.beginScan(), snapshot())
+        val file = m.state.value.files.first()
+        fun queued(sequence: Long, id: Long) = NativeQueuePageSnapshot("camera", sequence, sequence, false, false).also {
+            it.addOriginal(id, file.handle, file.size, file.fileName, file.captureDate, file.isProtected,
+                file.storageIds.toIntArray(), null, "WAITING", 0, 0f, 0, null, null, 0f)
+        }
+        m.queue.publish(queued(1, 1)); m.observeQueuePublication()
+        assertEquals(0, m.arrivals.value.revision) // Initial history never receives an animation.
+        m.expectAutomaticArrival(file)
+        m.queue.publish(queued(2, 2)); m.observeQueuePublication()
+        assertEquals(listOf(file), m.arrivals.value.files)
+        assertEquals(1, m.arrivals.value.revision)
+        m.observeQueuePublication(); assertEquals(1, m.arrivals.value.revision)
+        m.close(); m.expectAutomaticArrival(file); m.observeQueuePublication()
+        assertEquals(NativeQueueArrival(), m.arrivals.value)
+    }
+
+    @Test fun exportUsesTheIndexedCopyNameAndRealSizeInsteadOfTheCameraSentinel() {
+        val m = model()
+        val camera = CameraFileInfo(1, com.ztransfer.protocol.PtpConstants.SIZE_UNKNOWN, "DSC_0001.JPG", null)
+        assertTrue(m.publishOriginals(NativeOriginalIndexUpdate(1, -1, true).also {
+            it.add("dsc_0001 (2).jpg", 5_000_000_000L, null, "frozen-copy")
+        }))
+        val item = m.originalActionItems(listOf(camera)).single()
+        assertEquals(camera, item.file)
+        assertEquals("dsc_0001 (2).jpg", item.originalName)
+        assertEquals(5_000_000_000L, item.originalSize)
+        assertEquals("frozen-copy", item.locator)
+    }
+    @Test fun dateAndBurstBatchesUseCurrentFilteredSlotAndOriginalGridOrdering() {
+        val p = Platform(); val m = model(p)
+        val input = snapshot().also {
+            it.addFile(4, 100, "OTHER.NEF", "20260905T120004", true, intArrayOf(0x20001))
+        }
+        assertTrue(m.finishScan(m.beginScan(), input))
+        assertTrue(m.changeFilters(SharedPhotoFilterCriteria(storageSlot = 1, protectedOnly = true)))
+        val current = m.state.value
+        val chosen = nativeFilteredCameraFiles(current.files, current.storageIds, m.filters.value,
+            current.bursts.flatMap { it.files }.map { it.handle }.toSet(), emptySet())
+        assertEquals(listOf(1), chosen.map { it.handle })
+        val admitted = start { m.enqueue(chosen) }
+        assertContentEquals(intArrayOf(1), p.requested)
+        p.enqueueResult!!.complete(1)
+        assertEquals(1, admitted.result!!.getOrThrow())
+        assertTrue(m.changeFilters(SharedPhotoFilterCriteria()))
+        val all = m.state.value.groups.single().files
+        val batch = start { m.enqueue(all) }
+        assertContentEquals(all.map { it.handle }.toIntArray(), p.requested)
+        p.enqueueResult!!.complete(all.size)
+        assertEquals(all.size, batch.result!!.getOrThrow())
+    }
+
+    @Test fun aFrozenBatchIsRejectedIfAHandleIsReusedBeforeAdmission() {
+        val p = Platform(); val m = model(p)
+        m.finishScan(m.beginScan(), snapshot())
+        val chosen = m.state.value.files
+        val replacement = NativeFilesPageSnapshot("camera", true, false).also {
+            it.addFile(1, 987, "DIFFERENT.JPG", "20260905T130000", false, intArrayOf(0x10001))
+        }
+        m.finishScan(m.beginScan(), replacement)
+        assertEquals(0, start { m.enqueue(chosen) }.result!!.getOrThrow())
+        assertNull(p.enqueueResult)
+        assertEquals(NativeFilesNotice.ENQUEUE_FAILED, m.state.value.notice)
+    }
+
+    @Test fun browseSessionRestoresOnlyTheSameConnectionWithoutPersistingSlots() {
+        val p = Platform(); val m = model(p)
+        m.finishScan(m.beginScan(), snapshot())
+        m.changeFilters(SharedPhotoFilterCriteria(storageSlot = 2, protectedOnly = true))
+        m.browseSession.firstVisibleIndex = 19
+        m.browseSession.firstVisibleOffset = 37
+        m.browseSession.collapsedDates["20260905"] = true
+        val memory = m.captureBrowseSession()
+        m.close()
+        val restored = model(p)
+        assertTrue(restored.restoreBrowseSession(memory))
+        assertEquals(2, restored.filters.value.storageSlot)
+        assertEquals(19, restored.browseSession.firstVisibleIndex)
+        assertEquals(37, restored.browseSession.firstVisibleOffset)
+        assertEquals(true, restored.browseSession.collapsedDates["20260905"])
+        assertNull(p.preferences!!.criteria().storageSlot)
+        assertFalse(restored.restoreBrowseSession(NativeBrowseSession("other")))
+        assertTrue(restored.finishScan(restored.beginScan(), snapshot()))
+        assertFalse(restored.restoreBrowseSession(memory))
+        assertNull(model(p).filters.value.storageSlot)
+    }
+
     @Test fun incrementalRowsAreVisibleButFailureRestoresTheCompleteCatalog() {
         val m = model()
         assertTrue(m.finishScan(m.beginScan(), snapshot()))

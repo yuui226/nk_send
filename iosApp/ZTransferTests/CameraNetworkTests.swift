@@ -11,6 +11,23 @@ import XCTest
     func readAppearance() -> NativeAppearancePreferences? { NativeAppearancePreferences.companion.defaults() }
     func saveAppearance(value: NativeAppearancePreferences) -> Bool { true }
     func setScreenAwake(enabled: Bool) { XCTFail("Controller creation must not own app idle state") }
+    func productVersion() -> String { "fixture" }
+    func copyFeedbackContact() -> Bool { false }
+    func openSourceRepository() {}
+    func resetAppearanceAfterConfirmation() -> Bool { false }
+}
+
+@MainActor private final class OriginalActionReceipt: NSObject, NativeOriginalActionCompletion {
+    var calls = 0
+    var succeeded: [Int32] = []
+    var failedCount: Int32 = 0
+    var cancelled = false
+    var message: String?
+    func complete(succeededIndices: KotlinIntArray, failedCount: Int32, cancelled: Bool, message: String?) {
+        calls += 1
+        succeeded = (0..<Int(succeededIndices.size)).map { succeededIndices.get(index: Int32($0)) }
+        self.failedCount = failedCount; self.cancelled = cancelled; self.message = message
+    }
 }
 
 @MainActor private final class FakeGpsGattDriver: NikonGpsGattDriver {
@@ -226,6 +243,153 @@ private actor FakeExifSource: CameraExifSource {
 }
 
 final class CameraNetworkTests: XCTestCase {
+    func testExportCopiesAreByteExactAndCleanupNeverDeletesIndexedOriginals() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let input = root.appendingPathComponent("input")
+        try FileManager.default.createDirectory(at: input, withIntermediateDirectories: true)
+        let jpg = input.appendingPathComponent("照片.JPG"), mov = input.appendingPathComponent("clip.MOV")
+        let bytes = Data((0..<150_003).map { UInt8(truncatingIfNeeded: $0) })
+        try bytes.write(to: jpg); try Data(bytes.reversed()).write(to: mov)
+        let source = CameraOriginalStore(root: input)
+        let index = try await source.originals(since: -1, rescan: true)
+        let copies = OriginalActionCopies(source: source, root: root)
+        var exported: [URL] = []
+        for entry in index.entries {
+            let copy = try await copies.prepare(ExistingOriginalReference(name: entry.name, size: entry.size,
+                locator: entry.url.absoluteString))
+            XCTAssertNotEqual(copy.url, entry.url)
+            XCTAssertEqual(try Data(contentsOf: copy.url), try Data(contentsOf: entry.url))
+            exported.append(copy.url)
+        }
+        XCTAssertEqual(exported.count, 2)
+        await copies.release()
+        XCTAssertTrue(exported.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+        XCTAssertEqual(try Data(contentsOf: jpg), bytes)
+        XCTAssertEqual(try Data(contentsOf: mov), Data(bytes.reversed()))
+    }
+
+    func testExportReferenceMismatchFailsWithoutChangingAHealthyPreparedCopy() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sourceRoot = root.appendingPathComponent("input")
+        try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)
+        let original = sourceRoot.appendingPathComponent("a.NEF")
+        try Data([1,2,3,4]).write(to: original)
+        let source = CameraOriginalStore(root: sourceRoot)
+        _ = try await source.originals(since: -1, rescan: true)
+        let copies = OriginalActionCopies(source: source, root: root)
+        let saved = try await copies.prepare(ExistingOriginalReference(name: "a.NEF", size: 4, locator: original.absoluteString))
+        do {
+            _ = try await copies.prepare(ExistingOriginalReference(name: "a.NEF", size: 5, locator: original.absoluteString))
+            XCTFail("Expected frozen identity mismatch")
+        } catch {}
+        XCTAssertEqual(try Data(contentsOf: saved.url), Data([1,2,3,4]))
+        await copies.release()
+        XCTAssertEqual(try Data(contentsOf: original), Data([1,2,3,4]))
+    }
+
+    @MainActor func testExplicitPreferenceRepairsKeepBackupsAndNeverResetOtherDomains() throws {
+        let suite = "repairs-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let unknown = Data(#"{"version":999,"future":true}"#.utf8)
+        for key in [BrowsePreferencesStore.key, AppearancePreferencesStore.key, OriginalDestinationPreferences.key] {
+            defaults.set(unknown, forKey: key)
+        }
+        defaults.set("untouched", forKey: "pairing-test")
+        let transfers = TransferPreferencesStore(defaults: defaults)
+        XCTAssertTrue(transfers.saveAutomatic(true))
+        let transferBytes = defaults.data(forKey: TransferPreferencesStore.key)
+        let browse = BrowsePreferencesStore(defaults: defaults)
+        XCTAssertNil(browse.read())
+        XCTAssertTrue(browse.resetAfterUserConfirmation())
+        XCTAssertEqual(defaults.data(forKey: BrowsePreferencesStore.key + ".recoveryBackup"), unknown)
+        XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key), unknown)
+        let appearance = AppearancePreferencesStore(defaults: defaults)
+        XCTAssertTrue(appearance.resetAfterUserConfirmation())
+        XCTAssertEqual(defaults.data(forKey: AppearancePreferencesStore.key + ".recoveryBackup"), unknown)
+        let destination = OriginalDestinationPreferences(defaults: defaults)
+        XCTAssertNil(destination.read())
+        XCTAssertTrue(destination.resetToSandboxAfterUserConfirmation())
+        XCTAssertEqual(destination.read(), .sandbox)
+        XCTAssertEqual(defaults.data(forKey: OriginalDestinationPreferences.key + ".recoveryBackup"), unknown)
+        XCTAssertEqual(defaults.data(forKey: TransferPreferencesStore.key), transferBytes)
+        XCTAssertEqual(defaults.string(forKey: "pairing-test"), "untouched")
+    }
+
+    @MainActor func testSystemExportPartialReceiptDoesNotInventPerFileSuccess() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = CameraOriginalStore(root: root)
+        let items = try (1...2).map { n -> NativeOriginalActionItem in
+            let url = root.appendingPathComponent("photo\(n).JPG")
+            try Data([1,2,3]).write(to: url)
+            return NativeOriginalActionItem(file: CameraFileInfo(handle: Int32(n), size: 3, fileName: url.lastPathComponent,
+                captureDate: nil, isProtected: false, storageIds: []), locator: url.absoluteString)
+        }
+        _ = try await source.originals(since: -1, rescan: true)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let host = UIViewController(); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { host.dismiss(animated: false); window.isHidden = true }
+        let owner = OriginalActionPresenter(source: source), receipt = OriginalActionReceipt()
+        owner.perform("files", items: items, presenter: host, completion: receipt)
+        try await waitUntil("system export controller") { await MainActor.run { host.presentedViewController is UIDocumentPickerViewController } }
+        let picker = try XCTUnwrap(host.presentedViewController as? UIDocumentPickerViewController)
+        owner.documentPicker(picker, didPickDocumentsAt: [root.appendingPathComponent("partial-result.JPG")])
+        XCTAssertTrue(receipt.succeeded.isEmpty)
+        XCTAssertEqual(receipt.calls, 1)
+        XCTAssertTrue(receipt.message?.contains("1/2") == true)
+        owner.documentPickerWasCancelled(picker)
+        XCTAssertEqual(receipt.calls, 1)
+        owner.close()
+        for item in items { XCTAssertEqual(try Data(contentsOf: XCTUnwrap(URL(string: item.locator))), Data([1,2,3])) }
+    }
+    @MainActor func testFormalPhotoBatchReportsPartialImportAndKeepsBothOriginals() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = CameraOriginalStore(root: root)
+        let items = try ["photo.JPG", "unsupported.TXT"].enumerated().map { index, name -> NativeOriginalActionItem in
+            let url = root.appendingPathComponent(name); try Data([9,8,7]).write(to: url)
+            return NativeOriginalActionItem(file: CameraFileInfo(handle: Int32(index + 1), size: 3,
+                fileName: name, captureDate: nil, isProtected: false, storageIds: []), locator: url.absoluteString)
+        }
+        _ = try await source.originals(since: -1, rescan: true)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let host = UIViewController(); window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let client = FakePhotoLibrary(authorization: .allowed)
+        let owner = OriginalActionPresenter(source: source, importer: PhotoLibraryImporter(client: client))
+        let receipt = OriginalActionReceipt()
+        owner.perform("photos", items: items, presenter: host, completion: receipt)
+        try await waitUntil("batch photo receipt") { await MainActor.run { receipt.calls == 1 } }
+        XCTAssertEqual(receipt.succeeded, [0]); XCTAssertEqual(receipt.failedCount, 1)
+        XCTAssertEqual(client.imports, 1); XCTAssertEqual(client.requests, 0)
+        owner.close()
+        for item in items { XCTAssertEqual(try Data(contentsOf: XCTUnwrap(URL(string: item.locator))), Data([9,8,7])) }
+    }
+    @MainActor func testBrowseSessionSurvivesPageReplacementButRejectsAnotherConnection() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let camera = stationCamera(command: FakeCameraConnection(bytes: Data()))
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let catalog = CameraCatalog(source: camera, stationMode: true)
+        let previews = CameraPreviewStore(source: camera)
+        var saved: NativeBrowseSession?
+        let first = OriginalFilesPageBridge(connectionID: camera.connectionID, catalog: catalog,
+            queue: queue, previews: previews, exifSource: camera, exifCache: NativePreviewExifCache(),
+            stationMode: true, rememberBrowseSession: { saved = $0 })
+        first.close()
+        let memory = try XCTUnwrap(saved)
+        let second = OriginalFilesPageBridge(connectionID: camera.connectionID, catalog: catalog,
+            queue: queue, previews: previews, exifSource: camera, exifCache: NativePreviewExifCache(),
+            stationMode: true, browseSession: memory)
+        XCTAssertTrue(second.model.browseSession === memory)
+        XCTAssertFalse(second.model.restoreBrowseSession(value: NativeBrowseSession(connectionId: UUID().uuidString)))
+        second.close()
+    }
     @MainActor func testTransferPreferenceDefaultAndRoundTripDoNotTouchBrowsePreferences() throws {
         let suite = "transfer-preferences-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

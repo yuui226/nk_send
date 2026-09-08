@@ -17,6 +17,11 @@ final class AppearancePreferencesStore {
         var keepScreenOn: Bool?
     }
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    func resetAfterUserConfirmation() -> Bool {
+        if let raw = defaults.object(forKey: Self.key) { defaults.set(raw, forKey: Self.key + ".recoveryBackup") }
+        defaults.removeObject(forKey: Self.key)
+        return save(NativeAppearancePreferences.companion.defaults())
+    }
 
     func read() -> NativeAppearancePreferences? {
         guard let raw = defaults.object(forKey: Self.key) else { return NativeAppearancePreferences.companion.defaults() }
@@ -94,6 +99,25 @@ final class AppAppearanceSettings: NSObject, ObservableObject, NativeAppearanceP
     }
 
     func readAppearance() -> NativeAppearancePreferences? { store.read() }
+    func productVersion() -> String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+        return "Z传 iOS " + version + " (" + build + ")"
+    }
+    func copyFeedbackContact() -> Bool {
+        guard !closed else { return false }
+        UIPasteboard.general.string = "953000922"
+        return UIPasteboard.general.string == "953000922"
+    }
+    func openSourceRepository() {
+        guard !closed, let url = URL(string: "https://github.com/yuui226/nk_send") else { return }
+        UIApplication.shared.open(url)
+    }
+    func resetAppearanceAfterConfirmation() -> Bool {
+        guard !closed, store.resetAfterUserConfirmation() else { return false }
+        themeName = store.read()?.themeName ?? "SYSTEM"
+        return true
+    }
     func saveAppearance(value: NativeAppearancePreferences) -> Bool {
         guard !closed else { return false }
         themeName = value.themeName // Live shell changes even if persistence is unavailable.
