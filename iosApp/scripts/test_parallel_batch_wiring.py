@@ -75,7 +75,7 @@ class ParallelBatchWiringTest(unittest.TestCase):
 
     def test_automatic_path_uses_queue_admission_not_download_or_second_destination(self):
         source = read(AUTO)
-        for token in ('preferences.readAutomatic() == true', 'transfer ?? preferences.read()',
+        for token in ('mayAutomaticallyTransfer', 'transfer ?? preferences.read()',
                       'addition.snapshot.connectionID == connectionID', 'let file = addition.newMedia',
                       'queue.enqueueNewMedia', 'worker?.cancel()', 'func close()'):
             self.assertIn(token, source)
@@ -99,10 +99,10 @@ class ParallelBatchWiringTest(unittest.TestCase):
 
     def test_new_apple_scenarios_are_registered_but_not_claimed_executed(self):
         project = read('iosApp/ZTransfer.xcodeproj/project.pbxproj')
-        for filename, minimum in (('CatalogEventReconciliationTests.swift', 15),
-                                  ('AutomaticTransferTests.swift', 14), ('ExifCompatibilityTests.swift', 9),
-                                  ('CameraWorkspaceTests.swift', 6), ('CameraDiscoveryProfileTests.swift', 16),
-                                  ('MediaPreviewCompatibilityTests.swift', 16)):
+        for filename, minimum in (('CatalogEventReconciliationTests.swift', 25),
+                                  ('AutomaticTransferTests.swift', 16), ('ExifCompatibilityTests.swift', 9),
+                                  ('CameraWorkspaceTests.swift', 11), ('CameraDiscoveryProfileTests.swift', 16),
+                                  ('MediaPreviewCompatibilityTests.swift', 17)):
             self.assertIn('path = ' + filename, project)
             self.assertGreaterEqual(read('iosApp/ZTransferTests/' + filename).count('func test'), minimum)
 
@@ -146,5 +146,45 @@ class ParallelBatchWiringTest(unittest.TestCase):
         self.assertIn('CGImageSourceCreateImageAtIndex', original)
         self.assertNotIn('CGImageSourceCreateThumbnailAtIndex', original)
         self.assertNotIn('honorOrientation: true', original)
+
+    def test_idle_reconciliation_replays_retained_scan_candidates_with_existing_fence(self):
+        catalog = read(CATALOG)
+        self.assertIn('await publishScanAdditions(updated, previousFiles: base.files)', catalog)
+        replay = catalog.split('private func publishScanAdditions(', 1)[1].split('private func wakeResolver()', 1)[0]
+        for token in ('!needsEventRescan', 'latest?.publicationRevision == result.publicationRevision',
+                      'scanCatchupHandles.remove(addition.info.handle)'):
+            self.assertIn(token, replay)
+        with self.assertRaises(AssertionError):
+            previous_parallel_batch_source(CATALOG, catalog.replace(
+                'await publishScanAdditions(updated, previousFiles: base.files)', '// lost replay'))
+
+    def test_failed_disable_cancels_admission_before_disk_write_and_latches_session_off(self):
+        automatic = read(AUTO)
+        setter = automatic.split('func setEnabled(', 1)[1].split('func preferencesDidChange()', 1)[0]
+        self.assertLess(setter.index('disabledForSession = true'), setter.index('preferences.saveAutomatic(enabled)'))
+        self.assertLess(setter.index('invalidatePending()'), setter.index('preferences.saveAutomatic(enabled)'))
+        self.assertIn('if enabled { disabledForSession = false }', setter)
+        self.assertIn('return stored && !disabledForSession', automatic)
+        self.assertIn('self.mayAutomaticallyTransfer, self.pendingIndex < self.pending.count', automatic)
+
+    def test_initial_catalog_reuse_checks_current_connection_then_keeps_explicit_refresh(self):
+        host = read(PROBE).split('func openSharedFiles(', 1)[1].split('func pauseQueue()', 1)[0]
+        self.assertLess(host.index('await catalog.snapshot()'), host.index('await connection.snapshot()'))
+        self.assertIn('apConnection === connection, self.catalog === catalog', host)
+        self.assertIn('page.loadInitialCatalog(initialCatalog, state: state)', host)
+        page = read(PAGE)
+        initial = page.split('func loadInitialCatalog(', 1)[1].split('func refresh()', 1)[0]
+        for token in ('state.connectionID == connectionID', 'value.revision == state.eventRevision',
+                      'value.metadataComplete, !value.changedWhileScanning', 'refreshOriginals(', 'refresh()'):
+            self.assertIn(token, initial)
+        explicit = page.split('func refresh()', 1)[1].split('private func refreshOriginals(', 1)[0]
+        self.assertIn('try await self.catalog.refresh()', explicit)
+
+    def test_backup_catchup_uses_existing_shared_identity_not_filename_only(self):
+        catalog = read(CATALOG)
+        helper = catalog.split('private static func sameLogicalIdentity(', 1)[1].split('private func wakeResolver()', 1)[0]
+        self.assertIn('!NewCameraObjectPolicy.shared.isNew(files: [saved], handle: differentHandle, info: candidate)', helper)
+        self.assertIn('scanCatchupMedia.values.contains { Self.sameLogicalIdentity($0, file) }', catalog)
+        self.assertIn('scanCatchupMedia.filter { !Self.sameLogicalIdentity($0.value, media) }', catalog)
 
 if __name__ == '__main__': unittest.main()

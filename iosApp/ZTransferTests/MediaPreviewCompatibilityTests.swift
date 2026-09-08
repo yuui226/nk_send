@@ -75,9 +75,22 @@ final class MediaPreviewCompatibilityTests: XCTestCase {
         XCTAssertEqual(first.height, second.height, file: file, line: line)
         let a = try rgba(first), b = try rgba(second)
         guard a.count == b.count else { return }
-        for index in stride(from: 0, to: a.count, by: max(1, a.count / 512)) {
-            XCTAssertLessThanOrEqual(abs(Int(a[index]) - Int(b[index])), tolerance, "channel \(index)", file: file, line: line)
+        // Sample pixels, not bytes: an even byte stride could omit green/alpha entirely.
+        let pixelCount = a.count / 4
+        for pixel in stride(from: 0, to: pixelCount, by: max(1, pixelCount / 512)) {
+            for channel in 0..<4 {
+                let index = pixel * 4 + channel
+                XCTAssertLessThanOrEqual(abs(Int(a[index]) - Int(b[index])), tolerance,
+                    "pixel \(pixel), RGBA channel \(channel)", file: file, line: line)
+            }
         }
+    }
+
+    private func pixel(_ image: CGImage, x: Int, y: Int) throws -> [UInt8] {
+        // CGImage cropping addresses raster rows, independent of a CGContext's drawing axes.
+        // A one-pixel crop also avoids resampling or vertical-flip ambiguity in the RGBA probe.
+        let sample = try XCTUnwrap(image.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)))
+        return try rgba(sample)
     }
 
     func testDimensionMetadataRejectsBooleanFractionalNonfiniteAndOverflowWithoutDecode() {
@@ -127,6 +140,43 @@ final class MediaPreviewCompatibilityTests: XCTestCase {
             let actual = (y * grid.width + x) * 4 + channel
             XCTAssertLessThanOrEqual(abs(Int(a[expected]) - Int(b[actual])), 3)
         } } }
+    }
+
+    func testAllEightGridOrientationsMapActualPixelsUsingAndroidOrientationRules() async throws {
+        let decoder = PreviewImageDecoder(), original = try image()
+        for orientation in 1...8 {
+            let input = try encoded(original, type: "public.jpeg", orientation: orientation)
+            let raw = try decoded(input)
+            let grid = try decoded(await decoder.gridThumbnailPNG(input))
+            let swapsAxes = orientation >= 5
+            XCTAssertEqual(grid.width, swapsAxes ? raw.height : raw.width)
+            XCTAssertEqual(grid.height, swapsAxes ? raw.width : raw.height)
+            // Source -> destination mappings derived from Android ExifBitmapOrientation.kt:
+            // horizontal/vertical mirrors, +/-90/180 rotation, transpose and transverse.
+            // Compare six distinct color-block interiors, away from JPEG/resampling seams.
+            for y in [10, 30] { for x in [10, 30, 50] {
+                let destination: (x: Int, y: Int)
+                switch orientation {
+                case 1: destination = (x, y)
+                case 2: destination = (raw.width - 1 - x, y)
+                case 3: destination = (raw.width - 1 - x, raw.height - 1 - y)
+                case 4: destination = (x, raw.height - 1 - y)
+                case 5: destination = (y, x)
+                case 6: destination = (raw.height - 1 - y, x)
+                case 7: destination = (raw.height - 1 - y, raw.width - 1 - x)
+                case 8: destination = (y, raw.width - 1 - x)
+                default: return XCTFail("Unexpected EXIF orientation")
+                }
+                let expected = try pixel(raw, x: x, y: y)
+                let actual = try pixel(grid, x: destination.x, y: destination.y)
+                for channel in 0..<4 {
+                    XCTAssertLessThanOrEqual(abs(Int(expected[channel]) - Int(actual[channel])), 3,
+                        "orientation \(orientation), source (\(x),\(y)), RGBA channel \(channel)")
+                }
+            } }
+        }
+        // Original and FHD deliberately do NOT apply EXIF orientation; their all-eight
+        // raw-grid comparisons live in testAllExifOrientationsKeepRawOriginalAndFhdGridButGridNormalizesAxes.
     }
 
     func testAlphaAndTransparentPixelsSurviveOriginalAndThumbnailPng() async throws {

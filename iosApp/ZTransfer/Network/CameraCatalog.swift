@@ -260,7 +260,8 @@ actor CameraCatalog {
                 pendingObjects.removeValue(forKey: handle) // Withdraw even an in-flight metadata read.
                 pendingOrder.removeAll { $0 == handle }
                 scanCatchupHandles.remove(handle)
-                scanCatchupMedia.removeValue(forKey: handle)
+                // Withdraw this raw handle immediately, but retain undelivered logical-media
+                // eligibility until authoritative reconciliation checks surviving backup aliases.
                 // An unknown removed handle may still invalidate an in-progress first scan.
                 if scanning || !handleBaseline.hasSnapshot || handle == 0 || handle == -1 ||
                     !handleBaseline.shouldResolve(handle: handle, visibleFiles: latest?.files ?? []) {
@@ -358,7 +359,6 @@ actor CameraCatalog {
                 pendingOrder.removeAll { !handles.contains($0) }
                 pendingObjects = pendingObjects.filter { handles.contains($0.key) }
                 scanCatchupHandles.formIntersection(handles)
-                scanCatchupMedia = scanCatchupMedia.filter { handles.contains($0.key) }
                 for handle in handleOrder where handleBaseline.shouldResolve(handle: handle, visibleFiles: files) {
                     if pendingObjects[handle] == nil {
                         pendingObjects[handle] = PendingObject(next: Self.nowMs() + NewCameraObjectPolicy.shared.COALESCE_MS)
@@ -375,6 +375,11 @@ actor CameraCatalog {
                 pendingChange = nil; needsEventRescan = false
                 _ = await previews?.reconcile(updated)
                 if !closed, !Task.isCancelled, let onChange { await onChange(updated) }
+                // A deletion can interrupt full-scan addition delivery after its baseline was
+                // committed. Replay retained candidates against THIS stable publication; they
+                // are already known to the baseline, so the normal resolver cannot recover them.
+                // The existing delivery fence handles another change/close during this callback.
+                await publishScanAdditions(updated, previousFiles: base.files)
             }
         } catch CameraStreamError.operationInProgress { return 90 }
         catch is CameraOperationError { return 2_000 } // Busy/malformed/partial is never deletion.
@@ -393,27 +398,42 @@ actor CameraCatalog {
     private func publishScanAdditions(_ result: CameraCatalogSnapshot, previousFiles: [CameraFileInfo]) async {
         var compared = previousFiles
         var additions: [CameraCatalogAddition] = []
+        var assignedMedia: [CameraFileInfo] = []
+        scanCatchupHandles.formIntersection(Set(result.objectInfos.keys))
+        let survivingCandidates = result.indexedObjectInfos.filter { scanCatchupHandles.contains($0.handle) }
+            .compactMap { NewCameraObjectPolicy.shared.publicationFile(info: $0) }
+        scanCatchupMedia = scanCatchupMedia.filter { saved in
+            survivingCandidates.contains { Self.sameLogicalIdentity(saved.value, $0) }
+        }
         for info in result.indexedObjectInfos where scanCatchupHandles.contains(info.handle) {
             guard let file = NewCameraObjectPolicy.shared.publicationFile(info: info) else { continue }
             let isNew = NewCameraObjectPolicy.shared.isNew(files: compared, handle: info.handle, info: file)
             compared = NewCameraObjectPolicy.shared.publish(files: compared, handle: info.handle, info: file)
-            let saved = scanCatchupMedia[info.handle]
-            let sameSavedIdentity = saved?.fileName == file.fileName && saved?.size == file.size && saved?.captureDate == file.captureDate
-            let media = (isNew || sameSavedIdentity) && NewCameraObjectPolicy.shared.automaticMedia(file: file) ? file : nil
-            if let media { scanCatchupMedia[info.handle] = media }
+            let savedIdentity = scanCatchupMedia.values.contains { Self.sameLogicalIdentity($0, file) }
+            let alreadyAssigned = assignedMedia.contains { Self.sameLogicalIdentity($0, file) }
+            let media = !alreadyAssigned && (isNew || savedIdentity) && NewCameraObjectPolicy.shared.automaticMedia(file: file) ? file : nil
+            if let media { scanCatchupMedia[info.handle] = media; assignedMedia.append(media) }
             additions.append(CameraCatalogAddition(snapshot: result, info: info, newMedia: media))
         }
         // A complete scan accounts for every raw handle, including non-media/folders. Only failed
         // or raced scans retain candidates; repeating a successful scan must not enqueue them again.
-        scanCatchupHandles = scanCatchupHandles.intersection(Set(result.objectInfos.keys))
-        scanCatchupMedia = scanCatchupMedia.filter { scanCatchupHandles.contains($0.key) }
         for addition in additions {
             guard !closed, !Task.isCancelled, !needsEventRescan,
                   latest?.publicationRevision == result.publicationRevision else { return }
             scanCatchupHandles.remove(addition.info.handle)
-            scanCatchupMedia.removeValue(forKey: addition.info.handle)
+            if let media = addition.newMedia {
+                // Consume a logical photo once even if another pending handle is its backup.
+                scanCatchupMedia = scanCatchupMedia.filter { !Self.sameLogicalIdentity($0.value, media) }
+            }
             if let onAddition { await onAddition(addition) }
         }
+    }
+
+    private static func sameLogicalIdentity(_ saved: CameraFileInfo, _ candidate: CameraFileInfo) -> Bool {
+        // Reuse the exact shared logicalIdentity comparison. The deliberately different probe
+        // handle disables isNew's raw-handle shortcut; no separate Swift identity format exists.
+        let differentHandle: Int32 = saved.handle == 0 ? 1 : 0
+        return !NewCameraObjectPolicy.shared.isNew(files: [saved], handle: differentHandle, info: candidate)
     }
 
     private func wakeResolver() {

@@ -167,6 +167,156 @@ final class CatalogEventReconciliationTests: XCTestCase {
         await catalog.close()
     }
 
+    func testDeletionDuringFullScanPublicationReplaysSurvivingAdditionAfterLightweightReconciliation() async throws {
+        let source = EventCatalogSource(infos: [try info(1, name: "OLD.JPG")])
+        let sink = EventCatalogSink(holdFirstChange: true)
+        let catalog = CameraCatalog(source: source, stationMode: false,
+            onAddition: { await sink.addition($0) }, onChange: { await sink.change($0) })
+        _ = try await catalog.refresh()
+        await source.update(try info(2, name: "NEW.JPG"))
+        await source.replace(storage: 0x10001, handles: [1, 2])
+        await source.setRevision(300)
+        await catalog.receiveEvents(CameraEventBatch(cursor: CameraEventCursor(connectionID: source.connectionID, revision: 300),
+                                                     events: [], requiresRescan: true))
+        try await until { await sink.isChangeHeld }
+        let metadataReads = await source.metadataReads
+        // The complete scan already committed handle 2, but its onAddition has not been delivered.
+        await source.replace(storage: 0x10001, handles: [2])
+        await event(catalog, source, code: 0x4003, handle: 1, revision: 301)
+        await sink.releaseChange()
+        try await until { await sink.additions.count == 1 }
+        let additions = await sink.additions, changes = await sink.changes, after = await source.metadataReads
+        XCTAssertEqual(changes.count, 2)
+        XCTAssertEqual(additions.first?.newMedia?.handle, 2)
+        XCTAssertEqual(additions.first?.snapshot.revision, 301)
+        XCTAssertEqual(additions.first?.snapshot.files.map(\.handle), [2])
+        XCTAssertEqual(after, metadataReads, "Replay must not turn the handle-only reconciliation into a metadata rescan")
+        // Neither a duplicate deletion nor a later complete scan redelivers the consumed candidate.
+        await event(catalog, source, code: 0x4003, handle: 1, revision: 302)
+        await event(catalog, source, code: 0x400C, handle: 0x10001, revision: 303)
+        try await until { await sink.changes.count == 3 }
+        let repeated = await sink.additions
+        XCTAssertEqual(repeated.count, 1)
+        await catalog.close()
+    }
+
+    func testDeletionOfDeferredNewObjectWithdrawsAdditionBeforeReplay() async throws {
+        let source = EventCatalogSource(infos: [try info(1, name: "OLD.JPG")])
+        let sink = EventCatalogSink(holdFirstChange: true)
+        let catalog = CameraCatalog(source: source, stationMode: false,
+            onAddition: { await sink.addition($0) }, onChange: { await sink.change($0) })
+        _ = try await catalog.refresh()
+        await source.update(try info(2, name: "NEW.JPG"))
+        await source.replace(storage: 0x10001, handles: [1, 2])
+        await event(catalog, source, code: 0x400C, handle: 0x10001, revision: 1)
+        try await until { await sink.isChangeHeld }
+        await source.replace(storage: 0x10001, handles: [1])
+        await event(catalog, source, code: 0x4003, handle: 2, revision: 2)
+        await sink.releaseChange()
+        try await until { await sink.changes.count == 2 }
+        let additions = await sink.additions, snapshot = await catalog.snapshot()
+        XCTAssertTrue(additions.isEmpty)
+        XCTAssertEqual(snapshot?.files.map(\.handle), [1])
+        await catalog.close()
+    }
+
+    func testDeferredNewPhotoEligibilityMovesFromRemovedPrimaryToSurvivingBackupOnlyOnce() async throws {
+        let source = EventCatalogSource(infos: [try info(1, name: "OLD.JPG")])
+        let sink = EventCatalogSink(holdFirstChange: true)
+        let catalog = CameraCatalog(source: source, stationMode: false,
+            onAddition: { await sink.addition($0) }, onChange: { await sink.change($0) })
+        _ = try await catalog.refresh()
+        await source.update(try info(2, name: "NEW.NEF"))
+        await source.update(try info(3, name: "NEW.NEF", storage: 0x20001))
+        await source.replace(storage: 0x10001, handles: [1, 2])
+        await source.replace(storage: 0x20001, handles: [3])
+        await source.setRevision(300)
+        await catalog.receiveEvents(CameraEventBatch(cursor: CameraEventCursor(connectionID: source.connectionID, revision: 300),
+                                                     events: [], requiresRescan: true))
+        try await until { await sink.isChangeHeld }
+        let metadataReads = await source.metadataReads
+        // First invalidation defers delivery after the full scan committed both backup handles.
+        await source.replace(storage: 0x10001, handles: [2])
+        await event(catalog, source, code: 0x4003, handle: 1, revision: 301)
+        await source.holdNextHandles()
+        await sink.releaseChange()
+        try await until { await source.isHeld }
+        // Now the new photo's primary disappears during the lightweight query, but its backup lives.
+        await source.replace(storage: 0x10001, handles: [])
+        await event(catalog, source, code: 0x4003, handle: 2, revision: 302)
+        await source.release()
+        try await until { await sink.additions.count == 1 }
+        let delivered = await sink.additions, after = await source.metadataReads
+        XCTAssertEqual(delivered.first?.info.handle, 3)
+        XCTAssertEqual(delivered.first?.newMedia?.handle, 3)
+        XCTAssertEqual(delivered.first?.snapshot.files.map(\.handle), [3])
+        XCTAssertEqual(delivered.first?.snapshot.files.first?.storageIds.map { $0.int32Value }, [0x20001])
+        XCTAssertEqual(delivered.first?.snapshot.revision, 302)
+        XCTAssertEqual(after, metadataReads, "Backup promotion reuses indexed metadata; no extra ObjectInfo scan")
+        await event(catalog, source, code: 0x400C, handle: 0x20001, revision: 303)
+        try await until { await sink.changes.count == 3 }
+        let repeated = await sink.additions
+        XCTAssertEqual(repeated.filter { $0.newMedia != nil }.count, 1)
+        await catalog.close()
+    }
+
+    func testDeferredEligibilityDoesNotAttachToDifferentPhotoWithSameFilename() async throws {
+        let source = EventCatalogSource(infos: [try info(1, name: "OLD.JPG"), try info(4, name: "NEW.NEF", size: 11)])
+        let sink = EventCatalogSink(holdFirstChange: true)
+        let catalog = CameraCatalog(source: source, stationMode: false,
+            onAddition: { await sink.addition($0) }, onChange: { await sink.change($0) })
+        _ = try await catalog.refresh()
+        await source.update(try info(2, name: "NEW.NEF", size: 10))
+        await source.replace(storage: 0x10001, handles: [1, 2, 4])
+        await event(catalog, source, code: 0x400C, handle: 0x10001, revision: 1)
+        try await until { await sink.isChangeHeld }
+        await source.replace(storage: 0x10001, handles: [2, 4])
+        await event(catalog, source, code: 0x4003, handle: 1, revision: 2)
+        await source.holdNextHandles(); await sink.releaseChange()
+        try await until { await source.isHeld }
+        await source.replace(storage: 0x10001, handles: [4])
+        await event(catalog, source, code: 0x4003, handle: 2, revision: 3)
+        await source.release()
+        try await until { await sink.changes.count == 2 }
+        let additions = await sink.additions, final = await catalog.snapshot()
+        XCTAssertTrue(additions.isEmpty, "Filename alone is not the shared logical identity")
+        XCTAssertEqual(final?.files.map(\.handle), [4])
+        await catalog.close()
+    }
+
+    func testCatchupDoesNotCollapseSameFilenameWithDifferentSharedIdentity() async throws {
+        let source = EventCatalogSource(infos: [try info(1, name: "OLD.JPG")])
+        let sink = EventCatalogSink()
+        let catalog = CameraCatalog(source: source, stationMode: false, onAddition: { await sink.addition($0) })
+        _ = try await catalog.refresh()
+        await source.update(try info(2, name: "SAME.NEF", size: 10))
+        await source.update(try info(3, name: "SAME.NEF", storage: 0x20001, size: 11))
+        await source.replace(storage: 0x10001, handles: [1, 2])
+        await source.replace(storage: 0x20001, handles: [3])
+        await event(catalog, source, code: 0x400C, handle: 0x20001, revision: 1)
+        try await until { await sink.additions.count == 2 }
+        let additions = await sink.additions
+        XCTAssertEqual(additions.compactMap(\.newMedia).map(\.size).sorted(), [10, 11])
+        XCTAssertEqual(additions.compactMap(\.newMedia).map(\.handle).sorted(), [2, 3])
+        await catalog.close()
+    }
+
+    func testCloseDuringFullScanPublicationNeverReplaysDeferredAdditions() async throws {
+        let source = EventCatalogSource(infos: [try info(1, name: "OLD.JPG")])
+        let sink = EventCatalogSink(holdFirstChange: true)
+        let catalog = CameraCatalog(source: source, stationMode: false,
+            onAddition: { await sink.addition($0) }, onChange: { await sink.change($0) })
+        _ = try await catalog.refresh()
+        await source.update(try info(2, name: "NEW.JPG"))
+        await source.replace(storage: 0x10001, handles: [1, 2])
+        await event(catalog, source, code: 0x400C, handle: 0x10001, revision: 1)
+        try await until { await sink.isChangeHeld }
+        await catalog.close(); await sink.releaseChange()
+        try await Task.sleep(nanoseconds: 150_000_000)
+        let additions = await sink.additions
+        XCTAssertTrue(additions.isEmpty)
+    }
+
     func testNewRequestDuringHeldEnumerationCannotBeClearedByOldResult() async throws {
         let source = EventCatalogSource(infos: [try info(1), try info(2, name: "B.JPG")])
         let catalog = CameraCatalog(source: source, stationMode: false)
@@ -377,10 +527,10 @@ final class CatalogEventReconciliationTests: XCTestCase {
             try await Task.sleep(nanoseconds: 5_000_000)
         }
     }
-    private func info(_ handle: Int32, name: String = "SAME.JPG", storage: Int32 = 0x10001) throws -> PtpObjectInfo {
+    private func info(_ handle: Int32, name: String = "SAME.JPG", storage: Int32 = 0x10001, size: UInt8 = 10) throws -> PtpObjectInfo {
         var payload = Data(repeating: 0, count: 52)
         for index in 0..<4 { payload[index] = UInt8(truncatingIfNeeded: storage >> (index * 8)) }
-        payload[4] = 1; payload[5] = 0x38; payload[8] = 10
+        payload[4] = 1; payload[5] = 0x38; payload[8] = size
         for value in [name, "20260908T120000", ""] {
             payload.append(UInt8(value.utf16.count + 1))
             for unit in value.utf16 { payload.append(UInt8(truncatingIfNeeded: unit)); payload.append(UInt8(unit >> 8)) }
@@ -398,7 +548,15 @@ private func unwrapCatalogValue<T>(_ value: T?, file: StaticString = #filePath, 
 private actor EventCatalogSink {
     private(set) var changes: [CameraCatalogSnapshot] = []
     private(set) var additions: [CameraCatalogAddition] = []
-    func change(_ value: CameraCatalogSnapshot) { changes.append(value) }
+    private let holdFirstChange: Bool
+    private var changeContinuation: CheckedContinuation<Void, Never>?
+    var isChangeHeld: Bool { changeContinuation != nil }
+    init(holdFirstChange: Bool = false) { self.holdFirstChange = holdFirstChange }
+    func change(_ value: CameraCatalogSnapshot) async {
+        changes.append(value)
+        if holdFirstChange && changes.count == 1 { await withCheckedContinuation { changeContinuation = $0 } }
+    }
+    func releaseChange() { let pending = changeContinuation; changeContinuation = nil; pending?.resume() }
     func addition(_ value: CameraCatalogAddition) { additions.append(value) }
 }
 

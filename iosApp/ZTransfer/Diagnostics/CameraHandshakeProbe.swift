@@ -559,11 +559,13 @@ final class CameraHandshakeProbe: ObservableObject {
         filesPage = page
         Task {
             let snapshot = await queue.snapshot()
+            let initialCatalog = await catalog.snapshot()
+            // Validate AFTER reading the baseline: a newer event revision invalidates its reuse.
             let state = await connection.snapshot()
-            guard filesPage === page else { return }
+            guard filesPage === page, apConnection === connection, self.catalog === catalog else { return }
             page.publishQueue(snapshot)
             page.setConnected(state.phase == .ready)
-            page.refresh()
+            page.loadInitialCatalog(initialCatalog, state: state)
         }
     }
     func pauseQueue() { if let queue = originalQueue { Task { await queue.pauseAfterCurrent() } } }

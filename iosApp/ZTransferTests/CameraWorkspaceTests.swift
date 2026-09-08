@@ -79,10 +79,159 @@ final class CameraWorkspaceTests: XCTestCase {
         XCTAssertEqual(try history.select(responderGUID: guid)?.address.host, "192.168.20.9")
     }
 
+    @MainActor func testInitialPageReusesCompletedCatalogButExplicitRefreshStillReadsCameraAndOriginals() async throws {
+        let fixture = try pageFixture()
+        let baseline = try await fixture.catalog.refresh()
+        let state = await fixture.source.snapshot()
+        XCTAssertTrue(fixture.page.loadInitialCatalog(baseline, state: state))
+        await fixture.page.originalIndexTask?.value
+        let firstScans = await fixture.source.scans, firstInfos = await fixture.source.infoReads
+        let firstOriginals = await fixture.originals.requests
+        XCTAssertEqual(firstScans, 1); XCTAssertEqual(firstInfos, 1)
+        XCTAssertEqual(firstOriginals, [true], "Reusing camera metadata must still initialize local originals")
+        fixture.page.refresh() // Real NativeFilesPagePlatform action, not a cache-helper call.
+        try await until { await fixture.source.infoReads == 2 }
+        await fixture.page.originalIndexTask?.value
+        let nextScans = await fixture.source.scans, nextOriginals = await fixture.originals.requests
+        XCTAssertEqual(nextScans, 2); XCTAssertEqual(nextOriginals, [true, true])
+        await close(fixture)
+    }
+
+    @MainActor func testInitialPageRescansWhenAnEventArrivedAfterBaselineWasRead() async throws {
+        let fixture = try pageFixture()
+        let baseline = try await fixture.catalog.refresh()
+        await fixture.source.advanceRevision()
+        // Same ordering as openSharedFiles: catalog first, then current connection state.
+        let current = await fixture.source.snapshot()
+        XCTAssertFalse(fixture.page.loadInitialCatalog(baseline, state: current))
+        try await until { await fixture.catalog.snapshot()?.revision == current.eventRevision }
+        let scans = await fixture.source.scans
+        XCTAssertEqual(scans, 2)
+        await close(fixture)
+    }
+
+    @MainActor func testInitialPageRejectsMissingOtherSessionPartialAndChangedCatalogCandidates() async throws {
+        for variant in 0..<4 {
+            let fixture = try pageFixture()
+            let baseline = try await fixture.catalog.refresh()
+            let candidate: CameraCatalogSnapshot? = variant == 0 ? nil : CameraCatalogSnapshot(
+                connectionID: variant == 1 ? UUID() : baseline.connectionID, revision: baseline.revision,
+                storageIDs: baseline.storageIDs, files: baseline.files, objectInfos: baseline.objectInfos,
+                totalHandles: baseline.totalHandles, metadataComplete: variant != 2,
+                changedWhileScanning: variant == 3, publicationRevision: baseline.publicationRevision)
+            let current = await fixture.source.snapshot()
+            XCTAssertFalse(fixture.page.loadInitialCatalog(candidate, state: current))
+            try await until { await fixture.source.infoReads == 2 }
+            let scans = await fixture.source.scans
+            XCTAssertEqual(scans, 2, "Invalid reuse candidate must use the real camera refresh route")
+            await close(fixture)
+        }
+    }
+
+    @MainActor func testInitialPageCannotLoadAfterCloseOrWithAnotherOrClosedConnectionState() async throws {
+        let fixture = try pageFixture()
+        let baseline = try await fixture.catalog.refresh()
+        for state in [CameraConnectionSnapshot(connectionID: UUID(), phase: .ready, eventRevision: 0, errorDescription: nil),
+                      CameraConnectionSnapshot(connectionID: fixture.camera.connectionID, phase: .closed, eventRevision: 0, errorDescription: nil)] {
+            XCTAssertFalse(fixture.page.loadInitialCatalog(baseline, state: state))
+        }
+        fixture.page.close()
+        let current = await fixture.source.snapshot()
+        XCTAssertFalse(fixture.page.loadInitialCatalog(baseline, state: current))
+        let scans = await fixture.source.scans, originals = await fixture.originals.requests
+        XCTAssertEqual(scans, 1); XCTAssertTrue(originals.isEmpty)
+        await close(fixture)
+    }
+
+    @MainActor func testRejectedOlderPublicationReleasesScanBeforeFallbackRefresh() async throws {
+        let fixture = try pageFixture()
+        let older = try await fixture.catalog.refresh()
+        let newer = try await fixture.catalog.refresh()
+        let current = await fixture.source.snapshot()
+        XCTAssertTrue(fixture.page.loadInitialCatalog(newer, state: current))
+        // Same event revision can still have a newer catalog publication (another complete scan).
+        // acceptCatalog must finish the rejected scan token, allowing refresh() to begin its own.
+        XCTAssertFalse(fixture.page.loadInitialCatalog(older, state: current))
+        try await until { await fixture.source.infoReads == 3 }
+        let scans = await fixture.source.scans
+        XCTAssertEqual(scans, 3, "Rejected cache must not leave the shared page in scanning=true")
+        await close(fixture)
+    }
+
+    @MainActor private func pageFixture() throws -> WorkspacePageFixture {
+        let camera = CameraWiFiConnection(command: try CameraTCPStream(host: "127.0.0.1", port: 15740),
+            event: try CameraTCPStream(host: "127.0.0.1", port: 15740))
+        var payload = Data(repeating: 0, count: 52)
+        payload[0] = 1; payload[2] = 1; payload[4] = 1; payload[5] = 0x38; payload[8] = 10
+        for text in ["BASELINE.JPG", "20260908T120000", ""] {
+            payload.append(UInt8(text.utf16.count + 1))
+            for unit in text.utf16 { payload.append(UInt8(truncatingIfNeeded: unit)); payload.append(UInt8(unit >> 8)) }
+            payload.append(contentsOf: [0, 0])
+        }
+        let info = try XCTUnwrap(PtpIPChannel.objectInfo(handle: 1, payload: payload))
+        let source = WorkspaceCatalogSource(connectionID: camera.connectionID, info: info)
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        let originals = WorkspaceOriginalsSource(), previews = CameraPreviewStore(source: camera)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let queue = CameraOriginalQueue(camera: camera, store: CameraOriginalStore(root: root))
+        let page = OriginalFilesPageBridge(connectionID: camera.connectionID, catalog: catalog, queue: queue,
+            previews: previews, exifSource: camera, exifCache: NativePreviewExifCache(), stationMode: false, originals: originals)
+        page.setConnected(true)
+        return WorkspacePageFixture(camera: camera, source: source, catalog: catalog, originals: originals, previews: previews, page: page)
+    }
+    @MainActor private func close(_ fixture: WorkspacePageFixture) async {
+        fixture.page.close(); await fixture.catalog.close(); await fixture.previews.close(); await fixture.camera.abort()
+    }
+    private func until(_ predicate: () async -> Bool) async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + 2
+        while !(await predicate()) {
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                XCTFail("Initial workspace catalog route did not settle"); throw CameraStreamError.timedOut
+            }
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+    }
+
     private func response(transaction: UInt32, code: UInt16 = 0x2001) -> Data {
         Data([14, 0, 0, 0, 7, 0, 0, 0, UInt8(truncatingIfNeeded: code), UInt8(code >> 8)])
             + Data((0..<4).map { UInt8(truncatingIfNeeded: transaction >> ($0 * 8)) })
     }
+}
+
+private struct WorkspacePageFixture {
+    let camera: CameraWiFiConnection
+    let source: WorkspaceCatalogSource
+    let catalog: CameraCatalog
+    let originals: WorkspaceOriginalsSource
+    let previews: CameraPreviewStore
+    let page: OriginalFilesPageBridge
+}
+
+private actor WorkspaceCatalogSource: CameraCatalogSource {
+    nonisolated let connectionID: UUID
+    private let info: PtpObjectInfo
+    private var revision: UInt64 = 0
+    private(set) var scans = 0
+    private(set) var infoReads = 0
+    init(connectionID: UUID, info: PtpObjectInfo) { self.connectionID = connectionID; self.info = info }
+    func storageIDs() -> [Int32] { scans += 1; return [info.storageId] }
+    func objectHandles(storageID: Int32) -> [Int32] { [info.handle] }
+    func objectInfo(handle: Int32) -> PtpObjectInfo { infoReads += 1; return info }
+    func snapshot() -> CameraConnectionSnapshot {
+        CameraConnectionSnapshot(connectionID: connectionID, phase: .ready, eventRevision: revision, errorDescription: nil)
+    }
+    func advanceRevision() { revision += 1 }
+}
+
+private actor WorkspaceOriginalsSource: OriginalFilesReading {
+    private(set) var requests: [Bool] = []
+    func originals(since revision: Int64, rescan: Bool) -> OriginalIndexUpdate {
+        requests.append(rescan)
+        return OriginalIndexUpdate(revision: 0, baseRevision: revision, fullSnapshot: true, entries: [])
+    }
+    func originalData(locator: String) throws -> Data { throw OriginalIndexError.unsafeRoot }
+    func originalRawPreviewData(locator: String) -> Data? { nil }
+    func originalExif(locator: String) -> PhotoExif? { nil }
 }
 
 private final class WorkspaceWire: CameraByteConnection {

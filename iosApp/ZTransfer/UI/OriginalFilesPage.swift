@@ -169,6 +169,26 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         return Int32(year * 10000 + month * 100 + date)
     }
 
+    /// Initial presentation may reuse the session owner's completed baseline. A current connection
+    /// snapshot must be sampled AFTER the catalog value; stale/partial candidates take the normal scan.
+    /// This is deliberately separate from refresh(), which always performs a user-requested scan.
+    @discardableResult
+    func loadInitialCatalog(_ value: CameraCatalogSnapshot?, state: CameraConnectionSnapshot) -> Bool {
+        guard !closed, connected, refreshTask == nil, state.connectionID == connectionID, state.phase == .ready else { return false }
+        if let value, value.connectionID == connectionID, value.revision == state.eventRevision,
+           value.metadataComplete, !value.changedWhileScanning {
+            let sequence = model.beginScan()
+            if sequence > 0, acceptCatalog(value, sequence: sequence) {
+                // publishQueue may already have started this page's initial original-index read.
+                // Catalog reuse must not skip local originals or enqueue that same read twice.
+                if originalIndexTask == nil { refreshOriginals(rescan: originalRevision < 0) }
+                return true
+            }
+        }
+        refresh()
+        return false
+    }
+
     func refresh() {
         guard !closed, connected, refreshTask == nil else { return }
         let sequence = model.beginScan()

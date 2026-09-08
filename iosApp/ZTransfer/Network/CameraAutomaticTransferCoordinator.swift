@@ -26,6 +26,9 @@ final class CameraAutomaticTransferCoordinator {
     private let preferences: TransferPreferencesStore
     private let dayKey: @MainActor () -> Int32
     private var closed = false
+    // A failed settings write must never undo the user's request to stop this session.
+    // Only an explicitly successful enable may clear this latch.
+    private var disabledForSession = false
     private var lastSeenPublication: UInt64?
     private var seenHandles = Set<Int32>()
     private var pending: [Candidate] = []
@@ -43,7 +46,12 @@ final class CameraAutomaticTransferCoordinator {
 
     deinit { worker?.cancel() }
 
-    var enabled: Bool? { preferences.readAutomatic() }
+    var enabled: Bool? {
+        guard let stored = preferences.readAutomatic() else { return nil }
+        return stored && !disabledForSession
+    }
+
+    private var mayAutomaticallyTransfer: Bool { !closed && enabled == true }
 
     /// Must only receive the catalog's onAddition channel, never a whole scan or a metadata refresh.
     /// Observing a disabled event consumes it: subsequently enabling the option never backfills it.
@@ -56,7 +64,7 @@ final class CameraAutomaticTransferCoordinator {
         // not the entire snapshot; logical backup identity remains the shared queue's decision.
         guard seenHandles.insert(addition.info.handle).inserted else { return }
         guard addition.snapshot.metadataComplete, !addition.snapshot.changedWhileScanning,
-              let file = addition.newMedia, preferences.readAutomatic() == true,
+              let file = addition.newMedia, mayAutomaticallyTransfer,
               let options = transfer ?? preferences.read() else { return }
         // Shared queue admission validates metadata/file identity, media type and duplicate identity.
         // The queue's current committed directory remains authoritative at its actor admission turn.
@@ -67,20 +75,26 @@ final class CameraAutomaticTransferCoordinator {
 
     @discardableResult
     func setEnabled(_ enabled: Bool) -> Bool {
-        guard !closed, preferences.saveAutomatic(enabled) else { return false }
-        if !enabled { invalidatePending() }
+        guard !closed else { return false }
+        if !enabled {
+            disabledForSession = true
+            invalidatePending()
+        }
+        guard preferences.saveAutomatic(enabled) else { return false }
+        if enabled { disabledForSession = false }
         return true
     }
 
     /// Also use after an explicitly confirmed preference recovery. Already-admitted queue tasks
     /// retain Android's normal pause/withdraw semantics; toggling is not a destructive queue action.
     func preferencesDidChange() {
-        if preferences.readAutomatic() != true { invalidatePending() }
+        if !mayAutomaticallyTransfer { invalidatePending() }
     }
 
     @discardableResult
     func resetAfterUserConfirmation() -> Bool {
         guard !closed else { return false }
+        disabledForSession = true
         invalidatePending()
         return preferences.resetAfterUserConfirmation()
     }
@@ -101,7 +115,7 @@ final class CameraAutomaticTransferCoordinator {
         let token = UUID(); workerToken = token
         worker = Task { [weak self] in
             while !Task.isCancelled, let self, !self.closed, self.workerToken == token,
-                  self.preferences.readAutomatic() == true, self.pendingIndex < self.pending.count {
+                  self.mayAutomaticallyTransfer, self.pendingIndex < self.pending.count {
                 let item = self.pending[self.pendingIndex]
                 self.pendingIndex += 1
                 // enqueueNewMedia checks this task's cancellation at its synchronous actor entry.

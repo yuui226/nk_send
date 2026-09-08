@@ -29,7 +29,10 @@ class DirectoryUIWiringTest(unittest.TestCase):
         self.assertIn('SharedTransferDirectoryHeader(dirText, directoryAttentionActive, text, selectDirectory)', card)
         native = read(COMMON + 'NativePhotoSettingsOverlay.kt')
         self.assertIn('SharedTransferDirectoryHeader(directory.description, false, text, model.directory::choose)', native)
-        self.assertNotIn('SettingsTextKey.auto_transfer_new_media', native)
+        # This historical stage had no automatic control; the later batch verifies its real wiring.
+        from parallel_batch_wiring import previous_parallel_batch_source
+        self.assertNotIn('SettingsTextKey.auto_transfer_new_media',
+                         previous_parallel_batch_source(COMMON + 'NativePhotoSettingsOverlay.kt', native))
 
     def test_native_page_owns_request_lifetime_and_preserves_existing_warning_on_cancel(self):
         model = read(COMMON + 'NativeDirectorySettingsModel.kt')

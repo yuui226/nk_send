@@ -57,7 +57,9 @@ class HandleBaselineWiringTest(unittest.TestCase):
                         ('detectNewHandles: Bool = false', 'detectNewHandles: Bool = true')):
             with self.assertRaises(AssertionError):
                 previous_handle_baseline_source(CATALOG, raw.replace(old,new))
-        changed = raw.replace('if result.metadataComplete { latest = result }', 'latest = result')
+        publication = 'if result.metadataComplete && !result.changedWhileScanning { latest = result }'
+        self.assertIn(publication, raw)  # Never let a vanished mutation target become a no-op.
+        changed = raw.replace(publication, 'latest = result')
         # W02-B's adjacent wakeup hunk now guards this original publication condition too.
         with self.assertRaises(AssertionError):
             previous_handle_baseline_source(CATALOG, changed)

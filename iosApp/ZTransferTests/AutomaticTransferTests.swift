@@ -13,12 +13,14 @@ private actor AutomaticAdmissionProbe: CameraAutomaticTransferAdmitting {
     }
     private let core = NativeOriginalTransferQueue()
     private var calls: [Call] = []
+    private var completedCalls = 0
     private var target = true
     private var holdNext = false
     private var held: CheckedContinuation<Void, Never>?
     func hold() { holdNext = true }
     func release() { held?.resume(); held = nil }
     func isHeld() -> Bool { held != nil }
+    func completedCount() -> Int { completedCalls }
     func setTarget(_ value: Bool) { target = value }
     func pause() { core.pauseAfterCurrent() }
     func observations() -> (calls: [Call], count: Int, running: Bool, paused: Bool) {
@@ -26,6 +28,7 @@ private actor AutomaticAdmissionProbe: CameraAutomaticTransferAdmitting {
     }
     func enqueueNewMedia(_ infos: [PtpObjectInfo], files: [CameraFileInfo], enabled: Bool,
                          byDate: Bool, dayKey: Int32, deferred: Bool) async -> Int {
+        defer { completedCalls += 1 }
         calls.append(Call(handle: infos.first?.handle ?? 0, byDate: byDate, dayKey: dayKey, deferred: deferred))
         if holdNext {
             holdNext = false
@@ -202,7 +205,8 @@ final class AutomaticTransferTests: XCTestCase {
         let suite = "automatic-cancel-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let id = UUID(), queue = AutomaticAdmissionProbe(), store = TransferPreferencesStore(defaults: defaults)
-        XCTAssertTrue(store.saveAutomatic(true)); await queue.hold()
+        XCTAssertTrue(store.saveAutomatic(true))
+        await queue.hold()
         let owner = CameraAutomaticTransferCoordinator(connectionID: id, queue: queue, preferences: store)
         defer { owner.close() }
         owner.receive(try addition(id, handle: 1, revision: 1))
@@ -213,6 +217,78 @@ final class AutomaticTransferTests: XCTestCase {
         await queue.release()
         try await eventually { await queue.observations().count == 1 }
         let state = await queue.observations(); XCTAssertEqual(state.calls.map(\.handle), [1, 3])
+    }
+
+    @MainActor func testFailedDisableCancelsHeldAdmissionAndCannotSilentlyReenableThisSession() async throws {
+        let suite = "automatic-failed-disable-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let id = UUID(), queue = AutomaticAdmissionProbe(), store = TransferPreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.saveAutomatic(true))
+        let validEnabledDocument = try XCTUnwrap(defaults.data(forKey: TransferPreferencesStore.key))
+        await queue.hold()
+        let owner = CameraAutomaticTransferCoordinator(connectionID: id, queue: queue, preferences: store)
+        defer { owner.close() }
+        owner.receive(try addition(id, handle: 1, revision: 1))
+        try await eventually { await queue.isHeld() }
+        owner.receive(try addition(id, handle: 2, revision: 2))
+
+        let corrupt = Data("broken".utf8)
+        defaults.set(corrupt, forKey: TransferPreferencesStore.key)
+        XCTAssertFalse(owner.setEnabled(false))
+        XCTAssertNil(owner.enabled) // Preserve the recovery warning, not a false successful save.
+        XCTAssertEqual(defaults.data(forKey: TransferPreferencesStore.key), corrupt)
+        XCTAssertFalse(owner.setEnabled(true)) // Failed enable cannot release the session latch.
+        await queue.release()
+        try await eventually { await queue.completedCount() == 1 }
+        let stopped = await queue.observations()
+        XCTAssertEqual(stopped.count, 0)
+        XCTAssertEqual(stopped.calls.map(\.handle), [1])
+
+        // Even if the old enabled document becomes readable, only explicit enabling resumes.
+        defaults.set(validEnabledDocument, forKey: TransferPreferencesStore.key)
+        owner.preferencesDidChange()
+        XCTAssertEqual(owner.enabled, false)
+        let disabled = try addition(id, handle: 3, revision: 3)
+        owner.receive(disabled)
+        XCTAssertTrue(owner.setEnabled(true))
+        XCTAssertEqual(owner.enabled, true)
+        owner.receive(disabled) // No backfill of media observed while the session was stopped.
+        owner.receive(try addition(id, handle: 4, revision: 4))
+        try await eventually { await queue.completedCount() == 2 }
+        let resumed = await queue.observations()
+        XCTAssertEqual(resumed.count, 1)
+        XCTAssertEqual(resumed.calls.map(\.handle), [1, 4])
+    }
+
+    @MainActor func testConfirmedRecoveryCancelsHeldAdmissionAndRequiresExplicitEnable() async throws {
+        let suite = "automatic-reset-held-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let id = UUID(), queue = AutomaticAdmissionProbe(), store = TransferPreferencesStore(defaults: defaults)
+        XCTAssertTrue(store.saveAutomatic(true))
+        await queue.hold()
+        let owner = CameraAutomaticTransferCoordinator(connectionID: id, queue: queue, preferences: store)
+        defer { owner.close() }
+        owner.receive(try addition(id, handle: 1, revision: 1))
+        try await eventually { await queue.isHeld() }
+        owner.receive(try addition(id, handle: 2, revision: 2))
+        defaults.set(Data("broken".utf8), forKey: TransferPreferencesStore.key)
+        XCTAssertTrue(owner.resetAfterUserConfirmation())
+        XCTAssertEqual(owner.enabled, false)
+        XCTAssertEqual(store.readAutomatic(), false)
+        await queue.release()
+        try await eventually { await queue.completedCount() == 1 }
+        let stopped = await queue.observations()
+        XCTAssertEqual(stopped.count, 0)
+        XCTAssertEqual(stopped.calls.map(\.handle), [1])
+        let disabled = try addition(id, handle: 3, revision: 3)
+        owner.receive(disabled)
+        XCTAssertTrue(owner.setEnabled(true))
+        owner.receive(disabled)
+        owner.receive(try addition(id, handle: 4, revision: 4))
+        try await eventually { await queue.completedCount() == 2 }
+        let resumed = await queue.observations()
+        XCTAssertEqual(resumed.count, 1)
+        XCTAssertEqual(resumed.calls.map(\.handle), [1, 4])
     }
 
     @MainActor func testDateDeferredAndFallbackDayAreFrozenTogetherAtReceipt() async throws {
@@ -242,7 +318,8 @@ final class AutomaticTransferTests: XCTestCase {
         let suite = "automatic-directory-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let id = UUID(), queue = AutomaticAdmissionProbe(), store = TransferPreferencesStore(defaults: defaults)
-        XCTAssertTrue(store.saveAutomatic(true)); await queue.setTarget(false)
+        XCTAssertTrue(store.saveAutomatic(true))
+        await queue.setTarget(false)
         let owner = CameraAutomaticTransferCoordinator(connectionID: id, queue: queue, preferences: store)
         defer { owner.close() }
         let missing = try addition(id, handle: 1, revision: 1)
@@ -259,7 +336,8 @@ final class AutomaticTransferTests: XCTestCase {
         let suite = "automatic-close-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let id = UUID(), queue = AutomaticAdmissionProbe(), store = TransferPreferencesStore(defaults: defaults)
-        XCTAssertTrue(store.saveAutomatic(true)); await queue.hold()
+        XCTAssertTrue(store.saveAutomatic(true))
+        await queue.hold()
         let owner = CameraAutomaticTransferCoordinator(connectionID: id, queue: queue, preferences: store)
         owner.receive(try addition(id, handle: 1, revision: 1))
         try await eventually { await queue.isHeld() }
