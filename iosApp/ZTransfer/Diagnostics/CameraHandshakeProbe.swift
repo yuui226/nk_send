@@ -265,6 +265,12 @@ final class CameraHandshakeProbe: ObservableObject {
         productState = CameraProductSessionState(requestID: current.requestID, phase: phase, message: message)
     }
 
+    private func publishPairingStarted(connectionID: UUID, requestID: Int64?) {
+        guard !Task.isCancelled, apConnection?.connectionID == connectionID,
+              productState?.requestID == requestID, productState?.phase == "connecting" else { return }
+        publishProduct("connecting", message: "正在配对，请在相机端确认。 / Pairing; confirm on the camera.")
+    }
+
     func start(host: String, stationMode: Bool, persistentAP: Bool = false,
                allowPairing: Bool = false, forcePairing: Bool = false, expectedResponder: String? = nil,
                service: CameraBonjourService? = nil, productRequestID: Int64? = nil) {
@@ -546,7 +552,7 @@ final class CameraHandshakeProbe: ObservableObject {
         }
     }
     func openSharedFiles(originals: OriginalFilesReading? = nil) {
-        guard running, !downloading, !scanningCatalog, let queue = originalQueue, let connection = apConnection,
+        guard running, !downloading, let queue = originalQueue, let connection = apConnection,
               let catalog, let previews = previewStore else { return }
         workspaceNavigation &+= 1
         queuePage?.close(); queuePage = nil
@@ -564,12 +570,14 @@ final class CameraHandshakeProbe: ObservableObject {
         Task {
             let snapshot = await queue.snapshot()
             let initialCatalog = await catalog.snapshot()
+            let presentation = await catalog.presentation()
             // Validate AFTER reading the baseline: a newer event revision invalidates its reuse.
             let state = await connection.snapshot()
             guard filesPage === page, apConnection === connection, self.catalog === catalog else { return }
             page.publishQueue(snapshot)
             page.setConnected(state.phase == .ready)
-            page.loadInitialCatalog(initialCatalog, state: state)
+            if presentation.scanning { page.followSessionScan(presentation.progress, publication: presentation.publication) }
+            else { page.loadInitialCatalog(presentation.complete ?? initialCatalog, state: state) }
         }
     }
     func pauseQueue() { if let queue = originalQueue { Task { await queue.pauseAfterCurrent() } } }
@@ -660,7 +668,8 @@ final class CameraHandshakeProbe: ObservableObject {
         apConnection = connection
         let sessionCatalog = CameraCatalog(source: connection, stationMode: stationMode, previews: previews,
             onAddition: { [weak self] addition in await self?.receiveCatalogAddition(addition) },
-            onChange: { [weak self] snapshot in await self?.receiveCatalogChange(snapshot) })
+            onChange: { [weak self] snapshot in await self?.receiveCatalogChange(snapshot) },
+            onBatch: { [weak self] snapshot in await self?.receiveCatalogBatch(snapshot) })
         catalog = sessionCatalog
         previewStore = previews
         defer {
@@ -678,14 +687,20 @@ final class CameraHandshakeProbe: ObservableObject {
             let profiles: StationProfileStore?
             if stationMode { profiles = try StationProfileStore.applicationStore() } else { profiles = nil }
             let options = StationConnectionOptions(expectedResponderGUID: expectedResponder,
-                                                    allowPairing: allowPairing, forceProfilePairing: forcePairing)
+                                                    allowPairing: allowPairing, forceProfilePairing: forcePairing,
+                                                    exploreAlbumAccess: stationMode && productState != nil)
+            let openingRequest = productState?.requestID
             let identity = try await connection.connect(guid: profiles?.identity ?? Self.probeIdentity(), stationOptions: options,
                 hasPairingMarker: { try profiles?.isPaired($0) ?? false },
                 onPairingAcknowledged: { responder in
                     guard let profiles else { throw CameraStationError.missingIdentity }
                     try profiles.markPaired(responder)
+                }, onPairingStarted: { [weak self] in
+                    await self?.publishPairingStarted(connectionID: connection.connectionID, requestID: openingRequest)
                 })
             let description = identity.map { "\($0.manufacturer) \($0.model)" } ?? "相机（机型信息不可用）"
+            let directReads = await connection.usesDirectObjectReads()
+            await previews.configureDirectObjectReads(directReads)
             let diskReady: Bool
             if let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
                let key = await connection.thumbnailCacheKey() {
@@ -756,6 +771,7 @@ final class CameraHandshakeProbe: ObservableObject {
                 } catch {
                     guard let self, !Task.isCancelled, self.catalog === sessionCatalog else { return }
                     self.catalogStatus = "首次目录读取未完成，请在文件页刷新；不会把旧照片当作自动传输新增。"
+                    self.filesPage?.sessionScanFailed()
                 }
             }
             var terminalMessage: String?
@@ -823,6 +839,10 @@ final class CameraHandshakeProbe: ObservableObject {
             address: CameraEndpointAddress.parse(address))
     }
 
+    private func receiveCatalogBatch(_ snapshot: CameraCatalogSnapshot) {
+        guard apConnection?.connectionID == snapshot.connectionID else { return }
+        filesPage?.followSessionScan(snapshot)
+    }
     private func receiveCatalogChange(_ snapshot: CameraCatalogSnapshot) {
         guard apConnection?.connectionID == snapshot.connectionID else { return }
         filesPage?.publishAddition(snapshot)

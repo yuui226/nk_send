@@ -198,12 +198,14 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
             guard let self else { return }
             defer { self.refreshTask = nil }
             do {
-                let snapshot = try await self.catalog.refresh()
+                let snapshot = try await self.catalog.refresh(onBatch: { [weak self] value in
+                    await self?.acceptBatch(value, sequence: sequence)
+                })
                 guard !self.closed, !Task.isCancelled else { return }
                 _ = self.acceptCatalog(snapshot, sequence: sequence)
             } catch {
                 guard !self.closed else { return }
-                _ = self.model.finishScan(sequence: sequence, snapshot: nil)
+                self.failScan(sequence: sequence)
             }
         }
     }
@@ -244,10 +246,10 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     }
 
     @discardableResult
-    func acceptCatalog(_ value: CameraCatalogSnapshot, sequence: Int64) -> Bool {
+    func acceptCatalog(_ value: CameraCatalogSnapshot, sequence: Int64, incremental: Bool = false) -> Bool {
         guard !closed else { return false }
         guard value.publicationRevision >= lastCatalogPublication else {
-            _ = model.finishScan(sequence: sequence, snapshot: nil); return false
+            failScan(sequence: sequence); return false
         }
         let snapshot = NativeFilesPageSnapshot(connectionId: value.connectionID.uuidString,
             metadataComplete: value.metadataComplete, changedWhileScanning: value.changedWhileScanning)
@@ -261,17 +263,56 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
             if !snapshot.addFile(handle: file.handle, size: file.size, name: file.fileName, captureDate: file.captureDate,
                 isProtected: file.isProtected, storageIds: stores) { break }
         }
-        guard model.finishScan(sequence: sequence, snapshot: snapshot) else { return false }
+        let accepted = incremental ? model.publishScanBatch(sequence: sequence, snapshot: snapshot)
+            : model.finishScan(sequence: sequence, snapshot: snapshot)
+        guard accepted else {
+            if !incremental { filesByHandle = committedFiles; infosByHandle = committedInfos }
+            return false
+        }
+        if incremental {
+            for file in value.files { filesByHandle[file.handle] = file }
+            for (handle, info) in value.objectInfos { infosByHandle[handle] = info }
+            return true
+        }
         scanSequence = sequence
         lastCatalogPublication = value.publicationRevision
         filesByHandle = Dictionary(uniqueKeysWithValues: value.files.map { ($0.handle, $0) })
         infosByHandle = value.objectInfos
+        committedFiles = filesByHandle; committedInfos = infosByHandle
         return true
+    }
+
+    private var committedFiles: [Int32: CameraFileInfo] = [:]
+    private var committedInfos: [Int32: PtpObjectInfo] = [:]
+    private func failScan(sequence: Int64) {
+        _ = model.finishScan(sequence: sequence, snapshot: nil)
+        filesByHandle = committedFiles; infosByHandle = committedInfos
+    }
+    private func acceptBatch(_ value: CameraCatalogSnapshot, sequence: Int64) {
+        guard !closed, !Task.isCancelled else { return }
+        _ = acceptCatalog(value, sequence: sequence, incremental: true)
+    }
+    func followSessionScan(_ value: CameraCatalogSnapshot?, publication: UInt64? = nil) {
+        guard !closed, connected, refreshTask == nil else { return }
+        if let revision = value?.publicationRevision ?? publication, revision <= lastCatalogPublication { return }
+        let existing = model.currentScanSequence()
+        let sequence = existing > 0 ? existing : model.beginScan()
+        if sequence > 0, let value { acceptBatch(value, sequence: sequence) }
+        if originalIndexTask == nil { refreshOriginals(rescan: originalRevision < 0) }
+    }
+    func sessionScanFailed() {
+        guard refreshTask == nil else { return }
+        let sequence = model.currentScanSequence()
+        if sequence > 0 { failScan(sequence: sequence) }
     }
 
     /// Coalesce already-resolved snapshots on the UI actor; never start another network scan.
     func publishAddition(_ value: CameraCatalogSnapshot) {
         guard !closed, value.connectionID == connectionID, value.publicationRevision > lastCatalogPublication else { return }
+        let active = model.currentScanSequence()
+        if refreshTask == nil, active > 0 {
+            _ = acceptCatalog(value, sequence: active); return
+        }
         if let pendingCatalogPublication, pendingCatalogPublication.publicationRevision >= value.publicationRevision { return }
         pendingCatalogPublication = value
         guard catalogPublicationTask == nil else { return }
@@ -331,7 +372,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
                 guard !Task.isCancelled, let data = try await self.previews.thumbnail(info: info, allowRemote: allowRemote) else {
                     completion.complete(encodedImage: nil, retryable: false); return
                 }
-                let png = try await self.decoder.gridThumbnailPNG(data)
+                let png = try await self.decoder.gridThumbnailPNG(data, file: file)
                 guard !self.closed, !Task.isCancelled, self.filesByHandle[file.handle] == file else {
                     completion.complete(encodedImage: nil, retryable: false); return
                 }
@@ -535,6 +576,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
         commands.values.forEach { $0.cancel() }; commands.removeAll()
         images.values.forEach { $0.cancel() }; images.removeAll()
         filesByHandle.removeAll(); infosByHandle.removeAll()
+        committedFiles.removeAll(); committedInfos.removeAll()
     }
     func close() { model.close() }
 }

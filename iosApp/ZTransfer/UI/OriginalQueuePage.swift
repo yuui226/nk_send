@@ -101,7 +101,7 @@ final class OriginalQueuePageBridge: NSObject, ObservableObject, Identifiable, N
                       let data = try await self.previews.thumbnail(info: info) else {
                     completion.complete(encodedImage: nil); return
                 }
-                let png = try await self.decoder.queueThumbnailPNG(data)
+                let png = try await self.decoder.queueThumbnailPNG(data, file: file)
                 guard !self.closed, !Task.isCancelled else { completion.complete(encodedImage: nil); return }
                 let bytes = KotlinByteArray(size: Int32(png.count))
                 for (index, value) in png.enumerated() { bytes.set(index: Int32(index), value: Int8(bitPattern: value)) }

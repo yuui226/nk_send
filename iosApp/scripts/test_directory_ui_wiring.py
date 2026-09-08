@@ -69,4 +69,6 @@ class DirectoryUIWiringTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 previous_directory_ui_source(path, read(path).replace(old, new))
         changed = read(BRIDGE).replace('func close() { model.close() }', 'func close() {}')
-        self.assertNotEqual(before(BRIDGE), previous_directory_ui_source(BRIDGE, changed))
+        # Full-file fingerprints now reject unrelated mutations before historical inversion.
+        with self.assertRaises(AssertionError):
+            previous_directory_ui_source(BRIDGE, changed)

@@ -10,6 +10,7 @@ object NikonStaBridge {
     fun expectedResponder(expected: String?, actual: String?): Boolean = isExpectedStaResponder(expected, actual)
     fun usableStorage(code: Int, ids: IntArray): Boolean = hasUsableStaAlbumStorage(code, ids.toList())
     fun pairingOnly(info: LabDeviceInfo?): Boolean = info != null && isStaPairingOnlyOperationSet(info.operations)
+    fun advertises(info: LabDeviceInfo?, operation: Int): Boolean = info?.operations?.contains(operation) == true
     fun forcePairing(code: Int, force: Boolean, allow: Boolean, marked: Boolean): Boolean =
         shouldForceStaProfilePairing(code, force, allow, marked)
 }

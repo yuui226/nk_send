@@ -5,6 +5,8 @@ struct StationConnectionOptions {
     var expectedResponderGUID: String? = nil
     var allowPairing = false
     var forceProfilePairing = false
+    /// Explicit compatibility path. The baseline/diagnostic route remains unchanged by default.
+    var exploreAlbumAccess = false
 }
 
 enum CameraStationError: Error, LocalizedError {
@@ -14,7 +16,7 @@ enum CameraStationError: Error, LocalizedError {
         switch self {
         case .unexpectedResponder: return "响应相机与选中的机身身份不符，已停止连接。"
         case .pairingRequired: return "相机需要完成电脑模式配对，请勾选“允许首次电脑模式配对”，重试并在相机端确认。"
-        case .albumUnavailable: return "STA 标准流程尚未取得可用相册；专用兼容/直接读取路径还未接入。"
+        case .albumUnavailable: return "STA 相册读取验证未通过。请确认相机有可读取的照片、电脑连接模式已开启，再重试。"
         case .missingIdentity: return "相机未返回可持久保存的机身身份，不能确认配对。"
         case .corruptIdentityStore: return "本地相机身份文件无效；未重置身份或覆盖原文件。"
         case .pairingCompleted: return "相机已确认配对并保存标记，请完成相机端提示后重新连接。"

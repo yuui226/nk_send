@@ -5,6 +5,7 @@ import com.ztransfer.protocol.CameraFileInfo
 import com.ztransfer.ui.screen.*
 import com.ztransfer.viewmodel.NativeOriginalFileIndex
 import com.ztransfer.viewmodel.NativeOriginalIndexUpdate
+import com.ztransfer.viewmodel.logicalIdentity
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,6 +77,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     private var previewReads: NativePreviewReadSession? = null
     private var nextPreviewSession = 0L
     private var attempt = 0L
+    private var scanBaseline: NativeFilesState? = null
     private var currentFiles = emptyMap<Int, CameraFileInfo>()
     private val mutableState = MutableStateFlow(NativeFilesState())
     internal val state = mutableState.asStateFlow()
@@ -217,8 +219,28 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     fun beginScan(): Long {
         if (closed || !queue.connected.value || mutableState.value.scanning || mutableState.value.enqueueing) return 0
         attempt++
+        scanBaseline = mutableState.value
         mutableState.value = mutableState.value.copy(scanning = true, notice = NativeFilesNotice.NONE)
         return attempt
+    }
+
+    fun currentScanSequence(): Long = if (!closed && mutableState.value.scanning) attempt else 0
+
+    /** Provisional rows are browsable, never deletion evidence or an automatic-transfer baseline. */
+    fun publishScanBatch(sequence: Long, snapshot: NativeFilesPageSnapshot): Boolean {
+        if (closed || sequence != attempt || !mutableState.value.scanning || !queue.connected.value ||
+            snapshot.connectionId != connectionId || snapshot.changedWhileScanning) return false
+        val incoming = snapshot.validatedFiles() ?: return false
+        val handles = incoming.map { it.handle }.toSet()
+        val identities = incoming.map { it.logicalIdentity() }.toSet()
+        val combined = newestFirstCameraFiles((scanBaseline?.files.orEmpty().filterNot {
+            it.handle in handles || it.logicalIdentity() in identities
+        }) + incoming)
+        currentFiles = combined.associateBy { it.handle }
+        mutableState.value = mutableState.value.copy(files = combined,
+            groups = groupCameraFilesByDate(combined).map { FileGroup(it.date, it.files) },
+            bursts = detectCameraBurstGroups(combined).map { BurstPhotoGroup(it.id, it.files) })
+        return true
     }
 
     fun finishScan(sequence: Long, snapshot: NativeFilesPageSnapshot?): Boolean {
@@ -233,9 +255,13 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
             else -> NativeFilesNotice.NONE
         }
         if (notice != NativeFilesNotice.NONE) {
-            mutableState.value = mutableState.value.copy(scanning = false, notice = notice)
+            val restored = scanBaseline ?: mutableState.value
+            currentFiles = restored.files.associateBy { it.handle }
+            mutableState.value = restored.copy(scanning = false, notice = notice)
+            scanBaseline = null
             return false // Never treat partial/failed/event-raced scans as deletion evidence.
         }
+        scanBaseline = null
         val complete = checkNotNull(files)
         currentFiles = complete.associateBy { it.handle }
         mutableState.value = NativeFilesState(
@@ -322,6 +348,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         owner?.cancelRequests()
         queue.close()
         currentFiles = emptyMap()
+        scanBaseline = null
         mutableState.value = NativeFilesState()
         mutableOriginals.value = NativeOriginalsState()
         originalIndex = NativeOriginalFileIndex()

@@ -35,6 +35,17 @@ def extract(source):
     for index, chunk in enumerate(chunks):
         assert android.count(chunk) == 1
         android = android.replace(chunk.rstrip("\n") + "\n", WRAPPER.rstrip("\n") + "\n" if index == 1 else "", 1)
+    # W11: move the original pure timing functions and their three constants verbatim too.
+    # Android retains its existing clock, effect, callback and frame scheduling.
+    start = source.index("internal fun connectionHeroProgress(")
+    end = source.index("// 连接成功后的入场节奏", start)
+    timeline = source[start:end]
+    android = android.replace(timeline, "", 1)
+    common += "\n" + timeline.replace("internal fun connection", "fun connection")
+    for name in ("CONNECT_CELEBRATE_DELAY_MS", "CONNECTION_HERO_DURATION_MS", "CONNECTION_SUCCESS_DURATION_MS"):
+        declaration = next(line for line in source.splitlines() if "const val " + name + " =" in line)
+        android = android.replace(declaration + "\n", "", 1)
+        common += declaration.removeprefix("private ") + "\n"
     return android, common.rstrip() + "\n"
 
 def baseline():

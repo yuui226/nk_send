@@ -93,6 +93,8 @@ CHANGES = {
 }
 
 def previous_connection_product_source(path, value):
+    from transfer_completion_wiring import previous_transfer_completion_source
+    value = previous_transfer_completion_source(path, value)
     for current, previous in CHANGES.get(path, ()):
         assert value.count(current) == 1, f"connection product hunk changed: {path}"
         value = value.replace(current, previous, 1)

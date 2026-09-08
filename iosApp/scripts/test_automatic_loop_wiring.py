@@ -51,7 +51,30 @@ class AutomaticLoopWiringTest(unittest.TestCase):
              "build.gradle.kts", "settings.gradle.kts", "gradle"], cwd=ROOT).decode().strip()
         import home_card_extraction as home
         home.verify()
-        allowed = {home.ANDROID, home.COMMON,
+        import sta_media_extraction as sta
+        sta.verify()
+        import thumbnail_crop_extraction as crop
+        crop.verify()
+        allowed = {home.ANDROID, home.COMMON, sta.ANDROID, sta.COMMON, crop.ANDROID, crop.COMMON,
+            "shared/src/commonMain/kotlin/com/ztransfer/catalog/ThumbnailFillQueue.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeThumbnailFillQueue.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeFilesPageModel.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/preview/PreviewExifRationalReader.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/preview/PreviewExifSupplement.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/catalog/NativeThumbnailFillQueueTest.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeFilesPageModelTest.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/protocol/StaVideoDateTest.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/protocol/NativePreviewPolicy.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/protocol/NativePreviewPolicyTest.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/preview/ThumbnailCropPolicyTest.kt",
+            "shared/src/iosMain/kotlin/com/ztransfer/preview/NativeThumbnailCropBridge.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/protocol/NativeStaDirectMetadata.kt",
+            "shared/src/iosMain/kotlin/com/ztransfer/preview/NativeStaDirectBridge.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeCameraCatalogScan.kt",
+            "shared/src/commonMain/kotlin/com/ztransfer/connection/NikonStaBridge.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/protocol/NativeStaDirectMetadataTest.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/catalog/NativeCameraCatalogScanTest.kt",
+            "shared/src/commonTest/kotlin/com/ztransfer/connection/NikonStaBridgeTest.kt",
             "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeConnectionHome.kt",
             "shared/src/commonMain/kotlin/com/ztransfer/ui/NativeConnectionHomeText.kt",
             "shared/src/commonTest/kotlin/com/ztransfer/ui/NativeConnectionHomeTest.kt"}

@@ -28,6 +28,12 @@ class ParallelBatchWiringTest(unittest.TestCase):
         import home_card_extraction as home
         home.verify()
         changed.discard(home.ANDROID)
+        import sta_media_extraction as sta
+        sta.verify()
+        changed.discard(sta.ANDROID)
+        import thumbnail_crop_extraction as crop
+        crop.verify()
+        changed.discard(crop.ANDROID)
         self.assertFalse(changed, changed)
 
     def test_one_event_observer_owns_catalog_and_real_automatic_admission(self):
@@ -64,7 +70,8 @@ class ParallelBatchWiringTest(unittest.TestCase):
                       'before.eventRevision == after.eventRevision', 'after.eventRevision <= (receivedEventRevision ?? 0)',
                       'allowsCatalogReconciliation()', 'catch is CameraOperationError { return 2_000 }'):
             self.assertIn(token, source)
-        self.assertIn('if batch.requiresRescan { requestChange(full: true); return }', source)
+        self.assertIn('if batch.requiresRescan {', source)
+        self.assertIn('await previews?.suspendCatalogBatchFill()', source)
         self.assertIn('if result.changedWhileScanning { requestChange(full: true) }', source)
         self.assertIn('[Int32(0x4004), 0x4005, 0x4007, 0x400C]', source)
         self.assertIn('changeWorker?.cancel()', source)
@@ -175,14 +182,15 @@ class ParallelBatchWiringTest(unittest.TestCase):
         host = read(PROBE).split('func openSharedFiles(', 1)[1].split('func pauseQueue()', 1)[0]
         self.assertLess(host.index('await catalog.snapshot()'), host.index('await connection.snapshot()'))
         self.assertIn('apConnection === connection, self.catalog === catalog', host)
-        self.assertIn('page.loadInitialCatalog(initialCatalog, state: state)', host)
+        self.assertIn('page.loadInitialCatalog(presentation.complete ?? initialCatalog, state: state)', host)
+        self.assertIn('page.followSessionScan(presentation.progress, publication: presentation.publication)', host)
         page = read(PAGE)
         initial = page.split('func loadInitialCatalog(', 1)[1].split('func refresh()', 1)[0]
         for token in ('state.connectionID == connectionID', 'value.revision == state.eventRevision',
                       'value.metadataComplete, !value.changedWhileScanning', 'refreshOriginals(', 'refresh()'):
             self.assertIn(token, initial)
         explicit = page.split('func refresh()', 1)[1].split('private func refreshOriginals(', 1)[0]
-        self.assertIn('try await self.catalog.refresh()', explicit)
+        self.assertIn('try await self.catalog.refresh(onBatch:', explicit)
 
     def test_backup_catchup_uses_existing_shared_identity_not_filename_only(self):
         catalog = read(CATALOG)

@@ -32,6 +32,13 @@ class NativeThumbnailFillQueue {
         return true
     }
 
+    fun appendScanBatch(files: List<CameraFileInfo>): Boolean {
+        if (files.any { it.fileName.isEmpty() || it.size < 0 } || files.map { it.handle }.toSet().size != files.size) return false
+        queue.appendScanBatch(files.filterNot { it.handle == active?.file?.handle }
+            .map { it.copy(storageIds = it.storageIds.toSet()) })
+        return true
+    }
+
     fun next(): NativeThumbnailFillRequest? {
         if (active != null) return null
         val file = queue.poll() ?: return null

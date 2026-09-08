@@ -113,7 +113,7 @@ final class MediaPreviewCompatibilityTests: XCTestCase {
         XCTAssertEqual(bytes, before)
     }
 
-    func testAllExifOrientationsKeepRawOriginalAndFhdGridButGridNormalizesAxes() async throws {
+    func testAllExifOrientationsKeepOriginalFhdAndCameraThumbnailPixelGrid() async throws {
         let decoder = PreviewImageDecoder(), original = try image()
         for orientation in 1...8 {
             let input = try encoded(original, type: "public.jpeg", orientation: orientation)
@@ -123,17 +123,17 @@ final class MediaPreviewCompatibilityTests: XCTestCase {
             let grid = try decoded(await decoder.gridThumbnailPNG(input))
             XCTAssertEqual(local.width, 60); XCTAssertEqual(local.height, 40)
             XCTAssertEqual(fhd.width, 60); XCTAssertEqual(fhd.height, 40)
-            XCTAssertEqual(grid.width, orientation >= 5 ? 40 : 60)
-            XCTAssertEqual(grid.height, orientation >= 5 ? 60 : 40)
+            XCTAssertEqual(grid.width, 60)
+            XCTAssertEqual(grid.height, 40)
             try assertPixelsClose(raw, local); try assertPixelsClose(raw, fhd)
-            if orientation == 1 { try assertPixelsClose(raw, grid) }
+            try assertPixelsClose(raw, grid)
         }
     }
 
-    func testMirroredOrientationIsActuallyTransformedForGridNotOnlyResized() async throws {
+    func testMirroredOrientationIsActuallyTransformedForDiagnosticNotOnlyResized() async throws {
         let source = try encoded(image(), type: "public.jpeg", orientation: 2)
         let decoder = PreviewImageDecoder(), local = try decoded(await decoder.originalBitmapPNG(source))
-        let grid = try decoded(await decoder.gridThumbnailPNG(source))
+        let grid = try await decoder.decode(source, maximumPixelSize: 512)
         let a = try rgba(local), b = try rgba(grid)
         for y in [10, 30] { for x in [10, 30, 50] { for channel in 0..<4 {
             let expected = (y * local.width + (local.width - 1 - x)) * 4 + channel
@@ -142,12 +142,12 @@ final class MediaPreviewCompatibilityTests: XCTestCase {
         } } }
     }
 
-    func testAllEightGridOrientationsMapActualPixelsUsingAndroidOrientationRules() async throws {
+    func testAllEightDiagnosticOrientationsMapActualPixelsUsingAndroidOrientationRules() async throws {
         let decoder = PreviewImageDecoder(), original = try image()
         for orientation in 1...8 {
             let input = try encoded(original, type: "public.jpeg", orientation: orientation)
             let raw = try decoded(input)
-            let grid = try decoded(await decoder.gridThumbnailPNG(input))
+            let grid = try await decoder.decode(input, maximumPixelSize: 512)
             let swapsAxes = orientation >= 5
             XCTAssertEqual(grid.width, swapsAxes ? raw.height : raw.width)
             XCTAssertEqual(grid.height, swapsAxes ? raw.width : raw.height)
@@ -197,6 +197,8 @@ final class MediaPreviewCompatibilityTests: XCTestCase {
             let result = try decoded(output)
             XCTAssertEqual(result.colorSpace?.model, .rgb)
             try assertPixelsClose(original, result, tolerance: 3)
+            let thumbnail = try decoded(await PreviewImageDecoder().gridThumbnailPNG(input))
+            try assertPixelsClose(original, thumbnail, tolerance: 3)
         }
     }
 

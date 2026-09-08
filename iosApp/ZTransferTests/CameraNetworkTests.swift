@@ -3453,6 +3453,170 @@ final class CameraNetworkTests: XCTestCase {
         await camera.abort()
     }
 
+    func testStationCompatibilityValidatesFirstMiddleLastBeforeReadyAndReusesSingleCardHandles() async throws {
+        let wire = FakeCameraConnection(bytes: stationAck() + response(transaction: 0) + response(transaction: 1)
+            + response(transaction: 2, payload: hex("0100000001000100"))
+            + response(transaction: 3, code: 0x2005)
+            + response(transaction: 4, payload: hex("03000000010000000200000003000000"))
+            + response(transaction: 5, payload: Data(repeating: 0, count: 53))
+            + response(transaction: 6, payload: Data(repeating: 0, count: 53))
+            + response(transaction: 7, payload: Data(repeating: 0, count: 53)))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        let direct = await camera.usesDirectObjectReads(); XCTAssertFalse(direct)
+        let before = wire.sent()
+        let handles = try await camera.objectHandles(storageID: 0x10001)
+        XCTAssertEqual(handles, [1, 2, 3]); XCTAssertEqual(wire.sent(), before)
+        XCTAssertEqual(stationOperations(wire), [0x1002, 0x941C, 0x1004, 0x1001, 0x1007, 0x1008, 0x1008, 0x1008])
+        await camera.abort()
+    }
+
+    func testStationDirectCapabilityRequiresBothSizeAndSuccessfulNonemptyPartialSample() async throws {
+        for valid in [true, false] {
+            let wire = FakeCameraConnection(bytes: stationAck() + response(transaction: 0) + response(transaction: 1)
+                + response(transaction: 2, payload: hex("0100000001000100"))
+                + response(transaction: 3, code: 0x2005)
+                + response(transaction: 4, payload: hex("0100000001000029"))
+                + response(transaction: 5, code: 0x200F)
+                + response(transaction: 6, code: 0x200A)
+                + response(transaction: 7, payload: hex("0010000000000000"))
+                + response(transaction: 8, code: valid ? 0x2001 : 0x200F, payload: valid ? hex("FFD8FF") : nil)
+                + (valid ? Data() : response(transaction: 9, code: 0x2005)))
+            let camera = stationCamera(command: wire)
+            do {
+                _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+                    stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+                XCTAssertTrue(valid)
+            } catch {
+                XCTAssertFalse(valid); XCTAssertTrue(error is CameraStationError)
+            }
+            let direct = await camera.usesDirectObjectReads(); XCTAssertEqual(direct, valid)
+            XCTAssertFalse(stationOperations(wire).contains(0x1009), "Capability probe must never download an original")
+            await camera.abort()
+            let after = await camera.usesDirectObjectReads(); XCTAssertFalse(after)
+        }
+    }
+
+    func testFailedStationApplicationModeProbeRollsBackAndNeverBecomesReady() async throws {
+        let wire = FakeCameraConnection(bytes: stationAck() + response(transaction: 0) + response(transaction: 1)
+            + response(transaction: 2, code: 0x200F) + response(transaction: 3, code: 0x2005)
+            + response(transaction: 4) + response(transaction: 5)
+            + response(transaction: 6, payload: hex("0100000001000100"))
+            + response(transaction: 7, payload: hex("00000000")) + response(transaction: 8))
+        let camera = stationCamera(command: wire)
+        do {
+            _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+                stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+            XCTFail("Empty sample must not imply album access")
+        } catch { XCTAssertTrue(error is CameraStationError) }
+        XCTAssertEqual(stationOperations(wire).suffix(5), [0x9435, 0x941C, 0x1004, 0x1007, 0x9435])
+        XCTAssertEqual(wire.sent().last, hex("16000000060000000100000035940800000000000000"))
+        let state = await camera.snapshot(); XCTAssertEqual(state.phase, .closed)
+        await camera.abort()
+    }
+
+    private func stationOperations(_ wire: FakeCameraConnection) -> [UInt16] {
+        wire.sent().dropFirst().filter { $0.count >= 14 && $0[4] == 6 }
+            .map { UInt16($0[12]) | UInt16($0[13]) << 8 }
+    }
+
+    private func stationDirectOpeningReplies() -> Data {
+        stationAck() + response(transaction: 0) + response(transaction: 1)
+            + response(transaction: 2, payload: hex("0100000001000100"))
+            + response(transaction: 3, code: 0x2005)
+            + response(transaction: 4, payload: hex("0100000001000029"))
+            + response(transaction: 5, code: 0x200F) + response(transaction: 6, code: 0x200A)
+            + response(transaction: 7, payload: hex("0010000000000000"))
+            + response(transaction: 8, payload: hex("FFD8FF"))
+    }
+
+    func testDirectCatalogUsesSharedHeaderNameAndPreservesGoodRowsAfterObjectFailure() async throws {
+        let header = hex("FFD8") + Data("DSC_0001.JPG".utf8)
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: hex("0010000000000000")) + response(transaction: 10, payload: header)
+            + response(transaction: 11, payload: hex("0100000001000100"))
+            + response(transaction: 12, payload: hex("0100000001000029")) + response(transaction: 13, code: 0x200F))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        let catalog = CameraCatalog(source: camera, stationMode: true)
+        let complete = try await catalog.refresh()
+        XCTAssertTrue(complete.metadataComplete); XCTAssertEqual(complete.files.count, 1)
+        XCTAssertEqual(complete.files.first?.fileName, "DSC_0001.JPG")
+        XCTAssertEqual(complete.files.first?.size, 4096)
+        XCTAssertEqual(complete.storageIDs, [0x10001])
+        XCTAssertEqual(Array(stationOperations(wire).suffix(2)), [0x9421, 0x9431])
+        let partial = try await catalog.refresh()
+        XCTAssertFalse(partial.metadataComplete)
+        let retained = await catalog.snapshot()
+        XCTAssertEqual(retained?.files.first?.fileName, complete.files.first?.fileName)
+        XCTAssertEqual(retained?.publicationRevision, complete.publicationRevision)
+        await catalog.close(); await camera.abort()
+    }
+
+    func testDirectOriginalForcesSharedPartialPolicyEvenOnHighThroughputPage() async throws {
+        let original = hex("FFD8FFD9")
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies() + response(transaction: 9, payload: original))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        var received = Data()
+        let stats = try await camera.download(handle: 2, declaredSize: 4, highThroughput: true) { received.append($0) }
+        XCTAssertEqual(received, original); XCTAssertEqual(stats.bytes, 4); XCTAssertEqual(stats.transferred, 4)
+        XCTAssertEqual(stationOperations(wire).last, 0x9431)
+        XCTAssertEqual(wire.sent().last, hex("2600000006000000010000003194090000000200000000000000000000000400000000000000"))
+        await camera.abort()
+    }
+
+    func testDirectOriginalUnsupportedFirstEmptyChunkUsesOnlySharedFullFallback() async throws {
+        let original = hex("FFD8FFD9")
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, code: 0x2005) + response(transaction: 10, payload: original))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        var received = Data()
+        _ = try await camera.download(handle: 2, declaredSize: 4, highThroughput: true) { received.append($0) }
+        XCTAssertEqual(received, original)
+        XCTAssertEqual(Array(stationOperations(wire).suffix(2)), [0x9431, 0x1009])
+        await camera.abort()
+    }
+
+    func testDirectResumeReadsOnlyRemainingBytesAndNeverFallsBackAfterUnsupportedResponse() async throws {
+        for rejected in [false, true] {
+            let tail = hex("FFD9")
+            let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+                + response(transaction: 9, code: rejected ? 0x2005 : 0x2001, payload: rejected ? nil : tail))
+            let camera = stationCamera(command: wire)
+            _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+                stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+            var received = Data()
+            do {
+                let stats = try await camera.download(handle: 2, declaredSize: 4, resumeOffset: 2) { received.append($0) }
+                XCTAssertFalse(rejected); XCTAssertEqual(stats.bytes, 4); XCTAssertEqual(stats.transferred, 2)
+                XCTAssertEqual(received, tail)
+            } catch { XCTAssertTrue(rejected); XCTAssertTrue(error is CameraDownloadError) }
+            XCTAssertEqual(stationOperations(wire).last, 0x9431)
+            XCTAssertFalse(stationOperations(wire).contains(0x1009))
+            await camera.abort()
+        }
+    }
+
+    func testDirectOversizedChunkCannotBecomeASuccessfulOriginal() async throws {
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: Data(repeating: 1, count: 5)))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8),
+            stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        do {
+            _ = try await camera.download(handle: 2, declaredSize: 4) { _ in }
+            XCTFail("Bytes exceeding the requested direct range must not publish success")
+        } catch {}
+        XCTAssertFalse(stationOperations(wire).contains(0x1009))
+        await camera.abort()
+    }
+
     func testStationWrongResponderStopsBeforeOpeningEventSocket() async throws {
         let wire = FakeCameraConnection(bytes: stationAck())
         let events = FakeCameraConnection(bytes: hex("0800000004000000"))
@@ -4700,6 +4864,217 @@ final class CameraNetworkTests: XCTestCase {
         XCTAssertFalse(NativeRawPreviewBridge.shared.isCompleteJpeg(data: Data() as NSData))
     }
 
+    func testIncrementalCatalogPublishesBeforeWholeMetadataAndNeverCommitsPartialBaseline() async throws {
+        let source = BaselineCatalogSource(), handles = (1...45).map(Int32.init)
+        var infos: [Int32: PtpObjectInfo] = [:]
+        for handle in handles { infos[handle] = try resolverInfo(handle, name: "PHOTO_\(handle).JPG") }
+        await source.set(handles, infos: infos)
+        let catalog = CameraCatalog(source: source, stationMode: false)
+        let batches = expectation(description: "20 and 40 rows arrive before the whole directory")
+        batches.expectedFulfillmentCount = 2
+        let result = try await catalog.refresh(onBatch: { value in
+            XCTAssertTrue([20, 40].contains(value.files.count))
+            let reads = await source.readCount
+            XCTAssertEqual(reads, value.files.count)
+            XCTAssertFalse(value.metadataComplete)
+            let complete = await catalog.snapshot(); XCTAssertNil(complete)
+            let presentation = await catalog.presentation()
+            XCTAssertTrue(presentation.scanning); XCTAssertEqual(presentation.progress?.files.count, value.files.count)
+            batches.fulfill()
+        })
+        await fulfillment(of: [batches], timeout: 2)
+        XCTAssertTrue(result.metadataComplete); XCTAssertEqual(result.files.count, 45)
+        let final = await catalog.presentation(); XCTAssertFalse(final.scanning); XCTAssertNil(final.progress)
+        await catalog.close()
+    }
+
+    func testIncrementalThumbnailFillRunsBeforeScanFinishWithoutDeletingPreviousDiskEntries() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let png = try thumbnailFixture(), id = UUID()
+        let source = FillPreviewSource(results: [1: [.bytes(png)], 2: [.bytes(png)]])
+        let store = CameraPreviewStore(source: source, connectionID: id)
+        _ = await store.openDiskCache(root: root, cameraIdentity: "batch-camera")
+        await store.startBackgroundFill(startDay: 0, endDay: 0, revision: 1)
+        _ = await store.reconcile(try fillCatalog(id, handles: [1]))
+        try await waitForFillIdle(store)
+        let pendingToken = await store.beginCatalogScan()
+        let token = try XCTUnwrap(pendingToken)
+        let accepted = await store.appendCatalogBatch(token, snapshot: try fillCatalog(id, handles: [2], complete: false))
+        XCTAssertTrue(accepted)
+        try await waitForFillIdle(store)
+        let calls = await source.stats(); XCTAssertEqual(calls.handles, [1, 2])
+        let disk = try CameraThumbnailDiskCache(root: root, cameraIdentity: "batch-camera")
+        XCTAssertNotNil(try disk.read(key: NativePreviewPolicy().thumbnailKey(info: sampleInfo(1))))
+        let failed = await store.finishCatalogScan(token, snapshot: nil); XCTAssertFalse(failed)
+        await store.close()
+        let late = await store.appendCatalogBatch(token, snapshot: try fillCatalog(id, handles: [2], complete: false))
+        XCTAssertFalse(late)
+    }
+
+    func testRawEmbeddedExifUsesSharedDirectoryRouteWithoutMutatingOriginal() async throws {
+        let jpeg = try previewExifJpegFixture()
+        var bytes = rawIndexFixture([(4096, UInt32(jpeg.count))])
+        bytes.append(Data(repeating: 0, count: 8192 - bytes.count))
+        bytes.replaceSubrange(4096..<(4096 + jpeg.count), with: jpeg)
+        let before = bytes
+        let header = try PreviewExifReader.metadata(header: bytes, locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(header?.aperture, "f/4"); XCTAssertEqual(header?.iso, "ISO64")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".NEF")
+        try bytes.write(to: url); defer { try? FileManager.default.removeItem(at: url) }
+        let input = try FileHandle(forReadingFrom: url); defer { try? input.close() }
+        let local = try PreviewExifReader.metadata(fileDescriptor: input.fileDescriptor, size: Int64(bytes.count),
+            cancellation: PreviewExifReadCancellation(), locale: Locale(identifier: "en_US_POSIX"))
+        XCTAssertEqual(local?.aperture, header?.aperture); XCTAssertEqual(local?.dateTime, header?.dateTime)
+        XCTAssertEqual(try Data(contentsOf: url), before)
+    }
+
+    func testDirectVideoThumbnailReusesHeaderJpegAndKeepsVideoIdentity() async throws {
+        let jpeg = try previewExifJpegFixture()
+        var header = Data(repeating: 0, count: 4096)
+        header.replaceSubrange(4..<12, with: Data("ftypqt  ".utf8))
+        header.replaceSubrange(16..<20, with: Data("mvhd".utf8))
+        let seconds: UInt32 = 2_082_844_801
+        for i in 0..<4 { header[24 + i] = UInt8(truncatingIfNeeded: seconds >> ((3 - i) * 8)) }
+        header.replaceSubrange(512..<(512 + jpeg.count), with: jpeg)
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: hex("0010000000000000")) + response(transaction: 10, payload: header))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8), stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        let snapshot = try await CameraCatalog(source: camera, stationMode: true).refresh()
+        let file = try XCTUnwrap(snapshot.files.first)
+        XCTAssertTrue(file.fileName.hasSuffix(".mov")); XCTAssertEqual(file.size, 4096)
+        let before = wire.sent().count
+        let thumbnail = try await camera.thumbnail(handle: file.handle)
+        XCTAssertEqual(thumbnail, jpeg); XCTAssertEqual(wire.sent().count, before)
+        XCTAssertEqual(PreviewMediaDate.video(header, timeZone: try XCTUnwrap(TimeZone(secondsFromGMT: 0))), "19700101T000001")
+        XCTAssertEqual(PreviewMediaDate.video(header, timeZone: try XCTUnwrap(TimeZone(secondsFromGMT: 28800))), "19700101T080001")
+        await camera.abort()
+    }
+
+    func testVideoPrefixDecoderRejectsBadOrOversizedInputAndHonorsCancellation() async throws {
+        let decoder = PreviewImageDecoder()
+        let invalid = try await decoder.videoThumbnail(Data([0, 1, 2]), fileExtension: ".mov")
+        let large = try await decoder.videoThumbnail(Data(repeating: 0, count: 8 * 1024 * 1024 + 1), fileExtension: ".mov")
+        XCTAssertNil(invalid); XCTAssertNil(large)
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await decoder.videoThumbnail(Data([1]), fileExtension: ".mp4")
+        }
+        do { _ = try await cancelled.value; XCTFail("Cancelled video probe") }
+        catch { XCTAssertTrue(error is CancellationError) }
+    }
+
+    func testDirectRawAndVideoMissesRemainRetryableAtPreviewStoreBoundary() async throws {
+        for name in ["A.NEF", "A.MOV", "A.MP4"] {
+            let source = FakePreviewSource(thumbs: [.missing, .bytes(Data([7]))])
+            let store = CameraPreviewStore(source: source)
+            await store.configureDirectObjectReads(true)
+            let file = CameraFileInfo(handle: 1, size: 400, fileName: name, captureDate: nil, isProtected: false, storageIds: [])
+            let info = NativePreviewPolicy().originalThumbnailInfo(file: file)
+            let first = try await store.thumbnail(info: info), second = try await store.thumbnail(info: info)
+            XCTAssertNil(first); XCTAssertEqual(second, Data([7]))
+            let count = await source.counts(); XCTAssertEqual(count.thumb, 2)
+            await store.close()
+        }
+    }
+
+    func testDirectMpfPreviewUsesSecondaryRangeAndLatchesUnsupportedCameraFhd() async throws {
+        let jpeg = try previewExifJpegFixture()
+        var header = Data(repeating: 0, count: 128 * 1024)
+        func u16(_ at: Int, _ value: UInt16) { for i in 0..<2 { header[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        func u32(_ at: Int, _ value: UInt32) { for i in 0..<4 { header[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        header.replaceSubrange(0..<10, with: hex("FFD8FFE2004C4D504600"))
+        header[10] = 73; header[11] = 73; u16(12, 42); u32(14, 8)
+        u16(18, 2); u16(20, 0xB001); u16(22, 4); u32(24, 1); u32(28, 2)
+        u16(32, 0xB002); u16(34, 7); u32(36, 32); u32(40, 38)
+        u32(48, 0x030000); u32(52, 900_000); u32(56, 0)
+        u32(64, 0x010002); u32(68, UInt32(jpeg.count)); u32(72, 500_000)
+        header[80] = 0xff; header[81] = 0xda
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: hex("0000100000000000")) + response(transaction: 10, payload: header)
+            + response(transaction: 11, code: 0x200F) + response(transaction: 12, payload: jpeg)
+            + response(transaction: 13, payload: jpeg))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8), stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        _ = try await CameraCatalog(source: camera, stationMode: true).refresh()
+        let first = try await camera.fhdPicture(handle: 0x29000001)
+        let again = try await camera.fhdPicture(handle: 0x29000001)
+        XCTAssertEqual(first, jpeg); XCTAssertEqual(again, jpeg)
+        XCTAssertEqual(Array(stationOperations(wire).suffix(3)), [0x920F, 0x9431, 0x9431])
+        let request = try XCTUnwrap(wire.sent().last)
+        XCTAssertEqual(request.subdata(in: 22..<30), hex("2AA1070000000000")) // TIFF base 10 + 500000.
+        XCTAssertFalse(stationOperations(wire).contains(0x1009))
+        await camera.abort()
+    }
+
+    func testDirectRawThumbnailUsesSmallestIndexedRangeWithoutChangingOriginal() async throws {
+        let small = try previewExifJpegFixture(), large = try padJpegFixture(previewExifJpegFixture())
+        var header = rawIndexFixture([(400_000, UInt32(large.count)), (300_000, UInt32(small.count))])
+        header.append(Data(repeating: 0, count: 128 * 1024 - header.count))
+        let wire = FakeCameraConnection(bytes: stationDirectOpeningReplies()
+            + response(transaction: 9, payload: hex("0000100000000000")) + response(transaction: 10, payload: header)
+            + response(transaction: 11, payload: small))
+        let camera = stationCamera(command: wire)
+        _ = try await camera.connect(guid: Data("0123456789abcdef".utf8), stationOptions: StationConnectionOptions(exploreAlbumAccess: true))
+        let snapshot = try await CameraCatalog(source: camera, stationMode: true).refresh()
+        XCTAssertTrue(snapshot.files.first?.fileName.lowercased().hasSuffix(".nef") == true)
+        let actual = try await camera.thumbnail(handle: 0x29000001)
+        XCTAssertEqual(actual, small)
+        XCTAssertEqual(wire.sent().last?.subdata(in: 22..<30), hex("E093040000000000"))
+        XCTAssertFalse(stationOperations(wire).contains(0x1009))
+        await camera.abort()
+    }
+
+    func testEmbeddedExifThumbnailDoesNotRenderPrimaryJpegWhenThumbnailMissing() async throws {
+        let original = try previewExifJpegFixture()
+        let result = try await PreviewImageDecoder().embeddedExifThumbnailPNG(original)
+        XCTAssertNil(result)
+        XCTAssertNotNil(try PreviewImageDecoder.cameraPreviewDimensions(original))
+        XCTAssertNil(try PreviewImageDecoder.cameraPreviewDimensions(Data([1, 2, 3])))
+    }
+
+    func testEmbeddedExifThumbnailCanDecodeWithoutPrimaryImageEntropy() async throws {
+        let jpeg = try previewExifJpegFixture()
+        var tiff = Data(repeating: 0, count: 80 + jpeg.count)
+        func u16(_ at: Int, _ value: UInt16) { for i in 0..<2 { tiff[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        func u32(_ at: Int, _ value: UInt32) { for i in 0..<4 { tiff[at + i] = UInt8(truncatingIfNeeded: value >> (8 * i)) } }
+        tiff[0] = 73; tiff[1] = 73; u16(2, 42); u32(4, 8); u16(8, 0); u32(10, 14)
+        u16(14, 5)
+        for (i, entry) in [(UInt16(0x0100), UInt32(12)), (0x0101, 8), (0x0103, 6), (0x0201, 80), (0x0202, UInt32(jpeg.count))].enumerated() {
+            let at = 16 + i * 12
+            u16(at, entry.0); u16(at + 2, 4); u32(at + 4, 1); u32(at + 8, entry.1)
+        }
+        tiff.replaceSubrange(80..<(80 + jpeg.count), with: jpeg)
+        let length = tiff.count + 8
+        let envelope = Data([0xff, 0xd8, 0xff, 0xe1, UInt8(length >> 8), UInt8(length & 255)])
+            + Data("Exif\0\0".utf8) + tiff + Data([0xff, 0xd9])
+        let thumbnail = try await PreviewImageDecoder().embeddedExifThumbnailPNG(envelope)
+        let decoded = try XCTUnwrap(thumbnail)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(decoded as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(image.width, 12); XCTAssertEqual(image.height, 8)
+    }
+
+    func testSharedThumbnailCropPreservesContentAndLeavesFhdUncropped() async throws {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 100, height: 100, bitsPerComponent: 8,
+            bytesPerRow: 400, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(gray: 0, alpha: 1)); context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+        context.setFillColor(CGColor(red: 1, green: 0.2, blue: 0.1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 5, width: 100, height: 90))
+        let image = try XCTUnwrap(context.makeImage()), decoder = PreviewImageDecoder()
+        let cropped = try await decoder.cropThumbnail(image, video: false)
+        XCTAssertEqual(cropped.width, 100); XCTAssertEqual(cropped.height, 88)
+        XCTAssertEqual(image.height, 100)
+        let encoded = NSMutableData()
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithData(encoded, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil); XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let fhd = try await decoder.fhdPreviewPNG(encoded as Data)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(fhd as CFData, nil))
+        let uncropped = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(uncropped.height, 100)
+    }
+
     private func orientedPreviewFixture(width: Int, height: Int, orientation: Int) throws -> Data {
         let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
             bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
@@ -5184,6 +5559,7 @@ private actor NewObjectCatalogSource: CameraCatalogSource {
 }
 
 private actor BaselineCatalogSource: CameraCatalogSource {
+    private(set) var readCount = 0
     enum Failure: Equatable { case none, enumeration, cancelEnumeration, closedEnumeration, foreignEnumeration, cancelMetadata }
     nonisolated let connectionID = UUID()
     private var handles: [Int32] = []
@@ -5202,6 +5578,7 @@ private actor BaselineCatalogSource: CameraCatalogSource {
         return []
     }
     func objectInfo(handle: Int32) throws -> PtpObjectInfo {
+        readCount += 1
         if failure == .cancelMetadata { withUnsafeCurrentTask { $0?.cancel() }; throw CancellationError() }
         guard let info = infos[handle] else { throw CameraOperationError.malformedDataset(operation: 0x1008) }
         return info

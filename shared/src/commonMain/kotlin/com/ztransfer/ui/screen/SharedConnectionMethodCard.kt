@@ -895,3 +895,18 @@ private fun DrawScope.drawPremiumSuccessEffect(progress: Float) {
         )
     }
 }
+
+
+fun connectionHeroProgress(elapsedMs: Long): Float =
+    (elapsedMs.toFloat() / CONNECTION_HERO_DURATION_MS).coerceIn(0f, 1f)
+
+fun connectionSuccessProgress(elapsedMs: Long): Float {
+    val linearProgress = (
+        (elapsedMs - CONNECT_CELEBRATE_DELAY_MS).toFloat() / CONNECTION_SUCCESS_DURATION_MS
+        ).coerceIn(0f, 1f)
+    return FastOutSlowInEasing.transform(linearProgress)
+}
+
+const val CONNECT_CELEBRATE_DELAY_MS = 500L
+const val CONNECTION_HERO_DURATION_MS = 620L
+const val CONNECTION_SUCCESS_DURATION_MS = 760L

@@ -21,6 +21,16 @@ class NativeCameraCatalogScan(rawStorageIds: IntArray, private val stationMode: 
     private val indices = HashMap<String, Int>()
     private val objectInfos = HashMap<Int, PtpObjectInfo>()
     private val indexedHandles = ArrayList<Int>()
+    private var direct = false
+    private var directLayout: StaDirectStorageLayout? = null
+    /** Opt-in before enumeration only; the existing AP/standard STA constructor is unchanged. */
+    fun enableDirectObjectReads(): Boolean {
+        if (!stationMode || orders != null || batches.any { it != null }) return false
+        direct = true
+        return true
+    }
+    fun filterStorageIds(): IntArray = (directLayout?.filterStorageIds ?: stores).toIntArray()
+    fun directReadStorageId(handle: Int): Int = directLayout?.storageIdsByHandle?.get(handle)?.firstOrNull() ?: 0
     var metadataComplete: Boolean = true
         private set
     val storageCount: Int get() = stores.size
@@ -43,7 +53,12 @@ class NativeCameraCatalogScan(rawStorageIds: IntArray, private val stationMode: 
 
     fun begin(): Boolean {
         if (orders != null || batches.any { it == null }) return false
-        orders = newestFirstHandleOrders(batches.filterNotNull())
+        if (direct) directLayout = analyzeStaDirectStorageLayout(batches.filterNotNull())
+        val seen = mutableSetOf<Int>()
+        val inputs = if (direct) batches.filterNotNull().map { batch ->
+            batch.copy(handles = batch.handles.filter(seen::add))
+        } else batches.filterNotNull()
+        orders = newestFirstHandleOrders(inputs)
         return true
     }
 
@@ -70,7 +85,8 @@ class NativeCameraCatalogScan(rawStorageIds: IntArray, private val stationMode: 
         objectInfos[handle] = info
         metadataComplete = metadataComplete && info.identityComplete
         heads[index] = CameraFileInfo(handle, info.size, name, info.captureDate, info.isProtected,
-            if (info.storageId == 0 || info.storageId == -1) emptySet() else setOf(info.storageId))
+            if (direct) directLayout?.storageIdsByHandle?.get(handle).orEmpty()
+            else if (info.storageId == 0 || info.storageId == -1) emptySet() else setOf(info.storageId))
         return true
     }
 

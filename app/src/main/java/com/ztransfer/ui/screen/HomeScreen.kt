@@ -1186,22 +1186,9 @@ private fun ResetStaPairingDialog(
  * 免费版不进入该分支，原有绿色双脉冲的外观和节奏保持不变。
  */
 
-internal fun connectionHeroProgress(elapsedMs: Long): Float =
-    (elapsedMs.toFloat() / CONNECTION_HERO_DURATION_MS).coerceIn(0f, 1f)
-
-internal fun connectionSuccessProgress(elapsedMs: Long): Float {
-    val linearProgress = (
-        (elapsedMs - CONNECT_CELEBRATE_DELAY_MS).toFloat() / CONNECTION_SUCCESS_DURATION_MS
-        ).coerceIn(0f, 1f)
-    return FastOutSlowInEasing.transform(linearProgress)
-}
-
 // 连接成功后的入场节奏：同一条约 120fps 时钟先驱动图标起飞，随后在图标中心播放
 // 成功光效；完成后直接通知 MainScreen 跳转。相册扫描不等待这条时间线。
-const val CONNECT_CELEBRATE_DELAY_MS = 500L
 private const val CONNECTION_ATTENTION_FRAME_MS = 8L
-private const val CONNECTION_HERO_DURATION_MS = 620L
-private const val CONNECTION_SUCCESS_DURATION_MS = 760L
 private const val CONNECTION_CELEBRATION_TOTAL_MS =
     CONNECT_CELEBRATE_DELAY_MS + CONNECTION_SUCCESS_DURATION_MS
 private const val CONNECTION_CELEBRATION_FRAME_MS = 8L

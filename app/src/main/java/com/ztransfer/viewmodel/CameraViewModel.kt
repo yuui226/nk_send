@@ -3511,47 +3511,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * 检出后每侧多裁 1px，吃掉 JPEG 在黑边交界处的灰色过渡线，边缘干净"刚刚好"。
      * 仅在解码时执行一次（后台线程），结果入缓存，滚动与传输热路径零开销。
      */
+    private fun thumbnailCropPixels(src: Bitmap) = object : com.ztransfer.preview.ThumbnailCropPixels {
+        override val width: Int get() = src.width
+        override val height: Int get() = src.height
+        override fun readLine(index: Int, horizontal: Boolean, into: IntArray) {
+            if (horizontal) src.getPixels(into, 0, src.width, 0, index, src.width, 1)
+            else src.getPixels(into, 0, 1, index, 0, 1, src.height)
+        }
+    }
+
     private fun cropLetterbox(src: Bitmap): Bitmap {
-        val w = src.width
-        val h = src.height
-        if (w < 16 || h < 16) return src
-        val buf = IntArray(maxOf(w, h))
-
-        // 横线（y 行）或竖线（x 列）是否几乎全为近黑像素。隔点采样，量级仅几千次整数比较。
-        fun lineIsBlack(index: Int, horizontal: Boolean): Boolean {
-            val n = if (horizontal) w else h
-            if (horizontal) src.getPixels(buf, 0, w, 0, index, w, 1)
-            else src.getPixels(buf, 0, 1, index, 0, 1, h)
-            var dark = 0
-            var total = 0
-            var i = 0
-            while (i < n) {
-                val p = buf[i]
-                if ((p ushr 16 and 0xFF) < BAR_BLACK_MAX &&
-                    (p ushr 8 and 0xFF) < BAR_BLACK_MAX &&
-                    (p and 0xFF) < BAR_BLACK_MAX
-                ) dark++
-                total++
-                i += 2
-            }
-            return dark * 100 >= total * 97
-        }
-
-        // 从两端向内数黑线；不成对/不对称/越过上限均按"无黑边"处理，成对时各 +1px 裁掉过渡线。
-        fun scanPair(size: Int, isBlack: (Int) -> Boolean): Pair<Int, Int> {
-            val limit = (size * BAR_MAX_FRACTION).toInt()
-            var a = 0
-            while (a < limit && isBlack(a)) a++
-            var b = 0
-            while (b < limit && isBlack(size - 1 - b)) b++
-            return if (a == 0 || b == 0 || a >= limit || b >= limit || kotlin.math.abs(a - b) > 3) 0 to 0
-            else a + 1 to b + 1
-        }
-
-        val (top, bottom) = scanPair(h) { y -> lineIsBlack(y, horizontal = true) }
-        val (left, right) = scanPair(w) { x -> lineIsBlack(x, horizontal = false) }
-        if (top == 0 && left == 0) return src
-        return Bitmap.createBitmap(src, left, top, w - left - right, h - top - bottom)
+        val crop = com.ztransfer.preview.ThumbnailCropPolicy.letterbox(thumbnailCropPixels(src)) ?: return src
+        return Bitmap.createBitmap(src, crop.left, crop.top, crop.width, crop.height)
     }
 
     /**
@@ -3563,31 +3534,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      * （画面均值远高于黑条）。每侧多裁 1px 吃掉交界灰线，与 [cropLetterbox] 同规。
      */
     private fun cropVideoBars(src: Bitmap): Bitmap {
-        val w = src.width
-        val h = src.height
-        if (w < 16 || h < 16) return src
-        val cut = (h - w * 9 / 16) / 2
-        if (cut < 2 || h - (cut + 1) * 2 < 8) return src   // 已接近 16:9 或图太小，无带可裁
-        val buf = IntArray(w)
-        fun bandIsDark(y0: Int, y1: Int): Boolean {
-            var sum = 0L
-            var cnt = 0
-            var y = y0
-            while (y < y1) {
-                src.getPixels(buf, 0, w, 0, y, w, 1)
-                var x = 0
-                while (x < w) {
-                    val p = buf[x]
-                    sum += maxOf(p ushr 16 and 0xFF, p ushr 8 and 0xFF, p and 0xFF)
-                    cnt++
-                    x += 2
-                }
-                y += 2
-            }
-            return cnt > 0 && sum < cnt.toLong() * BAR_AVG_MAX
-        }
-        if (!bandIsDark(0, cut) || !bandIsDark(h - cut, h)) return src
-        return Bitmap.createBitmap(src, 0, cut + 1, w, h - (cut + 1) * 2)
+        val crop = com.ztransfer.preview.ThumbnailCropPolicy.videoBars(thumbnailCropPixels(src)) ?: return src
+        return Bitmap.createBitmap(src, crop.left, crop.top, crop.width, crop.height)
     }
 
     private suspend fun loadThumbnailFromDisk(file: CameraFileInfo): ImageBitmap? {
@@ -4089,11 +4037,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val MAX_FHD_PREVIEW_EDGE = 1_920
         // 黑边判定：近黑像素的通道上限（JPEG 压缩后黑条并非纯黑，留噪声余量）；
         // 黑边占边长的上限——3:2 塞 4:3 为 5.6%、16:9 为 12.5%，超过 15% 视为画面本身偏暗。
-        const val BAR_BLACK_MAX = 32
-        const val BAR_MAX_FRACTION = 0.15f
+        const val BAR_BLACK_MAX = com.ztransfer.preview.ThumbnailCropPolicy.BAR_BLACK_MAX
+        const val BAR_MAX_FRACTION = com.ztransfer.preview.ThumbnailCropPolicy.BAR_MAX_FRACTION
         // 视频封面黑边兜底（cropVideoBars）：待裁带平均亮度上限。比 BAR_BLACK_MAX 略宽
         //（均值统计天然抗噪），但仍远低于正常画面暗部的均值。
-        const val BAR_AVG_MAX = 40
+        const val BAR_AVG_MAX = com.ztransfer.preview.ThumbnailCropPolicy.BAR_AVG_MAX
         // 视频扩展名：封面黑边兜底裁切按 16:9 画面处理。
         // 注意与 PhotoPreview.kt 顶部的 VIDEO_EXTENSIONS（预览占位分支）保持同步。
         val VIDEO_EXTENSIONS = effectPreviewVideoExtensions

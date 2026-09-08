@@ -80,4 +80,6 @@ class TransferPreferencesWiringTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 previous_transfer_source(path, (ROOT/path).read_text(encoding='utf-8').replace(old, new))
         value = (ROOT/BRIDGE).read_text(encoding='utf-8').replace('func close() { model.close() }', 'func close() {}')
-        self.assertNotEqual(before(BRIDGE), previous_transfer_source(BRIDGE, value))
+        # Full-file fingerprints now reject unrelated mutations before historical inversion.
+        with self.assertRaises(AssertionError):
+            previous_transfer_source(BRIDGE, value)

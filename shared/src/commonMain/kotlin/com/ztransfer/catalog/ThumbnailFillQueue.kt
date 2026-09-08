@@ -88,6 +88,11 @@ class ThumbnailFillQueue<T : CameraCatalogFile> {
         prioritizedThumbnailFiles(missing, priorityRange).forEach(::addLast)
     }
 
+    /** Existing sorted scan batches append behind earlier/newer rows within each priority lane. */
+    fun appendScanBatch(files: List<T>) {
+        prioritizedThumbnailFiles(files.filterNot { it.handle in failed }, range).forEach(::addLast)
+    }
+
     /** Camera ObjectAdded events are normally newest, so they enter the front of their lane. */
     fun enqueueNew(file: T) {
         if (file.handle in settledHandles || file.handle in pendingHandles || file.handle in failed) {

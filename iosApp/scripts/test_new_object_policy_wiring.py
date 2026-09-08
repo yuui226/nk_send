@@ -16,7 +16,7 @@ def between(value, start, end): return value.split(start, 1)[1].split(end, 1)[0]
 class NewObjectPolicyWiringTest(unittest.TestCase):
     def test_full_android_owner_restores_after_only_enumerated_delegation(self):
         self.assertEqual({ANDROID}, set(CHANGES))
-        self.assertEqual(before(ANDROID), previous_new_object_policy_source(ANDROID, read(ANDROID)))
+        self.assertEqual(before(ANDROID), previous_new_object_policy_source(ANDROID, (ROOT / ANDROID).read_text(encoding="utf8")))
         for path in ('app/src/main/java/com/ztransfer/protocol/NikonCamera.kt',
                      'app/src/main/java/com/ztransfer/viewmodel/TransferViewModel.kt',
                      'shared/src/commonMain/kotlin/com/ztransfer/viewmodel/CameraFilePublicationPolicy.kt',
@@ -57,4 +57,6 @@ class NewObjectPolicyWiringTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 previous_new_object_policy_source(ANDROID, raw.replace(old,new))
         changed = raw.replace('const val KEEPALIVE_INTERVAL_MS = 10_000L', 'const val KEEPALIVE_INTERVAL_MS = 1L')
-        self.assertNotEqual(before(ANDROID), previous_new_object_policy_source(ANDROID, changed))
+        # Full-file fingerprints now reject unrelated mutations before historical inversion.
+        with self.assertRaises(AssertionError):
+            previous_new_object_policy_source(ANDROID, changed)

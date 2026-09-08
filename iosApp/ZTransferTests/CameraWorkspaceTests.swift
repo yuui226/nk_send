@@ -5,6 +5,20 @@ import ZTransferShared
 @testable import ZTransfer
 
 final class CameraWorkspaceTests: XCTestCase {
+    @MainActor func testClosingWorkspaceCancelsPendingConnectionAndNeverCreatesPages() async throws {
+        let owner = CameraHandshakeProbe(), workspace = CameraWorkspaceBridge(session: nil)
+        workspace.close()
+        XCTAssertFalse(workspace.connectCamera(address: "camera.local", stationMode: false, allowPairing: false, requestId: 1))
+        let active = CameraWorkspaceBridge(session: owner)
+        XCTAssertTrue(active.connectCamera(address: "camera.local", stationMode: false, allowPairing: false, requestId: 2))
+        active.close(); active.close()
+        active.openCameraFiles(); active.openTransferQueue()
+        let deadline = Date().addingTimeInterval(2)
+        while owner.running && Date() < deadline { try await Task.sleep(nanoseconds: 1_000_000) }
+        XCTAssertFalse(owner.running); XCTAssertFalse(owner.sessionReady)
+        XCTAssertNil(owner.filesPage); XCTAssertNil(owner.queuePage)
+        XCTAssertFalse(active.model.publish(requestId: 2, phase: "ready", message: "late"))
+    }
     func testResolvedEndpointIsUnavailableBeforeReadyAndAfterCancellation() async throws {
         let wire = WorkspaceWire(bytes: Data(), remoteHost: "192.168.10.7")
         let stream = CameraTCPStream(connection: wire)

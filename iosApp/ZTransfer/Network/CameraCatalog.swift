@@ -11,9 +11,15 @@ protocol CameraCatalogSource: AnyObject {
     func catalogStorageIDs(permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32]
     func catalogObjectHandles(storageID: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32]
     func catalogObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo
+    func usesDirectObjectReads() async -> Bool
+    func prepareDirectCatalog(storageIDs: [Int32], storageByHandle: [Int32: Int32],
+                              permitted: @escaping @Sendable () async -> Bool) async throws
 }
 
 extension CameraCatalogSource {
+    func usesDirectObjectReads() async -> Bool { false }
+    func prepareDirectCatalog(storageIDs: [Int32], storageByHandle: [Int32: Int32],
+                              permitted: @escaping @Sendable () async -> Bool) async throws {}
     func catalogStorageIDs(permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32] {
         guard await permitted() else { throw CameraStreamError.operationInProgress }
         return try await storageIDs()
@@ -78,6 +84,7 @@ actor CameraCatalog {
     private let stationMode: Bool
     private let previews: CameraPreviewStore?
     private var scanning = false
+    private var progressSnapshot: CameraCatalogSnapshot?
     private var latest: CameraCatalogSnapshot?
     private let handleBaseline = NativeCameraHandleBaseline()
     private struct PendingObject: Sendable { let token = UUID(); var attempts: Int32 = 0; var next: Int64 }
@@ -92,6 +99,7 @@ actor CameraCatalog {
     private(set) var needsEventRescan = false
     private let onAddition: (@Sendable (CameraCatalogAddition) async -> Void)?
     private let onChange: (@Sendable (CameraCatalogSnapshot) async -> Void)?
+    private let onBatch: (@Sendable (CameraCatalogSnapshot) async -> Void)?
     private struct ChangeRequest: Sendable { let token: UInt64; let full: Bool }
     private var changeSerial: UInt64 = 0
     private var pendingChange: ChangeRequest?
@@ -104,19 +112,26 @@ actor CameraCatalog {
 
     init(source: CameraCatalogSource, stationMode: Bool, previews: CameraPreviewStore? = nil,
          onAddition: (@Sendable (CameraCatalogAddition) async -> Void)? = nil,
-         onChange: (@Sendable (CameraCatalogSnapshot) async -> Void)? = nil) {
+         onChange: (@Sendable (CameraCatalogSnapshot) async -> Void)? = nil,
+         onBatch: (@Sendable (CameraCatalogSnapshot) async -> Void)? = nil) {
         self.source = source; self.stationMode = stationMode; self.previews = previews
         self.onAddition = onAddition
         self.onChange = onChange
+        self.onBatch = onBatch
     }
     deinit { resolver?.cancel(); changeWorker?.cancel() }
     func snapshot() -> CameraCatalogSnapshot? { latest }
-
-    func refresh(detectNewHandles: Bool = false) async throws -> CameraCatalogSnapshot {
-        try await scanCatalog(detectNewHandles: detectNewHandles, change: nil)
+    func presentation() -> (scanning: Bool, complete: CameraCatalogSnapshot?, progress: CameraCatalogSnapshot?, publication: UInt64) {
+        (scanning, latest, progressSnapshot, publicationRevision)
     }
 
-    private func scanCatalog(detectNewHandles: Bool, change: ChangeRequest?) async throws -> CameraCatalogSnapshot {
+    func refresh(detectNewHandles: Bool = false,
+                 onBatch: (@Sendable (CameraCatalogSnapshot) async -> Void)? = nil) async throws -> CameraCatalogSnapshot {
+        try await scanCatalog(detectNewHandles: detectNewHandles, change: nil, batch: onBatch)
+    }
+
+    private func scanCatalog(detectNewHandles: Bool, change: ChangeRequest?,
+                             batch: (@Sendable (CameraCatalogSnapshot) async -> Void)? = nil) async throws -> CameraCatalogSnapshot {
         guard !closed else { throw CameraStreamError.closed }
         guard !scanning else { throw CameraStreamError.operationInProgress }
         try Task.checkCancellation()
@@ -125,7 +140,7 @@ actor CameraCatalog {
         let generation = scanGeneration
         publicationRevision &+= 1
         activeScanNewHandles.removeAll()
-        defer { scanning = false; activeScanNewHandles.removeAll(); wakeChanges(); wakeResolver() }
+        defer { scanning = false; progressSnapshot = nil; activeScanNewHandles.removeAll(); wakeChanges(); wakeResolver() }
         let fillScan = await previews?.beginCatalogScan()
         do {
             let before = await source.snapshot()
@@ -139,6 +154,8 @@ actor CameraCatalog {
             if change != nil { stores = try await source.catalogStorageIDs(permitted: admission) }
             else { stores = try await source.storageIDs() }
             let scan = NativeCameraCatalogScan(rawStorageIds: Self.native(stores), stationMode: stationMode)
+            let direct = await source.usesDirectObjectReads()
+            if direct, !scan.enableDirectObjectReads() { throw CameraStreamError.invalidArgument }
             var enumeratedHandles: [Int32] = []
             for index in 0..<Int(scan.storageCount) {
                 try Task.checkCancellation()
@@ -150,6 +167,13 @@ actor CameraCatalog {
                 enumeratedHandles.append(contentsOf: handles)
             }
             guard scan.begin() else { throw CameraStreamError.invalidArgument }
+            if direct {
+                var membership: [Int32: Int32] = [:]
+                for handle in enumeratedHandles { membership[handle] = scan.directReadStorageId(handle: handle) }
+                try await source.prepareDirectCatalog(
+                    storageIDs: (0..<Int(scan.storageCount)).map { scan.storageId(index: Int32($0)) },
+                    storageByHandle: membership, permitted: admission)
+            }
             let enumerated = await source.snapshot()
             try Task.checkCancellation()
             guard !closed, enumerated.phase == .ready, enumerated.connectionID == before.connectionID else { throw CameraStreamError.closed }
@@ -169,6 +193,7 @@ actor CameraCatalog {
             if change == nil {
                 handleDelta = handleBaseline.acceptEnumeration(handles: Self.native(enumeratedHandles), detectNewHandles: detectNewHandles)
             }
+            var publishedRows = 0
             while true {
                 try Task.checkCancellation()
                 if let handle = scan.nextReadHandle()?.int32Value {
@@ -184,6 +209,28 @@ actor CameraCatalog {
                     }
                     guard scan.accept(handle: handle, info: info) else { throw CameraStreamError.invalidArgument }
                 } else if !scan.publishNext() { break }
+                else if change == nil, scan.metadataComplete, Int(scan.rowCount) - publishedRows >= 20 {
+                    let current = await source.snapshot()
+                    try Task.checkCancellation()
+                    guard !closed, current.phase == .ready, current.connectionID == before.connectionID else { throw CameraStreamError.closed }
+                    if current.eventRevision == before.eventRevision {
+                        var files: [CameraFileInfo] = [], infos: [Int32: PtpObjectInfo] = [:]
+                        for index in 0..<Int(scan.rowCount) {
+                            if let file = scan.fileAt(index: Int32(index)), let info = scan.objectInfo(handle: file.handle) {
+                                files.append(file); infos[file.handle] = info
+                            }
+                        }
+                        let filters = scan.filterStorageIds()
+                        let value = CameraCatalogSnapshot(connectionID: before.connectionID, revision: before.eventRevision,
+                            storageIDs: (0..<Int(filters.size)).map { filters.get(index: Int32($0)) },
+                            files: files, objectInfos: infos, totalHandles: Int(scan.totalHandles),
+                            metadataComplete: false, changedWhileScanning: false, publicationRevision: publicationRevision)
+                        progressSnapshot = value; publishedRows = Int(scan.rowCount)
+                        if let fillScan { _ = await previews?.appendCatalogBatch(fillScan, snapshot: value) }
+                        if let callback = batch ?? onBatch { await callback(value) }
+                        await Task.yield() // The existing FIFO command gate lets thumbnails/transfers run between metadata reads.
+                    }
+                }
             }
             let after = await source.snapshot()
             try Task.checkCancellation()
@@ -210,8 +257,9 @@ actor CameraCatalog {
                 guard let file = scan.fileAt(index: Int32(index)) else { throw CameraStreamError.invalidArgument }
                 files.append(file)
             }
+            let filters = scan.filterStorageIds()
             let result = CameraCatalogSnapshot(connectionID: source.connectionID, revision: before.eventRevision,
-                storageIDs: (0..<Int(scan.storageCount)).map { scan.storageId(index: Int32($0)) },
+                storageIDs: (0..<Int(filters.size)).map { filters.get(index: Int32($0)) },
                 files: files, objectInfos: infos, totalHandles: Int(scan.totalHandles),
                 metadataComplete: scan.metadataComplete, changedWhileScanning: before.eventRevision != after.eventRevision,
                 handleDelta: handleDelta, publicationRevision: publicationRevision, indexedObjectInfos: indexedInfos)
@@ -244,11 +292,15 @@ actor CameraCatalog {
     }
 
     /// Connection's existing observer forwards batches; never read a second copy of its AsyncStream.
-    func receiveEvents(_ batch: CameraEventBatch) {
+    func receiveEvents(_ batch: CameraEventBatch) async {
         guard !closed, batch.cursor.connectionID == source.connectionID else { return }
         if let receivedEventRevision, batch.cursor.revision <= receivedEventRevision { return }
         receivedEventRevision = batch.cursor.revision
-        if batch.requiresRescan { requestChange(full: true); return }
+        if batch.requiresRescan {
+            requestChange(full: true)
+            await previews?.suspendCatalogBatchFill()
+            return
+        }
         for event in batch.events {
             let handle = Int32(truncatingIfNeeded: event.firstParameter)
             if event.code == Lab.shared.EVT_OBJECT_ADDED, scanning, activeScanNewHandles.contains(handle) {
@@ -278,10 +330,14 @@ actor CameraCatalog {
             }
         }
         wakeResolver()
+        if batch.events.contains(where: { [Int32(0x4003), 0x4004, 0x4005, 0x4007, 0x400C].contains($0.code) }) {
+            await previews?.suspendCatalogBatchFill()
+        }
     }
 
     func close() {
         closed = true; scanGeneration &+= 1; resolver?.cancel(); changeWorker?.cancel()
+        progressSnapshot = nil
         pendingChange = nil; scanCatchupHandles.removeAll()
         scanCatchupMedia.removeAll()
         pendingObjects.removeAll(); pendingOrder.removeAll()

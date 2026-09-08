@@ -39,6 +39,12 @@ actor CameraPreviewStore {
     private var pending: [String: Task<Data?, Error>] = [:]
     private var epoch: UInt64 = 0
     private let policy = NativePreviewPolicy()
+    private var directObjectReads = false
+    func configureDirectObjectReads(_ value: Bool) {
+        guard !closed, directObjectReads != value else { return }
+        directObjectReads = value
+        epoch &+= 1; cache.removeAll(); cacheBytes = 0
+    }
     private let connectionID: UUID?
     private var disk: CameraThumbnailDiskCache?
     private var diskConfigured = false
@@ -53,6 +59,9 @@ actor CameraPreviewStore {
     private var transfersBusy = false
     private var foregroundUses = Set<UUID>()
     private var scanToken: UUID?
+    private var scanAllowsFill = false
+    private var scanHandles = Set<Int32>()
+    private var lastCompleteSnapshot: CameraCatalogSnapshot?
     private var catalogReady = false
     private var catalogInfos: [Int32: PtpObjectInfo] = [:]
     private var catalogPublicationRevision: UInt64 = 0
@@ -95,7 +104,8 @@ actor CameraPreviewStore {
     func beginCatalogScan() -> UUID? {
         guard !closed else { return nil }
         let token = UUID()
-        scanToken = token; catalogReady = false
+        scanToken = token; catalogReady = false; scanAllowsFill = false; scanHandles.removeAll()
+        _ = fill.replace(files: [])
         wakeFill(retryFailures: false)
         return token
     }
@@ -103,15 +113,44 @@ actor CameraPreviewStore {
     func finishCatalogScan(_ token: UUID, snapshot: CameraCatalogSnapshot?) -> Bool {
         guard !closed, scanToken == token else { return false }
         scanToken = nil
-        guard let snapshot else { return false }
+        scanAllowsFill = false; scanHandles.removeAll()
+        guard let snapshot, snapshot.metadataComplete, !snapshot.changedWhileScanning else {
+            if let previous = lastCompleteSnapshot { _ = reconcile(previous) }
+            else { fill.clear(); catalogInfos.removeAll(); catalogReady = false }
+            return false
+        }
         return reconcile(snapshot)
+    }
+
+    /// Add-only while scanning: never prune disk or infer missing handles as deleted.
+    func appendCatalogBatch(_ token: UUID, snapshot: CameraCatalogSnapshot) -> Bool {
+        guard !closed, scanToken == token, snapshot.connectionID == connectionID,
+              !snapshot.changedWhileScanning else { return false }
+        let newFiles = snapshot.files.filter { !scanHandles.contains($0.handle) }
+        for file in newFiles {
+            guard let info = snapshot.objectInfos[file.handle], info.identityComplete,
+                  info.fileName == file.fileName, info.size == file.size else { return false }
+        }
+        guard fill.appendScanBatch(files: newFiles.filter { policy.prefetchThumbnail(direct: directObjectReads, file: $0) }) else { return false }
+        for file in newFiles {
+            scanHandles.insert(file.handle)
+            if let info = snapshot.objectInfos[file.handle] {
+                catalogInfos[file.handle] = info
+                allowedThumbnailKeys?.insert(policy.thumbnailKey(info: info))
+            }
+        }
+        catalogReady = true; scanAllowsFill = true; wakeFill(retryFailures: false)
+        return true
     }
     func fillCounts() -> (pending: Int32, failed: Int32, running: Bool) {
         (fill.pendingCount, fill.failedCount, fillWorker != nil)
     }
+    func suspendCatalogBatchFill() {
+        if scanToken != nil { scanAllowsFill = false; wakeFill(retryFailures: false) }
+    }
 
     private var mayFill: Bool {
-        fillEnabled && !closed && connected && catalogReady && scanToken == nil &&
+        fillEnabled && !closed && connected && catalogReady && (scanToken == nil || scanAllowsFill) &&
             !transfersBusy && foregroundUses.isEmpty && disk != nil && !diskWritesBlocked
     }
     private func mayReadBackground(_ request: NativeThumbnailFillRequest) -> Bool { mayFill && fill.isCurrent(request: request) }
@@ -148,7 +187,9 @@ actor CameraPreviewStore {
                     diskWritesBlocked = true; _ = fill.returnToFront(request: request); return (false, observed)
                 }
             }
-            _ = fill.settled(request: request) // nil means a fully consumed, confirmed thumbnail miss.
+            if data == nil && !policy.rememberThumbnailMiss(direct: directObjectReads, info: info) {
+                _ = fill.failed(request: request)
+            } else { _ = fill.settled(request: request) }
         } catch CameraStreamError.operationInProgress {
             _ = fill.returnToFront(request: request)
             return (false, observed) // A real foreground/scan/pending-slot state change wakes this; no polling timer.
@@ -198,8 +239,9 @@ actor CameraPreviewStore {
                   info.fileName == file.fileName, info.size == file.size, info.captureDate == file.captureDate else { return false }
             keys.insert(policy.thumbnailKey(info: info))
         }
-        guard fill.replace(files: snapshot.files) else { return false }
+        guard fill.replace(files: snapshot.files.filter { policy.prefetchThumbnail(direct: directObjectReads, file: $0) }) else { return false }
         catalogPublicationRevision = snapshot.publicationRevision
+        lastCompleteSnapshot = snapshot
         allowedThumbnailKeys = keys
         catalogInfos = snapshot.objectInfos
         catalogReady = true
@@ -226,6 +268,7 @@ actor CameraPreviewStore {
         allowedThumbnailKeys = []
         disk = nil
         fill.clear(); catalogInfos.removeAll(); foregroundUses.removeAll(); scanToken = nil; catalogReady = false
+        scanAllowsFill = false; scanHandles.removeAll(); lastCompleteSnapshot = nil
     }
 
     func thumbnail(info: PtpObjectInfo, allowRemote: Bool = true) async throws -> Data? {
@@ -313,7 +356,8 @@ actor CameraPreviewStore {
         guard !closed else { throw CameraStreamError.closed }
         // FHD nil includes Busy, unsupported and per-object failures: never negative-cache it.
         // The thumbnail source returns nil only after a complete confirmed-miss/OK-empty response.
-        if epoch == startedEpoch && allowedThumbnailKeys?.contains(identity) != false && (!fhd || result != nil) {
+        let rememberMiss = !fhd && policy.rememberThumbnailMiss(direct: directObjectReads, info: info)
+        if epoch == startedEpoch && allowedThumbnailKeys?.contains(identity) != false && (result != nil || rememberMiss) {
             store(result, key: key)
         }
         // Memory pressure does not discard a useful completed disk result. Reconciliation does reject stale identities.

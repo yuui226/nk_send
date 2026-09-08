@@ -59,6 +59,11 @@ internal class PreviewExifSupplement {
         // The walker intentionally does not implement every MakerNote/embedded-JPEG route.
         // Preserve ImageIO-only fields instead of treating an unvisited tag as confirmed absent.
         fields.forEach { (id, target) -> if (attributes.containsKey(id)) values.set(target, text(id)) }
+        // AndroidX addDefaultValues copies DateTimeOriginal into a missing TIFF DateTime.
+        // Do not replace an existing (including blank) DateTime attribute.
+        if (!attributes.containsKey(0x0132) && attributes.containsKey(0x9003)) {
+            values.set(PreviewExifTag.DATETIME, text(0x9003))
+        }
         fun rational(value: String): Double? {
             val parts = value.split('/')
             if (parts.size != 2) return null

@@ -4,6 +4,19 @@ import com.ztransfer.protocol.CameraFileInfo
 import kotlin.test.*
 
 class NativeThumbnailFillQueueTest {
+    @Test fun batchesKeepActiveSettledAndFailedWorkWhileAppendingInDateLanes() {
+        val q = NativeThumbnailFillQueue()
+        q.replace(listOf(file(4)))
+        val active = assertNotNull(q.next())
+        assertTrue(q.appendScanBatch(listOf(file(4), file(3), file(2))))
+        assertTrue(q.isCurrent(active)); q.settled(active)
+        val failed = assertNotNull(q.next()); assertEquals(3, failed.file.handle); q.failed(failed)
+        q.appendScanBatch(listOf(file(3), file(2), file(1)))
+        q.setPriorityRange(20260901, 20260901) // A real date change grants the failed row one retry.
+        assertEquals(listOf(1, 2, 3), q.drain())
+        assertNull(q.next())
+    }
+
     private fun file(handle: Int) = CameraFileInfo(handle, 100, "$handle.JPG", "2026090${handle}T120000", false)
 
     @Test fun orderingMatchesOriginalQueueForAllRangesAndInputOrders() {

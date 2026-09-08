@@ -67,8 +67,24 @@ actor CameraWiFiConnection {
     private var downloadActive = false
     private var partialSupport: Int32 = -1
     private let previewPolicy = NativePreviewPolicy()
+    private let staPreviewPolicy = NativeStaPreviewPolicy()
+    private let directDecoder = PreviewImageDecoder()
     private var thumbnailCacheIdentity: String?
     private var verifiedResponderGUID: String?
+    private var directObjectReadValidated = false
+    private var prefetchedStationHandles: (storage: Int32, handles: [Int32])?
+    private var stationDeviceInfo: LabDeviceInfo?
+    private let directMetadata = NativeStaDirectMetadata()
+    private var directNamesLoaded = false
+    private var directNameValueSupported: Bool?
+    private var directStorageByHandle: [Int32: Int32] = [:]
+    private var directHeaders: [Int32: Data] = [:]
+    private var directHeaderOrder: [Int32] = []
+    private var directInfos: [Int32: PtpObjectInfo] = [:]
+    private var directContentRevision: UInt64 = 0
+    private var directRawReferences: [Int32: [NefPreviewReference]] = [:]
+    private var directRawHint: NefPreviewReference?
+    private var directThumbnailMisses = Set<Int32>()
 
     init(command: CameraTCPStream, event: CameraTCPStream, stationMode: Bool = false) {
         self.command = command
@@ -92,7 +108,8 @@ actor CameraWiFiConnection {
 
     func connect(guid: Data, stationOptions: StationConnectionOptions = StationConnectionOptions(),
                  hasPairingMarker: ((String) throws -> Bool)? = nil,
-                 onPairingAcknowledged: ((String) throws -> Void)? = nil) async throws -> LabDeviceInfo? {
+                 onPairingAcknowledged: ((String) throws -> Void)? = nil,
+                 onPairingStarted: (() async -> Void)? = nil) async throws -> LabDeviceInfo? {
         guard phase == .idle else { throw terminalError ?? CameraStreamError.operationInProgress }
         guard guid.count == 16 else { throw CameraStreamError.invalidArgument }
         if stationMode, let expected = stationOptions.expectedResponderGUID,
@@ -124,7 +141,8 @@ actor CameraWiFiConnection {
             let identity: LabDeviceInfo?
             if stationMode {
                 try await initializeStation(options: stationOptions, responder: ack.responderGuidHex,
-                                             hasMarker: hasPairingMarker, acknowledged: onPairingAcknowledged)
+                                             hasMarker: hasPairingMarker, acknowledged: onPairingAcknowledged,
+                                             pairingStarted: onPairingStarted)
                 // The normal STA storage-success route must NOT query DeviceInfo unconditionally.
                 identity = nil
                 startEvents()
@@ -158,6 +176,7 @@ actor CameraWiFiConnection {
     /// Pairing/history may use only the responder acknowledged by this ready session, never a
     /// display name, Bonjour candidate or thumbnail-cache fallback containing a session UUID.
     func responderGUID() -> String? { phase == .ready ? verifiedResponderGUID : nil }
+    func usesDirectObjectReads() -> Bool { phase == .ready && directObjectReadValidated }
 
     func resolvedRemoteHost() async -> String? {
         guard phase == .ready else { return nil }
@@ -166,7 +185,8 @@ actor CameraWiFiConnection {
     }
 
     private func initializeStation(options: StationConnectionOptions, responder: String?,
-                                   hasMarker: ((String) throws -> Bool)?, acknowledged: ((String) throws -> Void)?) async throws {
+                                   hasMarker: ((String) throws -> Bool)?, acknowledged: ((String) throws -> Void)?,
+                                   pairingStarted: (() async -> Void)?) async throws {
         let policy = NikonStaBridge.shared
         let compatibility = try await session.execute(operationCode: policy.COMPATIBILITY_INIT)
         guard compatibility.code == PtpConstants.shared.RESPONSE_OK else {
@@ -176,21 +196,92 @@ actor CameraWiFiConnection {
         let ids = storage.payload.flatMap { PtpIPChannel.identifiers($0) } ?? []
         let marked = try responder.map { try hasMarker?($0) ?? false } ?? false
         if policy.forcePairing(code: storage.code, force: options.forceProfilePairing, allow: options.allowPairing, marked: marked) {
+            await pairingStarted?()
+            try requirePhase(.opening)
             try await pairStation(responder: responder, acknowledged: acknowledged)
         }
         let values = KotlinIntArray(size: Int32(ids.count))
         for (index, value) in ids.enumerated() { values.set(index: Int32(index), value: value) }
-        if policy.usableStorage(code: storage.code, ids: values) {
+        if policy.usableStorage(code: storage.code, ids: values) && !options.exploreAlbumAccess {
             prefetchedStorageIDs = ids
             return
         }
         let device = try await session.execute(operationCode: PtpConstants.shared.GET_DEVICE_INFO)
         let info = device.code == PtpConstants.shared.RESPONSE_OK ? device.payload.flatMap { PtpIPChannel.deviceInfo($0) } : nil
+        stationDeviceInfo = info
         if policy.pairingOnly(info: info) {
             guard options.allowPairing else { throw CameraStationError.pairingRequired }
+            await pairingStarted?()
+            try requirePhase(.opening)
             try await pairStation(responder: responder, acknowledged: acknowledged)
         }
+        if options.exploreAlbumAccess {
+            if policy.usableStorage(code: storage.code, ids: values),
+               try await validateStationObjectAccess(storageIDs: ids) {
+                prefetchedStorageIDs = ids
+                return
+            }
+            // Android's one bounded application-mode probe. No identity guessing or AP fallback.
+            let changed = try await session.execute(operationCode: 0x9435, parameters: [1])
+            if changed.code == PtpConstants.shared.RESPONSE_OK {
+                do {
+                    _ = try await session.execute(operationCode: policy.COMPATIBILITY_INIT)
+                    let modeStorage = try await session.execute(operationCode: PtpConstants.shared.GET_STORAGE_IDS)
+                    let modeIDs = modeStorage.payload.flatMap { PtpIPChannel.identifiers($0) } ?? []
+                    let native = KotlinIntArray(size: Int32(modeIDs.count))
+                    for (index, value) in modeIDs.enumerated() { native.set(index: Int32(index), value: value) }
+                    if policy.usableStorage(code: modeStorage.code, ids: native),
+                       try await validateStationObjectAccess(storageIDs: modeIDs) {
+                        prefetchedStorageIDs = modeIDs
+                        return
+                    }
+                } catch {
+                    // Best effort only on the same command owner; a poisoned transport stays closed.
+                    _ = try? await session.execute(operationCode: 0x9435, parameters: [0], timeout: 5)
+                    throw error
+                }
+                _ = try? await session.execute(operationCode: 0x9435, parameters: [0], timeout: 5)
+            }
+        }
         throw CameraStationError.albumUnavailable
+    }
+
+    /// Mirrors NikonCamera.validateStaObjectAccess: first/middle/last ObjectInfo, then ONE
+    /// bounded thumbnail/size/prefix sample only when ObjectInfo was denied. Never GetObject.
+    private func validateStationObjectAccess(storageIDs: [Int32]) async throws -> Bool {
+        try requirePhase(.opening)
+        let response = try await session.execute(operationCode: PtpConstants.shared.GET_OBJECT_HANDLES,
+            parameters: [-1, -1, 0], maximumPayloadBytes: 16 * 1024 * 1024)
+        guard response.code == PtpConstants.shared.RESPONSE_OK,
+              let data = response.payload, let handles = PtpIPChannel.identifiers(data), !handles.isEmpty else { return false }
+        var accessible = true
+        var sampled = Set<Int>()
+        for index in [0, (handles.count - 1) / 2, handles.count - 1] where sampled.insert(index).inserted {
+            let result = try await session.execute(operationCode: PtpConstants.shared.GET_OBJECT_INFO,
+                parameters: [handles[index]], maximumPayloadBytes: 64 * 1024)
+            if result.code != PtpConstants.shared.RESPONSE_OK || (result.payload?.count ?? 0) < 53 { accessible = false }
+        }
+        if !accessible {
+            let handle = handles[0]
+            _ = try await session.execute(operationCode: PtpConstants.shared.GET_THUMB,
+                parameters: [handle], maximumPayloadBytes: 4 * 1024 * 1024)
+            let size = try await session.execute(operationCode: PtpConstants.shared.NK_GET_OBJECT_SIZE,
+                parameters: [handle], maximumPayloadBytes: 64 * 1024)
+            let prefix = try await session.execute(operationCode: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX,
+                parameters: [handle, 0, 0, 64 * 1024, 0], maximumPayloadBytes: 64 * 1024)
+            accessible = size.code == PtpConstants.shared.RESPONSE_OK &&
+                size.payload.map { PtpIPChannel.objectSize($0) > 0 } == true &&
+                prefix.code == PtpConstants.shared.RESPONSE_OK && prefix.payload?.isEmpty == false
+            directObjectReadValidated = accessible
+        }
+        if accessible {
+            let usable = storageIDs.filter { $0 != 0 && $0 != -1 }
+            if usable.count == 1 {
+                let id = usable[0]
+                prefetchedStationHandles = (id & 0xFFFF == 0 ? -1 : id, handles)
+            }
+        }
+        return accessible
     }
 
     private func pairStation(responder: String?, acknowledged: ((String) throws -> Void)?) async throws {
@@ -221,11 +312,17 @@ actor CameraWiFiConnection {
     }
 
     func objectHandles(storageID: Int32) async throws -> [Int32] {
+        try requirePhase(.ready)
+        if let prefetched = prefetchedStationHandles, prefetched.storage == storageID {
+            prefetchedStationHandles = nil
+            return prefetched.handles
+        }
         // Exact Android GetObjectHandles arguments, including the vendor-tolerated -1 format.
         try await identifiers(operation: PtpConstants.shared.GET_OBJECT_HANDLES, parameters: [storageID, -1, 0])
     }
 
     func objectInfo(handle: Int32) async throws -> PtpObjectInfo {
+        if directObjectReadValidated { return try await directObjectInfo(handle: handle) }
         let operation = PtpConstants.shared.GET_OBJECT_INFO
         let payload = try await metadata(operation: operation, parameters: [handle], limit: 64 * 1024)
         guard let info = PtpIPChannel.objectInfo(handle: handle, payload: payload) else {
@@ -237,6 +334,7 @@ actor CameraWiFiConnection {
     }
 
     func newObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo {
+        if directObjectReadValidated { return try await directObjectInfo(handle: handle, permitted: permitted) }
         let operation = PtpConstants.shared.GET_OBJECT_INFO
         let result = try await previewCommand(operation: operation, handle: handle, limit: 64 * 1024, admission: permitted)
         guard result.code == PtpConstants.shared.RESPONSE_OK else {
@@ -259,12 +357,147 @@ actor CameraWiFiConnection {
     }
 
     func catalogObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo {
+        if directObjectReadValidated { return try await directObjectInfo(handle: handle, permitted: permitted) }
         let operation = PtpConstants.shared.GET_OBJECT_INFO
         let data = try await catalogMetadata(operation: operation, parameters: [handle], limit: 64 * 1024, permitted: permitted)
         guard let info = PtpIPChannel.objectInfo(handle: handle, payload: data) else {
             throw CameraOperationError.malformedDataset(operation: operation)
         }
         return info
+    }
+
+    /// Enumeration supplies the shared-validated membership. Do not infer slots from raw handle bits.
+    func prepareDirectCatalog(storageIDs: [Int32], storageByHandle: [Int32: Int32],
+                              permitted: @escaping @Sendable () async -> Bool) async throws {
+        try requirePhase(.ready)
+        guard directObjectReadValidated else { return }
+        let revision = directContentRevision
+        directStorageByHandle = storageByHandle
+        // A refreshed directory must re-observe object bytes/size; failed compact indexes do not
+        // erase valid prior name/date entries. The catalog retains its prior complete snapshot.
+        directInfos.removeAll()
+        let policy = NikonStaBridge.shared, bridge = NativeStaDirectBridge.shared
+        if !directNamesLoaded {
+            if policy.advertises(info: stationDeviceInfo, operation: PtpConstants.shared.GET_OBJECT_PROP_LIST) {
+                let result = try await directCommand(operation: PtpConstants.shared.GET_OBJECT_PROP_LIST,
+                    parameters: [-1, 0, PtpConstants.shared.OBJECT_PROP_OBJECT_FILE_NAME, 0, 0],
+                    limit: 16 * 1024 * 1024, permitted: permitted)
+                guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+                if result.code == PtpConstants.shared.RESPONSE_OK, let data = result.payload {
+                    bridge.loadNames(model: directMetadata, data: data as NSData)
+                }
+            }
+            directNamesLoaded = true
+        }
+        if policy.advertises(info: stationDeviceInfo, operation: PtpConstants.shared.NK_GET_OBJECTS_METADATA) {
+            for store in storageIDs.isEmpty ? [-1] : storageIDs {
+                let result = try await directCommand(operation: PtpConstants.shared.NK_GET_OBJECTS_METADATA,
+                    parameters: [store, 0, 0], limit: 16 * 1024 * 1024, permitted: permitted)
+                guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+                if result.code == PtpConstants.shared.RESPONSE_OK, let data = result.payload {
+                    bridge.loadDates(model: directMetadata, data: data as NSData)
+                }
+            }
+        }
+    }
+
+    private func directCommand(operation: Int32, parameters: [Int32], limit: Int,
+                               permitted: (@Sendable () async -> Bool)? = nil) async throws -> PtpIPCommandResult {
+        let admission: (@Sendable () async -> Bool)?
+        if let permitted {
+            admission = { [weak self] in
+                guard let self, await self.backgroundReadsAllowed() else { return false }
+                return await permitted()
+            }
+        } else { admission = nil }
+        return try await previewCommand(operation: operation, parameters: parameters, limit: limit, admission: admission)
+    }
+
+    private func directObjectInfo(handle: Int32, permitted: (@Sendable () async -> Bool)? = nil) async throws -> PtpObjectInfo {
+        try requirePhase(.ready)
+        if let permitted, !(await permitted()) { throw CameraStreamError.operationInProgress }
+        if let cached = directInfos[handle] { return cached }
+        let revision = directContentRevision
+        let bridge = NativeStaDirectBridge.shared
+        if directMetadata.name(handle: handle) == nil, directNameValueSupported != false {
+            if NikonStaBridge.shared.advertises(info: stationDeviceInfo, operation: PtpConstants.shared.GET_OBJECT_PROP_VALUE) {
+                let result = try await directCommand(operation: PtpConstants.shared.GET_OBJECT_PROP_VALUE,
+                    parameters: [handle, PtpConstants.shared.OBJECT_PROP_OBJECT_FILE_NAME], limit: 64 * 1024, permitted: permitted)
+                guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+                let name = result.code == PtpConstants.shared.RESPONSE_OK
+                    ? result.payload.flatMap { bridge.loadName(model: directMetadata, handle: handle, data: $0 as NSData) } : nil
+                directNameValueSupported = name != nil
+            } else { directNameValueSupported = false }
+        }
+        let sizeResult = try await directCommand(operation: PtpConstants.shared.NK_GET_OBJECT_SIZE,
+            parameters: [handle], limit: 64 * 1024, permitted: permitted)
+        guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+        guard sizeResult.code == PtpConstants.shared.RESPONSE_OK else {
+            throw CameraOperationError.rejected(operation: PtpConstants.shared.NK_GET_OBJECT_SIZE, response: sizeResult.code)
+        }
+        let size = sizeResult.payload.map { PtpIPChannel.objectSize($0) } ?? 0
+        guard size > 0 else { throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.NK_GET_OBJECT_SIZE) }
+        let storage = directStorageByHandle[handle] ?? 0
+        if let indexed = directMetadata.indexedInfo(handle: handle, size: size, storageId: storage) {
+            directInfos[handle] = indexed
+            return indexed
+        }
+        let header = try await directPrefix(handle: handle, count: Int(min(size, 128 * 1024)), permitted: permitted)
+        guard let header, !header.isEmpty() else {
+            throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX)
+        }
+        let exif = try PreviewExifReader.metadata(header: header)
+        var captureDate = exif?.dateTime
+        let mediaExtension = bridge.mediaExtension(data: header as NSData)
+        if mediaExtension == ".mov" || mediaExtension == ".mp4" {
+            captureDate = PreviewMediaDate.video(header) ?? captureDate ?? directMetadata.captureDate(handle: handle)
+            if captureDate == nil, size > Int64(header.count) {
+                let count = Int(min(size, 256 * 1024))
+                if let tail = try await directPartial(handle: handle, offset: size - Int64(count), count: count, permitted: permitted) {
+                    captureDate = PreviewMediaDate.video(tail)
+                }
+            }
+        }
+        guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+        guard let info = bridge.headerInfo(model: directMetadata, handle: handle, size: size,
+            data: header as NSData, exifDate: captureDate, storageId: storage) else {
+            throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX)
+        }
+        try requirePhase(.ready)
+        if let permitted, !(await permitted()) { throw CameraStreamError.operationInProgress }
+        directInfos[handle] = info
+        if info.fileName?.lowercased().hasSuffix(".nef") == true {
+            let references = bridge.rawIndexed(data: header as NSData)
+            if !references.isEmpty { directRawReferences[handle] = references }
+        }
+        return info
+    }
+
+    private func directPrefix(handle: Int32, count: Int, permitted: (@Sendable () async -> Bool)? = nil) async throws -> Data? {
+        guard count > 0, count <= 16 * 1024 * 1024 else { throw CameraStreamError.invalidArgument }
+        let retained = directHeaders[handle] ?? Data()
+        let revision = directContentRevision
+        if retained.count >= count { return Data(retained.prefix(count)) }
+        guard let suffix = try await directPartial(handle: handle, offset: Int64(retained.count),
+            count: count - retained.count, permitted: permitted) else { return nil }
+        guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+        let bytes = retained + suffix
+        directHeaders[handle] = Data(bytes.prefix(512 * 1024))
+        directHeaderOrder.removeAll { $0 == handle }; directHeaderOrder.append(handle)
+        while directHeaderOrder.count > 4 { directHeaders.removeValue(forKey: directHeaderOrder.removeFirst()) }
+        return bytes
+    }
+
+    private func directPartial(handle: Int32, offset: Int64, count: Int,
+                               permitted: (@Sendable () async -> Bool)? = nil) async throws -> Data? {
+        guard count > 0, count <= 16 * 1024 * 1024,
+              let native = PtpTransferBridge.shared.partialParameters(handle: handle, offset: offset, count: Int64(count)) else {
+            throw CameraStreamError.invalidArgument
+        }
+        let result = try await directCommand(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX,
+            parameters: (0..<Int(native.size)).map { native.get(index: Int32($0)) }, limit: count, permitted: permitted)
+        guard result.code == PtpConstants.shared.RESPONSE_OK, let data = result.payload, !data.isEmpty else { return nil }
+        return data
     }
 
     private func catalogIdentifiers(operation: Int32, parameters: [Int32],
@@ -303,6 +536,7 @@ actor CameraWiFiConnection {
     private func backgroundReadsAllowed() -> Bool { phase == .ready && !downloadActive }
 
     private func readThumbnail(handle: Int32, admission: (@Sendable () async -> Bool)? = nil) async throws -> Data? {
+        if directObjectReadValidated { return try await directThumbnail(handle: handle, permitted: admission) }
         let code = PtpConstants.shared.GET_THUMB
         let result = try await previewCommand(operation: code, handle: handle, limit: 4 * 1024 * 1024, admission: admission)
         switch result.code {
@@ -312,8 +546,233 @@ actor CameraWiFiConnection {
         }
     }
 
-    /// Standard AP camera-generated FHD only. Paired STA uses a different capability/fallback path;
-    /// until its MPF/partial-read flow is integrated, return nil so callers use the real thumbnail.
+    private func directFhdPicture(handle: Int32, retryDeviceBusy: Bool) async throws -> Data? {
+        let revision = directContentRevision
+        for operation in [PtpConstants.shared.NK_GET_FHD_PICTURE, PtpConstants.shared.NK_GET_LARGE_THUMB] {
+            guard staPreviewPolicy.shouldRequest(operation: operation,
+                advertised: NikonStaBridge.shared.advertises(info: stationDeviceInfo, operation: operation)) else { continue }
+            var retries = retryDeviceBusy ? previewPolicy.busyRetries : 0
+            while true {
+                let result = try await previewCommand(operation: operation, handle: handle, limit: 32 * 1024 * 1024)
+                guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+                let payload = result.code == PtpConstants.shared.RESPONSE_OK ? result.payload : nil
+                let valid = try payload.map { try PreviewImageDecoder.cameraPreviewDimensions($0) != nil } ?? false
+                staPreviewPolicy.record(operation: operation, response: result.code, validJpeg: valid)
+                if valid { return payload }
+                if result.code == PtpConstants.shared.DEVICE_BUSY, retries > 0 {
+                    retries -= 1
+                    try await Task.sleep(nanoseconds: UInt64(previewPolicy.busyDelayMs) * 1_000_000)
+                    continue
+                }
+                break
+            }
+        }
+        guard let info = directInfos[handle], let name = info.fileName?.lowercased() else { return nil }
+        if name.hasSuffix(".nef") { return try await directRawPreview(info: info) }
+        guard name.hasSuffix(".jpg"),
+              let header = try await directPrefix(handle: handle, count: Int(min(info.size, 128 * 1024))) else { return nil }
+        // Shared MPF reader returns secondary images only, in original FHD/4K/VGA preference order.
+        for reference in NativeStaDirectBridge.shared.mpf(data: header as NSData, objectSize: info.size) {
+            guard let data = try await directPartial(handle: handle, offset: reference.offset, count: Int(reference.length)),
+                  data.count == Int(reference.length),
+                  NativeRawPreviewBridge.shared.isCompleteJpeg(data: data as NSData),
+                  try PreviewImageDecoder.rawPreviewPixels(data) > 0 else { continue }
+            guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+            return data
+        }
+        return nil
+    }
+
+    private func directThumbnail(handle: Int32, permitted: (@Sendable () async -> Bool)?) async throws -> Data? {
+        let revision = directContentRevision
+        if directThumbnailMisses.contains(handle) { return nil }
+        let info = try await directObjectInfo(handle: handle, permitted: permitted)
+        let name = info.fileName?.lowercased() ?? ""
+        if name.hasSuffix(".nef") { return try await directRawThumbnail(info: info, permitted: permitted) }
+        guard let header = try await directPrefix(handle: handle, count: Int(min(info.size, 128 * 1024)), permitted: permitted) else {
+            throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX)
+        }
+        if name.hasSuffix(".jpg"), let segment = NativeStaDirectBridge.shared.exifSegment(data: header as NSData) {
+            let start = Int(segment.offset), end = start + Int(segment.length)
+            guard start >= 0, end <= header.count else { throw PreviewImageError.invalidImage }
+            let envelope = Data([0xFF, 0xD8]) + header.subdata(in: start..<end) + Data([0xFF, 0xD9])
+            let data = try await directDecoder.embeddedExifThumbnailPNG(envelope)
+            guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+            return data
+        }
+        if name.hasSuffix(".mov") || name.hasSuffix(".mp4") {
+            if let range = NativeStaDirectBridge.shared.scannedJpeg(data: header as NSData) {
+                guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+                return header.subdata(in: Int(range.offset)..<(Int(range.offset) + Int(range.length)))
+            }
+            let maximum = Int(min(info.size, 8 * 1024 * 1024))
+            guard let data = try await directPrefix(handle: handle, count: maximum, permitted: permitted) else {
+                throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX)
+            }
+            guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+            if let range = NativeStaDirectBridge.shared.scannedJpeg(data: data as NSData) {
+                let start = Int(range.offset), end = start + Int(range.length)
+                guard start >= 0, end <= data.count else { throw PreviewImageError.invalidImage }
+                return data.subdata(in: start..<end)
+            }
+            let frame = try await directDecoder.videoThumbnail(data, fileExtension: name.hasSuffix(".mov") ? ".mov" : ".mp4")
+            guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+            if let frame { return frame }
+            if data.count == maximum { directThumbnailMisses.insert(handle); return nil }
+            throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.GET_THUMB)
+        }
+        // A completed JPEG header without an embedded thumbnail is a deterministic miss.
+        // RAW/video short reads must remain retryable instead of poisoning the negative cache.
+        if !name.hasSuffix(".jpg") { throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.GET_THUMB) }
+        guard header.count >= Int(min(info.size, 128 * 1024)) else {
+            throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX)
+        }
+        guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+        return nil
+    }
+
+    /// Original Nikon RAW grid route: smallest indexed JPEG, learned offset hint, then bounded
+    /// incremental TIFF/scan fallback. Unlike FHD, Android accepts SOI-only referenced thumbnails.
+    private func directRawThumbnail(info: PtpObjectInfo, permitted: (@Sendable () async -> Bool)?) async throws -> Data? {
+        let handle = info.handle, revision = directContentRevision, bridge = NativeStaDirectBridge.shared
+        func accept(_ data: Data?) -> Data? {
+            guard let data, data.count >= 2, data[data.startIndex] == 0xFF, data[data.startIndex + 1] == 0xD8 else { return nil }
+            return data
+        }
+        func slice(_ data: Data, _ range: NefPreviewReference) -> Data? {
+            guard range.offset >= 0, range.length > 0, range.offset <= Int64(data.count) - Int64(range.length) else { return nil }
+            return data.subdata(in: Int(range.offset)..<(Int(range.offset) + Int(range.length)))
+        }
+        if let reference = directRawReferences[handle]?.last {
+            let data = accept(try await directPartial(handle: handle, offset: reference.offset,
+                count: Int(reference.length), permitted: permitted))
+            guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+            guard let data else { throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.GET_THUMB) }
+            return data
+        }
+        if let hint = directRawHint, hint.offset >= 0, hint.offset < info.size,
+           let plan = bridge.rawThumbnailProbe(available: info.size - hint.offset, previous: hint.length) {
+            if var data = try await directPartial(handle: handle, offset: hint.offset, count: Int(plan.initialBytes), permitted: permitted) {
+                var range = bridge.scannedJpeg(data: data as NSData)
+                if range == nil, data.count < Int(plan.maximumBytes),
+                   let suffix = try await directPartial(handle: handle, offset: hint.offset + Int64(data.count),
+                        count: Int(plan.maximumBytes) - data.count, permitted: permitted) {
+                    data.append(suffix); range = bridge.scannedJpeg(data: data as NSData)
+                }
+                guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+                if let range, let result = slice(data, range) {
+                    let absolute = NefPreviewReference(offset: hint.offset + range.offset, length: range.length)
+                    directRawHint = absolute; directRawReferences[handle] = [absolute]
+                    return result
+                }
+            }
+        }
+        var accumulated = directHeaders[handle] ?? Data()
+        let maximum = Int(min(info.size, 16 * 1024 * 1024))
+        var referenced = false
+        for configured in [240, 256, 512, 1024, 2048, 4096, 8192, 16384] {
+            try Task.checkCancellation()
+            if let permitted, !(await permitted()) { throw CameraStreamError.operationInProgress }
+            let target = min(maximum, configured * 1024)
+            if accumulated.count < target {
+                guard let suffix = try await directPartial(handle: handle, offset: Int64(accumulated.count),
+                    count: target - accumulated.count, permitted: permitted) else {
+                    throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX)
+                }
+                accumulated.append(suffix)
+            }
+            guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+            directHeaders[handle] = Data(accumulated.prefix(512 * 1024))
+            directHeaderOrder.removeAll { $0 == handle }; directHeaderOrder.append(handle)
+            while directHeaderOrder.count > 4 { directHeaders.removeValue(forKey: directHeaderOrder.removeFirst()) }
+            let references = bridge.rawIndexed(data: accumulated as NSData)
+            if let reference = references.last {
+                referenced = true
+                if let data = accept(try await directPartial(handle: handle, offset: reference.offset,
+                    count: Int(reference.length), permitted: permitted)) {
+                    guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+                    directRawHint = reference; directRawReferences[handle] = references
+                    return data
+                }
+            }
+            if let range = bridge.scannedJpeg(data: accumulated as NSData), let result = slice(accumulated, range) {
+                guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+                directRawHint = range; directRawReferences[handle] = [range]
+                return result
+            }
+            if accumulated.count >= maximum {
+                if !referenced { directThumbnailMisses.insert(handle); return nil }
+                break
+            }
+            if accumulated.count < target { break }
+        }
+        throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.GET_THUMB)
+    }
+
+    private func directRawPreview(info: PtpObjectInfo,
+                                  permitted: (@Sendable () async -> Bool)? = nil) async throws -> Data? {
+        let handle = info.handle, revision = directContentRevision
+        let bridge = NativeStaDirectBridge.shared
+        var accumulated = directHeaders[handle] ?? Data()
+        let maximum = Int(min(info.size, 16 * 1024 * 1024))
+        guard maximum > 0 else { return nil }
+        var tried = Set<String>()
+        var bestScanned: Data?
+        for configured in [128, 240, 256, 512, 1024, 2048, 4096, 8192, 16384] {
+            try Task.checkCancellation()
+            if let permitted, !(await permitted()) { throw CameraStreamError.operationInProgress }
+            let target = min(maximum, configured * 1024)
+            if accumulated.count < target {
+                guard let suffix = try await directPartial(handle: handle, offset: Int64(accumulated.count),
+                    count: target - accumulated.count, permitted: permitted) else {
+                    throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX)
+                }
+                accumulated.append(suffix)
+            }
+            guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+            // A bounded four-prefix cache; the current 16 MiB scan buffer is not retained by the session.
+            directHeaders[handle] = Data(accumulated.prefix(512 * 1024))
+            directHeaderOrder.removeAll { $0 == handle }; directHeaderOrder.append(handle)
+            while directHeaderOrder.count > 4 { directHeaders.removeValue(forKey: directHeaderOrder.removeFirst()) }
+            let indexed = bridge.rawIndexed(data: accumulated as NSData)
+            let candidates = staPreviewPolicy.rawCandidates(values: indexed)
+            var fallback: Data?
+            for reference in candidates {
+                let key = "\(reference.offset):\(reference.length)"
+                guard reference.offset >= 0, reference.length > 0, reference.length <= 16 * 1024 * 1024,
+                      reference.offset <= info.size - Int64(reference.length), tried.insert(key).inserted else { continue }
+                let data: Data?
+                let end = reference.offset + Int64(reference.length)
+                if end <= Int64(accumulated.count) {
+                    data = accumulated.subdata(in: Int(reference.offset)..<Int(end))
+                } else {
+                    data = try await directPartial(handle: handle, offset: reference.offset,
+                        count: Int(reference.length), permitted: permitted)
+                }
+                guard let data, data.count == Int(reference.length),
+                      NativeRawPreviewBridge.shared.isCompleteJpeg(data: data as NSData),
+                      let bounds = try PreviewImageDecoder.cameraPreviewDimensions(data) else { continue }
+                guard revision == directContentRevision else { throw CameraStreamError.operationInProgress }
+                fallback = data
+                if staPreviewPolicy.rawPreviewAdequate(width: bounds.width, height: bounds.height) { return data }
+            }
+            if let fallback { return fallback }
+            if let range = bridge.scannedJpeg(data: accumulated as NSData) {
+                let end = Int(range.offset) + Int(range.length)
+                if end <= accumulated.count, Int(range.length) > (bestScanned?.count ?? 0) {
+                    bestScanned = accumulated.subdata(in: Int(range.offset)..<end)
+                }
+            }
+            if accumulated.count >= maximum { break }
+            if accumulated.count < target {
+                throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX)
+            }
+        }
+        if let bestScanned, try PreviewImageDecoder.rawPreviewPixels(bestScanned) > 0 { return bestScanned }
+        return nil
+    }
+
+    /// Same interactive owner for standard AP/STA and validated direct-STA previews.
     func fhdPicture(handle: Int32, retryDeviceBusy: Bool = true) async throws -> Data? {
         try await withInteractivePreviewPriority {
             try await self.readFhdPicture(handle: handle, retryDeviceBusy: retryDeviceBusy)
@@ -322,7 +781,8 @@ actor CameraWiFiConnection {
 
     private func readFhdPicture(handle: Int32, retryDeviceBusy: Bool) async throws -> Data? {
         try requirePhase(.ready)
-        if stationMode || previewPolicy.disabled { return nil }
+        if directObjectReadValidated { return try await directFhdPicture(handle: handle, retryDeviceBusy: retryDeviceBusy) }
+        if previewPolicy.disabled { return nil }
         var remaining = retryDeviceBusy ? previewPolicy.busyRetries : 0
         while true {
             try Task.checkCancellation()
@@ -337,8 +797,7 @@ actor CameraWiFiConnection {
         }
     }
 
-    /// Same partial-object command as Android readExifHeader. This standard AP/STA path does
-    /// not infer support or retry Busy; paired STA's recent-header cache remains a separate gate.
+    /// Same partial-object command and direct recent-header reuse as Android readExifHeader.
     func exifHeader(handle: Int32, maximumBytes: Int32) async throws -> Data? {
         try await withInteractivePreviewPriority {
             try await self.readExifHeader(handle: handle, maximumBytes: maximumBytes)
@@ -352,6 +811,9 @@ actor CameraWiFiConnection {
             throw CameraStreamError.invalidArgument
         }
         try requirePhase(.ready)
+        if directObjectReadValidated, let retained = directHeaders[handle] {
+            return Data(retained.prefix(Int(maximumBytes)))
+        }
         let parameters = (0..<Int(values.size)).map { values.get(index: Int32($0)) }
         do {
             let result = try await previewCommand(operation: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX,
@@ -549,6 +1011,20 @@ actor CameraWiFiConnection {
 
     private func receivedEvent(_ decoded: PtpIpEvent) async {
         guard phase == .opening || phase == .ready else { return }
+        if directObjectReadValidated {
+            if [Int32(0x4003), 0x4007].contains(decoded.code) {
+                directContentRevision &+= 1
+                let handle = Int32(truncatingIfNeeded: decoded.firstParameter)
+                directInfos.removeValue(forKey: handle); directHeaders.removeValue(forKey: handle)
+                directHeaderOrder.removeAll { $0 == handle }; directMetadata.invalidate(handle: handle)
+                directRawReferences.removeValue(forKey: handle); directThumbnailMisses.remove(handle); directRawHint = nil
+            } else if [Int32(0x4004), 0x4005, 0x400C].contains(decoded.code) {
+                directContentRevision &+= 1
+                directInfos.removeAll(); directHeaders.removeAll(); directHeaderOrder.removeAll()
+                directMetadata.clear(); directNamesLoaded = false; directNameValueSupported = nil
+                directRawReferences.removeAll(); directThumbnailMisses.removeAll(); directRawHint = nil
+            }
+        }
         // Never wrap a cursor into the range of an old history. Closing preserves fail-closed semantics.
         guard eventRevision < UInt64.max else { await abort(error: CameraStreamError.invalidArgument); return }
         eventRevision += 1
@@ -598,7 +1074,7 @@ actor CameraWiFiConnection {
                 effectiveSize = policy.resolvedSize(declared: declaredSize, queried: size)
             }
             let partial = policy.usePartial(support: partialSupport, size: effectiveSize, resume: resumeOffset,
-                                             highThroughput: highThroughput, forcePartial: false)
+                                             highThroughput: highThroughput, forcePartial: directObjectReadValidated)
             if policy.resumeUnavailable(offset: resumeOffset, partial: partial) { throw CameraDownloadError.resumeUnavailable }
             if partial {
                 var offset = resumeOffset
@@ -614,7 +1090,7 @@ actor CameraWiFiConnection {
                     let parameters = (0..<Int(values.size)).map { values.get(index: Int32($0)) }
                     let chunk = try await session.executeStreaming(
                         operationCode: PtpConstants.shared.NK_GET_PARTIAL_OBJECT_EX, parameters: parameters,
-                        maximumBytes: Int64.max - offset
+                        maximumBytes: directObjectReadValidated ? requested : Int64.max - offset
                     ) { data in
                         try consume(data)
                         received += Int64(data.count)

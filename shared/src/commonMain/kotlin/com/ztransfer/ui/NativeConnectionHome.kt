@@ -71,6 +71,7 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
     private var closed = false
     private var nextRequest = 1L
     private var retryChoice: NativeStationChoice? = null
+    private var celebratedRequest: Long? = null
     private val savedMode = platform?.readConnectionMode()
     private val mutableState = MutableStateFlow(NativeConnectionHomeState(
         stationMode = savedMode == "sta", preferencesUnavailable = savedMode !in setOf("ap", "sta")))
@@ -141,6 +142,7 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
         if (closed || requestId <= 0 || before.requestId != requestId ||
             phase !in setOf("connecting", "ready", "closing", "failed", "idle", "paired")) return false
         if (before.phase == "closing" && phase !in setOf("closing", "failed", "idle")) return false
+        if (before.phase == "ready" && phase in setOf("connecting", "paired")) return false
         if (before.phase in setOf("idle", "failed", "paired") && phase in setOf("connecting", "ready", "paired")) return false
         mutableState.value = before.copy(phase = phase, message = message,
             allowPairing = before.allowPairing && phase != "paired")
@@ -174,6 +176,11 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
     internal fun discover() {
         if (!closed && !mutableState.value.busy && mutableState.value.stationMode) platform?.discoverCameras()
     }
+    internal fun stopSearching() {
+        if (closed || mutableState.value.busy) return
+        platform?.stopDiscovering()
+        mutableState.value = mutableState.value.copy(searching = false)
+    }
     internal fun cancel() {
         val value = mutableState.value
         if (closed || value.phase != "connecting") return
@@ -186,8 +193,19 @@ class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
         mutableState.value = value.copy(phase = "closing")
         platform?.disconnectCamera(value.requestId)
     }
-    internal fun openFiles() { if (!closed && isReady()) platform?.openCameraFiles() }
-    internal fun openQueue() { if (!closed && isReady()) platform?.openTransferQueue() }
+    internal fun openFiles() {
+        if (!closed && isReady()) { celebratedRequest = currentRequestId(); platform?.openCameraFiles() }
+    }
+    internal fun openQueue() {
+        if (!closed && isReady()) { celebratedRequest = currentRequestId(); platform?.openTransferQueue() }
+    }
+    internal fun shouldCelebrate(requestId: Long): Boolean =
+        !closed && isReady() && requestId == currentRequestId() && celebratedRequest != requestId
+    internal fun celebrationFinished(requestId: Long) {
+        if (!shouldCelebrate(requestId)) return
+        celebratedRequest = requestId
+        platform?.openCameraFiles()
+    }
     internal fun settings() { if (!closed) platform?.openNetworkSettings() }
     fun close() {
         if (closed) return
@@ -209,6 +227,21 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
     val presentation = state.presentation()
     val selected = homeSelectedConnection(presentation.isConnectedToCamera, presentation.connectionType)
     val clock = remember { kotlin.time.TimeSource.Monotonic.markNow() }
+    val totalMs = CONNECT_CELEBRATE_DELAY_MS + CONNECTION_SUCCESS_DURATION_MS
+    val elapsed = remember(model, state.requestId, state.ready) {
+        mutableLongStateOf(if (!state.ready || model.shouldCelebrate(state.requestId)) 0L else totalMs)
+    }
+    LaunchedEffect(model, state.requestId, state.ready) {
+        val request = state.requestId
+        if (!model.shouldCelebrate(request)) return@LaunchedEffect
+        val started = kotlin.time.TimeSource.Monotonic.markNow()
+        while (model.shouldCelebrate(request)) {
+            // One display-synchronised clock drives the original Android timing curves.
+            // Scan startup remains owned by the session and never waits for this visual.
+            withFrameNanos { elapsed.longValue = started.elapsedNow().inWholeMilliseconds.coerceAtMost(totalMs) }
+            if (elapsed.longValue >= totalMs) { model.celebrationFinished(request); break }
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = androidx.compose.ui.platform.LocalDensity.current
         val widthPx = with(density) { maxWidth.toPx() }
@@ -231,8 +264,10 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
                 else listOf(label("在相机中启用 Wi-Fi 热点，然后在 iPhone 的系统设置中加入该热点。没有互联网连接是正常现象。", "Enable the camera Wi-Fi hotspot and join it in iPhone Settings. No Internet connection is expected.")),
                 modeSelector = { WifiModeTabs(selectedMode = presentation.wirelessMode, enabled = !state.busy,
                     onSelectAp = { model.setStationMode(false) }, onSelectSta = { model.setStationMode(true) }) },
-                selected = state.ready, success = state.ready, attentionActive = !state.busy,
-                attentionPhaseOffset = 0f, selectionSceneProgress = { 0f }, successEffectProgress = { 1f },
+                selected = state.ready, success = state.ready && elapsed.longValue >= CONNECT_CELEBRATE_DELAY_MS,
+                attentionActive = !state.busy,
+                attentionPhaseOffset = 0f, selectionSceneProgress = { connectionHeroProgress(elapsed.longValue) },
+                successEffectProgress = { connectionSuccessProgress(elapsed.longValue) },
                 feedbackFollowsModeSelector = true,
                 feedback = when (state.phase) {
                     "connecting" -> ConnectionCardFeedback(label("正在连接…", "Connecting…"),
@@ -284,7 +319,12 @@ internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: St
                     TextButton(onClick = model::discover, enabled = !state.busy && !state.searching) {
                         Text(label("查找相机 / 历史与已配对相机", "Find cameras / history and paired cameras"))
                     }
-                    if (state.searching) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (state.searching) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        TextButton(onClick = model::stopSearching, enabled = !state.busy) {
+                            Text(label("停止查找", "Stop searching"))
+                        }
+                    }
                     state.discoveryMessage?.let { Text(it, color = AppTheme.colors.onSurfaceVariant) }
                     state.choices.forEach { choice ->
                         OutlinedButton(onClick = { model.choose(choice) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {

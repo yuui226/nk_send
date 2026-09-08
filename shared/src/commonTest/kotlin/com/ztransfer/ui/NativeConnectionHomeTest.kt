@@ -6,6 +6,56 @@ import com.ztransfer.ui.screen.homeSelectedConnection
 import kotlin.test.*
 
 class NativeConnectionHomeTest {
+    @Test fun stoppingDiscoveryRetainsChoicesAndCannotCancelAnActiveConnection() {
+        val p = Platform(); val m = NativeConnectionHomeModel(p); m.setStationMode(true)
+        val choice = NativeStationChoice("one", "Camera", "Bonjour", false)
+        m.publishChoices(listOf(choice), true, null); val stopped = p.stops
+        m.stopSearching(); assertEquals(stopped + 1, p.stops)
+        assertFalse(m.state.value.searching); assertEquals(listOf(choice), m.state.value.choices)
+        m.choose(choice); m.stopSearching(); assertEquals(stopped + 1, p.stops)
+        assertEquals("connecting", m.currentPhase())
+    }
+    @Test fun celebrationNavigatesOnceOnlyForActualReadyRequest() {
+        val p = Platform(); val m = NativeConnectionHomeModel(p)
+        m.connect(); val request = m.currentRequestId()
+        m.celebrationFinished(request); assertEquals(0, p.files)
+        m.publish(request, "ready", null)
+        assertTrue(m.shouldCelebrate(request))
+        m.celebrationFinished(request); m.celebrationFinished(request)
+        assertEquals(1, p.files); assertFalse(m.shouldCelebrate(request))
+        assertFalse(m.publish(request, "connecting", "late"))
+        assertFalse(m.publish(request, "paired", "late"))
+    }
+    @Test fun lateCelebrationCannotUndoCancelFailureDisconnectOrClose() {
+        for (terminal in listOf("cancel", "failed", "disconnect", "close")) {
+            val p = Platform(); val m = NativeConnectionHomeModel(p)
+            m.connect(); val request = m.currentRequestId()
+            when (terminal) {
+                "cancel" -> m.cancel()
+                "failed" -> m.publish(request, "failed", null)
+                "disconnect" -> { m.publish(request, "ready", null); m.disconnect() }
+                else -> { m.publish(request, "ready", null); m.close() }
+            }
+            m.celebrationFinished(request); assertEquals(0, p.files)
+        }
+    }
+    @Test fun manualNavigationAndReconnectFenceCelebrationCallbacks() {
+        val p = Platform(); val m = NativeConnectionHomeModel(p)
+        m.connect(); val old = m.currentRequestId(); m.publish(old, "ready", null)
+        m.openQueue(); m.celebrationFinished(old); assertEquals(0, p.files); assertEquals(1, p.queues)
+        m.disconnect(); m.publish(old, "idle", null); m.connect()
+        val current = m.currentRequestId(); m.publish(current, "ready", null)
+        m.celebrationFinished(old); assertEquals(0, p.files)
+        m.celebrationFinished(current); assertEquals(1, p.files)
+    }
+    @Test fun originalConnectionTimingBoundariesArePreserved() {
+        assertEquals(0f, com.ztransfer.ui.screen.connectionHeroProgress(-1))
+        assertEquals(0.5f, com.ztransfer.ui.screen.connectionHeroProgress(310))
+        assertEquals(1f, com.ztransfer.ui.screen.connectionHeroProgress(620))
+        assertEquals(0f, com.ztransfer.ui.screen.connectionSuccessProgress(499))
+        assertEquals(0f, com.ztransfer.ui.screen.connectionSuccessProgress(500))
+        assertEquals(1f, com.ztransfer.ui.screen.connectionSuccessProgress(1260))
+    }
     @Test fun apDefaultAddressRecoveryCannotChangeStationOrActiveSession() {
         val m = NativeConnectionHomeModel(Platform())
         m.editAddress("bad:15740"); m.connect(); assertEquals("failed", m.currentPhase())

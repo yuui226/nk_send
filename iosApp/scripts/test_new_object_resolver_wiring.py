@@ -95,7 +95,9 @@ class NewObjectResolverWiringTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 previous_new_object_resolver_source(path, raw_read(path).replace(old, new))
         raw = raw_read(CONNECTION).replace('initialTransactionId: stationMode ? -1 : 0', 'initialTransactionId: 0')
-        self.assertNotEqual(before(CONNECTION), previous_new_object_resolver_source(CONNECTION, raw))
+        # Full-file fingerprints now reject unrelated mutations before historical inversion.
+        with self.assertRaises(AssertionError):
+            previous_new_object_resolver_source(CONNECTION, raw)
 
     def test_apple_scenarios_are_registered_as_source_not_claimed_as_execution(self):
         value = read('iosApp/ZTransferTests/CameraNetworkTests.swift')

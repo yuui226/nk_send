@@ -8,6 +8,39 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun incrementalRowsAreVisibleButFailureRestoresTheCompleteCatalog() {
+        val m = model()
+        assertTrue(m.finishScan(m.beginScan(), snapshot()))
+        val original = m.state.value
+        val sequence = m.beginScan()
+        val batch = NativeFilesPageSnapshot("camera", false, false).also {
+            it.addFile(9, 10, "NEW.JPG", "20260906T120000", false, intArrayOf(0x10001))
+        }
+        assertTrue(m.publishScanBatch(sequence, batch))
+        assertTrue(m.state.value.scanning)
+        assertEquals(setOf(1, 2, 3, 9), m.state.value.files.map { it.handle }.toSet())
+        assertEquals(original.scanSequence, m.state.value.scanSequence)
+        assertFalse(m.finishScan(sequence, null))
+        assertEquals(original.files, m.state.value.files)
+        assertEquals(NativeFilesNotice.SCAN_FAILED, m.state.value.notice)
+        assertEquals(0, m.currentScanSequence())
+    }
+
+    @Test fun lateForeignAndRacedBatchesCannotChangeRowsOrNormalizeFilters() {
+        val m = model()
+        val sequence = m.beginScan()
+        assertFalse(m.publishScanBatch(sequence + 1, snapshot()))
+        assertFalse(m.publishScanBatch(sequence, snapshot(connection = "other")))
+        assertFalse(m.publishScanBatch(sequence, snapshot(changed = true)))
+        assertTrue(m.state.value.files.isEmpty())
+        assertTrue(m.publishScanBatch(sequence, snapshot(complete = false)))
+        assertFalse(m.state.value.hasSnapshot)
+        assertTrue(m.finishScan(sequence, snapshot()))
+        assertFalse(m.publishScanBatch(sequence, snapshot()))
+        m.close()
+        assertEquals(0, m.currentScanSequence())
+    }
+
     @Test fun explicitTransferPreferenceReloadDoesNotRecreateCatalogOrBrowseState() {
         val p = Platform(); val m = model(p)
         m.finishScan(m.beginScan(), snapshot()); m.setOrganizeByDate(true); m.setDeferStart(true)

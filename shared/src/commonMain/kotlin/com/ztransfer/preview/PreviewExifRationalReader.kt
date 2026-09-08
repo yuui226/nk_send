@@ -91,6 +91,15 @@ object PreviewExifRationalReader {
             var base = 0L; var end = size
             // Android retains visited relative offsets and attribute bytes across JPEG APP1s.
             val visited = mutableSetOf<Long>()
+            // Android getRawAttributes probes primary/preview/thumbnail JPEGs only when that
+            // directory lacks an image dimension. MakerNote bytes are not arbitrary JPEG input.
+            class ImageDirectory {
+                var width = false
+                var height = false
+                var offset: Long? = null
+                var length: Long? = null
+            }
+            val images = mutableListOf<ImageDirectory>()
             fun parseTiff(segmentBase: Long, segmentEnd: Long) {
                 base = segmentBase; end = segmentEnd
                 val order = bytes(base, 2, end)
@@ -112,12 +121,23 @@ object PreviewExifRationalReader {
                     val start = absolute(relative)
                     val count = u16(bytes(start, 2, end), 0).toShort().toInt()
                     if (count <= 0) return // Android reads this field as signed short, including zero.
+                    val image = if (captureMetadata && kind == DirectoryKind.TIFF)
+                        ImageDirectory().also(images::add) else null
                     repeat(count) { index ->
                         // Read in encounter order: a truncated later entry must not erase earlier values.
                         val entries = bytes(start + 2 + index * 12L, 12, end)
                         val at = 0
                         val tag = u16(entries, at); val encodedType = u16(entries, at + 2)
                         val components = u32(entries, at + 4)
+                        if (image != null && components == 1L && encodedType in setOf(3, 4, 7)) {
+                            val scalar = if (encodedType == 3) u16(entries, 8).toLong() else u32(entries, 8)
+                            when (tag) {
+                                0x0100 -> image.width = true
+                                0x0101 -> image.height = true
+                                0x0201 -> image.offset = scalar
+                                0x0202 -> image.length = scalar
+                            }
+                        }
                         // Even non-numeric GPS/interop visits matter: a later EXIF pointer to an
                         // already visited relative offset must not reinterpret that directory.
                         val pointerKind = when {
@@ -174,27 +194,42 @@ object PreviewExifRationalReader {
                 // Each APP1 root is read even if its relative offset was already seen.
                 ifd(first, DirectoryKind.TIFF, 0, root = true)
             }
-            val signature = bytes(0, 2)
-            recognized = signature.contentEquals(byteArrayOf(-1, -40)) ||
-                signature.contentEquals(byteArrayOf(73, 73)) || signature.contentEquals(byteArrayOf(77, 77))
-            if (signature[0] == 0xFF.toByte() && signature[1] == 0xD8.toByte()) {
-                var offset = 2L
-                while (offset < size) {
-                    if (bytes(offset++, 1)[0] != 0xFF.toByte()) throw Invalid()
-                    var marker = bytes(offset++, 1)[0].toInt() and 255
-                    while (marker == 255) marker = bytes(offset++, 1)[0].toInt() and 255
+            fun parseJpeg(start: Long, limit: Long) {
+                if (start != 0L && !bytes(start, 2, limit).contentEquals(byteArrayOf(-1, -40))) throw Invalid()
+                var offset = start + 2
+                while (offset < limit) {
+                    if (bytes(offset++, 1, limit)[0] != 0xFF.toByte()) throw Invalid()
+                    var marker = bytes(offset++, 1, limit)[0].toInt() and 255
+                    while (marker == 255) marker = bytes(offset++, 1, limit)[0].toInt() and 255
                     if (marker == 0xDA || marker == 0xD9) break
                     if (marker == 0x01 || marker in 0xD0..0xD7) continue
-                    val lengthBytes = bytes(offset, 2)
+                    val lengthBytes = bytes(offset, 2, limit)
                     val length = ((lengthBytes[0].toInt() and 255) shl 8) or (lengthBytes[1].toInt() and 255)
-                    if (length < 2 || length.toLong() > size - offset) throw Invalid()
-                    if (marker == 0xE1 && length >= 8 && bytes(offset + 2, 6).contentEquals(byteArrayOf(69, 120, 105, 102, 0, 0))) {
+                    if (length < 2 || length.toLong() > limit - offset) throw Invalid()
+                    if (marker == 0xE1 && length >= 8 && bytes(offset + 2, 6, limit).contentEquals(byteArrayOf(69, 120, 105, 102, 0, 0))) {
                         parseTiff(offset + 8, offset + length)
                     }
                     offset += length
                 }
+            }
+            val signature = bytes(0, 2)
+            recognized = signature.contentEquals(byteArrayOf(-1, -40)) ||
+                signature.contentEquals(byteArrayOf(73, 73)) || signature.contentEquals(byteArrayOf(77, 77))
+            if (signature[0] == 0xFF.toByte() && signature[1] == 0xD8.toByte()) {
+                parseJpeg(0, size)
             } else {
                 parseTiff(0, size)
+                if (captureMetadata) {
+                    for (image in images.toList().take(3)) {
+                        if (image.width && image.height) continue
+                        val offset = image.offset ?: continue
+                        if (image.length == null) continue
+                        // Pinned AndroidX 1.3.7 reads the offset attribute twice here: the second
+                        // value is its buffer length. Lock this quirk, do not silently fix it.
+                        if (offset <= 0 || offset > 8 * 1024 * 1024 || offset > size - offset) continue
+                        parseJpeg(offset, offset + offset)
+                    }
+                }
             }
             // ExifInterface stores bytes, not normalized numbers; getAttribute uses the final
             // EXIF byte order even for attributes retained from a preceding APP1 segment.

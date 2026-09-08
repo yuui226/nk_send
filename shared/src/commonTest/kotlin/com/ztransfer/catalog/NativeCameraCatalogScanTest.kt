@@ -4,6 +4,40 @@ import com.ztransfer.protocol.PtpObjectInfo
 import kotlin.test.*
 
 class NativeCameraCatalogScanTest {
+    @Test fun directModeRequiresStationAndMustBeChosenBeforeEnumeration() {
+        assertFalse(NativeCameraCatalogScan(intArrayOf(0x10001), false).enableDirectObjectReads())
+        val scan = NativeCameraCatalogScan(intArrayOf(0x10001), true)
+        scan.addHandles(0, intArrayOf(1)); assertFalse(scan.enableDirectObjectReads())
+    }
+    @Test fun directCrossSlotAliasesDisableFilteringAndReadEachHandleOnce() {
+        val scan = NativeCameraCatalogScan(intArrayOf(0x10001, 0x20001), true)
+        assertTrue(scan.enableDirectObjectReads())
+        scan.addHandles(0, intArrayOf(1, 2)); scan.addHandles(1, intArrayOf(2, 3)); scan.begin()
+        val reads = mutableListOf<Int>()
+        while (true) {
+            val handle = scan.nextReadHandle()
+            if (handle != null) { reads += handle; scan.accept(handle, info(handle, store = 0)) }
+            else if (!scan.publishNext()) break
+        }
+        assertEquals(3, reads.size); assertEquals(3, reads.toSet().size)
+        assertEquals(3, scan.rowCount); assertEquals(3, scan.totalHandles)
+        assertTrue(scan.filterStorageIds().isEmpty())
+        repeat(scan.rowCount) { assertTrue(scan.fileAt(it)!!.storageIds.isEmpty()) }
+    }
+    @Test fun directReliableMembershipUsesEnumerationNotObjectInfoStorage() {
+        val scan = NativeCameraCatalogScan(intArrayOf(0x10001, 0x20001), true)
+        scan.enableDirectObjectReads(); scan.addHandles(0, intArrayOf(1)); scan.addHandles(1, intArrayOf(2)); scan.begin()
+        assertEquals(0x10001, scan.directReadStorageId(1)); assertEquals(0x20001, scan.directReadStorageId(2))
+        assertEquals(0, scan.directReadStorageId(999))
+        while (true) {
+            val handle = scan.nextReadHandle()
+            if (handle != null) scan.accept(handle, info(handle, store = 0, name = "backup.JPG"))
+            else if (!scan.publishNext()) break
+        }
+        assertEquals(1, scan.rowCount)
+        assertEquals(setOf(0x10001, 0x20001), scan.fileAt(0)!!.storageIds)
+        assertContentEquals(intArrayOf(0x10001, 0x20001), scan.filterStorageIds())
+    }
     private fun info(handle: Int, store: Int = 0x10001, name: String = "$handle.JPG",
                      date: String? = "20260905T120000", folder: Boolean = false, complete: Boolean = true) =
         PtpObjectInfo(handle, store, if (folder) 0x3001 else 0x3801, 10, name, date, false, folder, complete)

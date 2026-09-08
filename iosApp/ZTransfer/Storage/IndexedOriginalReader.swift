@@ -19,7 +19,7 @@ final class IndexedOriginalReader {
     /// Read only the captured index entry. The caller owns the directory grant/coordinated lifetime.
     /// No network access or index rescan on a preview request; deletion/size change fails locally.
     func originalData(locator: String) throws -> Data {
-        try withOriginalInput(locator: locator, maximumFileBytes: Int64(Int32.max)) { input, size in
+        try withOriginalInput(locator: locator, maximumFileBytes: 256 * 1024 * 1024) { input, size in
             var data = Data()
             var remaining = size
             while remaining > 0 {

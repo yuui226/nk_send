@@ -64,4 +64,6 @@ class HandleBaselineWiringTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             previous_handle_baseline_source(CATALOG, changed)
         changed = raw.replace('else if !scan.publishNext() { break }', 'else if !scan.publishNext() { continue }')
-        self.assertNotEqual(before(CATALOG), previous_handle_baseline_source(CATALOG, changed))
+        # Full-file fingerprints now reject unrelated mutations before historical inversion.
+        with self.assertRaises(AssertionError):
+            previous_handle_baseline_source(CATALOG, changed)

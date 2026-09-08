@@ -16,7 +16,10 @@ class RawPreviewExtractionTest(unittest.TestCase):
         ).decode('utf-8').replace('\r\n', '\n')
 
     def test_entire_android_file_only_changes_to_parser_delegates(self):
-        self.assertEqual(migration.android(self.before), (ROOT / migration.ANDROID).read_text(encoding='utf-8'))
+        import sta_media_extraction as sta
+        sta.verify()
+        actual = sta.previous_sta_media_source(migration.ANDROID, (ROOT / migration.ANDROID).read_text(encoding='utf-8'))
+        self.assertEqual(migration.android(self.before), actual)
 
     def test_entire_common_parser_matches_original_except_visibility_and_ascii_adapter(self):
         self.assertEqual(migration.common(self.before), (ROOT / migration.COMMON).read_text(encoding='utf-8'))

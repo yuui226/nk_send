@@ -78,8 +78,11 @@ class CatalogAliasIndexWiringTest(unittest.TestCase):
                                (BASELINE, 'knownHandles = previous - delta.removed', 'knownHandles = current')):
             with self.assertRaises(AssertionError):
                 previous_catalog_alias_index_source(path, raw_read(path).replace(old, new))
-        changed = raw_read(SCAN).replace('newestFirstHandleOrders(batches.filterNotNull())', 'emptyList()')
-        self.assertNotEqual(before(SCAN), previous_catalog_alias_index_source(SCAN, changed))
+        current = raw_read(SCAN)
+        self.assertEqual(current.count('orders = newestFirstHandleOrders(inputs)'), 1)
+        changed = current.replace('orders = newestFirstHandleOrders(inputs)', 'orders = emptyList()')
+        with self.assertRaises(AssertionError):
+            previous_catalog_alias_index_source(SCAN, changed)
 
     def test_real_apple_scan_partial_failure_and_idle_baseline_scenarios_are_present(self):
         cases = read('iosApp/ZTransferTests/CameraNetworkTests.swift')

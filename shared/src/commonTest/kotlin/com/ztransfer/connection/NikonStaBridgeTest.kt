@@ -5,6 +5,11 @@ import com.ztransfer.protocol.PtpConstants
 import kotlin.test.*
 
 class NikonStaBridgeTest {
+    @Test fun optionalMetadataCommandsRequireActualAdvertisedOperations() {
+        val info = LabDeviceInfo("Nikon", "Test", "1", "", 0, 0, "", setOf(0x9434), emptySet(), emptySet())
+        assertTrue(NikonStaBridge.advertises(info, 0x9434))
+        assertFalse(NikonStaBridge.advertises(info, 0x9805)); assertFalse(NikonStaBridge.advertises(null, 0x9434))
+    }
     @Test
     fun storageAndForcedPairingKeepExistingDecisions() {
         for (code in listOf(PtpConstants.RESPONSE_OK, PtpConstants.DEVICE_BUSY, 0x200F)) {

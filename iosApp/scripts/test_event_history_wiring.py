@@ -57,7 +57,9 @@ class EventHistoryWiringTest(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 previous_event_history_source(CONNECTION, raw.replace(old, new))
         changed = raw.replace('initialTransactionId: stationMode ? -1 : 0', 'initialTransactionId: 0')
-        self.assertNotEqual(before(CONNECTION), previous_event_history_source(CONNECTION, changed))
+        # Full-file fingerprints now reject unrelated mutations before historical inversion.
+        with self.assertRaises(AssertionError):
+            previous_event_history_source(CONNECTION, changed)
         cases = read(TESTS)
         for token in ('testEventHistoryPreservesOrderedDecodedFieldsAcrossAPAndStationWithoutAnotherStreamConsumer',
                       'testEventHistoryOverflowReportsGapAndNeverReturnsAnIncompleteTailAsComplete',

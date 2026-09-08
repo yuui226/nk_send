@@ -39,10 +39,12 @@ class FilesPageWiringTest(unittest.TestCase):
     def test_bridge_uses_real_catalog_and_existing_queue_without_another_consumer(self):
         root=Path(__file__).resolve().parents[2]
         s=(root/'iosApp/ZTransfer/UI/OriginalFilesPage.swift').read_text(encoding='utf-8')
-        self.assertIn('try await self.catalog.refresh()', s)
+        self.assertIn('try await self.catalog.refresh(onBatch:', s)
+        self.assertIn('await self?.acceptBatch(value, sequence: sequence)', s)
         self.assertIn('await self.queue.enqueueCatalog', s)
         self.assertIn('SharedUiController.shared.originalFiles', s)
         self.assertNotIn('for await', s)
         self.assertNotIn('queue.stop', s)
         self.assertNotIn('queue.updates', s)
-        self.assertLess(s.index('guard model.finishScan'), s.index('Dictionary(uniqueKeysWithValues:'))
+        self.assertLess(s.index('guard accepted else'), s.index('Dictionary(uniqueKeysWithValues:'))
+        self.assertIn(': model.finishScan(sequence: sequence, snapshot: snapshot)', s)

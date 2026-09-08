@@ -120,7 +120,62 @@ public final class ExifRationalOracle {
             check(jpeg(bytes), name + " JPEG little=" + little);
         }
     }
+    static byte[] rawWithEmbeddedJpeg(boolean dimensions, boolean makerOnly) {
+        byte[] inner = jpeg(tiff(List.of(new Tag(0x829D, 5, 1, 8, 1)), true));
+        ByteBuffer b = ByteBuffer.allocate(2048).order(ByteOrder.LITTLE_ENDIAN);
+        b.putShort((short)0x4949).putShort((short)42).putInt(8).putShort((short)(dimensions ? 5 : 3));
+        b.putShort((short)0x8769).putShort((short)4).putInt(1).putInt(96);
+        b.putShort((short)0x0201).putShort((short)4).putInt(1).putInt(512);
+        b.putShort((short)0x0202).putShort((short)4).putInt(1).putInt(inner.length);
+        if (dimensions) {
+            b.putShort((short)0x0100).putShort((short)4).putInt(1).putInt(40);
+            b.putShort((short)0x0101).putShort((short)4).putInt(1).putInt(30);
+        }
+        b.putInt(0).position(96);
+        b.putShort((short)1).putShort((short)(makerOnly ? 0x927c : 0x829D))
+            .putShort((short)(makerOnly ? 7 : 5)).putInt(makerOnly ? inner.length : 1).putInt(128).putInt(0);
+        if (makerOnly) b.position(128).put(inner); else b.putInt(128, 4).putInt(132, 1);
+        b.position(512).put(inner);
+        return b.array();
+    }
+    static void checkMetadata(byte[] bytes, String description) throws Exception {
+        ExifInterface android = new ExifInterface(new ByteArrayInputStream(bytes));
+        PreviewExifByteSource source = (offset, count) -> Arrays.copyOfRange(bytes, Math.toIntExact(offset), Math.toIntExact(offset) + count);
+        NativePreviewExifValues actual = new NativePreviewExifValues();
+        PreviewExifRationalReader.INSTANCE.readMetadata(source, bytes.length, false).applyTo(actual);
+        for (int i = 0; i < TAGS.length; i++) {
+            String expected = android.getAttribute(NAMES[i]), observed = actual.attribute(TAGS[i]);
+            if (!Objects.equals(originalFloat(expected), originalFloat(observed)))
+                throw new AssertionError(description + " " + NAMES[i] + ": Android=" + expected + " Native=" + observed);
+        }
+        String[] names = {ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, ExifInterface.TAG_LENS_MODEL,
+            ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_DATETIME_DIGITIZED, ExifInterface.TAG_DATETIME,
+            ExifInterface.TAG_GPS_LATITUDE_REF, ExifInterface.TAG_GPS_LATITUDE, ExifInterface.TAG_GPS_LONGITUDE_REF, ExifInterface.TAG_GPS_LONGITUDE};
+        PreviewExifTag[] tags = {PreviewExifTag.PHOTOGRAPHIC_SENSITIVITY, PreviewExifTag.LENS_MODEL,
+            PreviewExifTag.DATETIME_ORIGINAL, PreviewExifTag.DATETIME_DIGITIZED, PreviewExifTag.DATETIME,
+            PreviewExifTag.GPS_LATITUDE_REF, PreviewExifTag.GPS_LATITUDE, PreviewExifTag.GPS_LONGITUDE_REF, PreviewExifTag.GPS_LONGITUDE};
+        for (int i = 0; i < tags.length; i++) if (!Objects.equals(android.getAttribute(names[i]), actual.attribute(tags[i])))
+            throw new AssertionError(description + " " + names[i] + ": Android=" + android.getAttribute(names[i]) + " Native=" + actual.attribute(tags[i]));
+        checked++;
+    }
+    static byte[] metadataText(boolean little, String lens) {
+        byte[] text = (lens + "\0").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] date = "2026:09:08 11:12:13\0".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        ByteBuffer b = ByteBuffer.allocate(512).order(little ? ByteOrder.LITTLE_ENDIAN : ByteOrder.BIG_ENDIAN);
+        b.put((byte)(little ? 73 : 77)).put((byte)(little ? 73 : 77)).putShort((short)42).putInt(8)
+            .putShort((short)1).putShort((short)0x8769).putShort((short)4).putInt(1).putInt(26).putInt(0)
+            .putShort((short)3).putShort((short)0x8827).putShort((short)3).putInt(2).putShort((short)64).putShort((short)100)
+            .putShort((short)0xA434).putShort((short)2).putInt(text.length).putInt(128)
+            .putShort((short)0x9003).putShort((short)2).putInt(date.length).putInt(256).putInt(0);
+        b.position(128).put(text); b.position(256).put(date);
+        return b.array();
+    }
     public static void main(String[] args) throws Exception {
+        for (boolean dimensions : new boolean[]{true, false}) for (boolean maker : new boolean[]{true, false})
+            checkMetadata(rawWithEmbeddedJpeg(dimensions, maker), "RAW embedded dimensions=" + dimensions + " MakerNote=" + maker);
+        for (boolean little : new boolean[]{true, false}) for (String lens : new String[]{" NIKKOR Z ", "镜头 Ω", "A\u0001B\u0002C"})
+            for (byte[] input : new byte[][]{metadataText(little, lens), jpeg(metadataText(little, lens))})
+                checkMetadata(input, "text/ISO/date endian=" + little + " lens=" + lens);
         for (boolean little : new boolean[]{true,false}) {
             byte[] full = tiff(List.of(new Tag(0x829D, 5, 1, 28, 10), new Tag(0x9204, 10, 1, -2, 3)), little);
             for (byte[] container : new byte[][]{full, jpeg(full)}) {
@@ -170,6 +225,7 @@ public final class ExifRationalOracle {
             variants(tags, "seeded case=" + caseId);
         }
         System.out.println("PASS AndroidX 1.3.7 actual decoder: " + checked + " TIFF/JPEG samples, five numeric fields and visible preview equality");
-        System.out.println("NOT PROVEN: ImageIO/Swift/Native execution, thumbnail/preview occupancy, embedded RAW JPEG attributes or malformed-file equivalence.");
+        System.out.println("Includes RAW embedded numeric attributes with/without primary dimensions and opaque MakerNote bytes.");
+        System.out.println("NOT PROVEN: ImageIO/Swift/Native execution, camera-specific files, other metadata formats or arbitrary malformed-file equivalence.");
     }
 }

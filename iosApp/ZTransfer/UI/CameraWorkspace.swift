@@ -13,7 +13,6 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
     private var discoveryObservation: AnyCancellable?
     private var observations = Set<AnyCancellable>()
     private var closed = false
-    private var pendingFilesNavigation = false
     private var expectedResponderGUID: String?
     private let connectionPreferences: CameraConnectionPreferences
 
@@ -25,14 +24,6 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
         self.session.$productState.sink { [weak self] value in
             guard let self, let value, !self.closed else { return }
             _ = self.model.publish(requestId: value.requestID, phase: value.phase, message: value.message)
-        }.store(in: &observations)
-        self.session.$scanningCatalog.sink { [weak self] scanning in
-            guard !scanning else { return }
-            Task { @MainActor [weak self] in
-                guard let self, self.pendingFilesNavigation, !self.closed, self.model.isReady() else { return }
-                self.pendingFilesNavigation = false
-                self.session.openSharedFiles()
-            }
         }.store(in: &observations)
     }
 
@@ -51,24 +42,18 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
     }
     func cancelConnection(requestId: Int64) {
         guard session.productState?.requestID == requestId else { return }
-        pendingFilesNavigation = false
         session.cancel() // Cancels automatic admission synchronously before any async queue teardown.
     }
     func disconnectCamera(requestId: Int64) {
         guard !closed, session.productState?.requestID == requestId else { return }
-        pendingFilesNavigation = false
         session.disconnect()
     }
     func openCameraFiles() {
         guard !closed, model.isReady(), session.sessionReady else { return }
-        if session.scanningCatalog {
-            pendingFilesNavigation = true
-            _ = model.publish(requestId: model.currentRequestId(), phase: "ready", message: "正在读取首次照片目录，完成后打开。 / Reading the first catalog; photos will open when ready.")
-        } else { session.openSharedFiles() }
+        session.openSharedFiles() // Ready navigation may show incremental rows from the existing scan.
     }
     func openTransferQueue() {
         guard !closed, model.isReady(), session.sessionReady else { return }
-        pendingFilesNavigation = false
         session.openSharedQueue()
     }
     func openNetworkSettings() {
@@ -176,14 +161,12 @@ final class CameraWorkspaceBridge: NSObject, ObservableObject, NativeConnectionH
         }
     }
     func enterBackground() {
-        pendingFilesNavigation = false
         stopDiscovering()
         session.cancel()
     }
     func close() {
         guard !closed else { return }
         model.close(); closed = true
-        pendingFilesNavigation = false
         discovery?.stop(); discoveryObservation = nil
         session.cancel(); observations.removeAll()
     }
