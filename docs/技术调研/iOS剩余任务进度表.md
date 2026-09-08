@@ -3,9 +3,79 @@
 > 后续执行和报进度优先读本文件。原[实现任务清单](./iOS实现任务清单.md)保留功能总账和历史证据，不再凭批次数估算百分比。
 > 基准：2026-09-06，`research/ios`，`42abf5b`（第59批结束）。本表是该检查点之后的剩余工作，不要求重写已经完成的代码。
 
+## 新会话接手入口（先读，2026-09-08更新）
+
+本文件是项目接续的唯一进度入口。新会话在同一仓库收到“按此文档继续”后，应核实代码状态并继续实现，不必让用户重述历史，不要仅重新列计划。以下是已确认的项目要求；新的用户指令及仓库AGENTS.md优先。不要把文档里的历史“已授权”当作跳过当前工具权限或擅自发布的许可。
+
+### 我们在做什么
+
+- 为现有Android应用“Z传”实现同仓库iOS传图版。核心目标是复用已有业务规则与可共享UI，减少两套逻辑的重复维护，保持Android已有功能和体验不变。
+- Android业务共享化已完成；当前做的是iOS实现及完整传图流程接线，不是重新迁移Android，也不是另做一个只有相似外观的演示App。
+- 本轮目标：在Windows完成所有能做的代码、接线、测试样本与适用验证，再交给Mac完成Apple编译及真机验收。用户有MacBook Air M1，但当前不要求启动Mac。Windows还有实质工作，不能把尚能实现的内容一概归为“等Mac”。
+- 两处照片效果、会员/支付、遥控监看、GPS发送暂缓；照片已有GPS元数据读取、相机已有视频文件传输不随之暂缓。iOS不新增USB Host入口，不承诺无限后台传输。按Android实际已有能力对照，不擅增视频播放器或相机删除能力。
+
+### 先确认仓库，不要切回旧master
+
+- 本机仓库：`D:\code\nk_send`；当前开发分支：`research/ios`；远端：`origin`，`https://github.com/yuui226/nk_send.git`。
+- 最近已提交并推送的代码检查点：`7dd094d`（审计修复），前一实现检查点`8503823`，该实现批次之前基线`ca00994`。两次提交均已推送，不是“修复还没提交”。本次交接说明更新仅改文档，是否已提交必须以新会话实际Git状态为准。
+- 交接核对时，本地`master`仍为`a6b679a`，尚未纳入共享化迁移；`research/ios`比它多104个提交。这是时间点快照，后续先核实，不硬编码。用户只咨询过合回master的方案，**尚未要求执行合并/变基/挑拣提交/切分支**。
+- 先运行下列只读检查。若当前分支、HEAD或工作区与本记录不同，先辨认后续提交和用户修改，不能重置、覆盖或重复应用本批代码。`origin/...`是本地远端跟踪引用，不等于新会话已联网检查远端。
+
+```powershell
+git status --short
+git branch --show-current
+git log -5 --oneline
+git rev-list --left-right --count HEAD...origin/research/ios
+```
+
+### 进度口径：严禁再次混淆两个“50”
+
+- 用户所说“完成50个任务”指本文件W01—W50的**主任务**。此前agent误拆了P01—P50子项并汇报“50/50”，造成错误预期；[并行批次](./iOS并行实现批次.md)只作历史实现索引，绝不代表主任务完成。
+- 当前主任务W01—W05为WIN-DONE，**5/50主项完成，45项未结项，下一项W06**。未结项不等于没有代码：先查现有实现，再补实际缺口，不重写已有能力。
+- 延续历史刻度82.0%仅用于兼容旧记录，不能据此推算“只剩18%工作量”。对用户优先报主任务完成数、这次完成的W编号及待验内容；不再给另一批子步骤报“总完成百分比”。
+- Windows的WIN-DONE要求真实代码/接线、适用Windows检查通过、Apple专属样本已写并登记；不等于Swift已编译或真机通过。Mac仍0/12，393项XCTest仅是源码中的方法数。发现缺陷必须重开对应项，不能保住数字却隐藏返工。
+
+### 代码地图与架构边界
+
+以下路径相对仓库根目录，用于快速定位，不要求一开始通读整个项目。
+
+| 职责 | 现有入口 | 接续时不可破坏的约束 |
+|---|---|---|
+| Android宿主 | `app/`、`shared/src/androidMain/` | 本轮默认不改宿主/服务/协议平台适配、版本及打包脚本；若确有必要，先说明原因和验证范围 |
+| 共用规则/页面 | `shared/src/commonMain/kotlin/com/ztransfer/` | 业务判定只保留一份；原Android共享调用语义不变，common不持有Apple对象 |
+| 正式iOS入口/会话 | `iosApp/ZTransfer/ContentView.swift`、`UI/CameraWorkspace.swift`、`Diagnostics/CameraHandshakeProbe.swift` | Probe名称是历史遗留，现已是Release和Debug共用的单一连接所有者，不要因位于Diagnostics就另造一套会话 |
+| 相机目录/自动接纳 | `Network/CameraWiFiConnection.swift`、`CameraCatalog.swift`、`CameraAutomaticTransferCoordinator.swift` | 复用同一事件观察流、目录基线、命令准入及实际原片队列；不额外订阅抢走事件，不复制队列 |
+| 原片队列/页面/保存 | `Network/CameraOriginalQueue.swift`、`UI/OriginalFilesPage.swift`、`UI/OriginalQueuePage.swift`、`Storage/ProviderOriginalStore.swift` | 真实完成/跳过/失败决定界面状态，页面不模拟成功；保存目标和原片所有权保持单一 |
+| 共用新增/队列规则 | `shared/.../viewmodel/NewCameraObjectPolicy.kt`、`NativeOriginalTransferQueue.kt`、`TransferQueuePolicy.kt` | 不为iOS另写去重、双卡身份、入队、重试规则；这里的省略号指commonMain/kotlin/com/ztransfer |
+| Apple桥接/测试 | `shared/src/iosMain/`、`iosApp/ZTransferTests/`、`iosApp/ZTransfer.xcodeproj/project.pbxproj` | 新Swift文件和测试要注册；common metadata检查不等于Native导出和Swift类型检查 |
+
+“Android没改”必须说清比较基线：`ca00994..7dd094d`这一批未改Android宿主/平台/打包脚本；**整个iOS分支相对旧master包含Android共享化改造**，不能把局部无差异说成整个分支从未改Android。
+
+### 下一项W06：接手后的具体动作
+
+1. 完整读本表与[最近审计记录](./iOS并行50项审计记录.md)，再对照Android实际实现和上述代码入口。W01—W05已经完成，不重新造事件/目录/自动开关基础设施。
+2. 跟踪真实调用链：现有连接事件→CameraCatalog新增媒体→CameraAutomaticTransferCoordinator→CameraOriginalQueue/共享队列→原片保存发布→文件页/队列页状态。逐段核实，不把“有方法/有文件”当成功能已打通。
+3. 补W06尚缺的整链路接线/反馈与组合样本：首次旧照片不自动传、连续新增、重复事件/双卡合并、暂停与延后、目标目录切换、失败重试、成功/跳过/失败反馈与徽标一致。尤其核对自动入队结果与原Android飞入/合并反馈，不另造独立动画状态机。与W24完整队列布局的边界要记录，不能给同一次工作重复计分。
+4. 保留7dd094d的四项修复：删除打断补扫后的补通知、主卡删除后存活副卡的逻辑资格转交、关闭自动传输先取消再保存且失败保持本会话关闭、首次文件页只复用同代稳定目录而显式刷新仍真扫描；图片测试须检查RGBA四通道和8方向实际像素。
+5. 对真实缺口实现、做针对性审查与验证；同批更新W06状态、证据、得分及变更记录。未满足整行条件继续DOING，不因代码写了一部分就加分。W06完成后进入W07；可并行推进其它主项，但必须按文件划分所有权，不能同时覆盖同一所有者文件。
+
+### 工作方式与验证边界
+
+- 用户希望持续完成主任务，尽量自主推进，不要每个小步骤都要求回车；有新权限、外部配置、平台能力差异或实质范围变更才说明并请求决定。收到“继续”后应做实现，不只是重新报告计划。
+- 用户允许多agent。是否能起8个以当前环境真实并发上限为准，不虚报数量；主agent统一集成/审查/计分。子agent只处理明确归属的任务，**不各自运行Gradle、不各自提交或推送**。
+- 最新构建要求是“允许构建验证，但不能同时起多个构建”。先前“不要构建/等20或50项再构建”已被替代，不应继续套用。按风险做适用验证，不必仅因换窗口重复一遍相同全量构建。
+- 遵守根目录AGENTS.md：Gradle从可访问用户缓存/镜像的主机环境运行，至少预留240秒、只允许一个构建；超时先检查原进程，不能直接再起一轮。以BUILD SUCCESSFUL/FAILED为准。上次工具链为`D:\dev\jdk-17`和`D:\dev\android-sdk`，使用前确认存在；不提交本机路径配置或擅自升级依赖。
+- 可用源码检查：`python -B -m unittest discover -s iosApp/scripts -p 'test_*.py'`、`python -B iosApp/scripts/check_structure.py`、`python -B iosApp/scripts/check_shared_ui_migration.py`、`git diff --check`。旧源码守卫的精确逆转换是历史基线保护，不得用宽泛替换/跳过断言来“修绿”；新接线必须另有当前契约和行为样本。
+- 最近验证基线7dd094d：709项shared+317项app=1026项测试通过；314项Python、工程结构和原UI守卫通过；shared/app Debug Lint均0错误（app有179 Warning/11 Hint）；42个App Swift、8个XCTest文件、393个方法存在但未执行，另有17项Native图片测试待Mac。新改动需新证据，不套用历史PASS。
+- 不自动打包APK。用户明确要Debug包时只用`dist-debug/build-debug.bat`，正式Release才用`dist/build.bat`；本轮不擅改版本、签名、发布脚本、服务器或上传商店。
+- 之前确认的推送已完成，不能把一次确认解读为今后无条件推送。后续按当前用户请求与工具权限执行提交/推送，提交说明写清实现、检查和未验边界；不强推、不自动合回master。
+- 不用“完美/绝对不影响/一次上Mac必成功”作交付结论。用户曾真机测试Android有线和STA无异常，是历史证据，不能代替未来最终三连接回归。Apple编译、系统授权和真机传图依据[Mac首次操作指南](../测试与验证/iOS首次Mac操作指南.md)及M01—M12另行验收。
+
+每次交接结束前更新本入口的代码基线/下一项、主表及已有拆分表的一致状态、测试数量与是否执行、未提交内容和具体阻塞。文档修订本身不增加功能进度。旧[实现任务清单](./iOS实现任务清单.md)中的批次说明仅按需追溯，不要把旧TODO或旧百分比覆盖当前事实。
+
 ## 进度口径与当前数值
 
-> 2026-09-08审计完成：检查点`8503823`已提交；其后发现的iOS竞态/重复扫描及测试盲区已修正在工作区。唯一一轮Gradle串行BUILD SUCCESSFUL，1026项Kotlin/Android测试、314项Python、结构/原UI守卫通过；393项XCTest未运行。50实现子项不等于本表50主项，详见[批次](./iOS并行实现批次.md)及[审计记录](./iOS并行50项审计记录.md)。
+> 2026-09-08审计完成：实现检查点`8503823`和审计修复`7dd094d`均已提交并推送至`origin/research/ios`。唯一一轮Gradle串行BUILD SUCCESSFUL，1026项Kotlin/Android测试、314项Python、结构/原UI守卫通过；393项XCTest未运行。P01—P50只是历史实现子项，不能当成用户要求的W01—W50主项，详见[批次](./iOS并行实现批次.md)及[审计记录](./iOS并行50项审计记录.md)。
 
 - **Windows 剩余任务：5 / 50 个主项完成，已得5 / 50分，收尾进度10.0%。** W01—W05完成；本次W03-B补0.5分、W04/W05各1分，共+2.5分。下一项W06，未完成主项45个。Apple样本登记待Mac，不等于运行通过。
 - **延续此前口径的总计划进度：82.0%。** 固定计算为 `80 + 20 × 已完成分 / 50`；本轮+1.0个百分点。
@@ -16,7 +86,7 @@
 
 ## 更新规则
 
-1. Windows状态只用 `TODO`、`DOING`、`WIN-DONE`。未拆分主项完成分只能是0或1；已拆分主项按完成子项累计（如0.5），不能主项子项重复相加；开工不计分，写完但缺本项检查不计分。大项确需分批时，先拆成可独立验证的子项并平分原1分，总分仍50，不能把已有工作再计一次。
+1. Windows状态只用 `TODO`、`DOING`、`WIN-DONE`。未拆分主项完成分只能是0或1；保留已有W02/W03拆分记录，主表只累计一次。开工不计分，写完但缺本项检查不计分。后续按原W01—W50主项结项；内部步骤可以细列，但不再另造“50项完成率”或未经确认改分母。
 2. 每项WIN-DONE要求：本行全部剩余交付点有实现/真实接线；复用已有shared规则；适用的Windows验证通过；Apple专属测试已写并登记待Mac；证据栏填写代码入口、验证结果、提交号或待提交文件。纯源码检查不能记成Swift编译或真机通过。
 3. 每完成一项，**同批更新状态、得分、证据、顶部两个百分比、变更记录**，并向用户报“本次完成Wxx，+0.4，总计划xx.x%，剩余清单n/50”。完成多项累加；子项按所占分数报告（0.5分对应总计划+0.2），同步报告完整主项数与得分；不得等大功能全部完成才给已经独立验收的子项计分。
 4. 本项针对性检查包含在本项1分内；W43—W50是跨模块/收口验收，不重复为同一次测试计分。已有实现只补剩余接线/证据，不为复制代码、增加文件或增加测试数量计分。
@@ -31,8 +101,8 @@
 | ID | 关联旧ID | 剩余交付点与完成条件 | 主要依赖 | 状态 | 得分 | 证据 |
 |---|---|---|---|---|---|---|
 | W01 | IOS-D01、IOS-D04、IOS-N06 | 首次扫描基线与后续差量：首次旧照片不自动入队；成功的handle枚举成为下一基线；空卡/部分元数据失败按原规则处理，锁定样本 | 已有目录/事件记录 | WIN-DONE | 1 | 第60批：NativeCameraHandleBaseline.kt、CameraCatalog.swift；6项common+4项XCTest源码；966项Kotlin/Android、279项Python及结构/原UI守卫PASS；Apple待验；8484b35 |
-| W02 | IOS-D04、IOS-N06 | 新增事件消费：真实读取对象信息，处理Busy/重复/迟到事件，与扫描去重；只报告真正新增媒体，复用原发布规则 | W01 | WIN-DONE | 1 | W02-A/B各0.5均完成；第62批真实AP/标准STA观察者→目录解析→共享发布→同一文件页/缓存；977项Kotlin/Android、290项Python及结构/原UI守卫PASS，12项新增XCTest待Mac；删除/缺口扫描W03/W04、自动开关W05仍未完成 |
-| W03 | IOS-D04、IOS-D01 | 删除/属性/存储卡变化：旧页、索引、双卡合并归属、预览缓存正确失效或更新；不把读取失败当删除 | W01 | WIN-DONE | 1 | W03-B补齐CameraCatalog删除/属性/卡槽核对、索引/缓存/页面更新；25项目录XCTest源码（含6项审计竞态）待Mac。1026项Kotlin/Android、314项Python及结构/原UI守卫通过；8503823后审计修复待提交。 |
+| W02 | IOS-D04、IOS-N06 | 新增事件消费：真实读取对象信息，处理Busy/重复/迟到事件，与扫描去重；只报告真正新增媒体，复用原发布规则 | W01 | WIN-DONE | 1 | W02-A/B各0.5均完成；第62批真实AP/标准STA观察者→目录解析→共享发布→同一文件页/缓存；当批977项Kotlin/Android、290项Python及结构/原UI守卫PASS，12项新增XCTest待Mac。后续W03/W04/W05已在7dd094d达Windows门槛，不能套用当批未完成状态 |
+| W03 | IOS-D04、IOS-D01 | 删除/属性/存储卡变化：旧页、索引、双卡合并归属、预览缓存正确失效或更新；不把读取失败当删除 | W01 | WIN-DONE | 1 | W03-B补齐CameraCatalog删除/属性/卡槽核对、索引/缓存/页面更新；25项目录XCTest源码（含6项审计竞态）待Mac。1026项Kotlin/Android、314项Python及结构/原UI守卫通过；8503823实现及7dd094d审计修复均已提交推送。 |
 | W04 | IOS-D04、IOS-N06 | 事件缺口及扫描竞争：消费已有游标记录；溢出重扫、扫描期间事件追赶、关闭取消、同代校验有完整调度与竞态样本，不另抢通知流 | W01—W03 | WIN-DONE | 1 | 复用唯一事件游标与目录扫描；缺口恢复、稳定版本门控、关闭取消、删除打断补扫与副卡资格转交已接线。25项目录XCTest源码待Mac，现行Windows检查通过；不宣称Swift竞态已运行。 |
 | W05 | IOS-T01、IOS-U06、IOS-D04 | 自动传输真实开关：保存/恢复选项并绑定事件到已有入队入口；目录/日期/延后参数取同一有效快照；关闭选项不误补传旧目录 | W02、W04 | WIN-DONE | 1 | 同一偏好文档/共享设置开关→连接所有者→既有自动入队；日期/延后/实际目标准入；关闭写失败仍立即停止本会话。16项自动XCTest待Mac、6项设置common测试已通过；完整反馈仍W06。 |
 | W06 | IOS-T01、IOS-D04 | 自动传图闭环回归：首次连接→连拍→事件/扫描→原片入队→目标发布→徽标；重复、暂停、切目录、失败重试场景有集成接线与测试 | W03—W05 | DOING | 0 | 已有事件→真实队列样本；完整连续拍摄→provider发布→徽标/飞入反馈、切目录/失败闭环仍需补齐。 |
@@ -83,12 +153,12 @@
 
 ## W03拆分跟进（原1分拆为0.5+0.5，不增加总分）
 
-拆分原因：现有iOS完整扫描只把合并后主行的ObjectInfo带出，删除核对需要保留被合并的备份别名；先完成可独立测试的全索引与原Android共享核对接口，再接Apple事件、IO和缓存更新。主表只累计子项得分一次。
+历史拆分原因：当时iOS完整扫描只把合并后主行的ObjectInfo带出，删除核对需要保留被合并的备份别名；先完成可独立测试的全索引与原Android共享核对接口，再接Apple事件、IO和缓存更新。现A/B均已达Windows门槛，主表只累计子项得分一次。
 
 | 子项 | 剩余交付点/完成条件 | 分值 | 状态 | 已得分 | 证据 |
 |---|---|---|---|---|---|
 | W03-A | 完整扫描和新增发布保留所有别名及稳定读取顺序；提供复用原删除/双卡重建与idle handle基线规则的Native入口，失败枚举不代表空卡；共享测试、真实Apple扫描用例源码和Windows检查通过 | 0.5 | WIN-DONE | 0.5 | 第63批：NativeCameraCatalogScan/NativeCameraHandleBaseline/NativeCameraCatalogReconciliation、CameraCatalog；10项新增common、3项新增XCTest源码；987项Kotlin/Android、298项Python及结构/原UI守卫PASS；本次提交，Apple待验 |
-| W03-B | 删除/对象属性/存储卡事件接真实核对及对应页面/索引/缓存更新；移除主卡保留副卡、失败保留旧数据、同代取消和门控有样本；对照Android原属性处理并记录平台适配边界，Windows检查通过 | 0.5 | DOING | 0 | 2026-09-08真实接线与19项目录XCTest源码已写，尚未执行；按50子项节点集中验证，不计提前完成分 |
+| W03-B | 删除/对象属性/存储卡事件接真实核对及对应页面/索引/缓存更新；移除主卡保留副卡、失败保留旧数据、同代取消和门控有样本；对照Android原属性处理并记录平台适配边界，Windows检查通过 | 0.5 | WIN-DONE | 0.5 | 8503823实现、7dd094d审计修复，均已推送；25项目录XCTest样本待Mac。1026项Kotlin/Android、314项Python、结构/原UI守卫通过；本行计入W03的1分，不再额外累加 |
 
 ## W02拆分跟进（原1分拆为0.5+0.5，不增加总分）
 
@@ -97,7 +167,7 @@
 | 子项 | 剩余交付点/完成条件 | 分值 | 状态 | 已得分 | 证据 |
 |---|---|---|---|---|---|
 | W02-A | 提取并由Android实际调用原新增handle准入、逻辑去重/双卡合并发布、原批量/合并等待/重试节奏；组合对照旧算法与完整旧主体守卫通过 | 0.5 | WIN-DONE | 0.5 | 第61批：NewCameraObjectPolicy.kt、CameraViewModel.kt；7项common覆盖399组发布/1197组准入；973项Kotlin/Android、283项Python、结构/原UI守卫PASS；9a65a60 |
-| W02-B | Apple真实事件消费接上述shared入口：同代对象读取、Busy有界重试、重复/迟到/扫描和预览互斥、读取期间移除失效，只有真实新增媒体报告；实际调用链与XCTest场景齐备，Windows检查通过 | 0.5 | WIN-DONE | 0.5 | 第62批：CameraCatalog/CameraWiFiConnection/CameraHandshakeProbe、OriginalFilesPage/CameraPreviewStore；4项新增common实跑，12项新增XCTest待Mac；977项Kotlin/Android、290项Python及结构/原UI守卫PASS；本次提交。自动开关W05与完整闭环W06仍不计完成 |
+| W02-B | Apple真实事件消费接上述shared入口：同代对象读取、Busy有界重试、重复/迟到/扫描和预览互斥、读取期间移除失效，只有真实新增媒体报告；实际调用链与XCTest场景齐备，Windows检查通过 | 0.5 | WIN-DONE | 0.5 | 第62批：CameraCatalog/CameraWiFiConnection/CameraHandshakeProbe、OriginalFilesPage/CameraPreviewStore；4项新增common实跑，12项新增XCTest待Mac；当批977项Kotlin/Android、290项Python及结构/原UI守卫PASS。该批未计W05/W06；后续W05已完成，W06仍DOING |
 
 ## Mac / 真机 / 外部配置剩余验收（独立计数12）
 
@@ -106,7 +176,7 @@
 | ID | 关联旧ID | 验收交付点 | 状态 | 得分 | 证据 |
 |---|---|---|---|---|---|
 | M01 | IOS-B01、IOS-U01、IOS-L05、IOS-Q01 | M1 Mac首次环境/依赖、Native framework、Swift桥接与并发、资源链接、Debug/Release两架构实际编译；错误回开Windows对应项 | 待验 | 0 | — |
-| M02 | IOS-B02、IOS-Q01 | iOS simulator commonTest、Native预览/位图、全部XCTest实际执行，含当前284项及后续新增；保留日志/xcresult，不只统计方法数 | 待验 | 0 | — |
+| M02 | IOS-B02、IOS-Q01 | iOS simulator commonTest、Native预览/位图、全部XCTest实际执行；7dd094d有393项XCTest及17项Native图片测试待验，后续按源码实际数量更新；保留日志/xcresult，不只统计方法数 | 待验 | 0 | — |
 | M03 | IOS-N01、IOS-N02、IOS-N03、IOS-D01、IOS-T01、IOS-Q02 | iPhone+相机AP从授权/连接/浏览/拍照自动传输到保存分享全流程及异常响应，记录机型固件和原片哈希 | 待验 | 0 | — |
 | M04 | IOS-N04、IOS-N05、IOS-N06、IOS-Q02 | iPhone+相机STA发现/配对/历史/重连、标准与STA-direct兼容、双卡/空卡/大文件传输；明确支持机型边界 | 待验 | 0 | — |
 | M05 | IOS-D02、IOS-D03、IOS-D04、IOS-D05、IOS-E01、IOS-U04 | JPG/NEF/RAW/MOV预览、MPF/EXIF/方向色彩、筛选/连拍/跨卡选择、扫描竞态和高速新增，图像与元数据对照 | 待验 | 0 | — |
