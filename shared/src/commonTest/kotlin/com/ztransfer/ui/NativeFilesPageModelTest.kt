@@ -8,6 +8,18 @@ import kotlin.coroutines.*
 import kotlin.test.*
 
 class NativeFilesPageModelTest {
+    @Test fun explicitTransferPreferenceReloadDoesNotRecreateCatalogOrBrowseState() {
+        val p = Platform(); val m = model(p)
+        m.finishScan(m.beginScan(), snapshot()); m.setOrganizeByDate(true); m.setDeferStart(true)
+        val catalog = m.state.value; val browse = m.layout.value
+        p.transfers = NativeTransferPreferences.defaults()
+        m.reloadTransferPreferences()
+        assertEquals(NativeTransferPreferences.defaults(), m.currentTransferPreferences())
+        assertEquals(catalog, m.state.value); assertEquals(browse, m.layout.value)
+        m.close(); p.transfers = NativeTransferPreferences(true, true); m.reloadTransferPreferences()
+        assertEquals(NativeTransferPreferences.defaults(), m.currentTransferPreferences())
+    }
+
     @Test fun transferPreferencesRestoreAndPersistIndependentlyOfBrowseAndCatalog() {
         val p = Platform(); val m = model(p)
         m.finishScan(m.beginScan(), snapshot())

@@ -22,6 +22,9 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
     text: NativeSettingsPageText, anchor: Rect, appearance: NativeAppearanceModel, onDismiss: () -> Unit) {
     val appearanceState by appearance.state.collectAsState()
     val transfers by model.transferPreferences.collectAsState()
+    val automatic by model.automaticTransfer.state.collectAsState()
+    var confirmTransferReset by remember(model) { mutableStateOf(false) }
+    val recoveryText = nativeTransferRecoveryText(appearanceState.resolvedLanguage)
     val directory by model.directory.state.collectAsState()
     val openingAnchor = remember { anchor }
     val density = LocalDensity.current
@@ -45,7 +48,7 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
                 onCollapseBursts = { model.changeLayout(model.layout.value.columns, it) },
                 onTapToPreview = model::setTapToPreview)
             Spacer(Modifier.height(14.dp))
-            // Reuse the original header; automatic-event controls appear only once actually connected.
+            // All three controls use the same preferences document and existing transfer queue.
             SharedSettingsCard {
                 SharedTransferDirectoryHeader(directory.description, false, text, model.directory::choose)
                 if (directory.selecting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -61,6 +64,17 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
                         checked = transfers.deferStart, onCheckedChange = model::setDeferStart,
                         hapticsEnabled = appearanceState.hapticsEnabled, modifier = Modifier.weight(1f), text = text)
                 }
+                if (automatic.available) {
+                    SharedBooleanSettingsWheel(label = text.label(SettingsTextKey.auto_transfer_new_media),
+                        checked = automatic.enabled, onCheckedChange = model.automaticTransfer::setEnabled,
+                        enabled = !automatic.failed && (automatic.canEnable || automatic.enabled),
+                        hapticsEnabled = appearanceState.hapticsEnabled, text = text)
+                    if (!automatic.canEnable) Text(text.label(SettingsTextKey.dir_please_set),
+                        color = AppTheme.colors.accentOrange, style = MaterialTheme.typography.bodySmall)
+                    if (automatic.failed) TextButton(onClick = { confirmTransferReset = true }) {
+                        Text(recoveryText.reset, color = AppTheme.colors.accentOrange)
+                    }
+                }
             }
             Spacer(Modifier.height(14.dp))
             SharedAppearanceSettingsCard(appearanceState.theme, appearanceState.language, "system", appearanceState.skin,
@@ -70,4 +84,11 @@ internal fun NativePhotoSettingsOverlay(model: NativeFilesPageModel, layout: Nat
                 onKeepScreenOn = appearance::setKeepScreenOn, close = close)
         }
     }
+    if (confirmTransferReset) AlertDialog(onDismissRequest = { confirmTransferReset = false },
+        title = { Text(recoveryText.title) }, text = { Text(recoveryText.message) },
+        confirmButton = { TextButton(onClick = {
+            confirmTransferReset = false
+            if (model.automaticTransfer.resetAfterConfirmation()) model.reloadTransferPreferences()
+        }) { Text(recoveryText.reset) } },
+        dismissButton = { TextButton(onClick = { confirmTransferReset = false }) { Text(recoveryText.cancel) } })
 }

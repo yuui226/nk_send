@@ -86,6 +86,9 @@ actor CameraPreviewStore {
         return token
     }
     func allowsObjectResolution() -> Bool { !closed && foregroundUses.isEmpty }
+    /// Idle catalog reconciliation must yield to transfers as well as foreground image requests.
+    /// Do not test scanToken here: this admission also belongs to the active catalog scan itself.
+    func allowsCatalogReconciliation() -> Bool { !closed && !transfersBusy && foregroundUses.isEmpty }
     func endForegroundUse(_ token: UUID) {
         if foregroundUses.remove(token) != nil { wakeFill(retryFailures: foregroundUses.isEmpty) }
     }

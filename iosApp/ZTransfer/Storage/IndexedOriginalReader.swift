@@ -29,6 +29,10 @@ final class IndexedOriginalReader {
                 data.append(chunk); remaining -= Int64(chunk.count)
             }
             guard (try input.read(upToCount: 1) ?? Data()).isEmpty else { throw OriginalIndexError.incompleteMetadata }
+            var finalState = stat()
+            guard fstat(input.fileDescriptor, &finalState) == 0, finalState.st_size == size else {
+                throw OriginalIndexError.incompleteMetadata
+            }
             try checkCancellation()
             return data
         }

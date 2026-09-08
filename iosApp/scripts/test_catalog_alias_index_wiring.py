@@ -9,14 +9,17 @@ CATALOG = 'iosApp/ZTransfer/Network/CameraCatalog.swift'
 SCAN = 'shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeCameraCatalogScan.kt'
 BASELINE = 'shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeCameraHandleBaseline.kt'
 FACADE = 'shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeCameraCatalogReconciliation.kt'
-def read(path): return (ROOT/path).read_text(encoding='utf-8')
+def raw_read(path): return (ROOT/path).read_text(encoding='utf-8')
+def read(path):
+    from parallel_batch_wiring import previous_parallel_batch_source
+    return previous_parallel_batch_source(path, raw_read(path))
 def before(path): return subprocess.check_output(['git', 'show', 'e216b1d:' + path], cwd=ROOT).decode('utf-8')
 
 class CatalogAliasIndexWiringTest(unittest.TestCase):
     def test_exact_inverse_preserves_all_prior_scan_and_resolver_bodies(self):
         self.assertEqual({CATALOG, SCAN, BASELINE}, set(CHANGES))
         for path in CHANGES:
-            self.assertEqual(before(path), previous_catalog_alias_index_source(path, read(path)))
+            self.assertEqual(before(path), previous_catalog_alias_index_source(path, raw_read(path)))
 
     def test_android_kernel_and_existing_io_ui_cache_remain_unchanged(self):
         for path in ('app/src/main/java/com/ztransfer/viewmodel/CameraViewModel.kt',
@@ -74,8 +77,8 @@ class CatalogAliasIndexWiringTest(unittest.TestCase):
                                (SCAN, 'indexedHandles += handle', 'indexedHandles += 0'),
                                (BASELINE, 'knownHandles = previous - delta.removed', 'knownHandles = current')):
             with self.assertRaises(AssertionError):
-                previous_catalog_alias_index_source(path, read(path).replace(old, new))
-        changed = read(SCAN).replace('newestFirstHandleOrders(batches.filterNotNull())', 'emptyList()')
+                previous_catalog_alias_index_source(path, raw_read(path).replace(old, new))
+        changed = raw_read(SCAN).replace('newestFirstHandleOrders(batches.filterNotNull())', 'emptyList()')
         self.assertNotEqual(before(SCAN), previous_catalog_alias_index_source(SCAN, changed))
 
     def test_real_apple_scan_partial_failure_and_idle_baseline_scenarios_are_present(self):

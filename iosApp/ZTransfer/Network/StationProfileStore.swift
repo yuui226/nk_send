@@ -23,7 +23,8 @@ enum CameraStationError: Error, LocalizedError {
 }
 
 /// Only this installation's stable PC identity and authoritative pairing acknowledgements.
-/// Full profile history/selection/Bonjour remain separate. Atomic local writes precede pacing.
+/// Address metadata stays in CameraEndpointHistory; this existing identity format is preserved.
+/// Atomic local writes precede pacing. Forgetting one responder never regenerates the initiator.
 final class StationProfileStore: @unchecked Sendable {
     private struct Document: Codable {
         var version: Int = 1
@@ -59,26 +60,65 @@ final class StationProfileStore: @unchecked Sendable {
     }
 
     static func applicationStore() throws -> StationProfileStore {
+        try StationProfileStore(file: applicationFile())
+    }
+
+    private static func applicationFile() throws -> URL {
         let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                                                  appropriateFor: nil, create: true)
-        return try StationProfileStore(file: support.appendingPathComponent("ZTransfer/station-identity.json"))
+        return support.appendingPathComponent("ZTransfer/station-identity.json")
+    }
+
+    @discardableResult static func recoverApplicationIdentity(confirmed: Bool) throws -> URL? {
+        try recoverCorruptStore(file: applicationFile(), confirmed: confirmed)
     }
 
     func isPaired(_ responder: String) throws -> Bool {
         Self.diskLock.lock()
         defer { Self.diskLock.unlock() }
         guard let normalized = NikonStaBridge.shared.normalizeGuid(value: responder) else { return false }
-        return try Self.read(file).pairedResponders.contains(normalized)
+        return try currentDocument().pairedResponders.contains(normalized)
     }
 
     func markPaired(_ responder: String) throws {
         Self.diskLock.lock()
         defer { Self.diskLock.unlock() }
         guard let normalized = NikonStaBridge.shared.normalizeGuid(value: responder) else { throw CameraStationError.missingIdentity }
-        var document = try Self.read(file)
+        var document = try currentDocument()
         if document.pairedResponders.contains(normalized) { return }
         document.pairedResponders.append(normalized)
         try JSONEncoder().encode(document).write(to: file, options: .atomic)
+    }
+
+    func pairedResponderGUIDs() throws -> [String] {
+        Self.diskLock.lock(); defer { Self.diskLock.unlock() }
+        return Array(Set(try currentDocument().pairedResponders)).sorted()
+    }
+
+    func forgetResponder(_ responder: String) throws {
+        guard let normalized = NikonStaBridge.shared.normalizeGuid(value: responder) else { throw CameraStationError.missingIdentity }
+        Self.diskLock.lock(); defer { Self.diskLock.unlock() }
+        var document = try currentDocument()
+        guard document.pairedResponders.contains(normalized) else { return }
+        document.pairedResponders.removeAll { $0 == normalized }
+        try JSONEncoder().encode(document).write(to: file, options: .atomic)
+    }
+
+    /// Only an explicitly confirmed recovery may archive an unreadable/unsupported document.
+    /// A valid identity store is never reset here; use forgetResponder for one-camera re-pairing.
+    @discardableResult static func recoverCorruptStore(file: URL, confirmed: Bool) throws -> URL? {
+        guard confirmed else { throw CameraEndpointError.confirmationRequired }
+        guard file.isFileURL else { throw CameraStationError.corruptIdentityStore }
+        Self.diskLock.lock(); defer { Self.diskLock.unlock() }
+        guard FileManager.default.fileExists(atPath: file.path) else { return nil }
+        if (try? Self.read(file)) != nil { return nil }
+        let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else { throw CameraStationError.corruptIdentityStore }
+        let archive = file.deletingLastPathComponent().appendingPathComponent("station-identity-backup-\(UUID().uuidString).json")
+        // Move only this exact regular file. Its complete bytes survive; next explicit open creates
+        // a fresh installation identity and requires pairing again (never pretend old markers apply).
+        try FileManager.default.moveItem(at: file, to: archive)
+        return archive
     }
 
     private static func read(_ file: URL) throws -> Document {
@@ -90,6 +130,12 @@ final class StationProfileStore: @unchecked Sendable {
               document.pairedResponders.allSatisfy({ NikonStaBridge.shared.normalizeGuid(value: $0) == $0 }) else {
             throw CameraStationError.corruptIdentityStore
         }
+        return document
+    }
+
+    private func currentDocument() throws -> Document {
+        let document = try Self.read(file)
+        guard Data(document.initiator.utf8) == identity else { throw CameraStationError.corruptIdentityStore }
         return document
     }
 }

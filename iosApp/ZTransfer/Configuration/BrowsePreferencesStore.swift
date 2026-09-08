@@ -10,6 +10,8 @@ final class TransferPreferencesStore {
         let version: Int
         let organizeByDate: Bool
         let deferStart: Bool
+        // Optional v1 extension: Android's original automatic-transfer default is false.
+        let autoTransferNewMedia: Bool?
     }
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     func read() -> NativeTransferPreferences? {
@@ -20,8 +22,33 @@ final class TransferPreferencesStore {
     }
     @discardableResult
     func save(_ value: NativeTransferPreferences) -> Bool {
-        guard read() != nil else { return false } // Preserve corrupt/future bytes across downgrades.
-        let document = Document(version: 1, organizeByDate: value.organizeByDate, deferStart: value.deferStart)
+        guard let automatic = readAutomatic() else { return false } // Preserve corrupt/future bytes across downgrades.
+        let document = Document(version: 1, organizeByDate: value.organizeByDate, deferStart: value.deferStart,
+                                autoTransferNewMedia: automatic)
+        return write(document)
+    }
+
+    func readAutomatic() -> Bool? {
+        guard let raw = defaults.object(forKey: Self.key) else { return false }
+        guard let data = raw as? Data, data.count <= 4096,
+              let document = try? JSONDecoder().decode(Document.self, from: data), document.version == 1 else { return nil }
+        return document.autoTransferNewMedia ?? false
+    }
+
+    @discardableResult
+    func saveAutomatic(_ enabled: Bool) -> Bool {
+        guard let value = read() else { return false }
+        return write(Document(version: 1, organizeByDate: value.organizeByDate, deferStart: value.deferStart,
+                              autoTransferNewMedia: enabled))
+    }
+
+    /// The UI must obtain explicit confirmation. Ordinary reads/writes never erase unknown data.
+    @discardableResult
+    func resetAfterUserConfirmation() -> Bool {
+        return write(Document(version: 1, organizeByDate: false, deferStart: false, autoTransferNewMedia: false))
+    }
+
+    private func write(_ document: Document) -> Bool {
         guard let data = try? JSONEncoder().encode(document), data.count <= 4096 else { return false }
         defaults.set(data, forKey: Self.key)
         return defaults.data(forKey: Self.key) == data // Store acknowledgement, not fsync.

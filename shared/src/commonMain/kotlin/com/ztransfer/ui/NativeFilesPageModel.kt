@@ -69,6 +69,7 @@ internal data class NativeOriginalsState(val revision: Long = -1, val refreshing
 class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageModel, platform: NativeFilesPagePlatform) {
     init { require(queue.connectionId == connectionId) }
     val directory = NativeDirectorySettingsModel()
+    val automaticTransfer = NativeAutomaticTransferSettingsModel()
     private var platform: NativeFilesPagePlatform? = platform
     private var closed = false
     private var previewPlatform: NativePreviewReadPlatform? = null
@@ -102,6 +103,14 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
     internal val transferPreferencesFailed = mutableTransferPreferencesFailed.asStateFlow()
 
     fun currentTransferPreferences(): NativeTransferPreferences = mutableTransfers.value
+    /** After an explicit settings reset; never clears catalog, selection or queue state. */
+    fun reloadTransferPreferences() {
+        if (closed) return
+        val value = platform?.readTransferPreferences()
+        mutableTransfers.value = value ?: NativeTransferPreferences.defaults()
+        mutableTransferPreferencesFailed.value = value == null
+        automaticTransfer.reload()
+    }
     internal fun setOrganizeByDate(value: Boolean) = changeTransfers(mutableTransfers.value.copy(organizeByDate = value))
     internal fun setDeferStart(value: Boolean) = changeTransfers(mutableTransfers.value.copy(deferStart = value))
     private fun changeTransfers(value: NativeTransferPreferences) {
@@ -305,6 +314,7 @@ class NativeFilesPageModel(val connectionId: String, val queue: NativeQueuePageM
         if (closed) return
         closed = true
         directory.close()
+        automaticTransfer.close()
         previewReads?.close(); previewReads = null; previewPlatform = null
         enqueues.toList().forEach { it.cancel() }; enqueues.clear()
         images.toList().forEach { it.cancel() }; images.clear()

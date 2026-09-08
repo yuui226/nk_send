@@ -1,0 +1,287 @@
+package com.ztransfer.ui
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.ztransfer.connection.*
+import com.ztransfer.protocol.CameraConnectionType
+import com.ztransfer.protocol.PtpConstants
+import com.ztransfer.ui.screen.*
+import com.ztransfer.ui.theme.AppTheme
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+/** One platform session owner. No sockets, queue, profile store or permission authority in shared UI. */
+interface NativeConnectionHomePlatform {
+    fun connectCamera(address: String, stationMode: Boolean, allowPairing: Boolean, requestId: Long): Boolean
+    fun cancelConnection(requestId: Long)
+    fun disconnectCamera(requestId: Long)
+    fun openCameraFiles()
+    fun openTransferQueue()
+    fun openNetworkSettings()
+    fun discoverCameras()
+    fun stopDiscovering()
+    fun connectChoice(id: String, paired: Boolean, allowPairing: Boolean, requestId: Long): Boolean
+    fun clearExpectedCamera()
+    fun forgetCameraProfile(id: String): Boolean
+    fun resetCameraHistory(): Boolean
+    fun recoverCameraIdentity(): Boolean
+}
+
+/** paired distinguishes profile rows from live service rows; only the platform pairing store grants trust. */
+data class NativeStationChoice(val id: String, val title: String, val detail: String, val paired: Boolean)
+
+internal data class NativeConnectionHomeState(
+    val address: String = PtpConstants.CAMERA_IP,
+    val stationMode: Boolean = false,
+    val allowPairing: Boolean = false,
+    val requestId: Long = 0,
+    val phase: String = "idle",
+    val message: String? = null,
+    val choices: List<NativeStationChoice> = emptyList(),
+    val searching: Boolean = false,
+    val discoveryMessage: String? = null,
+    val expectedCamera: String? = null,
+    val attemptedChoice: String? = null,
+) {
+    val busy: Boolean get() = phase == "connecting" || phase == "closing" || phase == "ready"
+    val ready: Boolean get() = phase == "ready"
+    fun presentation() = HomeConnectionUiState(
+        isConnectedToCamera = ready, connectionType = if (ready) CameraConnectionType.WIFI else null,
+        wirelessMode = if (stationMode) WirelessMode.STA else WirelessMode.AP, isStaConnection = ready && stationMode,
+        staConnectionStatus = when { !stationMode -> StaConnectionStatus.IDLE; phase == "connecting" -> StaConnectionStatus.CONNECTING
+            phase == "failed" -> StaConnectionStatus.FAILED; else -> StaConnectionStatus.IDLE },
+        staConnectionError = message.takeIf { stationMode && phase == "failed" }, usbConnectionError = null,
+        wifiConnectionStatus = when { stationMode -> WifiConnectionStatus.IDLE; phase == "connecting" -> WifiConnectionStatus.PROBING
+            phase == "failed" -> WifiConnectionStatus.FAILED; else -> WifiConnectionStatus.IDLE })
+}
+
+class NativeConnectionHomeModel(platform: NativeConnectionHomePlatform) {
+    private var platform: NativeConnectionHomePlatform? = platform
+    private var closed = false
+    private var nextRequest = 1L
+    private var retryChoice: NativeStationChoice? = null
+    private val mutableState = MutableStateFlow(NativeConnectionHomeState())
+    internal val state = mutableState.asStateFlow()
+    fun currentRequestId(): Long = mutableState.value.requestId
+    fun isReady(): Boolean = mutableState.value.ready
+    fun currentPhase(): String = mutableState.value.phase
+    fun currentAddress(): String = mutableState.value.address
+
+    internal fun editAddress(value: String) {
+        if (!closed && !mutableState.value.busy) {
+            retryChoice = null
+            mutableState.value = mutableState.value.copy(address = value.take(512), attemptedChoice = null)
+        }
+    }
+    internal fun setStationMode(value: Boolean) {
+        if (closed || mutableState.value.busy) return
+        platform?.stopDiscovering()
+        platform?.clearExpectedCamera(); retryChoice = null
+        mutableState.value = mutableState.value.copy(stationMode = value, phase = "idle", message = null,
+            choices = emptyList(), searching = false, discoveryMessage = null, expectedCamera = null, attemptedChoice = null)
+    }
+    internal fun setAllowPairing(value: Boolean) {
+        if (!closed && !mutableState.value.busy) mutableState.value = mutableState.value.copy(allowPairing = value)
+    }
+    private fun begin(): Long? {
+        if (closed || mutableState.value.busy || nextRequest == Long.MAX_VALUE) return null
+        val request = nextRequest++
+        mutableState.value = mutableState.value.copy(requestId = request, phase = "connecting", message = null, searching = false)
+        return request
+    }
+    internal fun connect() {
+        val owner = platform ?: return
+        val before = mutableState.value
+        if (closed || before.busy) return
+        retryChoice?.let { previous ->
+            if (previous in before.choices) choose(previous)
+            else mutableState.value = before.copy(phase = "failed", message = "候选已失效，请重新选择相机。 / Select the camera again; this candidate is no longer available.")
+            return
+        }
+        val address = NativeCameraEndpointAddress.normalize(before.address)
+        if (address == null) {
+            mutableState.value = before.copy(phase = "failed", message = "请输入有效相机地址，不要包含网址、路径或端口。 / Enter a camera address without a URL, path or port.")
+            return
+        }
+        mutableState.value = before.copy(address = address)
+        val request = begin() ?: return
+        if (!owner.connectCamera(address, before.stationMode, before.allowPairing, request) && mutableState.value.phase == "connecting")
+            publish(request, "failed", null)
+    }
+    internal fun choose(choice: NativeStationChoice) {
+        val owner = platform ?: return
+        val before = mutableState.value
+        if (!before.stationMode || choice !in before.choices) return
+        val request = begin() ?: return
+        retryChoice = choice
+        mutableState.value = mutableState.value.copy(attemptedChoice = choice.title)
+        if (!owner.connectChoice(choice.id, choice.paired, before.allowPairing, request) && mutableState.value.phase == "connecting") publish(request, "failed", null)
+    }
+    /** Generation and terminal-transition fence: a delayed ready callback cannot undo cancellation. */
+    fun publish(requestId: Long, phase: String, message: String?): Boolean {
+        val before = mutableState.value
+        if (closed || requestId <= 0 || before.requestId != requestId ||
+            phase !in setOf("connecting", "ready", "closing", "failed", "idle")) return false
+        if (before.phase == "closing" && phase !in setOf("closing", "failed", "idle")) return false
+        if (before.phase in setOf("idle", "failed") && phase in setOf("connecting", "ready")) return false
+        mutableState.value = before.copy(phase = phase, message = message)
+        return true
+    }
+    fun publishChoices(values: List<NativeStationChoice>, searching: Boolean, message: String?) {
+        if (closed || mutableState.value.busy || !mutableState.value.stationMode) return
+        mutableState.value = mutableState.value.copy(choices = values.distinctBy { it.paired to it.id }.take(256),
+            searching = searching, discoveryMessage = message)
+    }
+    fun publishExpectedCamera(description: String?) {
+        if (!closed) mutableState.value = mutableState.value.copy(expectedCamera = description)
+    }
+    internal fun clearExpectedCamera() {
+        if (closed || mutableState.value.busy) return
+        platform?.clearExpectedCamera(); retryChoice = null
+        mutableState.value = mutableState.value.copy(expectedCamera = null, attemptedChoice = null)
+    }
+    internal fun forgetConfirmed(choice: NativeStationChoice) {
+        if (closed || mutableState.value.busy || !choice.paired || choice !in mutableState.value.choices) return
+        if (platform?.forgetCameraProfile(choice.id) == true) { retryChoice = null }
+    }
+    internal fun resetHistoryConfirmed() {
+        if (closed || mutableState.value.busy) return
+        if (platform?.resetCameraHistory() == true) { retryChoice = null; clearExpectedCamera() }
+    }
+    internal fun recoverIdentityConfirmed() {
+        if (closed || mutableState.value.busy) return
+        if (platform?.recoverCameraIdentity() == true) { retryChoice = null; clearExpectedCamera() }
+    }
+    internal fun discover() {
+        if (!closed && !mutableState.value.busy && mutableState.value.stationMode) platform?.discoverCameras()
+    }
+    internal fun cancel() {
+        val value = mutableState.value
+        if (closed || value.phase != "connecting") return
+        mutableState.value = value.copy(phase = "closing")
+        platform?.cancelConnection(value.requestId)
+    }
+    internal fun disconnect() {
+        val value = mutableState.value
+        if (closed || !value.ready) return
+        mutableState.value = value.copy(phase = "closing")
+        platform?.disconnectCamera(value.requestId)
+    }
+    internal fun openFiles() { if (!closed && isReady()) platform?.openCameraFiles() }
+    internal fun openQueue() { if (!closed && isReady()) platform?.openTransferQueue() }
+    internal fun settings() { if (!closed) platform?.openNetworkSettings() }
+    fun close() {
+        if (closed) return
+        val owner = platform; val value = mutableState.value
+        closed = true; platform = null
+        owner?.stopDiscovering()
+        if (value.busy) owner?.cancelConnection(value.requestId)
+        mutableState.value = value.copy(phase = "idle", choices = emptyList(), searching = false)
+    }
+}
+
+@Composable
+internal fun NativeConnectionHome(model: NativeConnectionHomeModel, language: String) {
+    val state by model.state.collectAsState()
+    var forgetting by remember(model) { mutableStateOf<NativeStationChoice?>(null) }
+    var resettingHistory by remember(model) { mutableStateOf(false) }
+    var recoveringIdentity by remember(model) { mutableStateOf(false) }
+    val chinese = language.startsWith("zh", ignoreCase = true)
+    fun label(zh: String, en: String) = if (chinese) zh else en
+    val presentation = state.presentation()
+    val selected = homeSelectedConnection(presentation.isConnectedToCamera, presentation.connectionType)
+    val shape = RoundedCornerShape(24.dp)
+    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text("Z传", style = MaterialTheme.typography.headlineLarge)
+        Text(label("连接相机，浏览与传输原片", "Connect your camera to browse and transfer originals"), color = AppTheme.colors.onSurfaceVariant)
+        ConnectionCardSurface(modifier = Modifier.fillMaxWidth().connectionCardMaterialFrame(shape),
+            shape = shape, tint = AppTheme.colors.accentBlue.copy(alpha = 0.05f)) {
+            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !state.stationMode, enabled = !state.busy, onClick = { model.setStationMode(false) },
+                        label = { Text(label("相机热点 AP", "Camera hotspot AP")) })
+                    FilterChip(selected = state.stationMode, enabled = !state.busy, onClick = { model.setStationMode(true) },
+                        label = { Text(label("局域网 STA", "Local network STA")) })
+                }
+                Text(if (state.stationMode) label("手机与相机加入同一个 Wi-Fi，在相机中启用连接至计算机。", "Join the same Wi-Fi as the camera and enable Connect to computer on the camera.")
+                    else label("在相机中启用 Wi-Fi 热点，然后在 iPhone 的系统设置中加入该热点。没有互联网连接是正常现象。", "Enable the camera Wi-Fi hotspot and join it in iPhone Settings. No Internet connection is expected."))
+                OutlinedTextField(value = state.address, onValueChange = model::editAddress, enabled = !state.busy,
+                    singleLine = true, label = { Text(label("相机 IP 地址或主机名", "Camera IP address or hostname")) }, modifier = Modifier.fillMaxWidth())
+                if (state.stationMode) {
+                    state.expectedCamera?.let {
+                        Text(label("将核对所选相机身份：", "Expected camera identity: ") + it)
+                        TextButton(onClick = model::clearExpectedCamera, enabled = !state.busy) { Text(label("改选其它相机", "Choose another camera")) }
+                    }
+                    Row {
+                        Checkbox(checked = state.allowPairing, enabled = !state.busy, onCheckedChange = model::setAllowPairing)
+                        Text(label("允许首次电脑模式配对（需在相机确认）", "Allow first computer-mode pairing (confirm on the camera)"))
+                    }
+                    TextButton(onClick = model::discover, enabled = !state.busy && !state.searching) {
+                        Text(label("查找相机 / 历史与已配对相机", "Find cameras / history and paired cameras"))
+                    }
+                    if (state.searching) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    state.discoveryMessage?.let { Text(it, color = AppTheme.colors.onSurfaceVariant) }
+                    state.choices.forEach { choice ->
+                        OutlinedButton(onClick = { model.choose(choice) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) {
+                            Column { Text(choice.title); Text(choice.detail, style = MaterialTheme.typography.bodySmall) }
+                        }
+                        if (choice.paired) TextButton(onClick = { forgetting = choice }, enabled = !state.busy) {
+                            Text(label("忘记此相机记录", "Forget this camera record"))
+                        }
+                    }
+                    TextButton(onClick = { resettingHistory = true }, enabled = !state.busy) {
+                        Text(label("备份并重置地址历史", "Back up and reset address history"))
+                    }
+                    if (state.discoveryMessage != null) TextButton(onClick = { recoveringIdentity = true }, enabled = !state.busy) {
+                        Text(label("修复损坏的配对身份文件", "Recover a damaged pairing identity file"))
+                    }
+                }
+                state.attemptedChoice?.let { Text(label("当前连接候选：", "Connection candidate: ") + it) }
+                when (state.phase) {
+                    "ready" -> {
+                        Text(label("相机会话已连接", "Camera session connected"))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = model::openFiles, enabled = selected == CameraConnectionType.WIFI) { Text(label("浏览照片", "Browse photos")) }
+                            OutlinedButton(onClick = model::openQueue) { Text(label("传输队列", "Transfer queue")) }
+                        }
+                        TextButton(onClick = model::disconnect) { Text(label("断开连接", "Disconnect")) }
+                    }
+                    "connecting" -> {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        TextButton(onClick = model::cancel) { Text(label("取消连接", "Cancel connection")) }
+                    }
+                    "closing" -> Text(label("正在关闭连接…", "Closing connection…"))
+                    else -> Button(onClick = model::connect) {
+                        Text(if (state.phase == "failed") label("重试连接", "Retry connection") else label("连接相机", "Connect camera"))
+                    }
+                }
+                if (state.phase == "failed" && state.message == null) Text(label("连接未能开始，请检查地址和当前会话。", "Connection could not start. Check the address and current session."))
+                state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+        }
+        Text(label("请允许局域网访问。传输期间保持应用在前台；切入后台会关闭当前相机会话。此版本仅提供 AP / 标准 STA，不提供 iOS USB 连接。", "Allow Local Network access. Keep this app in the foreground while transferring; backgrounding closes the camera session. This version supports AP / standard STA, not iOS USB."),
+            style = MaterialTheme.typography.bodySmall, color = AppTheme.colors.onSurfaceVariant)
+        TextButton(onClick = model::settings) { Text(label("打开应用系统设置", "Open app Settings")) }
+    }
+    forgetting?.let { choice ->
+        AlertDialog(onDismissRequest = { forgetting = null }, title = { Text(label("忘记此相机？", "Forget this camera?")) },
+            text = { Text(choice.title + "\n" + label("仅移除此相机的配对标记和地址记录，不删除照片或其它相机。", "Remove only this camera's pairing marker and address. Photos and other cameras are kept.")) },
+            confirmButton = { TextButton(onClick = { forgetting = null; model.forgetConfirmed(choice) }) { Text(label("忘记", "Forget")) } },
+            dismissButton = { TextButton(onClick = { forgetting = null }) { Text(label("取消", "Cancel")) } })
+    }
+    if (resettingHistory) AlertDialog(onDismissRequest = { resettingHistory = false }, title = { Text(label("重置地址历史？", "Reset address history?")) },
+        text = { Text(label("先备份现有历史文件，再清空地址记录。不会重置安装身份、配对标记或照片。", "Back up the existing history file, then clear addresses. Installation identity, pairing markers and photos are kept.")) },
+        confirmButton = { TextButton(onClick = { resettingHistory = false; model.resetHistoryConfirmed() }) { Text(label("备份并重置", "Back up and reset")) } },
+        dismissButton = { TextButton(onClick = { resettingHistory = false }) { Text(label("取消", "Cancel")) } })
+    if (recoveringIdentity) AlertDialog(onDismissRequest = { recoveringIdentity = false }, title = { Text(label("恢复损坏的配对身份？", "Recover damaged pairing identity?")) },
+        text = { Text(label("仅在身份文件损坏时先备份再重新创建。恢复后所有相机需要重新进行电脑模式配对；照片和地址历史不删除。有效身份不会被重置。", "Only a damaged identity file is backed up and recreated. Afterwards every camera must be paired again. Photos and address history are kept; a valid identity is not reset.")) },
+        confirmButton = { TextButton(onClick = { recoveringIdentity = false; model.recoverIdentityConfirmed() }) { Text(label("确认恢复", "Confirm recovery")) } },
+        dismissButton = { TextButton(onClick = { recoveringIdentity = false }) { Text(label("取消", "Cancel")) } })
+}

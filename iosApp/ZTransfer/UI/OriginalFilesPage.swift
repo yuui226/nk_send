@@ -6,7 +6,7 @@ import ZTransferShared
 
 /// A page adapter, not another camera/queue owner. The diagnostic/session owner forwards its ONE queue observer.
 @MainActor
-final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, NativeFilesPagePlatform, NativePreviewReadPlatform, NativeDirectorySettingsPlatform, UIDocumentPickerDelegate {
+final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, NativeFilesPagePlatform, NativePreviewReadPlatform, NativeDirectorySettingsPlatform, NativeAutomaticTransferSettingsPlatform, UIDocumentPickerDelegate {
     let id = UUID()
     let queuePage: OriginalQueuePageBridge
     private let connectionID: UUID
@@ -19,6 +19,8 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     private let decoder = PreviewImageDecoder()
     private let preferences: BrowsePreferencesStore
     private let transferPreferences: TransferPreferencesStore
+    private let automaticTransfer: CameraAutomaticTransferCoordinator?
+    private let automaticTransferTargetAvailable: Bool
     private let directorySelection: ((URL, @escaping (String?) -> Void) -> Void)?
     private var directoryPicker: (request: Int64, controller: UIDocumentPickerViewController)?
     private var refreshTask: Task<Void, Never>?
@@ -47,16 +49,20 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
          exifSource: CameraExifSource, exifCache: NativePreviewExifCache, stationMode: Bool,
          preferences: BrowsePreferencesStore? = nil, originals: OriginalFilesReading? = nil,
          transferPreferences: TransferPreferencesStore? = nil, directoryDescription: String? = nil,
-         directoryMessage: String? = nil, selectDirectory: ((URL, @escaping (String?) -> Void) -> Void)? = nil) {
+         directoryMessage: String? = nil, selectDirectory: ((URL, @escaping (String?) -> Void) -> Void)? = nil,
+         automaticTransfer: CameraAutomaticTransferCoordinator? = nil, automaticTransferTargetAvailable: Bool = false) {
         self.connectionID = connectionID; self.catalog = catalog; self.queue = queue; self.previews = previews
         self.exifSource = exifSource; self.exifCache = exifCache
         self.originals = originals ?? queue // One immutable source for the entire page/preview lifetime.
         self.preferences = preferences ?? BrowsePreferencesStore()
         self.transferPreferences = transferPreferences ?? TransferPreferencesStore()
+        self.automaticTransfer = automaticTransfer
+        self.automaticTransferTargetAvailable = automaticTransferTargetAvailable
         self.directorySelection = selectDirectory
         queuePage = OriginalQueuePageBridge(connectionID: connectionID, queue: queue, previews: previews, stationMode: stationMode)
         super.init()
         precondition(model.attachPreviewReads(platform: self))
+        if automaticTransfer != nil { precondition(model.automaticTransfer.attach(platform: self)) }
         if selectDirectory != nil {
             precondition(model.directory.attach(platform: self, description: directoryDescription, message: directoryMessage))
         }
@@ -110,7 +116,9 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
             refreshOriginals(rescan: originalRevision < 0)
         }
     }
-    func setConnected(_ value: Bool) { if !closed { connected = value; queuePage.setConnected(value) } }
+    func setConnected(_ value: Bool) {
+        if !closed { connected = value; queuePage.setConnected(value); model.automaticTransfer.reload() }
+    }
     func readBrowsePreferences() -> NativeBrowsePreferences? {
         guard !closed else { return nil }
         let value = preferences.read()
@@ -123,7 +131,23 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
     }
     func saveTransferPreferences(value: NativeTransferPreferences) -> Bool {
         guard !closed else { return false }
-        return transferPreferences.save(value)
+        let saved = transferPreferences.save(value)
+        automaticTransfer?.preferencesDidChange()
+        model.automaticTransfer.reload()
+        return saved
+    }
+    func readAutomaticTransfer() -> NativeAutomaticTransferPreferences {
+        let enabled = closed ? nil : automaticTransfer?.enabled
+        return NativeAutomaticTransferPreferences(enabled: enabled ?? false, valid: enabled != nil,
+            canEnable: automaticTransferTargetAvailable && connected)
+    }
+    func changeAutomaticTransfer(enabled: Bool) -> Bool {
+        guard !closed, !enabled || (automaticTransferTargetAvailable && connected) else { return false }
+        return automaticTransfer?.setEnabled(enabled) ?? false
+    }
+    func resetTransferPreferencesAfterConfirmation() -> Bool {
+        guard !closed else { return false }
+        return automaticTransfer?.resetAfterUserConfirmation() ?? false
     }
     func saveBrowsePreferences(value: NativeBrowsePreferences) -> Bool {
         guard !closed else { return false }
@@ -393,6 +417,7 @@ final class OriginalFilesPageBridge: NSObject, ObservableObject, Identifiable, N
                 else { data = try await self.originals.originalData(locator: source) }
                 guard let data else { completion.complete(image: nil); return }
                 try Task.checkCancellation()
+                guard !self.closed, self.previewUse?.session == sessionId else { completion.complete(image: nil); return }
                 let png = try await self.decoder.originalBitmapPNG(data)
                 try Task.checkCancellation()
                 guard !self.closed, self.previewUse?.session == sessionId else { completion.complete(image: nil); return }

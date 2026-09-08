@@ -17,15 +17,19 @@ class PreviewExifRationalValues internal constructor(
     val complete: Boolean,
     private val attributes: Map<PreviewExifTag, String?>,
     val partial: Boolean = false,
+    private val supplement: PreviewExifSupplement? = null,
+    private val littleEndian: Boolean = true,
 ) {
-    /** Even a missing/invalid raw tag replaces an ImageIO synthesized decimal. */
+    /** The five rational tags clear synthesized decimals; optional extras replace observed tags only. */
     fun applyTo(values: NativePreviewExifValues) {
         if (complete || partial) rationalTags.values.forEach { values.set(it, attributes[it]) }
+        if (complete || partial) supplement?.applyTo(values, littleEndian)
     }
     fun value(tag: PreviewExifTag): String? = attributes[tag]
 }
 
-/** Small supplement for the five numeric preview tags, not a second image/EXIF decoder.
+/** Bounded preview attributes, not a second image/MakerNote decoder. Existing numeric-only
+ * entry points retain their five-tag contract; Native metadata opts into text/ISO/GPS fields.
  * Types and Float-vs-Double attribute representation follow AndroidX ExifInterface 1.3.7.
  * No JPEG entropy/image scan, MakerNote traversal or full-file allocation is needed.
  */
@@ -33,17 +37,22 @@ object PreviewExifRationalReader {
     const val maximumReadBytes = 512 * 1024
     private class Invalid : Exception()
     private class Unavailable : Exception()
-    private enum class DirectoryKind { TIFF, EXIF, OTHER }
+    private enum class DirectoryKind { TIFF, EXIF, GPS, OTHER }
 
     fun read(source: PreviewExifByteSource, size: Long): PreviewExifRationalValues = readInternal(source, size, false)
 
     /** Bounded camera headers may end after useful attributes. Never use for local file I/O. */
     fun readHeader(source: PreviewExifByteSource, size: Long): PreviewExifRationalValues = readInternal(source, size, true)
 
-    private fun readInternal(source: PreviewExifByteSource, size: Long, retainPartial: Boolean): PreviewExifRationalValues {
+    /** Native preview metadata uses the same directory walk and limits, adding non-rational fields. */
+    fun readMetadata(source: PreviewExifByteSource, size: Long, header: Boolean): PreviewExifRationalValues =
+        readInternal(source, size, header, captureMetadata = true)
+
+    private fun readInternal(source: PreviewExifByteSource, size: Long, retainPartial: Boolean, captureMetadata: Boolean = false): PreviewExifRationalValues {
         var budget = 8 * 1024 * 1024
         var requests = 0
         val rawValues = mutableMapOf<PreviewExifTag, ByteArray?>()
+        val supplement = if (captureMetadata) PreviewExifSupplement() else null
         fun bytes(offset: Long, count: Int, end: Long = size): ByteArray {
             if (count < 0 || count > maximumReadBytes || offset < 0 || offset > end || count.toLong() > end - offset || end > size) throw Invalid()
             if (++requests > 4096 || count > budget) throw Unavailable()
@@ -76,7 +85,7 @@ object PreviewExifRationalReader {
                     (numerator.toDouble() / denominator.toDouble()).toString()
                 } else "$numerator/$denominator"
             }
-            return PreviewExifRationalValues(complete, values, partial)
+            return PreviewExifRationalValues(complete, values, partial, supplement, little)
         }
         try {
             var base = 0L; var end = size
@@ -114,7 +123,7 @@ object PreviewExifRationalReader {
                         val pointerKind = when {
                             kind == DirectoryKind.TIFF && tag == 0x8769 -> DirectoryKind.EXIF
                             kind == DirectoryKind.TIFF && tag == 0x014A -> DirectoryKind.TIFF
-                            kind == DirectoryKind.TIFF && tag == 0x8825 -> DirectoryKind.OTHER
+                            kind == DirectoryKind.TIFF && tag == 0x8825 -> if (captureMetadata) DirectoryKind.GPS else DirectoryKind.OTHER
                             kind == DirectoryKind.EXIF && tag == 0xA005 -> DirectoryKind.OTHER
                             else -> null
                         }
@@ -128,6 +137,18 @@ object PreviewExifRationalReader {
                                 if (unit == 2) u16(body, 0).toLong() else u32(body, 0)
                             }
                             if (pointer > 0 && pointer < end - base) ifd(pointer, pointerKind, depth + 1)
+                        }
+                        // Reuse this exact visited-offset and APP1 boundary policy. Do not ask
+                        // ImageIO to select an unrelated embedded thumbnail's metadata.
+                        val metadataType = supplement?.expectedType(tag, kind.name)
+                        if (metadataType != null && (encodedType == metadataType || encodedType == 7)) {
+                            val width = when (metadataType) { 3 -> 2; 5 -> 8; else -> 1 }
+                            if (components <= Int.MAX_VALUE / width) {
+                                val length = (components * width).toInt()
+                                val body = if (length <= 4) entries.copyOfRange(8, 8 + length)
+                                    else bytes(dataOffset(entries, 8), length, end)
+                                supplement?.accept(tag, metadataType, body, if (kind == DirectoryKind.TIFF && !root) 1 else 0)
+                            }
                         }
                         val target = if (kind == DirectoryKind.EXIF) rationalTags[tag] else null
                         if (target == null) return@repeat

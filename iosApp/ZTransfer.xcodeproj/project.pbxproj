@@ -7,6 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        7A120000000000000000007E = {isa = PBXBuildFile; fileRef = 7A120000000000000000007F; };
+        7A1200000000000000000080 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000081; };
+        7A1200000000000000000082 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000083; };
+        7A1200000000000000000084 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000085; };
+        7A1200000000000000000086 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000087; };
+        7A1200000000000000000088 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000089; };
+        7A1200000000000000000076 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000077; };
+        7A1200000000000000000078 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000079; };
+        7A120000000000000000007A = {isa = PBXBuildFile; fileRef = 7A120000000000000000007B; };
+        7A120000000000000000007C = {isa = PBXBuildFile; fileRef = 7A120000000000000000007D; };
 		7A1200000000000000000074 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000075; };
 		7A1200000000000000000072 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000073; };
 		7A1200000000000000000070 = {isa = PBXBuildFile; fileRef = 7A1200000000000000000071; };
@@ -51,6 +61,16 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        7A120000000000000000007F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/CameraWorkspace.swift; sourceTree = "<group>"; };
+        7A1200000000000000000081 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network/CameraEndpointHistory.swift; sourceTree = "<group>"; };
+        7A1200000000000000000083 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network/CameraDiscoveryCoordinator.swift; sourceTree = "<group>"; };
+        7A1200000000000000000085 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPreviewCompatibilityTests.swift; sourceTree = "<group>"; };
+        7A1200000000000000000087 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraWorkspaceTests.swift; sourceTree = "<group>"; };
+        7A1200000000000000000089 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraDiscoveryProfileTests.swift; sourceTree = "<group>"; };
+        7A1200000000000000000077 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network/CameraAutomaticTransferCoordinator.swift; sourceTree = "<group>"; };
+        7A1200000000000000000079 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogEventReconciliationTests.swift; sourceTree = "<group>"; };
+        7A120000000000000000007B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomaticTransferTests.swift; sourceTree = "<group>"; };
+        7A120000000000000000007D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExifCompatibilityTests.swift; sourceTree = "<group>"; };
 		7A1200000000000000000075 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Configuration/OriginalDestinationPreferences.swift; sourceTree = "<group>"; };
 		7A1200000000000000000073 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/OriginalFilesReading.swift; sourceTree = "<group>"; };
 		7A1200000000000000000071 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage/IndexedOriginalReader.swift; sourceTree = "<group>"; };
@@ -129,6 +149,10 @@
 		7A1100000000000000000005 /* ZTransfer */ = {
 			isa = PBXGroup;
 			children = (
+                7A120000000000000000007F,
+                7A1200000000000000000081,
+                7A1200000000000000000083,
+                7A1200000000000000000077,
 				7A1100000000000000000006 /* ZTransferApp.swift */,
 				7A1100000000000000000007 /* ContentView.swift */,
 				7A1200000000000000000011 /* CameraTCPStream.swift */,
@@ -178,7 +202,7 @@
 /* iOS network tests: built by the shared scheme against the real application/framework. */
 		7A1200000000000000000021 /* ZTransferTests */ = {
 			isa = PBXGroup;
-			children = (7A1200000000000000000014, 7A120000000000000000006F,);
+			children = (7A1200000000000000000014, 7A120000000000000000006F, 7A1200000000000000000079, 7A120000000000000000007B, 7A120000000000000000007D, 7A1200000000000000000085, 7A1200000000000000000087, 7A1200000000000000000089,);
 			path = ZTransferTests;
 			sourceTree = "<group>";
 		};
@@ -208,7 +232,7 @@
 		7A1200000000000000000031 = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (7A1200000000000000000004, 7A120000000000000000006E,);
+			files = (7A1200000000000000000004, 7A120000000000000000006E, 7A1200000000000000000078, 7A120000000000000000007A, 7A120000000000000000007C, 7A1200000000000000000084, 7A1200000000000000000086, 7A1200000000000000000088,);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		7A1200000000000000000032 = {
@@ -356,6 +380,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                7A120000000000000000007E,
+                7A1200000000000000000080,
+                7A1200000000000000000082,
+                7A1200000000000000000076,
 				7A1100000000000000000009 /* ContentView.swift in Sources */,
 				7A1100000000000000000008 /* ZTransferApp.swift in Sources */,
 				7A1200000000000000000001 /* CameraTCPStream.swift in Sources */,

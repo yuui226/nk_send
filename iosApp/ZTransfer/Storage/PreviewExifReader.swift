@@ -109,7 +109,11 @@ enum PreviewExifReader {
            CGImageSourceGetCount(source) > 0,
            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] {
             result = metadata(properties, locale: locale, rawRationals: rationals)
-        } else { result = nil }
+        } else {
+            // A valid TIFF/NEF metadata directory need not contain a decodable image in this
+            // range. The bounded shared reader still owns tag selection and original rules.
+            result = metadata([:], locale: locale, rawRationals: rationals)
+        }
         if cancellation.isCancelled { throw CancellationError() }
         if reader.failed { throw OriginalIndexError.incompleteMetadata }
         try Task.checkCancellation()

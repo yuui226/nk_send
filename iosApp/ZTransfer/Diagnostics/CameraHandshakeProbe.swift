@@ -1,4 +1,3 @@
-#if DEBUG
 import Foundation
 import SwiftUI
 import UIKit
@@ -10,16 +9,25 @@ private actor APProbeLifetime {
     func isClosing() -> Bool { closing }
 }
 
+#if DEBUG
 private struct ProbeDocumentRequest: Identifiable {
     let id = UUID()
     let purpose: SystemDocumentPicker.Purpose
 }
+#endif
 
-/// Temporary native diagnostic UI, not the product's shared Compose screens.
-/// Exercises real standard AP/STA sessions and platform adapters. This is not acceptance evidence
-/// until built and run on a Mac/iPhone; STA-direct and the shared product UI remain separate work.
+struct CameraProductSessionState: Equatable {
+    let requestID: Int64
+    let phase: String
+    let message: String?
+}
+
+/// Sole AP/STA session owner, reused by the shared product home and DEBUG diagnostic controls.
+/// The historical name is retained to avoid cloning or moving the camera/queue workflow.
 @MainActor
 final class CameraHandshakeProbe: ObservableObject {
+    @Published private(set) var productState: CameraProductSessionState?
+    @Published private(set) var sessionReady = false
     @Published private(set) var status = "先在系统设置中加入相机热点或相机所在的 Wi-Fi。"
     @Published private(set) var running = false
     @Published private(set) var samples: [String] = []
@@ -40,7 +48,7 @@ final class CameraHandshakeProbe: ObservableObject {
     @Published var filesPage: OriginalFilesPageBridge?
     private var workspaceNavigation: UInt64 = 0
     var canOpenSharedWorkspace: Bool {
-        running && !downloading && originalQueue != nil && apConnection != nil && previewStore != nil && catalog != nil
+        running && sessionReady && !downloading && originalQueue != nil && apConnection != nil && previewStore != nil && catalog != nil
     }
     private var originalQueue: CameraOriginalQueue?
     private var queueObserver: Task<Void, Never>?
@@ -48,6 +56,8 @@ final class CameraHandshakeProbe: ObservableObject {
     private var closingTask: Task<Void, Never>?
     private var apConnection: CameraWiFiConnection?
     private var catalog: CameraCatalog?
+    private let transferPreferences = TransferPreferencesStore()
+    private var automaticTransfer: CameraAutomaticTransferCoordinator?
     private var catalogTask: Task<Void, Never>?
     @Published private(set) var scanningCatalog = false
     @Published private(set) var catalogStatus = ""
@@ -239,12 +249,30 @@ final class CameraHandshakeProbe: ObservableObject {
         }
     }
 
+    @discardableResult
+    func connectProduct(host: String, stationMode: Bool, allowPairing: Bool, requestID: Int64,
+                        expectedResponder: String? = nil, service: CameraBonjourService? = nil) -> Bool {
+        guard requestID > 0, !running, !downloading, !directoryBusy, closingTask == nil else { return false }
+        guard service != nil || NativeCameraEndpointAddress.shared.normalize(raw: host) != nil else { return false }
+        start(host: host, stationMode: stationMode, persistentAP: true, allowPairing: allowPairing,
+              expectedResponder: expectedResponder, service: service, productRequestID: requestID)
+        return running
+    }
+
+    private func publishProduct(_ phase: String, message: String? = nil) {
+        guard let current = productState else { return }
+        if current.phase == "closing" && phase == "ready" { return }
+        productState = CameraProductSessionState(requestID: current.requestID, phase: phase, message: message)
+    }
+
     func start(host: String, stationMode: Bool, persistentAP: Bool = false,
                allowPairing: Bool = false, forcePairing: Bool = false, expectedResponder: String? = nil,
-               service: CameraBonjourService? = nil) {
+               service: CameraBonjourService? = nil, productRequestID: Int64? = nil) {
         guard !running, !downloading, !directoryBusy else { return }
         stopDiscovery()
         running = true
+        sessionReady = false
+        productState = productRequestID.map { CameraProductSessionState(requestID: $0, phase: "connecting", message: nil) }
         samples = []
         sampleObjects = []
         downloadStatus = ""
@@ -253,9 +281,13 @@ final class CameraHandshakeProbe: ObservableObject {
         queueSnapshot = nil
         status = "正在检查命令与事件通道…"
         task = Task {
-            defer { running = false; task = nil }
+            defer {
+                running = false; task = nil; sessionReady = false
+                if productState?.phase != "failed" { publishProduct("idle") }
+            }
             do {
                 let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
+                try Task.checkCancellation()
                 if persistentAP || service != nil {
                     try await inspectPersistentConnection(host: address, stationMode: stationMode,
                                                            allowPairing: allowPairing, forcePairing: forcePairing,
@@ -304,11 +336,15 @@ final class CameraHandshakeProbe: ObservableObject {
                 }
             } catch {
                 status = Task.isCancelled ? "诊断已取消，连接已关闭。" : error.localizedDescription
+                publishProduct(Task.isCancelled ? "idle" : "failed", message: Task.isCancelled ? nil : error.localizedDescription)
             }
         }
     }
 
     func cancel() {
+        sessionReady = false
+        if running { publishProduct("closing") }
+        automaticTransfer?.close()
         filesPage?.close(); filesPage = nil
         queuePage?.close(); queuePage = nil
         stopDiscovery()
@@ -411,6 +447,9 @@ final class CameraHandshakeProbe: ObservableObject {
     }
 
     func disconnect() {
+        sessionReady = false
+        if running { publishProduct("closing") }
+        automaticTransfer?.close()
         queueShareTask?.cancel()
         directoryTask?.cancel()
         downloadTask?.cancel()
@@ -431,7 +470,7 @@ final class CameraHandshakeProbe: ObservableObject {
         guard let queue = originalQueue, sampleObjects.indices.contains(index) else { return }
         let info = sampleObjects[index]
         let transfer = filesPage?.model.currentTransferPreferences()
-            ?? TransferPreferencesStore().read() ?? NativeTransferPreferences.companion.defaults()
+            ?? transferPreferences.read() ?? NativeTransferPreferences.companion.defaults()
         let dayKey = OriginalFilesPageBridge.localDayKey(at: Date(), timeZone: .current)
         Task { await queue.enqueue(info, byDate: transfer.organizeByDate, dayKey: dayKey, deferred: transfer.deferStart) }
     }
@@ -510,11 +549,13 @@ final class CameraHandshakeProbe: ObservableObject {
         filesPage?.close()
         let page = OriginalFilesPageBridge(connectionID: connection.connectionID, catalog: catalog,
             queue: queue, previews: previews, exifSource: connection, exifCache: exifCache, stationMode: connection.stationMode,
-            originals: originals ?? transferDestination, directoryDescription: queueDestinationSummary, directoryMessage: queueDestinationError,
+            originals: originals ?? transferDestination, transferPreferences: transferPreferences,
+            directoryDescription: queueDestinationSummary, directoryMessage: queueDestinationError,
             selectDirectory: { [weak self] url, completion in
                 guard let self else { completion("连接已关闭，请重新连接后选择目录。"); return }
                 self.selectQueueDirectory(url, completion: completion)
-            })
+            }, automaticTransfer: automaticTransfer,
+            automaticTransferTargetAvailable: savesToSelectedDirectory && queueDestinationError == nil)
         filesPage = page
         Task {
             let snapshot = await queue.snapshot()
@@ -600,6 +641,9 @@ final class CameraHandshakeProbe: ObservableObject {
         savesToSelectedDirectory = restored.selected == .provider; queueDestinationError = restored.failure
         directoryStatus = restored.failure ?? (savesToSelectedDirectory ? "已恢复所选目录保存目标。" : "队列使用应用沙盒。")
         originalQueue = queue
+        let sessionAutomatic = CameraAutomaticTransferCoordinator(connectionID: connection.connectionID,
+            queue: queue, preferences: transferPreferences)
+        automaticTransfer = sessionAutomatic
         queueObserver = Task {
             for await snapshot in queue.updates {
                 if Task.isCancelled { break }
@@ -611,13 +655,16 @@ final class CameraHandshakeProbe: ObservableObject {
         }
         apConnection = connection
         let sessionCatalog = CameraCatalog(source: connection, stationMode: stationMode, previews: previews,
-            onAddition: { [weak self] addition in await self?.receiveCatalogAddition(addition) })
+            onAddition: { [weak self] addition in await self?.receiveCatalogAddition(addition) },
+            onChange: { [weak self] snapshot in await self?.receiveCatalogChange(snapshot) })
         catalog = sessionCatalog
         previewStore = previews
         defer {
+            sessionAutomatic.close(); automaticTransfer = nil
+            sessionReady = false
             filesPage?.close(); filesPage = nil
             queuePage?.close(); queuePage = nil
-            catalogTask?.cancel(); catalog = nil
+            catalogTask?.cancel(); catalogTask = nil; scanningCatalog = false; catalog = nil
             previewTask?.cancel(); previewStore = nil; previewImage = nil; previewPNG = nil
             apConnection = nil; originalQueue = nil; queueObserver?.cancel(); queueObserver = nil
             transferDestination = nil; savesToSelectedDirectory = false
@@ -644,9 +691,11 @@ final class CameraHandshakeProbe: ObservableObject {
             let browse = BrowsePreferencesStore().read() ?? NativeBrowsePreferences.companion.defaults()
             await previews.startBackgroundFill(startDay: browse.startDay, endDay: browse.endDay,
                                                revision: BrowsePreferencesStore.nextUpdateRevision())
-            let stores = try await connection.storageIDs()
+            var stores: [Int32] = [], handles: [Int32] = []
+            if productState == nil {
+            stores = try await connection.storageIDs()
             // Raw wildcard diagnostic only, not a replacement for shared dual-card catalog rules.
-            let handles = try await connection.objectHandles(storageID: -1)
+            handles = try await connection.objectHandles(storageID: -1)
             for handle in handles.prefix(20) {
                 try Task.checkCancellation()
                 let info = try await connection.objectInfo(handle: handle)
@@ -657,13 +706,56 @@ final class CameraHandshakeProbe: ObservableObject {
                     sampleObjects.append(info)
                 }
             }
-            let summary = "\(description)：原始存储 ID \(stores.count) 个、对象 \(handles.count) 个；仅抽样前 20 个对象，不代表完整照片列表。" +
+            }
+            let summary = (productState == nil ? "\(description)：原始存储 ID \(stores.count) 个、对象 \(handles.count) 个；仅抽样前 20 个对象，不代表完整照片列表。" : "\(description)：") +
                 (diskReady ? "" : "缩略图磁盘缓存不可用，当前仅使用内存缓存。")
+            try Task.checkCancellation()
+            let readyState = await connection.snapshot()
+            guard readyState.phase == .ready, productState?.phase != "closing" else { throw CameraStreamError.closed }
+            var readyMessage = description
+            if productState != nil {
+                let responder = await connection.responderGUID()
+                do {
+                    try Self.recordVerifiedStationEndpoint(stationMode: stationMode, service: service, host: host,
+                        responderGUID: responder, displayName: description, history: CameraEndpointHistory.applicationStore)
+                } catch {
+                    readyMessage += "（地址历史未保存：\(error.localizedDescription)）"
+                }
+            }
+            try Task.checkCancellation()
+            let finalReadyState = await connection.snapshot()
+            guard finalReadyState.phase == .ready, productState?.phase != "closing" else { throw CameraStreamError.closed }
+            sessionReady = true
+            publishProduct("ready", message: readyMessage)
             status = summary + "连接保持中。"
             // This owner existed before connect; revision zero includes opening events still retained.
             var eventCursor = CameraEventCursor(connectionID: connection.connectionID, revision: 0)
+            // Establish the old-photo baseline even when the user never opens the files page.
+            // This task is separate from the ONE event observer so events during scanning are retained.
+            scanningCatalog = true
+            catalogTask = Task { [weak self] in
+                defer {
+                    if self?.catalog === sessionCatalog {
+                        self?.scanningCatalog = false; self?.catalogTask = nil
+                    }
+                }
+                do {
+                    let first = try await sessionCatalog.refresh()
+                    guard let self, !Task.isCancelled, self.catalog === sessionCatalog else { return }
+                    self.receiveCatalogChange(first)
+                } catch {
+                    guard let self, !Task.isCancelled, self.catalog === sessionCatalog else { return }
+                    self.catalogStatus = "首次目录读取未完成，请在文件页刷新；不会把旧照片当作自动传输新增。"
+                }
+            }
+            var terminalMessage: String?
             for await state in connection.updates {
                 try Task.checkCancellation()
+                if state.phase == .closed {
+                    sessionAutomatic.close(); sessionReady = false
+                    terminalMessage = state.errorDescription
+                    publishProduct("closing", message: state.errorDescription)
+                }
                 await previews.setConnected(state.phase == .ready)
                 queuePage?.setConnected(state.phase == .ready)
                 filesPage?.setConnected(state.phase == .ready)
@@ -677,11 +769,14 @@ final class CameraHandshakeProbe: ObservableObject {
                 }
             }
             try Task.checkCancellation()
+            sessionAutomatic.close()
             await sessionCatalog.close()
             await previews.close()
             await queue.stop()
             await connection.abort()
+            publishProduct(terminalMessage == nil ? "idle" : "failed", message: terminalMessage)
         } catch {
+            sessionAutomatic.close()
             await sessionCatalog.close()
             await previews.close()
             await queue.stop()
@@ -694,7 +789,21 @@ final class CameraHandshakeProbe: ObservableObject {
         guard apConnection?.connectionID == addition.snapshot.connectionID else { return }
         filesPage?.publishAddition(addition.snapshot)
         if let media = addition.newMedia { catalogStatus = "已发现新文件：\(media.fileName)" }
-        // Automatic queue admission is deliberately not enabled before W05's real option is wired.
+        automaticTransfer?.receive(addition, transfer: filesPage?.model.currentTransferPreferences())
+    }
+
+    /// This history belongs to standard STA. An AP hotspot must not overwrite the same camera's
+    /// LAN address, and a Bonjour service name is never guessed to be a resolved host address.
+    nonisolated static func recordVerifiedStationEndpoint(stationMode: Bool, service: CameraBonjourService?, host: String,
+        responderGUID: String?, displayName: String, history: () throws -> CameraEndpointHistory) throws {
+        guard stationMode, service == nil, let responderGUID else { return }
+        try history().recordSuccessful(responderGUID: responderGUID, displayName: displayName,
+                                       address: CameraEndpointAddress.parse(host))
+    }
+
+    private func receiveCatalogChange(_ snapshot: CameraCatalogSnapshot) {
+        guard apConnection?.connectionID == snapshot.connectionID else { return }
+        filesPage?.publishAddition(snapshot)
     }
 
     nonisolated static func inspectAPSession(
@@ -766,8 +875,9 @@ final class CameraHandshakeProbe: ObservableObject {
     }
 }
 
+#if DEBUG
 struct CameraHandshakeProbeView: View {
-    @StateObject private var probe = CameraHandshakeProbe()
+    @ObservedObject var probe: CameraHandshakeProbe
     @State private var address = PtpConstants.shared.CAMERA_IP
     @State private var stationMode = false
     @State private var persistentAP = true

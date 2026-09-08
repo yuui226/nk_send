@@ -1,50 +1,39 @@
 import Foundation
 import SwiftUI
 
+@MainActor
 struct ContentView: View {
     @ObservedObject private var appearance = AppAppearanceSettings.shared
+    @StateObject private var workspace = CameraWorkspaceBridge()
     #if DEBUG
+    @State private var showDiagnostics = false
     @State private var showSharedComponents = false
     #endif
-    private var version: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-    }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                Text("Z传")
-                    .font(.largeTitle.bold())
-
-                Text("iOS 共享工程已就绪")
-                    .foregroundStyle(.secondary)
-
-                Text("v\(version)")
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(.tertiary)
-
-                #if DEBUG
-                Button("检查共享 Compose 组件") { showSharedComponents = true }
-                    .sheet(isPresented: $showSharedComponents) {
-                        NavigationStack {
-                            SharedUiProbeView()
-                                .toolbar { Button("关闭") { showSharedComponents = false } }
-                        }
-                    }
-                Divider()
-                CameraHandshakeProbeView()
-                Divider()
-                LocationProbeView()
-                BluetoothProbeView()
-                #endif
+        CameraWorkspace(bridge: workspace)
+            .preferredColorScheme(appearance.colorScheme)
+            .onAppear { appearance.start() }
+            #if DEBUG
+            .overlay(alignment: .topTrailing) {
+                Button("开发诊断") { showDiagnostics = true }
+                    .font(.caption).padding(8).disabled(workspace.session.running)
             }
-            .padding(24)
-        }
-        .preferredColorScheme(appearance.colorScheme)
-        .onAppear { appearance.start() }
+            .sheet(isPresented: $showDiagnostics) {
+                NavigationStack {
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            Button("检查共享 Compose 组件") { showSharedComponents = true }
+                            CameraHandshakeProbeView(probe: workspace.session)
+                            Divider(); LocationProbeView(); BluetoothProbeView()
+                        }.padding()
+                    }
+                    .toolbar { Button("关闭") { showDiagnostics = false } }
+                }
+                .sheet(isPresented: $showSharedComponents) { SharedUiProbeView() }
+            }
+            #endif
     }
 }
 
-#Preview {
-    ContentView()
-}
+#Preview { ContentView() }

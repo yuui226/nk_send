@@ -68,6 +68,7 @@ actor CameraWiFiConnection {
     private var partialSupport: Int32 = -1
     private let previewPolicy = NativePreviewPolicy()
     private var thumbnailCacheIdentity: String?
+    private var verifiedResponderGUID: String?
 
     init(command: CameraTCPStream, event: CameraTCPStream, stationMode: Bool = false) {
         self.command = command
@@ -135,6 +136,7 @@ actor CameraWiFiConnection {
             try requirePhase(.opening)
             thumbnailCacheIdentity = previewPolicy.cameraKey(info: identity, responderGuid: ack.responderGuidHex,
                                                              sessionId: connectionID.uuidString)
+            verifiedResponderGUID = NikonStaBridge.shared.normalizeGuid(value: ack.responderGuidHex)
             phase = .ready
             publish()
             startKeepalive()
@@ -153,6 +155,9 @@ actor CameraWiFiConnection {
     }
 
     func thumbnailCacheKey() -> String? { phase == .ready ? thumbnailCacheIdentity : nil }
+    /// Pairing/history may use only the responder acknowledged by this ready session, never a
+    /// display name, Bonjour candidate or thumbnail-cache fallback containing a session UUID.
+    func responderGUID() -> String? { phase == .ready ? verifiedResponderGUID : nil }
 
     private func initializeStation(options: StationConnectionOptions, responder: String?,
                                    hasMarker: ((String) throws -> Bool)?, acknowledged: ((String) throws -> Void)?) async throws {
@@ -235,6 +240,46 @@ actor CameraWiFiConnection {
             throw CameraOperationError.malformedDataset(operation: operation)
         }
         return info
+    }
+
+    func catalogStorageIDs(permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32] {
+        // Event-driven storage changes require a fresh wire query, never handshake-prefetched IDs.
+        try await catalogIdentifiers(operation: PtpConstants.shared.GET_STORAGE_IDS, parameters: [], permitted: permitted)
+    }
+
+    func catalogObjectHandles(storageID: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32] {
+        try await catalogIdentifiers(operation: PtpConstants.shared.GET_OBJECT_HANDLES,
+                                     parameters: [storageID, -1, 0], permitted: permitted)
+    }
+
+    func catalogObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo {
+        let operation = PtpConstants.shared.GET_OBJECT_INFO
+        let data = try await catalogMetadata(operation: operation, parameters: [handle], limit: 64 * 1024, permitted: permitted)
+        guard let info = PtpIPChannel.objectInfo(handle: handle, payload: data) else {
+            throw CameraOperationError.malformedDataset(operation: operation)
+        }
+        return info
+    }
+
+    private func catalogIdentifiers(operation: Int32, parameters: [Int32],
+                                    permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32] {
+        let data = try await catalogMetadata(operation: operation, parameters: parameters, limit: 16 * 1024 * 1024, permitted: permitted)
+        guard let ids = PtpIPChannel.identifiers(data) else { throw CameraOperationError.malformedDataset(operation: operation) }
+        return ids
+    }
+
+    private func catalogMetadata(operation: Int32, parameters: [Int32], limit: Int,
+                                 permitted: @escaping @Sendable () async -> Bool) async throws -> Data {
+        let result = try await previewCommand(operation: operation, parameters: parameters, limit: limit, admission: { [weak self] in
+            // PtpIPCommandSession invokes this after FIFO acquisition, BEFORE allocating a TID.
+            guard let self, await self.backgroundReadsAllowed() else { return false }
+            return await permitted()
+        })
+        guard result.code == PtpConstants.shared.RESPONSE_OK else {
+            throw CameraOperationError.rejected(operation: operation, response: result.code)
+        }
+        guard let data = result.payload else { throw CameraOperationError.malformedDataset(operation: operation) }
+        return data
     }
 
     /// A confirmed miss may be cached; Busy and other errors must remain retryable.

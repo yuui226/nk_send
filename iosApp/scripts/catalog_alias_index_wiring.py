@@ -8,6 +8,8 @@ CHANGES['shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeCameraCatalogS
 CHANGES['shared/src/commonMain/kotlin/com/ztransfer/catalog/NativeCameraHandleBaseline.kt'] = [('        com.ztransfer.viewmodel.NewCameraObjectPolicy.shouldResolve(handle, knownHandles, visibleFiles)\n    fun recordPublished(handle: Int) { knownHandles = knownHandles?.plus(handle) }\n\n    /**\n     * Idle GetObjectHandles reconciliation, unlike a full scan: only remove missing known handles.\n     * New handles remain unresolved until recordPublished, matching CameraViewModel.applyIdleHandleCatalog.\n     * Null denotes failed/incomplete enumeration; no baseline is invented and no deletion is inferred.\n     */\n    fun acceptIdleEnumeration(handles: IntArray?): CameraHandleDelta? {\n        val previous = knownHandles ?: return null\n        val current = handles?.toSet() ?: return null\n        val delta = cameraHandleDelta(previous, current)\n        knownHandles = previous - delta.removed\n        return delta\n    }\n\n    /**\n', '        com.ztransfer.viewmodel.NewCameraObjectPolicy.shouldResolve(handle, knownHandles, visibleFiles)\n    fun recordPublished(handle: Int) { knownHandles = knownHandles?.plus(handle) }\n\n    /**\n')]
 
 def previous_catalog_alias_index_source(path, value):
+    from parallel_batch_wiring import previous_parallel_batch_source
+    value = previous_parallel_batch_source(path, value)
     for current, previous in CHANGES.get(path, ()):
         assert value.count(current) == 1, f"catalog alias index hunk changed: {path}"
         value = value.replace(current, previous, 1)

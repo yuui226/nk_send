@@ -8,9 +8,24 @@ protocol CameraCatalogSource: AnyObject {
     func objectInfo(handle: Int32) async throws -> PtpObjectInfo
     func snapshot() async -> CameraConnectionSnapshot
     func newObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo
+    func catalogStorageIDs(permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32]
+    func catalogObjectHandles(storageID: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32]
+    func catalogObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo
 }
 
 extension CameraCatalogSource {
+    func catalogStorageIDs(permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32] {
+        guard await permitted() else { throw CameraStreamError.operationInProgress }
+        return try await storageIDs()
+    }
+    func catalogObjectHandles(storageID: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> [Int32] {
+        guard await permitted() else { throw CameraStreamError.operationInProgress }
+        return try await objectHandles(storageID: storageID)
+    }
+    func catalogObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo {
+        guard await permitted() else { throw CameraStreamError.operationInProgress }
+        return try await objectInfo(handle: handle)
+    }
     func newObjectInfo(handle: Int32, permitted: @escaping @Sendable () async -> Bool) async throws -> PtpObjectInfo {
         guard await permitted() else { throw CameraStreamError.operationInProgress }
         return try await objectInfo(handle: handle)
@@ -56,8 +71,8 @@ struct CameraCatalogSnapshot {
 
 /// Normal AP/STA catalog only. One immutable camera generation; failed enumeration never replaces
 /// the last good snapshot with an empty list. Shared code owns handle order and backup merging.
-/// Event revisions are invalidations, not lossless events; callers must schedule another scan when
-/// changedWhileScanning is true. Automatic transfer/event reconciliation is a separate coordinator.
+/// One connection-owned worker coalesces event invalidations. Only authoritative, complete,
+/// same-generation results replace rows; automatic admission remains a separate coordinator.
 actor CameraCatalog {
     private let source: CameraCatalogSource
     private let stationMode: Bool
@@ -76,34 +91,61 @@ actor CameraCatalog {
     private var resolverFailed = false
     private(set) var needsEventRescan = false
     private let onAddition: (@Sendable (CameraCatalogAddition) async -> Void)?
+    private let onChange: (@Sendable (CameraCatalogSnapshot) async -> Void)?
+    private struct ChangeRequest: Sendable { let token: UInt64; let full: Bool }
+    private var changeSerial: UInt64 = 0
+    private var pendingChange: ChangeRequest?
+    private var changeWorker: Task<Void, Never>?
+    // Full manual enumeration commits its baseline before metadata, just like Android. Keep these
+    // candidates across a failed/raced scan so that this early commit cannot swallow event catch-up.
+    private var scanCatchupHandles = Set<Int32>()
+    private var scanCatchupMedia: [Int32: CameraFileInfo] = [:]
+    private var activeScanNewHandles = Set<Int32>()
 
     init(source: CameraCatalogSource, stationMode: Bool, previews: CameraPreviewStore? = nil,
-         onAddition: (@Sendable (CameraCatalogAddition) async -> Void)? = nil) {
+         onAddition: (@Sendable (CameraCatalogAddition) async -> Void)? = nil,
+         onChange: (@Sendable (CameraCatalogSnapshot) async -> Void)? = nil) {
         self.source = source; self.stationMode = stationMode; self.previews = previews
         self.onAddition = onAddition
+        self.onChange = onChange
     }
-    deinit { resolver?.cancel() }
+    deinit { resolver?.cancel(); changeWorker?.cancel() }
     func snapshot() -> CameraCatalogSnapshot? { latest }
 
     func refresh(detectNewHandles: Bool = false) async throws -> CameraCatalogSnapshot {
+        try await scanCatalog(detectNewHandles: detectNewHandles, change: nil)
+    }
+
+    private func scanCatalog(detectNewHandles: Bool, change: ChangeRequest?) async throws -> CameraCatalogSnapshot {
         guard !closed else { throw CameraStreamError.closed }
         guard !scanning else { throw CameraStreamError.operationInProgress }
         try Task.checkCancellation()
         scanning = true
         scanGeneration &+= 1
+        let generation = scanGeneration
         publicationRevision &+= 1
-        defer { scanning = false; wakeResolver() }
+        activeScanNewHandles.removeAll()
+        defer { scanning = false; activeScanNewHandles.removeAll(); wakeChanges(); wakeResolver() }
         let fillScan = await previews?.beginCatalogScan()
         do {
             let before = await source.snapshot()
             guard before.phase == .ready else { throw CameraStreamError.notConnected }
             guard before.connectionID == source.connectionID else { throw CameraStreamError.closed }
-            let stores = try await source.storageIDs()
+            let admission: @Sendable () async -> Bool = { [weak self] in
+                guard let change else { return true }
+                return await self?.mayChange(change, generation: generation, duringScan: true) ?? false
+            }
+            let stores: [Int32]
+            if change != nil { stores = try await source.catalogStorageIDs(permitted: admission) }
+            else { stores = try await source.storageIDs() }
             let scan = NativeCameraCatalogScan(rawStorageIds: Self.native(stores), stationMode: stationMode)
             var enumeratedHandles: [Int32] = []
             for index in 0..<Int(scan.storageCount) {
                 try Task.checkCancellation()
-                let handles = try await source.objectHandles(storageID: scan.queryStorageId(index: Int32(index)))
+                let handles: [Int32]
+                if change != nil {
+                    handles = try await source.catalogObjectHandles(storageID: scan.queryStorageId(index: Int32(index)), permitted: admission)
+                } else { handles = try await source.objectHandles(storageID: scan.queryStorageId(index: Int32(index))) }
                 guard scan.addHandles(index: Int32(index), handles: Self.native(handles)) else { throw CameraStreamError.invalidArgument }
                 enumeratedHandles.append(contentsOf: handles)
             }
@@ -113,12 +155,28 @@ actor CameraCatalog {
             guard !closed, enumerated.phase == .ready, enumerated.connectionID == before.connectionID else { throw CameraStreamError.closed }
             // The raw handle list is already authoritative, even if later ObjectInfo is partial.
             // Like Android, disabled detection still advances the baseline; no first-scan catch-up.
-            let handleDelta = handleBaseline.acceptEnumeration(handles: Self.native(enumeratedHandles), detectNewHandles: detectNewHandles)
+            if handleBaseline.hasSnapshot {
+                activeScanNewHandles = Set(enumeratedHandles.filter {
+                    handleBaseline.shouldResolve(handle: $0, visibleFiles: latest?.files ?? [])
+                })
+                scanCatchupHandles.formUnion(activeScanNewHandles.filter {
+                    change != nil || detectNewHandles || pendingObjects[$0] != nil
+                })
+            }
+            // An event-driven scan is speculative until every metadata read and revision fence pass.
+            // Manual scan keeps Android's early-enumeration semantics and explicit partial result.
+            var handleDelta: CameraHandleDelta?
+            if change == nil {
+                handleDelta = handleBaseline.acceptEnumeration(handles: Self.native(enumeratedHandles), detectNewHandles: detectNewHandles)
+            }
             while true {
                 try Task.checkCancellation()
                 if let handle = scan.nextReadHandle()?.int32Value {
                     let info: PtpObjectInfo?
-                    do { info = try await source.objectInfo(handle: handle) }
+                    do {
+                        if change != nil { info = try await source.catalogObjectInfo(handle: handle, permitted: admission) }
+                        else { info = try await source.objectInfo(handle: handle) }
+                    }
                     catch is CameraOperationError {
                         // A fully consumed object-level rejection/incomplete dataset is a partial scan,
                         // never evidence that the file was deleted. Transport errors abort publication.
@@ -130,6 +188,17 @@ actor CameraCatalog {
             let after = await source.snapshot()
             try Task.checkCancellation()
             guard !closed, after.phase == .ready, after.connectionID == before.connectionID else { throw CameraStreamError.closed }
+            if let change {
+                guard await mayChange(change, generation: generation, duringScan: true),
+                      before.eventRevision == after.eventRevision,
+                      after.eventRevision <= (receivedEventRevision ?? 0) else {
+                    throw CameraStreamError.operationInProgress
+                }
+                guard scan.metadataComplete else {
+                    throw CameraOperationError.malformedDataset(operation: PtpConstants.shared.GET_OBJECT_INFO)
+                }
+                handleDelta = handleBaseline.acceptEnumeration(handles: Self.native(enumeratedHandles), detectNewHandles: true)
+            }
             var files: [CameraFileInfo] = []
             var infos: [Int32: PtpObjectInfo] = [:]
             var indexedInfos: [PtpObjectInfo] = []
@@ -148,12 +217,19 @@ actor CameraCatalog {
                 handleDelta: handleDelta, publicationRevision: publicationRevision, indexedObjectInfos: indexedInfos)
             // Keep old complete rows on partial metadata failure; return the partial attempt explicitly
             // for diagnostics. A future incremental reconciler may merge it, never infer missing=deleted.
-            if result.metadataComplete { latest = result }
+            let previousFiles = latest?.files ?? []
+            if result.metadataComplete && !result.changedWhileScanning { latest = result }
             resolverFailed = false
             if result.metadataComplete && !result.changedWhileScanning && result.revision >= (receivedEventRevision ?? 0) {
                 needsEventRescan = false
+                if change == nil || pendingChange?.token == change?.token { pendingChange = nil }
             }
+            if result.changedWhileScanning { requestChange(full: true) }
             if let fillScan { _ = await previews?.finishCatalogScan(fillScan, snapshot: result) }
+            if result.metadataComplete && !result.changedWhileScanning {
+                if change != nil, !closed, let onChange { await onChange(result) }
+                await publishScanAdditions(result, previousFiles: previousFiles)
+            }
             return result
         } catch {
             if let fillScan { _ = await previews?.finishCatalogScan(fillScan, snapshot: nil) }
@@ -172,13 +248,28 @@ actor CameraCatalog {
         guard !closed, batch.cursor.connectionID == source.connectionID else { return }
         if let receivedEventRevision, batch.cursor.revision <= receivedEventRevision { return }
         receivedEventRevision = batch.cursor.revision
-        if batch.requiresRescan { needsEventRescan = true; return }
+        if batch.requiresRescan { requestChange(full: true); return }
         for event in batch.events {
             let handle = Int32(truncatingIfNeeded: event.firstParameter)
+            if event.code == Lab.shared.EVT_OBJECT_ADDED, scanning, activeScanNewHandles.contains(handle) {
+                // This scan may already have committed its raw baseline. Preserve the actual event,
+                // without turning a manual detectNewHandles=false enumeration into auto discovery.
+                scanCatchupHandles.insert(handle)
+            }
             if event.code == Lab.shared.EVT_OBJECT_REMOVED {
                 pendingObjects.removeValue(forKey: handle) // Withdraw even an in-flight metadata read.
                 pendingOrder.removeAll { $0 == handle }
-                needsEventRescan = true // Actual removed-row reconciliation belongs to W03/W04.
+                scanCatchupHandles.remove(handle)
+                scanCatchupMedia.removeValue(forKey: handle)
+                // An unknown removed handle may still invalidate an in-progress first scan.
+                if scanning || !handleBaseline.hasSnapshot || handle == 0 || handle == -1 ||
+                    !handleBaseline.shouldResolve(handle: handle, visibleFiles: latest?.files ?? []) {
+                    requestChange(full: false)
+                }
+            } else if [Int32(0x4004), 0x4005, 0x4007, 0x400C].contains(event.code) {
+                // Standard StoreAdded/Removed, ObjectInfoChanged, StorageInfoChanged. NOT
+                // DevicePropChanged (0x4006): exposure changes must not churn the photo catalog.
+                requestChange(full: true)
             } else if event.code == Lab.shared.EVT_OBJECT_ADDED,
                       handleBaseline.shouldResolve(handle: handle, visibleFiles: latest?.files ?? []), pendingObjects[handle] == nil {
                 pendingObjects[handle] = PendingObject(next: Self.nowMs() + NewCameraObjectPolicy.shared.COALESCE_MS)
@@ -189,11 +280,141 @@ actor CameraCatalog {
     }
 
     func close() {
-        closed = true; scanGeneration &+= 1; resolver?.cancel()
+        closed = true; scanGeneration &+= 1; resolver?.cancel(); changeWorker?.cancel()
+        pendingChange = nil; scanCatchupHandles.removeAll()
+        scanCatchupMedia.removeAll()
         pendingObjects.removeAll(); pendingOrder.removeAll()
     }
 
     private static func nowMs() -> Int64 { Int64(ProcessInfo.processInfo.systemUptime * 1000) }
+
+    private func requestChange(full: Bool) {
+        changeSerial &+= 1
+        pendingChange = ChangeRequest(token: changeSerial, full: full || pendingChange?.full == true)
+        needsEventRescan = true
+        wakeChanges()
+    }
+
+    private func wakeChanges() {
+        guard !closed, !resolverFailed, !scanning, pendingChange != nil, changeWorker == nil else { return }
+        changeWorker = Task { [weak self] in
+            // Coalesce Event + GetEventEx duplicates, without blocking the connection observer.
+            do { try await Task.sleep(nanoseconds: 90_000_000) } catch { return }
+            while !Task.isCancelled, let delay = await self?.reconcileChange() {
+                do { try await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000) } catch { break }
+            }
+            await self?.changesFinished()
+        }
+    }
+    private func changesFinished() { changeWorker = nil; wakeChanges(); wakeResolver() }
+
+    private func mayChange(_ request: ChangeRequest, generation: UInt64, duringScan: Bool) async -> Bool {
+        guard !closed, !Task.isCancelled, !resolverFailed, scanGeneration == generation,
+              scanning == duringScan, pendingChange?.token == request.token else { return false }
+        if let previews, !(await previews.allowsCatalogReconciliation()) { return false }
+        return !closed && !Task.isCancelled && !resolverFailed && scanGeneration == generation &&
+            scanning == duringScan && pendingChange?.token == request.token
+    }
+
+    /// Like Android syncCameraHandleCatalog: all required GetObjectHandles must succeed before
+    /// removing anything; no ObjectInfo/thumbnail/EXIF read on this lightweight deletion path.
+    private func reconcileChange() async -> Int64? {
+        guard !closed, !resolverFailed, !Task.isCancelled, let request = pendingChange else { return nil }
+        guard !scanning else { return 90 }
+        let generation = scanGeneration
+        guard await mayChange(request, generation: generation, duringScan: false) else { return 90 }
+        do {
+            if request.full || latest == nil || !handleBaseline.hasSnapshot {
+                _ = try await scanCatalog(detectNewHandles: true, change: request)
+            } else if let base = latest {
+                let admission: @Sendable () async -> Bool = { [weak self] in
+                    await self?.mayChange(request, generation: generation, duringScan: false) ?? false
+                }
+                let before = await source.snapshot()
+                guard before.phase == .ready, before.connectionID == source.connectionID else { throw CameraStreamError.closed }
+                let plan = NativeCameraCatalogScan(rawStorageIds: Self.native(base.storageIDs), stationMode: stationMode)
+                var queries = Set<Int32>()
+                var handles = Set<Int32>()
+                var handleOrder: [Int32] = []
+                for index in 0..<Int(plan.storageCount) {
+                    let storage = plan.queryStorageId(index: Int32(index))
+                    if queries.insert(storage).inserted {
+                        for handle in try await source.catalogObjectHandles(storageID: storage, permitted: admission) {
+                            if handles.insert(handle).inserted { handleOrder.append(handle) }
+                        }
+                    }
+                }
+                let after = await source.snapshot()
+                guard await mayChange(request, generation: generation, duringScan: false),
+                      after.phase == .ready, after.connectionID == before.connectionID,
+                      before.eventRevision == after.eventRevision,
+                      after.eventRevision <= (receivedEventRevision ?? 0) else { return 90 }
+                let nativeHandles = Self.native(handleOrder)
+                guard let files = NativeCameraCatalogReconciliation.shared.reconcile(publishedFiles: base.files,
+                    currentHandles: nativeHandles, indexedInfos: base.indexedObjectInfos),
+                    let delta = handleBaseline.acceptIdleEnumeration(handles: nativeHandles) else { return 2_000 }
+                let indexed = base.indexedObjectInfos.filter { handles.contains($0.handle) }
+                let infos = base.objectInfos.filter { handles.contains($0.key) }
+                pendingOrder.removeAll { !handles.contains($0) }
+                pendingObjects = pendingObjects.filter { handles.contains($0.key) }
+                scanCatchupHandles.formIntersection(handles)
+                scanCatchupMedia = scanCatchupMedia.filter { handles.contains($0.key) }
+                for handle in handleOrder where handleBaseline.shouldResolve(handle: handle, visibleFiles: files) {
+                    if pendingObjects[handle] == nil {
+                        pendingObjects[handle] = PendingObject(next: Self.nowMs() + NewCameraObjectPolicy.shared.COALESCE_MS)
+                        pendingOrder.append(handle)
+                    }
+                }
+                publicationRevision &+= 1
+                let updated = CameraCatalogSnapshot(connectionID: base.connectionID, revision: after.eventRevision,
+                    storageIDs: base.storageIDs, files: files, objectInfos: infos, totalHandles: handles.count,
+                    metadataComplete: true, changedWhileScanning: false, handleDelta: delta,
+                    publicationRevision: publicationRevision, indexedObjectInfos: indexed)
+                latest = updated
+                // Consume THIS request before awaiting publication. A later event owns a new token.
+                pendingChange = nil; needsEventRescan = false
+                _ = await previews?.reconcile(updated)
+                if !closed, !Task.isCancelled, let onChange { await onChange(updated) }
+            }
+        } catch CameraStreamError.operationInProgress { return 90 }
+        catch is CameraOperationError { return 2_000 } // Busy/malformed/partial is never deletion.
+        catch is CancellationError {
+            if !closed { resolverFailed = true; needsEventRescan = true }
+            return nil
+        }
+        catch {
+            // A transport failure is not a reason to keep sending on a poisoned connection.
+            if !closed { resolverFailed = true; needsEventRescan = true }
+            return nil
+        }
+        return pendingChange == nil ? nil : 90
+    }
+
+    private func publishScanAdditions(_ result: CameraCatalogSnapshot, previousFiles: [CameraFileInfo]) async {
+        var compared = previousFiles
+        var additions: [CameraCatalogAddition] = []
+        for info in result.indexedObjectInfos where scanCatchupHandles.contains(info.handle) {
+            guard let file = NewCameraObjectPolicy.shared.publicationFile(info: info) else { continue }
+            let isNew = NewCameraObjectPolicy.shared.isNew(files: compared, handle: info.handle, info: file)
+            compared = NewCameraObjectPolicy.shared.publish(files: compared, handle: info.handle, info: file)
+            let saved = scanCatchupMedia[info.handle]
+            let sameSavedIdentity = saved?.fileName == file.fileName && saved?.size == file.size && saved?.captureDate == file.captureDate
+            let media = (isNew || sameSavedIdentity) && NewCameraObjectPolicy.shared.automaticMedia(file: file) ? file : nil
+            if let media { scanCatchupMedia[info.handle] = media }
+            additions.append(CameraCatalogAddition(snapshot: result, info: info, newMedia: media))
+        }
+        // A complete scan accounts for every raw handle, including non-media/folders. Only failed
+        // or raced scans retain candidates; repeating a successful scan must not enqueue them again.
+        scanCatchupHandles = scanCatchupHandles.intersection(Set(result.objectInfos.keys))
+        scanCatchupMedia = scanCatchupMedia.filter { scanCatchupHandles.contains($0.key) }
+        for addition in additions {
+            guard !closed, !Task.isCancelled, !needsEventRescan,
+                  latest?.publicationRevision == result.publicationRevision else { return }
+            scanCatchupHandles.remove(addition.info.handle)
+            scanCatchupMedia.removeValue(forKey: addition.info.handle)
+            if let onAddition { await onAddition(addition) }
+        }
+    }
 
     private func wakeResolver() {
         guard !closed, !resolverFailed, !needsEventRescan, resolver == nil, !scanning, handleBaseline.hasSnapshot,
